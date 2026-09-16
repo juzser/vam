@@ -109,6 +109,31 @@ const click = async (label: string) => {
   });
 };
 
+/**
+ * Start a session in a named project -- two presses now, and that is the
+ * change rather than an accident of this helper.
+ *
+ * The control was a `+` on the project heading labelled "new session in
+ * alpha", which is what these tests used to click. It is the first item of
+ * that project's own menu now (one icon less per heading, at the operator's
+ * request), so the route is: open the menu, press the item.
+ */
+const addInProject = async (projectId: string) => {
+  await act(async () => {
+    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
+  });
+  await act(async () => {
+    (
+      document.querySelector(
+        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
+      ) as HTMLElement
+    ).click();
+  });
+};
+
+/** The sidebar's "starting a session in …" row. */
+const startingRow = () => document.querySelector('[data-session-starting]');
+
 const press = async (key: string) => {
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
@@ -134,23 +159,42 @@ afterEach(() => {
   localStorage.clear();
 });
 
+/**
+ * WHAT CARRIES THE WAIT NOW THAT THE CONTROL CLOSES BEHIND ITSELF.
+ *
+ * These four used to read the `+`'s own attributes -- `data-pending`,
+ * `aria-busy`, `disabled` -- because the button stayed on screen through the
+ * spawn. The add is a menu item now, and a menu item that did not dismiss its
+ * menu would be the only one in vam that does not.
+ *
+ * Nothing is unheld by that. The wait was never carried by the button alone:
+ * `createSession` sets `starting`, which draws an `aria-live` row inside the
+ * project reading "starting a session in alpha…", and sets the status bar in
+ * the same breath. That row is the assertion here, and it is the better one --
+ * it names the project, it is announced, and it is what the operator actually
+ * looks at. The double-press guard never lived on the control either: a
+ * disabled button dispatches no click, so the guard that matters is
+ * `createSession`'s own `pendingAction` check, which the second test reaches
+ * through a DIFFERENT control exactly as it did before.
+ */
 describe('creating a session', () => {
-  it('shows the control working, and disables it, while the spawn runs', async () => {
+  it('shows the work running, and says where, while the spawn runs', async () => {
     const gate = deferred<void>();
     const { source } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
-    await click('new session in alpha');
+    await addInProject('p1');
 
-    const button = control('new session in alpha');
-    expect(button.getAttribute('data-pending')).toBe('true');
-    expect(button.getAttribute('aria-busy')).toBe('true');
-    expect(button.disabled).toBe(true);
+    const row = startingRow();
+    expect(row, 'no starting row while the spawn runs').not.toBeNull();
+    expect(row?.textContent).toContain('starting a session in alpha');
+    // Announced, not merely drawn: the row is the only thing on screen that
+    // changed, so a reader who cannot see it has to be told.
+    expect(row?.getAttribute('aria-live')).toBe('polite');
     expect(statusBar()).toContain('starting a new session in alpha');
 
     await act(async () => {
       gate.settle();
     });
-    expect(control('new session in alpha').getAttribute('data-pending')).toBeNull();
     expect(statusFull()).toContain('it may take a moment to appear');
   });
 
@@ -158,7 +202,7 @@ describe('creating a session', () => {
     const gate = deferred<void>();
     const { source, calls } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
-    await click('new session in alpha');
+    await addInProject('p1');
     await press('o');
     await click('new session');
     expect(calls.create).toEqual(['p1']);
@@ -171,18 +215,19 @@ describe('creating a session', () => {
     ['tmux-missing', 'the `tmux` command was not found'],
     ['unknown-project', 'vam cannot tell which directory project p1 is'],
     ['timed-out', 'tmux did not answer within 10s'],
-  ])('clears the pending state on %s and says why', async (code, message) => {
+  ])('stops saying it is working on %s, and says why', async (code, message) => {
     const gate = deferred<void>();
     const { source } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
-    await click('new session in alpha');
+    await addInProject('p1');
+    expect(startingRow()).not.toBeNull();
     await act(async () => {
       gate.fail({ kind: 'refused', code, message });
       await Promise.resolve();
     });
-    const button = control('new session in alpha');
-    expect(button.getAttribute('data-pending')).toBeNull();
-    expect(button.disabled).toBe(false);
+    // NOTHING IS LEFT SPINNING: an indicator that outlives its own failure
+    // says vam is still trying when vam has stopped.
+    expect(startingRow()).toBeNull();
     expect(statusFull()).toContain(message);
   });
 });
@@ -242,15 +287,33 @@ describe('closing a session', () => {
  * a test that read the animation would pass on a build nobody could read.
  */
 describe('pending without motion', () => {
-  it('says it is working in attributes and words, not only in movement', async () => {
+  it('says it is working in words, not only in movement', async () => {
     const gate = deferred<void>();
     const { source } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
-    await click('new session in alpha');
-    const button = control('new session in alpha');
-    expect(button.getAttribute('aria-busy')).toBe('true');
-    expect(button.getAttribute('title')).toContain('Starting');
+    await addInProject('p1');
+    // The row breathes a dot, and with motion off the dot is all that stops.
+    // What is left is a sentence naming the project and the status bar saying
+    // the same thing -- two text channels for a state that used to be an
+    // attribute on a button that has since closed behind itself.
+    expect(startingRow()?.textContent).toContain('starting a session in alpha');
     expect(statusBar()).toContain('starting a new session in alpha');
+    await act(async () => {
+      gate.settle();
+    });
+  });
+
+  /** The close control is still a button that stays on screen, so its own
+   *  attributes are still the channel there -- unchanged, and asserted so the
+   *  rewrite above cannot be read as "vam stopped doing this anywhere". */
+  it('keeps the same promise on the row close, which did not move', async () => {
+    const gate = deferred<void>();
+    const { source } = sourceWith(() => gate.promise);
+    render(<Canvas model={MODEL} source={source} />);
+    await click('close nightly sweep');
+    const button = control('close nightly sweep');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.getAttribute('title')).toContain('Stopping');
     await act(async () => {
       gate.settle();
     });
@@ -302,7 +365,7 @@ describe('a second action while one is in flight', () => {
     const { source, calls } = sourceWith(() => gate.promise);
     render(<Canvas model={TWO} source={source} />);
     await click('close nightly sweep');
-    await click('new session in alpha');
+    await addInProject('p1');
     expect(calls.create).toEqual([]);
     expect(statusBar()).toMatch(/still running/i);
     expect(statusFull()).toContain('alpha');

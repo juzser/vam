@@ -1445,6 +1445,52 @@ body {
   animation: vam-breathe 1.8s ease-in-out infinite;
 }
 
+/* A bell rung ONCE, for a session that has just stopped and wants an answer.
+   Finite on purpose: the sidebar is a thing the operator leaves on screen all
+   day, and a permanent motion in the corner of the eye is the exact complaint
+   this pass came from. It plays when the mark MOUNTS -- which is when the
+   status flips, since the glyph before it was a different element -- and
+   afterwards the bell holds the pose its last frame leaves it in, so that
+   frame is upright rather than leaning (`status-mark.tsx`).
+
+   The pivot is the bell's crown rather than its centre: a bell hangs. */
+@keyframes vam-swing {
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(11deg);
+  }
+  55% {
+    transform: rotate(-8deg);
+  }
+  80% {
+    transform: rotate(4deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.vam-swing {
+  transform-origin: 50% 20%;
+  animation: vam-swing 820ms ease-in-out 2;
+}
+
+/* THE RUNNING MARK HAS TWO BODIES AND THIS PICKS ONE. CSS cannot choose a
+   React component, so `status-mark.tsx` draws both the turning arc and a whole
+   ring and exactly one of them is displayed. The default is the arc; the
+   reduced-motion block below swaps them, because a STOPPED `LoaderCircle` is
+   not a paused spinner -- it is a ring with a bite out of it, which reads as
+   damage rather than as rest.
+
+   Scoped to the mark, so which one shows is decided by these two rules rather
+   than by declaration order: `.vam-spin` already carries a `display` of its
+   own at equal specificity to a bare attribute selector. */
+[data-status-mark] [data-mark-motion='rest'] {
+  display: none;
+}
+
 /* A control whose action is running. The SAME breathe the running dots use --
    the idiom for "this has not finished happening" already exists here and a
    second one would only be a second thing to learn. The rule is on the
@@ -1638,6 +1684,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
   .vam-breathe,
+  /* The waiting bell. It parks upright wherever it is stopped -- its first
+     frame IS its resting pose -- so unlike the spinner above it needs no
+     second body, only silence. */
+  .vam-swing,
   [data-pending='true'],
   .vam-ellipsis > span,
   .vam-running-edge::after,
@@ -1662,6 +1712,18 @@ body {
      cannot be pressed and says why in `aria-busy` and its own tooltip. */
   [data-pending='true'] {
     opacity: 1;
+  }
+  /* THE ONE MARK THAT CANNOT SIMPLY STOP. `animation: none` on the spinner
+     above leaves a gapped arc frozen at whatever angle it reached, which is a
+     broken ring rather than a resting one -- so the running mark swaps bodies
+     here instead: the arc goes and the whole ring it was drawn beside takes
+     its place. Same hue, same size, same lane; the only difference is that it
+     is a shape somebody chose rather than a frame somebody stopped on. */
+  [data-status-mark] [data-mark-motion='spin'] {
+    display: none;
+  }
+  [data-status-mark] [data-mark-motion='rest'] {
+    display: inline-block;
   }
   /* The sheen paints the word by clipping a gradient to its glyphs, so simply
      stopping it would leave transparent text. Off, the word is its own colour

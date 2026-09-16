@@ -1265,12 +1265,16 @@ describe('waiting on you', () => {
     // The operator asked for the sentence under the tab bar to go. RETIRED
     // half: "the header dot is amber and breathing" \u2014 A12.2 removed that
     // dot along with the rest of the header; the same `waiting` status is
-    // still on screen, on the sidebar row itself (`STATUS_DOT`,
-    // `SessionList.tsx`), which this change does not touch.
+    // still on screen, on the sidebar row itself.
+    // RETIRED AGAIN, one layer down: the row's amber breathing DOT is a
+    // ringing bell now (`status-mark.tsx`) -- five statuses drawn as five
+    // circles differing only in hue was the reading the operator called
+    // samey, and hue is the channel that is missing for somebody. The claim
+    // is unchanged: the waiting status is on the row, and nowhere in the pane.
     expect(screen.queryByText('session stopped, waiting on you')).toBeNull();
-    expect(document.querySelector('[data-action-pane] .vam-breathe.bg-waiting')).toBeNull();
+    expect(document.querySelector('[data-action-pane] [data-status-mark]')).toBeNull();
     expect(
-      document.querySelector('[data-session-row="urgent"] .vam-breathe.bg-waiting'),
+      document.querySelector('[data-session-row="urgent"] [data-status-mark="waiting"]'),
     ).not.toBeNull();
   });
 

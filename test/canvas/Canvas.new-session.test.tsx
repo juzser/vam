@@ -42,6 +42,22 @@ async function clickAsync(label: string) {
   });
 }
 
+/** The per-project add, which is the first item of that project's own menu
+ *  now rather than a `+` on its heading -- one icon less per heading, at the
+ *  operator's request. Two presses, same call. */
+async function addInProject(projectId: string) {
+  await act(async () => {
+    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
+  });
+  await act(async () => {
+    (
+      document.querySelector(
+        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
+      ) as HTMLElement
+    ).click();
+  });
+}
+
 async function pressAsync(key: string, modifiers: KeyboardEventInit = {}) {
   await act(async () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
@@ -131,13 +147,13 @@ describe('creating a session with `o`', () => {
    * So the assertion is by VALUE and in ORDER: the project id first, the
    * display name second.
    */
-  it('the per-project add button passes (id, name), in that order', async () => {
+  it('the per-project add item passes (id, name), in that order', async () => {
     const created: [string, string][] = [];
     const { source, wrote } = sourceWith(async (projectId, title) => {
       created.push([projectId, title]);
     });
     render(<Canvas model={MODEL} source={source} />);
-    await clickAsync('new session in alpha');
+    await addInProject('p1');
     expect(created).toEqual([['p1', 'alpha']]);
     expect(wrote.count).toBe(1);
   });
