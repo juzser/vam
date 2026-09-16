@@ -142,7 +142,7 @@ const headings = () =>
   [...document.querySelectorAll('[data-project-heading]')].map((el) => el.textContent ?? '');
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
-/** What the canvas root node draws for a session -- the one icon display left. */
+/** What the session row draws for its icon -- the one icon display left. */
 const nodeIcon = (id: string) =>
   document.querySelector(`[data-session-icon="${id}"]`)?.textContent ?? null;
 // A <textarea>, not an <input>: the composer is multiline, so a prompt is
@@ -622,7 +622,7 @@ describe('jumps', () => {
     expect(focused()).toBe('beta/b1');
   });
 
-  it('f arms jump mode, and its first label lands on the first node', () => {
+  it('f arms jump mode, and its first label lands on the first sidebar row', () => {
     render(<Canvas model={MODEL} />);
     press('j'); // move away so the jump has somewhere to come back from
     press('f');
@@ -989,7 +989,7 @@ describe('renaming, icons and closing', () => {
 
   it('shows an icon you chose on a previous visit', () => {
     // The read half of the store, end to end: what localStorage holds reaches
-    // the canvas root node without the canvas knowing an icon is a local
+    // the icon slot without the canvas knowing an icon is a local
     // preference. This used to read the SIDEBAR row (`rowText('a1')` contains
     // the glyph, `rowText('a2')` does not); the sidebar no longer draws a
     // session icon, so the same end-to-end path is asserted on the surface
@@ -1022,7 +1022,7 @@ describe('renaming, icons and closing', () => {
     expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
     // Also moved off the sidebar row: it asserted `rowText('a1')` no longer
-    // contained the cleared glyph, and now asserts the canvas node does not.
+    // contained the cleared glyph, and now asserts the icon slot does not.
     expect(nodeIcon('a1')).not.toBe('🛠');
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
@@ -1041,10 +1041,9 @@ describe('renaming, icons and closing', () => {
    * all.
    *
    * This is deliberately NOT written as "two sources share a session id, focus
-   * the second one". That test cannot be written today: `layout.ts` keys every
-   * canvas node on `session.id` alone (`infoNodeId(session.id)`, :237) and
-   * `focusedEntry` is `layout.nodes.find(n => n.id === focusedId)` (Canvas.tsx
-   * :243), so of two sessions sharing an id the second has no reachable node —
+   * the second one". That test cannot be written today: `focusedEntry` is
+   * `entries.find((e) => e.session.id === focusedSessionId)`, so of two
+   * sessions sharing an id the second is never the entry `.find` returns —
    * it cannot be focused, so it cannot be picked for. That collision is one
    * layer above the storage keys AC-1 re-keyed, and it is filed rather than
    * quietly fixed here.

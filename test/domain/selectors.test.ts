@@ -83,9 +83,9 @@ describe('waitingCount', () => {
 
 describe('visibleDecisions', () => {
   it('shows the three most recent, oldest first — newest at the bottom', () => {
-    // The model stores decisions newest-first; the node reads top to bottom like
-    // a log, so the newest lands at the bottom, nearest the eye's resting place
-    // after reading the ones before it.
+    // The model stores decisions newest-first; the sidebar reads top to bottom
+    // like a log, so the newest lands at the bottom, nearest the eye's resting
+    // place after reading the ones before it.
     const s = session('x', {
       decisions: [decision('4'), decision('3'), decision('2'), decision('1')],
     });
@@ -141,7 +141,7 @@ describe('decisionAwaitingYou', () => {
   it('never points past the three the canvas actually shows', () => {
     // The newest is always among the three, so this holds by construction —
     // pinned because the day the slice and the pick disagree, the sidebar names
-    // a row that is not on the node.
+    // a row that is not among the three it just showed.
     const s = session('x', {
       status: 'waiting',
       decisions: [decision('1'), decision('2'), decision('3'), decision('4')],
