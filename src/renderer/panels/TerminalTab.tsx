@@ -60,6 +60,7 @@ import {
   useState,
 } from 'react';
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
+import { isControlLetter } from '../../shared/terminal.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
@@ -248,6 +249,59 @@ function strokeFor(key: string): PaneKey | null {
   // through here at all. Widening this to count code points would change the
   // behaviour of exactly no input anyone has.
   return key.length === 1 ? { kind: 'text', text: key } : null;
+}
+
+/**
+ * THE CHORD A MODIFIED KEY BECOMES, or `null` when it is not the pane's.
+ *
+ * ONE SHAPE ONLY: Ctrl, held alone, plus a letter. Every other combination
+ * answers `null` and goes back to vam, and each exclusion is a decision:
+ *
+ *   NOT CMD. macOS applications own Cmd, and no terminal emulator sends it --
+ *   `Cmd+C` is copy, `Cmd+Q` has to reach the quit guard, `Cmd+S` the save.
+ *   The caller returns before this is ever asked, so Cmd cannot arrive here.
+ *
+ *   NOT ALT. On macOS Option is the COMPOSE key: `Option+e` opens a dead-key
+ *   composition that the hidden box exists to receive, and its keydown carries
+ *   `isComposing: false` -- so claiming Alt would break accented input in the
+ *   exact place the input-method work was built to fix. vam also binds
+ *   `Alt-<digit>` outright (`keyboard/chords.ts`). THE COST IS REAL AND IS THE
+ *   TRADE: Meta chords do not reach the pane, so readline's `Alt+B`/`Alt+F`
+ *   word motion is unavailable here. The portable spelling of Meta is the Esc
+ *   PREFIX -- press Escape, then the letter -- and Escape is already the
+ *   pane's, so nothing readline can do is actually out of reach. macOS
+ *   terminals themselves default Option to compose and make Meta opt-in, so
+ *   this is the platform's own answer rather than vam's idiosyncrasy.
+ *
+ *   NOT SHIFT, AND NOT ALT, ALONGSIDE CTRL. `Ctrl+Shift+P` and `Ctrl+Alt+]`
+ *   are real bindings in vam's grammar, and no terminal distinguishes
+ *   `Ctrl+Shift+U` from `Ctrl+U` anyway -- both are 0x15. So a chord with a
+ *   second modifier held is vam's, which costs the pane nothing.
+ *
+ *   NOT A DIGIT, AND THAT IS THE LINE THIS FUNCTION IS DRAWN ON. `Ctrl+1`
+ *   produces no control character in any terminal, so leaving it to vam costs
+ *   the operator nothing INSIDE the pane and keeps `Mod-<digit>` working from
+ *   within it. `onKeyDown`'s own older comment warned that widening the chord
+ *   branch would claim "the tab switch the operator uses to leave" first; the
+ *   letters-only rule is what answers that warning rather than overriding it.
+ *
+ * LOWER-CASED, AND BY THE CHARACTER RATHER THAN BY `shiftKey`. CapsLock
+ * upper-cases a letter with `shiftKey: false`, which is indistinguishable from
+ * a real Shift press at the character level and is a defect `normalizeKey`
+ * records having shipped once already. An operator with CapsLock on still
+ * means `Ctrl+U`, so the case is folded away here and the Shift TOKEN is read
+ * off `shiftKey` by the caller, exactly as the chord grammar does it.
+ *
+ * WHAT A NON-LATIN LAYOUT DOES, said rather than assumed: `event.key` under
+ * Ctrl is whatever the layout reports, so a keyboard that answers `к` rather
+ * than `k` is not claimed here and falls back to vam. That is the safe
+ * direction -- a chord vam does not recognise is handed on, never delivered as
+ * a different one -- and it is the same fold `normalizeKey` applies, which is
+ * what keeps the two layers agreeing about who owns a keystroke.
+ */
+function controlStrokeFor(key: string): PaneKey | null {
+  const letter = key.toLowerCase();
+  return isControlLetter(letter) ? { kind: 'control', letter } : null;
 }
 
 /**
@@ -740,42 +794,74 @@ export function TerminalTab({
   );
 
   /**
-   * WHO OWNS A KEY WHILE THE PANE HAS FOCUS. Three answers, and the middle one
-   * is the one that was easy to get wrong.
+   * WHO OWNS A KEY WHILE THE PANE HAS FOCUS. FOUR answers now, and the new one
+   * is the whole of this change.
    *
-   * A Cmd/Ctrl/Alt chord is VAM'S, always. The shortcut that takes you
-   * elsewhere must work from wherever you are, which is why the canvas
-   * exempts chords from its own typing guard.
+   * ── CTRL AND A LETTER IS THE PANE'S ──────────────────────────────────────
    *
-   * ALT IS IN THAT LIST BECAUSE VAM BINDS IT: `normalizeKey` emits an `Alt-`
-   * token (`keyboard/chords.ts`). Alt was missing here and the test for
-   * "printable" was a one-character `event.key`, which `Alt+1` and `Alt+k`
-   * both satisfy -- so those were stopped and typed into the agent while vam
-   * never heard them.
+   * THE REPORT WAS "khong dung duoc Cmd+U de xoa dong hoac cac shortcut khac
+   * trong terminal" -- Ctrl+U will not kill the line, and neither will any
+   * other terminal shortcut. It was exactly right, and older than any recent
+   * change: the single line that stood here returned early for EVERY modified
+   * key, so from the day this pane first learned to type it had never once
+   * forwarded a chord. Ctrl+U, Ctrl+C, Ctrl+A, Ctrl+E, Ctrl+K, Ctrl+W, Ctrl+R,
+   * Ctrl+D, Ctrl+L, Ctrl+Z: those are what a terminal is driven with.
    *
-   * SHIFT IS DELIBERATELY NOT IN IT. Shift is how a capital and every symbol
-   * on the number row is produced, so exempting it would leave a pane that
-   * cannot type `K` or `!`. It is not a chord modifier; it is part of the
-   * character.
+   * WHAT THE COMMENT THAT STOOD HERE SAID ABOUT CTRL+C, AND WHY IT IS ANSWERED
+   * RATHER THAN OVERRULED. It argued that interrupting a running agent is
+   * destructive and needs an affordance that says so, plus a `send-keys 'C-c'`
+   * builder that is "its own named builder and never a key-name parameter",
+   * and it warned that widening this branch would hand EVERY chord to the pane
+   * -- "and the first casualty would be the tab switch the operator uses to
+   * leave". All three are honoured. The affordance is the pane itself: the
+   * operator opened a terminal, the corner badge says typing goes to this
+   * session, and Ctrl+C in a terminal is the least surprising keystroke there
+   * is -- an interrupt reachable only through a button would be a terminal
+   * nobody could stop. The builder is `sendControlArgv`, which takes a
+   * `ControlLetter` and looks it up in a table of twenty-six constants, so no
+   * key NAME crosses the bridge. And the tab switch is precisely what the
+   * letters-only rule protects.
    *
-   * Nothing is sent and nothing is stopped for a chord, so it reaches the
-   * window listener and does its one thing.
+   * ── CTRL AND ANYTHING ELSE IS STILL VAM'S ────────────────────────────────
    *
-   * WHICH MEANS CTRL+C DOES NOT INTERRUPT THE AGENT, and someone who can type
-   * into this pane will eventually try it. It is vam's chord here like every
-   * other, so it does whatever vam binds it to and never reaches tmux. That
-   * is deliberate and not an oversight to fix by narrowing the exemption:
-   * interrupting a running agent is a destructive action on someone's work,
-   * and it needs an affordance that says so -- a visible control, or a chord
-   * of its own that is captioned in the key sheet as interrupting THIS
-   * session -- plus a `send-keys 'C-c'` builder that, per `tmux/argv.ts`,
-   * must be its own named builder and never a key-name parameter. Widening
-   * this branch instead would hand every chord to the pane, and the first
-   * casualty would be the tab switch the operator uses to leave.
+   * `Ctrl+1` produces no control character in any terminal, so leaving the
+   * digit row to vam costs the pane nothing and keeps `Mod-<digit>`,
+   * `Mod-Shift-[` and `Mod-Alt-[` working from inside it. Same for a chord
+   * with a SECOND modifier held: `Ctrl+Shift+P` and `Ctrl+Alt+]` stay vam's,
+   * and no terminal tells `Ctrl+Shift+U` from `Ctrl+U` anyway.
    *
-   * A printable key, Return and Backspace are the PANE'S, and they are
-   * stopped here. The
-   * canvas reads a focused element as text entry only when it is an
+   * WHAT IT COSTS, QUOTED HONESTLY. `normalizeKey` folds Ctrl and Cmd into one
+   * `Mod-` token, so the chords the pane now claims -- `Mod-k` (palette),
+   * `Mod-w` (close), `Mod-n`, `Mod-t`, `Mod-d`/`Mod-u` -- lose their CTRL
+   * spelling while this pane holds the keyboard. Every one of them keeps its
+   * CMD spelling, which is the shortcut a macOS operator reaches for, so no
+   * vam action becomes unreachable from here. `Mod-d`/`Mod-u` were already
+   * dead in this pane before today: they are the table's only `isSelectOnly`
+   * pair and this element carries `data-insert-scope`.
+   *
+   * ── CMD IS VAM'S, ALWAYS ─────────────────────────────────────────────────
+   *
+   * macOS applications own Cmd and no terminal emulator sends it: Cmd+Q must
+   * reach the quit guard, Cmd+S the save, Cmd+C and Cmd+V the clipboard. It
+   * returns first, above the chord branch, so a Cmd+Ctrl press is vam's too.
+   *
+   * ── ALT IS NOT THE PANE'S ────────────────────────────────────────────────
+   *
+   * vam binds `Alt-<digit>` outright, and on macOS Option is the COMPOSE key:
+   * `Option+e` opens a dead-key composition into the hidden box, and that
+   * keydown carries `isComposing: false`, so the guard above cannot protect
+   * it. Claiming Alt would break accented input in the exact place the
+   * input-method work was built to fix. `controlStrokeFor` carries the cost
+   * this pays -- readline's Meta chords -- and the Esc prefix that answers it.
+   *
+   * ── AND THE THREE THAT WERE ALREADY TRUE ─────────────────────────────────
+   *
+   * SHIFT IS NOT A CHORD MODIFIER. It is how a capital and every symbol on the
+   * number row is produced; exempting it would leave a pane that cannot type
+   * `K` or `!`.
+   *
+   * A printable key, Return and Backspace are the PANE'S, and they are stopped
+   * here. The canvas reads a focused element as text entry only when it is an
    * `INPUT` or a `TEXTAREA`, and this is a `section`: without stopping the
    * event, typing `j` here would type a `j` into the agent AND move vam's
    * cursor.
@@ -818,7 +904,67 @@ export function TerminalTab({
        * operator unable to finish the word.
        */
       if (event.nativeEvent.isComposing) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // CMD FIRST, so a Cmd+Ctrl press is vam's and never the pane's: the
+      // chord branch below must not be reachable with Cmd held.
+      if (event.metaKey) return;
+      /**
+       * THE CHORD, AND IT IS ANSWERED BEFORE THE COPY GESTURE AND BEFORE THE
+       * SCROLL KEYS, because neither concerns it. Nothing composes out of a
+       * control character, so there is no reason to pull the keyboard back
+       * onto the hidden box -- and doing so would COLLAPSE a selection the
+       * operator had just dragged, which is the only way there is to copy text
+       * out of this tab. Ctrl+C is not copy on macOS; taking the selection
+       * away to send it would be the one chord that destroyed what it looked
+       * like it was for.
+       *
+       * The guard runs before the cancelling for the reason the same guard
+       * does below: a key vam cannot deliver is not vam's to eat. Without a
+       * bridge -- the browser build -- a chord goes back to the window
+       * listener, where `Mod-k` still opens the palette.
+       */
+      if (event.ctrlKey && !event.altKey && !event.shiftKey) {
+        const chord = controlStrokeFor(event.key);
+        if (chord !== null) {
+          if (send === undefined || projectId === null) return;
+          // PREVENTED, and not only for vam's sake. In a focused text control
+          // on macOS, Chromium honours Cocoa's own emacs bindings -- Ctrl+A,
+          // Ctrl+E, Ctrl+K, Ctrl+U all move or delete in the hidden box -- so
+          // an unprevented chord would edit the composition staging area on
+          // its way to the agent.
+          event.preventDefault();
+          /**
+           * STOPPED, AND IT DOES TWO JOBS -- one obvious, one MEASURED and
+           * previously written down nowhere.
+           *
+           * THE OBVIOUS ONE: it makes this pane win over vam's grammar while
+           * it holds the keyboard. `Canvas.tsx` returns on `defaultPrevented`,
+           * so cancelling alone would be enough today; stopping says the
+           * stronger thing out loud, and `Mod-w` is the reason to say it -- a
+           * Ctrl+W that both killed a word and closed the session tab it was
+           * typed into is not a bug anybody would enjoy finding twice.
+           *
+           * THE OTHER ONE: it is what stops ONE keystroke reaching the agent
+           * TWICE. Measured in Chromium against the real bundle, with a
+           * native listener counting keydowns on this very element: remove
+           * this line and a single `Ctrl+U` arrives at the pane ONCE natively
+           * and is sent to tmux TWICE. It is not new and it is not about
+           * chords -- removing the identical line from the PLAIN-letter path
+           * below, which has stood since this pane learned to type, doubles a
+           * plain `x` in exactly the same way. React 19 dispatches the prop a
+           * second time once the native event is allowed past this element,
+           * and which of its paths does that is not run down here; what is
+           * established is the behaviour and that this line is the thing
+           * holding it. Deleting it would put a second `C-c` into somebody's
+           * agent, which is why it is not a matter of politeness.
+           */
+          event.stopPropagation();
+          queue([chord]);
+        }
+        return;
+      }
+      // Whatever is left holding Ctrl or Alt is vam's, unsent and unstopped,
+      // so it reaches the window listener and does its one thing.
+      if (event.ctrlKey || event.altKey) return;
       // TYPING ENDS A COPY GESTURE. `onPointerUp` leaves the keyboard on the
       // pane rather than the box when a drag selected something, so that
       // Cmd-C still has a selection to copy; the moment an unmodified key is

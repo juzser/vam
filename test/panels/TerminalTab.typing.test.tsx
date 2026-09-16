@@ -13,9 +13,13 @@
  * regression nobody notices.
  *
  * WHO OWNS A KEY: an unmodified key belongs to the pane and stops there, so
- * `j` does not also move vam's cursor. A Cmd/Ctrl chord belongs to vam and is
- * never typed -- the canvas already exempts chords from its typing guard, and
- * a chord is not text on any layout.
+ * `j` does not also move vam's cursor. A CMD chord belongs to vam and is never
+ * typed -- the canvas already exempts chords from its typing guard, and a
+ * chord is not text on any layout. CTRL AND A LETTER belongs to the pane, and
+ * that split has a file of its own (`TerminalTab.control-chords.test.tsx`):
+ * every `C-a`..`C-z` is a real control character and the program in the pane
+ * is what gives it meaning, while `Ctrl+1` is no control character at all and
+ * stays vam's, which is what keeps the tab switch working from in here.
  *
  * THE WAY OUT: Escape leaves. A focus stop that eats every key and cannot be
  * left from the keyboard is the trap the old comment promised this was not.
@@ -158,7 +162,12 @@ describe('the pane declines the keys that are not its own', () => {
     try {
       const send = await open();
       fireEvent.keyDown(pane() as HTMLElement, { key: '1', metaKey: true });
-      fireEvent.keyDown(pane() as HTMLElement, { key: 'k', ctrlKey: true });
+      // A LETTER UNDER CMD, WHICH IS THE CASE THAT CHANGED MEANING. `Ctrl+K`
+      // stood here and is the pane's now (`TerminalTab.control-chords
+      // .test.tsx`); `Cmd+K` is still vam's, and it is the spelling a macOS
+      // operator reaches for. Cmd is where the whole grammar stays reachable
+      // from inside a pane that has taken Ctrl.
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'k', metaKey: true });
       await settle();
       expect(send).not.toHaveBeenCalled();
       // Reaching vam is the point: `Cmd+1` picks a tab from anywhere,
@@ -170,24 +179,27 @@ describe('the pane declines the keys that are not its own', () => {
   });
 
   /**
-   * `Ctrl-D` AND `Ctrl-U`, WHICH VAM NOW BINDS — and the two facts that
-   * together mean this pane keeps them.
+   * `Ctrl-D` AND `Ctrl-U` ARE THE PANE'S NOW, AND THIS TEST USED TO SAY THE
+   * OPPOSITE. It is kept, inverted, rather than deleted, because the fact it
+   * was written about has not gone away and is the sharpest reason the split
+   * had to move.
    *
-   * The pane hands every Ctrl chord back, as the case above already pins for
-   * `Ctrl+K`. What is new is that `Mod-d`/`Mod-u` are bound in the grammar
-   * those keys reach, to a half-screen scroll — so "handed back" would have
-   * meant "scrolled a transcript that is not on screen" if the grammar took
-   * them here. It does not: this element carries `data-insert-scope`, the
-   * keystroke arrives in Insert, and `isSelectOnly` stands the grammar down
-   * (`Canvas.tsx`'s keydown handler).
+   * WHAT IT SAID. The pane handed every Ctrl chord back, and `Mod-d`/`Mod-u`
+   * are bound in the grammar those keys reach — so "handed back" would have
+   * meant "scrolled a transcript that is not on screen", except that this
+   * element carries `data-insert-scope` and `isSelectOnly` stood the grammar
+   * down. Both halves were true, and together they meant `Ctrl+U` in a
+   * terminal did NOTHING AT ALL: not the kill-line the operator pressed it
+   * for, and not the scroll vam binds it to either.
    *
-   * `cursorModeAt` is asked of the REAL element rather than a synthetic one
-   * carrying the attribute, because the whole point is that the mark is on
-   * this pane. And the tag is asserted beside it: a `section` is invisible to
-   * any `INPUT|TEXTAREA` test, so a scope-based rule is the only kind that can
-   * see this surface at all.
+   * WHAT IS TRUE NOW. The chord reaches the pane, and vam's own listener never
+   * hears it — which is what stops one keystroke doing two things. The insert
+   * scope is still asserted here because it is still load-bearing for every
+   * OTHER modified key: `cursorModeAt` is asked of the REAL element, and the
+   * tag beside it, because a `section` is invisible to any `INPUT|TEXTAREA`
+   * test and a scope-based rule is the only kind that can see this surface.
    */
-  it('hands Ctrl-D and Ctrl-U back to a grammar that stands down in here', async () => {
+  it('sends Ctrl-D and Ctrl-U to the pane, and lets vam hear neither', async () => {
     const heard: string[] = [];
     const onKey = (event: KeyboardEvent) => heard.push(event.key);
     window.addEventListener('keydown', onKey);
@@ -196,8 +208,11 @@ describe('the pane declines the keys that are not its own', () => {
       fireEvent.keyDown(pane() as HTMLElement, { key: 'd', ctrlKey: true });
       fireEvent.keyDown(pane() as HTMLElement, { key: 'u', ctrlKey: true });
       await settle();
-      expect(send).not.toHaveBeenCalled();
-      expect(heard).toEqual(['d', 'u']);
+      expect(keys(send)).toEqual([
+        { kind: 'control', letter: 'd' },
+        { kind: 'control', letter: 'u' },
+      ]);
+      expect(heard).toEqual([]);
       expect(pane()?.tagName).toBe('SECTION');
       expect(cursorModeAt(pane())).toBe('insert');
     } finally {
