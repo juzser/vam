@@ -186,9 +186,31 @@ describe('the position is still the key, on every layout', () => {
     });
   });
 
-  it('leaves a bare digit alone, so the question card still marks by number', () => {
+  /**
+   * A BARE DIGIT IS BOUND NOW, AND THIS CASE IS KEPT INVERTED RATHER THAN
+   * DELETED, because the fact it was written about has not gone away.
+   *
+   * WHAT IT SAID: nothing answered a bare digit, so the question card could
+   * have them for its option marks with no coordination at all.
+   *
+   * WHAT IS TRUE NOW: the operator asked for a one-key view switch "only in
+   * Select mode", so a bare digit resolves to `pickView` — and the card keeps
+   * its marks anyway, by two mechanisms that each suffice on their own. Its
+   * listener sits BELOW the window listener and calls `preventDefault` on what
+   * it handled, and the bare spelling stands down in Insert regardless
+   * (`isSelectOnlyChord`). The mode is the load-bearing half and is measured
+   * in `test/canvas/Canvas.select-digit-view.test.tsx`; what belongs HERE is
+   * the spelling.
+   */
+  it('answers a bare digit as a POSITION, the same read the modified rows make', () => {
     expect(normalizeKey(digit(1), MAC)).toBe('1');
-    expect(press(digit(1), MAC).action).toBeNull();
+    expect(press(digit(1), MAC).action).toEqual({ kind: 'pickView', digit: 1 });
+    // AZERTY again, one modifier down: the unshifted `Digit1` reports `&`, and
+    // the binding is about the key's PLACE.
+    expect(press({ key: '&', code: 'Digit1' }, MAC).action).toEqual({
+      kind: 'pickView',
+      digit: 1,
+    });
   });
 });
 

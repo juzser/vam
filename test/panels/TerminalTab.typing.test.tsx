@@ -152,6 +152,42 @@ describe('a keystroke in the pane reaches tmux, exactly once', () => {
       window.removeEventListener('keydown', onKey);
     }
   });
+
+  /**
+   * AND A DIGIT IS A DIGIT HERE, WHICH IS NEWLY WORTH ASSERTING. A bare
+   * `1`..`9` picks a VIEW in Select now (`SELECT_DIGITS`, `keyboard/
+   * chords.ts`) — the operator asked for a one-key view switch — and this pane
+   * is the surface where that could have gone worst: it is a `section`, so
+   * `Canvas.tsx`'s INPUT|TEXTAREA typing guard cannot see it, and what it
+   * consumes goes into somebody's running agent.
+   *
+   * TWO THINGS, AND THE SECOND IS THE ONE A VIEW BAR COULD NOT TELL YOU: the
+   * digit is SENT, and vam's own window listener never hears it. A test that
+   * only checked the view had not changed would pass on a keystroke that was
+   * silently eaten and never typed.
+   *
+   * `isSelectOnlyChord` is the belt behind this brace, for the build where
+   * `send` is undefined and the pane hands its keys back — driven in
+   * `test/canvas/Canvas.select-digit-view.test.tsx`.
+   */
+  it('types a bare digit rather than letting it pick a view', async () => {
+    const heard: string[] = [];
+    const onKey = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', onKey);
+    try {
+      const send = await open();
+      fireEvent.keyDown(pane() as HTMLElement, { key: '3', code: 'Digit3' });
+      await settle();
+      expect(keys(send)).toEqual([{ kind: 'text', text: '3' }]);
+      expect(heard).toEqual([]);
+      // The two facts the stand-down is derived from, asserted where they are
+      // true rather than assumed: this is no text box, and it is Insert.
+      expect(pane()?.tagName).toBe('SECTION');
+      expect(cursorModeAt(pane())).toBe('insert');
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
 });
 
 describe('the pane declines the keys that are not its own', () => {

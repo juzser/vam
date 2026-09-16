@@ -170,20 +170,27 @@ describe('the digit still names a view, and still refuses aloud', () => {
 });
 
 describe('it claims one combination and declines the rest', () => {
-  it('leaves a bare digit and a differently-modified one alone', () => {
+  /**
+   * THE BARE DIGIT LEFT THIS LIST, AND IT IS THE ONLY MEMBER THAT DID.
+   *
+   * It stood here on the reasoning that "a bare digit is text". That is still
+   * true under a CARET and is now the whole of the rule (`isSelectOnlyChord`,
+   * `keyboard/chords.ts`); what it was never true of is Select, where there is
+   * no text being entered and the operator asked for exactly this key —
+   * "switch between the function tabs of the focused session faster… only in
+   * Select mode". The bare row is `pickView`'s second spelling now and is
+   * driven, in both modes, by `Canvas.select-digit-view.test.tsx`.
+   *
+   * WHAT IS LEFT HERE IS UNCHANGED AND IS WHY THE CASE SURVIVES: adding a
+   * spelling must not add a FAMILY. An extra modifier on the chord is still a
+   * different keystroke and still reaches nothing. `{ ctrlKey: false }` alone
+   * is deliberately not in this list — that is Option+<digit>, which the
+   * operator cancelled and which `pick-view-binding.test.ts` asserts resolves
+   * to nothing on either platform.
+   */
+  it('leaves a differently-modified chord alone', () => {
     render(<Canvas model={MODEL} />);
-    // The chord is exactly Ctrl+Option+<digit>. A bare digit is text, Cmd or
-    // Shift on top of it is a different chord, and none of them may reach the
-    // view bar. `{ ctrlKey: false }` alone is deliberately NOT in this list:
-    // that is Option+<digit>, which the operator cancelled and which
-    // `pick-view-binding.test.ts` asserts resolves to nothing on either
-    // platform -- asserting it here as well would be asserting it through a
-    // second layer for no extra information.
-    for (const extra of [
-      { ctrlKey: false, altKey: false },
-      { metaKey: true },
-      { shiftKey: true },
-    ]) {
+    for (const extra of [{ metaKey: true }, { shiftKey: true }]) {
       altDigit(2, extra);
     }
     expect(pressed('prs')).toBe('false');

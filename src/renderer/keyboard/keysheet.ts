@@ -20,8 +20,10 @@ import {
   bindingClashes,
   chordText,
   effectiveBindings,
+  isSelectOnlyChord,
   type KeyAction,
   type KeyBindings,
+  parseChord,
 } from './chords.js';
 
 /**
@@ -555,6 +557,27 @@ export function buildBindingSheet(
  * binding contributes one row PER MODE, each carrying the mode it is true in,
  * in `CURSOR_MODES` order; every other binding contributes the one row it
  * always did, with `mode: null`.
+ *
+ * AND A MODE CAN BELONG TO ONE KEY RATHER THAN TO THE ACTION — the second way
+ * a row gets tagged, added with the bare view digits.
+ *
+ * `pickView` holds two chords that are NOT alike: `Ctrl-Alt-3` reaches the
+ * Terminal view from anywhere, including from inside the prompt box, and a
+ * bare `3` is text wherever there is a caret and stands down
+ * (`isSelectOnlyChord`, `chords.ts`). `byMode` cannot say that — it is a
+ * function of the ACTION, so tagging the action would print "Select" against
+ * the chord as well, which is the neighbouring lie: a sheet that understates a
+ * binding sends the operator reaching for a three-key chord they have been
+ * told not to trust under a caret.
+ *
+ * So the tag is computed per KEY, exactly where `dead` already is and for the
+ * same reason — a row's two slots are judged separately. `SheetRow.mode` is
+ * unchanged in meaning ("which cursor mode this row is true in") and needs no
+ * new field; a Select-only key yields ONE row, tagged, rather than a second
+ * row saying "nothing here". `scrollHalf` prints that second row because the
+ * key is the text box's own editing command and an operator has to be told
+ * where it went; a digit under a caret types itself, which is the least
+ * surprising thing a key can do and not worth nine extra rows to say.
  */
 export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetGroup[] {
   return (
@@ -568,14 +591,33 @@ export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetG
             // Per KEY, because a row's two slots are judged separately: one of
             // them can be shadowed while the other still fires.
             const dead = row.dead[keys] ?? null;
-            return captions === null
-              ? [{ keys, label: row.label, mode: null, dead }]
-              : CURSOR_MODES.map((mode) => ({
-                  keys,
-                  label: `${MODE_TITLES[mode]} · ${captions[mode]}`,
-                  mode,
-                  dead,
-                }));
+            const selectOnly = isSelectOnlyChord(parseChord(keys));
+            if (captions === null) {
+              return selectOnly
+                ? [
+                    {
+                      keys,
+                      label: `${MODE_TITLES.select} · ${row.label}`,
+                      mode: 'select' as const,
+                      dead,
+                    },
+                  ]
+                : [{ keys, label: row.label, mode: null, dead }];
+            }
+            // BOTH AT ONCE IS ONE ROW, NOT TWO. Nothing in the shipped grammar
+            // is mode-dependent AND bound to a bare digit, but an operator can
+            // make it so in an afternoon — `move:down` onto `1` is a rebind the
+            // settings editor accepts and should — and the honest sheet for
+            // that is the Select half alone. Printing the Insert caption of a
+            // key the Insert scope never receives is the lie this whole module
+            // exists to prevent.
+            const modes = selectOnly ? (['select'] as const) : CURSOR_MODES;
+            return modes.map((mode) => ({
+              keys,
+              label: `${MODE_TITLES[mode]} · ${captions[mode]}`,
+              mode,
+              dead,
+            }));
           }),
         ),
       }))

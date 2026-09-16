@@ -39,7 +39,14 @@
 
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { createContext, type ReactNode, useContext } from 'react';
-import { actionId, activeBindings, bindingChords, type KeyAction } from './chords.js';
+import {
+  actionId,
+  activeBindings,
+  bindingChords,
+  isSelectOnlyChord,
+  type KeyAction,
+  parseChord,
+} from './chords.js';
 import { CURSOR_MODES, type CursorMode, describeAction, MODE_TITLES } from './keysheet.js';
 
 /** One row of a tooltip: the chords, and the mode that reading is true in
@@ -54,6 +61,23 @@ export type TipLine = {
  * unbound one: not an empty bracket, not a placeholder, not the shipped
  * default the operator just cleared. A caller with no lines renders its label
  * alone, the honest surface for a button no key reaches.
+ *
+ * AND THE CHORDS ARE JOINED ONLY WHERE THEY MEAN THE SAME THING — which they
+ * stopped doing the day `pickView` grew a one-key spelling.
+ *
+ * Its two slots are not alike: `Ctrl-Alt-1` reaches the Response view from
+ * anywhere, and a bare `1` is text wherever there is a caret and stands down
+ * (`isSelectOnlyChord`, `chords.ts`). Joined, this tip read "Ctrl-Alt-1 or 1"
+ * with nothing to say that half of it does nothing in the mode the operator
+ * may be in — the same lie the key sheet had to be taught to split, one
+ * surface over, and the reason this file's own header calls picking one
+ * silently "the same lie in a smaller font".
+ *
+ * So a Select-only spelling gets a LINE of its own, captioned with the mode it
+ * is true in, and a caller that has declared itself in Insert is not shown it
+ * at all. An action with no Select-only chord — which is every other action in
+ * the grammar — takes the unchanged path above it and still prints one joined
+ * line.
  */
 export function shortcutLines(
   action: KeyAction | undefined,
@@ -63,16 +87,39 @@ export function shortcutLines(
   if (action === undefined) {
     return [];
   }
-  const keys = bindingChords(overrides, actionId(action)).join(' or ');
-  if (keys === '') {
+  const chords = bindingChords(overrides, actionId(action));
+  if (chords.length === 0) {
     return [];
   }
-  const { byMode } = describeAction(action);
-  if (byMode === null) {
-    return [{ caption: null, keys }];
-  }
+  const { label, byMode } = describeAction(action);
+  const selectOnly = chords.filter((chord) => isSelectOnlyChord(parseChord(chord)));
   const modes = mode === undefined ? CURSOR_MODES : [mode];
-  return modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
+  if (selectOnly.length === 0) {
+    const keys = chords.join(' or ');
+    return byMode === null
+      ? [{ caption: null, keys }]
+      : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
+  }
+  const anywhere = chords.filter((chord) => !selectOnly.includes(chord));
+  const lines: TipLine[] = [];
+  if (anywhere.length > 0) {
+    const keys = anywhere.join(' or ');
+    lines.push(
+      ...(byMode === null
+        ? [{ caption: null, keys }]
+        : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }))),
+    );
+  }
+  // Shown unless the caller has said it is in Insert, where the key is not
+  // this action's at all. `mode === undefined` means "I do not know", and the
+  // honest answer to that is both lines.
+  if (mode !== 'insert') {
+    lines.push({
+      caption: `${MODE_TITLES.select} · ${byMode === null ? label : byMode.select}`,
+      keys: selectOnly.join(' or '),
+    });
+  }
+  return lines;
 }
 
 /**
