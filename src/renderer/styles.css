@@ -2326,10 +2326,39 @@ body {
  * is above the fold, and unsafe when a nested scroller pushes it below -- and
  * the icon picker is the one host here with a nested scroller.
  *
- * `flex: 1 1 0` is how the grid grows: `emoji-picker-react` writes its height
- * as an INLINE style, and flex-basis outranks the height property for the main
- * size of a flex item, so no `!important` is needed. Its width comes from the
- * component's own prop, which a stylesheet could not have overridden.
+ * THAT FIX DEPENDED ON THE CHROME ABOVE THE GRID STAYING SHORT, AND THE FIRST
+ * ROW ADDED ABOVE IT BROKE IT. `flex: 1 1 0` made the grid fill EXACTLY the
+ * space the header left, which meant the panel's content was always exactly
+ * 85dvh: its `overflow-y: auto` had nothing to scroll, and the grid's own
+ * scroller sat wherever the chrome happened to put it. Adding the glyph grid
+ * (109px) and the tone row (83px) pushed that scroller from 296px to 489px and
+ * the first emoji's bottom to 529px -- 21px under a 336px keyboard's fold, with
+ * no sheet scroll to recover it. Caught by
+ * `e2e/phone-shell.pw.ts`, `the icon picker can bring an emoji above an iOS
+ * keyboard`, which is run by `test:e2e:phone` and by CI.
+ *
+ * SO THE GRID IS A WHOLE SHEET TALL, and the fix stops depending on the
+ * arithmetic. `min-height: 85dvh` is the sheet's own height, so the grid ALONE
+ * fills it and everything above the grid is overflow -- which gives the sheet
+ * exactly the chrome's worth of scroll, whatever the chrome is. The invariant
+ * is now statable without a measurement: however many rows sit above the emoji
+ * grid, the sheet can scroll all of them away and bring the grid's own top edge
+ * to the sheet's. Measured after the change, same 390x844: 245px of slack
+ * against 231px of chrome, and the first emoji lands at 244-284px -- 224px
+ * clear of the fold, where it was 21px under it. The old version passed with a
+ * margin it had not chosen; this one has no margin to lose, because the slack
+ * grows with the chrome that consumes it.
+ *
+ * `flex: 1 1 0` STAYS, and still for its own reason: `emoji-picker-react`
+ * writes its height as an INLINE style, and flex-basis outranks the height
+ * property for the main size of a flex item, so no `!important` is needed. The
+ * `min-height` then clamps that resolved size up, because a min always wins
+ * over a used size. Its width comes from the component's own prop, which a
+ * stylesheet could not have overridden.
+ *
+ * `test/phone/overlay-sheets.test.ts` holds that the declaration is TYPED,
+ * which is all a content scan can say; that it WORKS is the Playwright
+ * measurement named above, and that one is not in the six-command gate.
  */
 .vam-phone [data-overlay-host] > [data-icon-picker] {
   height: 85dvh;
@@ -2338,5 +2367,5 @@ body {
 }
 .vam-phone [data-icon-picker] > .epr-main {
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 85dvh;
 }
