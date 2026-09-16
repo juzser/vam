@@ -82,9 +82,9 @@ describe('the copy vam shows', () => {
     // one commit after the refusals were fixed. That is the first paragraph a
     // person reads about a UI that no longer exists.
     //
-    // `docs/` is NOT scanned: `docs/ade-redesign.md` is a design record of the
-    // layout that was replaced, and a history that edits itself is not a
-    // history. The README describes what ships.
+    // `docs/` is NOT scanned: it holds design records of layouts that were
+    // replaced, and a history that edits itself is not a history. The
+    // README describes what ships.
     const readme = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8');
     expect(readme.length, 'a README to scan').toBeGreaterThan(2000);
     const stale = readme
