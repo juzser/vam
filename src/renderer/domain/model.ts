@@ -201,6 +201,36 @@ export type Decision = {
    * display a source can spoof by accident.
    */
   readonly unconfirmed?: boolean;
+  /**
+   * True on a turn vam minted from a window in which it could read NO
+   * conversation at all -- and therefore a turn whose answer vam has no
+   * evidence about, either way.
+   *
+   * WHY THIS IS A SEPARATE STATE AND NOT `output: null`. `null` is a reading:
+   * the source looked at this turn and collected no answer event, which is
+   * what a turn still in flight looks like. This is the ABSENCE of a reading,
+   * and the two were conflated for exactly as long as it took an operator to
+   * notice -- the Response view said "this turn ended without an answer" while
+   * the Terminal tab beside it held the agent's full reply.
+   *
+   * WHAT PRODUCES IT, measured rather than imagined. A transcript is read as a
+   * byte window from the end, and a single LINE can be larger than the whole
+   * window: 670 of them across 23 of the 85 session transcripts on the machine
+   * this was written for, the largest 1,356,930 bytes. One such line sitting in
+   * the window leaves it holding no `user` and no `assistant` line at all, and
+   * then the only thing able to open a turn is the `last-prompt` marker --
+   * whose branch has no answer to give, because the answer was never read.
+   * `tail.ts` now widens past such a line; this is what is reported when even
+   * the widened read found nothing, and a bounded read must be allowed to give
+   * up somewhere.
+   *
+   * ABSENT IS THE ORDINARY CASE, on the same rule as `errorCount` and
+   * `unconfirmed`: absent means this turn came out of a window vam really
+   * read. It is NOT a second `unconfirmed` -- that one is vam's own paint,
+   * about which no source has said anything yet; this is a source that said
+   * something vam could not reach.
+   */
+  readonly unread?: boolean;
 };
 
 /**

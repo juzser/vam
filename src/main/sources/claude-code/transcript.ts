@@ -46,17 +46,24 @@ import { collectQuestions } from './questions.js';
  * answer out of vam's model entirely -- not scrolled away, not collapsed,
  * never loaded.
  *
- * The real budget already exists one file over: `source.ts`'s `TAIL_BYTES`
- * (128 KiB = 131072 bytes) is the whole of what this function is ever
- * handed, so the number of turns the window could possibly carry is already
- * bounded by that byte budget divided by the smallest line able to open one
- * -- `{"type":"last-prompt","lastPrompt":"x"}`, 39 bytes on the wire plus its
+ * The real budget already exists one file over: `tail.ts`'s
+ * `TAIL_WINDOW_BYTES` (128 KiB = 131072 bytes) is one read step, and the
+ * number of turns a step could possibly carry is bounded by that byte budget
+ * divided by the smallest line able to open one --
+ * `{"type":"last-prompt","lastPrompt":"x"}`, 39 bytes on the wire plus its
  * newline, 40 total. 131072 / 40 = 3276.8, floored to 3276. A real
  * transcript's lines run to hundreds of bytes each and most of the window is
  * spent on assistant text besides, so no real session is expected to reach
- * this; it is a BACKSTOP against a pathological or adversarial tail, sized to
- * hold every turn the window can possibly contain rather than an arbitrary
- * smaller one.
+ * this; it is a BACKSTOP against a pathological or adversarial tail.
+ *
+ * ONE STEP, NOT THE WHOLE READ, and the difference is stated because it used
+ * to be absent. The live read may now take several steps -- up to
+ * `MAX_TAIL_READ_BYTES` -- and a history page may hand over a window of
+ * megabytes (`history.ts` doubles), so this no longer covers every turn the
+ * widest possible window could contain and is not claimed to. It is a
+ * backstop; and a live read that widened that far did so precisely because it
+ * was finding no conversation, which is a state `tail.ts` reports rather than
+ * papers over.
  */
 const MAX_DECISIONS = 3276;
 
@@ -89,7 +96,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
 export type Line = Record<string, unknown>;
 
 /** One parsed line, and where in the FILE it begins. */
-type Located = {
+export type Located = {
   readonly line: Line;
   /**
    * The absolute byte offset of this line, or `null` when the caller did not
@@ -100,7 +107,18 @@ type Located = {
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 
-function parseLines(tail: string, windowStart: number | null): Located[] {
+/**
+ * One window's whole lines, parsed, each carrying the byte offset it begins at.
+ *
+ * EXPORTED FOR THE WIDENING TAIL READ (`tail.ts`), and the reason is offsets.
+ * A read that has to step back past a line larger than one window ends up
+ * holding SEVERAL byte ranges, and gluing them into one string would shift
+ * every offset past the join -- by the size of whatever was skipped, which is
+ * a different number every time. A turn's id IS its offset, so that would
+ * rename turns the moment a window had to widen. Parsed per range and
+ * concatenated as lines, every offset stays absolute.
+ */
+export function parseTranscriptLines(tail: string, windowStart: number | null): Located[] {
   const out: Located[] = [];
   // Offsets are counted in BYTES, not characters: one emoji in a prompt would
   // otherwise put every line after it in the wrong place, and an id minted
@@ -480,7 +498,24 @@ export function summarizeTranscript(
    */
   windowStart: number | null = null,
 ): TranscriptFacts {
-  const located = parseLines(tail, windowStart);
+  return summarizeLines(parseTranscriptLines(tail, windowStart), decisionIdPrefix);
+}
+
+/**
+ * The same reading, over lines ALREADY parsed -- what a read that spans more
+ * than one byte range has (`tail.ts`, and `parseTranscriptLines` above says
+ * why it cannot just concatenate its ranges).
+ *
+ * `located` must be in FILE ORDER, oldest first, because every rule below is
+ * positional: a turn is opened by one line and named by a later one, an answer
+ * belongs to the turn that was open when it arrived, and a tool result to the
+ * call before it. Ranges read backwards are therefore reversed by the caller
+ * before they get here, never after.
+ */
+export function summarizeLines(
+  located: readonly Located[],
+  decisionIdPrefix: string,
+): TranscriptFacts {
   const lines = located.map((l) => l.line);
 
   let branch: string | null = null;

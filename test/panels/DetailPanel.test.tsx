@@ -3595,6 +3595,79 @@ describe('a turn with no answer says which kind of nothing it is', () => {
       expect(text, `status ${s}`).not.toContain('still running');
     }
   });
+
+  /**
+   * THE SENTENCE THAT WAS NOT A READING AT ALL.
+   *
+   * Reported from use: this pane said "this turn ended without an answer"
+   * while the Terminal tab beside it held the agent's full reply. The cause is
+   * one file over -- a transcript line can be larger than the whole byte
+   * window vam reads, and a window holding one of those holds no conversation
+   * at all, so the only thing left able to open a turn is the `last-prompt`
+   * marker and that branch has no answer to give (`tail.ts`, `Decision.unread`).
+   *
+   * EVERY ABSENCE SENTENCE IS A CLAIM ABOUT WHAT A SOURCE REPORTED, and on
+   * this turn no source reported anything. So `unread` shadows all four of
+   * them, at every status: a session vam cannot read is not a session whose
+   * turn ended without an answer, and it is not one still working on it
+   * either.
+   */
+  it('refuses every absence sentence for a turn vam could not read', () => {
+    for (const s of ['done', 'failed', 'running', 'waiting', 'idle'] as const) {
+      cleanup();
+      const only: Decision = { ...withOutput(null), unread: true };
+      draw({
+        decision: only,
+        entry: {
+          project: PROJECT,
+          session: { ...SESSION, status: s, activity: null, decisions: [only] },
+        },
+      });
+      const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+      expect(text, `status ${s}`).toContain('could not read');
+      expect(text, `status ${s}`).not.toContain('ended without an answer');
+      expect(text, `status ${s}`).not.toContain('no answer for this turn yet');
+      expect(text, `status ${s}`).not.toContain('resolved to nothing');
+    }
+  });
+
+  /**
+   * AND THE ACTIVITY LINE DOES NOT OUTRANK IT EITHER.
+   *
+   * A running session's newest turn prefers `Session.activity` over any of
+   * these sentences, because a live caption naming the tool the agent is on is
+   * better than prose. But `activity` is read off the SAME window, so on a
+   * window vam could not read it is at best stale -- a reading taken before,
+   * or from somewhere else -- and drawing it here would name work as this
+   * turn's working on the one turn vam has no working for. This is the
+   * `unconfirmed` rule next to it, for the same reason and one absence over.
+   */
+  it('keeps the unread sentence on a running turn that has an activity line', () => {
+    const only: Decision = { ...withOutput(null), unread: true };
+    draw({
+      decision: only,
+      entry: {
+        project: PROJECT,
+        session: {
+          ...SESSION,
+          status: 'running',
+          activity: 'Bash: run the tests',
+          decisions: [only],
+        },
+      },
+    });
+    const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+    expect(text).toContain('could not read');
+    expect(text).not.toContain('run the tests');
+  });
+
+  /** And a turn vam DID read keeps every sentence it had. */
+  it('says nothing about reading on an ordinary unanswered turn', () => {
+    show(null, 'done');
+    const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+    expect(text).toContain('ended without an answer');
+    expect(text).not.toContain('could not read');
+  });
 });
 
 /**

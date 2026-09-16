@@ -1763,11 +1763,25 @@ export function splitAnswers(output: string): string[] {
  * beside a Terminal tab holding the agent's actual answer. So the paint gets
  * its own, which says only what is true: the words went out and vam has not
  * heard back yet.
+ *
+ * A FOURTH, AND IT IS THE SAME SENTENCE CAUGHT A SECOND TIME. The paint was
+ * one route to "this turn ended without an answer" beside a Terminal tab
+ * holding the reply; a turn vam could not READ is the other, and it survived
+ * the first fix because it is not a paint -- the source really did report this
+ * turn, from a byte window that held no conversation in it at all. A single
+ * transcript line can be larger than the whole window (`tail.ts`: 670 such
+ * lines across 23 of the 85 transcripts measured, the largest 1,356,930
+ * bytes), and then the only line left able to open a turn is the `last-prompt`
+ * marker, whose branch has no answer to give. `Decision.unread` is a source
+ * saying so, and it shadows every sentence below: a session vam cannot read is
+ * not a session whose turn ended without an answer, and not one still working
+ * on it either.
  */
 function noAnswerNote(
   output: string | null,
   status: SessionStatus | null,
   unconfirmed: boolean | undefined,
+  unread: boolean | undefined,
 ): string {
   // FIRST, and it shadows none of the sentences under it: a paint's `output` is
   // `null` by construction (`optimistic.ts`), so the two answers-exist branches
@@ -1776,6 +1790,14 @@ function noAnswerNote(
   // is `done` is not evidence about a turn the source has never mentioned.
   if (unconfirmed === true) {
     return '\u2014 waiting for the source to report this turn back \u2014';
+  }
+  // SECOND, and above the status-derived tail for the same reason the paint is:
+  // the SESSION's status is not evidence about a turn whose transcript vam
+  // could not reach. `done` does not mean this turn ended; `running` does not
+  // mean its answer is still coming. Both may already be written down in a
+  // window vam was not allowed to read.
+  if (unread === true) {
+    return '\u2014 vam could not read the answer to this turn \u2014';
   }
   // A live turn that HAS an answer still gets a line, and the absence wordings
   // would all be lies about it: it is not empty, and it is not answerless. All
@@ -3665,9 +3687,15 @@ const TurnBlock = memo(function TurnBlock({
                         earlier as this turn's working, which is the same
                         unsupported claim `noAnswerNote` refuses one line down.
                         So the paint's own sentence wins over it. */}
-                    {decision.unconfirmed === true
-                      ? noAnswerNote(decision.output, status, decision.unconfirmed)
-                      : (activity ?? noAnswerNote(decision.output, status, decision.unconfirmed))}
+                    {decision.unconfirmed === true || decision.unread === true
+                      ? noAnswerNote(decision.output, status, decision.unconfirmed, decision.unread)
+                      : (activity ??
+                        noAnswerNote(
+                          decision.output,
+                          status,
+                          decision.unconfirmed,
+                          decision.unread,
+                        ))}
                   </span>
                   <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
                     <span>.</span>
@@ -3682,7 +3710,7 @@ const TurnBlock = memo(function TurnBlock({
                   )}
                 </span>
               ) : (
-                noAnswerNote(decision.output, status, decision.unconfirmed)
+                noAnswerNote(decision.output, status, decision.unconfirmed, decision.unread)
               )}
             </p>
           )}
