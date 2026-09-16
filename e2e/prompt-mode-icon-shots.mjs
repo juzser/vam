@@ -289,6 +289,70 @@ for (const mode of ['auto', 'manual', 'plan']) {
   console.log(`${outDir}/prompt-mode-icon-${mode}.png`);
 }
 
+// --- The same three hues in LIGHT, which is a separate set of values and not
+// the dark ones inverted: a glyph on a white card has to come a long way DOWN
+// to clear its floor, so the amber reads brown there. Measured on the painted
+// node for the same reason as the dark pass -- the token guard proves the
+// values are in the stylesheet, only a browser proves they reach the element.
+await page.evaluate(() => document.documentElement.classList.add('light'));
+await page.waitForTimeout(200);
+if ((await page.locator('[data-mode-picker]').count()) === 0) {
+  await toggle.click();
+  await page.waitForTimeout(150);
+}
+const lightInks = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-mode-option] [data-mode-glyph]')].map((el) => {
+    const cs = getComputedStyle(el);
+    const ground = window.vamInk.groundOf(el);
+    return {
+      mode: el.getAttribute('data-mode-glyph'),
+      colour: cs.color,
+      fill: cs.fill,
+      ground,
+      opaque: window.vamInk.opaque(cs.color) && window.vamInk.opaque(ground),
+      ratio: window.vamInk.opaque(cs.color)
+        ? Number(window.vamInk.ratio(cs.color, ground).toFixed(3))
+        : null,
+    };
+  }),
+);
+console.log('mode glyph paint, light:', JSON.stringify(lightInks));
+if (lightInks.length !== 3 || new Set(lightInks.map((i) => i.colour)).size !== 3) {
+  throw new Error(`light does not paint three distinct mode hues: ${JSON.stringify(lightInks)}`);
+}
+for (const ink of lightInks) {
+  if (!ink.opaque || ink.ratio < 3) {
+    throw new Error(
+      `light ${ink.mode} paints ${ink.colour} on ${ink.ground} — ${ink.ratio}:1, under 3:1.`,
+    );
+  }
+  const dark = inks.find((i) => i.mode === ink.mode);
+  // RE-DERIVED, NOT INHERITED. If a theme block were missing a token the var
+  // would fall through to the other theme's value and nothing else here would
+  // notice -- the hues would still be three and would still clear the floor.
+  if (ink.colour === dark.colour) {
+    throw new Error(
+      `light ${ink.mode} paints the DARK value (${ink.colour}) — the light block is not being ` +
+        'read, so this theme is wearing the other one.',
+    );
+  }
+}
+await page.screenshot({
+  path: `${outDir}/prompt-mode-picker-light.png`,
+  clip: (() => {
+    const p = pickerBox;
+    return {
+      x: toolsBox.x - 12,
+      y: p.y - 24,
+      width: toolsBox.width + 24,
+      height: toolsBox.y + toolsBox.height - p.y + 40,
+    };
+  })(),
+});
+console.log(`${outDir}/prompt-mode-picker-light.png`);
+await page.evaluate(() => document.documentElement.classList.remove('light'));
+await page.waitForTimeout(150);
+
 // --- Shot 3: the composer with the waiting notice gone. The demo's
 // `factory-sse-1` is exactly the session that used to carry it
 // (`waitingFor: 'permission prompt'`), so its absence here is the change.
