@@ -54,7 +54,17 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const SESSION = 'md-1';
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+// `deviceScaleFactor: 2` for the PICTURES and for nothing else. Every check
+// below is a `getBoundingClientRect` or a `getComputedStyle`, both of which
+// are CSS pixels and are unaffected by it -- what it changes is that a 12px
+// tree glyph reaches a reviewer as 24 real pixels instead of 12, which is the
+// difference between a colour they can judge and one they have to take on
+// trust. `files-tab-shots.mjs` captures the shipped README picture the same
+// way, for the same reason.
+const page = await browser.newPage({
+  viewport: { width: 1100, height: 800 },
+  deviceScaleFactor: 2,
+});
 
 page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('CONSOLE ERROR:', msg.text());
