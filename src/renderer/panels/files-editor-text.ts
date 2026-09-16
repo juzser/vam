@@ -153,6 +153,33 @@ export function editorFileKind(path: string): EditorFileKind | null {
 }
 
 /**
+ * IS THIS MARKDOWN? — and why it is a SEPARATE question from `editorFileKind`
+ * rather than a fourth case inside it.
+ *
+ * This is the place the header above predicted: the formatter's list and the
+ * highlighter's list have come apart, and markdown is what came apart. Three
+ * modules now want three different things from a `.md`:
+ *
+ *   * `files-format.ts` must keep answering "not mine". It routes anything
+ *     `editorFileKind` names and is not `json` straight into `formatIni` —
+ *     so a fourth case there would have handed a markdown file to a `.env`
+ *     formatter, which strips blank lines and rewrites `#` lines. In a
+ *     markdown file those are paragraph breaks and headings.
+ *   * `files-highlight.ts` DOES have an opinion now (see its own header for
+ *     the argument, which is about line structure rather than meaning).
+ *   * `FilesTab.tsx` asks it a third question again — "can this file be
+ *     PREVIEWED?" — and the answer has to be the same one the highlighter
+ *     uses, or the toggle would appear on a file the colours disagree about.
+ *
+ * `.markdown` as well as `.md`, because both are ordinary on disk, and both
+ * are what every renderer this file could be compared against accepts.
+ */
+export function isMarkdownPath(path: string): boolean {
+  const ext = extensionOf(baseName(path));
+  return ext === '.md' || ext === '.markdown';
+}
+
+/**
  * What a list row shows for an absolute path: relative to the session's own
  * root, which is the fact worth reading (the root itself is implied by which
  * session's tab this is) rather than noise repeated on every single row.

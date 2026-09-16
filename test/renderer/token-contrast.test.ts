@@ -62,6 +62,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { FILE_ROW_INKS } from '../../src/renderer/panels/files-icons.js';
 import { contrast } from '../support/contrast.js';
 import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
@@ -86,6 +87,17 @@ const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf
  * rule that matched nothing would pass this scan.
  */
 const MARKER_INK = /(?:\bmarker:|::marker\]:)text-([a-z0-9-]+)/g;
+
+/**
+ * The file tree's glyph inks, as TOKENS, read from the module that paints them.
+ *
+ * `FILE_ROW_INKS` is Tailwind utilities (`text-syn-string`); this file measures
+ * CSS custom properties (`--vam-syn-string`). The two are the same name either
+ * side of one prefix, and turning one into the other here is what stops this
+ * guard from being a second, remembered copy of a list that lives elsewhere —
+ * which is precisely what it was, and what a mutation caught.
+ */
+const TREE_GLYPH_INKS = FILE_ROW_INKS.map((utility) => `--vam-${utility.replace(/^text-/, '')}`);
 
 const RENDERER_DIR = resolve(process.cwd(), 'src/renderer');
 
@@ -291,8 +303,75 @@ describe('token contrast, per theme', () => {
           failing: [],
         });
       });
+
+      /**
+       * THE FILE TREE'S OWN GLYPHS, AND THE THIRD FILL THAT IS THE HARD ONE.
+       *
+       * `files-icons.tsx` draws a 12px picture before every row's name and
+       * gives four of its seven families a hue of their own. A glyph is a
+       * non-text mark, so the floor is 1.4.11's 3:1 rather than 1.4.3's 4.5 —
+       * but a tree ROW has three fills, not one, and only the first is
+       * obvious: the panel it sits on, `raised` while a pointer is over it,
+       * and `line-strong` under the keyboard cursor. The cursor's is by far
+       * the lightest, and it is exactly where a hue picked against the panel
+       * alone comes apart. `--vam-syn-comment` was the first candidate for the
+       * config family: 4.79 on the panel, 2.54 on the cursor row. It would
+       * have passed a one-ground check and been under the floor on the row the
+       * keyboard is actually sitting on, which is the row an operator looks at
+       * hardest. It is not in the palette below, and the test after this one
+       * records why rather than leaving the reason to this comment.
+       *
+       * THE INK LIST IS READ FROM `files-icons.tsx`, NOT SPELLED HERE, and
+       * that was a mutation finding rather than a design choice. With the five
+       * tokens typed out below, pointing the markdown family at
+       * `--vam-syn-comment` in BOTH the module and its own `FILE_ROW_INKS`
+       * reddened nothing at all: this file went on measuring the list it
+       * remembered. Two lists of the same thing is exactly the drift the
+       * module's own header argues against for the tree's hue, and the guard
+       * had it. `TREE_GLYPH_INKS` maps the Tailwind utility the module really
+       * paints (`text-syn-string`) to the token it resolves to
+       * (`--vam-syn-string`), which is the one-line bridge between a class
+       * name and a measurable colour.
+       *
+       * The literal `15` is still the point, the same way the `63` above is:
+       * five inks times three fills. Drop a fill from this list, or an ink
+       * from the module, and this reddens rather than passing more quietly.
+       */
+      it('draws every file-tree glyph at 3:1 on all three fills a row can have', () => {
+        const fills = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
+        const pairs = TREE_GLYPH_INKS.flatMap((ink) => fills.map((fill) => [ink, fill] as const));
+        expect(measure(pairs, 3)).toEqual({ pairs: 15, failing: [] });
+      });
     });
   }
+
+  /**
+   * THE ONE THAT WAS REJECTED, asserted as a rejection rather than deleted, so
+   * the next hand reaching for the quietest grey in the syntax palette for a
+   * tree glyph finds the measurement here instead of repeating the mistake.
+   *
+   * AND IT RUNS ONCE, ACROSS BOTH THEMES, because that is the shape of the
+   * finding. `--vam-syn-comment` on the cursor row reads 3.12 in light — over
+   * the floor, by a twentieth — and 2.54 in dark. Written inside the per-theme
+   * loop it failed in light and passed in dark, which is a true statement
+   * about one palette and a useless one about the token: an ink is only
+   * spendable if it clears in BOTH, and the number that decides that is the
+   * worse of the two.
+   */
+  it('records why syn-comment is not one of the file-tree glyph inks', () => {
+    const worst = Math.max(
+      ...THEMES.map((theme) => {
+        const t = tokens(ruleBody(CSS, theme.selector));
+        const comment = t.get('--vam-syn-comment');
+        const fill = t.get('--vam-line-strong');
+        expect(comment, `${theme.name} defines --vam-syn-comment`).toBeDefined();
+        expect(fill, `${theme.name} defines --vam-line-strong`).toBeDefined();
+        return -contrast(comment as string, fill as string);
+      }),
+    );
+    expect(THEMES.length).toBe(2);
+    expect(-worst).toBeLessThan(3);
+  });
 
   /**
    * A MARKER MAY NOT NAME AN INK THIS FILE DOES NOT MEASURE. Theme-independent,

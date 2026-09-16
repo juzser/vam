@@ -22,6 +22,7 @@ import type {
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import { FORMAT_OFFER } from '../../src/renderer/panels/files-format.js';
 import { resetUnsavedRegistry } from '../../src/renderer/panels/unsaved-files.js';
 import {
   DEFAULT_EDITOR_HIGHLIGHT,
@@ -249,6 +250,65 @@ describe('the file tree', () => {
       await Promise.resolve();
     });
     expect(rowPaths()).toEqual(['/work/atlas/src']);
+  });
+
+  /**
+   * THE ICON BEFORE THE NAME — what the operator asked for in as many words,
+   * and the only surface that proves `files-icons.tsx` is actually WIRED.
+   *
+   * `test/panels/files-icons.test.tsx` proves the classifier and the glyph in
+   * isolation; a module can be perfect and unreferenced. These check the tree
+   * really calls it, really passes the directory flag, and really passes the
+   * OPEN state — which is the one argument a row has that the classifier
+   * cannot derive for itself.
+   */
+  it('draws a folder before a directory’s name, and opens it when the row opens', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/src/index.ts', '/work/atlas/README.md'],
+        truncated: false,
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+
+    const icon = (path: string) =>
+      row(path)?.querySelector('[data-file-icon]')?.getAttribute('data-file-icon') ?? null;
+    expect(icon('/work/atlas/src')).toBe('directory');
+    expect(icon('/work/atlas/README.md')).toBe('doc');
+
+    await act(async () => {
+      row('/work/atlas/src')?.click();
+      await Promise.resolve();
+    });
+    expect(icon('/work/atlas/src')).toBe('directory-open');
+    expect(icon('/work/atlas/src/index.ts')).toBe('code');
+  });
+
+  /**
+   * AND THE HUE, which is the half of the operator's question this repo
+   * answered with a line drawn through it (`files-icons.tsx`'s header). What
+   * matters at the wiring level is only that the tree asks the right module:
+   * a `.md` and a `.ts` sitting side by side must not wear the same ink.
+   */
+  it('gives the files vam understands an ink of their own, and the rest the quiet grey', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md', '/work/atlas/index.ts', '/work/atlas/.env'],
+        truncated: false,
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+
+    const ink = (path: string) =>
+      row(path)?.querySelector('[data-file-icon]')?.getAttribute('class') ?? '';
+    expect(ink('/work/atlas/README.md')).toContain('text-quote');
+    expect(ink('/work/atlas/.env')).toContain('text-syn-string');
+    expect(ink('/work/atlas/index.ts')).toContain('text-ink-faint');
+    expect(ink('/work/atlas/README.md')).not.toBe(ink('/work/atlas/index.ts'));
   });
 
   it('filters the tree, keeping the directories that lead to a match', async () => {
@@ -1519,5 +1579,467 @@ describe('the highlight overlay', () => {
     // become a second one.
     expect(qa('[data-files] [data-insert-stop]').length).toBe(1);
     expect(q('[data-files] [data-insert-stop]')?.hasAttribute('data-files-editor')).toBe(true);
+  });
+});
+
+/* =========================================================================
+ * THE TOOLBAR'S OWN WORDS.
+ *
+ * The operator asked for "a tooltip for the Save button and the formatter
+ * button". Save had none at all; Format had a `title`, which is the shape
+ * `panels/Note.tsx` was written to replace and says why in its own header: a
+ * `title` opens on HOVER and on nothing else, so on a keyboard-first tool the
+ * explanation was unreadable to the operator it was written for.
+ *
+ * So both are `Note`s now, and these hold four things a later edit could
+ * quietly undo: that the note exists, that it names the chord (neither key is
+ * in the rebindable table -- they are `EDITOR_KEYS`, hardcoded, which is what
+ * makes writing them out honest here rather than a lie waiting to happen),
+ * that no `title` came back, and that wrapping added no element to a flex row.
+ * ====================================================================== */
+
+describe('the tooltips on the two buttons the operator named', () => {
+  const noteOn = (selector: string): string | null =>
+    q(selector)?.getAttribute('data-note') ?? null;
+
+  it('gives Save a note a keyboard can read, naming the chord that does the same thing', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const text = noteOn('[data-files-save]');
+    expect(text).not.toBeNull();
+    expect(text).toContain('Mod-s');
+  });
+
+  /**
+   * AND THE FORMAT NOTE QUOTES THE FORMATTER'S OWN OFFER rather than a second
+   * copy of it. This button is never disabled -- pressing it on a `.ts` puts a
+   * refusal on screen by name -- so what the tooltip owes the operator is the
+   * SCOPE, and a hand-typed scope goes stale the first time the formatter
+   * learns a file type. `FORMAT_OFFER` is the string every refusal already
+   * ends with; this asserts the tooltip is built from that one and then
+   * asserts a real refusal still carries it, so the two surfaces are one fact
+   * rather than two that happen to agree today.
+   */
+  it('gives Format a note that quotes the same offer its refusals do', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const text = noteOn('[data-files-format]');
+    expect(text).not.toBeNull();
+    expect(text).toContain('Mod-Shift-f');
+    expect(text).toContain(FORMAT_OFFER);
+
+    cleanup();
+    await openFile('/work/atlas/index.ts', 'export const a = 1\n');
+    await pressFormat();
+    expect(note()).toContain(FORMAT_OFFER);
+  });
+
+  /**
+   * THE REGRESSION ITSELF. A `title` is not a failure that shows up in a
+   * snapshot -- it works perfectly with a mouse -- so the only thing keeping
+   * it from coming back is a check that looks for it.
+   */
+  it('uses no bare title on either — the shape that was unreadable from the keyboard', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-save]')?.getAttribute('title')).toBeNull();
+    expect(q('[data-files-format]')?.getAttribute('title')).toBeNull();
+  });
+
+  /**
+   * `Tooltip.Trigger asChild` ADDS NO ELEMENT -- `ShortcutTip`'s own header
+   * states that as an invariant it depends on and does not enforce, and the
+   * header row these buttons sit in is a flex row whose spacing a wrapper
+   * would change. So each must still be a DIRECT child of that row.
+   */
+  it('wraps neither button in an extra element — the header row is a flex row', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    const children = [...(q('[data-files-header]')?.children ?? [])];
+    expect(children.some((el) => el.hasAttribute('data-files-save'))).toBe(true);
+    expect(children.some((el) => el.hasAttribute('data-files-format'))).toBe(true);
+  });
+});
+
+/* =========================================================================
+ * THE MARKDOWN PREVIEW.
+ *
+ * Operator: "a markdown preview in GitHub's format would be good. Switch
+ * between preview and raw mode with one toggle button next to the formatter
+ * button at the top."
+ *
+ * THE RENDERER IS `OUT_MARKDOWN`, the same component map the transcript
+ * dresses an agent's answer with, and that is the load-bearing decision
+ * rather than a saving. Both surfaces render text vam cannot vouch for; a
+ * second map would be a second set of decisions about raw HTML, `a` and
+ * `img`, and the second set is the one nobody re-derives. The `<script>`
+ * check below is what says so out loud.
+ *
+ * THE OTHER HALF IS THE TEXT NOT BEING LOST. Toggling a view must not touch a
+ * buffer -- not on the way in, not on the way out, and not when the operator
+ * leaves for another file and comes back.
+ * ====================================================================== */
+
+const pressPreview = async () => {
+  await act(async () => {
+    q<HTMLButtonElement>('[data-files-preview]')?.click();
+    await Promise.resolve();
+  });
+};
+
+const MD = ['# Title', '', 'Some **bold** prose.', '', '- one', '- two', ''].join('\n');
+
+describe('the markdown preview', () => {
+  it('offers the toggle on a markdown file and on nothing else', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    expect(q('[data-files-preview]')).not.toBeNull();
+    cleanup();
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-preview]')).toBeNull();
+    cleanup();
+    await openFile('/work/atlas/index.ts', 'export const a = 1\n');
+    expect(q('[data-files-preview]')).toBeNull();
+  });
+
+  it('swaps the raw editor for a rendered document, and back', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+
+    await pressPreview();
+    expect(q('[data-files-editor]')).toBeNull();
+    const view = q('[data-files-preview-view]');
+    expect(view).not.toBeNull();
+    expect(view?.querySelector('h1')?.textContent).toBe('Title');
+    expect(view?.querySelector('strong')?.textContent).toBe('bold');
+    expect(view?.querySelectorAll('li')).toHaveLength(2);
+
+    await pressPreview();
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+  });
+
+  it('renders GitHub-flavoured markdown, not the plain spec', async () => {
+    // A table and a strikethrough are GFM and nothing else — if `remarkGfm`
+    // were dropped from the plugin list, both would render as prose and this
+    // is the only thing that would notice.
+    await openFile(
+      '/work/atlas/README.md',
+      ['| a | b |', '| - | - |', '| 1 | 2 |', '', '~~struck~~', ''].join('\n'),
+    );
+    await pressPreview();
+    const view = q('[data-files-preview-view]');
+    expect(view?.querySelector('table')).not.toBeNull();
+    expect(view?.querySelectorAll('th')).toHaveLength(2);
+    expect(view?.querySelector('del')?.textContent).toBe('struck');
+  });
+
+  /**
+   * THE WALL. A file in a session's working directory is very often an
+   * agent's own output one step removed, and a preview is the first thing in
+   * this tab that RENDERS rather than displays it. react-markdown drops
+   * embedded HTML by default and `OUT_MARKDOWN` does not enable `rehype-raw`
+   * — this asserts the result rather than the configuration, because a
+   * configuration can be read and still be wrong about what reached the DOM.
+   */
+  it('renders raw HTML in the file as characters, never as DOM', async () => {
+    await openFile(
+      '/work/atlas/README.md',
+      '<script>globalThis.__pwned = 1</script>\n\n<img src=x onerror="globalThis.__pwned = 2">\n',
+    );
+    await pressPreview();
+    const view = q('[data-files-preview-view]');
+    expect(view).not.toBeNull();
+    expect(view?.querySelector('script')).toBeNull();
+    expect(view?.querySelector('img')).toBeNull();
+    expect(document.querySelector('script')).toBeNull();
+    expect(view?.textContent).toContain('<script>');
+    expect((globalThis as Record<string, unknown>).__pwned).toBeUndefined();
+  });
+
+  /**
+   * THE OTHER HALF OF THE WALL, AND THE ONE WITH TEETH IN AN ELECTRON WINDOW.
+   *
+   * `rehype-raw` being off stops HTML somebody WROTE as HTML. It does nothing
+   * about a perfectly ordinary markdown LINK, which react-markdown renders as
+   * a real `<a href>` by default — and in an Electron renderer a click on a
+   * real anchor navigates THE WHOLE APP WINDOW away. The window is the
+   * application: there is no back button, no other tab, and nothing on screen
+   * to say what happened. The same for `<img>`, one step quieter: a rendered
+   * image is a remote fetch that tells whoever wrote the file that this pane
+   * opened, without anybody asking for it.
+   *
+   * `OUT_MARKDOWN`'s `a:` and `img:` overrides are what defuse both, and this
+   * preview reuses them — that is the whole argument for sharing the map with
+   * the transcript rather than writing a second one. What was MISSING until
+   * this test is anything that would notice if the map were taken away.
+   *
+   * MEASURED AS THE RENDERED OUTCOME, NEVER AS THE PROP. Asserting that
+   * `components={OUT_MARKDOWN}` is passed would be a fact about this file's
+   * source text; the question is what reached the DOM.
+   *
+   * AND IT ASSERTS BOTH DIRECTIONS, because half of it is the easy half. "No
+   * anchor" alone is satisfied by rendering NOTHING, which would be a worse
+   * page than the bug: the destination has to still be READABLE, so an
+   * operator can see where a link goes and copy it deliberately. Same for the
+   * image's alt text, which is the only thing left of a picture vam will not
+   * fetch.
+   *
+   * THIS IS THE MUTATION THAT FOUND IT: dropping `components={OUT_MARKDOWN}`
+   * from the preview's own `<Markdown>` left all 1,338 tests in `test/panels`
+   * green. The neighbouring `remarkGfm` check covers a FEATURE; this covers
+   * the safety property sitting beside it.
+   */
+  it('defuses a link and an image — no anchor, no fetch, and the destination still readable', async () => {
+    await openFile(
+      '/work/atlas/README.md',
+      [
+        'See the [runbook](https://example.test/runbook) before deploying.',
+        '',
+        '![architecture diagram](https://example.test/arch.png)',
+        '',
+      ].join('\n'),
+    );
+    await pressPreview();
+    const view = q('[data-files-preview-view]');
+    expect(view).not.toBeNull();
+
+    // NOTHING NAVIGABLE, and nothing that fetches. `a[href]` rather than `a`
+    // because an anchor with no destination is harmless and is not what this
+    // is about; `img` outright, because there is no such thing as a harmless
+    // one here.
+    expect(view?.querySelectorAll('a[href]')).toHaveLength(0);
+    expect(view?.querySelectorAll('img')).toHaveLength(0);
+
+    // AND THE READER LOSES NOTHING. Both the words and the address survive, so
+    // "render nothing" cannot pass this.
+    const text = view?.textContent ?? '';
+    expect(text).toContain('runbook');
+    expect(text).toContain('https://example.test/runbook');
+    expect(text).toContain('architecture diagram');
+
+    // THE THIRD DIRECTION, borrowed from the transcript's own version of this
+    // guard (`DetailPanel.test.tsx`, "prints a link's address..."): the SYNTAX
+    // is consumed. Without this, a preview that had stopped rendering
+    // altogether and was showing the raw source would satisfy every
+    // expectation above — no anchor, no image, and all three strings present.
+    expect(text).not.toContain('](');
+    expect(text).not.toContain('![');
+  });
+
+  /**
+   * THE ONE THAT MATTERS MOST. A view toggle that loses an edit is worse than
+   * no view toggle, and the buffer is the only thing holding the operator's
+   * text — `buffers` survives a tab switch and a pane switch already, and the
+   * preview must be exactly as harmless as those.
+   */
+  it('keeps unsaved text across raw → preview → raw, and previews the UNSAVED text', async () => {
+    const editor = await openFile('/work/atlas/README.md', '# on disk\n');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: '# edited, never saved\n' } });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-dirty]')).not.toBeNull();
+
+    await pressPreview();
+    // The preview is of the BUFFER, not of what the bridge last read.
+    expect(q('[data-files-preview-view]')?.querySelector('h1')?.textContent).toBe(
+      'edited, never saved',
+    );
+    expect(q('[data-files-dirty]')).not.toBeNull();
+
+    await pressPreview();
+    expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('# edited, never saved\n');
+  });
+
+  it('keeps Save reachable from the preview, and a save from there really lands', async () => {
+    const write = vi.fn(async () => ({ signature: SIGNATURE({ sha256: 'next' }) }));
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]');
+    await act(async () => {
+      fireEvent.change(editor as HTMLTextAreaElement, { target: { value: '# b\n' } });
+      await Promise.resolve();
+    });
+    await pressPreview();
+    expect(q('[data-files-save]')).not.toBeNull();
+    await act(async () => {
+      q<HTMLButtonElement>('[data-files-save]')?.click();
+      await Promise.resolve();
+    });
+    expect(write).toHaveBeenCalledWith('/work/atlas/README.md', '# b\n', SIGNATURE());
+    expect(q('[data-files-dirty]')).toBeNull();
+  });
+
+  it('shows the raw editor for a file that cannot be previewed, and remembers the mode', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md', '/work/atlas/.env'],
+        truncated: false,
+      }),
+      read: async (path: string) => ({
+        content: path.endsWith('.md') ? '# a\n' : 'A=1\n',
+        isBinary: false,
+        signature: SIGNATURE(),
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    await pressPreview();
+    expect(q('[data-files-preview-view]')).not.toBeNull();
+
+    // A `.env` has no preview. The mode is not FORGOTTEN, only inapplicable.
+    await act(async () => {
+      row('/work/atlas/.env')?.click();
+      await Promise.resolve();
+    });
+    expect(q('[data-files-preview-view]')).toBeNull();
+    expect(q('[data-files-editor]')).not.toBeNull();
+
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    expect(q('[data-files-preview-view]')).not.toBeNull();
+  });
+
+  it('says which mode it is in, to a pointer and to a screen reader alike', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    const toggle = () => q('[data-files-preview]');
+    expect(toggle()?.getAttribute('data-files-preview-state')).toBe('raw');
+    expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle()?.getAttribute('data-note')).toContain('Mod-Shift-m');
+    await pressPreview();
+    expect(toggle()?.getAttribute('data-files-preview-state')).toBe('preview');
+    expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('the preview’s keyboard — a control reachable only by mouse is not finished here', () => {
+  it('toggles on Mod-Shift-m from the editor, and back from the preview itself', async () => {
+    const editor = await openFile('/work/atlas/README.md', MD);
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'm', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    const view = q<HTMLElement>('[data-files-preview-view]');
+    expect(view).not.toBeNull();
+
+    await act(async () => {
+      fireEvent.keyDown(view as HTMLElement, { key: 'm', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+  });
+
+  /**
+   * THE WAY OUT. Every other surface in this tab answers Escape and `Mod-[`
+   * by handing the keyboard back to Select; a read-only pane that swallowed
+   * the keyboard would be the one place in here an operator could get stuck.
+   */
+  it('hands the keyboard back on Escape and on Mod-[', async () => {
+    const editor = await openFile('/work/atlas/README.md', MD);
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'm', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    const view = q<HTMLElement>('[data-files-preview-view]') as HTMLElement;
+    view.focus();
+    expect(document.activeElement).toBe(view);
+    fireEvent.keyDown(view, { key: 'Escape' });
+    expect(document.activeElement).not.toBe(view);
+
+    view.focus();
+    fireEvent.keyDown(view, { key: '[', metaKey: true });
+    expect(document.activeElement).not.toBe(view);
+  });
+
+  it('moves across to the tree on the same chord the editor uses', async () => {
+    const editor = await openFile('/work/atlas/README.md', MD);
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'm', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    const view = q<HTMLElement>('[data-files-preview-view]') as HTMLElement;
+    await act(async () => {
+      fireEvent.keyDown(view, { key: 'e', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    expect((document.activeElement as HTMLElement).hasAttribute('data-files-row')).toBe(true);
+  });
+
+  it('is reachable by Tab — it is the only thing in the editor column', async () => {
+    const editor = await openFile('/work/atlas/README.md', MD);
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'm', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    expect(q('[data-files-preview-view]')?.getAttribute('tabindex')).toBe('0');
+  });
+
+  /**
+   * AND IT IS NOT AN INSERT SCOPE. The preview is a `<div>`, not a text box —
+   * the status bar must not call it Insert, and `focusInsertStop` must not
+   * land `I` on it. With the textarea gone, this tab has NO insert stop at
+   * all while previewing, which is the honest answer: there is nothing here
+   * to type into, so `I` belongs to the composer.
+   */
+  it('is not an insert scope, and leaves the tab with no insert stop at all', async () => {
+    const editor = await openFile('/work/atlas/README.md', MD);
+    expect(qa('[data-files] [data-insert-stop]')).toHaveLength(1);
+    await act(async () => {
+      fireEvent.keyDown(editor, { key: 'm', metaKey: true, shiftKey: true });
+      await Promise.resolve();
+    });
+    const view = q('[data-files-preview-view]');
+    expect(view?.hasAttribute('data-insert-scope')).toBe(false);
+    expect(view?.hasAttribute('data-insert-stop')).toBe(false);
+    expect(qa('[data-files] [data-insert-stop]')).toHaveLength(0);
+  });
+
+  /**
+   * ENTER ON A TREE ROW MEANS "open it and put me in it", and in preview mode
+   * the thing to be put in is the preview. A flag left armed for a textarea
+   * that is never going to exist would steal the keyboard the next time one
+   * did — the same trap the loading-buffer branch beside it was written for.
+   */
+  it('takes the keyboard when a file is opened from the tree into it', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md', '/work/atlas/CHANGELOG.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    await pressPreview();
+    const cursorRow = q<HTMLElement>('[data-files-cursor]') as HTMLElement;
+    cursorRow.focus();
+    await act(async () => {
+      fireEvent.keyDown(cursorRow, { key: 'Enter' });
+      await Promise.resolve();
+    });
+    expect(document.activeElement?.hasAttribute('data-files-preview-view')).toBe(true);
   });
 });

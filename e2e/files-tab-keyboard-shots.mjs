@@ -127,11 +127,13 @@ await page.addInitScript(() => {
         // TRUE ON PURPOSE, and it is the whole point of this stub's shape:
         // with it, the view pill carries all FIVE icons (Response, PRs,
         // Terminal, Agents, Files) -- the widest the corner ever gets, and a
-        // width NO OTHER web guard can reach, because they all run against
+        // width only a stub can reach, because every OTHER guard runs against
         // `?demo=1`, which has neither a terminal nor a file bridge and so
-        // has only ever drawn three. The `6rem`/`66px` corner reservations
-        // were fitted to that three-icon pill and were silently 22-50px short
-        // everywhere else. Nothing here opens the Terminal tab.
+        // has only ever drawn three. (`files-markdown-shots.mjs` stubs the
+        // same five for the same reason, and measures the toolbar controls
+        // this file does not know about.) The `6rem`/`66px` corner
+        // reservations were fitted to that three-icon pill and were silently
+        // 22-50px short everywhere else. Nothing here opens the Terminal tab.
         terminal: true,
         agentRoster: false,
       },

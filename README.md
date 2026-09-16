@@ -94,12 +94,29 @@ library behind it — the colours are vam's own, and so is the formatter.
 Both are drawn only where vam is sure, because a highlighter that
 mis-tokenises unfamiliar syntax is a worse lie than drawing none, and a
 formatter that mangles a file is worse than no formatter at all. So JSON,
-`.env` and `.ini` are coloured and everything else renders as plain text;
-`Mod-Shift-f` reformats a `.json` only when it can prove the result differs
-from your file by whitespace alone, tidies nothing in a `.env` but its blank
-lines and comments, and refuses by name everywhere else. A format is one
+`.env`, `.ini` and markdown are coloured and everything else renders as plain
+text; `Mod-Shift-f` reformats a `.json` only when it can prove the result
+differs from your file by whitespace alone, tidies nothing in a `.env` but its
+blank lines and comments, and refuses by name everywhere else. A format is one
 `Mod-z` away from being exactly undone. Appearance carries the two settings
 the editor has of its own: whether to colour, and how wide one indent step is.
+
+Markdown is the one that is coloured by its LINE STRUCTURE and by nothing
+else — headings, list markers, quote rails and fence rails. No emphasis, no
+link, no code span and not one byte of what is inside a fence, because none of
+those can be read from the head of a line and a wrong guess about them would
+be the lie the rule above is against. A fence is tracked all the same, so a
+`#` line inside a shell block is not painted as a heading.
+
+Markdown also has a second view. The toggle beside Format — or `Mod-Shift-m` —
+swaps the raw text for the file **rendered**, GitHub-flavoured, through the
+same renderer the Response tab dresses an agent's answer with: the same tables,
+the same fenced-code colours, the same refusal to turn raw HTML in the text into
+DOM. It is read-only, and your unsaved edits survive the switch in both
+directions. The tree beside it marks families with a glyph — folder, JSON,
+config, code, image, document — and spends a colour on only the four file types
+vam actually has something to offer for, so a real repository reads as mostly
+grey with the `.env` you were looking for standing out of it.
 
 What it does take seriously is that an agent is editing these files while
 you have them open. A save carries the size, mtime and hash the file had
@@ -401,6 +418,7 @@ says so, in the tab, rather than doing nothing.
 | `Tab` / `Shift-Tab` | Indent / outdent in the editor — trapped there, never a focus move, because `Escape` and `Mod-[` are both real ways out already |
 | `Mod-s` | Save the open file. vam takes this before the browser's own "Save Page" |
 | `Mod-Shift-f` | Format the open file — vam's own formatter, not the project's. It reformats only where it can prove it changed nothing but whitespace (`.json`, and the blank lines and comments of a `.env`/`.ini`) and names what it will not touch: pressing it on a `.ts` says so rather than doing nothing |
+| `Mod-Shift-m` | Switch a markdown file between the rendered document and its raw text — the same act as the toggle beside Format. The rendered view is read-only, and unsaved edits survive the switch both ways. On any other file type it says so rather than doing nothing |
 | `Mod-z` | Undo the last format, exactly, while the file is still what that format produced. Type one character and it is not vam's key any more: the browser's own undo of your typing gets it, as it always has |
 | `Escape` / `Mod-[` | Hand the keyboard back to Select — from the editor, the tree, the filter box or the new-file box. Never a discard: unsaved text survives it, exactly as it survives switching files, tabs and sessions |
 
