@@ -89,9 +89,12 @@ function digitChord(n: number, target?: HTMLElement) {
   press(String(n), { metaKey: true, code: `Digit${n}` }, target);
 }
 
-/** `Alt+<n>` — the other family on the same row: one of the pane's VIEWS. */
+/** `Ctrl+Option+<n>` — the other family on the same row: one of the pane's
+ *  VIEWS. The same physical chord on every platform, and spelled the same
+ *  string by `normalizeKey` on every platform, which is why this test does not
+ *  care that happy-dom reports a non-Apple `navigator.platform`. */
 function viewChord(n: number, target?: HTMLElement) {
-  press(String(n), { altKey: true, code: `Digit${n}` }, target);
+  press(String(n), { ctrlKey: true, altKey: true, code: `Digit${n}` }, target);
 }
 
 /** Which tab of the focused pane wears the active mark. */
@@ -256,6 +259,16 @@ describe('the two digit families on one row, told apart by the modifier', () => 
    * Asserted in both directions here so the asymmetry is a decision on record
    * rather than something a later reader discovers by pressing it.
    */
+  /**
+   * BOTH FAMILIES FIRE HERE NOW, and the second one is a change worth naming.
+   *
+   * The tab row always did, on the operator's own argument: the prompt box is
+   * where the reason to look at another tab comes from. The VIEW row did not,
+   * and not by decision -- it was a bare `Alt+<digit>`, and `Canvas.tsx`'s
+   * typing guard hands a focused INPUT|TEXTAREA everything that is not a
+   * Cmd/Ctrl chord. The three-key chord the operator asked for carries Ctrl,
+   * so the accident is gone and the two rows behave alike from inside the box.
+   */
   it('fires with the prompt box focused, where the operator actually is', () => {
     const { container } = mountFocused();
     intoResponsePane();
@@ -264,7 +277,7 @@ describe('the two digit families on one row, told apart by the modifier', () => 
     digitChord(2, box);
     expect(activeTab()).toBe('a2');
     viewChord(4, box);
-    expect(selectedTab()).toBe('response');
+    expect(selectedTab()).toBe('agents');
   });
 
   it('leaves an unmodified key typed in the prompt box alone', () => {
@@ -311,7 +324,7 @@ describe('the generated key sheet tells the truth about the digits', () => {
   it('lists every bound digit, zero included', () => {
     for (let digit = 1; digit <= 9; digit += 1) {
       expect(keys(), `Mod-${digit}`).toContain(`Mod-${digit}`);
-      expect(keys(), `Alt-${digit}`).toContain(`Alt-${digit}`);
+      expect(keys(), `Ctrl-Alt-${digit}`).toContain(`Ctrl-Alt-${digit}`);
     }
     // `Mod-0` is bound now (the sidebar), and a sheet that omitted it would be
     // hiding a key the operator can press -- the one thing a generated sheet
@@ -320,14 +333,14 @@ describe('the generated key sheet tells the truth about the digits', () => {
   });
 
   /**
-   * The sheet may not name a VIEW that cannot exist. `Alt-6`..`Alt-9` are
-   * bound so the pane can refuse them aloud rather than let them reach the
-   * browser, and a sheet that captioned them as views would be naming four
-   * that do not exist. (The Cmd row has no such ceiling — a pane's strip holds
-   * as many tabs as the project has sessions — which is why its caption names
-   * no count at all.)
+   * The sheet may not name a VIEW that cannot exist. `Ctrl-Alt-6`..
+   * `Ctrl-Alt-9` are bound so the pane can refuse them aloud rather than let
+   * them reach the browser, and a sheet that captioned them as views would be
+   * naming four that do not exist. (The Cmd row has no such ceiling — a pane's
+   * strip holds as many tabs as the project has sessions — which is why its
+   * caption names no count at all.)
    *
-   * `Alt-5` is DELIBERATELY EXCLUDED from this loop now that `TABS` holds
+   * `Ctrl-Alt-5` is DELIBERATELY EXCLUDED from this loop now that `TABS` holds
    * five names (`Files`, appended): the STATIC caption this test reads is a
    * function of `TABS` alone (`pickView`'s own label in `keysheet.ts`), which
    * knows nothing about whether any particular SOURCE actually offers Files
@@ -338,14 +351,14 @@ describe('the generated key sheet tells the truth about the digits', () => {
    */
   it('names no view past the last one the pane can hold', () => {
     const viewLabels = rows()
-      .filter((row) => row.keys.startsWith('Alt-'))
+      .filter((row) => row.keys.startsWith('Ctrl-Alt-'))
       .map((row) => row.label);
     expect(viewLabels.length).toBe(9);
     expect(viewLabels.some((label) => label.includes('Agents'))).toBe(true);
     expect(viewLabels.some((label) => label.includes('Files'))).toBe(true);
     for (const digit of [6, 7, 8, 9]) {
-      const row = rows().find((each) => each.keys === `Alt-${digit}`);
-      expect(row?.label, `Alt-${digit}`).toContain(`no view ${digit}`);
+      const row = rows().find((each) => each.keys === `Ctrl-Alt-${digit}`);
+      expect(row?.label, `Ctrl-Alt-${digit}`).toContain(`no view ${digit}`);
     }
   });
 

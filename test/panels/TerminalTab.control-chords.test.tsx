@@ -159,6 +159,13 @@ describe('Ctrl belongs to the terminal, because every Ctrl+letter is a control c
 describe('everything else modified is still vam’s, and reaches vam', () => {
   it.each([
     ['Ctrl and a digit, which is no control character', { key: '1', ctrlKey: true }],
+    // THE VIEW CHORD, which has to cross this pane to reach the grammar: it is
+    // `Ctrl-Alt-<digit>` since the operator asked for a three-key chord, and
+    // the pane declines it here on the `altKey` half of the rule rather than on
+    // the letters half. Without this row, a branch that claimed every Ctrl+Alt
+    // keystroke would take the one chord that switches a view from inside a
+    // terminal and type a control character into somebody's agent instead.
+    ['Ctrl+Alt and a digit, which vam binds to a view', { key: '1', ctrlKey: true, altKey: true }],
     ['Ctrl and an arrow', { key: 'ArrowUp', ctrlKey: true }],
     ['Ctrl and Tab, which is how the settings overlay steps', { key: 'Tab', ctrlKey: true }],
     ['Ctrl+Shift and a letter', { key: 'P', ctrlKey: true, shiftKey: true }],
@@ -179,7 +186,7 @@ describe('everything else modified is still vam’s, and reaches vam', () => {
     ['Cmd and a letter', { key: 'k', metaKey: true }],
     ['Cmd and a digit', { key: '1', metaKey: true }],
     ['Cmd+Ctrl together, where Cmd wins', { key: 'u', metaKey: true, ctrlKey: true }],
-    ['Alt and a digit, which vam binds to a view', { key: '1', altKey: true }],
+    ['Alt and a digit, which vam binds to nothing at all now', { key: '1', altKey: true }],
     ['Alt and a letter, which macOS composes with', { key: 'e', altKey: true }],
   ])('leaves %s alone', async (_why, init) => {
     const { sent, heard } = await press(init);

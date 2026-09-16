@@ -1,5 +1,13 @@
 /**
- * `Alt+<digit>` is a BINDING now, not a literal in a caption.
+ * The view row is a BINDING, not a literal in a caption.
+ *
+ * It lives on `Ctrl-Alt-<digit>` — Ctrl+Option+number on macOS — since the
+ * operator reported Ctrl+number "conflicting between switching function and
+ * switching tab" and asked for a three-key chord instead. It was
+ * `Alt-<digit>` when this file was written, and the move cost this file
+ * nothing but the literal: every assertion below already read the GENERATED
+ * sheet and the RESOLVED chord, which is what a binding being in the table
+ * is FOR.
  *
  * It used to be a bare `window` listener in `DetailPanel.tsx` that matched
  * `event.code` itself, and the cost of living outside `BINDING_TABLES` was
@@ -53,8 +61,8 @@ describe('the view digits are in the binding tables, so the key sheet can find t
     // the wrong reason.
     expect(rows.length).toBeGreaterThan(30);
     for (const [index, name] of TABS.entries()) {
-      const row = rows.find((each) => each.keys === `Alt-${index + 1}`);
-      expect(row, `no sheet row for Alt-${index + 1}`).toBeDefined();
+      const row = rows.find((each) => each.keys === `Ctrl-Alt-${index + 1}`);
+      expect(row, `no sheet row for Ctrl-Alt-${index + 1}`).toBeDefined();
       // The caption names the VIEW, not a digit — a row reading "position 3"
       // over a bar of icons is the caption that lies.
       expect(row?.label).toContain(name);
@@ -64,20 +72,28 @@ describe('the view digits are in the binding tables, so the key sheet can find t
   it('binds all nine digits, so the refusal for a digit past the last view is reachable', () => {
     const keys = sheetRows().map((row) => row.keys);
     for (const digit of DIGITS) {
-      expect(keys, `Alt-${digit} is unbound`).toContain(`Alt-${digit}`);
+      expect(keys, `Ctrl-Alt-${digit} is unbound`).toContain(`Ctrl-Alt-${digit}`);
     }
   });
 
-  it('resolves a real Alt+<digit> keydown to the view action, off the physical key', () => {
+  it('resolves a real Ctrl+Option+<digit> keydown to the view action, off the physical key', () => {
     // `event.code`, so a French layout with `&` on the `1` key still lands
     // here — the property `normalizeKey`'s digit-row exception exists for.
-    const key = normalizeKey({ key: '&', code: 'Digit1', altKey: true });
-    expect(key).toBe('Alt-1');
-    expect(resolveChord(EMPTY_CHORD, key ?? '').action).toEqual({ kind: 'pickView', digit: 1 });
+    // Spelled the same on every platform, which is why no flag is passed:
+    // Control is never the command modifier while Alt is held (`digitChord`).
+    for (const mac of [true, false]) {
+      const key = normalizeKey({ key: '&', code: 'Digit1', ctrlKey: true, altKey: true }, mac);
+      expect(key).toBe('Ctrl-Alt-1');
+      expect(resolveChord(EMPTY_CHORD, key ?? '').action).toEqual({ kind: 'pickView', digit: 1 });
+      // And the chord it moved OFF answers nothing, on either platform.
+      const dead = normalizeKey({ key: '&', code: 'Digit1', altKey: true }, mac);
+      expect(dead).toBe('Alt-1');
+      expect(resolveChord(EMPTY_CHORD, dead ?? '').action).toBeNull();
+    }
   });
 
   it('is primaryChord-resolvable, which is what lets a tooltip derive it', () => {
-    expect(primaryChord({ kind: 'pickView', digit: 3 })).toBe('Alt-3');
+    expect(primaryChord({ kind: 'pickView', digit: 3 })).toBe('Ctrl-Alt-3');
   });
 
   it('is rebindable, and the OLD key stops working when it is rebound', () => {
@@ -86,7 +102,7 @@ describe('the view digits are in the binding tables, so the key sheet can find t
       kind: 'pickView',
       digit: 1,
     });
-    expect(resolveChord(EMPTY_CHORD, 'Alt-1', overrides).action).toBeNull();
+    expect(resolveChord(EMPTY_CHORD, 'Ctrl-Alt-1', overrides).action).toBeNull();
   });
 });
 
@@ -117,10 +133,13 @@ describe('what promotion had to leave true', () => {
         kind: 'selectTab',
         digit,
       });
-      expect(tables.find(([key]) => key === `Alt-${digit}`)?.[1]).toEqual({
+      expect(tables.find(([key]) => key === `Ctrl-Alt-${digit}`)?.[1]).toEqual({
         kind: 'pickView',
         digit,
       });
+      // And the two spellings the operator cancelled hold nothing at all.
+      expect(tables.find(([key]) => key === `Alt-${digit}`)).toBeUndefined();
+      expect(tables.find(([key]) => key === `Ctrl-${digit}`)).toBeUndefined();
     }
   });
 

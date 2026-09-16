@@ -596,9 +596,16 @@ if (!sheetText.includes(viewChord)) {
   );
 }
 console.log(`key sheet lists the view chord ${JSON.stringify(viewChord)}`);
-// Scrolled to the rows in question, so the shot is evidence rather than a
-// picture of the sheet's first screen: `Alt-1` is in "panes & focus", well
-// below the fold at this height.
+// Scrolled to the row in question, so the shot is evidence rather than a
+// picture of the sheet's first screen: the view chords are in "panes & focus",
+// well below the fold at this height.
+//
+// THE CHORD IS THE ONE THE TIP JUST PRINTED, never a literal. It was `Alt-1`
+// here, hardcoded, and the row moved to `Ctrl-Alt-1` when the operator asked
+// for a three-key chord -- at which point this guard failed on a spelling
+// rather than on anything it exists to check. `viewChord` is read off the chip
+// a few lines up, which is read off the binding table, so the scroll target
+// follows a rebind the way the assertion above it already does.
 const scrolled = await page.evaluate((chord) => {
   const cell = [...document.querySelectorAll('[data-key-sheet-keys]')].find(
     (el) => (el.textContent ?? '').trim() === chord,
@@ -606,8 +613,8 @@ const scrolled = await page.evaluate((chord) => {
   if (cell === undefined) return false;
   cell.scrollIntoView({ block: 'center' });
   return true;
-}, `Alt-1`);
-if (!scrolled) throw new Error('the key sheet has no Alt-1 cell to scroll to');
+}, viewChord);
+if (!scrolled) throw new Error(`the key sheet has no ${viewChord} cell to scroll to`);
 await page.waitForTimeout(150);
 await page.screenshot({ path: `${outDir}/key-sheet-view-chords.png`, fullPage: false });
 await page.keyboard.press('Escape');

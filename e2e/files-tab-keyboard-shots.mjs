@@ -919,7 +919,14 @@ await treeRow('/work/demo/.env').click();
 await editor.click();
 const BEFORE = 'A=1\n\n\n\n# a note   \nB=2\n';
 await editor.fill(BEFORE);
-await page.keyboard.press('Control+Shift+KeyF');
+// META, NOT CONTROL, FOR THE EDITOR'S COMMAND CHORDS. `Mod-` is the
+// platform's command modifier for a letter since the operator gave
+// Ctrl+letter to the terminal (`CTRL_GESTURES`, `keyboard/chords.ts`) --
+// Ctrl+S is XOFF, Ctrl+Z is SUSP and Ctrl+F is readline's forward-char. A
+// Control spelling here would go on passing on the ubuntu runner while being
+// dead in a browser on macOS. `Mod-d` and `Mod-[` above are still pressed
+// with Control on purpose: they are the two families that kept it.
+await page.keyboard.press('Meta+Shift+KeyF');
 await page.waitForFunction(
   () => (document.querySelector('[data-files-editor]')?.value ?? '') === 'A=1\n\n# a note\nB=2\n',
   null,
@@ -935,7 +942,7 @@ check(
   (await page.locator('[data-files-note]').textContent())?.includes('Mod-z') === true &&
     (await page.locator('[data-files-format-undo]').count()) === 1,
 );
-await page.keyboard.press('Control+KeyZ');
+await page.keyboard.press('Meta+KeyZ');
 await page.waitForFunction(
   (want) => (document.querySelector('[data-files-editor]')?.value ?? '') === want,
   BEFORE,
@@ -1114,7 +1121,7 @@ check('and the mode chip follows the keyboard into Insert', modeAfterEnter === '
  * while the other stays green, which is how a half-wired toggle would
  * otherwise ship.
  */
-await page.keyboard.press('Control+Shift+E');
+await page.keyboard.press('Meta+Shift+E');
 await page.waitForFunction(
   () => document.activeElement?.hasAttribute('data-files-row') ?? false,
   null,
@@ -1125,7 +1132,7 @@ check(
   (await focusedRow()) === '/work/demo/.env',
   `focus is on ${await focusedRow()}`,
 );
-await page.keyboard.press('Control+Shift+E');
+await page.keyboard.press('Meta+Shift+E');
 await page.waitForFunction(
   () => document.activeElement?.matches('[data-files-editor]') ?? false,
   null,

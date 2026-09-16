@@ -69,7 +69,10 @@ function chord(first: string, second: string) {
 
 const openSheet = () => press('?', { shiftKey: true });
 const openSettings = () => press(',');
-const openPalette = () => press('k', { ctrlKey: true });
+// CMD, NOT CTRL: `Mod-k` is the command modifier alone for a letter since the
+// operator gave Ctrl+letter to the terminal (PR 361), and Cmd spells `Mod-k`
+// on every platform while Ctrl only does off macOS.
+const openPalette = () => press('k', { metaKey: true });
 
 /** Each overlay, by the key that opens it and the node it renders. */
 const OVERLAYS = [

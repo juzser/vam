@@ -65,14 +65,16 @@ function press(key: string) {
   });
 }
 
-/** A bare `Alt+<digit>`, the combination `DetailPanel` claims — `code` is
- *  what it matches on, not `key`. */
-function altDigit(digit: number) {
+/** `Ctrl+Option+<digit>`, the view chord — `code` is what the grammar
+ *  matches on, not `key`. It was a bare `Alt+<digit>` until the operator
+ *  asked for a three-key chord; the dispatch is the only thing that moved. */
+function viewDigit(digit: number) {
   act(() => {
     window.dispatchEvent(
       new KeyboardEvent('keydown', {
         key: String(digit),
         code: `Digit${digit}`,
+        ctrlKey: true,
         altKey: true,
         bubbles: true,
       }),
@@ -133,7 +135,7 @@ describe('the view icons are drawn in the focused pane only', () => {
       fireEvent.click([...document.querySelectorAll('[data-session-row]')][1] as HTMLElement);
     });
     expect(panes()).toHaveLength(2);
-    altDigit(2);
+    viewDigit(2);
     // `[data-prs]` is what the PRs view draws — readable in a pane that draws
     // no icon row, which `aria-pressed` is not.
     const prs = [...document.querySelectorAll('[data-prs]')];

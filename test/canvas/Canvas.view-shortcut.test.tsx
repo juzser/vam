@@ -64,7 +64,7 @@ function key(init: globalThis.KeyboardEventInit) {
 /** A bare `Alt+<digit>` — `code` is the physical key, which is what the
  *  grammar spells `Alt-<digit>` off. */
 const altDigit = (digit: number, extra: globalThis.KeyboardEventInit = {}) =>
-  key({ key: String(digit), code: `Digit${digit}`, altKey: true, ...extra });
+  key({ key: String(digit), code: `Digit${digit}`, ctrlKey: true, altKey: true, ...extra });
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const pressed = (view: string) => q(`[data-view="${view}"]`)?.getAttribute('aria-pressed');
@@ -172,23 +172,60 @@ describe('the digit still names a view, and still refuses aloud', () => {
 describe('it claims one combination and declines the rest', () => {
   it('leaves a bare digit and a differently-modified one alone', () => {
     render(<Canvas model={MODEL} />);
-    for (const extra of [{ altKey: false }, { metaKey: true }, { shiftKey: true }]) {
+    // The chord is exactly Ctrl+Option+<digit>. A bare digit is text, Cmd or
+    // Shift on top of it is a different chord, and none of them may reach the
+    // view bar. `{ ctrlKey: false }` alone is deliberately NOT in this list:
+    // that is Option+<digit>, which the operator cancelled and which
+    // `pick-view-binding.test.ts` asserts resolves to nothing on either
+    // platform -- asserting it here as well would be asserting it through a
+    // second layer for no extra information.
+    for (const extra of [
+      { ctrlKey: false, altKey: false },
+      { metaKey: true },
+      { shiftKey: true },
+    ]) {
       altDigit(2, extra);
     }
     expect(pressed('prs')).toBe('false');
     expect(pressed('response')).toBe('true');
   });
 
-  it('leaves a digit typed into the composer alone entirely', () => {
+  /**
+   * WHAT THE COMPOSER KEEPS, AND WHAT IT NO LONGER KEEPS -- and the second
+   * half is a real change, recorded rather than discovered.
+   *
+   * It used to keep BOTH. The view row was a bare `Alt+<digit>`, and
+   * `Canvas.tsx`'s typing guard lets a focused INPUT|TEXTAREA keep every key
+   * that is not a Cmd/Ctrl chord, so the chord simply never reached the
+   * grammar from inside the prompt box. That was an ACCIDENT OF THE MODIFIER
+   * rather than a decision: nothing in this repo ever argued that a view must
+   * not be switchable while writing a prompt, and the neighbouring digit row
+   * is deliberately reachable there -- "the operator is in the prompt box,
+   * which is where the reason to look at another tab comes from".
+   *
+   * The three-key chord the operator asked for carries Ctrl, so it passes that
+   * guard and the two digit families now behave alike from inside the box.
+   * vam cancels the keystroke's default the way it cancels every chord it
+   * resolves, so nothing is typed into the prompt on the way.
+   *
+   * A BARE DIGIT IS STILL THE BOX'S, which is the half that must not move: it
+   * is text, and typing `2` into a prompt has to stay typing.
+   */
+  it('takes the three-key chord in the composer, and leaves a typed digit alone', () => {
     render(<Canvas model={MODEL} />);
     const box = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
     expect(box, 'no composer to type into').not.toBeNull();
-    act(() => {
-      box?.dispatchEvent(
-        new KeyboardEvent('keydown', { key: '2', code: 'Digit2', altKey: true, bubbles: true }),
-      );
-    });
-    expect(pressed('response')).toBe('true');
+    const typeInBox = (modifiers: KeyboardEventInit) => {
+      act(() => {
+        box?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: '2', code: 'Digit2', bubbles: true, ...modifiers }),
+        );
+      });
+    };
+    typeInBox({});
+    expect(pressed('response'), 'a typed digit switched a view').toBe('true');
+    typeInBox({ ctrlKey: true, altKey: true });
+    expect(pressed('prs'), 'the view chord did not fire from the composer').toBe('true');
     expect(note()).toBeNull();
   });
 

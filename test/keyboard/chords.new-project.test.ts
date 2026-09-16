@@ -54,23 +54,31 @@ import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 
 /** A real macOS `Cmd+Shift+P` keydown: Shift has already upper-cased the key. */
 const CMD_SHIFT_P: KeyEventLike = { key: 'P', code: 'KeyP', metaKey: true, shiftKey: true };
-/** The same gesture on the platform CI runs, where `Mod` is Ctrl. */
+/** The same gesture on Linux and Windows, where `Mod` IS Control. Read with
+ *  `mac: false` explicitly rather than by detection — the two platforms answer
+ *  this keystroke differently now, so an ambient read would assert one grammar
+ *  on the operator's Mac and another on the ubuntu runner. */
 const CTRL_SHIFT_P: KeyEventLike = { key: 'P', code: 'KeyP', ctrlKey: true, shiftKey: true };
 /** And without Shift — the same binding, which is the cost this file quotes. */
 const CMD_P: KeyEventLike = { key: 'p', code: 'KeyP', metaKey: true };
 
 /** The whole path a keystroke takes: normalized, then resolved. */
-function actionFor(event: KeyEventLike): KeyAction | null {
-  const key = normalizeKey(event);
+function actionFor(event: KeyEventLike, mac = true): KeyAction | null {
+  const key = normalizeKey(event, mac);
   return key === null ? null : resolveChord(EMPTY_CHORD, key).action;
 }
 
 const sheetRows = () => buildKeySheet().flatMap((group) => group.rows);
 
 describe('Cmd+Shift+P starts a new project', () => {
-  it('reaches the new-project action from a real keydown, on either modifier', () => {
+  it('reaches the new-project action from a real keydown, on each platform’s modifier', () => {
     expect(actionFor(CMD_SHIFT_P)).toEqual({ kind: 'newProject' });
-    expect(actionFor(CTRL_SHIFT_P)).toEqual({ kind: 'newProject' });
+    expect(actionFor(CTRL_SHIFT_P, false)).toEqual({ kind: 'newProject' });
+    // AND NOT FROM Ctrl+Shift+P ON macOS, which is the operator's PR 361 rule:
+    // a terminal reads that keystroke as 0x10 and vam has no business also
+    // opening a directory picker on it. `test/keyboard/ctrl-letters.test.ts`
+    // carries the argument and the other five commands it applies to.
+    expect(actionFor(CTRL_SHIFT_P)).toBeNull();
   });
 
   it('is spelled `Mod-Shift-p`, which is now a string a keystroke produces', () => {
@@ -79,8 +87,9 @@ describe('Cmd+Shift+P starts a new project', () => {
     // the one defect `keysheet.ts` exists to prevent, and `bindingClashes`
     // cannot catch it — it finds two actions on one chord, not a chord with
     // nothing behind it.
-    expect(normalizeKey(CMD_SHIFT_P)).toBe('Mod-Shift-p');
-    expect(normalizeKey(CTRL_SHIFT_P)).toBe('Mod-Shift-p');
+    expect(normalizeKey(CMD_SHIFT_P, true)).toBe('Mod-Shift-p');
+    expect(normalizeKey(CTRL_SHIFT_P, false)).toBe('Mod-Shift-p');
+    expect(normalizeKey(CTRL_SHIFT_P, true)).toBe('Ctrl-Shift-p');
     // And Cmd+P is a DIFFERENT gesture again, bound to nothing. Pinned, so
     // that a later fold cannot quietly hand vam the browser's print key back.
     expect(normalizeKey(CMD_P)).toBe('Mod-p');

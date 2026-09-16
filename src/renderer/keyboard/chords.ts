@@ -95,12 +95,178 @@ function positionKey(event: KeyEventLike): string | null {
 }
 
 /**
+ * IS THE COMMAND MODIFIER Cmd RATHER THAN Ctrl? — asked of a platform string,
+ * so BOTH answers are reachable in a test.
+ *
+ * `src/main/menu.ts` takes `process.platform` as a parameter for exactly this
+ * reason and says so in one line: "the non-darwin branch is reachable in a
+ * test". The renderer has no `process`, so the string is `navigator.platform`
+ * ("MacIntel", "Linux x86_64", "Win32"), with the user agent behind it for a
+ * runtime that reports no platform at all.
+ *
+ * DEPRECATED AND STILL THE RIGHT QUESTION. `navigator.platform` is frozen
+ * rather than removed in every engine vam runs on — Chromium in the packaged
+ * app, and whatever browser reaches the Tailscale Serve build — and what is
+ * asked of it is which physical key the OPERATING SYSTEM puts the command
+ * modifier on, which is the one thing it has always answered.
+ *
+ * IT DECIDES WHICH KEYSTROKE SPELLS `Mod-`, everywhere but the bracket pair.
+ * Two separate operator decisions put it there: the digit row (`digitChord`)
+ * and, on PR 361, the letters (`CTRL_GESTURES`). The brackets are what is
+ * left folded — `Ctrl-[` and `Cmd+[` both leave the prompt box, on every
+ * platform — and the two comments below argue each half.
+ */
+export function isApplePlatform(description: string): boolean {
+  return /Mac|iPhone|iPad|iPod/.test(description);
+}
+
+/**
+ * The answer for THIS machine, read once.
+ *
+ * Every platform-sensitive test passes the flag to `normalizeKey` explicitly
+ * rather than reaching this: CI runs on ubuntu and the operator's machine is a
+ * Mac, so a test that read the platform off its host would assert a different
+ * grammar in each place while looking identical in both.
+ */
+const APPLE_PLATFORM = isApplePlatform(
+  globalThis.navigator?.platform ?? globalThis.navigator?.userAgent ?? '',
+);
+
+/**
+ * THE DIGIT ROW, WHERE Ctrl AND Cmd ARE NOT ONE KEY ANY MORE.
+ *
+ * `Mod-` folds them together everywhere else in this grammar, and the fold is
+ * right wherever the two spellings mean ONE INTENT. On the digit row they
+ * stopped meaning one: the operator reported that "Ctrl+number seems to be
+ * conflicting between switching function and switching tab", cancelled
+ * Ctrl+number outright, and asked for the view row on a three-key chord. Two
+ * families that shared one string are four distinct ones now, and only an
+ * unfolded spelling can write them down at all.
+ *
+ *   Mod-<digit>        THE COMMAND MODIFIER — Cmd on macOS, Ctrl elsewhere
+ *   Ctrl-<digit>       macOS's Control, and bound to NOTHING
+ *   Ctrl-Alt-<digit>   the three-key chord: a view in the focused pane
+ *   Alt-<digit>        bound to nothing, since the view row left it
+ *
+ * `Mod-` KEEPS ITS SPELLING, deliberately. `Mod-0`..`Mod-9` and `Mod-[` are
+ * written into README rows, into `panels/files-tree.ts`'s key lists and into
+ * `DetailPanel`'s own `onKeyDown`, and none of those readers has any business
+ * learning a new token because one row's MEANING narrowed. What changed here
+ * is which physical key produces it, not what the string is called.
+ *
+ * ONE RULE, COVERING EVERY PLATFORM vam SHIPS (`electron-builder.config.cjs`
+ * builds dmg/zip, AppImage and nsis/zip): CONTROL SPELLS `Ctrl-` WHEN IT IS
+ * NOT THE COMMAND MODIFIER — always on macOS, and elsewhere only when Alt is
+ * held, because `Ctrl+Alt` is the three-key chord rather than a command chord.
+ * So `Ctrl-Alt-<digit>` is ONE table entry naming the SAME physical keystroke
+ * on all three, while `Mod-<digit>` is Cmd on macOS and Ctrl on Linux and
+ * Windows — which is what leaves a tab row on the two platforms that have no
+ * Cmd key at all. Meta is the command modifier off macOS too, so a
+ * Super+<digit> that reaches the page lands on the tab row rather than losing
+ * every token and arriving as a BARE digit, which is a real keystroke
+ * elsewhere (`z0`, and the question card's option marks).
+ *
+ * AND THE COSTS, QUOTED RATHER THAN LEFT TO BE DISCOVERED:
+ *
+ *   IN A BROWSER TAB, macOS LOSES THE SPELLING THAT GOT THROUGH. Chrome and
+ *   Safari reserve `Cmd+1`..`Cmd+9` for their own tabs and a page cannot
+ *   cancel them (`test/keyboard/browser-contested-chords.test.ts` keeps that
+ *   census); Ctrl+<digit> was the one spelling the browser did not want, and
+ *   it is gone. The desktop app is unaffected — vam owns its application menu
+ *   and nothing native holds the row.
+ *
+ *   ON WINDOWS AND LINUX, AltGr IS Ctrl+Alt. A layout with an AltGr key
+ *   reports both modifiers for a keystroke that TYPES a character, so the view
+ *   row is reachable there by accident in a way it is not on macOS, where
+ *   Option composes on its own. It is the hazard `toggleFocusView`'s comment
+ *   records for `Alt-<letter>`, one modifier along, and it cannot be fixed
+ *   from the page: no browser tells AltGr apart from a real Ctrl+Alt.
+ *
+ * THE BRACKET PAIR IS NOT HERE, AND STAYS FOLDED. It sits in `POSITION_CODES`
+ * for the same reason the digits do — a modifier changes the character it
+ * produces — but Ctrl and Cmd still mean one intent on it, and `Ctrl-[` is
+ * vim's own way out of insert mode, promised by name in the README and
+ * answered by `DetailPanel` and `FilesTab`. The fold is lifted exactly where
+ * the two modifiers stopped agreeing, and nowhere else.
+ */
+/**
+ * THE LETTERS vam KEEPS UNDER CTRL — the whole exception, as data.
+ *
+ * THE RULE THIS IS AN EXCEPTION TO. The operator, on PR 361: "Ctrl + a letter
+ * applies only to the terminal, like the default terminal shortcuts." Four of
+ * the eight `Mod-<letter>` chords vam shipped are readline's own — `Ctrl+K`
+ * kill-to-end, `Ctrl+W` delete-word-back, `Ctrl+N` next-history, `Ctrl+T`
+ * transpose — and a keystroke a terminal has a meaning for should not also be
+ * an application command. So on macOS `Mod-<letter>` is Cmd and only Cmd, and
+ * `Ctrl+<letter>` belongs to whatever is being typed into.
+ *
+ * AND THE TWO THAT STAY, BECAUSE THE OPERATOR DREW THE LINE HIMSELF. Asked
+ * about exactly these: "Keep them in the Response view; drop them in the
+ * terminal." `Mod-d` / `Mod-u` are vim's `Ctrl-D` / `Ctrl-U` — they were asked
+ * for by that name — and they are gestures for READING A TRANSCRIPT, not
+ * application commands. Cmd+D / Cmd+U is not where a vim user's hand goes.
+ *
+ * THE "DROP THEM IN THE TERMINAL" HALF IS ALREADY PAID, TWICE OVER, and is not
+ * this list's job: `isSelectOnly` stands `scrollHalf` down wherever the cursor
+ * is in Insert (the terminal pane carries `data-insert-scope`), and
+ * `TerminalTab.tsx` claims every plain Ctrl+letter and stops it before the
+ * window listener sees it. This list is only about which keystroke SPELLS the
+ * binding.
+ *
+ * A LIST RATHER THAN A CONDITION, deliberately. "Ctrl is the command modifier
+ * unless the action is one that scrolls" would put the grammar's table inside
+ * its normaliser — which runs BEFORE resolution and must stay table-blind, or
+ * an operator's rebind would silently move which keystrokes fold. Two letters,
+ * named, with the reason above them, is the readable form of an exception that
+ * is genuinely not derivable.
+ *
+ * KEYED ON THE LOWER-CASED LETTER, the same base a modified letter is spelled
+ * with, so CapsLock cannot take an operator out of the fold.
+ *
+ * OFF macOS THIS LIST DOES NOTHING. Control IS the command modifier on Linux
+ * and Windows, so every `Mod-<letter>` answers Ctrl there whether or not it is
+ * named here — which is what keeps `palette`, `newTab`, `close`,
+ * `newSession`, `focusList` and `newProject` reachable on the two platforms
+ * with no Cmd key at all.
+ */
+const CTRL_GESTURES: ReadonlySet<string> = new Set(['d', 'u']);
+
+function digitChord(event: KeyEventLike, position: string, mac: boolean): string {
+  const ctrl = event.ctrlKey === true;
+  const alt = event.altKey === true;
+  const command = mac ? event.metaKey === true : (ctrl && !alt) || event.metaKey === true;
+  const control = ctrl && (mac || alt);
+  const shift = event.shiftKey === true;
+  return `${command ? 'Mod-' : ''}${control ? 'Ctrl-' : ''}${alt ? 'Alt-' : ''}${shift ? 'Shift-' : ''}${position}`;
+}
+
+/**
  * A `KeyboardEvent` reduced to the one string a binding is written in, or
  * `null` when the event is not a keystroke at all.
  *
- * `Mod` folds Ctrl and Cmd together, borrowing orca's token (§4.1): vam runs on
- * one machine at a time, both spellings mean the same intent, and keeping them
- * apart would mean declaring every binding twice.
+ * `Mod` IS THE PLATFORM'S COMMAND MODIFIER: Cmd on macOS, Ctrl on Linux and
+ * Windows. The token itself is borrowed from orca (§4.1).
+ *
+ * IT USED TO FOLD THE TWO TOGETHER, on the argument that vam runs on one
+ * machine at a time, both spellings mean the same intent, and keeping them
+ * apart would mean declaring every binding twice. TWO OPERATOR DECISIONS ENDED
+ * THAT, each because the premise stopped holding for a family:
+ *
+ *   THE DIGIT ROW (`digitChord`). Ctrl+number and Cmd+number were given two
+ *   different fates — one cancelled, one kept — so they no longer mean one
+ *   intent and one token cannot carry both.
+ *
+ *   THE LETTERS (`CTRL_GESTURES`). "Ctrl + a letter applies only to the
+ *   terminal, like the default terminal shortcuts": four of vam's eight letter
+ *   chords are readline's own, and a keystroke a terminal has a meaning for
+ *   should not also be an application command. Two letters are excepted BY
+ *   NAME, `d` and `u`, because they are vim's gestures for reading a
+ *   transcript rather than commands.
+ *
+ * WHAT IS STILL FOLDED IS THE BRACKET PAIR, and only it: `Ctrl-[` is vim's own
+ * way out of insert mode, the README promises it by name, and the bracket
+ * chords mean one intent under either modifier. So `Mod-[`, `Mod-Shift-[` and
+ * `Mod-Alt-[` answer Ctrl and Cmd alike, everywhere.
  *
  * Shift deliberately gets no token *for characters*. The browser already
  * applied it — `G` and `?` arrive as themselves — so adding one would give the
@@ -133,6 +299,14 @@ function positionKey(event: KeyEventLike): string | null {
  * place twice over — it keeps a shifted digit from matching an unshifted
  * binding, and it is what lets the bracket pair be bound under Shift at all.
  *
+ * THAT IS A FACT ABOUT CMD, AND IT DECIDED THE VIEW ROW'S CHORD. The operator
+ * offered two three-key chords for the views, Ctrl+Option+number and
+ * Ctrl+Shift+number. While Ctrl and Cmd were one token, the screenshot keys
+ * barred the whole Shift row rather than half of it, so Ctrl+Shift+3/4/5 could
+ * not be told apart here from the three gestures macOS had already eaten —
+ * three dead digits in the middle of a nine-digit family. Ctrl+Option has no
+ * such hole, and is what `SINGLE` binds.
+ *
  * `event.code` answers all of it: `Digit1` and `BracketLeft` are POSITIONS,
  * whatever the layout put on them, so those keys keep one spelling everywhere
  * and Shift can carry a token there without giving any keystroke a second one.
@@ -140,8 +314,12 @@ function positionKey(event: KeyEventLike): string | null {
  *
  * Returning `null` for a bare modifier is what stops reaching for a shortcut
  * and thinking better of it from silently eating a half-typed `g`.
+ *
+ * `mac` IS A PARAMETER, defaulting to this machine, because the digit row's
+ * answer differs by platform and both answers have to be assertable from one
+ * test run — see `isApplePlatform`.
  */
-export function normalizeKey(event: KeyEventLike): string | null {
+export function normalizeKey(event: KeyEventLike, mac: boolean = APPLE_PLATFORM): string | null {
   if (MODIFIER_KEYS.has(event.key)) {
     return null;
   }
@@ -184,7 +362,13 @@ export function normalizeKey(event: KeyEventLike): string | null {
   }
   const position = positionKey(event);
   if (position !== null) {
-    return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${event.shiftKey === true ? 'Shift-' : ''}${position}`;
+    // THE DIGIT ROW ASKS WHICH MODIFIER, the bracket pair does not. Both are
+    // positions and both read `event.code`; only the digits had their fold
+    // lifted, and `digitChord` carries the whole argument for why the line
+    // falls between the two halves of one table.
+    return /^[0-9]$/.test(position)
+      ? digitChord(event, position, mac)
+      : `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${event.shiftKey === true ? 'Shift-' : ''}${position}`;
   }
   // A LETTER KEEPS ITS SHIFT, AS A TOKEN, AND LOSES IT AS CASE.
   //
@@ -201,7 +385,19 @@ export function normalizeKey(event: KeyEventLike): string | null {
   // into the CASE, and a normaliser that lower-cases has thrown it away.
   const base = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const shifted = event.shiftKey === true && /^[a-z]$/.test(base);
-  return `${mod ? 'Mod-' : ''}${alt ? 'Alt-' : ''}${shifted ? 'Shift-' : ''}${base}`;
+  // AND CTRL IS NOT CMD HERE EITHER, FOR ALL BUT TWO LETTERS. `CTRL_GESTURES`
+  // above carries the operator's rule, which two keep the fold and why the
+  // exception is written as a list rather than as a condition.
+  //
+  // ONE RULE ACROSS BOTH BRANCHES: Control spells `Ctrl-` exactly when it is
+  // NOT acting as the command modifier for this key — which is `digitChord`'s
+  // rule with a different answer to "is it?". So an extra modifier is always a
+  // different keystroke: `Cmd+Ctrl+K` is `Mod-Ctrl-k` and answers nothing,
+  // rather than reaching `Mod-k` by having a token quietly dropped.
+  const ctrlIsCommand = mac ? event.ctrlKey === true && CTRL_GESTURES.has(base) : true;
+  const command = mac ? event.metaKey === true || ctrlIsCommand : mod;
+  const control = event.ctrlKey === true && !ctrlIsCommand;
+  return `${command ? 'Mod-' : ''}${control ? 'Ctrl-' : ''}${alt ? 'Alt-' : ''}${shifted ? 'Shift-' : ''}${base}`;
 }
 
 /** Keys that open a chord instead of doing something on their own. */
@@ -342,8 +538,9 @@ export type KeyAction =
    * `Alt-ƒ` and the binding would simply never match. That is the reason
    * `POSITION_CODES` exists at all -- "a modifier CHANGES the character these
    * keys produce" -- and it covers the digit row and the brackets, not
-   * letters, which is why every `Alt-` binding vam has is a DIGIT and there is
-   * not one `Alt-<letter>` in this file. Worse, no guard here could have
+   * letters, which is why every binding vam holds under Alt is a DIGIT
+   * (`Ctrl-Alt-<digit>`, `Mod-Alt-[`) and there is not one `Alt-<letter>` in
+   * this file. Worse, no guard here could have
    * caught it: Playwright's injected `Alt+f` carries `key: 'f'`, so it would
    * have gone green on a chord that is dead on the operator's own machine.
    *
@@ -391,12 +588,18 @@ export type KeyAction =
       session list and stop at the ends; these walk a strip, and every tab
       strip's own arrows wrap. */
   | { readonly kind: 'stepTab'; readonly delta: 1 | -1 }
-  /** `Alt-1` … `Alt-9` — pick a VIEW in the focused response pane: Response,
-      PRs, Terminal, Agents. A SLOT IN `TABS`, never a position in the drawn
-      bar — `Alt-3` is Terminal because Terminal is `TABS[2]`, whether or not
-      this source offers one, and `tabForDigit` is the one place that
-      resolution happens (`panels/tabs.ts`; A5.4/A15.6, won twice after
-      positional indexing shipped as a bug twice).
+  /** `Ctrl-Alt-1` … `Ctrl-Alt-9` — pick a VIEW in the focused response pane:
+      Response, PRs, Terminal, Agents. A SLOT IN `TABS`, never a position in
+      the drawn bar — `Ctrl-Alt-3` is Terminal because Terminal is `TABS[2]`,
+      whether or not this source offers one, and `tabForDigit` is the one
+      place that resolution happens (`panels/tabs.ts`; A5.4/A15.6, won twice
+      after positional indexing shipped as a bug twice).
+
+      A THREE-KEY CHORD AT THE OPERATOR'S REQUEST. It was `Alt-<digit>` until
+      they reported Ctrl+number "conflicting between switching function and
+      switching tab"; the table entry below carries which of their two
+      suggested chords this is and why. `Alt-<digit>` answers nothing now —
+      the view row moved rather than gaining a short form.
 
       Distinct from `position` on purpose. `position` means whatever the
       focused PANE counts — a session in Select, a tab in Insert — and
@@ -408,9 +611,11 @@ export type KeyAction =
       whose contract is "every binding is here", not rebindable while its
       `Mod-` cousin was, its chord hand-written into an `aria-label` a screen
       reader repeated on every focus, and an operator override free to take
-      `Alt-1` — after which the override and the listener both answered one
-      keystroke. Being here is the fix for all four, and the second listener
-      is gone rather than guarded. */
+      the chord it listened for — after which the override and the listener
+      both answered one keystroke. Being here is the fix for all four, and the
+      second listener is gone rather than guarded. It is also what made THIS
+      move a one-line change rather than a hunt: the chord lives in one table,
+      and the tooltip, the key sheet and the settings editor all read it. */
   | { readonly kind: 'pickView'; readonly digit: number }
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
@@ -459,12 +664,20 @@ export type KeyAction =
       because inside a text field `Ctrl-D` is delete-forward and `Ctrl-U` is
       delete-to-line-start.
 
-      AND `Cmd+D` IS THE SAME CHORD, because `normalizeKey` folds Ctrl and Cmd
-      into one `Mod-` token for every binding in this table — the same alias
-      `Mod-Shift-p` already carries for `Cmd+Shift+P`. The operator was told
-      and chose it; `test/keyboard/chords.half-page.test.ts` pins it, so a
-      later attempt to separate the two modifiers reddens rather than passing
-      quietly. */
+      AND `Cmd+D` IS THE SAME CHORD — THE LAST PAIR IN THE TABLE OF WHICH
+      THAT IS TRUE. `normalizeKey` used to fold Ctrl and Cmd into one `Mod-`
+      token for every binding; these two letters are all that is left of it
+      (`CTRL_GESTURES`), because the operator kept them by name when every
+      other Ctrl+letter went to the terminal on PR 361: "keep them in the
+      Response view; drop them in the terminal." So `Mod-d` is `Cmd+D` AND
+      `Ctrl+D`, deliberately, and `test/keyboard/chords.half-page.test.ts`
+      pins both spellings — losing either one reddens.
+
+      THE OTHER SIX WENT THE OTHER WAY, and it is the same test applied twice:
+      `Mod-k`, `Mod-n`, `Mod-t`, `Mod-w`, `Mod-Shift-h` and `Mod-Shift-p` are
+      APPLICATION COMMANDS, four of them readline's own chords, so Control
+      belongs to whatever is being typed into. These two are gestures for
+      READING, so Control is where a vim user's hand goes. */
   | { readonly kind: 'scrollHalf'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' };
 
@@ -543,11 +756,24 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // is macOS's Hide, claimed by `role: 'appMenu'` in `src/main/menu.ts`, and a
   // native accelerator matches before the page sees the keydown. This replaces
   // a bare `H`; `Mod-0` still answers the same act from the digit row.
+  //
+  // CMD+SHIFT+H, AND NOT Ctrl+Shift+H, ON macOS. No terminal distinguishes
+  // `Ctrl+Shift+H` from `Ctrl+H` -- both are 0x08, backspace -- so vam answering
+  // it was an application command sitting on a terminal gesture; measured on
+  // the base revision, pressing it with a terminal pane focused moved the
+  // keyboard to the session list while tmux received nothing. `CTRL_GESTURES`
+  // carries the rule that ended it.
   'Mod-Shift-h': { kind: 'focusList' },
   'Mod-k': { kind: 'palette' },
-  // Cmd/Ctrl + a digit is THE SESSION TAB AT THAT POSITION, counted across
-  // every pane on screen. One meaning, in both cursor modes, whatever has the
-  // keyboard.
+  // THE COMMAND MODIFIER + a digit is THE SESSION TAB AT THAT POSITION,
+  // counted across every pane on screen. One meaning, in both cursor modes,
+  // whatever has the keyboard.
+  //
+  // CMD, AND ON macOS ONLY CMD. It read "Cmd/Ctrl" until the operator asked
+  // for Ctrl+number to be cancelled; `digitChord` holds the unfold that made
+  // the two spellings expressible apart, and what the narrowing costs. On
+  // Linux and Windows this row is Ctrl, because there is no Cmd key there and
+  // `Mod-` means the platform's command modifier for every digit.
   //
   // THIS IS THE FIFTH ARRANGEMENT OF THIS ROW. The history is kept because it
   // is load-bearing: an agent this week was about to "fix" `gt` by renaming
@@ -564,7 +790,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   //      not refuted, it was OUTWEIGHED — Cmd+number is "switch tab" in every
   //      browser and every editor, and a key whose meaning changes with the
   //      cursor is a key you have to think about before pressing. Its pane
-  //      fork was gone twice over: the four VIEWS had moved to `Alt-<digit>`,
+  //      fork was gone twice over: the four VIEWS had moved off the Cmd row,
   //      and the SIDEBAR's positions were dropped rather than re-homed,
   //      because `j`/`k`, `gg`/`G`, `f` and `/` already reach any row. What
   //      that cost was jumping to sidebar row N by number.
@@ -635,37 +861,60 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // the action `zw`/`zW` already carry rather than a second action — the
   // chord keeps working and the key sheet prints one row with both spellings,
   // which is what `MAX_BINDINGS = 2` is for.
+  //
+  // STILL FOLDED, unlike the digit row three lines down: the brackets take
+  // either Ctrl or Cmd, on every platform, because the operator separated the
+  // two modifiers on the DIGITS and nowhere else. `digitChord` argues where
+  // that line falls; the short of it is that `Ctrl-[` is vim's own way out of
+  // insert mode and the README promises it by name.
   'Mod-Alt-[': { kind: 'stepSplit', delta: -1 },
   'Mod-Alt-]': { kind: 'stepSplit', delta: 1 },
-  // The response pane's four views, by name. The same digit row under the
-  // OTHER modifier, and that is the whole distinction: Cmd picks a SESSION
-  // TAB in the focused pane, Alt picks one of that pane's four VIEWS.
-  // `normalizeKey` spells them apart (`Mod-1` vs `Alt-1`) off `event.code`, so
-  // neither can answer the other's keystroke on any layout. This split is what
-  // let the digit row above take a fixed meaning at all — while both families
-  // shared Cmd, one of them had to lose.
+  // The response pane's four views, by name. The same digit row under a
+  // DIFFERENT modifier, which is the whole distinction: the command modifier
+  // picks a SESSION TAB, and the three-key chord picks one of the focused
+  // pane's VIEWS. `normalizeKey` spells them apart (`Mod-1` vs `Ctrl-Alt-1`)
+  // off `event.code`, so neither can answer the other's keystroke on any
+  // layout. That split is what let the digit row above take a fixed meaning at
+  // all — while both families shared one modifier, one of them had to lose.
+  //
+  // IT IS A THREE-KEY CHORD BECAUSE THE OPERATOR ASKED FOR ONE. This row was
+  // `Alt-<digit>` and the tab row answered Ctrl as well as Cmd, and the report
+  // was that "Ctrl+number seems to be conflicting between switching function
+  // and switching tab"; the instruction was to cancel Ctrl+number and put the
+  // view row on Ctrl+Option+number or Ctrl+Shift+number. CTRL+OPTION, of those
+  // two, and the reason is one row up: macOS takes `Cmd+Shift+3/4/5` for
+  // screenshots before any window sees the keydown, and while Ctrl and Cmd
+  // were one token that barred the whole Shift row — so Ctrl+Shift+number
+  // would have been asking for three dead digits in the middle of a family.
+  //
+  // AND `Alt-<digit>` IS UNBOUND NOW, NOT RESERVED. The operator's second
+  // decision was that the view row moves rather than gains a short form:
+  // switching a view happens on the three-key chord alone. Unbinding is the
+  // whole of that; reserving it (`RESERVED_KEYS`) would additionally forbid an
+  // operator from ever putting something of their own there, which is a
+  // stronger act than was asked for and one this table has only taken for keys
+  // ANOTHER SURFACE already answers. `Ctrl-<digit>` is free for the same
+  // reason and on the same terms.
   //
   // ALL NINE, though only four name a view. Digits 5-9 are what make the
-  // refusal reachable: `Alt-5` says "no view 5" instead of falling through
-  // to the browser, and the key sheet captions them as the nothing they are
-  // rather than promising a fifth view. The same shape `position` already
-  // has for digits past the tab count.
+  // refusal reachable: `Ctrl-Alt-5` says "no view 5" instead of falling
+  // through to the browser, and the key sheet captions them as the nothing
+  // they are rather than promising a fifth view. The same shape `selectTab`
+  // already has for digits past the tab count.
   //
-  // Free when they were taken: nothing in any table held an `Alt-` key
+  // Free when they were taken: nothing in any table held a `Ctrl-` key
   // (`test/keyboard/pick-view-binding.test.ts` re-derives that no two
   // actions share a chord, over the generated bindings rather than over
-  // these lines). `RESERVED_KEYS` forbids nothing here — it guards the chord
-  // doors — so the guarantee is uniqueness within the grammar, not a
-  // registry.
-  'Alt-1': { kind: 'pickView', digit: 1 },
-  'Alt-2': { kind: 'pickView', digit: 2 },
-  'Alt-3': { kind: 'pickView', digit: 3 },
-  'Alt-4': { kind: 'pickView', digit: 4 },
-  'Alt-5': { kind: 'pickView', digit: 5 },
-  'Alt-6': { kind: 'pickView', digit: 6 },
-  'Alt-7': { kind: 'pickView', digit: 7 },
-  'Alt-8': { kind: 'pickView', digit: 8 },
-  'Alt-9': { kind: 'pickView', digit: 9 },
+  // these lines).
+  'Ctrl-Alt-1': { kind: 'pickView', digit: 1 },
+  'Ctrl-Alt-2': { kind: 'pickView', digit: 2 },
+  'Ctrl-Alt-3': { kind: 'pickView', digit: 3 },
+  'Ctrl-Alt-4': { kind: 'pickView', digit: 4 },
+  'Ctrl-Alt-5': { kind: 'pickView', digit: 5 },
+  'Ctrl-Alt-6': { kind: 'pickView', digit: 6 },
+  'Ctrl-Alt-7': { kind: 'pickView', digit: 7 },
+  'Ctrl-Alt-8': { kind: 'pickView', digit: 8 },
+  'Ctrl-Alt-9': { kind: 'pickView', digit: 9 },
   // `p` for project. It shipped hand-wired to its own window listener in
   // SessionList.tsx, which cost it both properties this table exists to give:
   // it appeared in no key sheet, and it fired straight through an open
@@ -674,6 +923,15 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // The same action as `x`, under the chord a person coming from a browser or
   // a terminal already has in their fingers. It is `Mod-w` rather than a
   // second letter because "close this thing" IS Cmd-W everywhere else.
+  //
+  // AND CMD-W IS NOW ALL IT IS, ON macOS. This and the five other application
+  // commands in this table came off Control on PR 361 (`CTRL_GESTURES`):
+  // `Ctrl+W` is readline's delete-word-back, and the pane's own comment
+  // already named the hazard out loud -- "a Ctrl+W that both killed a word and
+  // closed the session tab it was typed into is not a bug anybody would enjoy
+  // finding twice". `TerminalTab.tsx` stops that chord before this grammar
+  // sees it, so the pane was never the exposed surface; the composer and every
+  // other Cocoa text view were, and they have their editing key back.
   //
   // IT COLLIDES WITH THE WINDOW, and the collision is resolved in main:
   // Electron's default macOS menu binds Cmd-W to Close Window, and a native
