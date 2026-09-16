@@ -104,7 +104,6 @@ function Harness({
 const q = (selector: string) => document.querySelector<HTMLElement>(selector);
 const box = () => q('textarea[aria-label="prompt to session"]') as unknown as HTMLTextAreaElement;
 const note = () => q('[data-mode-cycle]')?.textContent ?? '';
-const keys = () => q('[data-prompt-keys]')?.textContent ?? '';
 const type = (text: string) => fireEvent.change(box(), { target: { value: text } });
 
 /** A bridge into a pane, typed as the real member is so calls can be read. */
@@ -411,96 +410,56 @@ describe('the box does not claim the chords that belong above or below it', () =
 });
 
 /**
- * THE KEYS THE BOX CAN BE OPERATED WITH, ON ONE ROW.
+ * THE KEYS THE BOX IS OPERATED WITH ARE NO LONGER PRINTED UNDER IT.
  *
  * Escape used to be the only way out of the composer, and the only place that
  * was written down was a caption saying `Esc → sidebar`. Both halves of that
- * are now false.
+ * went false, and the row that replaced it was then cut three more times by the
+ * person who reads it on every prompt they type -- the send key ("only the
+ * leave one needs showing"), the leave key ("drop the leave shortcut from under
+ * the prompt box"), and finally the place itself: "remove the 'Esc to
+ * interrupt' shortcut under the prompt input. Nothing is ever displayed down
+ * there."
  *
- * The row has been cut twice since, by the person who reads it on every prompt
- * they type: the send key went first ("only the leave one needs showing"), and
- * then the leave key went too ("drop the leave shortcut from under the prompt
- * box"). What is left has to follow the preference and the session rather than
- * read as a fixed string that happens to be right today -- and the keys that
- * stopped being PRINTED still have to WORK, which is the pair of assertions
- * this file exists to keep together.
+ * RETIRED WITH IT, all about captions this file no longer draws: `'names the
+ * interrupt, and nothing else that is a convention'`, `'follows the send-key
+ * preference rather than naming a fixed key, on a phone'`, `'does not offer an
+ * interrupt for a session vam cannot press a key in'`, `'retires the caption
+ * that promised Escape went to the sidebar'`, `'names no key a phone cannot
+ * press'` and `'costs no width while the box is not open for typing'`. The end
+ * state they were converging on is asserted once, structurally, in
+ * `DetailPanel.test.tsx` ("nothing is drawn beneath the prompt input, on any
+ * route").
+ *
+ * WHAT STAYS HERE IS THE HALF THAT WAS NEVER ABOUT A CAPTION: the keys that
+ * stopped being printed still have to WORK. Every Escape-interrupt test above
+ * is one of those, and so is the one below.
  */
 describe('the composer names the keys that operate it', () => {
-  it('names the interrupt, and nothing else that is a convention', () => {
-    // THE ROW HAS BEEN CUT TWICE, BY THE SAME PERSON READING IT. First: "of
-    // Enter-to-send and Mod-[-to-leave, only the leave one needs showing."
-    // Then, having lived with that: "drop the leave shortcut from under the
-    // prompt box." What is left is the one caption that is neither a
-    // convention nor printed anywhere else -- Escape, which in this box
-    // interrupts the agent rather than doing what Escape does everywhere else.
-    bridge();
-    draw();
-    expect(keys()).toContain('Esc');
-    expect(keys()).not.toContain('Mod-[');
-    expect(keys()).not.toContain('Enter');
-  });
-
-  it('follows the send-key preference rather than naming a fixed key, on a phone', () => {
-    // The caption survives where it is the only one there is: a soft keyboard
-    // has no Esc and no Ctrl, so the phone's row would otherwise be empty --
-    // and the return key is the one key in this box whose behaviour is a
-    // PREFERENCE rather than a convention, which is what a caption is for.
-    draw({}, { phone: true });
-    const shipped = keys();
-    act(() => setActivePromptSubmitKey('shift-enter'));
-    expect(keys()).toContain('Shift-Enter');
-    expect(keys()).not.toBe(shipped);
-  });
-
-  it('does not offer an interrupt for a session vam cannot press a key in', () => {
-    // A CONTROL THAT CANNOT ACT IS NOT DRAWN AS ONE, in its caption form: the
-    // hint would be promising an interrupt that can only ever be refused.
-    //
-    // With the leave caption gone this is now the case where the row draws
-    // NOTHING -- an empty `<p>` rather than a reserved band, which is the
-    // second half of the assertion: no stray separator, no residue.
-    draw({ vamControlled: false });
-    expect(keys()).not.toContain('Esc');
-    expect(keys().trim()).toBe('');
-  });
-
-  it('retires the caption that promised Escape went to the sidebar', () => {
-    // It no longer does, and a hint that survives the behaviour it described
-    // is worse than no hint: the operator would press Escape expecting to
-    // leave and interrupt their agent instead.
-    draw();
-    expect(q('[data-prompt-escape]')).toBeNull();
-    expect(keys()).not.toContain('sidebar');
-  });
-
-  it('names no key a phone cannot press', () => {
-    // A SOFT KEYBOARD HAS NO Esc AND NO Ctrl. The return key is real, so the
-    // send hint stays; the other two name keys that do not exist on the
-    // device, and the interrupt has a REAL control there already -- the
-    // keystroke strip's `Esc → agent` button, which presses the same key over
-    // the same bridge. Naming an absent key beside a working button is the
-    // "control that cannot act" rule in caption form.
-    draw({}, { phone: true, terminal: true });
-    expect(keys()).toContain('Enter');
-    expect(keys()).not.toContain('Esc');
-    expect(keys()).not.toContain('Mod-[');
-    // And the button that DOES interrupt on a phone is on screen.
-    expect(q('[data-key-strip-key="escape"]')).not.toBeNull();
-  });
-
-  it('still lets the box go on the key it stopped printing', () => {
+  it('still lets the box go on the key it never printed', () => {
     // THE CAPTION WENT; THE KEY DID NOT. This is the assertion that keeps the
-    // two apart -- delete the binding and the removal of a hint quietly
-    // becomes the removal of the only way out of the box without a mouse.
-    // `Mod-0` gets out from here too, and the `?` sheet names them both.
+    // two apart -- delete the binding and the removal of a hint quietly becomes
+    // the removal of the only way out of the box without a mouse.
+    //
+    // AND `Mod-[` IS TAUGHT NOWHERE NOW, which is worth writing down rather
+    // than repeating the comment this replaces. The `?` sheet is generated from
+    // the chord TABLES and this key is bound in the composer's own `onKeyDown`,
+    // so the sheet names `Mod-0` and `Mod-Shift-h` for the same act and has
+    // never named this one. That was already true when the caption went; it is
+    // recorded here because the old comment claimed otherwise.
     bridge();
     draw();
-    expect(keys()).not.toContain('Mod-[');
+    expect(q('[data-prompt-keys]')).toBeNull();
     expect(fireEvent.keyDown(box(), { key: '[', code: 'BracketLeft', metaKey: true })).toBe(false);
   });
 
-  it('costs no width while the box is not open for typing', () => {
-    draw({}, { composing: false });
+  it('draws nothing under the input on a phone either, where the row was unconditional', () => {
+    // The send caption was drawn on every phone prompt regardless of the
+    // preference, so the phone is the route a half-done removal survives on.
+    draw({}, { phone: true, terminal: true });
     expect(q('[data-prompt-keys]')).toBeNull();
+    // And the control that DOES interrupt on a phone is still on screen: what
+    // was removed is a caption, and the act keeps its button.
+    expect(q('[data-key-strip-key="escape"]')).not.toBeNull();
   });
 });

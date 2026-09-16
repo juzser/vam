@@ -31,6 +31,12 @@ import type {
 } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
+  EMPTY_CHORD,
+  isReserved,
+  NO_BINDINGS,
+  resolveChord,
+} from '../../src/renderer/keyboard/chords.js';
+import {
   AGENT_SPLIT_PX,
   ATTACH_LIMIT_BYTES,
   type AttachedFile,
@@ -1515,66 +1521,100 @@ describe('there is a way out of the prompt box without a mouse', () => {
     expect(document.activeElement).not.toBe(box);
   });
 
-  it('retires the caption that promised Escape went to the sidebar', () => {
-    // It no longer does -- Escape interrupts the agent from in here -- and a
-    // hint that outlives the behaviour it described is worse than no hint: it
-    // sends the operator to press a key expecting to leave and stops their
-    // agent instead. The replacement caption (`Mod-[ → leave`) is gone too,
-    // at the operator's later ask; `DetailPanel.composer-escape.test.tsx`
-    // holds the key still working.
-    draw({ composing: true });
-    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent).not.toContain('sidebar');
-    expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
-    // The row itself is still only drawn while the box is open for typing --
-    // it costs no width the rest of the time.
-    cleanup();
-    draw({ composing: false });
-    expect(q<HTMLElement>('[data-prompt-keys]')).toBeNull();
+  /**
+   * RETIRED, all four of them, with the row they were about: `'retires the
+   * caption that promised Escape went to the sidebar'`, `'names no leave key
+   * at all, on the operator's second look'`, `'brings the send caption back
+   * when the operator is not on the shipped key'` and `'keeps the send key on
+   * a phone, where it is the only key there is'`.
+   *
+   * They tracked a row that the operator narrowed in four steps and has now
+   * ended -- see the describe below, which asserts the end state directly and
+   * over every case those four covered between them. The keys they were about
+   * are asserted as BEHAVIOUR, which is where they always belonged:
+   * `'Mod-[ gives the keyboard back'` above, `DetailPanel.composer-escape.
+   * test.tsx` for the interrupt, and `DetailPanel.submit-key.test.tsx` for
+   * which keystroke really sends in each mode.
+   */
+});
+
+/**
+ * NOTHING IS EVER DRAWN UNDER THE PROMPT INPUT — the end of a sequence, not a
+ * tidy-up.
+ *
+ * The row under the composer was narrowed by the operator four times. It began
+ * as three captions (`Esc → sidebar`, `Mod-[ → leave`, the send key); `Esc →
+ * sidebar` went the day Escape became the agent's interrupt; then "drop the
+ * leave shortcut from under the prompt box"; then the send hint was narrowed
+ * to the deviation only, which left a row that drew nothing at all on a
+ * desktop with the shipped key. Now: "remove the 'Esc to interrupt' shortcut
+ * under the prompt input. Nothing is ever displayed down there." The whole row
+ * goes, the send caption on it included.
+ *
+ * ASSERTED AS A STRUCTURE, NOT AS ONE ABSENT SELECTOR. `[data-prompt-keys]`
+ * being null is true of a row that was renamed as well as of one that was
+ * deleted, so the load-bearing assertion is that the tools row is the LAST
+ * thing inside the prompt box -- there is no element under the input for
+ * anything to be drawn in.
+ */
+describe('nothing is drawn beneath the prompt input, on any route', () => {
+  /** Every state the four retired tests covered, in one table. */
+  const CASES: readonly (readonly [string, Partial<DetailPanelProps>])[] = [
+    ['desktop, box open', { composing: true }],
+    ['desktop, box closed', { composing: false }],
+    ['the phone route', { composing: true, phone: true }],
+    [
+      'a session vam cannot interrupt',
+      {
+        composing: true,
+        entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } },
+      },
+    ],
+  ];
+
+  it('leaves the tools row as the last thing in the prompt box', () => {
+    let boxes = 0;
+    for (const [name, props] of CASES) {
+      cleanup();
+      draw(props);
+      const box = q<HTMLElement>('[data-prompt-box]');
+      if (box === null) continue; // `composing: false` still draws it; a closed pane may not.
+      boxes += 1;
+      expect(box.lastElementChild?.hasAttribute('data-prompt-tools'), name).toBe(true);
+      expect(q<HTMLElement>('[data-prompt-keys]'), name).toBeNull();
+    }
+    // A sweep that examined nothing passes for the wrong reason.
+    expect(boxes, 'the prompt box was on screen in every case above').toBe(CASES.length);
   });
 
-  it("names no leave key at all, on the operator's second look", () => {
-    // Operator, first: "of Enter-to-send and Mod-[-to-leave, only the leave
-    // one needs showing." Then, having lived with it: "drop the leave shortcut
-    // from under the prompt box."
-    //
-    // THE KEY STILL WORKS. `Mod-[` is bound in the composer's own `onKeyDown`
-    // and reserved in `chords.ts`, `Mod-0` still gets out from here, and the
-    // `?` sheet still names both. What is gone is the CAPTION, which is the
-    // operator's call to make: they are the one reading this row on every
-    // prompt they type.
-    draw({ composing: true });
-    expect(q<HTMLElement>('[data-prompt-leave-key]')).toBeNull();
-    expect(q<HTMLElement>('[data-prompt-keys]')?.textContent ?? '').not.toContain('leave');
-    // And the send key stays where it was left -- silent on the shipped key,
-    // which is what makes the row EMPTY here rather than merely shorter.
-    expect(q<HTMLElement>('[data-prompt-send-key]')).toBeNull();
-  });
-
-  it('brings the send caption back when the operator is not on the shipped key', () => {
-    // THE OTHER HALF, and the reason the rule is not "never draw it". Once
-    // this row stopped naming the send key, nothing on a desktop did: the
-    // submit button's `Note` names the OUTCOME, never the keystroke, and the
-    // picker is two dialogs away. A caption for a convention is clutter; a
-    // caption for a deviation is the only report there is -- and
-    // `Shift-Enter` is the state where Return does something the operator did
-    // not ask it to.
-    setActivePromptSubmitKey('shift-enter');
-    try {
-      draw({ composing: true });
-      expect(q<HTMLElement>('[data-prompt-send-key]')?.textContent).toContain('Shift-Enter');
-    } finally {
-      setActivePromptSubmitKey(DEFAULT_PROMPT_SUBMIT_KEY);
+  it('draws no caption for the send key in either mode, on either route', () => {
+    // The send hint was the last survivor of the row and was UNCONDITIONAL on
+    // a phone, so a change that only dropped the interrupt caption would leave
+    // this one drawing. Both keys, both routes.
+    for (const key of ['enter', 'shift-enter'] as const) {
+      setActivePromptSubmitKey(key);
+      try {
+        for (const phone of [false, true]) {
+          cleanup();
+          draw({ composing: true, phone });
+          expect(q<HTMLElement>('[data-prompt-send-key]'), `${key} / phone=${phone}`).toBeNull();
+        }
+      } finally {
+        setActivePromptSubmitKey(DEFAULT_PROMPT_SUBMIT_KEY);
+      }
     }
   });
 
-  it('keeps the send key on a phone, where it is the only key there is', () => {
-    // The phone names no `Mod-[` and no `Esc` -- a soft keyboard has neither
-    // -- so dropping the send hint there would not simplify the row, it would
-    // empty it. The return key is real on a phone, and it is the one key whose
-    // behaviour is a PREFERENCE rather than a convention.
-    draw({ composing: true, phone: true });
-    expect(q<HTMLElement>('[data-prompt-send-key]')).not.toBeNull();
-    expect(q<HTMLElement>('[data-prompt-leave-key]')).toBeNull();
+  it('keeps every key the row used to name, because a caption is not a binding', () => {
+    // THE COST OF DELETING A ROW IS THE BINDINGS IT MIGHT TAKE WITH IT. `Mod-[`
+    // is bound in the composer's own `onKeyDown` and RESERVED in `chords.ts` so
+    // nothing else can claim it; `Mod-0` reaches `focusList`; Escape is handled
+    // ahead of every table. None of the three is a caption, and none may move
+    // because a caption did. Asked of the real grammar, not of a copy of it.
+    expect(isReserved('Mod-[')).toBe(true);
+    expect(isReserved('Escape')).toBe(true);
+    expect(resolveChord(EMPTY_CHORD, 'Mod-0', NO_BINDINGS).action).toEqual({ kind: 'focusList' });
+    expect(resolveChord(EMPTY_CHORD, 'Escape', NO_BINDINGS).action).toEqual({ kind: 'cancel' });
   });
 });
 

@@ -256,6 +256,34 @@ describe('token contrast, per theme', () => {
         });
       });
 
+      /**
+       * THE THREE MODE HUES, at the floor a GLYPH owes.
+       *
+       * The composer's mode icon paints one hue per mode (`DetailPanel.tsx`),
+       * at the operator's ask -- "the icon needs to be filled with colour (for
+       * example auto is yellow)". It is a non-text mark that carries
+       * information, so it owes WCAG 1.4.11's 3:1 rather than 1.4.3's 4.5:1.
+       * All six values in fact clear 4.5 on the resting chip as well, since
+       * each is a value the palette had already measured as TEXT somewhere --
+       * but 3 is the floor this control is actually held to, and asserting the
+       * floor it owes is what keeps the number honest when a hue moves.
+       *
+       * TWO GROUNDS, because the chip behind the glyph has two states. At rest
+       * it is `bg-card`; under a pointer it is `bg-line-strong`, which is
+       * LIGHTER in dark and DARKER in light, so neither ground bounds the pair
+       * on its own and a guard that checked only the resting one would go
+       * quiet on the hover.
+       */
+      it('paints each mode glyph at 3:1 on the chip it sits in, at rest and on hover', () => {
+        const pairs = ['--vam-mode-auto', '--vam-mode-manual', '--vam-mode-plan'].flatMap((token) =>
+          ['--vam-card', '--vam-line-strong'].map((ground) => [token, ground] as const),
+        );
+        // 3 hues x 2 chip states. The literal is the point, as above: dropping
+        // a mode or a state from either list has to redden this, not quieten
+        // it.
+        expect(measure(pairs, 3)).toEqual({ pairs: 6, failing: [] });
+      });
+
       it('draws the "New session" control border at 3:1 against the sidebar it sits on', () => {
         // `SessionList` draws `border-ink-quiet` on a control with no fill of
         // its own, so the enclosing ground is the sidebar behind it, not a

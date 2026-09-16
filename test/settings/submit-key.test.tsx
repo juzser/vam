@@ -91,7 +91,6 @@ function open(prefs: Prefs = EMPTY_PREFS) {
 const option = (key: string) =>
   document.querySelector<HTMLButtonElement>(`[data-submit-key-option="${key}"]`);
 const note = () => document.querySelector<HTMLElement>('[data-submit-key-note]')?.textContent ?? '';
-const hint = () => document.querySelector<HTMLElement>('[data-prompt-send-key]');
 
 function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
   const call = onChange.mock.calls[index];
@@ -146,33 +145,43 @@ describe('the sessions section offers the two keys', () => {
 });
 
 describe('picking a key changes the composer, not only the store', () => {
-  it('moves the send key, and the caption that names it, end to end', () => {
+  it('moves the send key end to end, and moves it back', () => {
     // THROUGH THE WHOLE SEAM: overlay → prefs → `writePrefs` → `activatePrefs`
     // → the module store → the box's subscription. A test that stopped at
     // `onChange` would pass over every one of those.
     //
-    // THE CAPTION IS NOW THE DEVIATION'S OWN REPORT, which makes this a
-    // sharper end-to-end assertion than it was: on the shipped key the
-    // desktop row says nothing about sending -- the operator asked for that
-    // -- and picking the other key is what brings it back. Absent, present,
-    // absent again, all three driven through the real dialog.
+    // ASSERTED ON THE KEYSTROKE, NOT ON A CAPTION, since the composer draws no
+    // caption for its send key any more -- the row under the prompt input is
+    // gone, at the operator's ask, and this test used to read it. A claimed
+    // keystroke is `defaultPrevented` on a cancelable event, which `fireEvent`
+    // builds and reports as its return value; that is the one signal the two
+    // modes really differ in.
+    //
+    // BOTH DIRECTIONS, which is what this test keeps that the one below does
+    // not: a pref that could be set once and not unset would strand an
+    // operator on a key they were trying out.
     render(<Canvas model={MODEL} />);
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', bubbles: true }));
     });
-    // A composer to have a caption IN, or every "absent" below is free.
-    expect(
-      document.querySelector('[data-prompt-keys]'),
-      'the composer is not open, so none of this is about a caption',
-    ).not.toBeNull();
-    expect(hint(), 'the shipped key is a convention and says nothing').toBeNull();
+    const box = document.querySelector(
+      'textarea[aria-label="prompt to session"]',
+    ) as HTMLTextAreaElement;
+    // A composer to press keys IN, or every claim below is free.
+    expect(box, 'the composer is not open, so none of this is about a send key').not.toBeNull();
+    fireEvent.change(box, { target: { value: 'ship it' } });
+    // The shipped key: a bare Enter is claimed, Shift+Enter is the newline.
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(false);
+    expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
 
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
     fireEvent.click(option('shift-enter') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
-    expect(hint()?.textContent).toContain('Shift-Enter → ');
+    fireEvent.change(box, { target: { value: 'ship it' } });
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(true);
+    expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(false);
 
     // And it is reversible from the same row.
     act(() => {
@@ -180,7 +189,9 @@ describe('picking a key changes the composer, not only the store', () => {
     });
     fireEvent.click(option('enter') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
-    expect(hint()).toBeNull();
+    fireEvent.change(box, { target: { value: 'ship it' } });
+    expect(fireEvent.keyDown(box, { key: 'Enter' })).toBe(false);
+    expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
   });
 
   it('makes the swapped key the one that actually submits', () => {
