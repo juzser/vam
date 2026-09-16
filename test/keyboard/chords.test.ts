@@ -354,8 +354,15 @@ describe('Mod-digit selects a tab, and the grammar carries only the digit', () =
     const azerty = normalizeKey({ key: '&', code: 'Digit1', metaKey: true });
     expect(azerty).toBe('Mod-1');
     expect(type([azerty as string]).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
-    const us = normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true });
+    // THE PLATFORM IS PASSED, NOT DETECTED. This used to press Ctrl+1 and
+    // expect the same action, back when `Mod-` folded Ctrl and Cmd together;
+    // Ctrl is the command modifier on Linux and Windows and is bound to
+    // nothing on macOS now (`digitChord`), so leaving the flag ambient would
+    // assert one grammar on the operator's Mac and a different one on the
+    // ubuntu runner while reading identically in both.
+    const us = normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true }, false);
     expect(type([us as string]).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
+    expect(normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true }, true)).toBe('Ctrl-1');
     // And zero the same way: `à` sits at `Digit0` on AZERTY.
     expect(normalizeKey({ key: 'à', code: 'Digit0', metaKey: true })).toBe('Mod-0');
   });
@@ -551,10 +558,16 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     expect(normalizeKey({ key: '1', code: 'Digit1' })).toBe('1');
   });
 
-  it('spells Alt and Mod-Alt over the position too', () => {
-    // macOS Alt+1 prints `\u00a1`; the position is still Digit1.
-    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true })).toBe('Alt-1');
-    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, metaKey: true })).toBe(
+  it('spells Alt and the three-key chord over the position too', () => {
+    // macOS Alt+1 prints `\u00a1`; the position is still Digit1. `Alt-1` is
+    // bound to nothing now -- the view row it used to answer moved to
+    // `Ctrl-Alt-1` -- but the SPELLING is what this asserts, and it is the
+    // reason the moved chord is reachable from a composed character at all.
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true }, true)).toBe('Alt-1');
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, ctrlKey: true }, true)).toBe(
+      'Ctrl-Alt-1',
+    );
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, metaKey: true }, true)).toBe(
       'Mod-Alt-1',
     );
   });

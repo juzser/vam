@@ -844,7 +844,11 @@ describe('filtering the sidebar with /', () => {
 describe('the command palette', () => {
   it('Ctrl-K and Cmd-K both open it', () => {
     const { unmount } = render(<Canvas model={MODEL} />);
-    press('k', { ctrlKey: true });
+    // CMD, NOT CTRL. `Mod-k` is the platform's command modifier for a letter
+    // since the operator gave Ctrl+letter to the terminal (PR 361,
+    // `CTRL_GESTURES` in `chords.ts`), so a Ctrl+K here would open nothing on
+    // macOS while still passing under happy-dom's non-Apple platform string.
+    press('k', { metaKey: true });
     expect(screen.getByPlaceholderText('go to session…')).toBeTruthy();
     unmount();
 
@@ -863,7 +867,11 @@ describe('the command palette', () => {
 
   it('Escape closes it from inside, where the window listener cannot hear', () => {
     render(<Canvas model={MODEL} />);
-    press('k', { ctrlKey: true });
+    // CMD, NOT CTRL. `Mod-k` is the platform's command modifier for a letter
+    // since the operator gave Ctrl+letter to the terminal (PR 361,
+    // `CTRL_GESTURES` in `chords.ts`), so a Ctrl+K here would open nothing on
+    // macOS while still passing under happy-dom's non-Apple platform string.
+    press('k', { metaKey: true });
     keyOn(screen.getByPlaceholderText('go to session…'), 'Escape');
     expect(screen.queryByPlaceholderText('go to session…')).toBeNull();
   });
@@ -1268,7 +1276,11 @@ describe('waiting on you', () => {
 
   it('groups it apart in the palette', () => {
     render(<Canvas model={WAITING} />);
-    press('k', { ctrlKey: true });
+    // CMD, NOT CTRL. `Mod-k` is the platform's command modifier for a letter
+    // since the operator gave Ctrl+letter to the terminal (PR 361,
+    // `CTRL_GESTURES` in `chords.ts`), so a Ctrl+K here would open nothing on
+    // macOS while still passing under happy-dom's non-Apple platform string.
+    press('k', { metaKey: true });
     // Scoped to the palette's own group headings: "needs you" also appears in
     // the sidebar row, and a bare text query would pass on that while the
     // grouping was missing.
@@ -1943,7 +1955,14 @@ describe('Cmd-number selects a tab in the pane the operator is looking at', () =
    */
   it('does not count sessions of another project, which the strip never draws', () => {
     render(<Canvas model={MODEL} />);
-    press('3', { ctrlKey: true, code: 'Digit3' });
+    // CMD, NOT CTRL, AND THE DIFFERENCE IS THE OPERATOR'S OWN. The digit row
+    // is the platform's COMMAND modifier now (`digitChord`, `chords.ts`), so
+    // a Ctrl+3 here is bound to nothing on the machine vam is used on -- and
+    // this line passed with Ctrl only because happy-dom reports a non-Apple
+    // `navigator.platform`, where Ctrl IS the command modifier. Cmd spells
+    // `Mod-3` on every platform, so the assertion means the same thing
+    // wherever it runs.
+    press('3', { metaKey: true, code: 'Digit3' });
     expect(focused()).toBe('alpha/a1');
     expect(statusBar()).toContain('only 2 tabs');
   });

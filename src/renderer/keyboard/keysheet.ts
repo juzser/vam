@@ -181,7 +181,7 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // It names no COUNT, because there is no fixed one to name: a pane's strip
   // draws as many tabs as the project has sessions. That is also why nothing
   // here is capped by `TABS.length` the way the Insert half used to be —
-  // `TABS` counts the four VIEWS, which live on `Alt-<digit>` and are
+  // `TABS` counts the four VIEWS, which live on `Ctrl-Alt-<digit>` and are
   // captioned by `pickView` just below.
   //
   // Still generated: the label is a function of the action's own digit, so the
@@ -209,14 +209,21 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // changed twice in this epic, and a hand-written caption is how the sheet
   // came to promise a view that had been renamed.
   //
-  // No `byMode`, and its neighbour on the other modifier has none either now:
-  // both digit families name the same thing in either cursor mode, which is
-  // what the fourth arrangement bought.
+  // No `byMode`, and its neighbour on the command modifier has none either
+  // now: both digit families name the same thing in either cursor mode, which
+  // is what the fourth arrangement bought.
+  //
+  // THE MODIFIER IS NOT WRITTEN INTO ANY CAPTION HERE, and that is what let
+  // this family move from `Alt-<digit>` to `Ctrl-Alt-<digit>` without a single
+  // sentence going stale: the chord comes from the binding, the caption says
+  // only what the key does. The two comments in this file that DID name the
+  // old modifier were prose about the table, and they are corrected above and
+  // below rather than left to be believed.
   //
   // Digits past the last view get the honest caption instead of a promise.
-  // `Alt-5`..`Alt-9` are bound so the pane can refuse them ALOUD rather than
-  // let them reach the browser, and a sheet that captioned them as views
-  // would be naming four that do not exist.
+  // `Ctrl-Alt-5`..`Ctrl-Alt-9` are bound so the pane can refuse them ALOUD
+  // rather than let them reach the browser, and a sheet that captioned them as
+  // views would be naming four that do not exist.
   pickView: {
     group: 'panes',
     label: (a) => {
@@ -340,26 +347,38 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
    * rather than the cursor, which is why the group's own note above now says
    * so.
    *
-   * AND THE CAPTION NAMES `Cmd` OUT LOUD, which no other row has needed to.
-   * `normalizeKey` folds Ctrl and Cmd into one `Mod-` token for every binding
-   * in the grammar, so `Mod-d` IS `Cmd+D` — and this is the one family where
-   * an operator meets that fold as a surprise rather than as a convenience:
-   * they asked for vim's `Ctrl-D`, and `Cmd+D` (bookmark, in the browser
-   * build) now scrolls too. The sheet is where that is found out, or it is
-   * found out by pressing the key. `test/keyboard/chords.half-page.test.ts`
-   * asserts the word is here, so the alias cannot quietly leave the caption.
+   * AND THE CAPTION NAMES BOTH SPELLINGS OUT LOUD, which no other row needs
+   * to — and the reason it is the only one INVERTED once, which is why this
+   * comment is worth reading rather than skimming.
+   *
+   * It used to be here because `Mod-` folded Ctrl and Cmd for every binding in
+   * the grammar, so `Mod-d` was `Cmd+D` as well and an operator who asked for
+   * vim's `Ctrl-D` met the alias as a surprise. That fold is gone from every
+   * other letter: the operator gave Ctrl+letter to the terminal on PR 361 and
+   * kept exactly these two ("keep them in the Response view; drop them in the
+   * terminal"), so `Mod-` now means the platform's command modifier
+   * everywhere — and these two rows are the exception, the only `Mod-<letter>`
+   * chords that still answer Control as well.
+   *
+   * SO THE SURPRISE SWAPPED ENDS AND THE CAPTION STILL HAS TO CARRY IT. An
+   * operator reading `Mod-k` is reading "Cmd+K, and Ctrl+K belongs to the
+   * terminal"; an operator reading `Mod-d` is reading something that is true
+   * of two keys. Naming both here is the whole disclosure, because nothing in
+   * the sheet's layout can show that one `Mod-` row means more than another.
+   * `test/keyboard/chords.half-page.test.ts` asserts both words are here, so
+   * neither spelling can quietly leave the caption.
    */
   scrollHalf: {
     group: 'navigation',
     label: (a) =>
       a.delta === 1
-        ? 'half a screen down this pane’s transcript — Cmd+D does it too'
-        : 'half a screen up this pane’s transcript — Cmd+U does it too',
+        ? 'half a screen down this pane’s transcript — Ctrl+D and Cmd+D both'
+        : 'half a screen up this pane’s transcript — Ctrl+U and Cmd+U both',
     byMode: (a) => ({
       select:
         a.delta === 1
-          ? 'half a screen down this pane’s transcript — Cmd+D does it too'
-          : 'half a screen up this pane’s transcript (Cmd+U too) — its head reads further back',
+          ? 'half a screen down this pane’s transcript — Ctrl+D and Cmd+D both'
+          : 'half a screen up this pane’s transcript (Ctrl+U or Cmd+U) — its head reads further back',
       insert: 'nothing here — whatever you are typing in keeps Ctrl-D, Cmd+D and Ctrl-U',
     }),
   },

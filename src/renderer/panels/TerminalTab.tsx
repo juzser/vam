@@ -264,8 +264,10 @@ function strokeFor(key: string): PaneKey | null {
  *   NOT ALT. On macOS Option is the COMPOSE key: `Option+e` opens a dead-key
  *   composition that the hidden box exists to receive, and its keydown carries
  *   `isComposing: false` -- so claiming Alt would break accented input in the
- *   exact place the input-method work was built to fix. vam also binds
- *   `Alt-<digit>` outright (`keyboard/chords.ts`). THE COST IS REAL AND IS THE
+ *   exact place the input-method work was built to fix. vam also binds the
+ *   VIEW ROW on `Ctrl-Alt-<digit>` (`keyboard/chords.ts`), which arrives here
+ *   carrying both modifiers and is declined by the Shift/Alt rule below rather
+ *   than by this one. THE COST IS REAL AND IS THE
  *   TRADE: Meta chords do not reach the pane, so readline's `Alt+B`/`Alt+F`
  *   word motion is unavailable here. The portable spelling of Meta is the Esc
  *   PREFIX -- press Escape, then the letter -- and Escape is already the
@@ -280,8 +282,13 @@ function strokeFor(key: string): PaneKey | null {
  *
  *   NOT A DIGIT, AND THAT IS THE LINE THIS FUNCTION IS DRAWN ON. `Ctrl+1`
  *   produces no control character in any terminal, so leaving it to vam costs
- *   the operator nothing INSIDE the pane and keeps `Mod-<digit>` working from
- *   within it. `onKeyDown`'s own older comment warned that widening the chord
+ *   the operator nothing INSIDE the pane and keeps the tab row working from
+ *   within it -- `Mod-<digit>`, which is Cmd on macOS and therefore reaches
+ *   vam by the Cmd branch above rather than by this one. Ctrl+<digit> itself
+ *   answers nothing in vam since the operator cancelled that row, so it is a
+ *   keystroke neither layer acts on; this rule is still what keeps it out of
+ *   somebody's agent. `onKeyDown`'s own older comment warned that widening the
+ *   chord
  *   branch would claim "the tab switch the operator uses to leave" first; the
  *   letters-only rule is what answers that warning rather than overriding it.
  *
@@ -847,7 +854,8 @@ export function TerminalTab({
    *
    * ── ALT IS NOT THE PANE'S ────────────────────────────────────────────────
    *
-   * vam binds `Alt-<digit>` outright, and on macOS Option is the COMPOSE key:
+   * vam binds the view row on `Ctrl-Alt-<digit>`, and on macOS Option is the
+   * COMPOSE key:
    * `Option+e` opens a dead-key composition into the hidden box, and that
    * keydown carries `isComposing: false`, so the guard above cannot protect
    * it. Claiming Alt would break accented input in the exact place the

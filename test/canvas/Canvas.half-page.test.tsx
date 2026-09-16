@@ -388,7 +388,11 @@ describe('the tab chords still fire from inside the prompt box', () => {
     render(<Canvas model={MODEL} />);
     press('i');
     expect(mode()).toBe('Insert');
-    const event = pressFocused('2', { ctrlKey: true, code: 'Digit2' });
+    // Cmd rather than Ctrl: the digit row is the platform's command modifier
+    // and nothing else (`digitChord`, `chords.ts`), and `Mod-2` is the one
+    // spelling that is true on macOS as well as under happy-dom's non-Apple
+    // platform string.
+    const event = pressFocused('2', { metaKey: true, code: 'Digit2' });
     expect(event.defaultPrevented).toBe(true);
   });
 });

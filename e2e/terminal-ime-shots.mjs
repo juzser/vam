@@ -616,6 +616,7 @@ const chordDown = (key, code, keyCode, modifiers) =>
     modifiers,
   });
 const CTRL = 2;
+const META = 4;
 
 await sent();
 await heard();
@@ -675,8 +676,16 @@ check(
 );
 
 // AND THE LINE THE RULE IS DRAWN ON. `Ctrl+1` is no control character in any
-// terminal, so it stays vam's — which is what keeps the tab switch working
-// from inside a pane that has taken every Ctrl+letter.
+// terminal, so it stays vam's — which is what keeps a digit chord out of
+// somebody's agent whatever vam does with it afterwards.
+//
+// WHAT VAM DOES WITH IT CHANGED, and the second check is what changed with it.
+// `Ctrl+1` used to BE the tab switch; the operator cancelled that row, so on
+// macOS it now resolves to nothing at all (`digitChord`, `keyboard/chords.ts`)
+// and the tab switch is `Cmd+1`. Both are asserted: the pane must decline the
+// Ctrl spelling (this rule), and the Cmd spelling must still cross the pane
+// and reach the window listener, which is the property the old caption here
+// claimed and would have gone on claiming while being false.
 await sent();
 await heard();
 await chordDown('1', 'Digit1', 49, CTRL);
@@ -685,6 +694,20 @@ check(
   'Ctrl+1 is NOT the pane’s: no control character comes of it in any terminal',
   (await sent()).length === 0,
   'a digit chord was typed into the agent',
+);
+check(
+  'and it still reaches the window listener rather than being swallowed here',
+  (await heard()).includes('1'),
+  'Ctrl+1 never reached the window listener',
+);
+await sent();
+await heard();
+await chordDown('1', 'Digit1', 49, META);
+await page.waitForTimeout(250);
+check(
+  'Cmd+1 is not the pane’s either — no terminal has ever wanted Cmd',
+  (await sent()).length === 0,
+  'a Cmd chord was typed into the agent',
 );
 check(
   'and it reaches vam, which is the tab switch an operator leaves this pane with',

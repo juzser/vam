@@ -18,11 +18,33 @@ describe('normalizeKey', () => {
     expect(normalizeKey({ key: 'T', shiftKey: true })).toBe('T');
   });
 
-  it('folds Ctrl and Cmd into one Mod token', () => {
-    // The tool runs on one machine at a time and both spellings mean the same
-    // intent. Two tokens would mean every binding declared twice.
-    expect(normalizeKey({ key: 'k', ctrlKey: true })).toBe('Mod-k');
-    expect(normalizeKey({ key: 'k', metaKey: true })).toBe('Mod-k');
+  it('makes Mod the platform’s command modifier for a letter', () => {
+    // IT USED TO FOLD CTRL AND CMD HERE, on the argument that the tool runs on
+    // one machine at a time and both spellings mean the same intent. The
+    // operator ended that for letters on PR 361 -- "Ctrl + a letter applies
+    // only to the terminal, like the default terminal shortcuts" -- because
+    // four of vam's eight letter chords are readline's own. So Cmd is the
+    // command modifier on macOS and Control is the terminal's; off macOS there
+    // is no Cmd key and Control is still the command modifier.
+    //
+    // The flag is PASSED rather than detected, on both sides: CI is ubuntu and
+    // this is written on a Mac, and an ambient read would assert a different
+    // grammar in each place while reading identically.
+    expect(normalizeKey({ key: 'k', metaKey: true }, true)).toBe('Mod-k');
+    expect(normalizeKey({ key: 'k', ctrlKey: true }, true)).toBe('Ctrl-k');
+    expect(normalizeKey({ key: 'k', ctrlKey: true }, false)).toBe('Mod-k');
+    expect(normalizeKey({ key: 'k', metaKey: true }, false)).toBe('Mod-k');
+  });
+
+  it('still folds the two READING gestures, which the operator asked to keep', () => {
+    // `Mod-d` / `Mod-u` are vim's `Ctrl-D` / `Ctrl-U` by request, and they scroll
+    // a transcript rather than command the application. `CTRL_GESTURES`
+    // (`chords.ts`) is the exception, written as a list because it is not
+    // derivable from anything the normaliser is allowed to see.
+    for (const key of ['d', 'u']) {
+      expect(normalizeKey({ key, ctrlKey: true }, true)).toBe(`Mod-${key}`);
+      expect(normalizeKey({ key, metaKey: true }, true)).toBe(`Mod-${key}`);
+    }
   });
 
   it('lower-cases the letter under Mod, so Cmd-Shift-K is not a third spelling', () => {
@@ -34,8 +56,14 @@ describe('normalizeKey', () => {
   });
 
   it('orders the modifiers the same way every time', () => {
-    expect(normalizeKey({ key: 'k', ctrlKey: true, altKey: true })).toBe('Mod-Alt-k');
-    expect(normalizeKey({ key: 'k', altKey: true, metaKey: true })).toBe('Mod-Alt-k');
+    expect(normalizeKey({ key: 'k', ctrlKey: true, altKey: true }, false)).toBe('Mod-Alt-k');
+    expect(normalizeKey({ key: 'k', altKey: true, metaKey: true }, false)).toBe('Mod-Alt-k');
+    expect(normalizeKey({ key: 'k', altKey: true, metaKey: true }, true)).toBe('Mod-Alt-k');
+    // And the Control token takes the same slot, right after Mod's.
+    expect(normalizeKey({ key: 'k', ctrlKey: true, altKey: true }, true)).toBe('Ctrl-Alt-k');
+    expect(normalizeKey({ key: 'k', ctrlKey: true, metaKey: true, altKey: true }, true)).toBe(
+      'Mod-Ctrl-Alt-k',
+    );
   });
 
   it('ignores a modifier keypress on its own', () => {

@@ -374,9 +374,24 @@ console.log(`${outDir}/key-truth-jump-refusal.png`);
 // the test itself last called `.focus()` on. Here the presses are the
 // browser's own and land on whatever really holds the keyboard.
 //
-// `Control`, not `Meta`: `normalizeKey` folds both into `Mod`, and CI is
-// ubuntu — a guard spelled with Cmd would be a guard that only ran on one
-// developer's machine.
+// `Meta`, NOT `Control`, FOR EVERY `Mod-` CHORD BUT THE BRACKETS — and the
+// reason is the whole of two operator decisions.
+//
+// It used to be the other way round, on the argument that `normalizeKey`
+// folded Ctrl and Cmd so a Control spelling would behave identically on the
+// ubuntu runner and on a Mac, while a Cmd spelling would only run in one
+// place. The fold is gone from the digit row (Ctrl+number was cancelled) and
+// from the letters (`CTRL_GESTURES`: "Ctrl + a letter applies only to the
+// terminal"), so `Mod-<digit>` and `Mod-<letter>` are Cmd on macOS and Ctrl
+// elsewhere. A guard still spelled with Control would go on passing in CI
+// while being DEAD in the browser on the machine vam is used from — worse than
+// no guard at all.
+//
+// Meta reaches those chords on BOTH sides of the rule (it is the command
+// modifier off macOS too), so it is the one spelling that measures the same
+// thing in both places. THE BRACKET PAIR IS STILL FOLDED and is still pressed
+// with Control below: `Ctrl-[` is vim's own way out of insert mode and is the
+// point of the case that presses it.
 
 /**
  * Wait for a state and REPORT rather than abort. `page.waitForFunction`
@@ -458,7 +473,7 @@ if (composing) {
   const before = await keyboardAt();
   check('the caret really is in the box before Mod-0', before.tag === 'TEXTAREA');
   check('and the bar reads Insert while it is', before.mode === 'Insert');
-  await page.keyboard.press('Control+Digit0');
+  await page.keyboard.press('Meta+Digit0');
   // Waited for the NEW state — the box letting go — never for "not in Insert",
   // which was already false a moment ago on some other screen.
   await settle(
@@ -515,7 +530,7 @@ await settle(
 const alreadySelect = await keyboardAt();
 check('the keyboard really is in Select before the key is pressed', alreadySelect.mode === 'Select');
 
-const modZero = await pressAndReadStatus(['Control+Digit0']);
+const modZero = await pressAndReadStatus(['Meta+Digit0']);
 console.log('Mod-0 already in Select:', JSON.stringify(modZero.text));
 check('Mod-0 refuses aloud rather than doing nothing', modZero.text !== '', 'the bar stayed empty');
 check(
@@ -524,7 +539,7 @@ check(
   `drawn "${modZero.text}" vs full "${modZero.full}"`,
 );
 
-const modShiftH = await pressAndReadStatus(['Control+Shift+KeyH']);
+const modShiftH = await pressAndReadStatus(['Meta+Shift+KeyH']);
 console.log('Mod-Shift-h already in Select:', JSON.stringify(modShiftH.text));
 check(
   'Mod-Shift-h answers the same act, and says the same thing',
@@ -621,7 +636,7 @@ if (splitOk) {
     owner !== null && owner !== focusedWas,
     `owner ${owner}, focused ${focusedWas}`,
   );
-  await page.keyboard.press('Control+Digit1');
+  await page.keyboard.press('Meta+Digit1');
   await settle(
     (id) =>
       document.querySelector('[data-split-pane][data-split-focused="true"]')?.getAttribute(
@@ -684,7 +699,7 @@ if (splitOk) {
 // `Control`, not `Meta`, for the reason the bracket families above give: CI is
 // ubuntu, and `normalizeKey` folds the two together anyway.
 
-const newProject = await pressAndReadStatus(['Control+Shift+KeyP']);
+const newProject = await pressAndReadStatus(['Meta+Shift+KeyP']);
 console.log('Cmd+Shift+P:', JSON.stringify(newProject.text));
 check(
   'Cmd+Shift+P is answered at all — it reaches the grammar rather than the browser',
@@ -1249,7 +1264,7 @@ if (inBox) {
     };
     globalThis.addEventListener('keydown', onKey, false);
   });
-  await page.keyboard.press('Control+Digit0');
+  await page.keyboard.press('Meta+Digit0');
   await page.waitForTimeout(150);
   const answer = await page.evaluate(
     () => globalThis.__vamKeyProbe ?? { key: null, cancelable: null, prevented: null },
