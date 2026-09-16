@@ -76,7 +76,14 @@
  * question no unit environment can be asked at all -- whether a bell rung for
  * a wait ever stops ringing, and what `prefers-reduced-motion` leaves drawn,
  * which is the cascade's answer about a real node rather than a content scan
- * of a stylesheet.
+ * of a stylesheet,
+ * and -- since an icon could be a glyph with a colour -- whether a tone CLASS
+ * resolves to anything at all (a token missing from the built stylesheet
+ * leaves the glyph on its inherited ink and every unit assertion still green),
+ * whether the light theme really remaps the eight rather than reproducing
+ * them, what a glyph's rectangle does to the name beside it, and whether the
+ * sentence a refusing control owes has a box on screen rather than only a
+ * value in a function.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -125,6 +132,7 @@ const GUARDS = [
   'terminal-ime-shots',
   'sidebar-tree-shots',
   'terminal-chrome-shots',
+  'tree-icon-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

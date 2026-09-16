@@ -159,6 +159,31 @@
   --color-ansi-bright-cyan: var(--vam-ansi-bright-cyan);
   --color-ansi-bright-white: var(--vam-ansi-bright-white);
 
+  /* THE ICON TONES. Eight, orca's own set, for the glyph an operator picks for
+     a project, a group or a session (`panels/icon-value.tsx`). They are named
+     by TONE rather than by meaning for exactly the reason the ANSI ramp above
+     is: `--color-failed` is a SESSION STATE, and an icon painted with it would
+     be vam saying something about a session the operator only meant to
+     decorate. Nothing derives one of these -- a tone is chosen by a person and
+     means whatever they decided -- so they must not borrow a name that already
+     makes a claim.
+
+     A GLYPH IS A NON-TEXT MARK, so these owe WCAG 1.4.11's 3:1 rather than
+     1.4.3's 4.5:1, on the four fills a chosen icon really sits on: `sidebar`
+     (the two headings), `pane` and `ground` (an inactive and an active tab)
+     and `panel` (the picker). `test/renderer/token-contrast.test.ts` holds all
+     thirty-two pairs per theme and argues the choice of floor where it makes
+     it. The tone is only ever given to an `<svg>`; an emoji takes none,
+     because `color` cannot reach one. */
+  --color-icon-neutral: var(--vam-icon-neutral);
+  --color-icon-red: var(--vam-icon-red);
+  --color-icon-orange: var(--vam-icon-orange);
+  --color-icon-yellow: var(--vam-icon-yellow);
+  --color-icon-green: var(--vam-icon-green);
+  --color-icon-teal: var(--vam-icon-teal);
+  --color-icon-purple: var(--vam-icon-purple);
+  --color-icon-pink: var(--vam-icon-pink);
+
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
@@ -958,6 +983,30 @@
   --vam-ansi-bright-cyan: #67e8f9;
   --vam-ansi-bright-white: #fafafa;
 
+  /* The icon tones, dark. Measured on the LIGHTEST fill one of these is drawn
+     on -- `sidebar`/`pane` at #282828, since a light tone loses contrast as its
+     ground climbs -- the eight run 5.330:1 (red) to 8.832:1 (yellow), all well
+     clear of the 3:1 a glyph owes and all clear of 4.5 besides. There is
+     headroom on purpose: an icon is 11px, and 11px of a saturated hue at the
+     bare floor is the size at which "passes WCAG" and "can be seen" stop being
+     the same sentence.
+
+     NEUTRAL IS `--vam-ink-faint`'S OWN VALUE, under its own name, the way
+     `--vam-filter-badge` carries `--vam-waiting`'s: the first swatch in the
+     row means "no colour", and the colour of no colour is the one the
+     unpainted `Monitor` and `Folder` placeholders already wear. A literal
+     rather than `var(--vam-ink-faint)` for the reason `--color-pane` gives;
+     the drift that buys is closed by an assertion in
+     `test/renderer/token-contrast.test.ts` rather than by hope. */
+  --vam-icon-neutral: #b0b0b0;
+  --vam-icon-red: #f87171;
+  --vam-icon-orange: #fb923c;
+  --vam-icon-yellow: #fbbf24;
+  --vam-icon-green: #4ade80;
+  --vam-icon-teal: #2dd4bf;
+  --vam-icon-purple: #c084fc;
+  --vam-icon-pink: #f472b6;
+
   --vam-running: #4ade80;
   /* A near-black on dark's bright green: 11.36:1. Taken under its own name
      rather than reaching for `--vam-ground`, the way `--vam-filter-badge` is
@@ -1256,6 +1305,34 @@ html.light {
   --vam-ansi-bright-magenta: #c026d3;
   --vam-ansi-bright-cyan: #0891b2;
   --vam-ansi-bright-white: #27272a;
+
+  /* The icon tones, light -- REMAPPED, not reproduced, which is the principle
+     `panels/terminal-ansi.ts` states for the ANSI ramp above ("ANSI white on a
+     white panel has to become a dark grey or it stops being text"). Every hue
+     here is the same NAME as its dark counterpart and none is the same value:
+     dark's tones are bright, because they are drawn on near-black, and every
+     one of them would be invisible on this theme's #f0eeea sidebar -- dark's
+     yellow measures 1.25:1 there. So the eight are re-picked at a deep
+     lightness against the DARKEST fill they land on, and run 4.249:1 (yellow)
+     to 6.027:1 (purple), against the 3:1 a glyph owes.
+
+     THAT IS WHY THE STORED VALUE IS A TONE NAME AND NOT A COLOUR. An operator
+     who picks "teal" has picked a word; the theme decides what teal is, and
+     switching themes keeps their choice legible instead of carrying a hex
+     chosen on the other screen. A colour in the prefs file would have made the
+     light theme an accessibility regression that only the person who used it
+     ever saw.
+
+     Neutral is `--vam-ink-faint`'s value here too, for the reason the dark
+     block gives. */
+  --vam-icon-neutral: #6a6a6f;
+  --vam-icon-red: #b91c1c;
+  --vam-icon-orange: #c2410c;
+  --vam-icon-yellow: #a16207;
+  --vam-icon-green: #15803d;
+  --vam-icon-teal: #0f766e;
+  --vam-icon-purple: #7e22ce;
+  --vam-icon-pink: #be185d;
 
   --vam-running: #166534;
   /* Light's running green is a DEEP one -- it has to read as text on white --
