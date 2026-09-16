@@ -463,6 +463,35 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// 5b. A THIRD RESIZABLE BOUNDARY: THE PANE MOVES UNDER A HAND-CHOSEN WIDTH.
+//
+// This is the cost the "NO RESIZER" paragraph named last, and the only one
+// whose answer is a behaviour rather than a component. Narrowing the window
+// narrows the space the two columns share, so the tree MUST draw smaller --
+// and widening it again must give the operator their own number back,
+// untouched. If the clamp were written back instead of applied at render,
+// the shrink would be permanent and this check is the only thing in the
+// suite that would see it: the tab-switch check above cannot, because a
+// hidden tab is never measured at all.
+// ---------------------------------------------------------------------------
+await page.setViewportSize({ width: 620, height: 800 });
+await page.waitForTimeout(400);
+const squeezed = await boxes();
+check(
+  'a narrowed window really does squeeze the tree — or the restore below is free',
+  squeezed.tree !== null && squeezed.tree.width < chosen,
+  `chose ${chosen}px, drawn ${squeezed.tree?.width}px in a ${squeezed.pane?.width}px pane`,
+);
+await page.setViewportSize({ width: 1100, height: 800 });
+await page.waitForTimeout(400);
+const restored = await boxes();
+check(
+  'and widening it back gives the operator their own width back, whole',
+  restored.tree !== null && Math.abs(restored.tree.width - chosen) <= 2,
+  `chose ${chosen}px, came back ${restored.tree?.width}px`,
+);
+
+// ---------------------------------------------------------------------------
 // 6. THE KEYBOARD, which is the cost vam cannot decline to pay.
 //
 // Focused with a real `.focus()` and driven with real key presses. The mode
