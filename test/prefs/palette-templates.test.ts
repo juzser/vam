@@ -31,6 +31,8 @@
  * every surface the template sets, per template, per theme.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   applyPaletteTemplate,
@@ -40,6 +42,27 @@ import {
 } from '../../src/renderer/prefs/palette-templates.js';
 import { EMPTY_PREFS, PALETTE_TOKENS, paletteFor } from '../../src/renderer/prefs/prefs.js';
 import { contrast, deltaE, lightness } from '../support/contrast.js';
+import { ruleBody, tokens } from '../support/css-tokens.js';
+
+/**
+ * THE STYLESHEET'S OWN DARK VALUES, READ, and the one place in this file that
+ * does read rather than type. `UNSETTABLE_INK` below argues the opposite case
+ * for the inks and is right about them: those are a record of what the
+ * templates were CHOSEN against, and a stylesheet that moves one should
+ * redden here.
+ *
+ * `is a different palette from vam’s own` is the other kind of claim. It asks
+ * whether each template is still a visible step from WHAT VAM PAINTS TODAY,
+ * so it has to follow the stylesheet by construction -- its own comment said
+ * "measured against what the stylesheet ACTUALLY paints" while typing a copy
+ * of `#2d2d2d` underneath. That held for exactly as long as nobody moved the
+ * pane. The fifth dark pass moved it to #282828, and a typed copy would have
+ * gone on measuring a retired colour -- the precise failure the comment was
+ * written to warn about.
+ */
+const DARK_STYLESHEET = tokens(
+  ruleBody(readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8'), ':root'),
+);
 
 /**
  * The inks a template does NOT set and therefore has to survive, per theme,
@@ -314,11 +337,14 @@ describe('palette templates', () => {
     // screen area.
     const panes = TINTED.map((t) => templatePalette(t.id, 'dark')['--vam-pane'] as string);
     expect(new Set(panes).size).toBe(TINTED.length);
-    // `--vam-pane`'s own dark value, which the fourth dark pass moved from
-    // #363636 to #2d2d2d. Measured against what the stylesheet ACTUALLY
+    // `--vam-pane`'s own dark value, READ from the stylesheet rather than
+    // copied here -- #363636, then #2d2d2d after the fourth dark pass, and
+    // #282828 after the fifth. Measured against what the stylesheet ACTUALLY
     // paints: a template compared against a retired colour is a step away
-    // from nothing.
-    const flat = panes.filter((p) => deltaE(p, '#2d2d2d') < 2.3);
+    // from nothing, and a typed copy retires quietly.
+    const vamsOwn = DARK_STYLESHEET.get('--vam-pane');
+    expect(vamsOwn, 'styles.css defines --vam-pane in :root').toMatch(/^#[0-9a-f]{6}$/i);
+    const flat = panes.filter((p) => deltaE(p, vamsOwn as string) < 2.3);
     expect(flat).toEqual([]);
   });
 

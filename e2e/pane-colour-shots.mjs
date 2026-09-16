@@ -960,20 +960,46 @@ console.log(`${outDir}/list-markers-dark.png`);
 //
 // SO THE DURABLE HALF IS KEPT AND THE DATED HALF IS RE-DERIVED. The ground is
 // still PINNED -- to where this pass put it, so accidental drift still fails
-// even though a deliberate move passed. And instead of "lighter than the
-// second pass's fill", each rung must still stand as far ABOVE THE GROUND as
-// the third pass left it: that is the separation the operator complained
-// about twice, and darkening the room is not allowed to quietly spend it.
+// even though a deliberate move passed.
+//
+// AND THE FIFTH PASS TURNS THE SECOND CHECK OVER, deliberately, because it is
+// the check that encoded the opposite request. It read "each rung must still
+// stand as far ABOVE THE GROUND as the third pass left it" -- darkness was
+// bought by moving the floor, and spending a rung's distance off that floor
+// was the way to get it wrong. The operator's next ask named five surfaces
+// and NOT the ground: the pane, the panel, the sidebar, the card and the
+// bubble. Answering that means closing exactly the distance this line used to
+// ratchet open, so a guard holding the old floor would fail on the fix.
+//
+// IT BECOMES THE SAME QUESTION WITH ITS SIGN FLIPPED: each rung must now be
+// at least `DARKENED_BY_AT_LEAST` CLOSER to the pinned ground than the FOURTH
+// pass painted it. That is the operator's request, as paint, and it is a
+// claim the stylesheet cannot make on its own -- `dark-ladder.test.ts` proves
+// the tokens moved, this proves the move reached a real element.
+//
+// WHAT THE OLD LINE PROTECTED IS NOT DROPPED, it is next door and unchanged:
+// the SEPARATION block below holds every pair of surfaces that TOUCH to a
+// distance wider than the one recorded before the pass that widened them. The
+// third pass's gain lives there, measured between the rungs rather than
+// between each rung and the floor -- which is where it was always the real
+// claim. All four of those rows still pass on this palette, which is what
+// makes it safe to stop ratcheting here.
 const GROUND_IS = '#141414';
 const GROUND_TOLERANCE = 1; // pinned to the pixel; this is rounding room, not a floor.
-/** `aboveGround`: the third pass's own ΔL* off its ground (10.27 L*). */
+/** `wasAboveGround`: the FOURTH pass's own painted ΔL* off this same ground. */
 const WIDENED_LADDER = [
-  { what: 'the sidebar', selector: '[data-sidebar-pane]', aboveGround: 12.35 },
-  { what: 'the detail pane', selector: '[data-action-pane]', aboveGround: 12.35 },
-  { what: 'a card on the pane', selector: '[data-question]', aboveGround: 17.7 },
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', wasAboveGround: 12.15 },
+  { what: 'the detail pane', selector: '[data-action-pane]', wasAboveGround: 12.15 },
+  { what: 'a card on the pane', selector: '[data-question]', wasAboveGround: 17.65 },
 ];
-/** How much of that distance 8-bit rounding may eat. Not a budget to spend. */
-const ABOVE_GROUND_SLACK = 0.5;
+/**
+ * How much closer to the ground each of them has to have come. 2.0 L* rather
+ * than the 2.3 JND for the reason `dark-ladder.test.ts` gives at length: with
+ * the ground pinned and every gap still owing a JND, the ladder's arithmetic
+ * caps the available move at 2.40 L* for the panel and 2.19 for the bubble,
+ * so a floor of 2.3 could only be met by spending a gap.
+ */
+const DARKENED_BY_AT_LEAST = 2;
 /** What the LIGHT theme paints on ground plus these three nodes, unmoved. */
 const LIGHT_UNMOVED = [
   'rgb(255, 255, 255)',
@@ -1025,7 +1051,7 @@ const widened = await widenedSeen();
 console.log(`  the page behind the panes: ${GROUND_IS} -> ${ground.fill} (L* ${ground.light}, step ${ground.step})`);
 for (const rung of widened) {
   const above = ground.light === null || rung.light === null ? null : Number((rung.light - ground.light).toFixed(2));
-  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, third pass had ${rung.aboveGround})`);
+  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, fourth pass had ${rung.wasAboveGround})`);
 }
 check(
   'every surface the ladder covers is drawn, and paints an opaque fill',
@@ -1038,14 +1064,14 @@ if (ground.painted && widened.every((r) => r.painted)) {
     Math.abs(ground.step) <= GROUND_TOLERANCE,
     `step ${ground.step} L* off ${GROUND_IS}`,
   );
-  const lostGround = widened
+  const notDarker = widened
     .map((r) => ({ ...r, above: Number((r.light - ground.light).toFixed(2)) }))
-    .filter((r) => r.above < r.aboveGround - ABOVE_GROUND_SLACK);
+    .filter((r) => r.above > r.wasAboveGround - DARKENED_BY_AT_LEAST);
   check(
-    'and darkening the room did not spend the separation the third pass bought',
-    lostGround.length === 0,
-    lostGround
-      .map((r) => `${r.what}: ${r.above} above ground, third pass had ${r.aboveGround}`)
+    'and every surface the operator named came DOWN towards the pinned ground',
+    notDarker.length === 0,
+    notDarker
+      .map((r) => `${r.what}: ${r.above} above ground, fourth pass had ${r.wasAboveGround}`)
       .join(' ; '),
   );
   // AND THE ORDER SURVIVED IT. The ladder is ground < sidebar = pane < card,
@@ -1176,11 +1202,32 @@ if (separations.every((s) => s.bothOpaque)) {
   );
 }
 
+// THE WHOLE ROOM, IN ONE FRAME, IN BOTH THEMES.
+//
+// Every other shot this file takes is a locator screenshot of one element,
+// which is the right shape for measuring and the wrong shape for the only
+// review that actually decides a palette: a person looking at it. The five
+// surfaces the fifth pass moved are `pane`, `panel`, `sidebar`, `card` and
+// `in-bubble`, and four of the five are only judgeable NEXT TO each other --
+// a card is too light when it is too light FOR ITS PANE. So the pair below is
+// deliberately un-clipped, taken at the point in this script where the
+// sidebar, the detail pane, a question card and the In bubble are all on
+// screen at once (the three selectors the ladder block just measured prove
+// the first three are; the bubble was measured further up).
+//
+// Both themes, from the same page state, so the two are comparable frame to
+// frame rather than being two different screens that happen to differ in
+// colour.
+await page.screenshot({ path: `${outDir}/whole-room-dark.png` });
+console.log(`${outDir}/whole-room-dark.png`);
+
 // THE OTHER THEME DID NOT MOVE, and this is the half a dark-only measurement
 // cannot see. The operator asked about dark; light is pinned as paint here and
 // as tokens in `dark-ladder.test.ts`.
 await page.evaluate(() => document.documentElement.classList.add('light'));
 await page.waitForTimeout(200);
+await page.screenshot({ path: `${outDir}/whole-room-light.png` });
+console.log(`${outDir}/whole-room-light.png`);
 const lightNow = await page.evaluate(
   (selectors) =>
     selectors.map((selector) => {
