@@ -182,7 +182,15 @@ describe('a keystroke in the pane reaches tmux, exactly once', () => {
       expect(heard).toEqual([]);
       // The two facts the stand-down is derived from, asserted where they are
       // true rather than assumed: this is no text box, and it is Insert.
-      expect(pane()?.tagName).toBe('SECTION');
+      //
+      // "No text box" was spelled `tagName === 'SECTION'`, which stopped being
+      // true when the pane became the scroller that also takes the keyboard --
+      // a `div` with `role="region"`, which is what a named `<section>` already
+      // was. The tag was a PROXY for the property; the property is the one
+      // `Canvas.tsx`'s `typing` guard actually reads, so it is asserted
+      // directly here and survives the next change of element.
+      expect(pane()?.getAttribute('role')).toBe('region');
+      expect(/^(INPUT|TEXTAREA)$/.test(pane()?.tagName ?? '')).toBe(false);
       expect(cursorModeAt(pane())).toBe('insert');
     } finally {
       window.removeEventListener('keydown', onKey);
