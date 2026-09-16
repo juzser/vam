@@ -2760,7 +2760,43 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 channel over data no source supplies, so a row at
                                 rest read as a dashboard reporting nothing. */}
                                 {!phone && (
-                                  <span className="flex items-center gap-1.5 font-mono text-meta text-ink-faint">
+                                  /*
+                                   * QUIETER THAN `ink-faint`, AND BY OPACITY RATHER THAN BY A
+                                   * DIMMER TOKEN. The operator asked for the age and the branch
+                                   * to recede. `--vam-ink-faint` cannot carry that: it is in
+                                   * `TEXT_TOKENS` and so owes WCAG 1.4.3's 4.5:1 on every surface
+                                   * it is painted on, and its worst pairing
+                                   * (`--vam-in-bubble`) is already 4.71:1 -- 0.21 of headroom.
+                                   * One step down fails that guard everywhere the token is worn,
+                                   * most of it nowhere near this row.
+                                   *
+                                   * Opacity composites against whatever surface the row is
+                                   * actually on, so the pair stays in tone wherever the row is
+                                   * drawn. The value is picked from a MEASUREMENT rather than
+                                   * from arithmetic over the token a reader would guess at: all
+                                   * seven rows composite over `--vam-raised`, not over
+                                   * `--vam-sidebar` and not over the selected row's fill. On that
+                                   * ground 0.82 lands at 4.74:1. The floor is 0.80
+                                   * (4.59:1) and 0.78 fails, so this keeps roughly a fifth of a
+                                   * point in hand -- which is the budget a future palette has to
+                                   * move `--vam-raised` within before the guard below stops it.
+                                   *
+                                   * `token-contrast.test.ts` CANNOT SEE THIS. It parses the
+                                   * stylesheet and compares two declarations, so an opacity on an
+                                   * element is invisible to it and it stays green at any value.
+                                   * The real measurement is therefore an e2e guard that reads
+                                   * `getComputedStyle` on this span and composites it by hand --
+                                   * `sidebar-tree-shots.mjs`. Dimming further without moving that
+                                   * guard's number is how this silently becomes unreadable.
+                                   */
+                                  <span
+                                    // Its own hook rather than `data-row-meta`, which is the
+                                    // PHONE row's and is asserted absent here. The guard needs to
+                                    // find the element the opacity sits on, not one of its
+                                    // children, because compositing is a property of this node.
+                                    data-row-meta-line
+                                    className="flex items-center gap-1.5 font-mono text-meta text-ink-faint opacity-[0.82]"
+                                  >
                                     <span className="flex min-w-0 flex-1 items-center gap-1">
                                       {/* THE GLYPH GOES WITH THE NAME. A branch
                                           icon beside an em-dash is a row
