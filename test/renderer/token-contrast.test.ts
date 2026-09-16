@@ -291,8 +291,71 @@ describe('token contrast, per theme', () => {
           failing: [],
         });
       });
+
+      /**
+       * THE FILE TREE'S OWN GLYPHS, AND THE THIRD FILL THAT IS THE HARD ONE.
+       *
+       * `files-icons.tsx` draws a 12px picture before every row's name and
+       * gives four of its seven families a hue of their own. A glyph is a
+       * non-text mark, so the floor is 1.4.11's 3:1 rather than 1.4.3's 4.5 —
+       * but a tree ROW has three fills, not one, and only the first is
+       * obvious: the panel it sits on, `raised` while a pointer is over it,
+       * and `line-strong` under the keyboard cursor. The cursor's is by far
+       * the lightest, and it is exactly where a hue picked against the panel
+       * alone comes apart. `--vam-syn-comment` was the first candidate for the
+       * config family: 4.79 on the panel, 2.54 on the cursor row. It would
+       * have passed a one-ground check and been under the floor on the row the
+       * keyboard is actually sitting on, which is the row an operator looks at
+       * hardest. It is not in the palette below, and the test after this one
+       * records why rather than leaving the reason to this comment.
+       *
+       * The literal `15` is the point, the same way the `63` above is: five
+       * inks times three fills. Drop a fill from this list, or an ink from
+       * `files-icons.tsx`'s own `FILE_ROW_INKS`, and this reddens rather than
+       * passing more quietly.
+       */
+      it('draws every file-tree glyph at 3:1 on all three fills a row can have', () => {
+        const inks = [
+          '--vam-ink',
+          '--vam-chip',
+          '--vam-syn-string',
+          '--vam-quote',
+          '--vam-ink-faint',
+        ] as const;
+        const fills = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
+        const pairs = inks.flatMap((ink) => fills.map((fill) => [ink, fill] as const));
+        expect(measure(pairs, 3)).toEqual({ pairs: 15, failing: [] });
+      });
     });
   }
+
+  /**
+   * THE ONE THAT WAS REJECTED, asserted as a rejection rather than deleted, so
+   * the next hand reaching for the quietest grey in the syntax palette for a
+   * tree glyph finds the measurement here instead of repeating the mistake.
+   *
+   * AND IT RUNS ONCE, ACROSS BOTH THEMES, because that is the shape of the
+   * finding. `--vam-syn-comment` on the cursor row reads 3.12 in light — over
+   * the floor, by a twentieth — and 2.54 in dark. Written inside the per-theme
+   * loop it failed in light and passed in dark, which is a true statement
+   * about one palette and a useless one about the token: an ink is only
+   * spendable if it clears in BOTH, and the number that decides that is the
+   * worse of the two.
+   */
+  it('records why syn-comment is not one of the file-tree glyph inks', () => {
+    const worst = Math.max(
+      ...THEMES.map((theme) => {
+        const t = tokens(ruleBody(CSS, theme.selector));
+        const comment = t.get('--vam-syn-comment');
+        const fill = t.get('--vam-line-strong');
+        expect(comment, `${theme.name} defines --vam-syn-comment`).toBeDefined();
+        expect(fill, `${theme.name} defines --vam-line-strong`).toBeDefined();
+        return -contrast(comment as string, fill as string);
+      }),
+    );
+    expect(THEMES.length).toBe(2);
+    expect(-worst).toBeLessThan(3);
+  });
 
   /**
    * A MARKER MAY NOT NAME AN INK THIS FILE DOES NOT MEASURE. Theme-independent,

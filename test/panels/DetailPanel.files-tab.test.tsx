@@ -251,6 +251,65 @@ describe('the file tree', () => {
     expect(rowPaths()).toEqual(['/work/atlas/src']);
   });
 
+  /**
+   * THE ICON BEFORE THE NAME — what the operator asked for in as many words,
+   * and the only surface that proves `files-icons.tsx` is actually WIRED.
+   *
+   * `test/panels/files-icons.test.tsx` proves the classifier and the glyph in
+   * isolation; a module can be perfect and unreferenced. These check the tree
+   * really calls it, really passes the directory flag, and really passes the
+   * OPEN state — which is the one argument a row has that the classifier
+   * cannot derive for itself.
+   */
+  it('draws a folder before a directory’s name, and opens it when the row opens', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/src/index.ts', '/work/atlas/README.md'],
+        truncated: false,
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+
+    const icon = (path: string) =>
+      row(path)?.querySelector('[data-file-icon]')?.getAttribute('data-file-icon') ?? null;
+    expect(icon('/work/atlas/src')).toBe('directory');
+    expect(icon('/work/atlas/README.md')).toBe('doc');
+
+    await act(async () => {
+      row('/work/atlas/src')?.click();
+      await Promise.resolve();
+    });
+    expect(icon('/work/atlas/src')).toBe('directory-open');
+    expect(icon('/work/atlas/src/index.ts')).toBe('code');
+  });
+
+  /**
+   * AND THE HUE, which is the half of the operator's question this repo
+   * answered with a line drawn through it (`files-icons.tsx`'s header). What
+   * matters at the wiring level is only that the tree asks the right module:
+   * a `.md` and a `.ts` sitting side by side must not wear the same ink.
+   */
+  it('gives the files vam understands an ink of their own, and the rest the quiet grey', async () => {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md', '/work/atlas/index.ts', '/work/atlas/.env'],
+        truncated: false,
+      }),
+    });
+    draw({ files: true });
+    await openFiles();
+
+    const ink = (path: string) =>
+      row(path)?.querySelector('[data-file-icon]')?.getAttribute('class') ?? '';
+    expect(ink('/work/atlas/README.md')).toContain('text-quote');
+    expect(ink('/work/atlas/.env')).toContain('text-syn-string');
+    expect(ink('/work/atlas/index.ts')).toContain('text-ink-faint');
+    expect(ink('/work/atlas/README.md')).not.toBe(ink('/work/atlas/index.ts'));
+  });
+
   it('filters the tree, keeping the directories that lead to a match', async () => {
     withBridge({
       list: async () => ({

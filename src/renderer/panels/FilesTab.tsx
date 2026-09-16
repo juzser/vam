@@ -115,6 +115,7 @@ import type { SourceError } from '../sources/port.js';
 import { applyTab, relativeLabel } from './files-editor-text.js';
 import { formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
+import { FileRowIcon } from './files-icons.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import {
@@ -1518,14 +1519,28 @@ function Tree({
                   isCursor ? 'bg-line-strong text-ink' : 'hover:bg-raised hover:text-ink',
                 ].join(' ')}
               >
-                <span
-                  aria-hidden="true"
-                  className="flex-none text-ink-faint"
-                  style={{ width: 8, fontSize: 9, lineHeight: '1' }}
-                >
-                  {row.isDirectory ? (open ? '▾' : '▸') : ''}
+                {/* ONE SLOT, ONE GLYPH — and it replaces the `▸`/`▾` twisty
+                    this row used to draw rather than sitting beside it.
+
+                    The operator asked for "an icon before the folder name",
+                    singular, and a chevron NEXT TO a folder is two icons
+                    before it. One that changes shape when the row opens
+                    (`Folder`/`FolderOpen`) carries the same open/shut fact in
+                    12px instead of 24, which is width this column genuinely
+                    does not have: at vam's narrowest legal pane the tree is
+                    `TREE_WIDTH`'s 7.5rem floor and every pixel of chrome comes
+                    off the NAME. The state a screen reader hears is unchanged
+                    — `aria-expanded` above was always what carried it, and the
+                    twisty was `aria-hidden` exactly as this is.
+
+                    `e2e/files-tab-keyboard-shots.mjs` measures what is left
+                    for the name at that floor, as a rectangle: a glyph that
+                    fits the column while squeezing the names down to an
+                    ellipsis would pass every check in this file. */}
+                <FileRowIcon path={row.path} isDirectory={row.isDirectory} open={open} />
+                <span data-files-row-name className="min-w-0 flex-1 truncate">
+                  {row.name}
                 </span>
-                <span className="min-w-0 flex-1 truncate">{row.name}</span>
                 {isDirty(buffers[row.path]) && (
                   <span
                     data-files-dirty
