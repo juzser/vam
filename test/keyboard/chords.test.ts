@@ -338,9 +338,24 @@ describe('Mod-digit selects a tab, and the grammar carries only the digit', () =
     ]);
   });
 
-  it('a bare digit stays unbound, so a stray 7 does not move the cursor', () => {
-    expect(type(['1']).actions).toEqual([]);
-    expect(type(['9']).actions).toEqual([]);
+  /**
+   * A BARE DIGIT PICKS A VIEW NOW — the operator asked for a one-key spelling
+   * of `Ctrl-Alt-<digit>`, "only in Select mode". This case used to assert the
+   * row was empty; it is kept, inverted, because the neighbouring fact is what
+   * it was really protecting: whatever the bare row means, it must not disturb
+   * the zero, which `z0` and `Mod-0` already spell two other ways.
+   */
+  it('a bare digit picks a view, and the zero is still nobody but z0’s', () => {
+    expect(type(['1']).actions).toEqual([{ kind: 'pickView', digit: 1 }]);
+    expect(type(['9']).actions).toEqual([{ kind: 'pickView', digit: 9 }]);
+    expect(type(['0']).actions).toEqual([]);
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+    // And a digit does not arm the chord machine, so `1` then `g` then `g` is
+    // still a view and then a jump to the top.
+    expect(type(['1', 'g', 'g']).actions).toEqual([
+      { kind: 'pickView', digit: 1 },
+      { kind: 'first' },
+    ]);
   });
 
   /**
@@ -552,10 +567,39 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     expect(normalizeKey({ key: 'h', code: 'KeyH' })).toBe('h');
   });
 
-  it('is unchanged for a digit typed with no modifier at all', () => {
-    // The `!` typeahead in the sidebar filter must keep receiving `!`.
-    expect(normalizeKey({ key: '!', code: 'Digit1', shiftKey: true })).toBe('!');
+  /**
+   * THE UNMODIFIED DIGIT ROW IS A POSITION TOO NOW, and this case is kept
+   * inverted rather than deleted because its stated worry is still the right
+   * worry — it just has a different answer.
+   *
+   * WHAT IT SAID: a bare digit was unbound, so `normalizeKey` could hand back
+   * `event.key` untouched and the `!` typeahead would keep receiving `!`.
+   *
+   * WHAT CHANGED: a bare digit is `pickView`'s second spelling now
+   * (`SELECT_DIGITS`), so it has to be read off `event.code` for the reason
+   * every other digit binding is — AZERTY puts `&` on the unshifted `Digit1`.
+   * Shift therefore earns a token here, exactly as it does for the bracket
+   * pair: `Shift+1` is `!` on one layout and `1` on another, and only a
+   * positional `Shift-1` is one keystroke on both.
+   *
+   * WHAT DID NOT CHANGE IS THE PROPERTY THE COMMENT WAS ABOUT. `Shift-1` is
+   * bound to nothing, so the canvas neither answers nor cancels it and the
+   * character still reaches the box — asserted end to end, not as a string, in
+   * `test/canvas/Canvas.select-digit-view.test.tsx` ("leaves Shift+digit
+   * alone, and does not cancel it"). A shifted CHARACTER that is not on the
+   * number row is untouched: `?` is still `?`, `<` is still `<`.
+   */
+  it('spells an unmodified digit by position, and gives its shifted form a token', () => {
     expect(normalizeKey({ key: '1', code: 'Digit1' })).toBe('1');
+    expect(normalizeKey({ key: '&', code: 'Digit1' })).toBe('1');
+    expect(normalizeKey({ key: '!', code: 'Digit1', shiftKey: true })).toBe('Shift-1');
+    // Nothing is bound there, which is what keeps `!` typeable.
+    expect(resolveChord(EMPTY_CHORD, 'Shift-1').action).toBeNull();
+    // And the rule stops at the number row: a bare bracket keeps its
+    // character, because nothing binds one and a second spelling would be
+    // churn with no behaviour behind it.
+    expect(normalizeKey({ key: '[', code: 'BracketLeft' })).toBe('[');
+    expect(normalizeKey({ key: '{', code: 'BracketLeft', shiftKey: true })).toBe('{');
   });
 
   it('spells Alt and the three-key chord over the position too', () => {

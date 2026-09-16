@@ -2510,9 +2510,19 @@ function QuestionCard({
    * `Mod-2` is not `2`, so the copy chord and the tab chords reach the window
    * listener by construction instead of by this file listing them.
    *
-   * The digits stay BARE and are still safe for the reason they always were:
-   * this listener only fires while the keyboard is already inside the options
-   * list, and the canvas grammar binds no bare digit.
+   * The digits stay BARE, and one of the two reasons that was safe has EXPIRED
+   * -- corrected here rather than left to be believed. This paragraph used to
+   * end "and the canvas grammar binds no bare digit". IT BINDS NINE OF THEM
+   * NOW: `1`..`9` are `pickView`'s one-key spelling (`SELECT_DIGITS`,
+   * `keyboard/chords.ts`), added at the operator's request.
+   *
+   * The other reason stands and was always the load-bearing one: this listener
+   * only fires while the keyboard is already inside the options list, it sits
+   * BELOW the window listener in the bubble path, and it cancels what it
+   * handled -- so the card claims a digit first and `Canvas.tsx` returns on
+   * `defaultPrevented`. The new binding adds a second, independent guard
+   * rather than relying on that: a bare digit is Select-only
+   * (`isSelectOnlyChord`), and an open question card is an insert scope.
    */
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     const action = resolveQuestionKey(normalizeKey(event));

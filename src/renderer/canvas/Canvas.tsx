@@ -76,10 +76,12 @@ import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import { DEMO_PROMPT } from '../fixtures/demo.js';
 import {
+  type Chord,
   type ChordState,
   chordText,
   EMPTY_CHORD,
   isSelectOnly,
+  isSelectOnlyChord,
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
@@ -4423,6 +4425,11 @@ function CanvasInner({
         return;
       }
 
+      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
+      // `resolveChord` clears the one-key memory, so after it runs there is no
+      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
+      // below turns on exactly that difference (`isSelectOnlyChord`).
+      const typed: Chord = { prefix: chord.current.pending ?? '', key };
       const step = resolveChord(chord.current, key);
       chord.current = step.state;
       const action = step.action;
@@ -4497,7 +4504,42 @@ function CanvasInner({
        * a status line here would answer a keystroke the operator aimed at the
        * box they are typing in.
        */
-      if (cursorMode === 'insert' && isSelectOnly(action)) {
+      /**
+       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
+       * ACT is welcome under a caret but whose SPELLING is not.
+       *
+       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
+       * chord — no layout makes a character out of one — and reaching the
+       * Terminal view from inside the prompt box is deliberate, tested and
+       * captioned. A bare `3` is text: it types a digit into every box on
+       * screen, and it is the question card's own option mark
+       * (`resolveQuestionKey`). One is the grammar's in both modes and the
+       * other in Select alone, which is why this predicate reads the CHORD and
+       * `isSelectOnly` above reads the ACTION. Widening either to cover both
+       * would take a working binding away.
+       *
+       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
+       * this handler reads INPUT|TEXTAREA — which is every text box in the
+       * shell, the composer, the palette filter, the search line, a rename
+       * field, the Files filter, and the terminal's own hidden compose box —
+       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
+       * whose keys go into somebody's running agent. That pane claims its own
+       * printable keys while it has a bridge to send them down and hands them
+       * back when it has none, so without this a bridgeless build would answer
+       * a digit aimed at an agent by switching the view under it.
+       *
+       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
+       * one. The `typing` clause at the top already returns for a focused
+       * INPUT|TEXTAREA — the composer, the palette filter, the session search
+       * line, a rename field, the Files tab's filter and its "new file" box
+       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
+       * lean on the tag name alone). Those boxes keep their digit whether or
+       * not this line exists; what only this line can reach is an insert scope
+       * that is no text box.
+       *
+       * The silence above applies unchanged: the key was never claimed.
+       */
+      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
         return;
       }
 

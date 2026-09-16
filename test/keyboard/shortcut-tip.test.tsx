@@ -348,14 +348,34 @@ describe('the view icons derive their shortcut, and do not repeat it in their na
   const icon = (view: string) =>
     document.querySelector<HTMLButtonElement>(`[data-view="${view}"]`) as HTMLButtonElement;
 
-  it('names the view and prints the chord the table holds for its digit', () => {
+  /**
+   * IT PRINTS EVERY CHORD, AND NO LONGER AS ONE JOINED STRING — a correction
+   * to this case rather than a loosening of it.
+   *
+   * `pickView` holds two spellings now (`SELECT_DIGITS`, `keyboard/chords.ts`)
+   * and they are not alike: `Ctrl-Alt-2` opens PRs from anywhere, and a bare
+   * `2` is text wherever there is a caret. `Ctrl-Alt-2 or 2` said they were
+   * interchangeable, which is exactly the sentence this file exists to keep
+   * out of the chrome — so the Select-only spelling gets a line of its own,
+   * captioned with the mode it is true in.
+   *
+   * The property is unchanged: every chord the TABLE holds is on screen,
+   * derived, with no shipped chord spelled in this test.
+   */
+  it('names the view and prints every chord the table holds for its digit', () => {
     render(<Canvas model={DEMO_MODEL} />);
     const action: KeyAction = { kind: 'pickView', digit: 2 };
     const keys = bindingChords(NO_BINDINGS, actionId(action));
     expect(keys, 'the fixture must have the digit bound, or this asserts nothing').not.toEqual([]);
+    expect(keys.length, 'the digit must hold both spellings, or the split asserts nothing').toBe(2);
     const text = openByFocus(icon('prs')).textContent ?? '';
     expect(text).toContain('PRs view');
-    expect(text).toContain(keys.join(' or '));
+    for (const chord of keys) {
+      expect(text, `the tip does not name ${chord}`).toContain(chord);
+    }
+    // And the one that works only in Select says so, rather than standing
+    // beside the chord as though they were the same key.
+    expect(text).toContain(MODE_TITLES.select);
   });
 
   it('follows the operator to a rebound key rather than to the shipped one', () => {

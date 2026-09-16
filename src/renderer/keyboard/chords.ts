@@ -326,6 +326,36 @@ export function normalizeKey(event: KeyEventLike, mac: boolean = APPLE_PLATFORM)
   const mod = event.ctrlKey === true || event.metaKey === true;
   const alt = event.altKey === true;
   if (!mod && !alt) {
+    // THE DIGIT ROW IS A POSITION HERE TOO — the same `event.code` read the
+    // modified branch below makes, for the same reason, now that a BARE digit
+    // is a binding (`SELECT_DIGITS`).
+    //
+    // The argument is this function's own and is not restated: those bindings
+    // are about a POSITION rather than a character, and a character-based
+    // spelling cannot keep that promise. It failed twice for the modified
+    // digits and would fail here identically — AZERTY puts `&` on the
+    // unshifted `Digit1`, so a bare `1` matched off `event.key` would be dead
+    // on that layout while `Ctrl-Alt-1` beside it kept working. One row,
+    // two spellings, and a key sheet that is true in one place only.
+    //
+    // AND SHIFT GETS ITS TOKEN, WHICH IS WHAT ANSWERS THE OPERATOR'S OTHER
+    // SUGGESTION. They asked for "a number, or Shift+number": Shift ALTERS a
+    // digit, so `Shift+1` is `!` on a US layout and `1` on AZERTY, and a
+    // character spelling would give one keystroke two spellings with only one
+    // of them ever matching. Positionally it is `Shift-1`, a keystroke of its
+    // own, bound to nothing — so a shifted digit can never answer the
+    // unshifted binding on any layout. That is the same thing the bracket
+    // pair's `Shift-` token buys one branch down.
+    //
+    // ONLY DIGITS, DELIBERATELY. `positionKey` answers for the bracket pair
+    // too, and folding those in here would change the spelling of bare `[`,
+    // `]`, `{` and `}` — four keys nothing binds — for no behaviour at all.
+    // The rule below, that a shifted CHARACTER is already itself, is untouched
+    // for every key that is not on the number row.
+    const digit = positionKey(event);
+    if (digit !== null && /^[0-9]$/.test(digit)) {
+      return event.shiftKey === true ? `Shift-${digit}` : digit;
+    }
     // THE SAME HAZARD AS BELOW, UNGUARDED HERE. CapsLock upper-cases a bare
     // letter exactly the way it upper-cases a modified one, and the browser
     // hands back whatever case is currently active with `shiftKey: false` --
@@ -1001,6 +1031,68 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // free for a real meaning rather than kept as captions that lie.
 };
 
+/**
+ * THE VIEW ROW AGAIN, ON ONE KEY — the operator's own ask, in their words:
+ * "in Select mode, is there a shortcut to switch between the function tabs of
+ * the focused session faster? For example a number, or Shift+number? Only in
+ * Select mode."
+ *
+ * A SECOND SPELLING OF `pickView`, NOT A SECOND ACT. `Ctrl-Alt-<digit>` stays
+ * exactly where it is and keeps working everywhere, including from inside the
+ * prompt box — which is the one thing a bare digit can never do and the reason
+ * the three-key chord is not simply replaced. Same action, same `actionId`, so
+ * the two land in one row of the key sheet and one row of the settings editor
+ * with two slots, which is what `MAX_BINDINGS = 2` is for.
+ *
+ * A TABLE OF ITS OWN, AND THAT IS NOT DECORATION. `Object.entries` walks
+ * INTEGER-LIKE KEYS FIRST, in ascending numeric order, whatever order they are
+ * written in — so `'1'` placed inside `SINGLE` would be visited before
+ * `'Ctrl-Alt-1'` no matter where the line went, `defaultBindings` would record
+ * the bare digit as slot 0, and `primaryChord` — the ONE chord an inline chip
+ * and a tooltip's first line print — would become `1`. A chip that names a key
+ * which does nothing under the caret the operator is looking at is the caption
+ * that lies. Listed after `SINGLE` in `BINDING_TABLES`, the chord leads and
+ * the short spelling follows.
+ *
+ * SELECT ONLY, AND IT IS A PROPERTY OF THE KEYSTROKE (`isSelectOnlyChord`),
+ * not of the action: `pickView` must stay live under a caret, and only its
+ * bare spelling stands down. The rule is `isSelectOnly`'s own — a binding
+ * stands down in Insert exactly when the keystroke ALREADY MEANS SOMETHING to
+ * whatever is being typed into — and a digit means two things at once there:
+ * it is a character to every text surface, and it is the question card's own
+ * option mark (`question-keys.ts`).
+ *
+ * NINE, NOT FOUR. Digits past the last view are bound so the pane can refuse
+ * them ALOUD, the same shape the chord row above already has: `5` on a source
+ * with no Files bridge says so, rather than falling through to the browser.
+ * It is the same handler, so there is one refusal and not two wordings — a
+ * second behaviour for the short spelling would be a second rule to keep in
+ * step, and the house style is that a control which can only refuse says so.
+ *
+ * `0` IS NOT HERE. `z0` is the zero's chord (`AFTER_Z`) and `Mod-0` is the way
+ * out of the tabs entirely, so the key already reads as "back to the start"
+ * twice over; a third meaning on the bare press would be the only digit in
+ * this row that named no view. It stays free — unbound, not reserved, which is
+ * the same terms `Alt-<digit>` was left on.
+ *
+ * FREE WHEN THEY WERE TAKEN. Nothing in `MOVES`, `SINGLE`, `AFTER_G`,
+ * `AFTER_Y` or `AFTER_Z` held a bare digit, and there is no vim-style count
+ * prefix in this grammar for one to be swallowed by. Re-derived over the
+ * generated bindings in `test/keyboard/select-digits.test.ts`, never over
+ * these nine lines.
+ */
+const SELECT_DIGITS: Readonly<Record<string, KeyAction>> = {
+  1: { kind: 'pickView', digit: 1 },
+  2: { kind: 'pickView', digit: 2 },
+  3: { kind: 'pickView', digit: 3 },
+  4: { kind: 'pickView', digit: 4 },
+  5: { kind: 'pickView', digit: 5 },
+  6: { kind: 'pickView', digit: 6 },
+  7: { kind: 'pickView', digit: 7 },
+  8: { kind: 'pickView', digit: 8 },
+  9: { kind: 'pickView', digit: 9 },
+};
+
 const AFTER_G: Readonly<Record<string, KeyAction>> = {
   g: { kind: 'first' },
   t: { kind: 'project', delta: 1 },
@@ -1105,6 +1197,10 @@ export const BINDING_TABLES: readonly {
 }[] = [
   { prefix: '', table: MOVES },
   { prefix: '', table: SINGLE },
+  // AFTER `SINGLE`, so `Ctrl-Alt-<digit>` is `pickView`'s slot 0 and the bare
+  // digit its slot 1 — `SELECT_DIGITS`' own comment argues why the order is
+  // load-bearing rather than tidy.
+  { prefix: '', table: SELECT_DIGITS },
   { prefix: 'g', table: AFTER_G },
   { prefix: 'y', table: AFTER_Y },
   { prefix: 'z', table: AFTER_Z },
@@ -1143,6 +1239,52 @@ export const BINDING_TABLES: readonly {
  */
 export function isSelectOnly(action: KeyAction): boolean {
   return action.kind === 'scrollHalf';
+}
+
+/**
+ * KEYSTROKES AN INSERT SCOPE KEEPS FOR ITSELF — the same rule as above, asked
+ * of the KEY instead of the act.
+ *
+ * ── THE RULE, UNCHANGED ──────────────────────────────────────────────────
+ *   A binding stands down in Insert exactly when the keystroke ALREADY MEANS
+ *   SOMETHING to whatever is being typed into.
+ * ─────────────────────────────────────────────────────────────────────────
+ *
+ * WHY THERE ARE TWO PREDICATES AND NOT ONE WIDER ONE. `isSelectOnly` is about
+ * the ACT because `scrollHalf` has no business firing under a caret whatever
+ * chord the operator moves it to. This one is about the KEYSTROKE because
+ * `pickView` is the opposite case: the act is welcome in Insert — switching a
+ * view from inside the prompt box is precisely what `Ctrl-Alt-<digit>` is for,
+ * and the key sheet says so — while its BARE spelling cannot be, because a
+ * bare digit is not a chord, it is text.
+ *
+ * A DIGIT MEANS TWO THINGS UNDER A CARET, AND BOTH ARE SOMEBODY ELSE'S. It is
+ * a character to every text surface — the composer, the palette filter, the
+ * search line, a rename field, the Files filter, the terminal's own hidden box
+ * — and it is the question card's option mark (`resolveQuestionKey`'s `mark`).
+ * Taking it globally would type a view switch into somebody's prompt.
+ *
+ * AND THE TAG NAME COULD NOT HAVE DONE IT. `Canvas.tsx`'s typing guard reads
+ * INPUT|TEXTAREA, which covers every box in the list above and MISSES the one
+ * that matters most: the terminal pane is a `section` carrying
+ * `data-insert-scope`, and a digit there is typed into somebody's running
+ * agent. That pane claims its own printable keys when it has a bridge to send
+ * them down, and hands them back when it does not — so without this predicate
+ * a bridgeless build would answer a digit aimed at a terminal by switching the
+ * view under it. Asked of the cursor mode, like `isSelectOnly`, for the same
+ * reason and at the same call site.
+ *
+ * A PREFIXED KEY IS NOT A BARE ONE. `z0` is two keystrokes behind a door, the
+ * card and the text boxes hear them one at a time, and neither hears `z` —
+ * so `z0` keeps working and the zero keeps its chord.
+ *
+ * `0`–`9`, THOUGH ONLY 1-9 ARE SHIPPED. The rule is about what the keystroke
+ * means to a text surface, and a zero types a zero; an operator who binds
+ * something to the free bare `0` gets the same stand-down, rather than the one
+ * digit in the row that quietly did not follow the rule.
+ */
+export function isSelectOnlyChord(chord: Chord): boolean {
+  return chord.prefix === '' && /^[0-9]$/.test(chord.key);
 }
 
 /* ---------------------------------------------------------------------------
