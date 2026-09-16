@@ -23,6 +23,11 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RESIZE_DEBOUNCE_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
 import { applyPalette } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  setActiveTerminalFontSize,
+  TERMINAL_FONT_SIZES,
+} from '../../src/renderer/prefs/terminal-font.js';
 import type { PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
@@ -243,6 +248,134 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
     // Nothing to assert but the absence of a crash: the browser build has no
     // main process, so there is no tmux to size.
     expect(q('[data-terminal-pane]')).not.toBeNull();
+  });
+});
+
+/**
+ * THE ONE FAILURE A SETTING FOR THE SCREEN'S SIZE CAN INTRODUCE, and it is
+ * silent.
+ *
+ * tmux composes the screen at the size it was TOLD, and vam works that size
+ * out by dividing the pane's box by the advance of one rendered character. The
+ * advance is a function of the font size. So the moment the size becomes a
+ * setting, "the size moved" and "the column count moved" have to be the same
+ * event -- and the thing that makes them not be is the obvious
+ * implementation: put the size on the document as a custom property, let CSS
+ * repaint, and never tell React. The pane's own box does not change when its
+ * type does, so its `ResizeObserver` never fires, and tmux goes on composing
+ * at the old width. Nothing looks broken. Long lines wrap in the wrong place,
+ * and the report is "tmux is broken".
+ *
+ * THE RULER IS NOT WRITTEN BY HAND IN THIS BLOCK, which is what makes it a
+ * test of the chain rather than of the arithmetic. `getBoundingClientRect` is
+ * defined to DERIVE the advance from the size the ruler is actually drawn at,
+ * read back through `getComputedStyle` -- happy-dom resolves inherited
+ * font-size, so this is the engine's answer to "what size is that character",
+ * not the test's. Move the size onto an inner element, take the ruler out of
+ * the pane, or drop `fontSize` from the effect's dependencies, and the column
+ * count stops moving while everything else still passes.
+ */
+describe('the column count follows the size the screen is drawn at', () => {
+  /** A monospace advance, as a fraction of the em -- Geist Mono measures about
+   *  0.63 here. The exact ratio does not matter; that it is a RATIO does. */
+  const ADVANCE = 0.6;
+
+  /** The layout a real engine would give: a fixed box, and a cell derived from
+   *  whatever size the ruler is really inheriting. */
+  function layoutDerived(box: { width: number; height: number }) {
+    const pane = q<HTMLElement>('[data-terminal-pane]');
+    const ruler = q<HTMLElement>('[data-terminal-ruler]');
+    if (pane === null || ruler === null) throw new Error('the pane was not drawn');
+    Object.defineProperty(pane, 'clientWidth', { value: box.width, configurable: true });
+    Object.defineProperty(pane, 'clientHeight', { value: box.height, configurable: true });
+    const characters = (ruler.textContent ?? '').length;
+    ruler.getBoundingClientRect = () => {
+      const em = Number.parseFloat(globalThis.getComputedStyle(ruler).fontSize);
+      return { width: em * ADVANCE * characters, height: em * 1.55 } as DOMRect;
+    };
+  }
+
+  const columnsFor = (px: number, width: number) => Math.floor(width / (px * ADVANCE));
+
+  /**
+   * THE DEBOUNCE ONLY -- deliberately NOT `fire()`.
+   *
+   * `fire()` invokes every observer callback by hand, which is a resize this
+   * scenario does not have: the pane's box is identical before and after the
+   * size changes, so a real `ResizeObserver` says nothing at all. Using it here
+   * would hand the measurement the very trigger whose absence is the defect,
+   * and the block would pass with `fontSize` deleted from the effect's
+   * dependencies -- measured, exactly that. What may fire is the effect
+   * RE-RUNNING, which re-observes, and `observe` delivers an initial size.
+   */
+  const tick = async () => {
+    await act(async () => {
+      vi.advanceTimersByTime(RESIZE_DEBOUNCE_MS * 2);
+      await Promise.resolve();
+    });
+  };
+
+  it('asks tmux for a different number of columns at every size it offers', async () => {
+    const resize = vi.fn(async () => true);
+    setActiveTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
+    await settle();
+    // The box never changes. Only the type does, which is the whole point:
+    // nothing here would make a `ResizeObserver` fire on its own.
+    layoutDerived({ width: 800, height: 480 });
+
+    const asked: number[] = [];
+    for (const size of TERMINAL_FONT_SIZES) {
+      await act(async () => {
+        setActiveTerminalFontSize(size);
+      });
+      await tick();
+      const last = resize.mock.calls.at(-1) as unknown[] | undefined;
+      asked.push(last?.[1] as number);
+      // The arithmetic, said exactly: the columns are the box over the advance
+      // AT THIS SIZE, and not at the size that shipped.
+      expect(asked.at(-1), `${size}px`).toBe(columnsFor(size, 800));
+    }
+
+    // AND THEY ARE ALL DIFFERENT. This is the assertion that fails when the
+    // size is applied by CSS alone: every entry would be the same number, and
+    // every other test in this file would still be green.
+    expect(new Set(asked).size).toBe(TERMINAL_FONT_SIZES.length);
+    // Bigger type, fewer columns -- in that direction, not merely "different".
+    expect([...asked].sort((a, b) => b - a)).toEqual(asked);
+  });
+
+  it('tells tmux nothing when the size is set to the one already in force', async () => {
+    // The other half. A resize is a process spawned against somebody's live
+    // session, so "the setting was written" must not be the trigger -- "the
+    // cell count changed" is.
+    const resize = vi.fn(async () => true);
+    setActiveTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
+    await settle();
+    layoutDerived({ width: 800, height: 480 });
+    await fire();
+    expect(resize).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      setActiveTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE);
+    });
+    await tick();
+    expect(resize).toHaveBeenCalledTimes(1);
   });
 });
 

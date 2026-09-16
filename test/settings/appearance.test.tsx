@@ -23,6 +23,10 @@ import {
   PALETTE_TOKENS,
   type Prefs,
 } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_SIZES,
+} from '../../src/renderer/prefs/terminal-font.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 
 function session(id: string): Session {
@@ -438,6 +442,55 @@ describe('the out text size is an appearance setting', () => {
         ?.textContent ?? '';
     expect(caption.length).toBeGreaterThan(20);
     expect(caption).not.toMatch(NAMES_A_PANE);
+  });
+});
+
+/**
+ * THE TERMINAL SCREEN'S SIZE, and why it is a row of choices where `out text`
+ * is a stepper.
+ *
+ * `out` is prose, and every integer between 10 and 20 is a legible paragraph.
+ * The terminal is a monospace GRID whose width is quantised into columns, so
+ * most single-pixel steps change nothing anyone can see and the useful range
+ * is a handful of sizes. The list lives in `prefs/terminal-font.ts` and this
+ * block derives from it rather than spelling it again: a second list of sizes
+ * is how a fifth size comes to exist in one of them.
+ */
+describe('the terminal text size is an appearance setting', () => {
+  const option = (size: number) => screen.getByLabelText(`terminal text ${size}px`);
+
+  it('lives in Appearance, beside the theme and the colours', () => {
+    open();
+    expect(
+      option(DEFAULT_TERMINAL_FONT_SIZE).closest('section')?.querySelector('h2, h3')?.textContent,
+    ).toBe('Appearance');
+  });
+
+  it('offers every size the pane can be drawn at, and no other', () => {
+    open();
+    for (const size of TERMINAL_FONT_SIZES) {
+      expect(option(size), `${size}`).not.toBeNull();
+    }
+    const offered = [...document.querySelectorAll('[data-terminal-size-option]')].map((el) =>
+      Number(el.getAttribute('data-terminal-size-option')),
+    );
+    expect(offered).toEqual([...TERMINAL_FONT_SIZES]);
+  });
+
+  it('shows the size in force and writes the one you press', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, terminalFontSize: 10.5 });
+    expect(option(10.5).getAttribute('aria-pressed')).toBe('true');
+    expect(option(14).getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(option(14));
+    expect(changed(onChange, 0).terminalFontSize).toBe(14);
+  });
+
+  it('disturbs no neighbouring preference', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, outFontSize: 15, theme: 'light' });
+    fireEvent.click(option(14));
+    const next = changed(onChange, 0);
+    expect(next.outFontSize).toBe(15);
+    expect(next.theme).toBe('light');
   });
 });
 

@@ -5419,6 +5419,14 @@ export function DetailPanel(props: DetailPanelProps) {
                `undefined` in the browser build, where the tab says so instead
                of taking keys it cannot deliver. */
             send={globalThis.window?.api?.terminal?.send}
+            /* THE BRANCH, for the rule under the screen. Passed from here
+               rather than read inside the tab for the reason the three
+               members above are: this panel is where the session is in scope,
+               and a fact reached for invisibly is a fact a later edit drops
+               with nothing to notice. `null` when there is no session and when
+               the source cannot say -- `TerminalTab` draws nothing for either,
+               and its `branch` prop says why that is not a dash. */
+            branch={entry?.session.branch ?? null}
           />
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />

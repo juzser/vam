@@ -231,9 +231,10 @@ describe('the pane declines the keys that are not its own', () => {
    * WHAT IS TRUE NOW. The chord reaches the pane, and vam's own listener never
    * hears it — which is what stops one keystroke doing two things. The insert
    * scope is still asserted here because it is still load-bearing for every
-   * OTHER modified key: `cursorModeAt` is asked of the REAL element, and the
-   * tag beside it, because a `section` is invisible to any `INPUT|TEXTAREA`
-   * test and a scope-based rule is the only kind that can see this surface.
+   * OTHER modified key: `cursorModeAt` is asked of the REAL element, and its
+   * role beside it, because a named region is invisible to any
+   * `INPUT|TEXTAREA` test and a scope-based rule is the only kind that can see
+   * this surface.
    */
   it('sends Ctrl-D and Ctrl-U to the pane, and lets vam hear neither', async () => {
     const heard: string[] = [];
@@ -249,7 +250,7 @@ describe('the pane declines the keys that are not its own', () => {
         { kind: 'control', letter: 'u' },
       ]);
       expect(heard).toEqual([]);
-      expect(pane()?.tagName).toBe('SECTION');
+      expect(pane()?.getAttribute('role')).toBe('region');
       expect(cursorModeAt(pane())).toBe('insert');
     } finally {
       window.removeEventListener('keydown', onKey);
@@ -516,12 +517,12 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
   });
 
   it('says where the exit is, but only while the pane has focus', async () => {
-    // An exit nobody can find is not an exit, and it may not cost a row: it
-    // rides the badge in the pane's corner and is appended only while the
-    // pane has focus, which is the only moment the question is asked.
+    // An exit nobody can find is not an exit. It rides the session name on the
+    // rule under the screen and is appended only while the pane has focus,
+    // which is the only moment the question is asked.
     await open();
     expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Tab');
-    expect(q('[data-terminal-badge]')?.getAttribute('class')).toContain('absolute');
+    expect(q('[data-terminal-exit-hint]')?.closest('[data-terminal-status]')).not.toBeNull();
 
     fireEvent.blur(pane() as HTMLElement);
     await settle();
@@ -658,18 +659,30 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(q<HTMLElement>('[data-terminal]')?.textContent).toContain('vam-atlas-a1b2c3');
   });
 
-  it('costs no row to say it: the badge is out of the flow, not a header', async () => {
+  it('costs ONE row to say it, under the screen rather than over it', async () => {
     await open();
     const badge = q<HTMLElement>('[data-terminal-badge]');
-    // Absolutely positioned against the wrapper, so it takes no vertical
-    // space -- the two lines the operator removed were flow content.
-    expect(badge?.getAttribute('class')).toContain('absolute');
-    // And OUTSIDE the scrolling box: inside, it would be laid out against the
-    // content and scroll out of sight with the first screenful.
+    // THE BARGAIN CHANGED, AND THIS IS WHERE IT IS RECORDED. It used to be
+    // absolutely positioned over the pane's bottom-right corner and was
+    // defended as costing no row. It cost no row and it covered the corner a
+    // terminal prints its last line into, in the faintest ink vam has. It is
+    // now a segment of the rule under the screen: one row, spent once, for a
+    // name that can actually be read -- and the row was being spent anyway,
+    // because the branch is on it.
+    expect(badge?.closest('[data-terminal-status]')).not.toBeNull();
+    expect(badge?.getAttribute('class')).not.toContain('absolute');
+    // And still OUTSIDE the scrolling box: inside, it would be laid out
+    // against the content and scroll out of sight with the first screenful.
     expect(badge?.closest('[data-terminal-pane]')).toBeNull();
-    // Still no flow chrome above the pane.
+    // Still no flow chrome ABOVE the pane -- the rule is under it, which is
+    // the half of the operator's request that has not changed.
     expect(q('[data-terminal-name]')).toBeNull();
     expect(q('[data-terminal-typing]')).toBeNull();
+    const tab = q<HTMLElement>('[data-terminal]') as HTMLElement;
+    const kids = [...tab.children];
+    expect(kids.indexOf(q<HTMLElement>('[data-terminal-status]') as HTMLElement)).toBe(
+      kids.length - 1,
+    );
   });
 
   it('draws no chrome above the pane at all, which is the space the operator asked for', async () => {
