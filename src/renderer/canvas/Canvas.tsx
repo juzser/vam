@@ -96,6 +96,7 @@ import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
+import { describeIcon, IconMark, parseIcon } from '../panels/icon-value.js';
 import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -103,7 +104,7 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
-import { resolveSessionGlyph } from '../panels/session-icon.js';
+import { resolveSessionIcon } from '../panels/session-icon.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
@@ -416,6 +417,24 @@ type ProjectIconTarget = {
   readonly projectId: string;
   readonly name: string;
 };
+
+/**
+ * WHETHER THE PANEL STAYS OPEN AFTER A PICK — one rule, used by all three
+ * pickers so the three levels cannot answer it differently.
+ *
+ * AN EMOJI IS ONE PRESS and the panel gets out of the way, exactly as it
+ * always has. A GLYPH IS TWO: the picture, and then the colour. Closing on the
+ * first would put the tone row out of reach of the only thing it can paint,
+ * and an operator would have to reopen the picker to finish a choice they had
+ * already started — which is also the state in which the row can do nothing
+ * and has to say so (`toneRefusal`).
+ *
+ * Clearing (`''`) parses to `null` and therefore closes, which is right: there
+ * is nothing left to colour.
+ */
+function keepPickerOpen(icon: string): boolean {
+  return parseIcon(icon)?.kind === 'glyph';
+}
 
 /**
  * ONE PANE's tabs, exactly as its strip draws them.
@@ -1091,7 +1110,12 @@ function TabStrip({
         // to its project's glyph the way the (now-deleted) canvas root node
         // already did, and the two surfaces disagreed the moment one carried
         // a project icon and no session icon of its own.
-        const glyph = resolveSessionGlyph(entry);
+        //
+        // The chain answers with a KIND now (an emoji, or a named glyph in a
+        // tone), not a character, so the tone arrives here without this strip
+        // knowing that colours exist -- see `session-icon.tsx` for why that is
+        // one chain and not two.
+        const icon = resolveSessionIcon(entry);
         return (
           <div
             key={entry.session.id}
@@ -1147,10 +1171,21 @@ function TabStrip({
               onContextMenu={tabMenuOf(entry)}
               className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
-              {glyph !== null && (
+              {icon !== null && (
                 <>
-                  <span data-session-icon={entry.session.id} aria-hidden="true">
-                    {glyph}
+                  {/* `inline-flex` so a drawn glyph sits on the label's centre
+                      line rather than on its baseline, which is where an
+                      inline `<svg>` lands by default and is about 3px too low
+                      beside 12px text. An emoji is unaffected: it is the only
+                      thing in the box either way. 12 is `--text-control`, the
+                      tab label's own size, so the two kinds of icon occupy the
+                      same height. */}
+                  <span
+                    data-session-icon={entry.session.id}
+                    aria-hidden="true"
+                    className="inline-flex items-center align-middle"
+                  >
+                    <IconMark value={icon} size={12} fallback={null} />
                   </span>{' '}
                 </>
               )}
@@ -2603,6 +2638,31 @@ function CanvasInner({
   const entriesById = useMemo(
     () => new Map(allEntries.map((entry) => [entry.session.id, entry])),
     [allEntries],
+  );
+
+  /**
+   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the three levels.
+   *
+   * DELIBERATELY NOT CAPTURED INTO THE TARGET beside the source and the id.
+   * What a target freezes is WHICH thing is being edited -- `IconTarget` argues
+   * why, and that is the part that must not move under an open panel. The icon
+   * ITSELF is the part that has to move: a glyph and its colour are two
+   * presses, and a frozen value would leave the swatches still refusing on the
+   * grounds that nothing was chosen, one press after something was.
+   *
+   * READ OFF THE MODEL RATHER THAN THE PREFS BUCKET, so the picker marks what
+   * the operator can SEE. The two agree for a project and a group -- prefs is
+   * the only writer of either -- but a session's icon can also come from a
+   * source's own fixture (`fixtures/demo.ts`), which never reaches prefs at
+   * all.
+   */
+  const projectIcons = useMemo(
+    () => new Map(allEntries.map((entry) => [entry.project.id, entry.project.icon ?? null])),
+    [allEntries],
+  );
+  const groupIcons = useMemo(
+    () => new Map((model.groups ?? []).map((group) => [group.id, group.icon ?? null])),
+    [model.groups],
   );
 
   /**
@@ -6044,6 +6104,7 @@ function CanvasInner({
       {pickingIconFor !== null && (
         <IconPicker
           title={pickingIconFor.title}
+          value={entriesById.get(pickingIconFor.sessionId)?.session.icon ?? null}
           onPick={(icon) => {
             // Both the source and the session come from the target captured
             // when the picker opened, so there is nothing to look up and
@@ -6054,8 +6115,12 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : // `describeIcon`, not the stored string: `lucide:rocket:teal`
+                  // in this sentence is vam reading its own storage format
+                  // aloud. An emoji still reports as itself.
+                  `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
@@ -6146,6 +6211,7 @@ function CanvasInner({
       {pickingGroupIconFor !== null && (
         <IconPicker
           title={pickingGroupIconFor.name}
+          value={groupIcons.get(pickingGroupIconFor.groupId) ?? null}
           onPick={(icon) => {
             savePrefs(
               setGroupIcon(prefs, pickingGroupIconFor.source, pickingGroupIconFor.groupId, icon),
@@ -6153,8 +6219,9 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingGroupIconFor(null);
           }}
           onClose={() => setPickingGroupIconFor(null)}
@@ -6164,6 +6231,7 @@ function CanvasInner({
       {pickingProjectIconFor !== null && (
         <IconPicker
           title={pickingProjectIconFor.name}
+          value={projectIcons.get(pickingProjectIconFor.projectId) ?? null}
           onPick={(icon) => {
             savePrefs(
               setProjectIcon(
@@ -6177,8 +6245,9 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingProjectIconFor(null);
           }}
           onClose={() => setPickingProjectIconFor(null)}

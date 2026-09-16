@@ -117,6 +117,45 @@ describe('the project heading icon picker', () => {
     expect(stored.projectIcons).toEqual({});
   });
 
+  /**
+   * A GLYPH IS TWO PRESSES, AND THE PANEL HAS TO SURVIVE THE FIRST.
+   *
+   * Every earlier pick was one press -- an emoji, or "clear icon" -- so every
+   * handler closed the panel as it wrote. A colour is chosen AFTER the glyph
+   * it paints, so closing on the glyph would put the tone row out of reach of
+   * the only thing it can act on, and the operator would have to reopen the
+   * picker to finish a choice they had already started. `keepPickerOpen` is
+   * the rule; this is the behaviour, driven through the real controls.
+   *
+   * IT ALSO PINS THE REFUSAL'S OTHER HALF. Before the first press the tone row
+   * cannot act and says so; after it, the sentence has to be GONE, or the
+   * panel would be explaining away a control that now works.
+   */
+  it('keeps the panel open after a glyph, so its colour is still reachable', () => {
+    render(<Canvas model={MODEL} />);
+    act(() => {
+      projectIcon('p1')?.click();
+    });
+    expect(document.querySelector('[data-icon-tone-refusal]')).not.toBeNull();
+
+    act(() => {
+      document.querySelector<HTMLButtonElement>('[data-icon-choice="rocket"]')?.click();
+    });
+    expect(iconPicker(), 'the panel closed on the glyph, before its colour').not.toBeNull();
+    expect(document.querySelector('[data-icon-tone-refusal]')).toBeNull();
+
+    act(() => {
+      document.querySelector<HTMLButtonElement>('[data-icon-tone-swatch="teal"]')?.click();
+    });
+    const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
+    expect(stored.projectIcons?.factory?.p1?.icon).toBe('lucide:rocket:teal');
+    // And the heading is wearing it, which is the half a stored string cannot
+    // prove on its own.
+    const glyph = projectIcon('p1')?.querySelector('[data-icon-glyph]');
+    expect(glyph?.getAttribute('data-icon-glyph')).toBe('rocket');
+    expect(glyph?.getAttribute('class')).toContain('text-icon-teal');
+  });
+
   it('stores the picked project icon under (source, projectId), not the session icon bucket', () => {
     render(<Canvas model={MODEL} />);
     act(() => {

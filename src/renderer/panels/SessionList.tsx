@@ -56,6 +56,7 @@ import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { IconMark, parseIcon } from './icon-value.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
@@ -1886,7 +1887,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       data-group-icon={group.id}
                       className="flex h-[15px] w-[15px] flex-none items-center justify-center text-meta leading-none text-ink-faint"
                     >
-                      {group.icon ?? <Folder size={11} strokeWidth={1.7} />}
+                      {/* `text-ink-faint` on the span is the EMOJI's ink and
+                          the placeholder's; a chosen glyph carries its own
+                          tone class, which wins on the element itself. The two
+                          agree when the tone is `neutral`, which is the value
+                          `--vam-icon-neutral` holds for exactly that reason
+                          (`styles.css`). */}
+                      <IconMark
+                        value={parseIcon(group.icon)}
+                        size={11}
+                        fallback={<Folder size={11} strokeWidth={1.7} />}
+                      />
                     </span>
                     {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
                       groupEditor
@@ -2124,15 +2135,22 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       aria-label={`change icon for ${section.project.name}`}
                       className="vam-tap vam-hit-24 flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-meta leading-none text-ink-faint hover:text-ink-dim"
                     >
-                      {section.project.icon ?? (
-                        /* A monitor, not a middot. The glyph has to read as "this
-                         is a machine you can name" — the middot read as a bullet
-                         and gave a clickable control no affordance at all. It is
-                         a placeholder in the literal sense: the picker replaces
-                         it with whatever emoji you choose, and choosing nothing
-                         leaves something that still looks deliberate. */
-                        <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
-                      )}
+                      <IconMark
+                        value={parseIcon(section.project.icon)}
+                        size={11}
+                        fallback={
+                          /* A monitor, not a middot. The glyph has to read as "this
+                           is a machine you can name" — the middot read as a bullet
+                           and gave a clickable control no affordance at all. It is
+                           a placeholder in the literal sense: the picker replaces
+                           it with whatever icon you choose, and choosing nothing
+                           leaves something that still looks deliberate. It is also
+                           what a value this build cannot draw falls back to, so an
+                           icon named by a newer vam looks like "none picked"
+                           rather than like a printed storage key. */
+                          <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
+                        }
+                      />
                     </button>
                   </ShortcutTip>
                   {projectDraft?.id === section.project.id ? (

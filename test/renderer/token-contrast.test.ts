@@ -63,6 +63,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FILE_ROW_INKS } from '../../src/renderer/panels/files-icons.js';
+import { ICON_TONE_INK, ICON_TONES } from '../../src/renderer/panels/icon-value.js';
 import { contrast } from '../support/contrast.js';
 import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
@@ -98,6 +99,35 @@ const MARKER_INK = /(?:\bmarker:|::marker\]:)text-([a-z0-9-]+)/g;
  * which is precisely what it was, and what a mutation caught.
  */
 const TREE_GLYPH_INKS = FILE_ROW_INKS.map((utility) => `--vam-${utility.replace(/^text-/, '')}`);
+
+/**
+ * The eight icon tones, as TOKENS, read from the module the picker paints with.
+ *
+ * Same bridge as `TREE_GLYPH_INKS` above, and for the same reason recorded
+ * there: the tree's inks were a typed second copy until a mutation showed that
+ * repointing a family in the module reddened nothing. `icon-value.tsx` is the
+ * only place the eight names exist; this turns each one's Tailwind utility
+ * into the custom property it resolves to.
+ */
+const ICON_TONE_TOKENS = ICON_TONES.map(
+  (tone) => `--vam-${ICON_TONE_INK[tone].replace(/^text-/, '')}`,
+);
+
+/**
+ * THE FOUR FILLS A CHOSEN ICON IS REALLY DRAWN ON.
+ *
+ * A glyph is not in one place. `SessionList` draws the group's and the
+ * project's on the sidebar column; the tab strip draws the session's on the
+ * pane behind an inactive tab and on `ground`, which the active tab fills
+ * itself; and the picker draws all twenty-four of them, plus the eight
+ * swatches, on the panel its shell is made of.
+ *
+ * `sidebar` and `pane` HOLD THE SAME VALUE TODAY and are both listed anyway,
+ * which is the argument `TEXT_GROUNDS` already makes about `--vam-pane`: the
+ * two were split so an operator could move one without the other, and a guard
+ * that measured only one would go quiet the day they did.
+ */
+const ICON_GROUNDS = ['--vam-sidebar', '--vam-pane', '--vam-ground', '--vam-panel'] as const;
 
 const RENDERER_DIR = resolve(process.cwd(), 'src/renderer');
 
@@ -365,6 +395,59 @@ describe('token contrast, per theme', () => {
        * five inks times three fills. Drop a fill from this list, or an ink
        * from the module, and this reddens rather than passing more quietly.
        */
+      /**
+       * THE EIGHT ICON TONES, AT THE FLOOR A GLYPH OWES — and the argument for
+       * which floor that is, because the two are a factor of 1.5 apart.
+       *
+       * A tone is painted on a LUCIDE PATH, never on text: `IconMark` gives it
+       * to an `<svg>` and to nothing else, and the emoji kind takes no tone at
+       * all precisely because a colour cannot reach it. So what is being
+       * measured is a graphical object that carries meaning — WCAG 1.4.11's
+       * 3:1 — and not body text under 1.4.3's 4.5:1. The glyph is also never
+       * the only thing saying which row this is: the project's name, the
+       * group's name and the session's title sit next to it in an ink this
+       * file already holds to 4.5. An icon whose colour an operator chose is
+       * decoration ON a label, not a label.
+       *
+       * ASSERTING THE FLOOR IT OWES RATHER THAN THE ONE IT HAPPENS TO CLEAR is
+       * the same decision the mode glyphs record above. Measured, the worst
+       * ground is `sidebar`/`pane` in both themes: dark runs 5.33 (red) to
+       * 8.83 (yellow), light 4.25 (yellow) to 6.03 (purple). Five of the eight
+       * clear 4.5 in light as well and three do not — orange 4.47, green 4.33,
+       * yellow 4.25 — and pinning the test at 4.5 would be pinning a margin
+       * nobody designed for, so that a hue moved for a reason would fail here
+       * for none.
+       *
+       * 8 tones x 4 fills. The literal is the point, as everywhere else in
+       * this file: dropping a tone from the module or a fill from the list has
+       * to redden this rather than quieten it.
+       */
+      it('paints every icon tone at 3:1 on each fill a chosen glyph is drawn on', () => {
+        const pairs = ICON_TONE_TOKENS.flatMap((ink) =>
+          ICON_GROUNDS.map((fill) => [ink, fill] as const),
+        );
+        expect(measure(pairs, 3)).toEqual({ pairs: 32, failing: [] });
+      });
+
+      /**
+       * NEUTRAL IS NOT A NINTH HUE, and this is what holds it to that.
+       *
+       * The first tone in the row is "no colour": the value an unpainted glyph
+       * already has, so that picking it looks like clearing a choice rather
+       * than choosing grey. The placeholders it has to match — `Monitor` on a
+       * project heading, `Folder` on a group's — paint `text-ink-faint`, and
+       * nothing but this assertion stops the two drifting into two slightly
+       * different greys answering the same question.
+       *
+       * A LITERAL, NOT `var(--vam-ink-faint)`, for the reason `--color-pane`
+       * gives in `styles.css`: a token pointed at another token moves two
+       * things whenever one of them is set. The cost of the literal is exactly
+       * the drift this test removes.
+       */
+      it('keeps the neutral tone on the ink an unpainted glyph already wears', () => {
+        expect(hex('--vam-icon-neutral')).toBe(hex('--vam-ink-faint'));
+      });
+
       it('draws every file-tree glyph at 3:1 on all three fills a row can have', () => {
         const fills = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
         const pairs = TREE_GLYPH_INKS.flatMap((ink) => fills.map((fill) => [ink, fill] as const));

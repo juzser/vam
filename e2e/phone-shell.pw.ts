@@ -839,6 +839,64 @@ test.describe('a sheet with the keyboard up', () => {
         `at ${reach.panelTop}px and its only scroller starts below the band.`,
     ).toBeLessThanOrEqual(reach.band);
   });
+
+  /**
+   * THE MECHANISM BEHIND THE TEST ABOVE, asserted separately — because that
+   * one can pass for a reason nobody chose.
+   *
+   * The picker cleared the fold by 21px for three releases, and it was not a
+   * margin anybody had designed: the sheet had NO scroll at all (`flex: 1 1 0`
+   * made the grid fill exactly what the header left, so the panel's content was
+   * always exactly its own height), and the grid's nested scroller simply
+   * happened to start above the band. The first row added above the grid spent
+   * that 21px and the emoji went under the keyboard.
+   *
+   * SO THIS ASSERTS THE PROPERTY THAT MAKES THE NUMBER SAFE: the sheet's own
+   * scroller must hold at least as much slack as there is chrome above the
+   * emoji grid, which is exactly the condition for the grid's top edge to be
+   * scrollable up to the sheet's. `styles.css` buys it by giving the grid a
+   * `min-height` of the sheet's own height, so the slack GROWS with whatever is
+   * added above it.
+   *
+   * A test that only measured the first emoji would go green again the moment
+   * a future row left 1px of margin. This one cannot: add a row and the slack
+   * has to grow with it.
+   */
+  test('the sheet can scroll away every row above the emoji grid', async ({ page }) => {
+    await openDemo(page);
+    await page.locator('[data-phone-shell] [data-project-icon]').first().tap();
+    const host = page.locator('[data-overlay-host]');
+    await expect(host).toBeVisible();
+    await host.locator('input').first().waitFor();
+
+    const sheet = await host.evaluate((el) => {
+      const panel = [...el.children].find((c) => c.tagName !== 'BUTTON') as HTMLElement;
+      const grid = panel.querySelector('.epr-main') as HTMLElement | null;
+      if (grid === null) return null;
+      // Every row between the sheet's top edge and the grid: the header, and
+      // whatever else has been put there since. Measured, not listed, so a row
+      // added tomorrow is counted by this test without editing it.
+      const chrome = Math.round(grid.getBoundingClientRect().top - panel.getBoundingClientRect().top);
+      return {
+        chrome,
+        slack: panel.scrollHeight - panel.clientHeight,
+        gridHeight: Math.round(grid.getBoundingClientRect().height),
+        sheetHeight: Math.round(panel.getBoundingClientRect().height),
+      };
+    });
+
+    expect(sheet, 'the picker sheet and its emoji grid rendered').not.toBeNull();
+    // A sheet whose chrome is zero would satisfy the inequality below while
+    // proving nothing, and it is not the shape this picker has.
+    expect(sheet?.chrome ?? 0, 'there is chrome above the grid to scroll away').toBeGreaterThan(100);
+    expect(
+      sheet?.slack ?? -1,
+      `the sheet is ${sheet?.sheetHeight}px tall and holds ${sheet?.chrome}px of rows above a ` +
+        `${sheet?.gridHeight}px grid, but its own scroller has only ${sheet?.slack}px of slack — ` +
+        `so ${(sheet?.chrome ?? 0) - (sheet?.slack ?? 0)}px of those rows can never be scrolled ` +
+        `out of the way, and the grid's scroller stays wherever they leave it.`,
+    ).toBeGreaterThanOrEqual(sheet?.chrome ?? 0);
+  });
 });
 
 /**
