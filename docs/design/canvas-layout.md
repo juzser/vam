@@ -19,7 +19,7 @@ NORMAL; Insert is the resting state of the response pane.
 | key | action |
 |---|---|
 | `j` `k` (Select) | up and down the SESSION LIST, in the order the sidebar prints |
-| `h` `l` (Select) | left and right across the canvas — **computed geometrically at press time** |
+| `h` `l` (Select) | previous / next tab of the active project — **a closed ring that wraps** |
 | `h j k l` (Insert) | the options of an open question; `h` alone returns to Select |
 | `f` | shows a jump label on every sidebar row (first 20), type the label to land there |
 | `/` `n` `N` | search by session/task name |
@@ -36,11 +36,12 @@ NORMAL; Insert is the resting state of the response pane.
 | `Mod-1` … `Mod-9` | a **position**, in whichever pane has the keyboard: a session in the sidebar, a tab in the response pane (`Mod-9` = the LAST session) |
 | `1` … `9` (in an open question) | marks the option beside that number |
 
-**Vertical is the LIST; horizontal is the canvas.** `j`/`k` walk the sidebar's
+**Vertical is the LIST; horizontal is the TAB STRIP.** `j`/`k` walk the sidebar's
 own order, so the cursor moves through the sessions in the order they are
 printed rather than through whatever happens to be geometrically below.
-`h`/`l` stay geometric, computed from real coordinates at press time and not
-from a fixed index, because across a row there is no list to follow.
+`h`/`l` walk previous/next tab of the active project (`projectTabIds`), a
+closed ring that wraps — including the one-tab ring — unlike `j`/`k`'s
+open-ended list, which does not.
 
 **The digit row means a position, in whatever the keyboard is pointed at.**
 That is the rule; the table above is only today's reading of it. Two earlier

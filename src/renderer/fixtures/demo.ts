@@ -132,7 +132,7 @@ export const DEMO_MODEL: CanvasModel = {
           activity: 'coder · round 2 · sonnet',
           age: '4m',
           // Newest first — the model's order, not the reading order. The canvas
-          // reverses it so the newest lands at the bottom of the node.
+          // reverses it so the newest lands at the bottom of the detail column.
           decisions: [
             {
               id: 'd-r5',
