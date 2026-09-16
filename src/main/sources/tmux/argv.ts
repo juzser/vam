@@ -29,6 +29,8 @@
  * element reaches the exec'd program as one word whatever it contains.
  */
 
+import type { ControlLetter } from '../../../shared/terminal.js';
+
 /**
  * The prefix that makes a session vam's own, AT A GLANCE.
  *
@@ -507,6 +509,109 @@ export function sendBackTabArgv(name: string): readonly string[] {
  */
 export function sendEscapeArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'Escape'];
+}
+
+/**
+ * THE TWENTY-SIX CONTROL CHORDS, one constant each, keyed by the letter.
+ *
+ * THIS TABLE IS THE ANSWER TO `sendBackspaceArgv`'S QUESTION RATHER THAN AN
+ * EXCEPTION TO IT. That note forbids a general `sendKeyArgv(name, keyName)` on
+ * the grounds that a builder taking a key NAME would take the operator's TEXT
+ * just as happily, and the day something passed a reply through it, a message
+ * reading `C-c` would interrupt the agent instead of being typed to it.
+ * Nothing here takes a name. `sendControlArgv` takes a `ControlLetter`, which
+ * is a twenty-six-member union at compile time and a frozen set at runtime
+ * (`shared/terminal.ts`), and the name it sends is one of the constants below.
+ * The property that note protects -- literal text and interpreted key names
+ * never meeting on one code path -- is untouched: there is still no path by
+ * which the operator's text becomes a key name.
+ *
+ * WRITTEN OUT RATHER THAN BUILT AS a `C-` template, and that IS the point: a
+ * template is precisely a place where a value becomes a key name. Twenty-six
+ * literals cannot be made to produce a twenty-seventh string.
+ *
+ * THE SPELLING IS TMUX'S OWN, READ OFF TMUX. `tmux list-keys` on 3.7b -- a
+ * read-only query, run against the server this machine already had -- prints
+ * twenty-one of these names verbatim in its default key tables (`C-a C-b C-c
+ * C-d C-e C-f C-g C-h C-j C-k C-l C-n C-o C-p C-r C-s C-u C-v C-w C-y C-z`),
+ * in the same key-name grammar `send-keys` parses. The five that do not appear
+ * (`C-i`, `C-m`, `C-q`, `C-t`, `C-x`) are absent only because tmux binds
+ * nothing to them by default, not because they are spelled differently.
+ *
+ * WHAT IS NOT MEASURED, said plainly because everything else in this file is.
+ * `BSpace` and `BTab` each carry a measurement of what the PANE RECEIVED, made
+ * against `cat -v` in a real session. No such measurement stands behind these:
+ * taking one means creating a tmux session, and the change that added them was
+ * made on a machine whose tmux server holds somebody's live agents. The
+ * spelling and the parser are evidence; that `send-keys C-u` puts 0x15 into
+ * the pane rather than something else is inference from them.
+ */
+const CONTROL_KEY_NAMES: Readonly<Record<ControlLetter, string>> = {
+  a: 'C-a',
+  b: 'C-b',
+  c: 'C-c',
+  d: 'C-d',
+  e: 'C-e',
+  f: 'C-f',
+  g: 'C-g',
+  h: 'C-h',
+  i: 'C-i',
+  j: 'C-j',
+  k: 'C-k',
+  l: 'C-l',
+  m: 'C-m',
+  n: 'C-n',
+  o: 'C-o',
+  p: 'C-p',
+  q: 'C-q',
+  r: 'C-r',
+  s: 'C-s',
+  t: 'C-t',
+  u: 'C-u',
+  v: 'C-v',
+  w: 'C-w',
+  x: 'C-x',
+  y: 'C-y',
+  z: 'C-z',
+};
+
+/**
+ * Press one Ctrl chord -- the SIXTH interpreted key, and the first that is a
+ * family rather than a single key.
+ *
+ * INTERPRETED, WHICH IS THE WHOLE OF IT, and it is the opposite case to
+ * `sendTextArgv` above. `-l` is what makes tmux type an argument instead of
+ * pressing it, so `send-keys -l -- 'C-u'` would put the three characters `C`,
+ * `-` and `u` on the operator's line. A chord has to go through tmux's own key
+ * translation, exactly as `Enter` and `BSpace` do -- which is why `control` is
+ * a `PaneKey` kind and not a character inside a `text` one.
+ *
+ * `--` IS HERE WHERE THE OTHER FIVE INTERPRETED BUILDERS HAVE NONE, and the
+ * difference is deliberate rather than drift. Those five pass a compile-time
+ * constant with no data path into it at all; this one passes a constant
+ * SELECTED BY a value that came off the bridge. The terminator makes "no
+ * argument can be read as an option" a property of the argv's SHAPE instead of
+ * a property of what happens to be in the table above -- and it costs nothing,
+ * because the same probe that established `-l` also confirmed tmux honours
+ * `--` on `send-keys` (see `sendTextArgv`).
+ *
+ * THE LOOKUP REFUSES RATHER THAN SPLICING. A letter with no constant is
+ * unreachable twice over -- `isPaneKey` turns it away at the bridge and the
+ * parameter's type turns it away at compile time -- but the alternative to a
+ * refusal is an argv with a hole in it, which reaches `execFile` as the string
+ * `undefined` and tmux as a key name it does not know. Throwing is what
+ * `newSessionArgv` already does for an argv that must never be built.
+ */
+export function sendControlArgv(name: string, letter: ControlLetter): readonly string[] {
+  const keyName = CONTROL_KEY_NAMES[letter];
+  if (keyName === undefined) {
+    // Its own sentence rather than `failCommand`'s, which names `new-session`
+    // and would send the next reader to the wrong builder entirely.
+    throw new Error(
+      `vam will not build a tmux send-keys argv: \`${String(letter)}\` is not one of the twenty-six control chords`,
+    );
+  }
+  return ['send-keys', '-t', paneTarget(name), '--', keyName];
 }
 
 /**

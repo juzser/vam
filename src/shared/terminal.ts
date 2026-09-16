@@ -138,6 +138,29 @@ export function isPaneSize(size: PaneSize): boolean {
  * a terminal that eats it is not a terminal. It was vam's way out of the
  * surface until they said it should be the pane's, and they were right.
  *
+ * `control` IS THE THIRD, AND IT IS THE LARGEST ONE THIS TYPE WILL EVER TAKE.
+ * The operator's report was that Ctrl+U would not kill the line "or any other
+ * terminal shortcut", and they were exactly right: `TerminalTab.tsx` returned
+ * early on every modified key from the day the pane first learned to type, so
+ * not one chord had ever crossed this channel. Ctrl+U, Ctrl+C, Ctrl+A, Ctrl+E,
+ * Ctrl+K, Ctrl+W, Ctrl+R, Ctrl+D and Ctrl+L are what a terminal is driven
+ * with, and a surface that can type into a running agent but cannot interrupt
+ * it is a worse tool than one that types nothing.
+ *
+ * AND IT CARRIES A LETTER, NOT A KEY NAME -- which is the sentence the
+ * `back-tab` note above is defending, made to hold for twenty-six chords
+ * instead of one. `sendBackspaceArgv` argues that vam must never grow a
+ * builder taking a key NAME, because such a builder would take the operator's
+ * TEXT just as happily, and the day something passed a reply through it a
+ * message reading `C-c` would interrupt an agent instead of being typed to it.
+ * That property is untouched. `letter` is one of twenty-six values checked
+ * against a frozen set, and `tmux/argv.ts` turns it into a key name by LOOKING
+ * IT UP in a table of twenty-six string constants -- so a value off the bridge
+ * is an INDEX and never a name. It cannot reach tmux as an option, as a second
+ * command, or as any key vam did not write down in advance. The twenty-six
+ * named builders the letter-by-letter reading of that note would demand ARE
+ * that table, written once.
+ *
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a
  * boolean that a missing field can make false.
@@ -149,7 +172,82 @@ export type PaneKey =
   /** Shift-Tab, `BTab` to tmux -- the session's own cycle-the-mode chord. */
   | { readonly kind: 'back-tab' }
   /** Escape, `Escape` to tmux -- the key every TUI cancels on. */
-  | { readonly kind: 'escape' };
+  | { readonly kind: 'escape' }
+  /** One Ctrl chord -- `C-u` to tmux, and its twenty-five siblings. */
+  | { readonly kind: 'control'; readonly letter: ControlLetter };
+
+/**
+ * THE WHOLE ALLOWLIST OF CHORDS, written out rather than derived.
+ *
+ * Twenty-six, and it is the letters exactly: Ctrl with a letter is the only
+ * shape that produces a C0 control character on every keyboard there is --
+ * `C-a` through `C-z` are 0x01 through 0x1a -- which is what makes this list
+ * CLOSED rather than a first instalment. `Ctrl+1` produces no control
+ * character in any terminal, so it is deliberately left to vam, where it still
+ * picks a session tab from inside the pane (`TerminalTab.tsx` carries that
+ * argument and the trade it makes).
+ *
+ * The punctuation chords a C0 table also holds -- `C-[`, `C-\`, `C-]`, `C-^`,
+ * `C-_` -- are NOT here, and their absence is a decision rather than an
+ * oversight. `C-[` IS Escape, which already has a kind of its own above; the
+ * other four sit on a different physical key on every layout, so each would be
+ * its own argument about what `event.key` means rather than a member of this
+ * family.
+ *
+ * SPELLED AS LITERALS so the union is twenty-six string types and the compiler
+ * can refuse a twenty-seventh. A `string` narrowed by a regular expression
+ * would be one `as` away from being a key name again.
+ */
+export const CONTROL_LETTERS = [
+  'a',
+  'b',
+  'c',
+  'd',
+  'e',
+  'f',
+  'g',
+  'h',
+  'i',
+  'j',
+  'k',
+  'l',
+  'm',
+  'n',
+  'o',
+  'p',
+  'q',
+  'r',
+  's',
+  't',
+  'u',
+  'v',
+  'w',
+  'x',
+  'y',
+  'z',
+] as const;
+
+/** One of the twenty-six above, and nothing else is assignable to it. */
+export type ControlLetter = (typeof CONTROL_LETTERS)[number];
+
+const CONTROL_LETTER_SET: ReadonlySet<string> = new Set<string>(CONTROL_LETTERS);
+
+/**
+ * Whether a value off the bridge names one of the twenty-six chords.
+ *
+ * A `Set` built FROM the list rather than a regular expression beside it: a
+ * regex is a second spelling of the same fact and can drift from it silently
+ * (`/^[a-z]$/` and a list of twenty-five would disagree and neither would
+ * complain), and membership of the array IS the definition.
+ *
+ * Exported because the renderer decides with it too. One list asked by both
+ * sides is what stops the pane building a stroke main then refuses as
+ * malformed -- a refusal the tab draws as a sentence about session PAIRING,
+ * which would send the operator after a problem that was never there.
+ */
+export function isControlLetter(value: unknown): value is ControlLetter {
+  return typeof value === 'string' && CONTROL_LETTER_SET.has(value);
+}
 
 /**
  * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
@@ -186,7 +284,7 @@ export type PaneSendResult = 'sent' | 'unaimed' | 'unavailable' | 'mispaired' | 
 /** Whether a value off the bridge is a keystroke vam will send. */
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;
-  const key = value as { kind?: unknown; text?: unknown };
+  const key = value as { kind?: unknown; text?: unknown; letter?: unknown };
   if (
     key.kind === 'enter' ||
     key.kind === 'backspace' ||
@@ -195,6 +293,10 @@ export function isPaneKey(value: unknown): value is PaneKey {
   ) {
     return true;
   }
+  // The only kind that carries a field main turns into a tmux KEY, and so the
+  // only one whose field is checked against a closed list rather than bounded
+  // in length: `letter` is looked up, never spliced.
+  if (key.kind === 'control') return isControlLetter(key.letter);
   return (
     key.kind === 'text' &&
     typeof key.text === 'string' &&

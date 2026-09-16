@@ -31,6 +31,7 @@ import { claimedPanes } from '../sources/claude-code/session-pane.js';
 import {
   sendBackspaceArgv,
   sendBackTabArgv,
+  sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
   sendTextArgv,
@@ -346,11 +347,12 @@ export async function sendToPane(
 ): Promise<PaneSendResult> {
   const match = { name } as const;
   // The builders are kept apart in `tmux/argv.ts` for the one reason that
-  // matters here: `-l` types, and Return, Backspace, Shift-Tab and Escape have
-  // to be PRESSED. There is deliberately no builder that takes a key name, so
-  // nothing here can turn the operator's text into a keypress by accident --
-  // and this switch is where that holds: a `kind` off the bridge selects one
-  // of four fixed argvs, and only `text` carries anything the operator wrote.
+  // matters here: `-l` types, and Return, Backspace, Shift-Tab, Escape and a
+  // Ctrl chord have to be PRESSED. There is deliberately no builder that takes
+  // a key name, so nothing here can turn the operator's text into a keypress
+  // by accident -- and this switch is where that holds: a `kind` off the bridge
+  // selects one of five fixed argvs, or one of twenty-six constants in a table
+  // it can only INDEX, and only `text` carries anything the operator wrote.
   const argv =
     key.kind === 'enter'
       ? sendEnterArgv(match.name)
@@ -365,6 +367,13 @@ export async function sendToPane(
               // literally it would put the six letters of `Escape` into a
               // prompt that was waiting to be dismissed.
               sendEscapeArgv(match.name)
-            : sendTextArgv(match.name, key.text);
+            : key.kind === 'control'
+              ? // THE LARGEST KEY THIS FUNCTION SENDS, and aimed by exactly the
+                // same guard for that reason: `C-c` interrupts a tool call,
+                // `C-d` can end a shell and `C-z` suspends one, so a chord in
+                // the wrong pane is a bigger mistake than a letter in it and
+                // never a smaller one.
+                sendControlArgv(match.name, key.letter)
+              : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

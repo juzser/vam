@@ -43,6 +43,19 @@
  *      absolutely positioned inside the scrolling region, so a plain `.focus()`
  *      scrolls the pane to it; `preventScroll` is what stops the screen
  *      jumping under the operator on every click.
+ *   8. A CONTROL CHORD REALLY REACHES THE PANE, AND VAM REALLY DOES NOT HEAR
+ *      IT. The operator's report was that Ctrl+U would not kill the line "or
+ *      any other terminal shortcut", and the cause was one early `return` that
+ *      had handed every modified key back to vam since this pane learned to
+ *      type. Only a real browser can answer the half that matters: a REAL
+ *      `Ctrl+U` keydown, with the modifier actually held, dispatched at the
+ *      element Chromium has actually focused, arriving at the window listener
+ *      vam really attaches -- or not arriving, which is the assertion. A
+ *      hand-built `KeyboardEvent` is not cancelable the same way and cannot
+ *      measure who won; that is the same reason `run-web-guards.mjs` already
+ *      gives for the key-truth guard. And the LINE is measured with it:
+ *      `Ctrl+1` must still reach vam, because `Mod-<digit>` is the tab switch
+ *      an operator uses to leave this pane.
  *
  * THE BRIDGE IS A STUB, injected with `page.addInitScript`, exactly as
  * `files-tab-keyboard-shots.mjs` does and for the same reason recorded there:
@@ -65,6 +78,12 @@
  *     insert-stop check reddens.
  *   - give the pane `tabIndex={0}` again -> case 4's Shift+Tab reddens.
  *   - drop `preventScroll` -> case 7 reddens.
+ *   - put `event.ctrlKey` back in the early `return` in `TerminalTab.tsx` ->
+ *     case 8's Ctrl+U reddens.
+ *   - drop the `event.stopPropagation()` from the chord branch -> case 8's
+ *     "vam never hears it" reddens while the send still lands.
+ *   - widen the chord branch to accept any one-character key -> case 8's
+ *     Ctrl+1 reddens.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/terminal-ime-shots.mjs http://localhost:5520 docs/ui
@@ -105,6 +124,23 @@ function check(label, ok, detail) {
 await page.addInitScript(() => {
   const SCREEN = Array.from({ length: 200 }, (_, i) => `line ${i} of the pane's screen`).join('\n');
   globalThis.window.__sent = [];
+  /**
+   * WHAT VAM'S OWN KEYBOARD HEARS, recorded where `Canvas.tsx` listens.
+   *
+   * On `window`, which is the element `Canvas.tsx` attaches its keydown
+   * listener to, so this hears a key exactly when vam's grammar would. It is
+   * the only way to measure OWNERSHIP as an outcome rather than as a
+   * `defaultPrevented` flag: a chord the pane claims has to stop before here,
+   * and a chord it declines has to arrive.
+   *
+   * Registered from an init script so it is attached before the bundle runs
+   * and cannot be ordered away by whatever React does later; `keydown` bubbles
+   * to `window` last either way.
+   */
+  globalThis.window.__heard = [];
+  globalThis.window.addEventListener('keydown', (event) => {
+    globalThis.window.__heard.push(event.key);
+  });
   const unavailable = () =>
     Promise.resolve({
       kind: 'unavailable',
@@ -200,6 +236,13 @@ const sent = () =>
   page.evaluate(() => {
     const list = globalThis.window.__sent;
     globalThis.window.__sent = [];
+    return list;
+  });
+/** Everything vam's own window listener heard, and reset. */
+const heard = () =>
+  page.evaluate(() => {
+    const list = globalThis.window.__heard;
+    globalThis.window.__heard = [];
     return list;
   });
 /** Where Chromium says the keyboard is, and what the status bar claims. */
@@ -538,6 +581,115 @@ check(
   'and Shift+Tab out again really leaves — a pane that was its own tab stop would hand it back',
   !out.inPane,
   `the keyboard is still on <${out.tag}>, which is the focus trap this shape exists to avoid`,
+);
+
+// ---------------------------------------------------------------------------
+// 8. A CONTROL CHORD REALLY REACHES THE PANE, AND VAM REALLY DOES NOT HEAR IT.
+//
+// LAST, deliberately: the declining half of this section presses `Ctrl+1`,
+// which vam binds to picking a session tab, so it may legitimately navigate
+// away from the terminal. Anything after it would be measuring a surface the
+// keystroke was allowed to change.
+//
+// The keyboard has to come back first -- the Tab checks above left it outside
+// the pane on purpose.
+
+await page.evaluate(() => {
+  document.querySelector('[data-terminal-pane]').focus();
+});
+await page.waitForTimeout(150);
+const backOnBox = await keyboardAt();
+check(
+  'the keyboard is back in the pane, or the chord checks below prove nothing',
+  backOnBox.isBox,
+  JSON.stringify(backOnBox),
+);
+
+/** A keydown with real modifiers held: Alt 1, Ctrl 2, Meta 4, Shift 8. */
+const chordDown = (key, code, keyCode, modifiers) =>
+  cdp.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key,
+    code,
+    windowsVirtualKeyCode: keyCode,
+    nativeVirtualKeyCode: keyCode,
+    modifiers,
+  });
+const CTRL = 2;
+
+await sent();
+await heard();
+await chordDown('u', 'KeyU', 85, CTRL);
+await page.waitForTimeout(200);
+const killedLine = await sent();
+check(
+  'Ctrl+U reaches the pane as a control chord — the report this whole change is about',
+  killedLine.length === 1 &&
+    killedLine[0]?.kind === 'control' &&
+    killedLine[0]?.letter === 'u',
+  `the pane sent ${JSON.stringify(killedLine)}`,
+);
+check(
+  'and vam never hears it, so one keystroke does not also scroll a transcript',
+  (await heard()).length === 0,
+  '`Mod-u` reached the window listener as well as the pane',
+);
+
+await chordDown('c', 'KeyC', 67, CTRL);
+await page.waitForTimeout(200);
+const interrupted = await sent();
+check(
+  'Ctrl+C reaches it too, which is how an operator interrupts a running agent',
+  interrupted.length === 1 &&
+    interrupted[0]?.kind === 'control' &&
+    interrupted[0]?.letter === 'c',
+  `the pane sent ${JSON.stringify(interrupted)}`,
+);
+await heard();
+
+// `Ctrl+W` IS THE ONE WITH TEETH. vam binds `Mod-w` to CLOSING the session,
+// and `normalizeKey` folds Ctrl into `Mod-`, so a chord that reached both
+// layers would delete the word AND close the tab it was typed in. The harm is
+// checked here and not just the mechanism: the pane has to still be there.
+await chordDown('w', 'KeyW', 87, CTRL);
+await page.waitForTimeout(250);
+const deletedWord = await sent();
+check(
+  'Ctrl+W reaches the pane',
+  deletedWord.length === 1 &&
+    deletedWord[0]?.kind === 'control' &&
+    deletedWord[0]?.letter === 'w',
+  `the pane sent ${JSON.stringify(deletedWord)}`,
+);
+check(
+  'and the session it was typed into is still open — `Mod-w` never heard it',
+  (await heard()).length === 0 &&
+    (await page.locator('[data-terminal-pane]').count()) === 1,
+  'Ctrl+W closed the session on its way to the shell',
+);
+const stillTyping = await keyboardAt();
+check(
+  'and the keyboard is still on the box, so the next thing typed is a letter again',
+  stillTyping.isBox,
+  JSON.stringify(stillTyping),
+);
+
+// AND THE LINE THE RULE IS DRAWN ON. `Ctrl+1` is no control character in any
+// terminal, so it stays vam's — which is what keeps the tab switch working
+// from inside a pane that has taken every Ctrl+letter.
+await sent();
+await heard();
+await chordDown('1', 'Digit1', 49, CTRL);
+await page.waitForTimeout(250);
+check(
+  'Ctrl+1 is NOT the pane’s: no control character comes of it in any terminal',
+  (await sent()).length === 0,
+  'a digit chord was typed into the agent',
+);
+check(
+  'and it reaches vam, which is the tab switch an operator leaves this pane with',
+  (await heard()).includes('1'),
+  '`Mod-1` never reached the window listener',
 );
 
 await browser.close();
