@@ -275,10 +275,40 @@ function strokeFor(key: string): PaneKey | null {
  *   terminals themselves default Option to compose and make Meta opt-in, so
  *   this is the platform's own answer rather than vam's idiosyncrasy.
  *
- *   NOT SHIFT, AND NOT ALT, ALONGSIDE CTRL. `Ctrl+Shift+P` and `Ctrl+Alt+]`
- *   are real bindings in vam's grammar, and no terminal distinguishes
- *   `Ctrl+Shift+U` from `Ctrl+U` anyway -- both are 0x15. So a chord with a
- *   second modifier held is vam's, which costs the pane nothing.
+ *   SHIFT IS NOT ASKED ABOUT AT ALL, AND THAT IS A CORRECTION. This function
+ *   used to decline a shifted control chord, on the argument that
+ *   `Ctrl+Shift+P` is a real binding in vam's grammar. The argument had the
+ *   fact and the conclusion pointing opposite ways: NO TERMINAL DISTINGUISHES
+ *   `Ctrl+Shift+P` FROM `Ctrl+P` -- both are 0x10, as `Ctrl+Shift+U` and
+ *   `Ctrl+U` are both 0x15 -- so a shifted control chord is a control
+ *   character on the wire and the pane is the layer that owes it to the
+ *   agent. MEASURED, before PR 366: `Ctrl+Shift+H` in a focused terminal moved
+ *   vam's keyboard to the session list and `Ctrl+Shift+P` opened a directory
+ *   picker, while tmux received nothing. PR 366 took Ctrl off vam's six
+ *   application commands on macOS, which stopped the wrong thing happening and
+ *   left the right thing still not happening: the chord did nothing at all.
+ *   The lower-casing below is what makes `'P'` a `ControlLetter`, so claiming
+ *   it costs no second rule. The operator was asked whether they use
+ *   `Ctrl+Shift+<letter>` in a terminal, said they do not, and asked for it
+ *   anyway -- so this is a correctness fix with a measured-low blast radius,
+ *   not a convenience.
+ *
+ *   IT COSTS LINUX AND WINDOWS TWO CHORDS, said rather than discovered later.
+ *   `Mod-` is Ctrl there, so `Ctrl+Shift+H` is `focusList` and `Ctrl+Shift+P`
+ *   is `newProject`, and both are now the pane's while it holds the keyboard
+ *   -- the same bill PR 361 already sent those platforms for `Ctrl+K`,
+ *   `Ctrl+W`, `Ctrl+N` and `Ctrl+T`. The pane does not ask which platform it
+ *   is on and is not given a branch to: one surface answering one keystroke
+ *   two ways would buy no terminal anything. The escape hatch is the one macOS
+ *   already relies on -- the caller declines the COMMAND modifier above, and
+ *   `normalizeKey` spells `Mod-` from Cmd on macOS and from Super on Linux and
+ *   Windows alike, so Super+Shift+H still reaches the session list from inside
+ *   a terminal. That last sentence is pinned by a test and was NOT driven on
+ *   either platform from the machine this was written on.
+ *
+ *   NOT ALT, ALONGSIDE CTRL. `Ctrl+Alt+]` is a real binding in vam's grammar
+ *   and Option is macOS's compose key, so the Alt half of the old rule stands
+ *   exactly as it was.
  *
  *   NOT A DIGIT, AND THAT IS THE LINE THIS FUNCTION IS DRAWN ON. `Ctrl+1`
  *   produces no control character in any terminal, so leaving it to vam costs
@@ -833,9 +863,15 @@ export function TerminalTab({
    *
    * `Ctrl+1` produces no control character in any terminal, so leaving the
    * digit row to vam costs the pane nothing and keeps `Mod-<digit>`,
-   * `Mod-Shift-[` and `Mod-Alt-[` working from inside it. Same for a chord
-   * with a SECOND modifier held: `Ctrl+Shift+P` and `Ctrl+Alt+]` stay vam's,
-   * and no terminal tells `Ctrl+Shift+U` from `Ctrl+U` anyway.
+   * `Mod-Shift-[` and `Mod-Alt-[` working from inside it. `Ctrl+Alt+]` stays
+   * vam's for the same reason with Option's compose duty on top of it.
+   *
+   * `Ctrl+Shift+<letter>` USED TO BE ON THAT LIST AND IS NOT ANY MORE, because
+   * the reason it was there was backwards: no terminal tells `Ctrl+Shift+U`
+   * from `Ctrl+U`, which makes it the PANE'S keystroke and not vam's. It is a
+   * letter, so `controlStrokeFor` claims it and the Shift token never reaches
+   * the wire -- exactly as a real terminal would do. `controlStrokeFor` holds
+   * the measurement, and what it costs Linux and Windows.
    *
    * WHAT IT COSTS, QUOTED HONESTLY. `normalizeKey` folds Ctrl and Cmd into one
    * `Mod-` token, so the chords the pane now claims -- `Mod-k` (palette),
@@ -864,9 +900,12 @@ export function TerminalTab({
    *
    * ── AND THE THREE THAT WERE ALREADY TRUE ─────────────────────────────────
    *
-   * SHIFT IS NOT A CHORD MODIFIER. It is how a capital and every symbol on the
-   * number row is produced; exempting it would leave a pane that cannot type
-   * `K` or `!`.
+   * SHIFT ON ITS OWN IS NOT A MODIFIER HERE AT ALL. It is how a capital and
+   * every symbol on the number row is produced; claiming it would leave a pane
+   * that cannot type `K` or `!`. Held WITH Ctrl it is not asked about either,
+   * and for the opposite-looking reason that is the same reason: the wire
+   * carries no Shift bit on a control character, so `Ctrl+Shift+P` is `C-p`
+   * and the pane owes it to the agent.
    *
    * A printable key, Return and Backspace are the PANE'S, and they are stopped
    * here. The canvas reads a focused element as text entry only when it is an
@@ -929,16 +968,30 @@ export function TerminalTab({
        * does below: a key vam cannot deliver is not vam's to eat. Without a
        * bridge -- the browser build -- a chord goes back to the window
        * listener, where `Mod-k` still opens the palette.
+       *
+       * SHIFT IS NOT ASKED ABOUT, AND THE CLAUSE THAT USED TO ASK WAS A HOLE.
+       * `controlStrokeFor` carries why (no terminal tells `Ctrl+Shift+P` from
+       * `Ctrl+P`); what belongs here is what the clause turned out to be
+       * DOING, since removing a condition is only safe once that is known.
+       * With Ctrl held, nothing below this branch is reachable -- the next
+       * line returns on `ctrlKey || altKey` -- so `!event.shiftKey` decided
+       * exactly one thing: who got `Ctrl+Shift+<letter>`. Every other shifted
+       * Ctrl keystroke still leaves by `controlStrokeFor` answering `null`,
+       * which is the same door it left by before, and
+       * `TerminalTab.control-chords.test.tsx` holds a row for each of them --
+       * Tab, a digit, a bracket, an arrow, Ctrl+Alt -- rather than leaving
+       * that as a claim about the shape of a condition.
        */
-      if (event.ctrlKey && !event.altKey && !event.shiftKey) {
+      if (event.ctrlKey && !event.altKey) {
         const chord = controlStrokeFor(event.key);
         if (chord !== null) {
           if (send === undefined || projectId === null) return;
           // PREVENTED, and not only for vam's sake. In a focused text control
           // on macOS, Chromium honours Cocoa's own emacs bindings -- Ctrl+A,
-          // Ctrl+E, Ctrl+K, Ctrl+U all move or delete in the hidden box -- so
-          // an unprevented chord would edit the composition staging area on
-          // its way to the agent.
+          // Ctrl+E, Ctrl+K, Ctrl+U all move or delete in the hidden box, and
+          // the SHIFTED spellings are the same family's selection-extending
+          // half -- so an unprevented chord would edit the composition staging
+          // area on its way to the agent.
           event.preventDefault();
           /**
            * STOPPED, AND IT DOES TWO JOBS -- one obvious, one MEASURED and

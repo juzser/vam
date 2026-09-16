@@ -143,6 +143,39 @@ describe('Linux and Windows lose none of the eight', () => {
   it('reaches them under Super too, rather than dropping every token', () => {
     expect(press(letter('k', { metaKey: true }), PC).action).toEqual({ kind: 'palette' });
   });
+
+  /**
+   * AND SUPER IS THE ESCAPE HATCH OUT OF A FOCUSED TERMINAL THERE.
+   *
+   * `TerminalTab.tsx` claims every Ctrl+letter and — since the shifted chords
+   * were handed to it — `Ctrl+Shift+<letter>` as well, PLATFORM-BLIND, because
+   * the pane does not know which platform it is on and no terminal's wire
+   * carries the difference anyway. On Linux and Windows that takes the CTRL
+   * spelling of six vam commands away while a terminal holds the keyboard, and
+   * the only thing stopping any of them becoming UNREACHABLE from in there is
+   * this: the pane returns above its chord branch on `metaKey`, and Super
+   * spells `Mod-` here exactly as Cmd does on macOS.
+   *
+   * THE TWO SHIFTED ONES ARE WHY THIS IS A TEST AND NOT A REMARK. The plain
+   * four were already in that position and nobody wrote the hatch down;
+   * `focusList` and `newProject` have now joined them, and a later reader
+   * deciding to spell `command` differently on PC would take the last way back
+   * out of a terminal with it and watch nothing go red.
+   *
+   * NOT DRIVEN ON EITHER PLATFORM. `PC` is a boolean this grammar is asked to
+   * answer as, so what is proved is the SPELLING — not that a Linux browser
+   * reports Super as `metaKey`, which is the web platform's own contract and
+   * is taken on faith here as it is everywhere else in this file.
+   */
+  it('keeps the two SHIFTED commands under Super, which is the way out of a terminal', () => {
+    expect(press(letter('H', { metaKey: true, shiftKey: true }), PC).key).toBe('Mod-Shift-h');
+    expect(press(letter('H', { metaKey: true, shiftKey: true }), PC).action).toEqual({
+      kind: 'focusList',
+    });
+    expect(press(letter('P', { metaKey: true, shiftKey: true }), PC).action).toEqual({
+      kind: 'newProject',
+    });
+  });
 });
 
 describe('what the letter unfold deliberately did NOT touch', () => {
@@ -179,11 +212,21 @@ describe('what the letter unfold deliberately did NOT touch', () => {
  * distinguishes `Ctrl+Shift+P` from `Ctrl+P` -- both are 0x10 -- so the
  * operator was pressing a terminal gesture and getting an application command.
  *
- * Half of that is fixed here and half is not, and the half that is not is
- * named rather than left: vam no longer answers either chord on macOS, so the
- * keystroke stops doing the wrong thing -- but `TerminalTab.tsx` still does not
- * FORWARD it, so it now does nothing at all in a terminal. Widening the pane's
- * claim to `Ctrl+Shift+<letter>` is that file's decision, not this grammar's.
+ * BOTH HALVES ARE FIXED NOW, in two commits and in two files, and this one
+ * only ever owned the first. Here: vam stopped answering either chord on
+ * macOS, so the keystroke stopped doing the wrong thing -- and for a while did
+ * nothing at all, because `TerminalTab.tsx` still did not FORWARD it. There:
+ * the pane's rule lost its `!shiftKey` clause and `Ctrl+Shift+P` became `C-p`
+ * on the wire, which is what every terminal has always sent for it.
+ *
+ * WHAT STAYS THIS GRAMMAR'S BUSINESS is the assertion below, and it is worth
+ * more now than it was when it was written: while the pane has the keyboard a
+ * shifted control chord never reaches vam at all, but the moment focus is
+ * anywhere ELSE on macOS these two must still answer nothing, or the operator
+ * gets a directory picker from a chord they meant for a shell.
+ * `test/panels/TerminalTab.control-chords.test.tsx` owns the other half, and
+ * `Mod-Shift-h`/`Mod-Shift-p` under Super above own what Linux and Windows
+ * pay for it.
  */
 describe('the shifted control chords a terminal would have wanted', () => {
   it('answers neither of them on macOS now', () => {
