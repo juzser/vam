@@ -64,6 +64,7 @@ import { extname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FILE_ROW_INKS } from '../../src/renderer/panels/files-icons.js';
 import { ICON_TONE_INK, ICON_TONES } from '../../src/renderer/panels/icon-value.js';
+import { PALETTE_TEMPLATES, templatePalette } from '../../src/renderer/prefs/palette-templates.js';
 import { contrast } from '../support/contrast.js';
 import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
@@ -205,6 +206,20 @@ const TEXT_GROUNDS = [
  * holds it to 4.5:1, so an edit that reaches for a quieter grey fails there.
  */
 
+/**
+ * The composer's three mode hues, and the two fills the chip behind one has.
+ *
+ * Hoisted out of the test that measures them because the template sweep at the
+ * bottom of this file asks the same question of the same list against fills a
+ * preset supplies, and two copies of one list is the drift this file has
+ * already been caught by twice (`TREE_GLYPH_INKS`, `ICON_TONE_TOKENS`).
+ */
+const MODE_TOKENS = ['--vam-mode-auto', '--vam-mode-manual', '--vam-mode-plan'] as const;
+const MODE_GROUNDS = ['--vam-card', '--vam-line-strong'] as const;
+
+/** The three fills a file-tree row can have under its glyph. */
+const TREE_GLYPH_FILLS = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
+
 /** Tokens that carry body text and therefore owe WCAG 1.4.3's 4.5:1. */
 const TEXT_TOKENS = [
   '--vam-ink',
@@ -305,8 +320,8 @@ describe('token contrast, per theme', () => {
        * quiet on the hover.
        */
       it('paints each mode glyph at 3:1 on the chip it sits in, at rest and on hover', () => {
-        const pairs = ['--vam-mode-auto', '--vam-mode-manual', '--vam-mode-plan'].flatMap((token) =>
-          ['--vam-card', '--vam-line-strong'].map((ground) => [token, ground] as const),
+        const pairs = MODE_TOKENS.flatMap((token) =>
+          MODE_GROUNDS.map((ground) => [token, ground] as const),
         );
         // 3 hues x 2 chip states. The literal is the point, as above: dropping
         // a mode or a state from either list has to redden this, not quieten
@@ -449,8 +464,9 @@ describe('token contrast, per theme', () => {
       });
 
       it('draws every file-tree glyph at 3:1 on all three fills a row can have', () => {
-        const fills = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
-        const pairs = TREE_GLYPH_INKS.flatMap((ink) => fills.map((fill) => [ink, fill] as const));
+        const pairs = TREE_GLYPH_INKS.flatMap((ink) =>
+          TREE_GLYPH_FILLS.map((fill) => [ink, fill] as const),
+        );
         expect(measure(pairs, 3)).toEqual({ pairs: 15, failing: [] });
       });
     });
@@ -526,4 +542,91 @@ describe('token contrast, per theme', () => {
       used.filter((u) => !TEXT_TOKENS.includes(u.ink as (typeof TEXT_TOKENS)[number])),
     ).toEqual([]);
   });
+});
+
+/**
+ * THE SAME FLOORS, AGAINST THE FILLS A COLOUR TEMPLATE PUTS THERE INSTEAD.
+ *
+ * Everything above reads `:root` and `html.light` and stops there, which was a
+ * complete account of vam's palette right up until the appearance settings
+ * grew a row of presets. A template REPLACES five of the fills this file calls
+ * grounds -- `panel`, `sidebar`, `pane`, `raised`, `card` -- and the tokens
+ * drawn ON them are mostly ones it does not set and cannot see: the eight icon
+ * tones, the three mode hues, the file tree's five glyph inks, the quiet ink a
+ * control's border is drawn in. "The ground a glyph is drawn on" is therefore
+ * not one value per theme but eight, and this file was measuring one of them.
+ *
+ * SO THE CORPUS IS THE PALETTE AN OPERATOR CAN ACTUALLY BE LOOKING AT. Each
+ * template's overrides are laid over the stylesheet's own map and the families
+ * re-measured on the result -- which also means a token a template does NOT
+ * set (`line-strong` under the keyboard cursor, `ground` behind a tab) keeps
+ * the stylesheet's value in the pair, because that is what would really be
+ * painted.
+ *
+ * WHY THE 4.5:1 TEXT SWEEP IS NOT ALSO HERE, and it is a split rather than a
+ * gap: `palette-templates.test.ts` owns it, 630 pairs of it, and states the
+ * claim in the form that file needs -- against a TYPED record of the inks each
+ * template was chosen under, so a stylesheet that moves one has to come and
+ * re-derive rather than silently agreeing. The floors in this file are the
+ * non-text ones (WCAG 1.4.11's 3:1), and nothing anywhere was asking them of a
+ * preset's surfaces.
+ *
+ * THE TEMPLATES ARE READ FROM THE MODULE, never listed here, for the reason
+ * `TREE_GLYPH_INKS` above records: a remembered list goes quiet exactly when
+ * somebody adds the thing it was supposed to cover.
+ */
+describe('non-text floors, on every colour template', () => {
+  const TINTED = PALETTE_TEMPLATES.filter((t) => t.kind === 'values');
+
+  it('has templates to measure at all', () => {
+    // A SWEEP OVER AN EMPTY ROW passes every assertion below by having nothing
+    // to compare. Four guards in this repo have gone green on an empty corpus.
+    expect(TINTED.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const theme of THEMES) {
+    const base = tokens(ruleBody(CSS, theme.selector));
+
+    describe(theme.name, () => {
+      it('holds every non-text mark to 3:1 on the fills each template paints under it', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const template of TINTED) {
+          const values = templatePalette(template.id, theme.name);
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${template.id} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          const marks = [
+            // A chosen icon's glyph, on all four fills one is drawn on.
+            ...ICON_TONE_TOKENS.flatMap((ink) => ICON_GROUNDS.map((fill) => [ink, fill] as const)),
+            // The composer's mode glyph, at rest and under a pointer.
+            ...MODE_TOKENS.flatMap((ink) => MODE_GROUNDS.map((fill) => [ink, fill] as const)),
+            // The file tree's glyphs, on all three fills a row can have.
+            ...TREE_GLYPH_INKS.flatMap((ink) =>
+              TREE_GLYPH_FILLS.map((fill) => [ink, fill] as const),
+            ),
+            // The "New session" border, on the sidebar a template repaints.
+            ['--vam-ink-quiet', '--vam-sidebar'] as const,
+            // The bullet a reader finds each list item by, on the pane.
+            ['--vam-ink-quiet', '--vam-pane'] as const,
+          ];
+          for (const [ink, ground] of marks) {
+            pairs += 1;
+            const ratio = contrast(hex(ink), hex(ground));
+            if (ratio < 3) {
+              failing.push(`${template.id}: ${ink} on ${ground} = ${ratio.toFixed(3)}`);
+            }
+          }
+        }
+        // 7 templates x 55 marks each: 8 tones x 4 fills, 3 modes x 2,
+        // 5 glyphs x 3, and the two borders. A LITERAL, not `TINTED.length *
+        // 55`: a count derived from the corpus shrinks with the corpus, so a
+        // template that quietly stopped being tinted would leave this sweep
+        // measuring six palettes and reporting a full house.
+        expect({ pairs, failing }).toEqual({ pairs: 385, failing: [] });
+      });
+    });
+  }
 });

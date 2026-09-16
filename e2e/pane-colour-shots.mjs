@@ -1386,66 +1386,95 @@ if (templateIds.length >= 3) {
   // The pane is still wearing the `--vam-pane` swatch driven further up, so
   // this reads the value the TEMPLATE lands on rather than the stylesheet's --
   // which makes "the press changed something" a real comparison.
-  const beforeTemplate = await page.evaluate(() => ({
+  let beforeTemplate = await page.evaluate(() => ({
     pane: getComputedStyle(document.querySelector('[data-action-pane]')).backgroundColor,
     sidebar: getComputedStyle(document.querySelector('[data-sidebar-pane]')).backgroundColor,
   }));
-  const picked = templateIds[1];
-  await page.locator(`[data-palette-template="${picked}"]`).click();
-  await page.waitForTimeout(350);
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
 
-  const painted = await page.evaluate(() => {
-    const { opaque, lightness, ratio } = window.vamColour;
-    const read = (sel) => {
-      const el = document.querySelector(sel);
-      return el === null ? null : getComputedStyle(el).backgroundColor;
-    };
-    const pane = read('[data-action-pane]');
-    const card = read('[data-question]');
-    const sidebar = read('[data-sidebar-pane]');
-    const bubble = read('[data-detail-scroll="in"]');
-    const all = [pane, card, sidebar, bubble];
-    const both = all.every((c) => c !== null && opaque(c));
-    return {
-      pane,
-      card,
-      sidebar,
-      bubble,
-      allOpaque: both,
-      cardOverPane: both ? Number((lightness(card) - lightness(pane)).toFixed(2)) : null,
-      bubbleOverPane: both ? Number((lightness(bubble) - lightness(pane)).toFixed(2)) : null,
-      bubbleRatio: both ? Number(ratio(bubble, pane).toFixed(3)) : null,
-    };
-  });
-  console.log(`  after "${picked}": ${JSON.stringify(painted)}`);
+  // EVERY TINTED TEMPLATE, NOT ONE OF THEM. This used to press `templateIds[1]`
+  // and take a screenshot of it, which measured the wiring once and said
+  // nothing about the other presets -- and a palette is exactly the kind of
+  // thing that ships broken one entry at a time. Each one is now pressed, its
+  // ladder re-measured AS PAINT, and its own screenshot taken; the last one
+  // pressed stays in force for the `default` section below, which needs some
+  // template in force to have anything to come back from.
+  const tinted = templateIds.filter((id) => id !== 'default');
+  check(
+    'the row offers a real corpus of tinted templates, not one',
+    tinted.length >= 3,
+    JSON.stringify(tinted),
+  );
 
-  check(
-    `pressing "${picked}" repaints the pane and the sidebar`,
-    painted.allOpaque &&
-      painted.pane !== beforeTemplate.pane &&
-      painted.sidebar !== beforeTemplate.sidebar,
-    `${JSON.stringify(beforeTemplate)} -> ${JSON.stringify(painted)}`,
-  );
-  // THE LADDER SURVIVED THE PRESS. A template keeps vam's own lightnesses and
-  // moves only a* and b*, so the card must still clear the pane by the JND the
-  // dark lift bought -- if a preset could flatten this, clicking one would undo
-  // a release of work and nothing would say so.
-  check(
-    `and "${picked}" keeps the card a visible step above the pane`,
-    painted.cardOverPane !== null && painted.cardOverPane >= 2.3,
-    `card is ${painted.cardOverPane} L* over the pane`,
-  );
-  check(
-    `and "${picked}" still draws an In bubble`,
-    painted.bubbleOverPane !== null &&
-      painted.bubbleOverPane > 0 &&
-      painted.bubbleRatio >= BUBBLE_FLOORS.dark.ratio,
-    `bubble ${painted.bubbleOverPane} L* over the pane at ${painted.bubbleRatio}:1`,
-  );
-  await page.screenshot({ path: `${outDir}/palette-template-${picked}.png` });
-  console.log(`${outDir}/palette-template-${picked}.png`);
+  const openSettings = async () => {
+    if ((await page.locator('[data-settings-overlay]').count()) === 0) {
+      await page.locator('button[aria-label="settings"]').click();
+      await page.waitForSelector('[data-settings-overlay]');
+      await page.waitForTimeout(300);
+    }
+  };
+
+  let painted = null;
+  let picked = null;
+  for (const id of tinted) {
+    await openSettings();
+    await page.locator(`[data-palette-template="${id}"]`).click();
+    await page.waitForTimeout(350);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+
+    painted = await page.evaluate(() => {
+      const { opaque, lightness, ratio } = window.vamColour;
+      const read = (sel) => {
+        const el = document.querySelector(sel);
+        return el === null ? null : getComputedStyle(el).backgroundColor;
+      };
+      const pane = read('[data-action-pane]');
+      const card = read('[data-question]');
+      const sidebar = read('[data-sidebar-pane]');
+      const bubble = read('[data-detail-scroll="in"]');
+      const all = [pane, card, sidebar, bubble];
+      const both = all.every((c) => c !== null && opaque(c));
+      return {
+        pane,
+        card,
+        sidebar,
+        bubble,
+        allOpaque: both,
+        cardOverPane: both ? Number((lightness(card) - lightness(pane)).toFixed(2)) : null,
+        bubbleOverPane: both ? Number((lightness(bubble) - lightness(pane)).toFixed(2)) : null,
+        bubbleRatio: both ? Number(ratio(bubble, pane).toFixed(3)) : null,
+      };
+    });
+    console.log(`  after "${id}": ${JSON.stringify(painted)}`);
+
+    check(
+      `pressing "${id}" repaints the pane and the sidebar`,
+      painted.allOpaque &&
+        painted.pane !== beforeTemplate.pane &&
+        painted.sidebar !== beforeTemplate.sidebar,
+      `${JSON.stringify(beforeTemplate)} -> ${JSON.stringify(painted)}`,
+    );
+    // THE LADDER SURVIVED THE PRESS. A template keeps vam's own lightnesses and
+    // moves only a* and b*, so the card must still clear the pane by the JND the
+    // dark lift bought -- if a preset could flatten this, clicking one would undo
+    // a release of work and nothing would say so.
+    check(
+      `and "${id}" keeps the card a visible step above the pane`,
+      painted.cardOverPane !== null && painted.cardOverPane >= 2.3,
+      `card is ${painted.cardOverPane} L* over the pane`,
+    );
+    check(
+      `and "${id}" still draws an In bubble`,
+      painted.bubbleOverPane !== null &&
+        painted.bubbleOverPane > 0 &&
+        painted.bubbleRatio >= BUBBLE_FLOORS.dark.ratio,
+      `bubble ${painted.bubbleOverPane} L* over the pane at ${painted.bubbleRatio}:1`,
+    );
+    await page.screenshot({ path: `${outDir}/palette-template-${id}.png` });
+    console.log(`${outDir}/palette-template-${id}.png`);
+    beforeTemplate = { pane: painted.pane, sidebar: painted.sidebar };
+    picked = id;
+  }
 
   // ------------------------------------- THE WAY BACK, AND WHAT IT PROMISES
   //
@@ -1458,17 +1487,19 @@ if (templateIds.length >= 3) {
   // it walks into a trap no unit test can see paint through: the overrides
   // live on the root's INLINE style and custom properties inherit, so by the
   // time this row is on screen the cascade IS the operator's palette. The
-  // obvious read hands the chip `slate`'s colours and it previews the very
-  // thing it is offering to leave.
+  // obvious read hands the chip the IN-FORCE template's colours and it
+  // previews the very thing it is offering to leave.
   //
-  // So this is measured with `slate` IN FORCE, in a real browser, against the
-  // surfaces it repaints afterwards. The discs promise; the press pays.
+  // So this is measured with a tinted template IN FORCE -- whichever the loop
+  // above pressed last, which is a stronger fixture than naming one, since it
+  // follows the table rather than a memory of it -- in a real browser, against
+  // the surfaces it repaints afterwards. The discs promise; the press pays.
   await page.locator('button[aria-label="settings"]').click();
   await page.waitForSelector('[data-settings-overlay]');
   await page.waitForTimeout(300);
   // EVERY CHIP DRAWS ITS OWN PALETTE, and this is the assertion that keeps the
-  // fix above from over-applying. `default` has to ask the cascade; the four
-  // tinted chips must NOT, or all five previews collapse onto one colour --
+  // fix above from over-applying. `default` has to ask the cascade; every
+  // tinted chip must NOT, or all of the previews collapse onto one colour --
   // the failure that looks most like working software, since the row still
   // renders, still has discs, and still applies the right palette when pressed.
   const firstDiscs = await page.evaluate(() =>
@@ -1482,7 +1513,7 @@ if (templateIds.length >= 3) {
   );
   console.log(`  every chip's pane disc: ${JSON.stringify(firstDiscs)}`);
   check(
-    'every template chip previews a pane of its own, rather than all five sharing one',
+    'every template chip previews a pane of its own, rather than all of them sharing one',
     firstDiscs.length >= 3 &&
       new Set(firstDiscs.map((d) => d.fill)).size === firstDiscs.length &&
       firstDiscs.every((d) => d.fill !== null),
