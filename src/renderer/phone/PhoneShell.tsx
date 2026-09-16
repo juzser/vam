@@ -8,8 +8,8 @@
  * the screen. Every `data-` hook they carry is therefore still where the
  * desktop's tests expect it.
  *
- * One cell of one 580x290 canvas card does not fit in 390px, so the graph is
- * not drawn at all.
+ * One cell of one 580x290 canvas card does not fit in 390px, so the canvas is
+ * not drawn on this screen at all.
  *
  * WHAT SCREEN TWO IS FOR, AND WHAT THAT COST. It is the prompt screen: read
  * the newest output, reply. It is NOT for browsing a session. Two strips of

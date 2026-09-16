@@ -375,12 +375,12 @@ export type Prefs = {
    * Where the operator was looking when they last quit: a SESSION, keyed by
    * its source, or `null` for "nothing was focused".
    *
-   * A session rather than a node id, which is the whole decision here. Node
-   * ids are derived from the layout and change whenever the model, the filters
-   * or the fold state change, so a stored node id would go stale between one
-   * launch and the next without anything having ended. A session id under its
-   * source is the identity `icons` and `renames` already store, and it is what
-   * a re-laid-out canvas can still be matched against (`focus.ts`).
+   * A session rather than a node id, which is the whole decision here. A
+   * remembered focus stores a session id under its source; candidates are
+   * rebuilt whenever the model, the filters or the fold state change, so a
+   * stored one goes stale rather than pointing at a session that has since
+   * ended. A session id under its source is the identity `icons` and
+   * `renames` already store, and it is the one `focus.ts` matches against.
    *
    * EXEMPT FROM THE ICON TTL, and for a different reason than `theme` is. This
    * IS a fact about a session, so the "not about the person" argument does not

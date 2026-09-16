@@ -1493,7 +1493,7 @@ function CanvasInner({
 
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
-    // the sidebar, the node and the detail panel all render `session.title`,
+    // the sidebar, the tab strip and the detail panel all render `session.title`,
     // and none of them should know a title can be vam's own rather than the
     // source's.
     () =>
@@ -2120,11 +2120,11 @@ function CanvasInner({
   /**
    * The one route into the session icon chooser.
    *
-   * Both askers come through here — the `s` chord and the root node's own
+   * Both askers come through here — the `s` chord and each tab's own
    * glyph — because two openers writing through two copies of this is how
    * they drift, and only one of them would keep the refusal below. Stable by
    * construction (functional setState, no model read), so it can sit in a
-   * node's data without going stale as the model refreshes.
+   * tab's data without going stale as the model refreshes.
    */
   /**
    * BEGIN A RENAME ON ONE SESSION, whichever route asked.
@@ -5960,11 +5960,12 @@ function CanvasInner({
         />
       )}
 
-      {/* Moved out of the canvas column when the canvas became hideable: the
-          palette is a window overlay, not part of the graph, and left inside
-          that column `Mod-k` opened a palette nothing could draw in either of
-          the two layouts that hide the canvas. It sits with the other overlays
-          now, over whichever columns are on screen. */}
+      {/* Moved out of the canvas column when that column became hideable: the
+          palette is a window overlay, and the column it left behind used to
+          hold the graph — left inside it, `Mod-k` opened a palette nothing
+          could draw in either of the two layouts that hide the canvas. It
+          sits with the other overlays now, over whichever columns are on
+          screen. */}
       {/* Same reason as the palette above: `?` in a layout that hides the
           canvas would otherwise open a sheet nothing could draw. */}
       {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
