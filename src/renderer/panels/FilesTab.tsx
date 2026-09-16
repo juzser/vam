@@ -205,14 +205,19 @@ export type ListFiles = (sessionId: string) => Promise<FileListResult>;
  *      keeps at least as much as the tree at every pane width, including
  *      `DETAIL_MIN`. The floor still wins last, exactly as `min-width` beats
  *      `max-width` in CSS, so nothing about the narrowest pane changes for an
- *      operator who has dragged nothing. `e2e/files-tab-keyboard-shots.mjs`
- *      measures both as rectangles, after a real drag to the maximum.
+ *      operator who has dragged nothing. `e2e/files-tree-resize-shots.mjs`
+ *      measures both as rectangles, after a real drag to the maximum at
+ *      `DETAIL_MIN` -- and it caught two defects no unit test could see while
+ *      this was being built.
  *
  *   4. A THIRD RESIZABLE BOUNDARY. What happens when the PANE is resized
  *      under a tree whose width was chosen by hand: the chosen width is kept,
  *      and only what is DRAWN shrinks. `renderedTreeWidth` is pure and lives
  *      on the render path only; nothing on a resize, a split, or a tab switch
- *      writes. Widen the pane again and the operator's own number comes back.
+ *      writes. Widen the pane again and the operator's own number comes back
+ *      -- asserted by narrowing a real window and widening it, which is the
+ *      only check in the suite that sees a write-back, because a hidden tab
+ *      is never measured at all.
  *      The one trap this arrangement has is that a hidden pane measures 0px
  *      and this tab is hidden with `display: none` rather than unmounted --
  *      see `files-tree-width.ts`'s header, which is entirely about that.
