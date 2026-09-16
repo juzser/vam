@@ -74,7 +74,6 @@ import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
-import { DEMO_PROMPT } from '../fixtures/demo.js';
 import {
   type ChordState,
   chordText,
@@ -2249,6 +2248,17 @@ function CanvasInner({
   const [collapsedSourceless, setCollapsedSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
+  /**
+   * Holds the query string `onSidebarFilterChange` just set, or `null`. The
+   * incremental-search effect (below `focusSession`) only moves focus when
+   * the CURRENT query still matches this value, so a `matches` recompute for
+   * an unrelated reason — a model refresh, a session landing, a status
+   * change, all of which leave `query` untouched — never consumes a stale
+   * flag and jumps focus on its own. Cleared right after the effect acts on
+   * it. This is what keeps the focus jump keystroke-triggered without the
+   * handler itself running a second `searchMatches` scan.
+   */
+  const filterKeystrokeQuery = useRef<string | null>(null);
 
   const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
 
@@ -3110,6 +3120,20 @@ function CanvasInner({
     },
     [setFocusedSessionId],
   );
+
+  // Incremental-search focus: move the cursor to the first match, but only
+  // for the keystroke that changed the filter query (`filterKeystrokeQuery`
+  // set by `onSidebarFilterChange`), never for a `matches` change caused by
+  // something else — a model refresh, a session landing, a status change,
+  // none of which touch `query`.
+  useLayoutEffect(() => {
+    if (filterKeystrokeQuery.current !== query) return;
+    filterKeystrokeQuery.current = null;
+    const first = matches[0];
+    if (first !== undefined) {
+      focusSession(first);
+    }
+  }, [matches, query, focusSession]);
 
   /**
    * A15.1 — split the FOCUSED pane, MOVING its active tab into the new half.
@@ -5233,19 +5257,15 @@ function CanvasInner({
     setFiltering(true);
   }, [focusedSessionId]);
 
-  const onSidebarFilterChange = useCallback(
-    (next: string) => {
-      setQuery(next);
-      // incsearch: the answer arrives while you type, not after you
-      // commit. Without it the list narrows under a focus ring that is
-      // still pointing at a row the filter just removed.
-      const first = searchMatches(allEntries, next)[0];
-      if (first !== undefined) {
-        focusSession(first);
-      }
-    },
-    [allEntries, focusSession],
-  );
+  const onSidebarFilterChange = useCallback((next: string) => {
+    // incsearch: the answer arrives while you type, not after you
+    // commit. Without it the list narrows under a focus ring that is
+    // still pointing at a row the filter just removed. The move itself
+    // happens in the layout effect above `focusSession`, reading the
+    // memoised `matches` for `next` rather than scanning again here.
+    filterKeystrokeQuery.current = next;
+    setQuery(next);
+  }, []);
 
   const onSidebarOriginFilters = useCallback(
     (next: SessionFilters) => savePrefs(setSessionFilters(prefs, next)),
@@ -5625,7 +5645,7 @@ function CanvasInner({
         answer: globalThis.window?.api?.terminal?.answer,
         prompt:
           source.kind === 'demo'
-            ? async () => DEMO_PROMPT
+            ? async () => (await import('../fixtures/demo.js')).DEMO_PROMPT
             : globalThis.window?.api?.terminal?.prompt,
         terminal: terminalTab,
         files: filesTab,
