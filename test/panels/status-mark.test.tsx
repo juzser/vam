@@ -115,6 +115,29 @@ describe('the status mark', () => {
     expect(idle.innerHTML).toContain('bg-idle');
   });
 
+  it('draws at a caller’s own lane and glyph, with the row’s sizes as the defaults', () => {
+    // The tab strip's line is 16px under a 12px title, not the row's 20 under
+    // 13, so it asks for a 12px lane with the glyph filling it
+    // (`TAB_MARK_LANE_PX` in `Canvas.tsx` carries the argument). Both numbers
+    // reach the DOM: the lane as the box's inline size, the glyph as the
+    // `<svg>`'s own width -- and the glyph is the SAME glyph, so the two
+    // surfaces cannot come to draw two bells.
+    const { container } = render(<StatusMark status="waiting" lane={12} glyph={10} />);
+    const mark = container.querySelector<HTMLElement>('[data-status-mark]');
+    expect(mark?.style.width).toBe('12px');
+    expect(mark?.style.height).toBe('12px');
+    const svg = mark?.querySelector('svg');
+    expect(svg?.getAttribute('width')).toBe('10');
+    expect(svg?.getAttribute('height')).toBe('10');
+    expect(glyphs(mark as Element)).toEqual(['lucide-bell']);
+    cleanup();
+    // And the defaults are the row's, unchanged: an existing caller that
+    // passes nothing draws exactly what it drew.
+    const row = markFor('waiting');
+    expect(row.style.width).toBe(`${MARK_LANE_PX}px`);
+    expect(row.querySelector('svg')?.getAttribute('width')).toBe('12');
+  });
+
   it('names the status aloud, once, for a reader who cannot see a shape at all', () => {
     const mark = markFor('waiting');
     expect(mark.textContent).toBe('waiting');

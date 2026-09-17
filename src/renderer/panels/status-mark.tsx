@@ -10,11 +10,11 @@
  *
  * A module of its own, like `session-icon.tsx` beside it and for the same
  * reason: "which mark stands for a status" is a rule about the session model,
- * not a detail of the sidebar. The sidebar is today's only caller; the tab
- * strip and the phone list still draw their own dots, and when either adopts a
- * mark it should adopt this one rather than reinvent a fourth table. The
- * argument that outlives the caller count is that the rule is statable and
- * testable on its own.
+ * not a detail of the sidebar. The sidebar was the first caller; the tab
+ * strip is the second (`Canvas.tsx`, `TabStrip`), and it adopted this table
+ * rather than keeping its own dot, which is what this paragraph asked of it.
+ * The phone list still draws its own. The argument that outlives the caller
+ * count is that the rule is statable and testable on its own.
  *
  * THE LANE IS FIXED, AND THAT IS HALF THE POINT. A status changes under the
  * operator's eyes -- `running` becomes `waiting` the moment an agent asks a
@@ -53,7 +53,7 @@ export const MARK_LANE_PX = 14;
 /** The glyph inside the lane. Smaller than the lane so a round mark and a
  *  triangular one, which bear their mass differently, both have room to sit
  *  centred rather than one touching the edges. */
-const GLYPH_PX = 12;
+export const GLYPH_PX = 12;
 
 /**
  * One turn of `.vam-spin`, in ms — the same 1.1s the rule in `styles.css`
@@ -95,7 +95,7 @@ export function spinPhaseMs(now: number = Date.now()): number {
  * reader -- test, guard or future surface -- has to retype the list and then
  * drift from it.
  */
-const GLYPH: Readonly<Record<SessionStatus, (phase: number) => ReactElement>> = {
+const GLYPH: Readonly<Record<SessionStatus, (phase: number, size: number) => ReactElement>> = {
   /**
    * Two bodies, one of which the stylesheet always hides.
    *
@@ -110,16 +110,16 @@ const GLYPH: Readonly<Record<SessionStatus, (phase: number) => ReactElement>> = 
    * is one hidden `<svg>` per running row, which is cheaper than a media query
    * subscription per row and, unlike one, cannot disagree with the paint.
    */
-  running: (phase) => (
+  running: (phase, size) => (
     <>
       <LoaderCircle
         data-mark-motion="spin"
         className="vam-spin text-running"
         style={{ animationDelay: `-${phase}ms` }}
-        size={GLYPH_PX}
+        size={size}
         strokeWidth={1.8}
       />
-      <Circle data-mark-motion="rest" className="text-running" size={GLYPH_PX} strokeWidth={1.8} />
+      <Circle data-mark-motion="rest" className="text-running" size={size} strokeWidth={1.8} />
     </>
   ),
   /**
@@ -136,8 +136,8 @@ const GLYPH: Readonly<Record<SessionStatus, (phase: number) => ReactElement>> = 
    * operator leaves on screen all day, and a permanent motion in the corner of
    * the eye is exactly what they asked to be rid of.
    */
-  waiting: () => (
-    <Bell data-mark-swing className="vam-swing text-waiting" size={GLYPH_PX} strokeWidth={1.8} />
+  waiting: (_phase, size) => (
+    <Bell data-mark-swing className="vam-swing text-waiting" size={size} strokeWidth={1.8} />
   ),
   /** The mark for "nothing is happening": the dot the row always had, at the
    *  size it always was, alone in a lane the others fill. */
@@ -146,8 +146,8 @@ const GLYPH: Readonly<Record<SessionStatus, (phase: number) => ReactElement>> = 
    *  column that already has one turning in it. A hair more stroke than its
    *  neighbours because a tick is two strokes and nothing else, and at 12px it
    *  otherwise reads lighter than the glyphs around it. */
-  done: () => <Check className="text-done" size={GLYPH_PX} strokeWidth={2} />,
-  failed: () => <TriangleAlert className="text-failed" size={GLYPH_PX} strokeWidth={1.8} />,
+  done: (_phase, size) => <Check className="text-done" size={size} strokeWidth={2} />,
+  failed: (_phase, size) => <TriangleAlert className="text-failed" size={size} strokeWidth={1.8} />,
 };
 
 /**
@@ -172,9 +172,20 @@ export const SESSION_STATUSES = Object.keys(GLYPH) as readonly SessionStatus[];
 export function StatusMark({
   status,
   announce = true,
+  lane = MARK_LANE_PX,
+  glyph = GLYPH_PX,
 }: {
   status: SessionStatus;
   announce?: boolean;
+  /**
+   * The lane and the glyph, in px, for a caller whose line is not the
+   * sidebar row's. The defaults are the row's; the tab strip passes its own
+   * (`TAB_MARK_LANE_PX` in `Canvas.tsx`, with the argument for the number).
+   * Two numbers rather than a scale so each surface can state its lane as a
+   * fact about its own line box, not as a ratio of somebody else's.
+   */
+  lane?: number;
+  glyph?: number;
 }): ReactElement {
   /**
    * Fixed at mount, not re-read per render.
@@ -196,10 +207,10 @@ export function StatusMark({
          never generates -- the rule would simply not exist and the lane would
          collapse to its content, which is the one thing it must not do. An
          inline style keeps `MARK_LANE_PX` the single place the number lives. */
-      style={{ width: MARK_LANE_PX, height: MARK_LANE_PX }}
+      style={{ width: lane, height: lane }}
       className="flex flex-none items-center justify-center"
     >
-      {GLYPH[status](phase)}
+      {GLYPH[status](phase, glyph)}
       {announce && <span className="sr-only">{status}</span>}
     </span>
   );

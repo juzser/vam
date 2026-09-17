@@ -472,8 +472,8 @@ export const DEMO_MODEL: CanvasModel = {
       ],
     },
     {
-      // A PROJECT OF TWO QUIET SESSIONS, and the only place the two quiet
-      // statuses stand side by side. `idle` is what the CLI calls a live
+      // A PROJECT OF QUIET SESSIONS -- two at first -- and the only place the
+      // two quiet statuses stand side by side. `idle` is what the CLI calls a live
       // session between turns -- the commonest thing an operator has open --
       // and vam painted it `waiting` for as long as the source read every
       // non-busy row as a demand. A fixture with no idle row would leave the
@@ -594,6 +594,48 @@ export const DEMO_MODEL: CanvasModel = {
               // is what a session that failed mid-turn actually looks like.
               output: null,
               commands: [],
+            },
+          ],
+        },
+        {
+          // RUNNING, beside the idle one -- and the fourth row of a project
+          // that was named for holding two. It is here for the tab strip's
+          // indicators (`prefs/tab-indicators.ts`): the operator's rule is
+          // that a resting tab draws NO mark while a busy one draws the
+          // sidebar's own glyph, and that rule is a picture of two tabs on
+          // ONE strip. No strip in this fixture could show it: `factory` has
+          // a running session and no idle one, `notes` had an idle session
+          // and nothing running. So the screenshot the rule is about could
+          // not be taken, and `e2e/tab-strip-shots.mjs` could not measure a
+          // bare tab's width against a spinning one's on the same row.
+          //
+          // NO ICON, deliberately, and the only session in this project
+          // without one: with the icon switch on by default, a tab with an
+          // icon always draws SOMETHING before its title, and the guard needs
+          // one tab whose only mark is its status -- so that "the spinner is
+          // the mark" is measured on a tab where nothing else could be.
+          //
+          // `factory` still holds exactly three; the split-pane guards are
+          // written around that and this row does not touch it.
+          vamControlled: true,
+          id: 'notes-4',
+          title: 'notes-4',
+          icon: null,
+          epic: 'd257-verdict',
+          branch: 'smith/d257/ledger-diff',
+          status: 'running',
+          runningAgents: 0,
+          activity: 'diffing the ledger against the projection',
+          age: '1m',
+          decisions: [
+            {
+              id: 'd-diff',
+              label: 'diff',
+              input: 'Diff the ledger against the projection and list what is missing.',
+              // Still writing. `running`, not `waiting`: it wants nothing yet.
+              output: null,
+              commands: [],
+              errorCount: 0,
             },
           ],
         },

@@ -12,10 +12,13 @@
  * diagnosed and fixed that exact pattern on the sidebar row; the new strip
  * reintroduced it on the primary navigation surface.
  *
- * Plus two operator requests measured here because they are paint:
+ * Plus three operator requests measured here because they are paint:
  *  - the focused tab wears a different opacity AND an accent border-bottom,
  *    with the inactive tabs' text held above 4.5:1 while dimmed;
- *  - the `+` sits next to the last tab rather than at the far right.
+ *  - the `+` sits next to the last tab rather than at the far right;
+ *  - a resting tab draws NO mark and a busy one draws the sidebar's own glyph
+ *    (sections 8-10): the status dot every tab wore is gone, the row is still
+ *    36px, and an unsent draft puts a named pencil after the title.
  *
  * WHY A REAL BROWSER: `opacity`, `pointer-events`, `:focus-visible` and a
  * computed contrast ratio are all resolved styles over Tailwind utilities
@@ -247,8 +250,9 @@ console.log(`${outDir}/tab-strip-marks.png`);
  * --- 6-8. THE OVERFLOWING STRIP, on a page of its own.
  *
  * HOW OVERFLOW IS PRODUCED: a narrow window, not a fixture. The demo's
- * largest project has three sessions, ~412px of tabs; at a 620px viewport the
- * pane's strip is ~310px wide, so the last tab is off its end. 620 is
+ * `factory` project, the one on screen at first paint, has three sessions --
+ * ~433px of tabs now that two of them wear a 12px mark; at a 620px viewport
+ * the pane's strip is ~310px wide, so the last tab is off its end. 620 is
  * deliberately above `PHONE_MAX_WIDTH` (519) — under it this would be
  * measuring the phone shell, which draws no strip. And every check below is
  * preceded by `scrollWidth > clientWidth`: a strip that fits sits at 0 and
@@ -359,13 +363,22 @@ if (afterWheel <= beforeWheel) {
 }
 
 /**
- * --- 8. EVERY TAB REPORTS ITS STATUS, and the mark survives the dimming.
+ * --- 8. A BUSY TAB DRAWS ITS MARK, A RESTING TAB DRAWS NONE, and the row
+ *        does not move.
  *
- * The status ink was applied only to the ACTIVE tab, so three of its four
- * statuses could never be seen. The dot is measured, not read off a class:
- * its box, its composited colour against the strip's ground at the inactive
- * tab's `opacity-85`, and that it is the element actually painted at its own
- * centre — an indicator hidden under a sibling is an indicator nobody sees.
+ * The operator: "if a tab is idle (not running, not waiting for you, ...)
+ * there is no need to show the dot on the tab. A tab should only show
+ * certain indicators." The 6px status dot every tab wore is gone. What is
+ * measured now is the paint of what replaced it (`TAB_MARK_LANE_PX` in
+ * `Canvas.tsx`, `prefs/tab-indicators.ts`):
+ *  - a running tab draws the sidebar's spinner and a waiting tab its bell,
+ *    each at least the 12px lane, painted on top at its own centre, with the
+ *    glyph's ink above 3:1 against the strip once the tab is dimmed;
+ *  - a done tab draws NO status mark, because `done` ships off;
+ *  - the strip's row is the 36px it was before the dot went (measured on
+ *    main before this change: `[data-tab-strip-row]` 36, every tab 35), so
+ *    swapping a 6px dot for a 12px lane moved nothing vertically.
+ * The idle half of the rule is section 9, on the strip that has an idle tab.
  */
 // BACK TO THE FIRST TAB BY THE SIDEBAR — the other route that changes which
 // tab is active, and the one that carries no key repeat to lean on. It puts
@@ -402,122 +415,332 @@ if (bySidebar.scrollLeft !== 0 || bySidebar.leftOfView > 1 || bySidebar.rightOfV
 // point of the measurement.
 await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
 await narrow.waitForTimeout(150);
-/** Every tab's dot as the browser paints it, for whichever project is active. */
-const readDots = () =>
+/**
+ * Every tab as the browser paints it, for whichever project is active: its
+ * status (off the tab itself now, not off a dot), its box, and every
+ * `data-tab-mark` it draws with the glyph's painted ink.
+ */
+const readTabs = () =>
   narrow.evaluate(() => {
     const parse = (s) => s.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number);
+    const STATUS_MARKS = ['running', 'waiting', 'failed', 'done'];
     return [...document.querySelectorAll('[data-session-tab]')].map((tab) => {
-      const dot = tab.querySelector('[data-tab-status]');
-      if (dot === null) return { status: null };
-      const r = dot.getBoundingClientRect();
+      const r = tab.getBoundingClientRect();
       const sr = tab.closest('[data-tab-strip]').getBoundingClientRect();
       const row = tab.closest('[data-tab-strip-row]');
       const rowGround = getComputedStyle(row).backgroundColor;
-      const ground = rowGround.startsWith('rgba(0, 0, 0, 0')
-        ? getComputedStyle(document.body).backgroundColor
-        : rowGround;
+      const ground = parse(
+        rowGround.startsWith('rgba(0, 0, 0, 0') ? getComputedStyle(document.body).backgroundColor : rowGround,
+      );
+      const select = tab.querySelector('[data-tab-select]');
+      const title = select.getBoundingClientRect();
+      const marks = [...tab.querySelectorAll('[data-tab-mark]')].map((mark) => {
+        const id = mark.getAttribute('data-tab-mark');
+        const b = mark.getBoundingClientRect();
+        // The glyph whose ink is painted: for the spinner that is the
+        // turning body, not the ring `prefers-reduced-motion` would swap in.
+        const svg = mark.querySelector('svg:not([data-mark-motion="rest"])');
+        const rest = mark.querySelector('[data-mark-motion="rest"]');
+        const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+        return {
+          id,
+          status: STATUS_MARKS.includes(id),
+          glyph: svg === null ? null : [...svg.classList].find((c) => /^lucide-./.test(c)) ?? null,
+          restHidden: rest === null ? null : getComputedStyle(rest).display === 'none',
+          width: b.width,
+          height: b.height,
+          ink: svg === null ? null : parse(getComputedStyle(svg).color),
+          // Where it sits against the title, in px: negative is before it.
+          fromTitle: b.left - title.right,
+          visible: b.left >= sr.left - 0.5 && b.right <= sr.right + 0.5,
+          onTop: hit !== null && mark.contains(hit),
+          ariaHidden: mark.getAttribute('aria-hidden'),
+          name: mark.getAttribute('aria-label'),
+        };
+      });
       return {
+        title: tab.querySelector('[data-tab-select]').textContent.trim(),
         active: tab.getAttribute('data-active') === 'true',
-        status: dot.getAttribute('data-tab-status'),
+        status: tab.getAttribute('data-tab-status'),
         opacity: Number.parseFloat(getComputedStyle(tab).opacity),
-        colour: parse(getComputedStyle(dot).backgroundColor),
-        ground: parse(ground),
+        ground,
         width: r.width,
         height: r.height,
-        // Only meaningful for a dot the strip is showing: one scrolled past the
-        // scroller's end is clipped, and `elementFromPoint` then answers about
-        // the strip rather than about the dot.
-        visible: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5,
-        onTop: document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === dot,
+        rowHeight: row.getBoundingClientRect().height,
+        // The title's own line box, which every mark has to fit inside: a
+        // mark taller than the line is a mark that moves the row.
+        lineHeight: Number.parseFloat(getComputedStyle(select).lineHeight),
+        // How far the title starts from the tab's left edge: the padding
+        // plus whatever is drawn before it. A reserved empty lane would show
+        // up here as an idle tab with the same offset as a marked one.
+        titleOffset: title.left - r.left,
+        // Is the title the FIRST thing in the tab? On a resting tab it must
+        // be: a dot put back, a lane reserved, anything at all before the
+        // title is the clutter the operator asked to be rid of.
+        firstIsTitle: tab.firstElementChild === select,
+        marks,
       };
     });
   });
 
-const dots = await readDots();
-console.log('status dots:', JSON.stringify(dots));
-if (dots.length < 2) throw new Error('need more than one tab to prove the inactive ones are marked');
-if (dots.some((d) => d.status === null)) {
-  throw new Error('a tab carries no status mark — the strip is the densest status surface here');
+/** The 36px row measured on main before the dot went, and the lane the
+ *  mark is drawn in -- the one constant this guard copies from the source. */
+const ROW_HEIGHT_PX = 36;
+const LANE_PX = 12;
+
+/** 3:1 is WCAG 1.4.11: the mark is a graphical object carrying information,
+ *  not text. Composited over the strip's ground at the tab's own opacity --
+ *  the pixel a reader actually gets. */
+function markContrast(mark, tab) {
+  const blended = mark.ink.map((c, i) => c * tab.opacity + tab.ground[i] * (1 - tab.opacity));
+  return (
+    (Math.max(luminance(blended), luminance(tab.ground)) + 0.05) /
+    (Math.min(luminance(blended), luminance(tab.ground)) + 0.05)
+  );
 }
-const inactiveDots = dots.filter((d) => !d.active);
-if (inactiveDots.length === 0) throw new Error('no inactive tab to measure the dimmed dot on');
-if (!inactiveDots.some((d) => d.visible)) {
-  throw new Error('no inactive dot was inside the strip to measure — the check saw nothing');
+
+/** Every check a drawn status mark owes, whichever strip it is on. */
+function checkStatusMark(tab, expectGlyph) {
+  const statusMarks = tab.marks.filter((m) => m.status);
+  if (statusMarks.length !== 1 || statusMarks[0].id !== tab.status) {
+    throw new Error(
+      `the ${tab.status} tab "${tab.title}" draws ${JSON.stringify(statusMarks.map((m) => m.id))} ` +
+        `for its status, not exactly one ${tab.status} mark`,
+    );
+  }
+  const mark = statusMarks[0];
+  if (mark.glyph !== expectGlyph) {
+    throw new Error(`the ${tab.status} mark draws ${mark.glyph}, not the sidebar's ${expectGlyph}`);
+  }
+  if (mark.width < LANE_PX - 0.5 || mark.height < LANE_PX - 0.5) {
+    throw new Error(`a ${mark.width}x${mark.height} ${tab.status} mark is under its ${LANE_PX}px lane`);
+  }
+  if (mark.height > tab.lineHeight + 0.5) {
+    throw new Error(
+      `a ${mark.height}px ${tab.status} mark is taller than the title's ${tab.lineHeight}px line — ` +
+        'it is not sized for the tab, and it is what would move the row',
+    );
+  }
+  if (mark.fromTitle >= 0) {
+    throw new Error(`the ${tab.status} mark sits after the title (${mark.fromTitle}px), not before it`);
+  }
+  if (mark.ariaHidden !== 'true') {
+    throw new Error(`the ${tab.status} mark is not aria-hidden: one per tab would read every status first`);
+  }
+  if (mark.visible && !mark.onTop) {
+    throw new Error(`the ${tab.status} mark is not the element painted at its own centre`);
+  }
+  if (mark.ink === null) throw new Error(`the ${tab.status} mark has no painted glyph to measure`);
+  const ratio = markContrast(mark, tab);
+  console.log(
+    `${tab.active ? 'active' : 'dimmed'} ${tab.status} mark: ${mark.glyph}, ${mark.width}x${mark.height}, ` +
+      `contrast ${ratio.toFixed(2)}:1 at opacity ${tab.opacity}`,
+  );
+  if (ratio < 3) {
+    throw new Error(
+      `the ${tab.status} mark lands at ${ratio.toFixed(2)}:1 against the strip once dimmed, ` +
+        `under the 3:1 floor for a non-text indicator`,
+    );
+  }
 }
-if (!inactiveDots.some((d) => d.opacity < 1)) {
+
+const busy = await readTabs();
+console.log('the factory strip:', JSON.stringify(busy.map((t) => ({ title: t.title, status: t.status, active: t.active, marks: t.marks.map((m) => m.id) }))));
+if (busy.length < 2) throw new Error('need more than one tab to prove the inactive ones are marked');
+if (busy.some((t) => t.status === null)) {
+  throw new Error('a tab reports no status — `data-tab-status` has to live on the tab now that idle draws nothing');
+}
+if (!busy.some((t) => !t.active && t.opacity < 1)) {
   throw new Error(
     'every inactive tab measured at full opacity, so the contrast below was never checked ' +
       'against the dimming it exists to survive',
   );
 }
-for (const dot of inactiveDots) {
-  if (dot.width < 4 || dot.height < 4) {
-    throw new Error(`a ${dot.width}x${dot.height} status dot is not a mark anyone can see`);
-  }
-  if (dot.visible && !dot.onTop) {
-    throw new Error('the status dot is not the element painted at its own centre');
-  }
-  // Composited over the strip's ground at the tab's own opacity — the pixel a
-  // reader actually gets. 3:1 is WCAG 1.4.11: the dot is a graphical object
-  // carrying information, not text.
-  const blended = dot.colour.map((c, i) => c * dot.opacity + dot.ground[i] * (1 - dot.opacity));
-  const dotRatio =
-    (Math.max(luminance(blended), luminance(dot.ground)) + 0.05) /
-    (Math.min(luminance(blended), luminance(dot.ground)) + 0.05);
-  console.log(`dimmed ${dot.status} dot contrast: ${dotRatio.toFixed(2)}:1 (at opacity ${dot.opacity})`);
-  if (dotRatio < 3) {
-    throw new Error(
-      `the ${dot.status} dot lands at ${dotRatio.toFixed(2)}:1 against the strip once dimmed, ` +
-        `under the 3:1 floor for a non-text indicator`,
-    );
+const waitingTab = busy.find((t) => t.status === 'waiting');
+const runningTab = busy.find((t) => t.status === 'running');
+const doneTab = busy.find((t) => t.status === 'done');
+if (waitingTab === undefined || runningTab === undefined || doneTab === undefined) {
+  throw new Error(`this strip must hold a waiting, a running and a done tab; it holds ${busy.map((t) => t.status).join(', ')}`);
+}
+checkStatusMark(waitingTab, 'lucide-bell');
+checkStatusMark(runningTab, 'lucide-loader-circle');
+const spinner = runningTab.marks.find((m) => m.id === 'running');
+if (spinner.restHidden !== true) {
+  throw new Error('the spinner draws its reduced-motion ring alongside the turning arc — both bodies are on screen');
+}
+if (doneTab.marks.some((m) => m.status)) {
+  throw new Error(
+    `the done tab draws ${JSON.stringify(doneTab.marks.map((m) => m.id))}: \`done\` ships off, and a tick ` +
+      'on every finished session is the grey dot again in a different shape',
+  );
+}
+for (const tab of busy) {
+  if (tab.rowHeight !== ROW_HEIGHT_PX) {
+    throw new Error(`the strip's row is ${tab.rowHeight}px, not the ${ROW_HEIGHT_PX} it was before the dot went`);
   }
 }
-await narrow.screenshot({ path: `${outDir}/tab-strip-status-dots.png` });
-console.log(`${outDir}/tab-strip-status-dots.png`);
+console.log(`the strip's row is ${busy[0].rowHeight}px; tabs are ${[...new Set(busy.map((t) => t.height))].join('/')}px`);
+await narrow.screenshot({ path: `${outDir}/tab-strip-status-marks.png` });
+console.log(`${outDir}/tab-strip-status-marks.png`);
 
-// --- IDLE IS NOT WAITING, measured as pixels rather than as a class name.
-//
-// The source read every interactive row the CLI did not call `busy` as
-// `waiting`, so the CLI's `idle` -- three of five rows on a real machine --
-// wore the amber that means "the ball is with you". Every finished session
-// went loud, which is the badge crying wolf. The `notes` project holds one of
-// each, so one strip carries both dots and the two have to come back as two
-// different colours: a unit test can only read the class back, and this
-// codebase has shipped a rule that matched nothing before.
+/**
+ * --- 9. IDLE IS NOT WAITING, and idle is not ANYTHING: the resting tab.
+ *
+ * The source once read every interactive row the CLI did not call `busy` as
+ * `waiting`, so the CLI's `idle` -- three of five rows on a real machine --
+ * wore the amber that means "the ball is with you". That is still the thing
+ * this section refuses. Now that a resting tab draws no mark at all, the
+ * refusal is stronger than "a different colour": an idle session painted as a
+ * demand would be a tab that grew a bell.
+ *
+ * AND NO LANE IS KEPT FOR THE MARK IT IS NOT WEARING. Measured as the
+ * distance from the tab's left edge to its title: the idle tab's is the
+ * marked tabs' less at least the lane, or the strip is reserving space and
+ * the operator's "no need to show the dot" got them an invisible dot.
+ *
+ * The `notes` project holds one of each of idle, waiting, failed and running
+ * on one strip, which is the picture the rule is about.
+ */
 await narrow.locator('[data-session-row="notes-1"]').click();
 await narrow.waitForTimeout(250);
 await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
 await narrow.waitForTimeout(150);
-const quiet = await readDots();
-console.log('the quiet project’s dots:', JSON.stringify(quiet));
-const idleDot = quiet.find((d) => d.status === 'idle');
-const waitingDot = quiet.find((d) => d.status === 'waiting');
-if (idleDot === undefined || waitingDot === undefined) {
+const quiet = await readTabs();
+console.log('the quiet project’s tabs:', JSON.stringify(quiet.map((t) => ({ title: t.title, status: t.status, active: t.active, titleOffset: Math.round(t.titleOffset), marks: t.marks.map((m) => m.id) }))));
+const idleTab = quiet.find((t) => t.status === 'idle');
+const quietWaiting = quiet.find((t) => t.status === 'waiting');
+const quietFailed = quiet.find((t) => t.status === 'failed');
+const quietRunning = quiet.find((t) => t.status === 'running');
+if (idleTab === undefined || quietWaiting === undefined || quietFailed === undefined || quietRunning === undefined) {
   throw new Error(
-    `this strip must hold an idle tab and a waiting one to tell apart, it holds ` +
-      `${quiet.map((d) => d.status).join(', ')}.`,
+    `this strip must hold an idle, a waiting, a failed and a running tab, it holds ` +
+      `${quiet.map((t) => t.status).join(', ')}.`,
   );
 }
-if (idleDot.colour.join(',') === waitingDot.colour.join(',')) {
+const idleStatusMarks = idleTab.marks.filter((m) => m.status);
+if (idleStatusMarks.length !== 0) {
   throw new Error(
-    `the idle dot and the waiting dot are both rgb(${idleDot.colour.join(', ')}) — an idle ` +
-      'session is being painted as a demand, which is the amber meaning nothing.',
+    `the idle tab draws ${JSON.stringify(idleStatusMarks.map((m) => m.id))} — a resting session is being ` +
+      'painted as something, and if that something is the bell it is the amber meaning nothing.',
   );
 }
-const idleBlend = idleDot.colour.map(
-  (c, i) => c * idleDot.opacity + idleDot.ground[i] * (1 - idleDot.opacity),
+if (idleTab.marks.some((m) => m.id === 'draft')) {
+  throw new Error('the idle tab shows a draft pencil before anything was typed into it');
+}
+if (!idleTab.firstIsTitle) {
+  throw new Error(
+    'something is drawn before the idle tab\'s title — a dot put back, or a lane kept for a mark ' +
+      'it is not wearing',
+  );
+}
+checkStatusMark(quietWaiting, 'lucide-bell');
+checkStatusMark(quietFailed, 'lucide-triangle-alert');
+checkStatusMark(quietRunning, 'lucide-loader-circle');
+// The icon is INSIDE the title button, so it is not part of this offset:
+// what stands between a tab's left edge and its title is the padding, and
+// the status lane with its gap when there is one. Measured: 10px on the
+// idle tab, 28 on the marked ones -- the lane (12) and the strip's `gap-1.5`
+// (6) on top of `px-2.5`.
+console.log(
+  `title offsets: idle ${idleTab.titleOffset.toFixed(1)}px, running ${quietRunning.titleOffset.toFixed(1)}px, ` +
+    `waiting ${quietWaiting.titleOffset.toFixed(1)}px`,
 );
-const idleRatio =
-  (Math.max(luminance(idleBlend), luminance(idleDot.ground)) + 0.05) /
-  (Math.min(luminance(idleBlend), luminance(idleDot.ground)) + 0.05);
-console.log(`idle dot contrast: ${idleRatio.toFixed(2)}:1 (at opacity ${idleDot.opacity})`);
-if (idleRatio < 3) {
+if (quietRunning.titleOffset - idleTab.titleOffset < LANE_PX) {
   throw new Error(
-    `the idle dot lands at ${idleRatio.toFixed(2)}:1 against the strip, under the 3:1 floor — ` +
-      'a quiet status still has to be a visible one.',
+    `the idle tab's title starts only ${(quietRunning.titleOffset - idleTab.titleOffset).toFixed(1)}px ` +
+      `earlier than the running tab's, less than the ${LANE_PX}px lane — the strip is reserving room ` +
+      'for a mark the idle tab does not draw.',
+  );
+}
+if (idleTab.rowHeight !== ROW_HEIGHT_PX || quietRunning.height !== idleTab.height) {
+  throw new Error(
+    `the resting tab and the busy one are ${idleTab.height} and ${quietRunning.height}px tall in a ` +
+      `${idleTab.rowHeight}px row — the mark changed the row's geometry`,
   );
 }
 await narrow.screenshot({ path: `${outDir}/tab-strip-idle-vs-waiting.png` });
 console.log(`${outDir}/tab-strip-idle-vs-waiting.png`);
+
+/**
+ * --- 10. THE DRAFT PENCIL: unsent text in a tab you are not looking at.
+ *
+ * Typed into the failed session's box, then the strip is clicked to another
+ * tab -- which is the whole case: the draft is worth a mark exactly when the
+ * operator has moved away from it. (`Mod-[` would CLEAR the draft, by the
+ * composer's own rule; a tab click keeps it, and that is what is measured.)
+ * The pencil rides AFTER the title, and unlike the status marks it carries a
+ * name, because no other surface reads an unsent draft aloud.
+ */
+/** Type a draft into the failed session, then move to the idle tab by the
+ *  strip. On whichever page: the assertions run on the narrow one and the
+ *  documentation shot is taken on a wide one, below. */
+async function draftOnTheFailedTab(on) {
+  await on.locator('[data-session-row="notes-3"]').click();
+  await on.waitForTimeout(200);
+  await on.keyboard.press('Escape');
+  await on.keyboard.press('Control+[');
+  await on.keyboard.press('i');
+  await on.keyboard.type('half a thought');
+  await on.waitForTimeout(150);
+  await on.locator('[data-session-tab][data-tab-status="idle"] [data-tab-select]').click();
+  await on.waitForTimeout(250);
+}
+await draftOnTheFailedTab(narrow);
+await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
+await narrow.waitForTimeout(150);
+const drafted = await readTabs();
+const draftTab = drafted.find((t) => t.status === 'failed');
+const pencil = draftTab?.marks.find((m) => m.id === 'draft');
+console.log('the drafted tab:', JSON.stringify(draftTab?.marks));
+if (pencil === undefined) {
+  throw new Error('typing into a session and moving to another tab left no pencil on the tab that holds the draft');
+}
+if (pencil.glyph !== 'lucide-pencil') throw new Error(`the draft mark draws ${pencil.glyph}, not a pencil`);
+if (pencil.fromTitle < 0) throw new Error(`the pencil sits before the title (${pencil.fromTitle}px), not after it`);
+if (pencil.name !== 'unsent draft') throw new Error(`the pencil's accessible name is ${JSON.stringify(pencil.name)}`);
+if (pencil.visible && !pencil.onTop) throw new Error('the pencil is not the element painted at its own centre');
+if (drafted.filter((t) => t.marks.some((m) => m.id === 'draft')).length !== 1) {
+  throw new Error('the pencil is on more than one tab, or the draft followed the pane rather than the session');
+}
+checkStatusMark(draftTab, 'lucide-triangle-alert');
+const pencilRatio = markContrast(pencil, draftTab);
+console.log(`the pencil: ${pencil.width}x${pencil.height}, contrast ${pencilRatio.toFixed(2)}:1 at opacity ${draftTab.opacity}`);
+if (pencilRatio < 3) throw new Error(`the pencil lands at ${pencilRatio.toFixed(2)}:1 once dimmed, under 3:1`);
+if (drafted.some((t) => t.rowHeight !== ROW_HEIGHT_PX)) {
+  throw new Error('the pencil changed the row height');
+}
+
+// THE STRIP AS THE OPERATOR SEES IT, cropped to the row: an idle tab bare
+// beside a waiting tab with its bell, a running tab spinning, and a failed
+// tab with a pencil for the draft it holds. On a fresh WIDE page, at 2x, so
+// every tab fits and nothing is clipped by the overflow the narrow page
+// exists to produce; the split the first page made in section 5 would put
+// two strips in the picture. `clip`, not a post-crop: `sips` ignores crop
+// offsets on this machine. The width is the tabs plus the `+`, not the row,
+// which runs to the pane's edge and is mostly ground.
+const wide = await browser.newPage({ viewport: { width: 1100, height: 620 }, deviceScaleFactor: 2 });
+wide.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await wide.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+await wide.waitForSelector('[data-tab-strip]');
+await draftOnTheFailedTab(wide);
+const shot = await wide.evaluate(() => {
+  const row = document.querySelector('[data-tab-strip-row]').getBoundingClientRect();
+  const plus = document.querySelector('[data-tab-new]').getBoundingClientRect();
+  const tabs = [...document.querySelectorAll('[data-session-tab]')].map((t) => ({
+    status: t.getAttribute('data-tab-status'),
+    marks: [...t.querySelectorAll('[data-tab-mark]')].map((m) => m.getAttribute('data-tab-mark')),
+  }));
+  return { x: row.x, y: row.y, width: plus.right - row.x + 8, height: row.height, tabs };
+});
+console.log('the documented strip:', JSON.stringify(shot.tabs));
+if (!shot.tabs.some((t) => t.status === 'idle' && !t.marks.some((m) => m !== 'icon')) ||
+    !shot.tabs.some((t) => t.marks.includes('draft'))) {
+  throw new Error('the documentation shot does not hold a bare idle tab and a drafted one');
+}
+await wide.screenshot({
+  path: `${outDir}/tab-indicators.png`,
+  clip: { x: shot.x, y: shot.y, width: shot.width, height: shot.height },
+});
+console.log(`${outDir}/tab-indicators.png`);
 
 await browser.close();

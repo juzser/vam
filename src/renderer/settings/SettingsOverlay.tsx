@@ -51,6 +51,7 @@ import {
   type Prefs,
   paletteFor,
   paletteValue,
+  resetTabIndicators,
   setDefaultProvider,
   setEditorHighlight,
   setEditorIndent,
@@ -60,12 +61,18 @@ import {
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
+  setTabIndicator,
   setTerminalFontSize,
   setTheme,
   stylesheetPaletteValue,
   type Theme,
 } from '../prefs/prefs.js';
 import { type PromptSubmitKey, SUBMIT_KEY_LABELS } from '../prefs/submit-key.js';
+import {
+  DEFAULT_TAB_INDICATORS,
+  isTabIndicatorOn,
+  TAB_INDICATOR_IDS,
+} from '../prefs/tab-indicators.js';
 import { TERMINAL_FONT_SIZES } from '../prefs/terminal-font.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
@@ -792,6 +799,84 @@ export function SettingsOverlay({
                   <code className="text-ink">· N failed</code> count, and so does the newest turn
                   while the session is working or waiting.
                 </p>
+              </Block>
+
+              {/* WHAT A SESSION TAB DRAWS, and it is here and not under
+                  Sessions by the rule the two sections state about
+                  themselves: `focus view` above is Appearance because
+                  "nothing it changes reaches a session", and `send key` is
+                  Sessions because it decides when a prompt LEAVES for one. A
+                  mark on a tab reaches nothing. It is paint.
+
+                  EIGHT SWITCHES, ONE LIST. The rows are `TAB_INDICATOR_IDS`
+                  mapped, never written out, so a ninth indicator is a row the
+                  moment it is an id -- and idle, which is not an id, cannot
+                  become a row here by accident. The hint carries the one rule
+                  the switches do not: a resting tab shows its title alone.
+
+                  THE CAPTION IS THE WHOLE DOCUMENTATION of a glyph. Three of
+                  these are not guessable from their name, so each says what
+                  the mark MEANS -- "unsent text", "not yet recorded", a
+                  count -- rather than what it looks like.
+
+                  A RESET ONLY ONCE THERE IS SOMETHING TO RESET, the rule the
+                  colours and the shortcuts already keep: a button that can
+                  never act is a button that lies about having a job. */}
+              <Block
+                label={t('settings.appearance.tabIndicators.label')}
+                hint={t('settings.appearance.tabIndicators.hint')}
+                action={
+                  prefs.tabIndicators.join(',') === DEFAULT_TAB_INDICATORS.join(',') ? null : (
+                    <span data-tab-indicators-reset>
+                      <SmallButton
+                        label={t('settings.appearance.tabIndicators.reset')}
+                        onPick={() => onChange(resetTabIndicators(prefs))}
+                      />
+                    </span>
+                  )
+                }
+              >
+                <ul
+                  data-tab-indicators
+                  /* A GRID OF TWO COLUMNS, not eight flex rows. The switch's
+                     own word is `on` or `off`, and the two are not the same
+                     width -- in a flex row each caption would start wherever
+                     its own word ended, and the eight captions read as a
+                     ragged column (measured: it did). `max-content` sizes the
+                     first column by the widest switch, so every caption starts
+                     on one line, with no pixel width written down for it. */
+                  className="grid max-w-[52ch] grid-cols-[max-content_1fr] gap-x-3 gap-y-2"
+                >
+                  {TAB_INDICATOR_IDS.map((id) => (
+                    /* THE SWITCH FIRST, then the caption, so the eight
+                       tracks make one column the eye can read the state off
+                       at a glance -- which is what a switch is for -- and the
+                       captions hang off it as a second column of unequal
+                       lengths, where they cost nothing. The switch's own
+                       `on`/`off` word is kept: it is the state for a reader
+                       who does not share the knob convention. `contents`, so
+                       the list item is a row to a screen reader and nothing
+                       to the grid. */
+                    <li key={id} className="contents">
+                      <Switch
+                        name={`tab-${id}`}
+                        label={t(`settings.appearance.tabIndicators.${id}`)}
+                        checked={isTabIndicatorOn(prefs.tabIndicators, id)}
+                        onChange={(next) => onChange(setTabIndicator(prefs, id, next))}
+                      />
+                      {/* A `<p>`, not a `<span>`: the caption is a SENTENCE and
+                          takes the sentence rank of the case ladder
+                          (`e2e/settings-chrome-shots.mjs`) -- first letter up,
+                          the rest untouched. `vam-sentence` is `::first-letter`,
+                          which applies only to a block container; a span here
+                          measured `none` and the guard read it as a control
+                          name that was never capitalised. */}
+                      <p className="vam-sentence pt-[5px] text-control text-ink-dim">
+                        {t(`settings.appearance.tabIndicators.${id}`)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
               </Block>
 
               {/* THE FILE EDITOR'S OWN TWO, and they are here for the reason
