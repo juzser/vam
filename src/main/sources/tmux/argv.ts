@@ -680,13 +680,24 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
  * is another string to get wrong, and the rows are already in hand.
  *
  * Tabs separate them because a session name cannot contain one -- tmux rejects
- * it -- a project id is a digest (`project-id.ts`), and a pid is digits only
+ * it (measured, 3.7b: `invalid session name`; a space or a `:` it accepts) --
+ * a project id is a digest (`project-id.ts`), and a pid is digits only
  * (`PANE_PID_FORMAT`), so no field can swallow another. An unset option
  * arrives as an empty field, which is precisely the answer "vam did not
  * record this" -- "did not start this one" for the project field, "an older
  * vam, or the tag call itself failed" for the pid field (`createVamSession`
  * degrades silently rather than refusing when that happens; see
  * `VAM_PID_OPTION`).
+ *
+ * THE TABS ONLY SURVIVE A UTF-8 CLIENT. Measured on the same tmux: when the
+ * client's LC_CTYPE is not a UTF-8 locale -- and a GUI launch sets none --
+ * every control character in a `-F` expansion is printed as `_`, so this
+ * listing comes back with no tab on any line. `env/utf8-ctype.ts` gives the
+ * process a UTF-8 LC_CTYPE at startup so that never happens from vam; and
+ * `listVamSessions` refuses a line without its two tabs rather than skipping
+ * it, so if it ever does the answer is "could not ask", not "no sessions".
+ * This is the ONE format here that leans on a control character, and the
+ * argv test counts it.
  */
 export function listSessionsArgv(): readonly string[] {
   return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`];

@@ -333,12 +333,26 @@ function splitCursor(stdout: string): { text: string; cursor: PaneCursor } {
 /**
  * vam's own sessions, and only those.
  *
- * TWO decisions, both load-bearing. First, "no server running" resolves to an
+ * THREE decisions, all load-bearing. First, "no server running" resolves to an
  * EMPTY LIST: no server means no sessions, which is an answer, not a failure.
  * Every other failure stays `unavailable` with its own code. Second, the names
  * are filtered by vam's prefix, so the operator's unrelated `notes` or `irc`
  * session is never presented as something vam started -- and never offered to
  * a caller that might kill it.
+ *
+ * THIRD, A LINE WITHOUT ITS SEPARATORS IS AN UNREADABLE LISTING, NOT A
+ * SESSION TO SKIP. `listSessionsArgv` prints two tabs on EVERY line, tagged or
+ * not, so a non-empty line with fewer than two is not a session in some other
+ * shape: it is tmux telling us its output was rewritten. Measured on tmux
+ * 3.7b: a client whose LC_CTYPE is not UTF-8 -- unset, `C`, or a locale the
+ * system lacks -- prints every control character of a `-F` expansion as `_`,
+ * and a GUI-launched vam has no LANG or LC_* at all. Skipping such lines, as
+ * this loop once did, turned that into `ok, []`: "vam started none of these",
+ * for a machine whose every vam session was in the list -- so the reply
+ * refused as `no-terminal`, and Close and the Terminal tab refused with it,
+ * all pointing the operator at a pane vam could not see. `env/utf8-ctype.ts`
+ * repairs the environment so the tabs survive; this arm is what keeps the
+ * answer honest -- "could not ask", carrying why -- if they ever do not.
  */
 export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
   const { failure, stdout, stderr } = await run(listSessionsArgv());
@@ -350,13 +364,26 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
   }
   const sessions: TmuxSession[] = [];
   for (const line of stdout.split('\n')) {
+    // The one legitimately empty line is the one after the final newline.
+    if (line === '') continue;
     // Split on the FIRST TWO tabs only. The name is whatever follows the
     // second one, so a value that somehow held a tab cannot shorten the name
     // it is paired with.
     const firstTab = line.indexOf('\t');
-    if (firstTab === -1) continue;
-    const secondTab = line.indexOf('\t', firstTab + 1);
-    if (secondTab === -1) continue;
+    const secondTab = firstTab === -1 ? -1 : line.indexOf('\t', firstTab + 1);
+    if (secondTab === -1) {
+      return {
+        kind: 'unavailable',
+        error: {
+          kind: 'unreachable',
+          code: 'listing-unreadable',
+          message:
+            'tmux printed its session listing without the separators vam asked for ' +
+            '(its LC_CTYPE is not a UTF-8 locale, so it rewrote them), and vam will ' +
+            'not guess which sessions are its own from that (listing sessions)',
+        },
+      };
+    }
     const name = line.slice(secondTab + 1).trim();
     if (!isVamSession(name)) continue;
     sessions.push({

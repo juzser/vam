@@ -14,6 +14,7 @@
  * matters here is that the command arrives split.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   capturePaneArgv,
@@ -196,6 +197,40 @@ describe('tmux argv', () => {
       '-F',
       `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`,
     ]);
+  });
+
+  /**
+   * THE FAMILY, COUNTED. Measured on tmux 3.7b: a client whose LC_CTYPE is not
+   * UTF-8 -- a GUI launch has none -- prints every control character of a
+   * `-F` expansion as `_`. The listing's tabs were the one member that was
+   * hit, and it cost every session vam started (`listVamSessions`). This pins
+   * the count at one: a new `-F` format that leans on a tab or a newline must
+   * either join the list here, with its parser refusing a rewritten line the
+   * way the listing's does, or use a printable separator.
+   */
+  it('puts a control character in exactly one -F format, and that one is the listing', () => {
+    const formats = new Map<string, string>();
+    for (const [name, argv] of [
+      ['newSessionArgv', newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w', command: ['claude'] })],
+      ['capturePaneArgv', capturePaneArgv('vam-a1b2c3')],
+      ['listSessionsArgv', listSessionsArgv()],
+    ] as const) {
+      const at = argv.indexOf('-F');
+      expect(at, `${name} carries a -F`).toBeGreaterThan(-1);
+      formats.set(name, argv[at + 1] ?? '');
+    }
+    const isControl = (code: number): boolean => code < 0x20 || code === 0x7f;
+    const controlled = [...formats].filter(([, format]) =>
+      [...format].some((char) => isControl(char.charCodeAt(0))),
+    );
+    expect(controlled.map(([name]) => name)).toEqual(['listSessionsArgv']);
+    // And the corpus is the whole of argv.ts: a fourth `-F` written there
+    // without joining the list above fails here, rather than going unchecked.
+    const source = readFileSync(
+      new URL('../../src/main/sources/tmux/argv.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source.match(/'-F'/g)?.length).toBe(formats.size);
   });
 
   it('records the project on the session with a BARE target, not an =target', () => {
