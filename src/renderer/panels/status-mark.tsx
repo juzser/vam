@@ -36,9 +36,17 @@ import type { SessionStatus } from '../domain/model.js';
 /**
  * The side of the lane every mark is centred in, in px.
  *
- * 14, which is the tallest glyph plus its stroke, and one pixel under the
- * 15px slot the project heading's icon takes: a session's mark reads as a
- * smaller relative of the heading's glyph rather than as its equal.
+ * 14, which is the tallest glyph plus its stroke, and under the 16px slot the
+ * project heading's icon takes: a session's mark reads as a smaller relative
+ * of the heading's glyph rather than as its equal.
+ *
+ * THAT SENTENCE USED TO BE FALSE ON SCREEN, and this number is why it is true
+ * now. The lane was "one pixel under" a 15px slot, which was right about the
+ * boxes and wrong about the ink: the mark's glyph is 12 and the heading's was
+ * 11, so the level above painted as the smaller mark. The heading now draws
+ * its glyph at THIS number -- `HEADING_GLYPH_PX` in `SessionList.tsx` is
+ * `MARK_LANE_PX`, derived rather than copied -- as tall as the whole lane a
+ * mark is merely centred in. Change the lane and the heading follows.
  */
 export const MARK_LANE_PX = 14;
 

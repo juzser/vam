@@ -45,6 +45,51 @@
 
 import { useRef, useState } from 'react';
 
+/**
+ * What a drag handle must wear, in one string — because one of these two
+ * utilities is a REPAIR, and the repair was missing from all three handles.
+ *
+ * `select-none` is the half this module's header already describes: the
+ * gesture suppresses the native drag with `preventDefault()` and the native
+ * selection with this class, and no handle may spell that differently.
+ *
+ * `border-0` IS THE OTHER HALF, AND IT IS NOT TIDYING. Every handle in this
+ * app is an `<hr>` — a native `separator`, which is what biome's
+ * a11y/useSemanticElements rule asks for in place of a bare `role` — and
+ * Tailwind's preflight says this about that element:
+ *
+ *     *, ::before, ::after { border: 0 solid }        // the reset
+ *     hr { height: 0; color: inherit; border-top-width: 1px }
+ *
+ * The second rule comes AFTER the first and re-adds a top border, keeping the
+ * `solid` the reset left behind and taking `currentColor` for its colour. So
+ * an `<hr>` in this app paints a one-pixel rule across its own top edge IN THE
+ * INK COLOUR OF THE COLUMN IT SITS IN, unless something says otherwise — a
+ * near-white line in the dark theme, a near-black one in the light. The
+ * operator reported exactly that at the sidebar's top corner. The loudest
+ * instance was never reported because it is only on screen inside a split: a
+ * horizontal divider is hundreds of pixels wide, so it drew that same rule
+ * most of the way across the pane.
+ *
+ * THE SENTENCE THAT HID IT lived in `PaneResizer` and read: preflight "zeroes
+ * its default margin/border, so nothing here overrides that visually". Half
+ * right — the margin is zeroed and stays zeroed — and the wrong half is why
+ * three handles carried one defect through review. A declaration nobody wrote
+ * is a declaration nobody reads.
+ *
+ * SHARED AS TEXT RATHER THAN AS PROSE, for the reason the header already gives
+ * about the gesture: a rule each caller restates is a rule each caller can
+ * forget, and the next handle inherits the hole. Both utilities are spelled as
+ * whole literals because Tailwind's scanner reads SOURCE TEXT and emits a
+ * utility only where it finds one written out.
+ *
+ * The PAINT is held by `e2e/sidebar-seam-shots.mjs`, which rasterises the seam
+ * and compares its top row of pixels against the rows below it. That division
+ * is deliberate: this defect was invisible to every class-name assertion the
+ * repo had, because no class name was ever wrong.
+ */
+export const RESIZE_HANDLE_RESET = 'select-none border-0';
+
 export type PointerDragHandlers<E extends Element> = {
   readonly onPointerDown: (event: React.PointerEvent<E>) => void;
   readonly onPointerMove: (event: React.PointerEvent<E>) => void;

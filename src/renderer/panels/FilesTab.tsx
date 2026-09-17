@@ -143,7 +143,7 @@ import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
-import { type PointerDragHandlers, usePointerDrag } from './pane-drag.js';
+import { type PointerDragHandlers, RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 import {
   encodeUnsaved,
   NO_UNSAVED_FILES,
@@ -2262,7 +2262,11 @@ function Tree({
  * bare `role`), `cursor-col-resize`, transparent at rest and
  * `bg-line-loudest` on hover and while held -- because an operator who has
  * learned one of vam's three resize boundaries should not have to learn a
- * second grammar for the third.
+ * second grammar for the third. `RESIZE_HANDLE_RESET` is the part of that
+ * vocabulary that is now a constant rather than a copied string: preflight
+ * gives every `<hr>` a 1px `currentColor` top border, so all three handles had
+ * been drawing a hairline across their own top edge, and a copied class list
+ * is how all three came to have the identical defect.
  *
  * NEITHER INSERT MARK, deliberately, and it is worth saying why rather than
  * merely doing it: `keyboard/focus-scope.ts` derives the cursor mode from
@@ -2306,7 +2310,7 @@ function FilesTreeResizer({
       tabIndex={0}
       data-files-tree-resize={dragging ? 'dragging' : 'idle'}
       className={[
-        'absolute top-0 -left-[2px] z-10 h-full w-1 select-none',
+        `absolute top-0 -left-[2px] z-10 h-full w-1 ${RESIZE_HANDLE_RESET}`,
         'cursor-col-resize',
         dragging ? 'bg-line-loudest' : 'bg-transparent hover:bg-line-loudest',
       ].join(' ')}

@@ -91,7 +91,14 @@
  * whether a refused scheme puts a sentence on screen with a box of its own,
  * and whether jumping to `path:line` really SCROLLS the editor there --
  * computed from the textarea's own line height and viewport, both of which
- * are 0 or `''` in happy-dom, where the claim cannot be asked at all.
+ * are 0 or `''` in happy-dom, where the claim cannot be asked at all,
+ * and -- since the operator found a hairline where the sidebar meets the
+ * pane -- WHAT THE TOP ROW OF A SEAM ACTUALLY PAINTS, compared pixel by pixel
+ * against the rows below it. That is the one claim nothing in this repo could
+ * previously make: every element at that seam declared exactly the right
+ * thing, and the line came from Tailwind's own preflight handing every `<hr>`
+ * a `currentColor` top border back after the reset, so the class names, the
+ * tokens and the content scans were all green while the line was on screen.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -139,6 +146,7 @@ const GUARDS = [
   'files-tree-resize-shots',
   'terminal-ime-shots',
   'sidebar-tree-shots',
+  'sidebar-seam-shots',
   'terminal-chrome-shots',
   'tree-icon-shots',
   'out-links-shots',

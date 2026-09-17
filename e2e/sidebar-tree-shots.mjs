@@ -27,6 +27,11 @@
  *    nothing behind a green content scan.
  *  - WHETHER THE BELL EVER STOPS. `animation-iteration-count: 2` is text in a
  *    stylesheet until something watches it run out.
+ *  - HOW MUCH INK A HEADING'S ICON PUTS ON SCREEN, against the marks beneath
+ *    it. A `size` prop is a number handed to one of the two kinds of icon; an
+ *    emoji is text and never sees it, and the two kinds paint different
+ *    amounts of ink at the same number. Only rasterised pixels can say whether
+ *    the level above really reads as the larger mark.
  *
  * It also takes the screenshots that make the whole change reviewable as an
  * image, which is why it seeds two GROUPS: the demo fixture has none, and a
@@ -66,6 +71,14 @@ const PREFS = {
   groups: {
     factory: [{ id: 'g-build', name: 'build', projects: ['factory'] }],
     'claude-code': [{ id: 'g-notes', name: 'notes', projects: ['notes'] }],
+  },
+  // One heading of each KIND of icon, because the two are different rendering
+  // paths and the ink section below measures them against each other. The
+  // demo's own projects carry no icon, so without these the only heading glyph
+  // on screen is the placeholder. `at` is now: the bucket has a 30-day TTL.
+  projectIcons: {
+    factory: { factory: { icon: '📦', at: new Date().toISOString() } },
+    orca: { vam: { icon: 'lucide:rocket:teal', at: new Date().toISOString() } },
   },
 };
 
@@ -266,6 +279,250 @@ check(
   marks.every((m) => m.said === m.status),
   JSON.stringify(marks.map((m) => [m.status, m.said])),
 );
+
+// ---------------------------------------------------------- the heading icons
+
+/**
+ * HOW BIG A HEADING'S ICON PAINTS — the operator's "icon ở sidebar cần lớn
+ * hơn", measured as INK rather than as a `size` prop.
+ *
+ * `HEADING_GLYPH_PX` (`SessionList.tsx`) makes the argument for the number: a
+ * heading's glyph is the status lane, so the level above is finally the larger
+ * mark on screen and not the smaller one. But that number reaches only ONE of
+ * the two kinds of icon. An emoji is text and takes the slot's type class, and
+ * the two kinds do not put the same ink on screen at the same number — on a
+ * Mac an emoji's ink runs three to four pixels PAST its font-size (📦 at 11px
+ * drew 14x14) while a lucide glyph's ink is its `size` or a little under (the
+ * `Monitor` placeholder at 11 drew 11x9). So at the old numbers a placeholder
+ * painted SHORTER than the bell on the row beneath it, and a `size` assertion
+ * would have called that fine.
+ *
+ * Hence pixels. Each icon's box is rasterised with a margin and its ink is
+ * every pixel that is not the surface it sits on, which is the question an
+ * eye asks. What is ASSERTED is only what holds on every platform's fonts:
+ *
+ *   1. the lucide heading glyph and the placeholder paint TALLER than the
+ *      tallest status mark on screen — both sides are SVG, so this is the same
+ *      number on CI's Linux as here;
+ *   2. the emoji is set LARGER than the caption beside it, read as font-size,
+ *      because "bigger" for text is bigger than the text it stands next to;
+ *   3. neither kind spills past its slot, which is what would push the name;
+ *   4. the heading row is still its declared minimum, and the name still
+ *      starts one gap after the slot — a bigger glyph that reflowed the row
+ *      would have "fixed" the icon by moving everything beside it.
+ *
+ * WHAT IS ONLY REPORTED: how far apart the two kinds land. That distance is a
+ * fact about Apple Color Emoji versus Noto Color Emoji as much as about vam,
+ * and an assertion on it would be a guard that is green on one machine and
+ * red on another for reasons no change to this repo made. Here, after the
+ * change: emoji 15, lucide 13, placeholder 12, the tallest mark 11. Before:
+ * 14, 11, 9, 11.
+ *
+ * 📦 rather than the demo's 🔨, deliberately. Emoji ink is not a function of
+ * font-size alone: at every size tried the hammer paints eight or nine pixels
+ * because that is the picture, while nine of ten demo emoji paint full-box.
+ * This section is about what the SLOT does to an icon, not what one glyph
+ * does to itself, so it measures a full-box one.
+ *
+ * The marks are measured after every bell has settled: an arc or a swing
+ * mid-animation has a different ink box every frame.
+ */
+const inkOf = async (selector, label) => {
+  const box = await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (el === null) return null;
+    // ON SCREEN FIRST. The list scrolls, and a mark near its bottom edge sits
+    // under the status bar: a clip that crosses into another surface counts
+    // that surface as ink and reports a 22x20 "glyph" — measured, before this
+    // line existed. Centred, so the margin below has room on both sides.
+    el.scrollIntoView({ block: 'center' });
+    const r = el.getBoundingClientRect();
+    // The surface the icon sits on: the nearest ancestor that paints. Never
+    // `rgba(0, 0, 0, 0)`, which is how an ink count reads a whole box as ink.
+    let ground = null;
+    for (let node = el; node !== null; node = node.parentElement) {
+      const parts = getComputedStyle(node).backgroundColor.match(/[\d.]+/g)?.map(Number);
+      if (parts !== undefined && (parts.length < 4 || parts[3] > 0)) {
+        ground = parts.slice(0, 3);
+        break;
+      }
+    }
+    return { x: r.x, y: r.y, w: r.width, h: r.height, ground };
+  }, selector);
+  if (box === null || box.ground === null) return { label, missing: true };
+  const margin = 4;
+  const clip = {
+    x: Math.floor(box.x) - margin,
+    y: Math.floor(box.y) - margin,
+    width: Math.ceil(box.w) + margin * 2,
+    height: Math.ceil(box.h) + margin * 2,
+  };
+  const shot = await page.screenshot({ clip });
+  const ink = await page.evaluate(
+    async ({ b64, w, h, ground }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, w, h).data;
+      let minX = w;
+      let maxX = -1;
+      let minY = h;
+      let maxY = -1;
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          const i = (y * w + x) * 4;
+          const away = Math.max(
+            Math.abs(d[i] - ground[0]),
+            Math.abs(d[i + 1] - ground[1]),
+            Math.abs(d[i + 2] - ground[2]),
+          );
+          // Anti-aliased edges sit a few steps off the ground; a stroke or a
+          // coloured emoji sits far off it. 24 is well above the first and
+          // well below the second on both themes' surfaces.
+          if (away > 24) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      return maxX < 0 ? { w: 0, h: 0 } : { w: maxX - minX + 1, h: maxY - minY + 1 };
+    },
+    { b64: shot.toString('base64'), w: clip.width, h: clip.height, ground: box.ground },
+  );
+  return { label, slot: { w: Math.round(box.w), h: Math.round(box.h) }, ink };
+};
+
+// Every bell settled before a mark is measured. Polled on `getAnimations()`
+// rather than slept for, so the wait is exactly as long as the ring.
+await page.waitForFunction(
+  () =>
+    [...document.querySelectorAll('[data-status-mark] [data-mark-swing]')].every((el) =>
+      el.getAnimations().every((a) => a.playState === 'finished'),
+    ),
+  null,
+  { timeout: 5_000 },
+);
+
+const inks = {
+  emoji: await inkOf('[data-project-icon="factory"]', 'project heading, emoji'),
+  glyph: await inkOf('[data-project-icon="vam"]', 'project heading, lucide'),
+  placeholder: await inkOf('[data-project-icon="notes"]', 'project heading, placeholder'),
+  group: await inkOf('[data-group-icon="g-build"]', 'group heading, placeholder'),
+  // Every static mark, so the comparison is against the TALLEST of them
+  // rather than against whichever one was handy. Sequential: each one
+  // scrolls itself into view, and two scrolls in flight would race.
+  marks: [],
+};
+for (const s of ['waiting', 'done', 'idle', 'failed']) {
+  inks.marks.push(await inkOf(`[data-session-row] [data-status-mark="${s}"]`, `status mark, ${s}`));
+}
+// Back to the top, so the sections that follow measure the column the
+// operator first sees rather than wherever the last mark happened to be.
+await page.evaluate(() => {
+  document.querySelector('[data-project-heading]')?.scrollIntoView({ block: 'start' });
+});
+console.log('icon ink:', JSON.stringify(inks));
+const headings = [inks.emoji, inks.glyph, inks.placeholder, inks.group];
+check(
+  'every heading icon and every static mark was found and put ink on screen — the comparisons below are about something',
+  [...headings, ...inks.marks].every((i) => !i.missing && i.ink.h > 0 && i.ink.w > 0),
+  JSON.stringify(inks),
+);
+check(
+  'the emoji heading really is an emoji and the lucide one really is a glyph',
+  await page.evaluate(
+    () =>
+      document.querySelector('[data-project-icon="factory"]')?.textContent === '📦' &&
+      document.querySelector('[data-project-icon="vam"] [data-icon-glyph="rocket"]') !== null,
+  ),
+  'the seeded icons did not land on their headings',
+);
+const tallestMark = Math.max(...inks.marks.map((m) => m.ink.h));
+// AT LEAST as tall, not strictly taller, because a glyph's ink is its own
+// shape as well as its `size`: `Folder` at 14 paints 11 tall, the bell at 12
+// paints 11 tall, and "the level above is never the SMALLER mark" is the
+// claim. It still separates the two builds — before this change the `Monitor`
+// placeholder painted 9 and the `Folder` 9 against the same 11.
+check(
+  'the lucide heading glyph and both placeholders paint at least as tall as the tallest status mark — the level above is never the smaller mark',
+  inks.glyph.ink.h >= tallestMark &&
+    inks.placeholder.ink.h >= tallestMark &&
+    inks.group.ink.h >= tallestMark,
+  `lucide ${inks.glyph.ink.h}px, project placeholder ${inks.placeholder.ink.h}px, group placeholder ${inks.group.ink.h}px, tallest mark ${tallestMark}px`,
+);
+const emojiType = await page.evaluate(() => {
+  const heading = document.querySelector('[data-project-heading][data-project-id="factory"]');
+  const slot = heading?.querySelector('[data-project-icon]');
+  const name = [...(heading?.querySelectorAll('span') ?? [])].find(
+    (s) => s.textContent.trim() === 'factory',
+  );
+  return slot && name
+    ? {
+        emoji: Number.parseFloat(getComputedStyle(slot).fontSize),
+        caption: Number.parseFloat(getComputedStyle(name).fontSize),
+      }
+    : null;
+});
+check(
+  'the emoji is set larger than the caption it heads, which is what "bigger" means for text',
+  emojiType !== null && emojiType.emoji > emojiType.caption,
+  JSON.stringify(emojiType),
+);
+check(
+  'neither kind spills past its slot, so nothing here can push the name',
+  headings.every((i) => i.ink.h <= i.slot.h && i.ink.w <= i.slot.w),
+  JSON.stringify(headings.filter((i) => i.ink.h > i.slot.h || i.ink.w > i.slot.w)),
+);
+check(
+  'both headings and the group draw the same slot — a level is not a third kind of icon',
+  headings.every((i) => i.slot.w === headings[0].slot.w && i.slot.h === headings[0].slot.h),
+  headings.map((i) => `${i.label}: ${i.slot.w}x${i.slot.h}`).join(', '),
+);
+console.log(
+  `icon kinds: emoji ${inks.emoji.ink.h}px tall, lucide ${inks.glyph.ink.h}px, placeholder ${inks.placeholder.ink.h}px — reported, not asserted; see the header`,
+);
+// The reflow claim, read off the boxes a bigger glyph would have moved.
+const headingRow = await page.evaluate(() => {
+  const heading = document.querySelector('[data-project-heading][data-project-id="factory"]');
+  const slot = heading?.querySelector('[data-project-icon]');
+  const name = [...(heading?.querySelectorAll('span') ?? [])].find(
+    (s) => s.textContent.trim() === 'factory',
+  );
+  if (!heading || !slot || !name) return null;
+  const h = heading.getBoundingClientRect();
+  const s = slot.getBoundingClientRect();
+  const n = name.getBoundingClientRect();
+  return {
+    rowHeight: Math.round(h.height),
+    minHeight: getComputedStyle(heading).minHeight,
+    slotRight: Math.round(s.right),
+    nameLeft: Math.round(n.left),
+    gap: getComputedStyle(heading).columnGap,
+  };
+});
+console.log('heading row:', JSON.stringify(headingRow));
+check(
+  'the heading row is still its declared minimum — the icon did not make it taller',
+  headingRow !== null && `${headingRow.rowHeight}px` === headingRow.minHeight,
+  JSON.stringify(headingRow),
+);
+check(
+  'and the name still starts exactly one gap after the slot',
+  headingRow !== null &&
+    headingRow.nameLeft - headingRow.slotRight === Number.parseFloat(headingRow.gap),
+  JSON.stringify(headingRow),
+);
+await page
+  .locator('[data-sidebar-pane]')
+  .screenshot({ path: `${outDir}/sidebar-heading-icons.png` });
+console.log(`${outDir}/sidebar-heading-icons.png`);
 
 // A row whose source cannot name a branch draws neither glyph nor dash; a row
 // that has one draws both. Both halves, or "nothing is drawn" would pass on a

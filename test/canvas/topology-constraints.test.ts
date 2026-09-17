@@ -155,6 +155,80 @@ describe('epic.md section 13: standing constraints, made permanent and checkable
     expect(allSrcFiles.length).toBeGreaterThan(cssAndTsFiles.length);
   });
 
+  /**
+   * EVERY `<hr>` HAS TO SAY WHAT ITS TOP BORDER IS, because Tailwind's
+   * preflight already decided for it.
+   *
+   * Preflight resets `*` to `border: 0 solid` and then gives `hr` a
+   * `border-top-width: 1px` back, coloured `currentColor`. So an `<hr>` this
+   * repo writes without saying otherwise paints a one-pixel rule across its
+   * own top edge in the ink colour of its column — the near-white hairline the
+   * operator reported at the sidebar's top corner, and the same rule drawn
+   * hundreds of pixels wide across a horizontal split divider.
+   *
+   * The three drag handles now take that decision from one place
+   * (`RESIZE_HANDLE_RESET`), which is what this scans for. An `<hr>` that
+   * WANTS a rule — the markdown one in `out-markdown.tsx` — satisfies the same
+   * question by declaring a `border-` utility of its own. What cannot pass is
+   * an `<hr>` that answers neither, because that is a border nobody chose.
+   *
+   * THIS IS A CONTENT SCAN AND IT PROVES ONLY THAT THE RULE WAS TYPED. What is
+   * actually painted at the seam is measured in
+   * `e2e/sidebar-seam-shots.mjs`, which rasterises it. The two are not
+   * redundant: this one catches a FOURTH handle written next year, which no
+   * screenshot of today's app can.
+   */
+  it('every <hr> either takes the shared handle reset or declares its own border', () => {
+    const tsxFiles = allSrcFiles.filter((f) => f.endsWith('.tsx'));
+    expect(
+      tsxFiles.length,
+      'the .tsx selector matched nothing, so this rule scanned no files at all',
+    ).toBeGreaterThan(0);
+    const found: string[] = [];
+    const composing: string[] = [];
+    const undecided: string[] = [];
+    for (const f of tsxFiles) {
+      const text = readFileSync(join(SRC_DIR, f), 'utf8');
+      // Each JSX `<hr` element up to the `/>` that closes it — these are all
+      // self-closing, and an `<hr>` with children would not be an `<hr>`.
+      //
+      // `<hr` FOLLOWED BY WHITESPACE, never `<hr>`: the prose above every one
+      // of these handles says "a native <hr>", and a match that started in
+      // that sentence ran on to the real element's `/>` and carried the
+      // comment's own mention of the constant with it — so a handle whose
+      // class list had dropped the reset still read as composing it. Found by
+      // mutation, not by inspection: the harness stripped `PaneResizer`'s
+      // reset and this test stayed green.
+      for (const m of text.matchAll(/<hr\s+(?!>)[\s\S]*?\/>/g)) {
+        // Comments inside the element (a `//` line in a class array) are
+        // prose too, and are removed before the element is read.
+        const element = m[0].replace(/\/\/[^\n]*/g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+        found.push(`src/${f}`);
+        // The interpolated form, which is the only way a constant reaches a
+        // class string — a bare mention would be a name, not a class.
+        const composes = /\$\{RESIZE_HANDLE_RESET\}/.test(element);
+        if (composes) composing.push(`src/${f}`);
+        const decided = composes || /\bborder-(?:0|t\b|t-)/.test(element);
+        if (!decided) undecided.push(`src/${f}: ${element.split('\n')[0]?.trim() ?? ''}`);
+      }
+    }
+    // Both halves of the corpus, asserted rather than printed. Four `<hr>`
+    // elements exist: three resize handles and the markdown rule. A rename
+    // that stopped the pattern matching would otherwise leave this green.
+    expect(
+      found.length,
+      `only found ${found.length} <hr> elements: ${found.join(', ')}`,
+    ).toBeGreaterThanOrEqual(4);
+    expect(
+      composing.length,
+      `only ${composing.length} <hr> compose RESIZE_HANDLE_RESET: ${composing.join(', ')}`,
+    ).toBeGreaterThanOrEqual(3);
+    expect(
+      undecided,
+      `an <hr> takes preflight's 1px top border by default:\n${undecided.join('\n')}`,
+    ).toEqual([]);
+  });
+
   it('this file documents its own blind spot, so a future editor cannot silently strip it', () => {
     const contents = readFileSync(SELF_PATH, 'utf8');
     const phrases = ['CONTENT SCAN', 'cannot distinguish code from prose', 'PR #482'];
