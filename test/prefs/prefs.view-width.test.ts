@@ -4,19 +4,20 @@
  * THE WIDTH OF A VIEW: one stored flag, two measured maxima, and the store
  * that puts the flag in force.
  *
- * WHY THE TWO MAXIMA ARE PINNED HERE AND NOT ONLY IN A COMMENT. The whole of
- * this setting's honesty is that "narrowed" means the SAME PROMISE in four
- * views -- no more than eighty characters on a line -- and that the two pixel
- * answers differ only because a proportional character and a terminal cell are
- * not the same width. A test that restated the pixel numbers as literals would
- * let that promise drift silently the day somebody re-measured one of them and
- * not the other, so every number below is DERIVED from
- * `NARROW_MAX_CHARACTERS` and the one measured advance.
+ * NOT ONE PIXEL NUMBER IS PINNED HERE, AND THAT IS THE POINT. The first cut of
+ * this file pinned `480`, derived from an advance measured once on macOS, and
+ * the first Linux CI run put 83.95 characters on the line it produced. Both
+ * maxima are measurements now -- the prose one off a ruler in the real face
+ * (`narrowProseMaxWidth`), the terminal one off `ch` -- so what is asserted
+ * below is the ARITHMETIC and the DIRECTION, never a platform's answer.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   EMPTY_PREFS,
+  OUT_FONT_SIZE_VAR,
   readPrefs,
   type StorageLike,
   setNarrowViews,
@@ -27,16 +28,17 @@ import {
   activeNarrowViews,
   DEFAULT_NARROW_VIEWS,
   NARROW_MAX_CHARACTERS,
-  NARROW_PROSE_MAX_WIDTH,
-  NARROW_PROSE_TEXT_PX,
   NARROW_TERMINAL_MAX_WIDTH,
-  PROSE_ADVANCE_PX,
+  narrowProseMaxWidth,
+  PROSE_RULER_CLASS,
+  PROSE_RULER_TEXT,
   readNarrowViews,
   setActiveNarrowViews,
   subscribeNarrowViews,
 } from '../../src/renderer/prefs/view-width.js';
 
 const KEY = 'vam.prefs.v1';
+const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
 
 function fake(initial: string | null = null): StorageLike & { value: string | null } {
   return {
@@ -60,12 +62,16 @@ describe('the one promise the narrowed state makes', () => {
     expect(NARROW_MAX_CHARACTERS).toBe(80);
   });
 
-  it('turns that promise into prose pixels through the measured advance, not a guess', () => {
-    // The advance is a MEASUREMENT of the face the app actually paints in
-    // (`view-width.ts` records where it came from); the pixel maximum is that
-    // measurement times the character count and nothing else.
-    expect(NARROW_PROSE_TEXT_PX).toBe(Math.floor(NARROW_MAX_CHARACTERS * PROSE_ADVANCE_PX));
-    expect(NARROW_PROSE_MAX_WIDTH).toContain(`${NARROW_PROSE_TEXT_PX}px`);
+  it('turns that promise into prose pixels from a MEASURED advance, whatever it is', () => {
+    // Swept rather than sampled: the advance is whatever the operator's
+    // platform reports, so every plausible one has to come out right. 5.7180
+    // is the Linux CI figure that broke the frozen constant; 6.0079 is this
+    // macOS machine's.
+    for (const advance of [3, 4.7089, 5.718, 5.893, 6.0079, 8.4402, 11.5]) {
+      expect(narrowProseMaxWidth(advance), `${advance}`).toBe(
+        `calc(${Math.floor(NARROW_MAX_CHARACTERS * advance)}px + 1.75rem)`,
+      );
+    }
   });
 
   it('never rounds the cap UP past its own promise', () => {
@@ -73,10 +79,23 @@ describe('the one promise the narrowed state makes', () => {
     // function is the implementation and this is the rule. 80 × 6.0079 is
     // 480.63; `Math.round` shipped 481, and Chromium measured 80.4 characters
     // on the line. A maximum rounds DOWN or it is not a maximum.
-    expect(NARROW_PROSE_TEXT_PX).toBeLessThanOrEqual(NARROW_MAX_CHARACTERS * PROSE_ADVANCE_PX);
-    // And not by more than a character, which is the other way to satisfy the
-    // line above and be wrong.
-    expect(NARROW_PROSE_TEXT_PX).toBeGreaterThan((NARROW_MAX_CHARACTERS - 1) * PROSE_ADVANCE_PX);
+    for (const advance of [4.7089, 5.718, 5.893, 6.0079, 8.4402]) {
+      const px = Number(/calc\((\d+)px/.exec(narrowProseMaxWidth(advance) ?? '')?.[1]);
+      expect(px, `${advance}`).toBeLessThanOrEqual(NARROW_MAX_CHARACTERS * advance);
+      // And not short by a whole character, which is the other way to satisfy
+      // the line above and be wrong.
+      expect(px, `${advance}`).toBeGreaterThan((NARROW_MAX_CHARACTERS - 1) * advance);
+    }
+  });
+
+  it('caps nothing at all until something has actually been measured', () => {
+    // `fitPane`'s rule, in this file's terms: a ruler that has not been laid
+    // out reports a zero box, and a zero advance would produce a 28px column
+    // of nothing but padding. happy-dom reports exactly those zeros, and so
+    // does every real browser for one frame.
+    for (const nothing of [null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(narrowProseMaxWidth(nothing as number | null), String(nothing)).toBeUndefined();
+    }
   });
 
   it('turns it into terminal columns through `ch`, which is the browser measuring for us', () => {
@@ -86,9 +105,50 @@ describe('the one promise the narrowed state makes', () => {
     // IS eighty columns at whatever size the screen is drawn at -- and the
     // half cell is rounding slack, argued in `view-width.ts`.
     expect(NARROW_TERMINAL_MAX_WIDTH).toContain(`${NARROW_MAX_CHARACTERS + 0.5}ch`);
-    // And it must NOT be the prose answer: the two views do not share a pixel
-    // maximum, which is the whole reason there are two constants.
-    expect(NARROW_TERMINAL_MAX_WIDTH).not.toContain(`${NARROW_PROSE_TEXT_PX}px`);
+    // And it must carry no pixel width of its own: the moment a platform's
+    // prose answer were baked in here, "narrowed" would mean two things.
+    expect(NARROW_TERMINAL_MAX_WIDTH).not.toMatch(/\d+px\s*\+\s*1\.75rem/);
+  });
+});
+
+describe('the ruler the prose cap is measured on', () => {
+  it('is rendered at the SMALLER of the two prose sizes a response pane draws', () => {
+    // `out` is the operator's stepper and `--text-body` is the type scale;
+    // the column is shared by both, so the cap has to hold for the narrower
+    // character or it is not a maximum. Derived from `OUT_FONT_SIZE_VAR`
+    // rather than restating the custom property, because a renamed variable
+    // that still LOOKED right in a string is how this becomes `min()` of one
+    // thing.
+    //
+    // A CONTENT SCAN, AND IT KNOWS IT. This repo has shipped a rule whose
+    // selector matched nothing and read exactly like one that worked, so what
+    // this claims is only that the declaration was TYPED. Whether it reaches
+    // the element, and whether the column really follows the `out` stepper up
+    // and down, is measured in a browser by `e2e/view-width-shots.mjs`.
+    const rule = new RegExp(`\\.${PROSE_RULER_CLASS}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? '';
+    expect(rule, `no .${PROSE_RULER_CLASS} rule in styles.css`).not.toBe('');
+    expect(rule).toContain(`var(${OUT_FONT_SIZE_VAR}`);
+    expect(rule).toContain('var(--text-body');
+    expect(rule).toMatch(/font-size:\s*min\(/);
+  });
+
+  it('is ordinary lowercase English, which is what makes it conservative', () => {
+    // THE DIRECTION IS THE WHOLE ARGUMENT. Agent answers carry capitals,
+    // digits and identifiers, and those run WIDER: measured against the demo
+    // transcript, this sample is 5.8930px where its answers average 6.0079 --
+    // 1.9% narrower, so the column holds at most eighty of them. A ruler with
+    // capitals or digits in it would drift the other way and promise eighty
+    // while delivering eighty-one, and no assertion about a string length
+    // would notice.
+    expect(PROSE_RULER_TEXT).toBe(PROSE_RULER_TEXT.toLowerCase());
+    expect(PROSE_RULER_TEXT).not.toMatch(/\d/);
+    // Long enough that the engine's rounding of one rectangle is a thousandth
+    // of the answer -- `RULER_TEXT` in `TerminalTab.tsx` makes the same
+    // argument for ten characters instead of one.
+    expect(PROSE_RULER_TEXT.length).toBeGreaterThan(200);
+    // And really prose: a run of one letter would measure that letter.
+    expect(new Set(PROSE_RULER_TEXT.replace(/[^a-z]/g, '')).size).toBeGreaterThan(20);
+    expect(PROSE_RULER_TEXT.split(' ').length).toBeGreaterThan(40);
   });
 });
 

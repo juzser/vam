@@ -1986,6 +1986,61 @@ body {
  * selector that works.
  */
 
+/*
+ * THE PROSE RULER'S SIZE — what `DetailPanel.tsx` divides to learn how wide one
+ * character of this pane's prose really is.
+ *
+ * A STYLESHEET RULE AND NOT AN INLINE STYLE, which is the opposite of the
+ * choice `TerminalTab.tsx` makes for its own screen, and the difference is
+ * worth the two lines: that one is a value the operator PICKED, so there is no
+ * class to write at build time. This is a fixed DECLARATION — the smaller of
+ * the pane's two prose steps — and nothing in the renderer computes it. Written
+ * inline it would also have to survive the CSSOM, which rejects a `min()` in
+ * `font-size` in at least one DOM implementation this repo tests against.
+ *
+ * `min()` OF THE TWO, because a response pane draws prose at two sizes and the
+ * capped column is shared by both: `out` is the operator's stepper
+ * (`--vam-out-font-size`, 10..20) and everything else the cap covers — PR
+ * titles, agent turns, the question card, the draft being typed — is the type
+ * scale's `--text-body`. A maximum has to hold for the NARROWER character, so
+ * it is counted in whichever of the two that is.
+ *
+ * NO `var()` FALLBACK, because the property is declared right above instead.
+ * A fallback inside the `min()` would have been the same pixels and a worse
+ * fact: it would leave this the only rule in the file reading a property no
+ * rule in the file writes, which is exactly the orphan
+ * `focus-edge-removed.test.ts` exists to catch.
+ *
+ * `prefs/view-width.ts` carries why this is measured at all rather than
+ * written down: a frozen advance is a claim about somebody else's machine, and
+ * CI proved it on the first Linux run.
+ */
+/*
+ * DECLARED HERE, THOUGH NOTHING IN THIS FILE SETS IT AT RUN TIME.
+ * `applyOutFontSize` writes `--vam-out-font-size` onto `document.documentElement`
+ * as an inline style, which beats this every time — so this is the value before
+ * prefs have been read once, and it is `DEFAULT_OUT_FONT_SIZE` so that frame
+ * shows the size the app ships at rather than a fallback nobody chose.
+ *
+ * It is also what keeps the rule below honest rather than orphaned:
+ * `focus-edge-removed.test.ts` holds that every `var()` in this stylesheet
+ * names a property this stylesheet declares, because a `var()` whose property
+ * was deleted resolves to nothing and paints as if it had worked. Reading a
+ * property only ever written by JavaScript is the same shape of trap, and the
+ * ruler is the first rule in this file to do it.
+ *
+ * `html` rather than `:root` deliberately: the `:root` blocks above are the
+ * PALETTE, paired dark and light, and several guards parse them as such. A
+ * size is neither.
+ */
+html {
+  --vam-out-font-size: 13px;
+}
+
+.vam-prose-ruler {
+  font-size: min(var(--vam-out-font-size), var(--text-body));
+}
+
 .vam-hit-24 {
   position: relative;
 }

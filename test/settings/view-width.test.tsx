@@ -28,12 +28,30 @@ import {
 } from '../../src/renderer/prefs/prefs.js';
 import {
   DEFAULT_NARROW_VIEWS,
-  NARROW_PROSE_MAX_WIDTH,
+  narrowProseMaxWidth,
   setActiveNarrowViews,
 } from '../../src/renderer/prefs/view-width.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 
+/** One character of prose, as some platform might report it. Any number does;
+ *  the cap is divided out of it rather than looked up. */
+const ADVANCE = 6.0079;
+/** The `ResizeObserver` callbacks happy-dom will never fire on its own. */
+const OBSERVERS: (() => void)[] = [];
+
 beforeAll(() => {
+  // happy-dom has no `ResizeObserver`, and the panel's prose ruler needs one
+  // to report its rectangle. Collected rather than run: the rectangle is
+  // written by hand below, and a callback fired before that would measure the
+  // zeros happy-dom reports for everything.
+  class Collected {
+    constructor(callback: () => void) {
+      OBSERVERS.push(callback);
+    }
+    observe() {}
+    disconnect() {}
+  }
+  vi.stubGlobal('ResizeObserver', Collected);
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
     value: (() => {
@@ -181,12 +199,22 @@ describe('throwing the switch changes a pane, not only the store', () => {
     // nothing.
     panel();
     const body = () => document.querySelector<HTMLElement>('[data-detail-body]');
+    // The ruler gets the rectangle happy-dom will not lay out for it; the
+    // measurement itself is `DetailPanel.view-width.test.tsx`'s subject, and
+    // what is being asked here is only whether the flag reaches this pane.
+    const ruler = document.querySelector<HTMLElement>('[data-prose-ruler]');
+    const characters = (ruler?.textContent ?? '').length;
+    if (ruler === null) throw new Error('the panel drew no prose ruler');
+    ruler.getBoundingClientRect = () => ({ width: ADVANCE * characters, height: 16 }) as DOMRect;
+    act(() => {
+      for (const observer of OBSERVERS) observer();
+    });
     expect(body()?.style.maxWidth).toBe('');
 
     act(() => {
       writePrefs(browserStorage(), { ...EMPTY_PREFS, narrowViews: true });
     });
-    expect(body()?.style.maxWidth).toBe(NARROW_PROSE_MAX_WIDTH);
+    expect(body()?.style.maxWidth).toBe(narrowProseMaxWidth(ADVANCE));
 
     act(() => {
       writePrefs(browserStorage(), { ...EMPTY_PREFS, narrowViews: false });

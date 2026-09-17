@@ -18,10 +18,20 @@
  * characters on a line — and the pixel answers differ per view only because a
  * proportional character and a terminal cell are not the same width.
  *
- * MEASURED, both of them, and the measurements are below. They come out 481px
- * and 529–704px (the terminal's varies with its own text size), which is the
- * evidence for the paragraph above: a single shared pixel maximum would have
- * been right for at most one of the two and wrong by a third for the other.
+ * MEASURED, both of them, and NEITHER IS A CONSTANT IN THIS FILE. That is the
+ * correction this module's first cut earned: the prose maximum shipped as
+ * 480px, which was `80 × 6.0079px` measured on one macOS machine, and CI
+ * caught it on the very first Linux run — the same font stack resolves there to
+ * a face whose advance is 5.7180px, so the "eighty characters" the guard
+ * measured came out at 83.95. AN ADVANCE IS A PROPERTY OF THE FACE THE APP
+ * ACTUALLY PAINTS IN, and that is decided on the operator's machine. So it is
+ * measured there, at run time, off a ruler — the shape `terminal-size.ts` has
+ * always had, and for exactly the reason its header gives.
+ *
+ * The two answers still differ: on this macOS machine 471px of prose against
+ * 509–704px of terminal screen. That gap is the evidence for the paragraph
+ * above — a single shared pixel maximum would have been right for at most one
+ * of the two.
  *
  * ── WHY THE FILES TAB IS NOT IN IT ───────────────────────────────────────
  * The operator did not name it, and it is the one view that would be harmed:
@@ -60,66 +70,99 @@
 export const NARROW_MAX_CHARACTERS = 80;
 
 /**
- * One character of the agent's answer, in pixels, at the size `out` ships at.
+ * THE PROSE RULER'S TEXT — what one character of the pane's prose is measured
+ * on.
  *
- * A MEASUREMENT, NOT A RATIO, for the reason `terminal-size.ts` states about
- * its own advance: a font's average advance is a property of the face, the
- * size, the platform's hinting and the operator's zoom. Measured in Chromium
- * against the demo transcript's own answer prose — 822 characters over eleven
- * single-line runs, 4938.52px of ink, at the 13px `DEFAULT_OUT_FONT_SIZE` in
- * the face the app actually paints in (the stack's first bundled entry; Geist
- * is named but not shipped, so this is the system UI face). 6.0079px per
- * character; the run-to-run spread was 5.64–6.36.
+ * WHY A RULER AT ALL. This started as a constant, `6.0079`, measured once on a
+ * macOS machine. The first Linux CI run read 83.95 characters across the column
+ * that arithmetic produced: the same stack (`Geist, -apple-system, system-ui,
+ * 'Segoe UI', sans-serif` — Geist is NAMED BUT NOT SHIPPED, so what paints is
+ * whatever the platform has) resolves to a face measuring 5.7180px there
+ * against 6.0079px here. A frozen advance is a claim about somebody else's
+ * machine. So the advance is measured where it is true, off an element rendered
+ * in the real face at the real size, exactly as `terminal-size.ts` measures its
+ * own — "a MEASUREMENT and not a RATIO".
  *
- * `ch` IS THE WRONG UNIT HERE and that is the reason this constant exists at
- * all. `ch` is the advance of `0`, which in this face measures 8.125px at
- * 13px — 35% wider than a character of English. `80ch` of prose would have
- * been 108 characters, which is the width being fixed. (The Terminal's cap IS
- * written in `ch`, and correctly: in a monospace face `ch` is the cell, so it
- * is the same measurement rather than a proxy for it.)
+ * AND IT IS MEASURED AT THE SIZE, not scaled from one. Hinting makes the
+ * advance markedly non-proportional to the size: measured on this face,
+ * 4.7089px at 10px, 5.8930 at 13 and 8.4402 at 20 — ratios of 0.471, 0.453 and
+ * 0.422, an 11% spread. A cap computed by scaling one measurement would be out
+ * by that much at the ends of the `out` stepper.
  *
- * AT THE DEFAULT SIZE, AND ONLY THERE — the one limitation of this number,
- * stated rather than discovered. `outFontSize` is a stepper over 10..20, and
- * this pixel maximum does not follow it, so an operator reading at 10px gets
- * about 104 characters in the same column and one at 20px about 52. Both are
- * still a large improvement on the 217 measured at 1600px full-pane, and the
- * alternative is worse than the defect: scaling the cap by
- * `--vam-out-font-size` would move the PRs and Agents views too, and neither
- * of them draws a character at that size — they are on vam's own type scale.
- * A cap that moved for a setting that does not touch their text is a stranger
- * thing than a cap that is exact at the default.
+ * `ch` IS THE WRONG UNIT FOR PROSE, which is why this exists and the Terminal's
+ * cap does not need it. `ch` is the advance of `0`, which in this face measures
+ * 8.125px at 13px — 35% wider than a character of English. `80ch` of prose is
+ * 108 characters. In a MONOSPACE face `ch` IS the cell, so the Terminal can and
+ * does use it; here it would be a proxy, and a bad one.
+ *
+ * WHAT THE STRING IS, AND WHY IT IS ORDINARY. Lowercase English with ordinary
+ * punctuation, and deliberately no capitals, digits or identifiers. Agent
+ * answers carry all three, and they run WIDER: measured against the demo
+ * transcript's own answers (822 characters, 11 single-line runs) this sample is
+ * 5.8930px where the answers average 6.0079 — 1.9% narrower. That direction is
+ * the safe one and it is the reason for the choice rather than an accident: a
+ * ruler NARROWER than the prose it protects yields a column of at most eighty
+ * of that prose's characters (78.4 here), and a wider one would silently
+ * promise eighty and deliver eighty-one. The ratio being relied on is between
+ * two TEXTS, not two faces, so it carries across platforms — and
+ * `e2e/view-width-shots.mjs` re-measures the real answer prose on whatever
+ * platform CI runs, which is the check that caught the frozen constant.
+ *
+ * LONG ON PURPOSE. A browser rounds a rectangle; over ~300 characters that
+ * rounding is a thousandth of the advance, which is the same argument
+ * `RULER_TEXT` in `TerminalTab.tsx` makes for using ten characters instead of
+ * one.
  */
-export const PROSE_ADVANCE_PX = 6.0079;
+export const PROSE_RULER_TEXT =
+  'the plan is open, so the agent reads the diff it was given, writes the test it needs, runs it once, and says what it found before it changes a line of anyone else running work. it asks again only when the answer it has is older than the question, and it never guesses at a number it could measure.';
 
 /**
- * Eighty characters of answer text, in pixels: 480.
+ * The class that gives the ruler its size — the SMALLER of the two prose steps
+ * a response pane draws.
  *
- * Derived rather than chosen. The ONE thing to know when re-measuring: this is
- * the TEXT, not the box — the padding the box wears is added at the call site
- * by `NARROW_PROSE_MAX_WIDTH` below.
+ * THE DECLARATION IS IN `styles.css`, under this same name, and its own comment
+ * carries why: it is a fixed expression rather than a value anything here
+ * computes, and `min()` in a `font-size` does not survive every CSSOM this repo
+ * tests against. What is exported is the NAME, so the panel that wears it and
+ * the test that scans for the rule cannot drift apart.
  *
- * FLOORED AND NOT ROUNDED, which is not a detail. 80 × 6.0079 is 480.63, and
- * rounding it up put 80.06 characters on the line — a maximum that breaks its
- * own promise in the last place. Measured in Chromium at 481px: the guard read
- * 80.4 characters and went red, which is how the rounding was found. A cap
- * rounds DOWN or it is not a cap.
+ * TWO SIZES LIVE IN A RESPONSE PANE and the capped column is shared by both, so
+ * the cap has to hold for the narrower character or it is not a maximum: `out`
+ * is the operator's stepper over 10..20 and everything else — PR titles, agent
+ * turns, the question card, the draft being typed — is the type scale's body
+ * step. At `out` 10 the answers are the long lines and the ruler follows them
+ * down; at `out` 20 the answers are short and the body step is what the eighty
+ * has to be counted in.
  */
-export const NARROW_PROSE_TEXT_PX = Math.floor(NARROW_MAX_CHARACTERS * PROSE_ADVANCE_PX);
+export const PROSE_RULER_CLASS = 'vam-prose-ruler';
 
 /**
- * What a prose view's container is given as its `max-width`.
+ * The `max-width` a prose surface is given, from a measured advance — or
+ * `undefined`, which means "not measured yet, so do not cap".
  *
- * THE `1.75rem` IS THAT CONTAINER'S OWN `px-3.5`, and it is added rather than
- * ignored because `max-width` resolves against the BORDER box (Tailwind sets
+ * `undefined` IS THE IMPORTANT RETURN, and it is `fitPane`'s rule in this
+ * file's own terms: a ruler that has not been laid out reports a zero box, and
+ * a zero advance would produce a 28px column. Answering "no cap" leaves the
+ * pane exactly as it ships, for the one frame before the ruler is measured.
+ *
+ * FLOORED AND NOT ROUNDED, which is not a detail. With the old constant,
+ * 80 × 6.0079 = 480.63 rounded UP to 481 and Chromium measured 80.06 characters
+ * on the line — a maximum that breaks its own promise in the last place, found
+ * by the guard. A cap rounds DOWN or it is not a cap.
+ *
+ * THE `1.75rem` IS THE SURFACE'S OWN `px-3.5`, added rather than ignored
+ * because `max-width` resolves against the BORDER box (Tailwind sets
  * `box-sizing: border-box` on everything): without it the cap would be 28px of
- * padding plus 453px of text, and the promise would quietly be 75 characters.
- * It is the one number here that mirrors a utility class in
- * `DetailPanel.tsx` rather than deriving from a measurement — so the guard
- * that holds this setting honest counts CHARACTERS ON A RENDERED LINE
- * (`e2e/view-width-shots.mjs`) and not this expression, and a change to that
- * padding reddens there.
+ * padding plus 443px of text, and the promise would quietly be 75 characters.
+ * It is the one term here that mirrors a utility class in `DetailPanel.tsx`
+ * rather than coming from a measurement — so the guard that holds this setting
+ * honest counts CHARACTERS ON A RENDERED LINE and not this expression, and a
+ * change to that padding reddens there.
  */
-export const NARROW_PROSE_MAX_WIDTH = `calc(${NARROW_PROSE_TEXT_PX}px + 1.75rem)`;
+export function narrowProseMaxWidth(advance: number | null): string | undefined {
+  if (advance === null || !Number.isFinite(advance) || advance <= 0) return undefined;
+  return `calc(${Math.floor(NARROW_MAX_CHARACTERS * advance)}px + 1.75rem)`;
+}
 
 /**
  * What the Terminal tab is given as its `max-width` — eighty COLUMNS.
@@ -143,7 +186,7 @@ export const NARROW_PROSE_MAX_WIDTH = `calc(${NARROW_PROSE_TEXT_PX}px + 1.75rem)
  * pays for the rounding.
  *
  * THE `1.5rem + 2px` IS THE PANE'S OWN `px-3` AND ITS 1px BORDER, added for
- * the reason `NARROW_PROSE_MAX_WIDTH` adds its padding: the cap is a border
+ * the reason `narrowProseMaxWidth` adds its padding: the cap is a border
  * box and the measurement subtracts the padding again, so the two terms cancel
  * exactly and the content box is eighty cells wide.
  * `e2e/view-width-shots.mjs` reads the column count vam actually sent tmux, at
