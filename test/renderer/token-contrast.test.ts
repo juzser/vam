@@ -611,6 +611,18 @@ describe('non-text floors, on every colour template', () => {
             ['--vam-ink-quiet', '--vam-sidebar'] as const,
             // The bullet a reader finds each list item by, on the pane.
             ['--vam-ink-quiet', '--vam-pane'] as const,
+            // THE ONE PAIR WHERE THE GROUND IS THE MARK AND NOT THE SURFACE,
+            // and the reason it is here is that a template can now write it.
+            // `Switch` paints the knob of a checked switch `bg-ground` on a
+            // `bg-ink-faint` track -- the fill inverts with the state so that
+            // "the dot is the thing you can see" either way. Every other
+            // measurement in this file reads an ink ON the ground; this one
+            // reads the ground as an ink, so it is the pair that moves in the
+            // OPPOSITE direction when a palette darkens the room. It is also
+            // the one that would catch a preset going the other way: at
+            // #8a8a8a the knob reads 1.592:1 on its track and at #ffffff
+            // 2.169:1, both under 1.4.11's 3, where black reads 9.683:1.
+            ['--vam-ground', '--vam-ink-faint'] as const,
           ];
           for (const [ink, ground] of marks) {
             pairs += 1;
@@ -620,12 +632,57 @@ describe('non-text floors, on every colour template', () => {
             }
           }
         }
-        // 7 templates x 55 marks each: 8 tones x 4 fills, 3 modes x 2,
-        // 5 glyphs x 3, and the two borders. A LITERAL, not `TINTED.length *
-        // 55`: a count derived from the corpus shrinks with the corpus, so a
-        // template that quietly stopped being tinted would leave this sweep
-        // measuring six palettes and reporting a full house.
-        expect({ pairs, failing }).toEqual({ pairs: 385, failing: [] });
+        // 7 templates x 56 marks each: 8 tones x 4 fills, 3 modes x 2,
+        // 5 glyphs x 3, the two borders, and the switch knob. A LITERAL, not
+        // `TINTED.length * 56`: a count derived from the corpus shrinks with
+        // the corpus, so a template that quietly stopped being tinted would
+        // leave this sweep measuring six palettes and reporting a full house.
+        expect({ pairs, failing }).toEqual({ pairs: 392, failing: [] });
+      });
+
+      /**
+       * THE 63 TEXT PAIRS, AGAINST THE GROUNDS A TEMPLATE SUPPLIES.
+       *
+       * The sweep at the top of this file asks WCAG 1.4.3 of nine inks on
+       * seven grounds and answers it for the stylesheet. A template replaces
+       * five of those grounds outright and -- since a palette may write
+       * `--vam-ground` -- can replace a sixth, which is the one this pair list
+       * has always been weakest about: `ground` carries the code fence, the
+       * page behind the panes and the phone list, and it is now the token a
+       * high-contrast preset moves furthest.
+       *
+       * `palette-templates.test.ts` also sweeps text over template surfaces,
+       * and the two are not the same claim. That one measures against a TYPED
+       * record of the inks each template was chosen under, so a stylesheet
+       * that moves an ink reddens there and has to be re-derived; it covers
+       * the five surfaces a template sets. This one measures against whatever
+       * the stylesheet says TODAY, over all seven grounds including the two a
+       * template does not set -- so it answers "is this palette readable as
+       * the app is now", which is a question about the present rather than
+       * about the decision.
+       */
+      it('carries all 63 text pairs at 4.5:1 on the grounds each template supplies', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const template of TINTED) {
+          const values = templatePalette(template.id, theme.name);
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${template.id} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          for (const token of TEXT_TOKENS) {
+            for (const ground of TEXT_GROUNDS) {
+              pairs += 1;
+              const ratio = contrast(hex(token), hex(ground));
+              if (ratio < 4.5) {
+                failing.push(`${template.id}: ${token} on ${ground} = ${ratio.toFixed(3)}`);
+              }
+            }
+          }
+        }
+        // 7 templates x 9 inks x 7 grounds, as a literal for the reason above.
+        expect({ pairs, failing }).toEqual({ pairs: 441, failing: [] });
       });
     });
   }

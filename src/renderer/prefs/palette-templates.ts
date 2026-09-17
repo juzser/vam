@@ -16,13 +16,19 @@
  *     recorded. A preset that chose its own lightnesses would undo it in one
  *     click, and the operator -- who asked twice for a lighter, less flat dark
  *     theme -- would get the flat one back under a nicer name.
- *   - THE JND SEPARATIONS SURVIVE, including across the three rungs a template
- *     CANNOT set. `ground`, `sunken` and `well` are not in the swatch grid, so
- *     a preset that walks `panel` down lands it on a `well` that stayed where
- *     it was, and a recess inside a dialog stops being a recess. The ladder is
- *     therefore measured MERGED -- the four rungs a template sets dropped into
- *     the three it does not -- which is also what bounds the band it may use
- *     at all: 13.56..22.12 L*, `well` + one JND up to `segment-on` - one JND.
+ *   - THE JND SEPARATIONS SURVIVE, including across the rungs a template
+ *     CANNOT set. `sunken` and `well` are not writable by anything, so a
+ *     preset that walks `panel` down lands it on a `well` that stayed where it
+ *     was, and a recess inside a dialog stops being a recess. The ladder is
+ *     therefore measured MERGED -- the rungs a template sets dropped into the
+ *     ones it does not -- which is also what bounds the band it may use at
+ *     all: 13.56..22.12 L*, `well` + one JND up to `segment-on` - one JND.
+ *     `ground` USED TO BE IN THAT LIST and is now a template's own business
+ *     (`TEMPLATE_TOKENS`), which is what lets `contrast` paint a black page.
+ *     It moved the CEILING rather than the band: the tightest pair nobody can
+ *     write is `sunken -> well` at 2.51 L*, where it was `ground -> sunken` at
+ *     2.44. The band itself did not move a hundredth, because `well` -- not
+ *     the ground -- is what has always bounded `panel` from below.
  *   - THE CONTRAST FLOORS SURVIVE EXACTLY, and that is arithmetic rather than
  *     luck: CIE L* is a function of relative luminance alone, so two colours
  *     at one lightness read the SAME WCAG ratio against any ink, whatever hue
@@ -90,7 +96,7 @@
  */
 
 import type { EffectiveTheme, PaletteOverrides, Prefs } from './prefs.js';
-import { clearPalette, PALETTE_TOKENS, setPaletteColor } from './prefs.js';
+import { clearPalette, setPaletteColor, TEMPLATE_TOKENS } from './prefs.js';
 
 /** The id of a shipped template. */
 export type PaletteTemplateId =
@@ -328,40 +334,64 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
   },
   {
     /**
-     * HIGH CONTRAST, AND THE HALF OF THE ASK THAT IS NOT AVAILABLE.
+     * HIGH CONTRAST, AND THE ASK THAT WAS REFUSED ONCE BEFORE IT WAS BUILT.
      *
      * The operator asked for "near-absolute black, maximum separation". The
-     * second half is here. The first half cannot be, and the arithmetic is
-     * worth keeping because it is the kind of thing that otherwise gets
-     * re-attempted every six months:
+     * first version of this entry could deliver neither and said so with the
+     * arithmetic: `--vam-ground` was not writable by a template, so the app's
+     * outermost background was pinned at 6.32 L* whatever this table said, and
+     * `panel` could not descend past it because `well` (11.26) sat between
+     * them. The operator read that and changed the rule -- a palette may set
+     * the ground now (`TEMPLATE_TOKENS` in `prefs.ts`, held deliberately apart
+     * from the swatch grid, which is still without one). So:
      *
-     *   - `--vam-ground` (#141414) IS NOT SETTABLE BY A TEMPLATE. It left the
-     *     swatch grid at the operator's own ask and lives in `RETIRED_TOKENS`;
-     *     `applyPaletteTemplate` puts every value through `setPaletteColor`,
-     *     which drops what the grid does not offer. So the app's outermost
-     *     background stays at 6.32 L* whatever this entry says.
-     *   - `--vam-panel` IS ALREADY AT ITS FLOOR. `well` (11.26 L*) is pinned
-     *     too, so the darkest legal panel is 13.56, and the stylesheet paints
-     *     13.71 -- one 8-bit step above it. `dark-ladder.test.ts` asserts
-     *     exactly that, by taking the step and measuring the collapse.
-     *   - SO A TEMPLATE CANNOT GO BLACKER, only inverted: a panel under `well`
-     *     is a dialog darker than the recess inside it, which is not a
-     *     high-contrast theme but a broken one.
+     *   - THE GROUND IS #000000, the darkest value there is, and it is the
+     *     largest surface in the app: the page behind the panes, the code
+     *     fence every agent answer is read in, the tab strip behind an
+     *     inactive tab, the phone list, and the scrim under every modal.
+     *   - THE ROOM ABOVE IT DOES NOT MOVE, and that is not an omission. The
+     *     ground was never what bound `panel`: `well` + one JND is 13.56 and
+     *     the stylesheet paints 13.71, one 8-bit step over its floor, with
+     *     `sunken` and `well` still unwritable by any preset. A black ground
+     *     buys a black PAGE, not a black room, and the difference is worth
+     *     stating because the next ask will be for the other one.
+     *   - SO THE STEP FROM THE PAGE TO THE PANEL GOES 7.39 L* TO 13.80, which
+     *     is the widest elevation cue in the app and nearly double vam's own.
      *
-     * WHAT MAXIMUM SEPARATION IS WORTH, MEASURED, and it is almost nothing.
-     * Both ends of the band are pinned -- `well` below, `segment-on` above --
-     * and the rungs between them are already spread about as far as 8-bit
-     * sRGB allows. This entry's gaps are `panel -> pane` 2.69 and
-     * `pane -> raised` 2.43 against the stylesheet's 2.40 and 2.83, so the
-     * TIGHTEST gap in the merged ladder goes 2.40 -> 2.43 L*. Three
-     * hundredths of a just-noticeable difference, and there is no more to
-     * take: `ground -> sunken` is 2.44 and no template can touch it, so 2.44
-     * is the ceiling on any preset's tightest gap whatever it does with the
-     * four rungs it owns. The fifth dark pass got there first. The room is
-     * not where a high-contrast palette can live in this app, which is worth
-     * knowing before the next one is attempted.
+     * WHAT MAXIMUM SEPARATION IS WORTH NOW, MEASURED. With the ground free,
+     * the tightest pair NO template may write is `sunken -> well` at 2.51 L*,
+     * where it used to be `ground -> sunken` at 2.44. This entry's own gaps
+     * are 2.54, 2.60, 2.52 and 2.68, so every step it owns clears the one it
+     * does not, and the tightest rung in its whole ladder is the pair it is
+     * not allowed to widen. That is what "as separated as this app can be"
+     * means, it is true of exactly one template, and
+     * `cannot out-separate the one pair no template may write` is what holds
+     * it -- derived from `styles.css`, so the day `well` becomes settable the
+     * claim moves with it instead of going quietly stale.
      *
-     * SO IT SPENDS ITS BUDGET WHERE THERE IS SOME.
+     * WHAT IT COSTS: THE DROP SHADOW, AND THIS IS MEASURED RATHER THAN
+     * PREDICTED. `--vam-shadow-node` is black at 0.4 alpha and five modal
+     * panels wear it over a `bg-ground/70` scrim. On vam's #141414 the
+     * darkest composite that shadow can reach is 3.00 L* under the ground --
+     * just over the JND. One 8-bit step darker it is 1.94 and already
+     * invisible; on #000000 it is 0.00. There is no near-black ground that
+     * keeps it, so the halo is spent. What replaces it is the same scrim
+     * getting darker: the panel's step over it goes 4.45 L* to 10.48, ratio
+     * 1.107 to 1.248, so the dialog reads as MORE raised than it did with the
+     * shadow. `only spends the drop shadow when the panel still clears its
+     * scrim` holds that trade to a number, and `pane-colour-shots.mjs` reads
+     * the ground off the document and off the scrim that paints it.
+     *
+     * NOTHING ELSE MEASURED AGAINST THE GROUND GETS WORSE, because everything
+     * else drawn on it is lighter than it: `--vam-ink` 15.736:1 -> 17.937,
+     * the quiet inks 8.495 -> 9.683, `--vam-ansi-black` -- the darkest thing
+     * the terminal paints -- 4.665 -> 5.317, `--vam-syn-comment` 5.989 ->
+     * 6.827. The one pair that moves the other way is the SWITCH KNOB, which
+     * is `bg-ground` on a `bg-ink-faint` track: 8.495:1 -> 9.683, better here
+     * and the pair that would catch a palette lightening the ground instead
+     * (at #8a8a8a it reads 1.592:1). `token-contrast.test.ts` measures it.
+     *
+     * AND IT SPENDS THE REST OF ITS BUDGET WHERE THERE WAS ALREADY SOME.
      *
      *   - THE INK GOES TO PURE WHITE, which is the one token here not bounded
      *     by a rung: on this palette's own pane vam's #ededed would read
@@ -385,6 +415,9 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
      *     can be recognised by has to be bought with chroma. Three is the
      *     least that buys it with room (ΔE 3.25 against a 2.3 floor), and a
      *     cold near-black is what a high-contrast theme looks like anyway.
+     *     The GROUND carries none of it: black has no hue, and giving the
+     *     largest surface in the app a cast it does not need would be the one
+     *     place this palette stopped being about contrast.
      *
      * IN LIGHT THERE IS NO SUCH CEILING on the ink, so it takes all of it.
      */
@@ -396,17 +429,27 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
       "VS Code's Dark High Contrast (#000000 background, #ffffff foreground), bounded by vam's own pinned ground",
     // hue 199°, chroma 3 (dark) / 2 (light).
     dark: {
-      '--vam-panel': '#1f2424',
+      // THE ROOM THIS PALETTE IS NAMED FOR, and the token that was missing
+      // when it was written. The operator's answer to the arithmetic above
+      // was to let a palette set the ground; this is the whole of what that
+      // bought, and it is the largest surface in the app.
+      '--vam-ground': '#000000',
+      '--vam-panel': '#202424',
       '--vam-sidebar': '#232a2a',
       '--vam-pane': '#232a2a',
-      '--vam-raised': '#292f2f',
+      '--vam-raised': '#2a2f2f',
       '--vam-card': '#2f3535',
       '--vam-in-bubble': '#454d4d',
       '--vam-ink': '#ffffff',
     },
     light: {
-      // White is white: the light theme's own panel is already the brightest
-      // value there is, and moving it would be moving away from contrast.
+      // NO GROUND HERE, and the omission is the same argument `default` makes
+      // for the whole table: the light theme's ground is already #ffffff, the
+      // brightest value there is, so a template that set it would be freezing
+      // a colour it cannot improve against every later stylesheet.
+      //
+      // White is white: the light panel is already the brightest value there
+      // is, and moving it would be moving away from contrast.
       '--vam-panel': '#ffffff',
       '--vam-sidebar': '#eaefef',
       '--vam-pane': '#eaefef',
@@ -522,10 +565,18 @@ export function templatePalette(id: PaletteTemplateId, theme: EffectiveTheme): P
  * what "apply this template" means, and is undone by `reset <theme> colours`
  * the same as any other palette state.
  *
+ * IT WALKS `TEMPLATE_TOKENS`, NOT THE SWATCH GRID, and that one word is what
+ * lets `contrast` paint a black room. The grid is what an operator may pick
+ * from by hand; this is what a measured palette may write, and the ground is
+ * in the second list and not the first (`prefs.ts` argues both). While this
+ * loop walked the grid, a template naming `--vam-ground` had that value
+ * dropped on the floor silently -- the press worked, the other six colours
+ * landed, and the one that decides whether a dark theme is dark did not.
+ *
  * An id this file does not know changes NOTHING and returns the same object, so
  * a caller with a stale id cannot blank somebody's palette. Every value still
- * goes through `setPaletteColor`, which drops tokens vam does not offer -- the
- * table above is checked against `PALETTE_TOKENS` by the test, but the runtime
+ * goes through `setPaletteColor`, which drops tokens vam does not know -- the
+ * table above is checked against `TEMPLATE_TOKENS` by the test, but the runtime
  * does not take that on trust either.
  */
 export function applyPaletteTemplate(
@@ -542,7 +593,7 @@ export function applyPaletteTemplate(
   }
   const values = template[theme];
   let next: Prefs = { ...prefs, palette: { ...prefs.palette, [theme]: {} } };
-  for (const { token } of PALETTE_TOKENS) {
+  for (const token of TEMPLATE_TOKENS) {
     const value = values[token];
     if (value !== undefined) {
       next = setPaletteColor(next, theme, token, value);

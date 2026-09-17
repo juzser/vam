@@ -1415,10 +1415,56 @@ if (templateIds.length >= 3) {
 
   let painted = null;
   let picked = null;
+  // THE GROUND, READ OFF THE DOCUMENT AND OFF A PAINTED ELEMENT.
+  //
+  // A palette may write `--vam-ground` now, and that write has a longer road
+  // than any other token in the table: it is not in the swatch grid, so it
+  // travels `applyPaletteTemplate` -> `setPaletteColor` -> `writePrefs` ->
+  // `applyPalette`, and every one of those walks a LIST. It was dropped by the
+  // first of them until this change. A unit test can prove the bucket holds
+  // it; only a browser can prove it reached the root and then reached paint,
+  // which is why both are read here -- the custom property on the document,
+  // and the resolved colour of the scrim that is drawn with it.
+  const grounds = [];
   for (const id of tinted) {
     await openSettings();
     await page.locator(`[data-palette-template="${id}"]`).click();
     await page.waitForTimeout(350);
+    // While the overlay is still up: the scrim is the one element that paints
+    // `bg-ground` at every moment this guard can reach, so it is where the
+    // token's journey to a pixel is checked.
+    const ground = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement)
+        .getPropertyValue('--vam-ground')
+        .trim();
+      const scrim = document.querySelector('button[aria-label="close settings"]');
+      return {
+        root,
+        // NOT PARSED, COMPARED. Tailwind compiles `bg-ground/70` through its
+        // own colour pipeline and Chromium hands this back as
+        // `oklab(0.19125 ... / 0.7)`, so there is no hex here to match the
+        // root against -- two earlier versions of this check tried, and got
+        // `NaN` and then a 40-digit string. What the browser can answer
+        // without a colour-space conversion is whether the fill CHANGED, and
+        // that is the whole claim: a ground written by a template has to
+        // reach the element that paints it.
+        scrimFill: scrim === null ? null : getComputedStyle(scrim).backgroundColor,
+      };
+    });
+    grounds.push({ id, ...ground });
+    console.log(`  "${id}" ground: root ${ground.root}, scrim ${ground.scrimFill}`);
+    check(
+      `the "${id}" scrim is painted with something`,
+      ground.scrimFill !== null && ground.scrimFill !== '',
+      String(ground.scrimFill),
+    );
+    // THE ONE FRAME WHERE THE GROUND IS ACTUALLY ON SCREEN. The shot taken
+    // after this loop closes the overlay shows the ROOM -- sidebar, pane, tab
+    // strip -- and the ground is behind all of it: a palette can take the page
+    // to #000000 and the room screenshot will not move a pixel. The scrim is
+    // `bg-ground/70` across the whole viewport, so this is the frame that
+    // shows what a ground is worth.
+    await page.screenshot({ path: `${outDir}/palette-ground-${id}.png` });
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
 
@@ -1475,6 +1521,39 @@ if (templateIds.length >= 3) {
     beforeTemplate = { pane: painted.pane, sidebar: painted.sidebar };
     picked = id;
   }
+
+  // AND A PALETTE REALLY DOES MOVE IT. Every assertion in the loop above is
+  // satisfied by a feature that is completely dead: if no template wrote a
+  // ground at all, each one would simply show the stylesheet's and the root
+  // would agree with the scrim every time. So the sweep has to prove it found
+  // the thing it is here to measure -- more than one ground across the row,
+  // and at least one of them darker than vam's own.
+  const distinct = [...new Set(grounds.map((g) => g.root.toLowerCase()))];
+  console.log(`  grounds across the row: ${distinct.join(', ')}`);
+  check(
+    'at least one template paints a ground of its own, rather than all of them inheriting vam’s',
+    distinct.length >= 2,
+    JSON.stringify(grounds.map((g) => `${g.id}:${g.root}`)),
+  );
+  const darkest = grounds
+    .map((g) => ({ id: g.id, value: Number.parseInt(g.root.replace('#', ''), 16) }))
+    .sort((a, b) => a.value - b.value)[0];
+  console.log(`  darkest ground on the row: ${darkest.id}`);
+  check(
+    'the darkest ground on the row is darker than the one the stylesheet paints',
+    darkest.value < Number.parseInt('141414', 16),
+    JSON.stringify(darkest),
+  );
+  // AND IT REACHED THE PAINT, not just the custom property. `applyPalette`
+  // writes the root's inline style; a token that got that far and no further
+  // would leave every one of these fills identical, which is exactly what the
+  // guard saw when the apply loop was put back on the swatch grid.
+  const fills = [...new Set(grounds.map((g) => String(g.scrimFill)))];
+  check(
+    'and the scrim that paints the ground really changes with it',
+    fills.length >= 2,
+    JSON.stringify(grounds.map((g) => `${g.id}:${g.scrimFill}`)),
+  );
 
   // ------------------------------------- THE WAY BACK, AND WHAT IT PROMISES
   //
