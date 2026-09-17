@@ -48,6 +48,7 @@ import {
   TERMINAL_BACKGROUND_OPACITY_MAX,
   TERMINAL_BACKGROUND_OPACITY_MIN,
   TERMINAL_SCHEME_KEYS,
+  TERMINAL_SCHEME_LABELS,
   TERMINAL_SCHEME_VARS,
   TERMINAL_THEMES,
   type TerminalScheme,
@@ -140,6 +141,18 @@ describe('the table of built-in terminal themes', () => {
       }
       expect(theme.label, theme.id).not.toBe('');
       expect(theme.studied, theme.id).not.toBe('');
+    }
+  });
+
+  it('names every colour for a person, once, in the case the settings surface capitalises', () => {
+    // The label table is what the settings grid reads; a key without one
+    // would be a swatch with no name, and a label with a capital would be
+    // capitalised twice. Lower, like `PALETTE_TOKENS`, and one per key.
+    expect(Object.keys(TERMINAL_SCHEME_LABELS).sort()).toEqual([...TERMINAL_SCHEME_KEYS].sort());
+    const labels = TERMINAL_SCHEME_KEYS.map((key) => TERMINAL_SCHEME_LABELS[key]);
+    expect(new Set(labels).size).toBe(labels.length);
+    for (const label of labels) {
+      expect(label).toMatch(/^[a-z][a-z ]*$/);
     }
   });
 
