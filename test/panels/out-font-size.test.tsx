@@ -47,12 +47,16 @@ const find = (root: HTMLElement, sel: string): Element =>
     throw new Error(`no ${sel}`);
   })();
 
-// The `(href)` hint, the smallest thing `out` draws. Found by its own
-// attribute rather than by `p span span`: the link became a BUTTON with the
-// address beside it (see `OUT_MARKDOWN`'s `a:`), so the structural selector
-// stopped matching while the claim it was making -- 10.5/12 em -- was
-// untouched.
-const HINT = 'p [data-out-address]';
+// The host inside a link pill, the smallest thing `out` draws. Found by its
+// own attribute rather than by `p span span`: the link became a BUTTON with
+// the address beside it (see `OUT_MARKDOWN`'s `a:`), so the structural
+// selector stopped matching while the claim it was making -- 10.5/12 em --
+// was untouched; then the address became a pill with the HOST inside it, and
+// `data-out-address` moved onto the button, so the hint is the host now. The
+// claim is the same one: the quietest element in `out` is still 0.875em and
+// not the flat 11px `text-meta` the sidebar's pills wear, because a pixel
+// here is an element the reading-size setting can never reach.
+const HINT = 'p [data-out-host]';
 
 describe('every size inside out is relative, so one setting moves them all', () => {
   it('leaves no element behind in pixels', () => {
