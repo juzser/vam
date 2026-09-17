@@ -32,6 +32,11 @@
  *    emoji is text and never sees it, and the two kinds paint different
  *    amounts of ink at the same number. Only rasterised pixels can say whether
  *    the level above really reads as the larger mark.
+ *  - WHAT SIZE THE TWO CAPTIONS ARE ACTUALLY SET AT, against the rows they
+ *    head. A class is a claim about a token; `getComputedStyle().fontSize` is
+ *    the token honoured, and happy-dom resolves no stylesheet at all. The
+ *    operator asked for the project and the group to read a bit larger than
+ *    the session, and for a long time it was the reverse.
  *
  * It also takes the screenshots that make the whole change reviewable as an
  * image, which is why it seeds two GROUPS: the demo fixture has none, and a
@@ -205,6 +210,120 @@ check(
   JSON.stringify(register.project),
 );
 
+// THE SIZE THAT PUTS THE TWO CAPTIONS ABOVE THE ROWS. The operator, reading
+// the column: "make the font size of the project and the group a bit larger
+// than the session". It had been the other way round -- both headings at
+// `text-meta`, 11px, over rows titled at `text-body`, 13px -- and no unit
+// test could have said so: happy-dom resolves no stylesheet, so a class name
+// is all it can read, and a class name is a claim about a token that the
+// scale may or may not honour. `getComputedStyle().fontSize` is what the eye
+// gets. EVERY heading and EVERY row title, not the first of each: the
+// assertion is that the smallest heading is set above the largest row title,
+// so a single heading left at the old size would redden it. The corpus is
+// part of the check -- "every heading is larger" over zero headings is the
+// same sentence as "no heading is", and the counts say which one this is.
+// The count beside each name is read too: it is the one thing on a heading
+// that is meant to stay subordinate, so a count that grew with its name
+// would be a regression this sweep is the only place to catch.
+const sizes = await page.evaluate(() => {
+  const px = (el) => Number.parseFloat(getComputedStyle(el).fontSize);
+  const nameIn = (heading) =>
+    [...heading.querySelectorAll('span')].find(
+      (s) => s.textContent.trim().length > 1 && s.querySelector('svg') === null,
+    );
+  const captions = (selector, countOf) =>
+    [...document.querySelectorAll(selector)].map((heading) => {
+      const name = nameIn(heading);
+      const count = countOf(heading, name);
+      return {
+        text: name?.textContent.trim() ?? null,
+        name: name === undefined ? null : px(name),
+        count: count === null || count === undefined ? null : px(count),
+      };
+    });
+  return {
+    projects: captions('[data-project-heading]', (_h, name) => name?.nextElementSibling),
+    groups: captions('[data-group-heading]', (h) => h.querySelector('[data-group-count]')),
+    rows: [...document.querySelectorAll('[data-session-row] [data-row-title]')].map(px),
+  };
+});
+console.log('type sizes:', JSON.stringify(sizes));
+{
+  const headings = [...sizes.projects, ...sizes.groups];
+  const smallestHeading = Math.min(...headings.map((h) => h.name ?? Number.NaN));
+  const largestRow = Math.max(...sizes.rows);
+  check(
+    'a project heading, a group heading and a session title were all found, so the size order below is about something',
+    sizes.projects.length > 0 &&
+      sizes.groups.length > 0 &&
+      sizes.rows.length > 0 &&
+      headings.every((h) => h.name !== null && h.count !== null),
+    `${sizes.projects.length} projects, ${sizes.groups.length} groups, ${sizes.rows.length} rows; ${JSON.stringify(headings)}`,
+  );
+  check(
+    'every project heading is set larger than every session title -- the level above the rows is no longer the smallest type in the column',
+    sizes.projects.length > 0 &&
+      sizes.projects.every((h) => h.name !== null && h.name > largestRow),
+    `projects ${JSON.stringify(sizes.projects.map((h) => h.name))}, largest row ${largestRow}`,
+  );
+  check(
+    'and so is every group heading',
+    sizes.groups.length > 0 && sizes.groups.every((h) => h.name !== null && h.name > largestRow),
+    `groups ${JSON.stringify(sizes.groups.map((h) => h.name))}, largest row ${largestRow}`,
+  );
+  check(
+    'while the count beside each name stayed below the name -- it is subordinate to the heading, not a peer of the rows',
+    headings.length > 0 && headings.every((h) => h.count !== null && h.count < h.name),
+    JSON.stringify(headings),
+  );
+  console.log(
+    `type sizes: smallest heading ${smallestHeading}px, largest row title ${largestRow}px`,
+  );
+}
+
+// THE FACE, NOT ONLY THE SIZE. The operator, after the sizes moved: "use the
+// regular font, not mono". Both heading names were set in `--font-mono` over
+// rows titled in `--font-sans`, so the level that names the list was the one
+// thing in it written like a code sample. The property is that a heading is
+// set in the SAME face as the titles it heads, and `getComputedStyle().fontFamily`
+// is where a class's claim about that becomes what the eye gets -- read off
+// EVERY heading name, against the row title's own answer rather than a stack
+// spelled here, so a change of stack cannot silently pass this. The counts
+// beside the names are not read: they are meta, and meta is mono here.
+const faces = await page.evaluate(() => {
+  const face = (el) => getComputedStyle(el).fontFamily;
+  const nameIn = (heading) =>
+    [...heading.querySelectorAll('span')].find(
+      (s) => s.textContent.trim().length > 1 && s.querySelector('svg') === null,
+    );
+  const names = (selector) =>
+    [...document.querySelectorAll(selector)].map((heading) => {
+      const name = nameIn(heading);
+      return { text: name?.textContent.trim() ?? null, face: name === undefined ? null : face(name) };
+    });
+  const title = document.querySelector('[data-session-row] [data-row-title]');
+  return {
+    projects: names('[data-project-heading]'),
+    groups: names('[data-group-heading]'),
+    title: title === null ? null : face(title),
+  };
+});
+{
+  const headings = [...faces.projects, ...faces.groups];
+  check(
+    'a session title and every heading name were found, so the face check below is about something',
+    faces.title !== null && headings.length > 0 && headings.every((h) => h.face !== null),
+    JSON.stringify(faces),
+  );
+  check(
+    'every project and group heading is set in the same face as the session titles it heads, and that face is not a monospace one',
+    faces.title !== null &&
+      !/mono/i.test(faces.title) &&
+      headings.every((h) => h.face === faces.title),
+    JSON.stringify(faces),
+  );
+}
+
 // The rule above a group, which is the boundary the list's own even gaps could
 // not draw. Measured as a painted border rather than as a class.
 const rules = await page.evaluate(() =>
@@ -304,12 +423,19 @@ check(
  *   1. the lucide heading glyph and the placeholder paint TALLER than the
  *      tallest status mark on screen — both sides are SVG, so this is the same
  *      number on CI's Linux as here;
- *   2. the emoji is set LARGER than the caption beside it, read as font-size,
- *      because "bigger" for text is bigger than the text it stands next to;
+ *   2. the emoji is set ABOVE THE SCALE'S FLOOR, read as font-size against
+ *      `--text-meta` on `:root` — the step it was lifted from. It used to be
+ *      "larger than the caption beside it", and it was, until the caption
+ *      became a heading (`text-heading`, 15px; the size section above says
+ *      why); the emoji cannot follow it without breaking (3);
  *   3. neither kind spills past its slot, which is what would push the name;
- *   4. the heading row is still its declared minimum, and the name still
- *      starts one gap after the slot — a bigger glyph that reflowed the row
- *      would have "fixed" the icon by moving everything beside it.
+ *   4. the heading row is its floor or the name's line plus its padding,
+ *      whichever is taller, and the name still starts one gap after the
+ *      slot — a bigger glyph that reflowed the row would have "fixed" the
+ *      icon by moving everything beside it. (It used to read "still its
+ *      declared minimum"; a heading's 20px line put the row one pixel over
+ *      the 21px floor, so the name is the tallest child now and the claim is
+ *      that nothing ELSE is: the slot, never.)
  *
  * WHAT IS ONLY REPORTED: how far apart the two kinds land. That distance is a
  * fact about Apple Color Emoji versus Noto Color Emoji as much as about vam,
@@ -467,12 +593,25 @@ const emojiType = await page.evaluate(() => {
     ? {
         emoji: Number.parseFloat(getComputedStyle(slot).fontSize),
         caption: Number.parseFloat(getComputedStyle(name).fontSize),
+        // The scale's floor, read off `:root` where `styles.css` emits it for
+        // exactly this reason, rather than restated here as 11.
+        floor: Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue('--text-meta'),
+        ),
       }
     : null;
 });
+// ABOVE THE FLOOR, NOT ABOVE THE CAPTION. This used to assert the emoji was
+// set larger than the caption beside it, and it was, at 12 over 11 -- until
+// the caption became a heading (`text-heading`, 15px: the size section above
+// says why). The emoji cannot follow it up: at 12px its ink already fills
+// the 16px slot (the spill check below), so "bigger" for the emoji is now
+// measured against the step it was lifted FROM. A slot put back at
+// `text-meta` -- the original defect -- reddens this; a slot that climbed
+// after the caption reddens the spill check.
 check(
-  'the emoji is set larger than the caption it heads, which is what "bigger" means for text',
-  emojiType !== null && emojiType.emoji > emojiType.caption,
+  'the emoji is set above the scale\'s floor -- the step it was lifted from, and the one the caption used to share',
+  emojiType !== null && Number.isFinite(emojiType.floor) && emojiType.emoji > emojiType.floor,
   JSON.stringify(emojiType),
 );
 check(
@@ -499,18 +638,34 @@ const headingRow = await page.evaluate(() => {
   const h = heading.getBoundingClientRect();
   const s = slot.getBoundingClientRect();
   const n = name.getBoundingClientRect();
+  const cs = getComputedStyle(heading);
   return {
     rowHeight: Math.round(h.height),
-    minHeight: getComputedStyle(heading).minHeight,
+    minHeight: Number.parseFloat(cs.minHeight),
+    paddingBottom: Number.parseFloat(cs.paddingBottom),
+    nameLine: Math.round(n.height),
+    slotHeight: Math.round(s.height),
     slotRight: Math.round(s.right),
     nameLeft: Math.round(n.left),
-    gap: getComputedStyle(heading).columnGap,
+    gap: cs.columnGap,
   };
 });
 console.log('heading row:', JSON.stringify(headingRow));
+// THE FLOOR OR THE NAME SETS THE ROW, and the icon sits inside what they set.
+// This used to read `rowHeight === minHeight`, and that held while the name's
+// 16px line sat under the 21px floor. A heading's line is 20px, plus the
+// row's own bottom padding is 22, one over the floor -- so the name is the
+// tallest child now, and the claim worth keeping is that the row is whichever
+// of those two is taller and NOTHING ELSE: a glyph that grew past the line
+// would still redden this, which is what the check was for. Not `nameLine +
+// padding` alone -- a caption set back under the floor is the size sweep's
+// finding, not this one's, and this must not redden for it.
 check(
-  'the heading row is still its declared minimum — the icon did not make it taller',
-  headingRow !== null && `${headingRow.rowHeight}px` === headingRow.minHeight,
+  'the heading row is its floor or the name\'s line plus its padding, whichever is taller — the icon did not make it taller',
+  headingRow !== null &&
+    headingRow.rowHeight ===
+      Math.max(headingRow.minHeight, headingRow.nameLine + headingRow.paddingBottom) &&
+    headingRow.slotHeight < headingRow.rowHeight,
   JSON.stringify(headingRow),
 );
 check(

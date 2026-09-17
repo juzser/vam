@@ -164,8 +164,12 @@ export const SIDEBAR_STEP = 10;
  * mark below it is merely centred in. That makes it two pixels taller than the
  * mark's own ink rather than one shorter, which is the relation the geometry
  * has claimed all along, and it is the largest step that changes nothing else
- * -- the slot grew by one pixel to the name's own line box and the row's
- * `min-h` was never the binding number.
+ * -- the slot grew by one pixel to what was then the name's own line box
+ * (16px, `text-meta`'s leading) and the row's `min-h` was never the binding
+ * number. The name has since moved up to `text-heading`, a 20px line, and
+ * the slot did NOT follow it: the emoji's ink already fills the 16 (below),
+ * so a taller slot would hold either an emoji that spills it or a glyph
+ * adrift in it. `items-center` centres the slot in the taller line.
  *
  * DERIVED, NEVER COPIED. Moving the lane moves this, and
  * `SessionList.icon.test.tsx` asserts the equality rather than the value, so
@@ -1862,13 +1866,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-ink-faint">
                   <Monitor size={11} strokeWidth={1.7} />
                 </span>
-                {/* Typed exactly like the real project heading below, upper
-                    case and letter-spacing dropped with it: this row becomes
-                    one the moment the session arrives, and a change of case at
-                    that moment would read as the name having been rewritten. */}
-                <span className="truncate font-mono text-meta text-ink-dim">
-                  {starting.projectName}
-                </span>
+                {/* Typed exactly like the real project heading below -- upper
+                    case and letter-spacing dropped with it, `text-heading`
+                    and the sans face taken with it: this row becomes one the
+                    moment the session arrives, and a change of case, of size
+                    or of face at that moment would read as the name having
+                    been rewritten. */}
+                <span className="truncate text-heading text-ink-dim">{starting.projectName}</span>
               </div>
               <div className="flex flex-col gap-[5px]" style={{ paddingLeft: SIDEBAR_STEP }}>
                 <div
@@ -1929,14 +1933,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     }
                     className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                   >
-                    {/* THE SLOT IS THE NAME'S LINE BOX: 16px is
-                        `--text-meta--line-height`, the height of the caption
-                        beside it, so the icon stands as tall as the line it
-                        heads rather than two-thirds of it. `text-control` is
-                        the EMOJI's size (an emoji is text and takes no `size`),
-                        the largest that keeps a full-box emoji's ink inside
-                        this slot -- see `HEADING_GLYPH_PX`, which owns the
-                        argument for both numbers. */}
+                    {/* THE SLOT WAS THE NAME'S LINE BOX: 16px is
+                        `--text-meta--line-height`, the leading the caption
+                        beside it had when the slot was sized, so the icon
+                        stood as tall as the line it heads rather than
+                        two-thirds of it. The name is `text-heading` now (a
+                        20px line) and the slot stays at 16, centred in it by
+                        `items-center`: `text-control` is the EMOJI's size (an
+                        emoji is text and takes no `size`), the largest that
+                        keeps a full-box emoji's ink inside this slot -- see
+                        `HEADING_GLYPH_PX`, which owns the argument for both
+                        numbers and for why the slot did not grow with the
+                        name. */}
                     <span
                       data-group-icon={group.id}
                       className="flex h-[16px] w-[16px] flex-none items-center justify-center text-control leading-none text-ink-faint"
@@ -1956,7 +1964,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
                       groupEditor
                     ) : (
-                      <span className="truncate font-mono text-meta text-ink uppercase tracking-[0.12em]">
+                      /* `text-heading`, one step above the rows under it, and
+                         in the SANS face the rows are titled in. The argument
+                         for both is made once, on the project name below,
+                         because the operator asked for both levels in one
+                         breath each time. The register is untouched: upper
+                         case and tracking are what separate this level from
+                         the project's, and at 15px a name the column cannot
+                         hold still clips to an ellipsis before the count and
+                         the controls, which do not move -- measured, at the
+                         default width, with a 531px name in a 117px box. */
+                      <span className="truncate text-heading text-ink uppercase tracking-[0.12em]">
                         {group.name}
                       </span>
                     )}
@@ -2182,12 +2200,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       tip is the label alone. It replaces a native `title`,
                       which no browser opens on keyboard focus. */}
                   <ShortcutTip label="Change project icon">
-                    {/* Same slot as the group's above -- 16px, the name's own
-                        line box, `text-control` for the emoji -- and the same
-                        `HEADING_GLYPH_PX` for the glyph, because a level is
-                        not a third kind of icon. `vam-hit-24` hangs the hit
-                        area off an `::after` and the phone floor is a `min-`,
-                        so neither box moves with this one. */}
+                    {/* Same slot as the group's above -- 16px, centred in the
+                        name's 20px line, `text-control` for the emoji -- and
+                        the same `HEADING_GLYPH_PX` for the glyph, because a
+                        level is not a third kind of icon. `vam-hit-24` hangs
+                        the hit area off an `::after` and the phone floor is a
+                        `min-`, so neither box moves with this one. */}
                     <button
                       type="button"
                       data-project-icon={section.project.id}
@@ -2230,8 +2248,39 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        the operator typed it. Upper case cost legibility too:
                        a repo name is mostly lower-case letters with
                        distinctive ascenders, and capitalising them throws that
-                       shape away in the narrowest column in the app. */
-                    <span className="truncate font-mono text-meta text-ink-dim">
+                       shape away in the narrowest column in the app.
+
+                       ONE STEP ABOVE THE ROWS IT HEADS. The operator, reading
+                       the column: "make the font size of the project and the
+                       group a bit larger than the session". It was the other
+                       way round -- this name sat at `text-meta` (11px) over
+                       rows titled at `text-body` (13px), so the level that
+                       groups the list was the smallest type in it. "A bit
+                       larger than the session" is the scale's own next step
+                       up from the row, `text-heading` (15px), and not a new
+                       number between the two: the scale has four steps and
+                       `test/renderer/type-scale.test.ts` holds it to four.
+                       The cost is one pixel of row: `text-heading` carries a
+                       20px line where `text-meta` carried 16, and 20 plus the
+                       `pb-0.5` is 22 against the 21px `min-h` -- measured,
+                       and the same on the group above. The count beside the
+                       name stays `text-meta`: it is subordinate to the name,
+                       not a peer of the rows. `e2e/sidebar-tree-shots.mjs`
+                       reads both sizes off the paint and asserts the order.
+
+                       AND NOT MONO. The operator, once the sizes had moved:
+                       "use the regular font, not mono". Both heading names
+                       were set in `--font-mono` over rows titled in
+                       `--font-sans`, so the level that names the list was the
+                       one thing in it written like a code sample -- and at
+                       15px a mono repo name is also the widest thing in the
+                       narrowest column, since every glyph takes the em. A
+                       heading is set in the face of the titles it heads; the
+                       count beside it stays mono, because a count is meta and
+                       every piece of meta here (branch, age, badge) is mono.
+                       The same guard reads `fontFamily` off every heading
+                       name against the row title's and asserts they agree. */
+                    <span className="truncate text-heading text-ink-dim">
                       {section.project.name}
                     </span>
                   )}
