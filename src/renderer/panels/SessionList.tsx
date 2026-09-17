@@ -60,7 +60,7 @@ import { IconMark, parseIcon } from './icon-value.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
-import { StatusMark } from './status-mark.js';
+import { MARK_LANE_PX, StatusMark } from './status-mark.js';
 
 /**
  * What `pendingAction` holds while "new project" is running.
@@ -141,6 +141,52 @@ const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
  * generates -- the same trap `BRANCH_TAIL_MAX_CHARS` documents below.
  */
 export const SIDEBAR_STEP = 10;
+
+/**
+ * How big a HEADING's glyph is — a project's and a group's, which are the only
+ * icons the sidebar draws.
+ *
+ * Operator: "Icon ở sidebar cần lớn hơn." The number is not a preference, and
+ * it is not new either: it is `MARK_LANE_PX`, the box every session's status
+ * mark below is centred in, and taking it fixes an inversion that was already
+ * written down as the opposite.
+ *
+ * WHAT WAS INVERTED. `status-mark.tsx` picks 14 for its lane and says why: it
+ * is "one pixel under" the heading's slot, "so a session's mark reads as a
+ * smaller relative of the heading's glyph rather than as its equal". That is a
+ * claim about two BOXES, and it held. The GLYPHS inside them went the other
+ * way -- the mark draws at 12 inside its 14, the heading drew at 11 inside its
+ * 15 -- so on screen the level above was the smaller mark. The eye reads the
+ * ink, not the box, which is why the sidebar looked the way the operator said
+ * it looked while every number in it was the number somebody chose.
+ *
+ * A HEADING'S GLYPH IS THEREFORE THE LANE ITSELF: as tall as the whole box the
+ * mark below it is merely centred in. That makes it two pixels taller than the
+ * mark's own ink rather than one shorter, which is the relation the geometry
+ * has claimed all along, and it is the largest step that changes nothing else
+ * -- the slot grew by one pixel to the name's own line box and the row's
+ * `min-h` was never the binding number.
+ *
+ * DERIVED, NEVER COPIED. Moving the lane moves this, and
+ * `SessionList.icon.test.tsx` asserts the equality rather than the value, so
+ * the two cannot drift into two answers about one relationship.
+ *
+ * IT SIZES ONE OF THE TWO KINDS OF ICON, and that is a fact about the pixels
+ * rather than an omission. An emoji is text: `IconMark` hands this number to a
+ * lucide glyph and ignores it for an emoji, which takes the slot's own type
+ * class. The two kinds do not paint the same size at the same number --
+ * measured on the composited pixels, a full-box emoji's ink runs three to four
+ * pixels PAST its font-size (11px drew 14 tall) while a lucide glyph's ink is
+ * its `size` or a little under (`Monitor` at 11 drew 9, `Rocket` 11). So the
+ * slot carries `text-control` (12px, ink 15) beside this 14 (ink 12 to 13),
+ * which puts the two kinds two or three pixels apart instead of five, and
+ * the emoji is the larger of the two by exactly the margin a picture has
+ * over a stroke. Not every emoji is full-box -- a diagonal one like the
+ * hammer paints eight or nine at any size, because that is the drawing --
+ * and no font-size fixes that without overflowing the rest.
+ * `e2e/sidebar-tree-shots.mjs` measures both inks against the mark's.
+ */
+export const HEADING_GLYPH_PX = MARK_LANE_PX;
 
 /**
  * A branch name split so the END survives a narrow column.
@@ -1883,9 +1929,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     }
                     className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                   >
+                    {/* THE SLOT IS THE NAME'S LINE BOX: 16px is
+                        `--text-meta--line-height`, the height of the caption
+                        beside it, so the icon stands as tall as the line it
+                        heads rather than two-thirds of it. `text-control` is
+                        the EMOJI's size (an emoji is text and takes no `size`),
+                        the largest that keeps a full-box emoji's ink inside
+                        this slot -- see `HEADING_GLYPH_PX`, which owns the
+                        argument for both numbers. */}
                     <span
                       data-group-icon={group.id}
-                      className="flex h-[15px] w-[15px] flex-none items-center justify-center text-meta leading-none text-ink-faint"
+                      className="flex h-[16px] w-[16px] flex-none items-center justify-center text-control leading-none text-ink-faint"
                     >
                       {/* `text-ink-faint` on the span is the EMOJI's ink and
                           the placeholder's; a chosen glyph carries its own
@@ -1895,8 +1949,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           (`styles.css`). */}
                       <IconMark
                         value={parseIcon(group.icon)}
-                        size={11}
-                        fallback={<Folder size={11} strokeWidth={1.7} />}
+                        size={HEADING_GLYPH_PX}
+                        fallback={<Folder size={HEADING_GLYPH_PX} strokeWidth={1.7} />}
                       />
                     </span>
                     {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
@@ -2128,16 +2182,22 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       tip is the label alone. It replaces a native `title`,
                       which no browser opens on keyboard focus. */}
                   <ShortcutTip label="Change project icon">
+                    {/* Same slot as the group's above -- 16px, the name's own
+                        line box, `text-control` for the emoji -- and the same
+                        `HEADING_GLYPH_PX` for the glyph, because a level is
+                        not a third kind of icon. `vam-hit-24` hangs the hit
+                        area off an `::after` and the phone floor is a `min-`,
+                        so neither box moves with this one. */}
                     <button
                       type="button"
                       data-project-icon={section.project.id}
                       onClick={() => onPickIcon(section.project)}
                       aria-label={`change icon for ${section.project.name}`}
-                      className="vam-tap vam-hit-24 flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-meta leading-none text-ink-faint hover:text-ink-dim"
+                      className="vam-tap vam-hit-24 flex h-[16px] w-[16px] flex-none cursor-pointer items-center justify-center text-control leading-none text-ink-faint hover:text-ink-dim"
                     >
                       <IconMark
                         value={parseIcon(section.project.icon)}
-                        size={11}
+                        size={HEADING_GLYPH_PX}
                         fallback={
                           /* A monitor, not a middot. The glyph has to read as "this
                            is a machine you can name" — the middot read as a bullet
@@ -2148,7 +2208,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                            what a value this build cannot draw falls back to, so an
                            icon named by a newer vam looks like "none picked"
                            rather than like a printed storage key. */
-                          <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
+                          <Monitor
+                            data-project-icon-placeholder
+                            size={HEADING_GLYPH_PX}
+                            strokeWidth={1.7}
+                          />
                         }
                       />
                     </button>

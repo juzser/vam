@@ -25,6 +25,16 @@
  * gesture out would be two places for an overlay to reappear in. What is NOT
  * shared is the arithmetic below, which is specific to a two-column layout
  * whose second width is derived from the first.
+ *
+ * AND THE CLASS LIST IS NOW SHARED FOR THE SAME REASON, which this file is the
+ * cautionary tale for. It used to claim that "Tailwind's preflight zeroes its
+ * default margin/border, so nothing here overrides that visually" — the margin
+ * half is true, the border half is not, and preflight's own `hr` rule hands
+ * the element a 1px `currentColor` top border back. That is the near-white
+ * hairline the operator found at the sidebar's top corner. The repair is
+ * `RESIZE_HANDLE_RESET` in `pane-drag.ts`, which argues it in full, and it is
+ * a constant rather than a sentence here because the two other handles had the
+ * identical defect and a sentence is what let all three keep it.
  */
 
 import { useCallback } from 'react';
@@ -37,7 +47,7 @@ import {
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
-import { usePointerDrag } from './pane-drag.js';
+import { RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 
 /** A Shift-held arrow press moves further than a bare one — the standard
  *  slider pattern (WAI-ARIA APG "Slider"), sized against the same step the
@@ -164,8 +174,8 @@ export function PaneResizer(props: PaneResizerProps) {
   return (
     // A native <hr> already carries the `separator` role, which is what
     // biome's a11y/useSemanticElements rule asks for in place of a bare
-    // `role="separator"` div — Tailwind's preflight zeroes its default
-    // margin/border, so nothing here overrides that visually.
+    // `role="separator"` div. Preflight zeroes its margin and then hands it a
+    // 1px top border back; `RESIZE_HANDLE_RESET` is what takes that away.
     <hr
       aria-orientation="vertical"
       aria-label={ariaLabel}
@@ -175,7 +185,7 @@ export function PaneResizer(props: PaneResizerProps) {
       tabIndex={0}
       data-pane-resize-handle={pane}
       className={[
-        'absolute top-0 z-10 h-full w-1 select-none',
+        `absolute top-0 z-10 h-full w-1 ${RESIZE_HANDLE_RESET}`,
         SIDE[pane],
         'cursor-col-resize',
         dragging ? 'bg-line-loudest' : 'bg-transparent hover:bg-line-loudest',

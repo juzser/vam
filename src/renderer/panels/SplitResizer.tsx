@@ -37,7 +37,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { canDivide, dividerShare, MIN_PANE_PX, type SplitOrientation } from '../canvas/split.js';
 import { PANE_RESIZE_STEP } from '../prefs/panes.js';
-import { usePointerDrag } from './pane-drag.js';
+import { RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 
 /** A Shift-held arrow moves further than a bare one — the WAI-ARIA APG slider
  *  pattern, and the same multiplier `PaneResizer` uses, so the two handles
@@ -272,7 +272,11 @@ export function SplitResizer(props: SplitResizerProps) {
   return (
     // A native <hr> already carries the `separator` role, which is what
     // biome's a11y/useSemanticElements rule asks for in place of a bare
-    // `role="separator"` div — the same element `PaneResizer` settled on.
+    // `role="separator"` div — the same element `PaneResizer` settled on, and
+    // therefore the same preflight top border `RESIZE_HANDLE_RESET` removes.
+    // THIS IS THE WIDE ONE: a horizontal divider spans the whole pane, so the
+    // hairline the operator caught at the sidebar's four-pixel corner was
+    // hundreds of pixels long here and had still gone unreported.
     <hr
       ref={ref}
       aria-orientation={row ? 'vertical' : 'horizontal'}
@@ -290,7 +294,7 @@ export function SplitResizer(props: SplitResizerProps) {
       className={[
         // Straddles the 1px `gap-px` seam `SplitLayout` draws between the
         // slots, the way the sidebar handle straddles its border.
-        'absolute z-20 select-none',
+        `absolute z-20 ${RESIZE_HANDLE_RESET}`,
         row ? 'top-0 h-full w-1 -right-[2px]' : 'left-0 w-full h-1 -bottom-[2px]',
         // The affordance IS the cursor and the hover tint. A divider that
         // cannot move keeps neither: one that went on promising a drag and
