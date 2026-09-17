@@ -298,9 +298,9 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
  * The desktop canvas: rows AND a write route, both assembled from the main
  * process's own descriptor.
  *
- * The Claude Code source declares `recordPrompt: true` and, when it can reach
- * a running `claude --resume`, `deliverPrompt: true` too -- so the
- * `SessionSource` `createSourceFromPreload` returns genuinely carries a
+ * The Claude Code source declares `recordPrompt: true` and, because it can type
+ * a reply into the pane of a session it owns, `deliverPrompt: true` too -- so
+ * the `SessionSource` `createSourceFromPreload` returns genuinely carries a
  * `write` member. `Canvas` is given it as a `'session'` source rather than
  * left on the `READ_ONLY_SOURCE` default, so this shell is exactly as
  * writable as the descriptor it was built from -- whether a given write

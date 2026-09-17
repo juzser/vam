@@ -1493,15 +1493,21 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(control()?.getAttribute('aria-busy')).toBe('false');
   });
 
-  it('says SENT, not recorded, once the source delivers into the running session', async () => {
+  it('says the prompt was TYPED INTO THE TERMINAL when the source delivers, not that it was answered', async () => {
     const calls: { sessionId: string; prompt: string }[] = [];
     const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
       calls.push({ sessionId, prompt });
     });
     await submit(source, 'run task-4 again');
     expect(calls).toEqual([{ sessionId: 'a1', prompt: 'run task-4 again' }]);
-    expect(statusBar()).toContain('sent into the running session');
+    // After a keystroke-into-the-pane there is no echo that the turn landed, so
+    // the sentence claims only what is true: the text was typed into the
+    // terminal, and it will appear when the session records it.
+    expect(statusBar()).toContain('typed into the terminal');
     expect(statusBar()).not.toContain('recorded');
+    // It must not claim a delivery that was confirmed, nor that an answer is
+    // already coming -- the words the retired `--resume` echo used to earn.
+    expect(statusBar()).not.toMatch(/delivered|it will answer there/i);
   });
 
   it('says RECORDED when the source only records, not delivers', async () => {
@@ -1517,8 +1523,7 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(statusBar()).toContain('recorded, not sent to the agent');
     // Both directions, so the two outcomes cannot collapse into one wording
     // that happens to contain the word the assertion looked for.
-    expect(statusBar()).not.toContain('sent into the running session');
-    expect(statusBar()).not.toContain('sent into the running session');
+    expect(statusBar()).not.toContain('typed into the terminal');
     expect(wrote.count).toBe(1);
   });
 

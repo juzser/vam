@@ -63,7 +63,6 @@ import { readAgentWork } from './agent-work.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
-import { deliverPromptViaCli } from './deliver.js';
 import { readTranscriptHistory } from './history.js';
 import { prRepoOverride } from './pr-repos.js';
 import { projectIdOf } from './project-id.js';
@@ -541,17 +540,20 @@ const DESCRIPTOR: SourceDescriptor = {
   capabilities: {
     liveUpdates: false,
     // Both true, and they mean different things. `deliverPrompt` is the real
-    // claim: `claude --resume <id> -p` appends the turn to the running
-    // session's own history, so what vam sends is ANSWERED, not filed. The
-    // port makes `recordPrompt` the only required member of a write surface,
-    // so delivering is only reachable through it -- which is why it is true
-    // as well. See the note on `recordPrompt` below: for this source the two
-    // are one operation, and the weaker word is the one that is misleading.
+    // claim: vam TYPES the prompt into the tmux pane of a session it started
+    // (`reply.ts`), so what vam sends reaches a running agent rather than being
+    // filed in a log -- but only for a session vam owns a pane for, and a row
+    // with no such pane is refused, not recorded (there is no log to fall back
+    // to on this source). The port makes `recordPrompt` the only required
+    // member of a write surface, so the pane channel is only reachable through
+    // it -- which is why it is true as well. What vam can honestly claim after
+    // a send is that the text was typed into the pane; the turn shows in the
+    // Response view when the transcript does. See `recordPrompt` below.
     recordPrompt: true,
     deliverPrompt: true,
-    // `deliverPromptViaCli` already carries the arbitrary text of a prompt
-    // (`deliver.ts`); a path reference is just another line of that same
-    // string, and Claude Code reads the bytes itself on the other end
+    // A pasted image is a path in the typed prompt, which `reply.ts` types into
+    // the pane like any other text, and Claude Code reads the bytes itself on
+    // the other end
     // (`state/artifacts/vam-image-attach/findings.md`). The picking and the
     // two checks that matter -- inside the session's own directory, really an
     // image by content -- happen in main before the draft ever changes
@@ -693,10 +695,10 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
   },
   /**
    * The live list is re-asked here rather than cached from `load()`: it is
-   * where the session's working directory comes from, and a canvas drawn
-   * minutes ago may name a session that has since exited. Asking again costs
-   * one subprocess and is the difference between refusing a dead session and
-   * delivering into the wrong directory.
+   * where the pane pairing is resolved from, and a canvas drawn minutes ago may
+   * name a session that has since exited. Asking again costs one subprocess and
+   * is the difference between typing into the pane that exists now and refusing
+   * a session that is already gone.
    */
   recordPrompt: async (sessionId, prompt) => {
     const agentsResult = await listLiveAgents();
@@ -706,7 +708,6 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       rowId: sessionId,
       prompt,
       run: createTmuxRunner(),
-      deliver: deliverPromptViaCli,
       // Read fresh, for the same reason the agent list is: a canvas drawn
       // minutes ago is not evidence about which pane a session is in now.
       panes: await readPublishedPanes(defaultSessionsRoot()),

@@ -3638,9 +3638,9 @@ function CanvasInner({
    * prompt; it has no channel into a running agent session, so "recorded" is
    * the truth and "sent" would not be. A `'session'` source can be different:
    * when `capabilities.deliverPrompt` is true the write really does reach a
-   * running `claude --resume`, and saying "recorded" there would be the same
-   * lie in the other direction — the operator would think nothing happened
-   * when an agent is about to answer.
+   * running session -- it is TYPED into the pane vam owns -- and saying
+   * "recorded" there would be the same lie in the other direction, the operator
+   * thinking nothing happened when the keystrokes went out.
    *
    * WHAT THE WORDING IS ACTUALLY DERIVED FROM, said here because it reads
    * like a per-call outcome and is not one. `deliverPrompt` is the source's
@@ -3648,15 +3648,15 @@ function CanvasInner({
    * `SourceWrites.recordPrompt` is `Promise<void>` (`sources/port.ts`), the
    * preload unwraps it as `void` (`preload/api.ts`), and main's
    * `recordPrompt` resolves to `SourceError | null` -- a refusal or nothing
-   * (`main/sources/source.ts`). The Claude Code source routes a reply two
-   * ways, into a tmux pane it owns or into `claude --resume`
-   * (`main/sources/claude-code/reply.ts`), and reports neither: both count as
-   * delivered, and both refuse loudly rather than quietly recording, which is
-   * why resolving without an error is enough to say "sent" here. The gap that
-   * remains is a source declaring `deliverPrompt` while its write only
-   * appends -- vam cannot see that, and it cannot be closed in this file. It
-   * needs an outcome carried back through those four layers. Do not paper
-   * over it here with a wording that guesses.
+   * (`main/sources/source.ts`). The Claude Code source has ONE reply channel,
+   * a tmux pane it owns (`main/sources/claude-code/reply.ts`), and reports only
+   * whether the keystrokes went out: a row with no such pane REFUSES loudly
+   * rather than quietly recording, which is why resolving without an error is
+   * enough to say the text was typed here. What resolving does NOT prove is
+   * that the turn landed -- there is no echo, and the sentence stops short of
+   * claiming one. The gap that remains is a source declaring `deliverPrompt`
+   * while its write only appends -- vam cannot see that, and it cannot be
+   * closed in this file. Do not paper over it here with a wording that guesses.
    *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
@@ -3764,8 +3764,13 @@ function CanvasInner({
         try {
           await sessionSource.write.recordPrompt(entry.session.id, text);
           setStatus(
+            // What vam can honestly claim differs by source. A delivering
+            // source (Claude Code) TYPED the prompt into the pane it owns;
+            // there is no echo that the turn landed, so it claims none, and the
+            // turn appears here when the session's transcript records it. A
+            // recording source only appended to a log.
             sessionSource.capabilities.deliverPrompt
-              ? `sent into the running session of ${entry.session.title} — it will answer there`
+              ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
               : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
           );
           lastSent.current.set(entry.session.id, { text, at: Date.now() });

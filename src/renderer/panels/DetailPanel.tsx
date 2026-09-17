@@ -679,12 +679,12 @@ export type DetailPanelProps = {
   /**
    * True while a write is in flight.
    *
-   * `claude --resume` is a subprocess with a 120-second timeout
-   * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`), so this is not a flicker: Enter can
-   * start something that runs for two minutes. `Canvas` has had the flag since
-   * the composer was written -- it guards against a double submit -- and it
-   * never reached the pane, so the operator saw nothing happen and every
-   * further Enter was swallowed without a word.
+   * A reply is a run of tmux `send-keys` into the session's pane (`reply.ts`),
+   * each a subprocess of its own, plus the listing that resolves the pane
+   * first: quick, but not instant, and a multi-line prompt is several of them.
+   * `Canvas` has had the flag since the composer was written -- it guards
+   * against a double submit -- and it never reached the pane, so the operator
+   * saw nothing happen and every further Enter was swallowed without a word.
    */
   readonly sending?: boolean;
   /**
@@ -854,9 +854,9 @@ export type DetailPanelProps = {
    * THIS SETS THE GLOBAL DEFAULT, NOT THIS SESSION'S OWN PROVIDER — a fact
    * about the plumbing, not a design choice. `defaultProvider` is read once,
    * at NEW session creation (`sources/http-factory.ts`,
-   * `sources/preload-factory.ts`); every reply to a session already running
-   * goes through `claude --resume` (`main/sources/claude-code/deliver.ts`),
-   * which never consults it. A control drawn beside THIS session's composer
+   * `sources/preload-factory.ts`); every reply to a session already running is
+   * typed into its pane (`main/sources/claude-code/reply.ts`), which never
+   * consults it. A control drawn beside THIS session's composer
    * that claimed to change how ITS next reply is handled would be exactly
    * the lie `setModelRequest`'s own comment refuses elsewhere in this file —
    * there is no channel that would make it true. So the choice made here
@@ -5292,11 +5292,14 @@ export function DetailPanel(props: DetailPanelProps) {
   /**
    * What the composer's button claims, in the words the SOURCE earns.
    *
-   * PR #70 gave the Claude Code source a real channel into a running session,
-   * so for that source a prompt is handed over and answered — `record` now
-   * understates it, and an operator has to know when a message is going out.
-   * the factory source still genuinely only appends to a log, so this is per-source
-   * and not a rename: one wording for both would be wrong for one of them.
+   * The Claude Code source TYPES the prompt into the pane it owns -- a real
+   * channel into the running session, so `record` understates it and the
+   * operator has to know when a message is going out. But it is a keystroke
+   * with no echo that the turn landed, so the wording stops at "typed into the
+   * terminal" and does not promise a delivery or an answer (`Canvas.tsx`, and
+   * `sources/claude-code/reply.ts`). The factory source still genuinely only
+   * appends to a log, so this is per-source and not a rename: one wording for
+   * both would be wrong for one of them.
    */
   const composerClaim = sending
     ? // The in-flight wording keeps the delivers/records distinction. Losing it
@@ -5307,7 +5310,7 @@ export function DetailPanel(props: DetailPanelProps) {
       ? {
           Glyph: ArrowUp,
           label: 'sending prompt…',
-          title: 'handing the prompt to the running agent session — this can take a while',
+          title: 'typing the prompt into this session’s terminal — this can take a while',
         }
       : {
           Glyph: NotepadText,
@@ -5318,7 +5321,11 @@ export function DetailPanel(props: DetailPanelProps) {
       ? {
           Glyph: ArrowUp,
           label: 'send prompt',
-          title: 'sends the prompt into the running agent session — it is delivered, not filed',
+          // Typed into the pane vam owns, not delivered-and-confirmed: there is
+          // no echo that the turn landed (`sources/claude-code/reply.ts`), so
+          // this claims the keystroke, not the answer.
+          title:
+            'types the prompt into this session’s terminal — it appears when the session records it',
         }
       : {
           Glyph: NotepadText,
@@ -7192,8 +7199,8 @@ export function DetailPanel(props: DetailPanelProps) {
                 </Note>
               )}
               {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
-              and this drew one for both of them -- for a source that hands the
-              prompt to a running `claude --resume` and for a source that
+              and this drew one for both of them -- for a source that types the
+              prompt into the running session's pane and for a source that
               appends it to a log and nothing reads it back out. Those are
               different things to have done, and the whole distinction lived in
               an `aria-label` and a native `title`: invisible to anyone looking
