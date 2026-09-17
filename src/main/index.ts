@@ -18,6 +18,7 @@ import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
 import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
+import { applyUtf8Ctype } from './env/utf8-ctype.js';
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
 import { registerFilesIpc } from './files/ipc.js';
@@ -567,6 +568,11 @@ void app.whenReady().then(async () => {
     home: homedir(),
     probe: probeLoginShellPath,
   });
+  // AND THE LOCALE, FOR THE SAME REASON AND AT THE SAME MOMENT: a GUI launch
+  // has no LANG or LC_* either, and a tmux client without a UTF-8 LC_CTYPE
+  // rewrites the separators in every listing vam reads -- which made every
+  // session vam started invisible to it. See `./env/utf8-ctype.ts`.
+  applyUtf8Ctype(process.env, process.platform);
   registerPermissionPolicy();
   registerContentSecurityPolicy();
   // vam's own menu, replacing Electron's default one. The default claims
