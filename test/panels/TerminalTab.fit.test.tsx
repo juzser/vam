@@ -389,11 +389,16 @@ describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pix
    * The floor resolved to pixels, the way an engine resolves it.
    *
    * WHY THIS BLOCK IS ABOUT A FLOOR NOW. The cap was eighty columns; the
-   * operator asked for two thirds of the pane, so it is
-   * `max(two thirds, eighty columns)`. The fraction is a percentage no
-   * arithmetic here can resolve without a layout -- `e2e/view-width-shots.mjs`
-   * measures that half in Chromium -- and the eighty columns is the half this
-   * block was written for, unchanged in everything but its role.
+   * operator asked for two thirds of the pane, so it became
+   * `max(two thirds, eighty columns)`; then they split a pane and the eighty
+   * became the THRESHOLD the fraction stops applying at, so it is now two
+   * thirds while that is at least eighty columns and the whole pane below.
+   * The fraction and the step are percentages no arithmetic here can resolve
+   * without a layout -- `e2e/view-width-shots.mjs` measures those in Chromium
+   * and `prefs.view-width.test.ts` resolves the step by hand -- and the eighty
+   * columns is the part this block was written for, unchanged in everything
+   * but its role: it is the narrowest terminal vam ever narrows TO, so it must
+   * still come out at exactly eighty cells of content.
    *
    * PARSED FROM THE SOURCE'S OWN EXPRESSION rather than restated: this repo
    * has paid four times for a width that existed in a module and again in a
@@ -405,8 +410,10 @@ describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pix
   const term = /^([\d.]+)(ch|rem|px)$/;
   const floorExpression = (expr: string): string => {
     // No `\b` before `ch`: it is glued to a digit in `80.5ch`, where there is
-    // no word boundary at all.
-    const hit = /calc\(([^)]*ch[^)]*)\)/.exec(expr);
+    // no word boundary at all. And no parenthesis of either kind inside: the
+    // floor is a `calc()` NESTED in the step's, so the innermost one holding a
+    // `ch` is the floor and the one around it is the step.
+    const hit = /calc\(([^()]*ch[^()]*)\)/.exec(expr);
     if (hit === null) throw new Error(`no cell-sized floor in the cap: ${expr}`);
     return hit[1] as string;
   };

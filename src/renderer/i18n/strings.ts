@@ -109,10 +109,12 @@ const EN = {
   // would otherwise meet as a fault: that the Terminal is one of the four views
   // this reaches, that narrowing it tells tmux a new column count — which
   // re-wraps the screen of a session that is still running — and that the
-  // fraction has a floor, so nothing happens on a pane that is already narrow.
+  // fraction has a threshold, so a pane too narrow for two thirds of it to
+  // hold 80 characters is left whole rather than narrowed (the operator met
+  // the older floor as a defect in a split, `prefs/view-width.ts`).
   'settings.appearance.narrowViews.label': 'view width',
   'settings.appearance.narrowViews.hint':
-    'draw the response, PRs, agents and terminal views at about two thirds of the pane instead of filling it, and never narrower than 80 characters — the terminal is told the narrower column count, so tmux re-wraps its screen',
+    'draw the response, PRs, agents and terminal views at two thirds of the pane instead of filling it, while that is at least 80 characters — a narrower pane, such as one side of a split, is left whole; the terminal is told the narrower column count, so tmux re-wraps its screen',
   'settings.appearance.narrowViews.on': 'narrowed',
   'settings.appearance.narrowViews.off': 'full pane',
   'settings.appearance.focusView.label': 'focus view',
