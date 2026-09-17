@@ -7,16 +7,15 @@
  * lives on `Canvas`) re-rendered it in full every time. THE FIX wraps it in
  * `React.memo` and stabilises every prop; a single one left unstable defeats
  * the whole memo, so THIS GUARD asserts a render COUNT, not a millisecond
- * bound, exactly as `Canvas.keystroke-scaling.test.tsx` does and for the
- * same reason: two wall-clock samples drift independently under contention.
+ * bound: two wall-clock samples drift independently under contention, so a
+ * count, not a duration, is the only stable signal here.
  *
  * HOW THE COUNT IS TAKEN: `SessionList` is `memo(SessionListImpl)`, so
  * `actual.SessionList.type` is the raw, unmemoized function `memo()` wraps
  * (a documented shape of what `React.memo` returns). Calling it inside a
  * fresh `memo()` here recreates production's exact bail-or-render decision,
- * with a counter on the "render" branch -- the same technique
- * `Canvas.keystroke-scaling.test.tsx` uses on the four node-type components,
- * generalised to a component wrapped in `memo` by this file, not a library.
+ * with a counter on the "render" branch -- the technique generalises to
+ * any component `memo` wraps, not to one specific library's internals.
  *
  * FALSIFIED BY MUTATION: making one `Canvas.tsx` prop an inline arrow again
  * reproduces a non-zero count and reddens the assertion -- see the coder's
@@ -106,7 +105,7 @@ function typeOneCharacterAndCountSessionListRenders(sessionCount: number): numbe
 
 describe('a composer keystroke against the sidebar it should never touch', () => {
   // Exact count, not a millisecond bound -- deterministic under load. The
-  // 20s timeout is the same accommodation `Canvas.keystroke-scaling.test.tsx`
+  // 20s timeout is the accommodation the stress case
   // needs: mounting a 200-session Canvas under full-suite contention can
   // itself take longer than the 5s default.
   it('causes zero SessionList renders, at a realistic and a stress session count', () => {
