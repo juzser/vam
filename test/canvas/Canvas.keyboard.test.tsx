@@ -268,8 +268,9 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-  // Canvas now reads localStorage on mount. A pin or an icon left by one test
-  // would silently place a node — or draw an emoji — in the next.
+  // Canvas now reads localStorage on mount. An icon (or another
+  // `vam.prefs.v1` field) left by one test would leak into the next via
+  // `readPrefs`, undetected unless this suite clears it every time.
   localStorage.clear();
 });
 
