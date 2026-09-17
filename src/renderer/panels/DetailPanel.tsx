@@ -139,6 +139,13 @@ import {
   submitsPrompt,
   subscribePromptSubmitKey,
 } from '../prefs/submit-key.js';
+import {
+  activeNarrowViews,
+  narrowProseMaxWidth,
+  PROSE_RULER_CLASS,
+  PROSE_RULER_TEXT,
+  subscribeNarrowViews,
+} from '../prefs/view-width.js';
 import { useAgentWorkReader } from '../sources/agent-work-reader.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure, type SourceError } from '../sources/port.js';
@@ -156,7 +163,7 @@ import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, visibleTabs } from './tabs.js';
+import { narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
 import {
   appendOlder,
   applyWalk,
@@ -5066,6 +5073,79 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const focusView = useSyncExternalStore(subscribeFocusView, activeFocusView, activeFocusView);
   /**
+   * WHETHER THIS PANE'S VIEWS ARE CAPPED AT A READABLE LINE LENGTH.
+   *
+   * Read through the same seam `focusView` above it uses, and for the same
+   * reason: it is global, `Canvas.tsx` mounts one of these per split leaf and
+   * `PhoneShell` mounts another, and there is no dialogue in which a pane
+   * opened by a keystroke could be asked. `prefs/view-width.ts` carries the
+   * argument for the number and for which views it reaches.
+   */
+  const narrowViews = useSyncExternalStore(
+    subscribeNarrowViews,
+    activeNarrowViews,
+    activeNarrowViews,
+  );
+  /**
+   * HOW WIDE ONE CHARACTER OF THIS PANE'S PROSE REALLY IS, in pixels — or
+   * `null` until something has been laid out.
+   *
+   * THIS IS A MEASUREMENT AND IT USED TO BE A CONSTANT. The constant was
+   * `6.0079`, taken on one macOS machine, and the first Linux CI run measured
+   * 83.95 characters across the column it produced: the shipped font stack
+   * names Geist and does not bundle it, so what paints is the platform's own
+   * face and its advance is not ours to know. `prefs/view-width.ts` carries the
+   * whole argument; what belongs here is the mechanism, which is
+   * `terminal-size.ts`'s: render real glyphs, divide the rectangle the engine
+   * gives back.
+   *
+   * THE OBSERVER IS ON THE RULER, NOT ON THE PANE, and that is the one
+   * non-obvious line of this block. `TerminalTab.tsx` observes its own box
+   * because that is what its column count divides — and its own header records
+   * the cost of that choice: a font change does NOT move the box, so nothing
+   * fires and the effect has to re-run on the size instead. A ruler has the
+   * opposite property. Its width IS the thing that changes when the face
+   * resolves, when the operator steps `out` text, when the page is zoomed and
+   * when a webfont finally swaps in — so observing it turns all four of those
+   * into the one event this needs, and none of them is a prop or a dependency
+   * anything here could have listed.
+   */
+  const proseRulerRef = useRef<HTMLElement | null>(null);
+  const [proseAdvance, setProseAdvance] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const ruler = proseRulerRef.current;
+    if (ruler === null) return;
+    const measure = () => {
+      const width = ruler.getBoundingClientRect().width;
+      const characters = (ruler.textContent ?? '').length;
+      if (!(width > 0) || characters === 0) return;
+      // Only a real move, for `useSyncExternalStore`'s reason one screen up:
+      // an identical number written back every frame is a render per frame.
+      setProseAdvance((previous) =>
+        previous === width / characters ? previous : width / characters,
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(ruler);
+    return () => observer.disconnect();
+  }, []);
+  /**
+   * The cap itself, or `undefined` while the flag is off, while the current
+   * view caps itself, or before the ruler has been measured. One expression,
+   * because the body, the question card and the composer are ONE COLUMN --
+   * see the body's own comment for the operator's decision behind that.
+   */
+  const proseMaxWidth = narrowViews ? narrowProseMaxWidth(proseAdvance) : undefined;
+  /**
+   * The body's own, which is the same cap minus the two views that are not in
+   * it: the Terminal caps itself in `ch` (`narrowsAsProse`), and `FilesTab` is
+   * a CHILD of the body, so a cap left on for it would narrow a tree the
+   * operator drags the width of themselves. The composer and the question card
+   * need no such test — both are already withdrawn on those two views.
+   */
+  const bodyMaxWidth = narrowsAsProse(current) ? proseMaxWidth : undefined;
+  /**
    * THE TURNS THE OPERATOR HAS ASKED BACK, and why this is React state rather
    * than a stored field.
    *
@@ -5432,7 +5512,70 @@ export function DetailPanel(props: DetailPanelProps) {
         you read it. `min-h-0` on every level is still what makes a flex
         child able to shrink and scroll rather than growing its parent.
       */}
-      <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
+      {/* THE BODY EVERY VIEW BUT ONE IS DRAWN INSIDE, and where the operator's
+          width choice lands (`prefs/view-width.ts`).
+
+          A MAXIMUM AND NOTHING ELSE. `narrowsAsProse` decides which views it
+          reaches: the Terminal caps itself in `ch` because eighty of its
+          characters is a COLUMN COUNT, and `FilesTab` — a child of this very
+          element, always mounted and merely `hidden` — is not in the ask and
+          is the one view a second opinion about width would harm. The cap is
+          therefore keyed to the CURRENT view rather than put on unconditionally:
+          leaving it on while Files is up would narrow a tree the operator
+          drags the width of themselves.
+
+          `mx-auto` CENTRES IT, which is a choice and not a default. The cap
+          exists to shorten the eye's return sweep; pinning the column against
+          one edge of a 1600px pane leaves a thousand pixels of void the eye
+          still has to cross to get back. The chrome that frames this body —
+          the view pill in the corner, the composer below — keeps the pane's
+          own width either way, so the column reads as a column and not as a
+          panel that failed to fill.
+
+          `w-full` is what makes `mx-auto` mean anything: a flex child sized by
+          its content has no spare inline space for auto margins to share.
+
+          AND THE COMPOSER AND THE QUESTION CARD COME WITH IT -- the operator's
+          own decision, made on a screenshot of the first cut, where this body
+          was a narrow column of prose sitting on top of full-width chrome:
+          "narrow the composer and the question card too, so the whole block is
+          one column". The first cut argued the other way (they named four
+          VIEWS, and a wide box is better to type into); what that argument
+          missed is that the transcript and the box you answer it in are ONE
+          conversation, and a seam down the middle of it is what the eye
+          actually reads. The same `proseMaxWidth` is spent in all three
+          places, so there is one column and not three that happen to agree. */}
+      <div
+        data-detail-body
+        className={`flex min-h-0 w-full flex-1 select-text flex-col gap-2.5 px-3.5 py-3 ${
+          bodyMaxWidth === undefined ? '' : 'mx-auto'
+        }`}
+        style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
+      >
+        {/* THE RULER, and it is the whole of how the cap knows what a character
+            is. Real glyphs, in this pane's own face, at the smaller of the two
+            prose sizes a response pane draws (`PROSE_RULER_FONT_SIZE`) --
+            measured by the engine rather than assumed by us, which is the
+            correction a frozen macOS advance earned on its first Linux CI run.
+
+            INSIDE THIS ELEMENT so it inherits the face the prose is set in, and
+            `absolute` so its own width is its content's and never this
+            container's -- there is no feedback loop between the cap and the
+            thing the cap is computed from.
+
+            `select-none` IS LOAD-BEARING HERE, unlike on the terminal's ten-M
+            ruler:
+            this body is `select-text`, and three hundred invisible characters
+            inside it would otherwise land in the operator's clipboard every
+            time they selected a turn. */}
+        <span
+          ref={proseRulerRef}
+          data-prose-ruler
+          aria-hidden="true"
+          className={`${PROSE_RULER_CLASS} pointer-events-none absolute top-0 left-0 select-none whitespace-pre opacity-0`}
+        >
+          {PROSE_RULER_TEXT}
+        </span>
         {/* A failed session says so here, not only in the dot's colour.
             Measured against the real CLI: a failed row carries `cwd, id,
             kind, name, sessionId, startedAt, state` and NOTHING about why --
@@ -6140,7 +6283,16 @@ export function DetailPanel(props: DetailPanelProps) {
           // that could disagree with it. The card's options are also the
           // LANDING `I` aims at, by being the first stop in document order.
           {...insertScopeMark}
-          className="flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3"
+          /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
+             see the body's comment. The SEAM is what makes this more than
+             symmetry: `border-t` above draws the rule between the answer and
+             the question, and a rule spanning the whole pane under a 470px
+             column is a line pointing at nothing. Capped here, it is the
+             column's own seam. */
+          className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
+            proseMaxWidth === undefined ? '' : 'mx-auto w-full'
+          }`}
+          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
@@ -6201,7 +6353,12 @@ export function DetailPanel(props: DetailPanelProps) {
             // down the pane. See that constant for the measurement behind it.
             'relative flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
+            // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
+            // -- see the body's comment for the decision and the seam argument
+            // on the question bar above for why the rule has to move with it.
+            proseMaxWidth === undefined ? '' : 'mx-auto w-full',
           ].join(' ')}
+          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
         >
           {/* First child, so it inherits `composerHidden` for free: a
               `QuestionCard` open and unanswered withdraws the whole composer

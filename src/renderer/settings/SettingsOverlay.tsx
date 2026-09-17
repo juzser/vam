@@ -56,6 +56,7 @@ import {
   setEditorIndent,
   setFocusView,
   setKeyBindings,
+  setNarrowViews,
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
@@ -708,6 +709,39 @@ export function SettingsOverlay({
                     </button>
                   ))}
                 </div>
+              </Block>
+
+              {/* THE VIEWS' WIDTH, next to the two text sizes because it is
+                  the same question asked about the box instead of the glyph:
+                  how long is a line. Operator request, translated: "a setting
+                  for whether the width of the Response view, Terminal, PRs and
+                  Agents is full-pane or narrowed."
+
+                  ONE SWITCH FOR FOUR VIEWS BECAUSE IT IS ONE PROMISE -- no
+                  more than eighty characters on a line (WCAG 2.2 SC 1.4.8) --
+                  and `prefs/view-width.ts` carries the argument for why the
+                  Terminal belongs in it and why its pixel maximum is
+                  nevertheless a different number. A second switch would be
+                  asking the operator to answer the same question twice.
+
+                  AND IT IS NOT ONLY PAINT, which is why the hint ends the way
+                  it does. Narrowing the Terminal makes fewer columns fit and
+                  vam tells tmux the new width (`terminal-size.ts`) -- the same
+                  disclosure `terminal text` above it owes, for the same
+                  reason: an operator who is not told reads a re-wrapped screen
+                  as vam having broken their session. */}
+              <Block
+                label={t('settings.appearance.narrowViews.label')}
+                hint={t('settings.appearance.narrowViews.hint')}
+              >
+                <Switch
+                  name="narrow-views"
+                  label={t('settings.appearance.narrowViews.label')}
+                  checked={prefs.narrowViews}
+                  onChange={(next) => onChange(setNarrowViews(prefs, next))}
+                  on={t('settings.appearance.narrowViews.on')}
+                  off={t('settings.appearance.narrowViews.off')}
+                />
               </Block>
 
               {/* CONCISE MODE, and it is here for the same reason `out text`

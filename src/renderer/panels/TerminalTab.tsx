@@ -69,6 +69,11 @@ import {
   subscribeTerminalFontSize,
   TERMINAL_LINE_HEIGHT,
 } from '../prefs/terminal-font.js';
+import {
+  activeNarrowViews,
+  NARROW_TERMINAL_MAX_WIDTH,
+  subscribeNarrowViews,
+} from '../prefs/view-width.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
@@ -642,6 +647,19 @@ export function TerminalTab({
     subscribeTerminalFontSize,
     activeTerminalFontSize,
     activeTerminalFontSize,
+  );
+  /**
+   * WHETHER THE SCREEN IS CAPPED AT A READABLE WIDTH, read the same way and
+   * for the same reason as the size above it — `prefs/view-width.ts` carries
+   * the argument, and the half that belongs here is that eighty of THIS view's
+   * characters is a COLUMN COUNT. Capping the box is the whole mechanism: the
+   * box shrinks, the observer below fires, `measurePane` divides the smaller
+   * box by the same advance, and tmux is told eighty.
+   */
+  const narrowViews = useSyncExternalStore(
+    subscribeNarrowViews,
+    activeNarrowViews,
+    activeNarrowViews,
   );
   /**
    * Only a pane that is actually being drawn is measured -- and a pane is
@@ -1249,7 +1267,32 @@ export function TerminalTab({
        -- is behaviour, not text: a key vam cannot deliver is not cancelled,
        so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
        still draws its own line, which is not one of the two removed. */
-    <div data-terminal className="relative flex min-h-0 flex-1 flex-col gap-1.5">
+    /* AND THE OPERATOR'S WIDTH CHOICE LANDS HERE, on the tab as a whole rather
+       than on the screen alone, so the status rule stays the width of the
+       screen it belongs to.
+
+       WHY THE FACE AND THE SIZE ARE ON THIS ELEMENT. The cap is written in
+       `ch` -- eighty of them, `prefs/view-width.ts` argues why -- and `ch`
+       resolves against the element's OWN font. Every child below re-declares
+       both (the pane inline, the status rule through `text-meta`, the two
+       sentences through `font-sans`), so this declaration paints nothing at
+       all: it exists so that one cell here is one cell down there. Computing
+       the pixels instead would mean multiplying the size by a monospace RATIO,
+       which is precisely the mistake `terminal-size.ts`'s header records
+       paying for -- "out by a column every seventeen".
+
+       NOTHING TELLS THE MEASUREMENT ABOUT THIS, and that is correct rather
+       than an omission: unlike a font-size change, a cap change MOVES THIS
+       BOX, so the `ResizeObserver` the measuring effect installs fires on its
+       own and tmux is told the new column count by the ordinary path. */
+    <div
+      data-terminal
+      className="relative mx-auto flex w-full min-h-0 flex-1 flex-col gap-1.5 font-mono"
+      style={{
+        fontSize: `${fontSize}px`,
+        maxWidth: narrowViews ? NARROW_TERMINAL_MAX_WIDTH : undefined,
+      }}
+    >
       {/* THE THIRD EMPTY CASE, and the one `not-vam`/`unavailable` do not
           cover: a pane vam DID reach, showing nothing. That is a real screen
           -- the session exists, tmux answered, and the pane below is live and
@@ -1260,7 +1303,11 @@ export function TerminalTab({
           replace. `trim` because tmux pads every row to the pane's width, so
           a screen of only spaces is the same fact as an empty string. */}
       {view.text.trim() === '' && (
-        <p data-terminal-blank className="flex-none text-control text-ink-faint">
+        /* `font-sans` because the element above carries `font-mono` purely so
+           that `ch` means one terminal cell -- see its own note. This is an
+           English sentence about the pane, not a line of the pane, and it is
+           read in the face every other sentence in vam is read in. */
+        <p data-terminal-blank className="flex-none font-sans text-control text-ink-faint">
           {
             "This session's screen is empty right now — vam reached the pane, there is just nothing drawn on it yet."
           }
@@ -1276,7 +1323,9 @@ export function TerminalTab({
         <p
           data-terminal-refused
           data-terminal-refusal={refused}
-          className="flex-none text-control text-ink-faint"
+          /* `font-sans` for the reason `data-terminal-blank` above states: a
+             sentence about the pane is not a line of the pane. */
+          className="flex-none font-sans text-control text-ink-faint"
         >
           {refused === 'unaimed'
             ? // vam declined to guess: no session of its own answers for this

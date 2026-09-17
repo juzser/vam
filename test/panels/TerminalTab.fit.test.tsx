@@ -28,6 +28,11 @@ import {
   setActiveTerminalFontSize,
   TERMINAL_FONT_SIZES,
 } from '../../src/renderer/prefs/terminal-font.js';
+import {
+  NARROW_MAX_CHARACTERS,
+  NARROW_TERMINAL_MAX_WIDTH,
+  setActiveNarrowViews,
+} from '../../src/renderer/prefs/view-width.js';
 import type { PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
@@ -376,6 +381,145 @@ describe('the column count follows the size the screen is drawn at', () => {
     });
     await tick();
     expect(resize).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the narrowed width is eighty COLUMNS, not a number of pixels', () => {
+  /**
+   * The cap resolved to pixels, the way an engine resolves it.
+   *
+   * PARSED FROM THE SOURCE'S OWN EXPRESSION rather than restated: this repo
+   * has paid four times for a width that existed in a module and again in a
+   * test. Every term of `NARROW_TERMINAL_MAX_WIDTH` is read here, so a change
+   * to the slack, the padding or the border moves this arithmetic with it.
+   */
+  const term = /^([\d.]+)(ch|rem|px)$/;
+  const terms = (expr: string): readonly { readonly n: number; readonly unit: string }[] =>
+    expr
+      .replace(/^calc\(/, '')
+      .replace(/\)$/, '')
+      .split('+')
+      .map((piece) => {
+        const hit = term.exec(piece.trim());
+        if (hit === null) throw new Error(`unreadable term in the cap: ${piece}`);
+        return { n: Number(hit[1]), unit: hit[2] as string };
+      });
+
+  /** The root font size every `rem` in this app resolves against. */
+  const REM = 16;
+  /** Everything in the cap that is NOT cells: the pane's own padding and its
+   *  1px border, which `measurePane` and `clientWidth` between them subtract
+   *  again. The whole claim of the expression is that these cancel. */
+  const chrome = terms(NARROW_TERMINAL_MAX_WIDTH)
+    .filter((piece) => piece.unit !== 'ch')
+    .reduce((sum, piece) => sum + (piece.unit === 'rem' ? piece.n * REM : piece.n), 0);
+  const cells = terms(NARROW_TERMINAL_MAX_WIDTH).find((piece) => piece.unit === 'ch')?.n ?? 0;
+
+  /**
+   * Monospace advances, as a fraction of the em.
+   *
+   * THREE OF THEM, AND NOT ONE, because the whole point of writing the cap in
+   * `ch` is that nothing here knows the ratio: `TerminalTab.tsx` records
+   * 6.6015625px at 10.5px from one browser (0.6287), `e2e/view-width-shots.mjs`
+   * measured 0.606 in the shipped bundle on another day, and the face is
+   * whatever the platform actually resolved. A test pinned to one of those
+   * numbers would be asserting the ratio rather than the arithmetic. What is
+   * asserted is that the rounding slack holds across the range a monospace
+   * face can plausibly land in -- which is the claim, and it is stronger than
+   * any single measurement.
+   */
+  const ADVANCE_RATIOS = [0.55, 0.606, 6.6015625 / 10.5, 0.7];
+
+  it('resolves to exactly eighty cells of content at every size the dialog offers', () => {
+    // WHAT THIS REPLACES A BROWSER FOR. `ch` is the engine's own measurement
+    // of one cell, so the cap scales with the text size on its own -- but the
+    // CONTENT box is what `measurePane` divides, and `clientWidth` is an
+    // INTEGER. An exact `80ch` lands a fraction short at some sizes and
+    // `Math.floor` charges a whole column for it. The half cell in the
+    // expression is what pays for that, and this is where the claim is
+    // checked at all four sizes at once.
+    for (const ratio of ADVANCE_RATIOS) {
+      for (const size of TERMINAL_FONT_SIZES) {
+        const advance = size * ratio;
+        const borderBox = cells * advance + chrome;
+        // `clientWidth` excludes the border and is rounded; `measurePane` then
+        // subtracts the padding. Both are integers, so the two steps collapse.
+        const content = Math.round(borderBox) - chrome;
+        expect(Math.floor(content / advance), `${size}px at ${ratio}`).toBe(NARROW_MAX_CHARACTERS);
+      }
+    }
+  });
+
+  it('never buys an eighty-first column with its slack', () => {
+    // The other direction, and the reason the slack is half a cell rather
+    // than "some". A cap that rounded UP to 81 would be a promise of eighty
+    // that the screen quietly breaks.
+    for (const ratio of ADVANCE_RATIOS) {
+      for (const size of TERMINAL_FONT_SIZES) {
+        const advance = size * ratio;
+        const content = Math.round(cells * advance + chrome) - chrome;
+        expect(content / advance, `${size}px at ${ratio}`).toBeLessThan(NARROW_MAX_CHARACTERS + 1);
+      }
+    }
+  });
+
+  it('puts the cap on an element that is actually measured in cells', async () => {
+    // THE MUTATION THIS CATCHES is the one that leaves every other assertion
+    // green: `ch` resolves against the element's OWN font, so a cap moved onto
+    // a box drawn in the app's sans face silently means the advance of a
+    // proportional `0` -- 35% wider here -- and the "narrowed" terminal comes
+    // out at 59 columns. The face and the size therefore travel WITH the cap,
+    // and are asserted with it.
+    setActiveNarrowViews(true);
+    for (const size of TERMINAL_FONT_SIZES) {
+      setActiveTerminalFontSize(size);
+      render(
+        <TerminalTab
+          projectId={ATLAS}
+          read={vi.fn(async () => ok())}
+          resize={vi.fn(async () => true)}
+          send={undefined}
+        />,
+      );
+      await settle();
+      const tab = q<HTMLElement>('[data-terminal]');
+      expect(tab, `${size}px`).not.toBeNull();
+      expect(tab?.style.maxWidth, `${size}px`).toBe(NARROW_TERMINAL_MAX_WIDTH);
+      expect(tab?.className, `${size}px`).toContain('font-mono');
+      expect(tab?.style.fontSize, `${size}px`).toBe(`${size}px`);
+      cleanup();
+    }
+  });
+
+  it('caps nothing while the operator has not asked for it', async () => {
+    setActiveNarrowViews(false);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={vi.fn(async () => true)}
+        send={undefined}
+      />,
+    );
+    await settle();
+    expect(q<HTMLElement>('[data-terminal]')?.style.maxWidth).toBe('');
+  });
+
+  it('keeps the tab’s own sentences in the reading face the cap borrowed the other from', async () => {
+    // The cost of carrying `font-mono` for the sake of `ch`: every child that
+    // does not declare a family inherits it. The pane and its status rule are
+    // monospace anyway; these two are English sentences, and they say so.
+    setActiveNarrowViews(true);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok('   '))}
+        resize={vi.fn(async () => true)}
+        send={undefined}
+      />,
+    );
+    await settle();
+    expect(q<HTMLElement>('[data-terminal-blank]')?.className).toContain('font-sans');
   });
 });
 

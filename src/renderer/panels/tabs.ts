@@ -40,6 +40,33 @@ export const TABS = ['Response', 'PRs', 'Terminal', 'Agents', 'Files'] as const;
 export type Tab = (typeof TABS)[number];
 
 /**
+ * Is this view capped as PROSE when the operator asks for a narrowed width?
+ *
+ * HERE, BESIDE `TABS`, BECAUSE IT IS A FACT ABOUT A NAME. `DetailPanel` puts
+ * the cap on and `DetailPanel.view-width.test.tsx` derives the capped set from
+ * this predicate rather than restating three names -- so a sixth tab appended
+ * to `TABS` has to be classified once, here, instead of silently inheriting
+ * whichever answer the `!==` chain at the call site happened to give it.
+ *
+ * TWO NAMES SAY NO, FOR TWO DIFFERENT REASONS, and neither of them is "it is
+ * not prose":
+ *
+ *  - `Terminal` IS covered by the same setting -- one flag, one promise of
+ *    eighty characters a line (`prefs/view-width.ts`) -- but it caps ITSELF,
+ *    in `ch`, because eighty of its characters is a column count and a pixel
+ *    maximum imposed from out here would mean 78 columns at one text size and
+ *    59 at another.
+ *  - `Files` is not in the operator's ask at all, and it is the one view a
+ *    second opinion about width would harm: its tree is already a clamped
+ *    share of the pane and its editor's column is the operator's own drag.
+ *    It also shares the capped element (always mounted, merely `hidden`), so
+ *    a cap left on for it would narrow a tree nobody asked to narrow.
+ */
+export function narrowsAsProse(tab: Tab): boolean {
+  return tab !== 'Terminal' && tab !== 'Files';
+}
+
+/**
  * The tabs actually drawn, given whether the source has a terminal to show
  * and whether this build can show a file editor at all.
  *
