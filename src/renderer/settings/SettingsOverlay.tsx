@@ -74,6 +74,23 @@ import {
   TAB_INDICATOR_IDS,
 } from '../prefs/tab-indicators.js';
 import { TERMINAL_FONT_SIZES } from '../prefs/terminal-font.js';
+import {
+  clearTerminalSchemeColor,
+  clearTerminalSchemeOverrides,
+  DEFAULT_TERMINAL_THEME,
+  resolveTerminalScheme,
+  setTerminalBackgroundOpacity,
+  setTerminalSchemeColor,
+  setTerminalTheme,
+  TERMINAL_BACKGROUND_OPACITY_MAX,
+  TERMINAL_BACKGROUND_OPACITY_MIN,
+  TERMINAL_BACKGROUND_OPACITY_STEP,
+  TERMINAL_SCHEME_KEYS,
+  TERMINAL_SCHEME_LABELS,
+  type TerminalSchemeKey,
+  type TerminalTheme,
+  terminalThemesFor,
+} from '../prefs/terminal-scheme.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
 import { PHONE_SECTIONS, SECTIONS, type SectionId, shortcutSections } from './sections.js';
@@ -717,6 +734,21 @@ export function SettingsOverlay({
                   ))}
                 </div>
               </Block>
+
+              {/* THE TERMINAL'S OWN COLOURS, directly under its size: the two
+                  rows a screen has are its glyph and its paint, and an
+                  operator who came for the terminal finds both in one place.
+                  IN APPEARANCE AND NOT A SECTION OF ITS OWN, and the reason is
+                  the same the size row gives -- this is paint, and it is
+                  global -- with two more. A `Terminal` section would split the
+                  screen's size from its colours, or move the size row out of
+                  the family the type-size rows form; and the nav is measured
+                  for an even count (`SectionStrip` lays out two by two below
+                  `sm`), so a sixth destination costs a rethink of geometry
+                  four guards hold, for one setting. The four rows are a
+                  component so the overlay reads as a list of rows rather than
+                  a list of rows with a page in the middle. */}
+              <TerminalColours prefs={prefs} theme={theme} onChange={onChange} />
 
               {/* THE VIEWS' WIDTH, next to the two text sizes because it is
                   the same question asked about the box instead of the glyph:
@@ -1657,6 +1689,343 @@ function BindingLine({
   );
 }
 
+/* ---------------------------------------------------------------------------
+ * The terminal's colour scheme: two theme rows, the colour grid, the opacity.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The three colours a chip previews: the ground, the ink and the caret. They
+ * are the three a screen shows before any agent has written a coloured run,
+ * which makes them the picture of a scheme the way pane, card and In bubble
+ * are the picture of a palette (the template chips above). NOT the ANSI ramp:
+ * eight discs on a 28px chip are a barcode, and the ramp is what the grid
+ * below is for.
+ */
+const THEME_PREVIEW: readonly TerminalSchemeKey[] = ['background', 'foreground', 'cursor'];
+
+/** Only a plain six-digit colour, with or without its hash: the shape the
+ *  setter accepts, and the one a person pastes from any palette page. Case is
+ *  kept as typed, as the setter keeps it. */
+const TYPED_HEX = /^#?([0-9a-f]{6})$/i;
+
+function typedHex(raw: string): string | null {
+  const match = TYPED_HEX.exec(raw.trim());
+  return match === null ? null : `#${match[1]}`;
+}
+
+function TerminalColours({
+  prefs,
+  theme,
+  onChange,
+}: {
+  readonly prefs: Prefs;
+  readonly theme: EffectiveTheme;
+  readonly onChange: (next: Prefs) => void;
+}) {
+  const other: EffectiveTheme = theme === 'dark' ? 'light' : 'dark';
+  const resolved = resolveTerminalScheme(prefs.terminalScheme, theme);
+  const overrides = prefs.terminalScheme[theme].overrides;
+  const overridden = Object.keys(overrides).length > 0;
+  const percent = Math.round(prefs.terminalScheme.backgroundOpacity * 100);
+  return (
+    <>
+      {/* ONE ROW PER APP THEME, BOTH ALWAYS DRAWN -- which is the opposite of
+          the rule the app palette's grid follows, and on purpose. That grid
+          edits the theme on screen only because a single colour can be judged
+          only against the ground it will be worn on. A scheme is not a single
+          colour: it is a published palette chosen by NAME, and the chip carries
+          its own ground, ink and caret, so choosing the light scheme from a
+          dark dashboard is choosing from a catalogue rather than picking
+          blind. What the other row buys is the case the model was built for:
+          the OS flips at sunset and the light screen is already the one you
+          chose, not the one you had never seen. */}
+      {(['dark', 'light'] as const).map((on) => (
+        <TerminalThemeRow key={on} on={on} prefs={prefs} onChange={onChange} />
+      ))}
+
+      {/* THE GRID EDITS THE THEME ON SCREEN, for the app palette's reason: a
+          swatch shows a colour, and the only place a colour can be judged is
+          against the ground it will be worn in. The heading says which, and
+          switching the app theme above is how you reach the other set. */}
+      <Block
+        name="terminal-colours"
+        label={t('settings.appearance.terminalColours.label', { theme })}
+        hint={t('settings.appearance.terminalColours.hint', { theme, other })}
+        action={
+          overridden ? (
+            <SmallButton
+              label={t('settings.appearance.terminalColours.reset', { theme })}
+              onPick={() => onChange(clearTerminalSchemeOverrides(prefs, theme))}
+            />
+          ) : null
+        }
+      >
+        {/* TWO COLUMNS, MEASURED. The panel's rows are 670px wide at the
+            1100px the guards run at; a cell is a 24px swatch, a 72px hex
+            field, a 16px reset slot and three 8px gaps around a label, and
+            the widest label ("selection background") sets at 130px in the
+            body face -- 266px a cell. Three columns would give 207. The
+            ANSI ramp would read better as two rows of eight, and cannot: a
+            hex field per colour is what the operator asked for, and eight
+            of them do not fit in one row of this panel. */}
+        <div className="grid grid-cols-1 gap-x-6 gap-y-[10px] sm:grid-cols-2">
+          {TERMINAL_SCHEME_KEYS.map((key) => {
+            const label = TERMINAL_SCHEME_LABELS[key];
+            const hex = resolved[key];
+            const moved = overrides[key] !== undefined;
+            return (
+              /* THE RESET SLOT IS ALWAYS THERE, 16px wide, and only sometimes
+                 holds a button: with an `auto` track the hex field would
+                 step sideways every time a reset appeared beside it, and a
+                 column of fields that jitter as you edit them is a column
+                 you cannot read down. */
+              <div
+                key={key}
+                data-terminal-colour={key}
+                data-terminal-overridden={moved ? '' : undefined}
+                // THE RAMP STARTS A ROW OF ITS OWN. Seven named colours in
+                // two columns leave `black` in the right-hand cell of the
+                // fourth row, and from there the sixteen read as nothing --
+                // black beside selection foreground, red under it. Pushed to
+                // the first column they read as the pairs every emulator
+                // lists them in: black and red, green and yellow, blue and
+                // magenta, cyan and white, then the bright eight the same
+                // way. One empty cell, and the ramp is a ramp.
+                className={`grid grid-cols-[24px_minmax(0,1fr)_auto_16px] items-center gap-x-[8px] ${
+                  key === 'black' ? 'sm:col-start-1' : ''
+                }`}
+              >
+                {/* THE SAME DISC AS THE PALETTE'S, ring and all, and the
+                    argument on that swatch for why the edge owes 3:1 and why
+                    overridden reads as weight rather than hue holds here
+                    unchanged. THE FILL IS SET TWICE ON PURPOSE: `value` is
+                    what Chromium paints in the swatch's shadow part, and
+                    that part's paint cannot be read back through
+                    `getComputedStyle` -- measured, it answers transparent --
+                    so the element's own background is painted with the same
+                    colour underneath it. The same pixels either way, and a
+                    guard can read the second. */}
+                <input
+                  type="color"
+                  data-terminal-swatch={key}
+                  aria-label={`terminal ${label} colour, ${theme}`}
+                  value={hex}
+                  style={{ backgroundColor: hex }}
+                  onChange={(event) =>
+                    onChange(setTerminalSchemeColor(prefs, theme, key, event.target.value))
+                  }
+                  className={`vam-swatch vam-tap h-[24px] w-[24px] cursor-pointer rounded-full border-none p-0 ${FOCUS_RING} ${
+                    moved ? 'ring-2 ring-ink' : 'ring-1 ring-ink-faint'
+                  }`}
+                />
+                <span className="text-body text-ink capitalize">{label}</span>
+                <HexField
+                  name={`terminal ${label} hex, ${theme}`}
+                  hook={key}
+                  value={hex}
+                  onCommit={(next) => onChange(setTerminalSchemeColor(prefs, theme, key, next))}
+                />
+                <span className="flex justify-center">
+                  {moved ? (
+                    <button
+                      type="button"
+                      data-terminal-reset={key}
+                      aria-label={`reset terminal ${label} colour, ${theme}`}
+                      onClick={() => onChange(clearTerminalSchemeColor(prefs, theme, key))}
+                      className={`vam-hit-24 flex h-[24px] w-[16px] cursor-pointer items-center justify-center rounded text-ink-dim hover:text-ink ${FOCUS_RING}`}
+                    >
+                      <RotateCcw size={12} strokeWidth={1.8} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Block>
+
+      {/* A SLIDER, WHERE `Stepper` ARGUES AGAINST ONE, and the two arguments
+          do not collide. The stepper refused a range input for its CHROME:
+          a track and a thumb in the OS accent colour that no token reaches.
+          This one is drawn with `appearance: none` and two tokens, so there
+          is no such chrome. And the quantity is different in kind: a text
+          size is read as a number and set to one, where an opacity is
+          WATCHED -- the operator drags it and looks at the screen behind the
+          dialog, which is what a thumb on a track is for and a number in a
+          box is not. The value is still printed, because a thumb's position
+          is not a fact anyone can repeat to somebody else. */}
+      <Block
+        name="terminal-background"
+        label={t('settings.appearance.terminalOpacity.label')}
+        hint={t('settings.appearance.terminalOpacity.hint')}
+      >
+        <div className="flex items-center gap-3">
+          {/* THE TRACK IS `ink-faint` AND THE THUMB IS `ink` (`.vam-slider`,
+              styles.css), for the switch's reason: no line token clears
+              1.4.11's 3:1 on this panel, and the parts that carry the state
+              have to. */}
+          <input
+            type="range"
+            data-terminal-opacity
+            aria-label="terminal background opacity"
+            aria-valuetext={`${percent}%`}
+            min={TERMINAL_BACKGROUND_OPACITY_MIN}
+            max={TERMINAL_BACKGROUND_OPACITY_MAX}
+            step={TERMINAL_BACKGROUND_OPACITY_STEP}
+            value={prefs.terminalScheme.backgroundOpacity}
+            onChange={(event) =>
+              onChange(setTerminalBackgroundOpacity(prefs, Number(event.target.value)))
+            }
+            className={`vam-slider vam-tap h-[24px] w-[180px] cursor-pointer ${FOCUS_RING}`}
+          />
+          {/* `capitalize` DOES NOTHING TO A NUMERAL, and it is here for the
+              terminal-size buttons' reason: one case rule over the whole
+              panel, with no list of strings allowed to break it. */}
+          <span
+            data-terminal-opacity-value
+            className="w-[4ch] font-mono text-control text-ink-dim capitalize"
+          >
+            {percent}%
+          </span>
+        </div>
+      </Block>
+    </>
+  );
+}
+
+/** One app theme's row of scheme chips, the one in force pressed. */
+function TerminalThemeRow({
+  on,
+  prefs,
+  onChange,
+}: {
+  readonly on: EffectiveTheme;
+  readonly prefs: Prefs;
+  readonly onChange: (next: Prefs) => void;
+}) {
+  const chosen = prefs.terminalScheme[on].theme;
+  const fallback = terminalThemesFor(on).find((theme) => theme.id === DEFAULT_TERMINAL_THEME[on]);
+  return (
+    <Block
+      name={`terminal-theme-${on}`}
+      label={t('settings.appearance.terminalTheme.label', { on })}
+      hint={t('settings.appearance.terminalTheme.hint', {
+        on,
+        default: fallback?.label ?? DEFAULT_TERMINAL_THEME[on],
+      })}
+    >
+      <div data-terminal-theme-row={on} className="flex flex-wrap gap-1.5">
+        {terminalThemesFor(on).map((theme) => (
+          <TerminalThemeChip
+            key={theme.id}
+            theme={theme}
+            pressed={chosen === theme.id}
+            onPick={() => onChange(setTerminalTheme(prefs, on, theme.id))}
+          />
+        ))}
+      </div>
+    </Block>
+  );
+}
+
+/**
+ * The palette template chip's geometry -- three overlapped discs and a name
+ * on a 28px pill -- with the terminal-size button's STATE: this is a choice
+ * that stays chosen, so the pressed one wears the pressed fill and says so.
+ *
+ * THE NAME IS VERBATIM. Every other control name on this surface is
+ * capitalised by the panel's CSS, and these are the names the palettes are
+ * published under: `vam` is the product and is spelled lower everywhere it
+ * appears, `Catppuccin Mocha` already carries its own capitals. So the label
+ * opts out with `data-verbatim`, the same attribute the Update section's
+ * version line uses for the same reason -- somebody chose these letters --
+ * and `e2e/settings-chrome-shots.mjs` measures that a verbatim control
+ * starting with the product name paints it lower case.
+ */
+function TerminalThemeChip({
+  theme,
+  pressed,
+  onPick,
+}: {
+  readonly theme: TerminalTheme;
+  readonly pressed: boolean;
+  readonly onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-terminal-theme={theme.id}
+      aria-pressed={pressed}
+      aria-label={`${theme.label} terminal theme, ${theme.on}`}
+      title={`studied from ${theme.studied}`}
+      onClick={onPick}
+      className={`vam-tap flex h-[28px] cursor-pointer items-center gap-2 rounded border px-2.5 text-control capitalize ${FOCUS_RING} ${
+        pressed
+          ? 'border-line-loudest bg-raised text-ink'
+          : 'border-line text-ink-dim hover:border-line-loud hover:text-ink'
+      }`}
+    >
+      <span aria-hidden="true" className="flex items-center">
+        {THEME_PREVIEW.map((key, i) => (
+          <span
+            key={key}
+            data-theme-disc={key}
+            className="h-[13px] w-[13px] rounded-full ring-1 ring-line-loud"
+            style={{ backgroundColor: theme.scheme[key], marginLeft: i === 0 ? 0 : -4 }}
+          />
+        ))}
+      </span>
+      <span data-verbatim className="normal-case">
+        {theme.label}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * A hex colour, typed. The `Stepper`'s draft idiom: what is being typed
+ * stays in the box while it is being typed, is committed the moment it is a
+ * colour, and is dropped on blur -- so a box left holding `#12` shows the
+ * stored value again rather than a colour that was never written. The
+ * setter refuses anything that is not six hex digits, so a commit is only
+ * ever attempted with a value it will take.
+ *
+ * The pill is the stepper's: `well` under `ink-faint`, because `well` on
+ * `panel` is 1.03:1 and the border is the control's sole identifier.
+ */
+function HexField({
+  name,
+  hook,
+  value,
+  onCommit,
+}: {
+  readonly name: string;
+  readonly hook: TerminalSchemeKey;
+  readonly value: string;
+  readonly onCommit: (hex: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="text"
+      data-terminal-hex={hook}
+      aria-label={name}
+      spellCheck={false}
+      autoComplete="off"
+      maxLength={7}
+      value={draft ?? value}
+      onChange={(event) => {
+        const raw = event.target.value;
+        setDraft(raw);
+        const hex = typedHex(raw);
+        if (hex !== null) onCommit(hex);
+      }}
+      onBlur={() => setDraft(null)}
+      className={`vam-tap h-[24px] w-[72px] rounded border border-ink-faint bg-well px-1.5 text-center font-mono text-control text-ink outline-none ${FOCUS_RING}`}
+    />
+  );
+}
+
 /**
  * One setting: its name, what it is for underneath rather than beside, and the
  * control under both. 24px and a hairline separate one from the next — the
@@ -1672,15 +2041,22 @@ function Block({
   label,
   hint,
   action,
+  name,
   children,
 }: {
   readonly label: string;
   readonly hint: string;
   readonly action?: React.ReactNode;
+  /** A hook for a guard that has to find THIS row's box -- `data-settings-block`.
+   *  Optional, because most rows are found by the control they hold. */
+  readonly name?: string;
   readonly children: React.ReactNode;
 }) {
   return (
-    <div className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0">
+    <div
+      data-settings-block={name}
+      className="mt-6 border-line-loud border-t pt-6 first:mt-0 first:border-t-0 first:pt-0"
+    >
       <div className="flex items-baseline gap-3">
         {/* CAPITALISED, NOT SHOUTED, and the difference from the panel heading
             above is the whole reason there are two rules. There are four or

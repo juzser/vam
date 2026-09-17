@@ -136,6 +136,45 @@ export const TERMINAL_SCHEME_KEYS = Object.keys(
   TERMINAL_SCHEME_VARS,
 ) as readonly TerminalSchemeKey[];
 
+/**
+ * WHAT EACH COLOUR IS CALLED ON THE SETTINGS ROW. Lower case, like the labels
+ * `PALETTE_TOKENS` carries, because the settings surface capitalises every
+ * control name as CSS and a label stored with a capital would be capitalised
+ * twice (`SettingsOverlay.tsx`, on `Block`). One table beside the property
+ * table so a key cannot gain a property and no name: `terminal-scheme.test.ts`
+ * holds the two key sets equal.
+ *
+ * `cursor accent` is xterm.js's name and is kept rather than translated to
+ * "cursor text": it is the ink of the glyph UNDER a block cursor, which is
+ * text only while the cursor is a block, and the name a scheme is copied
+ * from is the name an operator will look for.
+ */
+export const TERMINAL_SCHEME_LABELS: Readonly<Record<TerminalSchemeKey, string>> = {
+  background: 'background',
+  foreground: 'foreground',
+  bold: 'bold',
+  cursor: 'cursor',
+  cursorAccent: 'cursor accent',
+  selectionBackground: 'selection background',
+  selectionForeground: 'selection foreground',
+  black: 'black',
+  red: 'red',
+  green: 'green',
+  yellow: 'yellow',
+  blue: 'blue',
+  magenta: 'magenta',
+  cyan: 'cyan',
+  white: 'white',
+  brightBlack: 'bright black',
+  brightRed: 'bright red',
+  brightGreen: 'bright green',
+  brightYellow: 'bright yellow',
+  brightBlue: 'bright blue',
+  brightMagenta: 'bright magenta',
+  brightCyan: 'bright cyan',
+  brightWhite: 'bright white',
+};
+
 /** The ids of the shipped themes. A slug, so a stored payload and a future
  *  URL can carry it without quoting. */
 export type TerminalThemeId =
@@ -678,6 +717,9 @@ export type TerminalSchemePref = {
  */
 export const TERMINAL_BACKGROUND_OPACITY_MIN = 0.3;
 export const TERMINAL_BACKGROUND_OPACITY_MAX = 1;
+/** The slider's step: fourteen stops between the floor and opaque, which is
+ *  a difference an eye can see at each one and not a number worth typing. */
+export const TERMINAL_BACKGROUND_OPACITY_STEP = 0.05;
 /** Opaque, which is what every scheme was designed at. */
 export const DEFAULT_TERMINAL_BACKGROUND_OPACITY = 1;
 

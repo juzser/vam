@@ -163,6 +163,7 @@ const GUARDS = [
   'sidebar-seam-shots',
   'terminal-chrome-shots',
   'terminal-scheme-shots',
+  'terminal-settings-shots',
   'tree-icon-shots',
   'out-links-shots',
   'view-width-shots',

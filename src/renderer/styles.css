@@ -2208,6 +2208,43 @@ html {
 }
 
 /*
+ * A range input drawn from the tokens, with none of the OS's chrome.
+ *
+ * `Stepper` in `SettingsOverlay.tsx` refused a range input because its track
+ * and thumb take the OS accent colour, which no `--vam-*` token reaches. With
+ * `appearance: none` on the element AND on the thumb neither is painted by
+ * the OS, and the two parts are drawn here in the tokens the switch uses for
+ * the same reason it gives: no line token clears WCAG 1.4.11's 3:1 on the
+ * panel, so the parts that carry the state borrow the inks. The thumb's
+ * negative margin centres 14px on a 4px track -- a thumb with `appearance:
+ * none` is laid out at the track's top edge.
+ *
+ * Structural, like `.vam-swatch` above it, and here rather than as arbitrary
+ * `[&::-webkit-slider-thumb]:` utilities for the reason that made it move:
+ * `target-size.test.ts` reads every `h-[Npx]` on a line with `cursor-pointer`
+ * as the CONTROL's height, and the track's 4px on the same line read as a
+ * 4px control with no hit area. The control is 24px; its track is not the
+ * control.
+ */
+.vam-slider {
+  appearance: none;
+  background: transparent;
+}
+.vam-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--vam-ink-faint);
+}
+.vam-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  background: var(--vam-ink);
+}
+
+/*
  * The phone shell's four geometry rules.
  *
  * They live here rather than in `PhoneShell.tsx` because each of them applies
