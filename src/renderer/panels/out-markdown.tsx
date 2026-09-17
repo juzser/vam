@@ -26,6 +26,7 @@
  * hole cannot be reopened by a highlighter.
  */
 
+import { Ban, ExternalLink } from 'lucide-react';
 import {
   createContext,
   Fragment,
@@ -45,6 +46,8 @@ import {
   SYNTAX_CLASS,
   tokenizeCode,
 } from './highlight.js';
+import { foldMiddle, linkParts, linkWhere, textIsAddress } from './link-face.js';
+import { Note } from './Note.js';
 import { useOutActions } from './out-actions.js';
 
 /**
@@ -74,13 +77,13 @@ import { useOutActions } from './out-actions.js';
  *
  * The POLICY is correct and is untouched -- nothing here renders an `<a
  * href>`, because a real anchor in this window navigates THE WHOLE
- * APPLICATION away and the window IS the app. The address is still printed,
- * because a link text can say one thing and go to another and the operator
- * has to be able to see where they are about to be sent. What was wrong was
- * only the CONCLUSION: "a control that does nothing" was treated as the end
- * of the argument rather than as a defect, and it left the operator
- * copy-and-pasting an address out of a panel by hand -- the same complaint
- * `src/main/issue/ipc.ts` was filed about.
+ * APPLICATION away and the window IS the app. The destination is still
+ * shown, because a link text can say one thing and go to another and the
+ * operator has to be able to see where they are about to be sent. What was
+ * wrong was only the CONCLUSION: "a control that does nothing" was treated
+ * as the end of the argument rather than as a defect, and it left the
+ * operator copy-and-pasting an address out of a panel by hand -- the same
+ * complaint `src/main/issue/ipc.ts` was filed about.
  *
  * So the address is now a BUTTON that asks main to open it in the operator's
  * own browser (`CHANNELS.linkOpen`), and what pays for that is the scheme
@@ -89,7 +92,9 @@ import { useOutActions } from './out-actions.js';
  * instead of in a round trip. `javascript:`, `data:`, `file:` and every app
  * scheme are refused; the refusal is drawn next to the control that was
  * pressed rather than swallowed, because a control which can only refuse says
- * so.
+ * so. The button is drawn as ONE PILL -- the text, then the host, then a
+ * glyph -- and `OutLink` below says what of the old printed address went
+ * where.
  *
  * AND ONE MORE THING BECAME A CONTROL: `src/foo/bar.ts:42`, the artifact
  * agents write constantly. It opens that file, at that line, in this pane's
@@ -235,61 +240,162 @@ function Refusal({ text }: { readonly text: string }) {
 }
 
 /**
- * A LINK AN AGENT WROTE, as a button and never as an anchor.
+ * The plain text of a link's children, or null when markdown put an element
+ * inside the brackets (`[**bold** name](…)`): only a plain text can BE the
+ * address, and a label with markup in it is drawn as it came.
+ */
+function plainText(children: ReactNode): string | null {
+  if (typeof children === 'string') return children;
+  if (Array.isArray(children) && children.every((k) => typeof k === 'string')) {
+    return children.join('');
+  }
+  return null;
+}
+
+/** What a link with no href at all is refused with -- `checkLink`'s own words. */
+const NO_ADDRESS = 'vam was given no address to open.';
+
+/**
+ * A LINK AN AGENT WROTE, as a button and never as an anchor -- drawn as ONE
+ * PILL: `[ text · host ↗ ]`.
+ *
+ * Operator: "the sources in an answer should be displayed compactly, as a
+ * tag or pill with a hyperlink." The control this replaces printed the text
+ * and then the whole parsed address after it, in mono, in brackets -- 262px
+ * for `runbook (https://example.test/runbook)` at the shipped 13px, and when
+ * the text WAS the address the eye read it twice. The pill is the text, the
+ * HOST in a quieter ink, and an external-link glyph, inside one bordered
+ * `rounded-full` control; `e2e/out-links-shots.mjs` measures the same link
+ * at 165.53px -- 37% narrower, and one thing to read instead of two.
+ *
+ * WHERE THE PRINTED ADDRESS WENT, because the property it carried must
+ * survive: "no anchor" is also satisfied by drawing nothing, and what the
+ * operator needs is to SEE where a control goes before pressing it. The HOST
+ * is painted inside the pill, and the host is the part of an address that
+ * decides where a click lands. The FULL parsed address is on the button as
+ * `data-out-address` (what the web guard reads), in the `Note` that opens on
+ * hover and on keyboard focus (the house rule `Note.tsx` states: a `title`
+ * opens on hover and on nothing else), and in a screen-reader-only span, so
+ * the destination is readable before pressing by every kind of reader. Both
+ * `test/panels/out-font-size.test.tsx` and the web guard find the pill's
+ * parts by attribute rather than by position in the tree.
  *
  * WHAT IS DRAWN IS THE PARSED ADDRESS, not the typed one -- `checkLink`
  * answers `new URL(...).href`, so a unicode host arrives here already in
  * punycode and a homograph stops being invisible. An address vam cannot read
- * at all has nothing parsed to show, so its own text is printed instead:
- * something unreadable is still better than nothing, and it is the state the
- * whole pane was in before this control existed.
+ * at all has nothing parsed to show, so its own text is printed instead,
+ * folded: something unreadable is still better than nothing.
+ *
+ * A SELF-NAMED LINK -- `<https://github.com/juzser/vam/pull/383>`, the shape
+ * a "Sources:" list is usually written in -- prints host + path rather than
+ * "address · host", which would be the double reading the operator asked to
+ * lose. `link-face.ts` decides which case a link is and how the path folds.
+ *
+ * A REFUSED ONE IS THE SAME PILL, dotted and faint, with a `Ban` glyph in
+ * place of the arrow -- a control that can only refuse says so before it is
+ * pressed -- and its quiet half names the scheme it refused, since a
+ * `javascript:` address has no host to name.
  *
  * PRESSING A REFUSED ONE IS NOT A NO-OP. The scheme check runs here first so
  * a refusal costs no round trip, and it is a CONVENIENCE: main runs the same
  * check on its own side of the boundary and would refuse the identical
  * address if this component sent it anyway (`src/main/link/ipc.ts`).
+ *
+ * SIZES ARE `em`, LIKE EVERYTHING ELSE IN THIS MAP, and not the `text-meta`
+ * the sidebar's pills wear: `--text-meta` is a flat 11px, and a pixel inside
+ * `out` is an element that ignores the reading-size setting for ever
+ * (`out-font-size.test.tsx`). The host takes the old hint's 0.875em; a
+ * self-named address takes the inline chip's 0.917em, because it IS a
+ * machine string and reads as a peer of the `path:line` chip beside it.
  */
 function OutLink({ href, children }: { readonly href?: string; readonly children: ReactNode }) {
   const { openLink } = useOutActions();
   const [note, setNote] = useState<string | null>(null);
   const checked = href === undefined ? null : checkLink(href);
-  const shown = checked?.ok === true ? checked.url : href;
+  const ok = checked?.ok === true;
+  const address = checked?.ok === true ? checked.url : href;
+  const text = plainText(children);
+  const self = text !== null && href !== undefined && textIsAddress(text, href);
+  // The host + path layout, taken only when a self-named address HAS a host:
+  // a self-named `javascript:` has nothing to split and is drawn as its text.
+  const face = self && address !== undefined ? linkParts(address) : null;
+  const split = face !== null && face.host !== '' ? face : null;
+  // The quiet half of a NAMED link. A self-named one already reads as its
+  // destination, so it gets none rather than its own host again.
+  const where = split !== null || self || href === undefined ? null : linkWhere(href);
+  const hint =
+    checked?.ok === true ? `opens ${address} in the browser` : (checked?.reason ?? NO_ADDRESS);
+  const Glyph = ok ? ExternalLink : Ban;
   return (
     <>
-      <button
-        type="button"
-        data-out-link
-        // The refused ones are marked so a guard can find them in a real
-        // browser, and so they can be drawn as what they are.
-        data-out-link-refused={checked?.ok === false ? 'true' : undefined}
-        className={[
-          'cursor-pointer rounded-[3px] underline decoration-dotted underline-offset-2',
-          checked?.ok === true ? 'text-done' : 'text-ink-faint',
-        ].join(' ')}
-        onClick={() => {
-          if (checked === null || !checked.ok) {
-            setNote(checked?.reason ?? 'vam was given no address to open.');
-            return;
-          }
-          setNote(null);
-          void openLink(checked.url).then((outcome) => {
-            if (!outcome.ok) setNote(outcome.reason);
-          });
-        }}
-      >
-        {children}
-      </button>
-      {shown !== undefined && (
-        // MARKED, because this is the half of the old rendering that must not
-        // be lost: "no anchor" is also satisfied by drawing nothing, and what
-        // the operator needs is to SEE where a control goes before pressing
-        // it. `test/panels/out-font-size.test.tsx` and the web guard both
-        // find it by this attribute rather than by its position in the tree.
-        <span data-out-address className="font-mono text-[0.875em] text-ink-faint">
-          {' '}
-          ({shown})
-        </span>
-      )}
+      <Note text={hint}>
+        <button
+          type="button"
+          data-out-link
+          // The refused ones are marked so a guard can find them in a real
+          // browser, and so they can be drawn as what they are.
+          data-out-link-refused={checked?.ok === false ? 'true' : undefined}
+          data-out-address={address}
+          className={[
+            // `items-baseline`, not `items-center`: the text and the host are
+            // two sizes and have to share the paragraph's baseline, or the
+            // pill's words sit a pixel above the sentence they are in.
+            // `max-w-full` with `truncate` on the parts, because an
+            // inline-flex box cannot break across lines and a long label
+            // would otherwise decide how wide the pane is.
+            'inline-flex max-w-full cursor-pointer items-baseline gap-1 rounded-full border px-1.5 align-baseline leading-[1.3]',
+            // `border-ink-quiet`: the one border token that clears WCAG
+            // 1.4.11's 3:1 on the pane in BOTH themes (6.80:1 dark, 4.64:1
+            // light); every `line-*` rung stops short in light (2.80:1 at
+            // loudest). `styles.css` names `ink-quiet` for exactly this, "a
+            // control border".
+            ok
+              ? 'border-ink-quiet text-done hover:bg-raised'
+              : 'border-ink-quiet border-dotted text-ink-faint',
+          ].join(' ')}
+          onClick={() => {
+            if (checked === null || !checked.ok) {
+              setNote(checked?.reason ?? NO_ADDRESS);
+              return;
+            }
+            setNote(null);
+            void openLink(checked.url).then((outcome) => {
+              if (!outcome.ok) setNote(outcome.reason);
+            });
+          }}
+        >
+          {split === null ? (
+            <>
+              <span className="truncate">{children}</span>
+              {where !== null && (
+                <span data-out-host className="truncate font-mono text-[0.875em] text-ink-faint">
+                  {where}
+                </span>
+              )}
+            </>
+          ) : (
+            // ONE span holding both halves, so the host and its path abut as
+            // they do in the address bar -- the flex `gap` is for the parts of
+            // a NAMED pill, and a gap inside a URL reads as a space in it.
+            <span className="truncate font-mono text-[0.917em]">
+              <span data-out-host>{split.host}</span>
+              {split.rest !== '' && (
+                <span data-out-path className="text-ink-faint">
+                  {foldMiddle(split.rest)}
+                </span>
+              )}
+            </span>
+          )}
+          <Glyph
+            aria-hidden
+            // Sized in `em` for the same reason as the words; `self-center`
+            // because an SVG has no baseline and would otherwise stand on it.
+            className="h-[0.875em] w-[0.875em] flex-none self-center text-ink-faint"
+            strokeWidth={1.8}
+          />
+          <span className="sr-only">, {hint}</span>
+        </button>
+      </Note>
       {note !== null && <Refusal text={note} />}
     </>
   );
