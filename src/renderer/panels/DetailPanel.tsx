@@ -5359,6 +5359,22 @@ export function DetailPanel(props: DetailPanelProps) {
   const pane = (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
+      /* THE SCOPE OF THE READING SIZE, and the only thing this attribute does.
+         `styles.css`'s `[data-reading-pane]` rule re-declares the type scale's
+         BODY and CONTROL steps in terms of `--vam-out-font-size`, so every
+         `text-body` and `text-control` inside this pane follows the size the
+         operator set for the answers. Operator report: "out để fontsize 15 khá
+         to nhưng phần prompt choice option hiện rất bé" -- at `out` 15 the
+         answers read comfortably and the prompt's choice options are tiny.
+         A HOOK RATHER THAN A CLASS because the declaration is a SCOPE, not a
+         style: nothing about this element paints differently, and every call
+         site inside keeps the role it already picked.
+         ITS OWN NAME, AND ON THIS ELEMENT, because `Canvas.tsx` already wraps
+         the desktop pane in `[data-detail-pane]` (the width holder) and
+         `PhoneShell` mounts this panel with no such wrapper: a scope keyed to
+         the Canvas attribute would have covered the desktop by accident and
+         the phone not at all. This element is under both. */
+      data-reading-pane=""
       style={width === undefined ? undefined : { width }}
       className={[
         // THE PANE'S OWN TOKEN, at the operator's ask ("split the pane's

@@ -1,115 +1,109 @@
 /**
- * THE VIEWS' WIDTH, MEASURED IN CHARACTERS, IN A REAL ENGINE.
+ * THE VIEWS' WIDTH AND THE PANE'S READING SIZE, MEASURED IN A REAL ENGINE.
+ *
+ * ── THE RULE THIS FILE MEASURES, AND THE ONE IT MEASURED BEFORE ──────────
+ * Narrowed means TWO THIRDS OF THE PANE, AND NEVER NARROWER THAN EIGHTY
+ * CHARACTERS. It used to mean "no more than eighty characters on a line"; the
+ * operator used the build and asked for two thirds instead ("narrow width cần
+ * lớn hơn, khoảng 2/3 pane width"), and the eighty became the floor under the
+ * fraction rather than the promise. Every check below that used to measure the
+ * old promise was re-aimed at the role its number now has, not deleted: a guard
+ * that measured the old rule should measure the new one. `view-width.ts`'s
+ * header carries what changed and who changed it.
  *
  * ── WHY THIS CANNOT BE A UNIT TEST ────────────────────────────────────────
- * The setting promises a LINE LENGTH -- no more than eighty characters -- and
- * every term of that sentence is a layout fact. happy-dom performs no layout,
- * so `test/panels/DetailPanel.view-width.test.tsx` can prove only WHICH
- * element the cap is put on; it cannot see a character, a `calc()`, a `ch` or
- * a rectangle. Worse, the two halves of this feature fail in ways that look
- * identical to a DOM assertion:
+ * Every term of that sentence is a layout fact. happy-dom performs no layout,
+ * so `test/panels/DetailPanel.view-width.test.tsx` can prove only WHICH element
+ * the cap is put on; it cannot resolve a percentage, a `calc()`, a `ch` or a
+ * rectangle. Worse, the halves of this feature fail in ways that look identical
+ * to a DOM assertion:
  *
- *   - the prose cap is a pixel maximum derived from an advance MEASURED ON THE
- *     OPERATOR'S OWN MACHINE. If the ruler is wrong, or its size resolves to
- *     something else, or the container's padding is not accounted for, the
- *     declaration is still exactly what the unit test asserted and the line is
- *     75 characters, or 95. THIS IS NOT HYPOTHETICAL: the first cut of the
- *     feature froze one macOS measurement into a constant, every unit test was
- *     green, and the first Linux run of THIS FILE read 83.95 characters. The
- *     independent measurement below is the whole reason that was caught, so it
- *     stays independent — it divides the prose the page really drew, and shares
- *     nothing with the ruler the app measures.
- *   - the terminal's cap is written in `ch`, which resolves against the
+ *   - the floor is derived from an advance MEASURED ON THE OPERATOR'S OWN
+ *     MACHINE. The first cut froze one macOS measurement into a constant, every
+ *     unit test was green, and the first Linux run of THIS FILE read 83.95
+ *     characters where it promised eighty. The independent measurement below
+ *     is the whole reason that was caught, so it stays independent — it divides
+ *     the prose the page really drew and shares nothing with the app's ruler.
+ *   - `max(two thirds, floor)` and `two thirds` alone produce the SAME
+ *     rectangle on a wide pane. Only a pane narrower than 1.5× the floor tells
+ *     them apart, and only a pane narrower than the floor shows whether the cap
+ *     still "never becomes a floor".
+ *   - the terminal's floor is written in `ch`, which resolves against the
  *     ELEMENT'S OWN FONT. Moved onto a box drawn in the app's sans face it
- *     silently means the advance of a proportional `0` -- 35% wider here --
- *     and the "narrowed" terminal comes out at 59 columns with every unit
- *     assertion green.
+ *     silently means the advance of a proportional `0` — 35% wider here — and
+ *     the "eighty columns" comes out at 59 with every unit assertion green.
+ *   - the pane's reading size is a scope that re-declares two custom
+ *     properties. A selector that matches nothing reads exactly like one that
+ *     works; only a computed `font-size` on a real element says which.
  *
- * So this file measures the CONSEQUENCE in the unit the promise is made in:
- * characters for the three prose views, and the column count vam actually sent
- * tmux for the fourth.
- *
- *   1. THE CAP BINDS, AND IT BINDS IN CHARACTERS. The same demo transcript is
- *      measured full-pane and narrowed at 1600px; the advance is measured off
- *      the prose the page really drew, and the capacity that falls out of it
- *      must cross from "past eighty" to "at most eighty".
- *   2. THE SAME RECTANGLE IN ALL THREE PROSE VIEWS, AND UNDER THE COMPOSER AND
- *      THE QUESTION CARD. One flag, one promise, and -- on the operator's own
- *      instruction after seeing the first screenshots -- ONE COLUMN: a narrow
- *      column of prose sitting on full-width chrome is the thing they were
- *      reacting to. Compared to each other rather than to a number, because
- *      "they agree" is the claim.
- *   3. THE CAP FOLLOWS THE `out` STEPPER THE WAY `min()` SAYS IT DOES. Stepped
- *      DOWN to 10px the column must get narrower -- the answers are the long
- *      lines there and the ruler has to follow them -- and stepped UP to 20px
- *      it must NOT move, because the eighty then has to be counted in the type
- *      scale's body step that the PRs, the agents and the draft are drawn at.
- *      Those two together are what separate `min(out, body)` from either of the
- *      two things it could be mistaken for, and no DOM assertion can tell them
- *      apart.
- *   4. A MAXIMUM IS NOT A FLOOR. At a 560px window (a desktop pane under
- *      `DETAIL_MIN + SIDEBAR_MIN`) and at a 390px phone, the capped body must
- *      be the very same width as the uncapped one -- to the pixel. A cap that
- *      changed a rectangle there would be a horizontal scrollbar on the one
- *      surface that cannot afford one.
- *   5. THE TERMINAL'S COLUMN COUNT REALLY FOLLOWS, AT EVERY OFFERED SIZE.
- *      What vam asked tmux for is read back off the bridge stub. Narrowed it
- *      must be exactly eighty at 10.5px and at 14px alike -- that is the whole
- *      claim of writing the cap in `ch` -- and full-pane it must be the box
- *      over the advance, unchanged from what shipped.
+ *   1. THE FRACTION BINDS, AT A WIDE PANE. The same demo transcript is measured
+ *      full-pane and narrowed at 1600px; the body must land on two thirds of
+ *      the pane, and the characters on a line — measured off the prose the
+ *      page really drew — must fall by the same two thirds.
+ *   2. ONE COLUMN. PRs and Agents, the composer and the question card must all
+ *      land on the identical rectangle, on the operator's own instruction after
+ *      the first screenshots. Compared to each other rather than to a number.
+ *   3. THE FLOOR BINDS, AT A MID PANE. At an 800px window two thirds of the
+ *      pane is under eighty characters, so the column must be the eighty and
+ *      not the fraction. That is the check that separates `max(fraction,
+ *      floor)` from a bare fraction — and it is where the floor's own mechanism
+ *      is checked: stepped DOWN to `out` 10 the floor must get narrower, and
+ *      stepped UP to 20 it must NOT, because the smallest step the pane reads
+ *      at is then the scaled control step and the ruler follows that.
+ *   4. A MAXIMUM IS NOT A FLOOR. At a 560px window and at a 390px phone the
+ *      capped body must be the very same width as the uncapped one. A bare
+ *      percentage would have failed this at both; the floor is why it holds.
+ *   5. THE TERMINAL FOLLOWS THE SAME SENTENCE. At a wide pane it is two thirds
+ *      of its containing block — more than eighty columns, and within 3% of
+ *      the prose column (2.1% measured: the two caps resolve inside and
+ *      outside the body's gutter). At a 1050px window its floor binds and vam
+ *      asks tmux for exactly eighty, at every offered text size. Full-pane,
+ *      the count is the box over the advance, unchanged from what shipped.
+ *   6. THE PANE'S TEXT FOLLOWS THE READING SIZE. At `out` 15 and 20 the
+ *      in-bubble prompt, the question text, the option labels and the composer
+ *      must scale, each by ITS OWN share of the scale; `text-meta` chrome must
+ *      not; and at `out` 10 nothing may shrink below the shipped scale.
  *
  * ── WHAT IS BEHIND THE PAGE ───────────────────────────────────────────────
- * The three prose views run on `?demo=1`, vam's own invented fixture. The
- * Terminal cannot: `?demo=1` has no terminal bridge at all, so the pane is
- * stubbed with `page.addInitScript` exactly as `terminal-chrome-shots.mjs`
- * does, and `?demo=1` is kept on the URL to say on the face of the request
- * that nothing real is behind it. Every string in the stub is invented -- no
- * session id, path, host or branch here belongs to a real machine.
+ * The prose views run on `?demo=1`, vam's own invented fixture. The Terminal
+ * cannot: `?demo=1` has no terminal bridge at all, so the pane is stubbed with
+ * `page.addInitScript` exactly as `terminal-chrome-shots.mjs` does, and
+ * `?demo=1` is kept on the URL to say on the face of the request that nothing
+ * real is behind it. Every string in the stub is invented — no session id,
+ * path, host or branch here belongs to a real machine.
  *
  * Falsified, each mutation alone and restored after, against a real build:
- *   - drop the half cell from `NARROW_TERMINAL_MAX_WIDTH` -> `narrowed, vam
- *     asks tmux for exactly 80 columns at 12.5px` and `...at 14px` redden with
- *     79. 10.5px and 11.5px stay green, which is the measurement the slack was
- *     added for: the rounding costs a column at some sizes and not others, so a
- *     guard that checked one size would have passed over it.
- *   - take `font-mono` off the element `TerminalTab.tsx` puts the cap on ->
- *     ALL FOUR of those checks redden. That is `ch` silently becoming the
- *     advance of a proportional `0`.
- *   - make the ruler's size `var(--text-body)` alone -> `the column follows the
- *     out stepper down to 10px` reddens (it does not move), and so does `at out
- *     10px the answer line still holds at 80 characters or fewer`.
- *   - make it `var(--vam-out-font-size)` alone -> `and stops following it up
- *     past the body step` reddens (the column grows a third at out 20).
- *   - write the prose cap as `width` instead of `max-width` -> both `the cap
- *     changes no rectangle` checks redden, at 560px and at the phone.
- *   - drop `Agents` from `narrowsAsProse` -> `narrowed, the agents view is the
- *     same rectangle the response view is` reddens.
+ *   - replace `max(fraction, floor)` with the bare fraction -> `at a mid pane
+ *     the column is the eighty-character floor, not two thirds` reddens, and so
+ *     do both `the cap changes no rectangle` checks (the phone narrows to
+ *     260px).
+ *   - replace it with the bare floor -> `narrowed, the body is two thirds of
+ *     the pane` reddens.
+ *   - size the ruler by `--text-control` alone -> `the floor follows the out
+ *     stepper down to 10px` reddens.
+ *   - size it by `--vam-out-font-size` alone -> `and stops following it up
+ *     past the pane's smallest step` reddens.
+ *   - take `font-mono` off the element the terminal's cap lands on -> every
+ *     `vam asks tmux for exactly 80 columns at …` reddens.
+ *   - drop the fraction from the terminal's cap (the old rule, quietly kept
+ *     for one view) -> `at a wide pane the narrowed terminal is two thirds of
+ *     its containing block` reddens at every size.
  *   - take the cap off the composer -> `narrowed, the composer bar is the same
  *     column the transcript is` reddens.
- *   - drop the half cell from the terminal cap, or its `font-mono` -> see the
- *     two entries above this list.
- *
- * AND TWO THAT THIS FILE DOES NOT CATCH, measured rather than assumed, because
- * a falsification list that only records the hits is a list that flatters
- * itself:
- *   - rounding `narrowProseMaxWidth` UP instead of down: still green here. It
- *     was red before the ruler existed, when the cap was a frozen constant
- *     sized to the last pixel; the ruler is ordinary English against answers
- *     that run wider, so the column now lands at 78.4 characters and has 1.6
- *     of headroom -- more than the 0.17 that rounding moves. The direction is
- *     held by `test/prefs/prefs.view-width.test.ts`'s `never rounds the cap UP
- *     past its own promise` instead, which is where a rule belongs.
- *   - putting ten digits at the front of `PROSE_RULER_TEXT` (the `80ch` trap in
- *     miniature, since a digit is 38% wider than a character of English here):
- *     also still green, for the same 2% of headroom. Caught by the same unit
- *     file's `is ordinary lowercase English, which is what makes it
- *     conservative`.
- *   THE HEADROOM IS THE REASON FOR BOTH, and it is not slack to be tightened
- *   away: the band here is deliberately wide because how much narrower
- *   ordinary English runs than an agent's answer is a property of the two
- *   TEXTS, and the only number this file may pin is the PROMISE. A tighter
- *   upper bound would be asserting the margin instead of the eighty, and that
- *   is the assertion that broke on Linux.
+ *   - drop `Agents` from `narrowsAsProse` -> the agents rectangle check reddens.
+ *   - delete the `[data-reading-pane]` block, drop `--text-control` from it,
+ *     or take the attribute off the pane -> `at out 15 the option label is
+ *     scaled by its own share` reddens.
+ *   - key the block to `body` instead of the pane -> `the sidebar outside the
+ *     pane does not move` reddens at 15 and 20. (Keyed to `html` it reddens
+ *     differently: `--vam-pane-size` is declared there in terms of the very
+ *     `--text-body` the block overrides, the cycle invalidates both, and the
+ *     whole pane collapses to 12px -- `at out 13 the pane draws the shipped
+ *     scale exactly` is what catches that.)
+ *   - let `--text-meta` scale too -> `and text-meta chrome does not move`
+ *     reddens.
+ *   - make `--vam-pane-size` the bare out size -> `at out 10 nothing shrinks`
+ *     reddens.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/view-width-shots.mjs http://localhost:5520 docs/ui
@@ -130,17 +124,22 @@ const STUB_SESSION = 'atlas-width';
 const STUB_BRANCH = 'work/atlas-width';
 
 /**
- * The promise, and the sizes the terminal offers.
+ * The rule's two numbers, and the sizes the terminal offers.
  *
- * SPELLED HERE BECAUSE A BROWSER SCRIPT CANNOT IMPORT FROM `src/` -- the same
+ * SPELLED HERE BECAUSE A BROWSER SCRIPT CANNOT IMPORT FROM `src/` — the same
  * constraint `terminal-chrome-shots.mjs` records for its own copy of the size
- * list. The unit suite is what holds the two lists together: the number below
- * is `NARROW_MAX_CHARACTERS`, and `test/prefs/prefs.view-width.test.ts`
- * derives every other number in the feature from it, so a change in the source
- * that was not made here fails there.
+ * list. The unit suite is what holds the lists together: `FRACTION` is
+ * `NARROW_PANE_FRACTION` and `FLOOR_CHARACTERS` is `NARROW_FLOOR_CHARACTERS`,
+ * and `test/prefs/prefs.view-width.test.ts` derives every other number in the
+ * feature from those two, so a change in the source that was not made here
+ * fails there.
  */
-const MAX_CHARACTERS = 80;
+const FRACTION = 2 / 3;
+const FLOOR_CHARACTERS = 80;
 const SIZES = [10.5, 11.5, 12.5, 14];
+/** The type scale's own steps, for the reading-size checks. `type-scale.test.ts`
+ *  pins these against `styles.css`. */
+const SCALE = { meta: 11, control: 12, body: 13 };
 
 const failures = [];
 function check(label, ok, detail) {
@@ -151,13 +150,9 @@ function check(label, ok, detail) {
   console.error(`FAIL  ${label}${detail === undefined ? '' : ` — ${detail}`}`);
   failures.push(label);
 }
+const near = (a, b, tolerance) => a !== null && b !== null && Math.abs(a - b) <= tolerance;
 
 const browser = await chromium.launch();
-
-/* ── 1 AND 2: THE THREE PROSE VIEWS ──────────────────────────────────────── */
-
-const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
-page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 
 /**
  * Seed the store and open the demo session.
@@ -165,17 +160,19 @@ page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
  * AN INIT SCRIPT AND NOT AN `evaluate` + `reload`, for the reason
  * `terminal-chrome-shots.mjs` records as a real failure rather than a
  * preference: `activatePrefs` runs on every read AND every write, so a mounted
- * app can put the whole prefs object back -- including the value read a moment
- * ago -- between the write and the reload. Init scripts run before any page
+ * app can put the whole prefs object back — including the value read a moment
+ * ago — between the write and the reload. Init scripts run before any page
  * script, and they STACK in registration order, so the last one registered is
  * the one in force.
  */
-async function openDemo(target, narrow, phone = false, outFontSize = undefined) {
+async function openDemo(target, narrow, { phone = false, outFontSize } = {}) {
   await target.addInitScript(
     ([value, size]) => {
       globalThis.localStorage.setItem(
         'vam.prefs.v1',
-        JSON.stringify(size === undefined ? { narrowViews: value } : { narrowViews: value, outFontSize: size }),
+        JSON.stringify(
+          size === undefined ? { narrowViews: value } : { narrowViews: value, outFontSize: size },
+        ),
       );
     },
     [narrow, outFontSize],
@@ -195,15 +192,14 @@ async function openDemo(target, narrow, phone = false, outFontSize = undefined) 
 }
 
 /**
- * The body's content box, and how many characters of the page's OWN prose fit
- * across it.
+ * The body's boxes, and how many characters of the page's OWN prose fit across
+ * its content.
  *
  * THE ADVANCE IS MEASURED OFF WHAT WAS DRAWN, never assumed and never taken
- * from `ch`. `ch` is the advance of `0`, which in this face is 35% wider than
- * a character of English -- using it would report a comfortable 80 over a line
- * that really runs to 108. So every text node inside the answer blocks that
- * the engine laid out as a SINGLE line is measured with a `Range`, and the
- * total ink over the total characters is the advance.
+ * from `ch`. `ch` is the advance of `0`, which in this face is 35% wider than a
+ * character of English. So every text node inside the answer blocks that the
+ * engine laid out as a SINGLE line is measured with a `Range`, and the total
+ * ink over the total characters is the advance.
  */
 const readProse = (target) =>
   target.evaluate(() => {
@@ -213,7 +209,6 @@ const readProse = (target) =>
     const content = body.clientWidth - px(style.paddingLeft) - px(style.paddingRight);
     let chars = 0;
     let ink = 0;
-    let longest = 0;
     for (const block of document.querySelectorAll('[data-detail-block="out"]')) {
       const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
       let node = walker.nextNode();
@@ -227,7 +222,6 @@ const readProse = (target) =>
           if (rects.length === 1) {
             chars += text.length;
             ink += rects[0].width;
-            longest = Math.max(longest, rects[0].width);
           }
         }
         node = walker.nextNode();
@@ -244,7 +238,6 @@ const readProse = (target) =>
       content,
       advance,
       sampled: chars,
-      longestRunPx: longest,
       characters: advance === 0 ? 0 : content / advance,
       // What the app itself decided, for the log only. NEVER used in an
       // assertion: the whole value of this file is that its arithmetic shares
@@ -258,6 +251,10 @@ const openView = async (target, view) => {
   await target.waitForTimeout(150);
 };
 
+/* ── 1 AND 2: THE FRACTION, AT A WIDE PANE, AND THE ONE COLUMN ───────────── */
+
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 await openDemo(page, false);
 const full = await readProse(page);
 console.log('full pane:', JSON.stringify(full));
@@ -268,12 +265,12 @@ check(
 );
 check(
   'full-pane, the response body fills its pane',
-  Math.abs(full.boxWidth - full.paneWidth) < 1,
+  near(full.boxWidth, full.paneWidth, 1),
   `body ${full.boxWidth}px in a ${full.paneWidth}px pane`,
 );
 check(
-  'and a 1600px window really is the complaint: the line runs well past eighty characters',
-  full.characters > MAX_CHARACTERS + 20,
+  'and a 1600px window really is the complaint: the line runs to two hundred characters',
+  full.characters > 180,
   `${full.characters.toFixed(1)} characters across ${full.content}px`,
 );
 // THE PAGE ITSELF MUST NOT SCROLL SIDEWAYS, and nothing asked this until the
@@ -309,10 +306,8 @@ check(
   overflow.scrollWidth <= overflow.clientWidth,
   `${overflow.scrollWidth - overflow.clientWidth}px of horizontal overflow; widest is ${overflow.widest}`,
 );
-
 await page.screenshot({ path: `${outDir}/view-width-full.png` });
 console.log(`${outDir}/view-width-full.png`);
-
 await page.close();
 
 const narrowPage = await browser.newPage({ viewport: { width: 1600, height: 900 } });
@@ -320,58 +315,45 @@ narrowPage.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 await openDemo(narrowPage, true);
 const narrow = await readProse(narrowPage);
 console.log('narrowed:', JSON.stringify(narrow));
+// THE RULE, IN PIXELS: two thirds of the pane, to the pixel the engine rounds.
+check(
+  'narrowed, the body is two thirds of the pane',
+  near(narrow.boxWidth, narrow.paneWidth * FRACTION, 1),
+  `body ${narrow.boxWidth}px in a ${narrow.paneWidth}px pane; two thirds is ${(narrow.paneWidth * FRACTION).toFixed(1)}`,
+);
 /**
- * The capacity of the narrowed column, in characters of the SAME face.
- *
- * DIVIDED BY THE FULL-PANE ADVANCE, and that is a methodology decision rather
- * than a convenience. The advance is a property of the face, not of the box --
- * but the SAMPLE is a property of the box: a narrow column wraps more, so
- * fewer runs survive the single-rectangle filter and the ones that do are
- * short, differently-distributed lines. Measured: 822 characters sampled
- * full-pane against 280 narrowed, and the two averages differ by 0.024px,
- * which is a quarter of a character across eighty of them. The larger sample
- * is the better estimate of the face, and it is the one taken.
+ * AND THE RULE, IN CHARACTERS — the unit the first version of this file was
+ * written in, re-aimed. Divided by the FULL-PANE advance rather than the
+ * narrowed page's own, and that is a methodology decision rather than a
+ * convenience: the advance is a property of the face, not of the box, but the
+ * SAMPLE is a property of the box — a narrower column wraps more, so fewer runs
+ * survive the single-rectangle filter. The larger sample is the better estimate
+ * of the face.
  */
 const narrowCharacters = narrow.content / full.advance;
+console.log(`narrowed capacity: ${narrowCharacters.toFixed(2)} characters across ${narrow.content}px`);
 check(
-  'narrowed, the cap actually binds',
-  narrow.boxWidth < narrow.paneWidth - 100,
-  `body ${narrow.boxWidth}px in a ${narrow.paneWidth}px pane`,
+  'and the line holds about two thirds as many characters as it did',
+  near(narrowCharacters, full.characters * FRACTION, 4),
+  `${narrowCharacters.toFixed(1)} against ${(full.characters * FRACTION).toFixed(1)}`,
 );
-// THE ASSERTION THIS FILE EXISTS FOR, in the unit the promise is made in.
+// What the operator asked for is PAST the old eighty, and this file says so
+// rather than quietly keeping both rules: on a wide pane the column is well
+// over eighty characters, by design.
 check(
-  `narrowed, the response line holds at ${MAX_CHARACTERS} characters or fewer`,
-  narrowCharacters <= MAX_CHARACTERS,
-  `${narrowCharacters.toFixed(2)} characters across ${narrow.content}px at ${full.advance.toFixed(4)}px each`,
+  'which on a wide pane is deliberately past the old eighty-character rule',
+  narrowCharacters > FLOOR_CHARACTERS + 20,
+  `${narrowCharacters.toFixed(1)} characters`,
 );
-console.log(
-  `narrowed capacity: ${narrowCharacters.toFixed(2)} characters across ${narrow.content}px`,
-);
-// AND THE OTHER DIRECTION, which is what stops a mistyped number passing as a
-// success: a column of 40 characters would satisfy the line above and be a
-// worse surface than the one being fixed.
-// AND THE OTHER DIRECTION, which is what stops a mistyped number passing as a
-// success: a column of 40 characters would satisfy the line above and be a
-// worse surface than the one being fixed. The band is wide on purpose -- the
-// app's ruler is ORDINARY ENGLISH and agent answers run a little wider, so the
-// column deliberately holds slightly fewer than eighty of them (78.4 here), and
-// how much fewer is a property of the platform's face.
-check(
-  'and has not collapsed into a ribbon',
-  narrowCharacters > MAX_CHARACTERS - 10,
-  `${narrowCharacters.toFixed(2)} characters`,
-);
-// The advance is a property of the face, not of the box: if these two
-// measurements disagree, one of the two pages was not measuring prose.
 check(
   'the same face was measured in both states',
   Math.abs(narrow.advance - full.advance) < 0.35,
   `${full.advance.toFixed(4)}px full-pane vs ${narrow.advance.toFixed(4)}px narrowed`,
 );
-// ONE COLUMN, NOT A COLUMN ON TOP OF CHROME -- the operator's own instruction
+// ONE COLUMN, NOT A COLUMN ON TOP OF CHROME — the operator's own instruction
 // after the first screenshots. Whichever of the two blocks the demo has open
-// (a `QuestionCard` withdraws the composer) has to be the SAME rectangle as the
-// transcript above it, so this compares them to each other.
+// (a `QuestionCard` withdraws the composer) has to be the SAME rectangle as
+// the transcript above it.
 const belowNarrow = narrow.questionWidth ?? narrow.composerWidth;
 check(
   'the demo drew a block under the transcript at all, so the next check is not vacuous',
@@ -379,25 +361,19 @@ check(
   'neither a composer bar nor a question bar was on the page',
 );
 check(
-  'narrowed, the composer is the same column the transcript is',
-  belowNarrow !== null && Math.abs(belowNarrow - narrow.boxWidth) < 1,
+  'narrowed, the question card is the same column the transcript is',
+  near(belowNarrow, narrow.boxWidth, 1),
   `${belowNarrow}px under a ${narrow.boxWidth}px transcript`,
 );
-// And full-pane it was NOT -- which is what proves the check above is about the
-// cap rather than about two blocks that happen to be the same width anyway.
 const belowFull = full.questionWidth ?? full.composerWidth;
 check(
   'full-pane, that same block is the width of the pane',
-  belowFull !== null && Math.abs(belowFull - full.paneWidth) < 1,
+  near(belowFull, full.paneWidth, 1),
   `${belowFull}px in a ${full.paneWidth}px pane`,
 );
 await narrowPage.screenshot({ path: `${outDir}/view-width-narrow.png` });
 console.log(`${outDir}/view-width-narrow.png`);
 
-// ONE FLAG, ONE PROMISE: the other two views the operator named must land on
-// the identical rectangle. Measured rather than assumed -- the cap is keyed to
-// the CURRENT view, so a name left out of the predicate is a view that quietly
-// stays full-pane.
 const perView = { Response: narrow.boxWidth };
 for (const view of ['prs', 'agents']) {
   await openView(narrowPage, view);
@@ -407,7 +383,7 @@ for (const view of ['prs', 'agents']) {
   perView[view] = seen;
   check(
     `narrowed, the ${view} view is the same rectangle the response view is`,
-    Math.abs(seen - narrow.boxWidth) < 1,
+    near(seen, narrow.boxWidth, 1),
     `${seen}px against the response view's ${narrow.boxWidth}px`,
   );
 }
@@ -416,10 +392,9 @@ await narrowPage.screenshot({ path: `${outDir}/view-width-narrow-agents.png` });
 console.log(`${outDir}/view-width-narrow-agents.png`);
 
 // AND THE COMPOSER ITSELF, which the demo's focused session never shows: it has
-// a `QuestionCard` open, and an open card WITHDRAWS the composer (one surface
-// answering one prompt). So the check above measured the question bar, and this
-// one goes to a session with no question to measure the other block. Without
-// it, taking the cap off the composer would redden nothing here.
+// a `QuestionCard` open, and an open card WITHDRAWS the composer. So a session
+// with no question is opened to measure the other block. Without it, taking
+// the cap off the composer would redden nothing here.
 await openView(narrowPage, 'response');
 await narrowPage.locator(`[data-session-row="${DEMO_COMPOSER_SESSION}"]`).first().click();
 await narrowPage.waitForSelector('[data-composer-bar]', { timeout: 5_000 });
@@ -439,86 +414,120 @@ check(
 );
 check(
   'narrowed, the composer bar is the same column the transcript is',
-  composerSeen.composer !== null &&
-    composerSeen.body !== null &&
-    Math.abs(composerSeen.composer - composerSeen.body) < 1,
+  near(composerSeen.composer, composerSeen.body, 1),
   `composer ${composerSeen.composer}px against a ${composerSeen.body}px transcript`,
 );
 await narrowPage.screenshot({ path: `${outDir}/view-width-narrow-composer.png` });
 console.log(`${outDir}/view-width-narrow-composer.png`);
 await narrowPage.close();
 
-/* ── 3: THE CAP FOLLOWS THE `out` STEPPER, THE WAY `min()` SAYS IT DOES ──── */
+/* ── 3: THE FLOOR, AT A MID PANE, AND WHAT IT FOLLOWS ────────────────────── */
 
 /**
- * THE CHECK THAT SEPARATES THE MECHANISM FROM ITS CONSEQUENCE.
+ * THE CHECK THAT SEPARATES `max(fraction, floor)` FROM THE BARE FRACTION.
  *
- * The cap is eighty characters of the SMALLER of the pane's two prose steps:
- * `min(--vam-out-font-size, --text-body)`. Three implementations produce the
- * identical rectangle at the default, where the two steps are both 13px -- the
- * real one, `--text-body` alone, and `--vam-out-font-size` alone -- so a check
- * taken only there is green for a reason nobody chose. Stepping the `out` size
- * to each end tells them apart, and nothing in the DOM can:
+ * At an 800px window the pane is ~535px, two thirds of that is ~357px, and the
+ * eighty-character floor is ~460px: the floor is the wider of the two, so the
+ * column MUST be the floor. On the 1600px pane above the two implementations
+ * produce the identical rectangle, which is why a wide pane alone would have
+ * been green for a reason nobody chose.
  *
- *   at 10 the column MUST get narrower (`--text-body` alone would not move)
- *   at 20 the column MUST NOT move    (`out` alone would grow by a third)
+ * AND THE FLOOR'S OWN MECHANISM IS CHECKED HERE, because a pane where the
+ * floor binds is the only place it shows. The floor is eighty characters of
+ * the SMALLEST step the pane reads at, `min(out, --text-control)`, and the two
+ * halves of that `min()` are told apart by stepping `out` to each end: at 10
+ * the answers are the smallest step and the floor must follow them down; at 20
+ * the control step (now scaled to 18.5px) is the smallest, so the floor must
+ * stop short of eighty 20px characters.
  *
- * And at both ends the promise still has to hold, measured off the prose the
- * page really drew at that size -- which is the whole feature.
+ * THE `out` 20 PAGE IS A 1000px WINDOW, NOT 800, and that is a lesson rather
+ * than a preference: at 800px the pane is 535px, and eighty characters at
+ * EITHER 18.5px (~656px) or 20px (~703px) is wider than that, so the pane
+ * clipped both answers to 535 and a ruler sized by the bare out size passed
+ * the check as written first. At 1000px the pane is 735px, two thirds is
+ * 490px, and both candidate floors fit inside — so the one the page really
+ * drew can be told from the one it must not.
  */
-const stepped = {};
+const midpane = {};
 for (const size of [10, 13, 20]) {
-  const outPage = await browser.newPage({ viewport: { width: 1600, height: 900 } });
-  outPage.on('pageerror', (err) => console.error('PAGE ERROR:', err));
-  await openDemo(outPage, true, false, size);
-  const seen = await readProse(outPage);
-  stepped[size] = seen;
-  // The floor is low ON PURPOSE and it is not slack: a 20px answer inside a
-  // 471px column wraps far more, so far fewer runs survive the single-rectangle
-  // filter -- 103 characters here against 280 at 13px. What it still catches is
-  // the vacuous case, which is the one that matters: a page that drew no prose
-  // at all would pass the character check underneath it by dividing zero.
-  check(
-    `at out ${size}px the demo still drew prose to measure`,
-    seen.sampled > 80 && seen.advance > 2,
-    `${seen.sampled} characters sampled, advance ${seen.advance}`,
-  );
-  check(
-    `at out ${size}px the answer line still holds at ${MAX_CHARACTERS} characters or fewer`,
-    seen.characters <= MAX_CHARACTERS,
-    `${seen.characters.toFixed(2)} characters across ${seen.content}px at ${seen.advance.toFixed(4)}px each`,
-  );
-  await outPage.close();
+  const mid = await browser.newPage({
+    viewport: { width: size === 20 ? 1000 : 800, height: 800 },
+  });
+  mid.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await openDemo(mid, true, { outFontSize: size });
+  await mid.locator(`[data-session-row="${DEMO_SESSION}"]`).first().click();
+  await mid.waitForTimeout(200);
+  midpane[size] = await readProse(mid);
+  if (size === 13) {
+    await mid.screenshot({ path: `${outDir}/view-width-mid-pane.png` });
+    console.log(`${outDir}/view-width-mid-pane.png`);
+  }
+  await mid.close();
 }
 console.log(
-  'out stepper:',
+  'mid pane by out size:',
   JSON.stringify(
     Object.fromEntries(
-      Object.entries(stepped).map(([size, s]) => [
+      Object.entries(midpane).map(([size, s]) => [
         size,
-        { box: s.boxWidth, content: s.content, advance: Number(s.advance.toFixed(4)) },
+        { pane: s.paneWidth, box: s.boxWidth, content: s.content, advance: Number(s.advance.toFixed(4)) },
       ]),
     ),
   ),
 );
+const mid = midpane[13];
 check(
-  'the column follows the out stepper down to 10px',
-  stepped[10].boxWidth < stepped[13].boxWidth - 20,
-  `${stepped[10].boxWidth}px at 10 against ${stepped[13].boxWidth}px at 13`,
+  'at a mid pane the cap still binds',
+  mid.boxWidth < mid.paneWidth - 20,
+  `body ${mid.boxWidth}px in a ${mid.paneWidth}px pane`,
 );
 check(
-  'and stops following it up past the body step',
-  Math.abs(stepped[20].boxWidth - stepped[13].boxWidth) < 1,
-  `${stepped[20].boxWidth}px at 20 against ${stepped[13].boxWidth}px at 13`,
+  'at a mid pane the column is the eighty-character floor, not two thirds',
+  mid.boxWidth > mid.paneWidth * FRACTION + 40,
+  `body ${mid.boxWidth}px; two thirds would be ${(mid.paneWidth * FRACTION).toFixed(1)}px`,
+);
+// The floor, in the unit it is defined in — measured off the page's own prose.
+// The app's ruler is ordinary English against answers that run wider, and it
+// is counted at the control step rather than the body step, so the column
+// holds somewhat FEWER than eighty of the answer's own characters; what must
+// hold is that it is a reading column and not a fraction of a small pane.
+const midCharacters = mid.content / mid.advance;
+console.log(`mid-pane capacity: ${midCharacters.toFixed(2)} characters across ${mid.content}px`);
+check(
+  'and that column is about eighty characters wide',
+  midCharacters > FLOOR_CHARACTERS - 14 && midCharacters <= FLOOR_CHARACTERS,
+  `${midCharacters.toFixed(1)} characters`,
+);
+check(
+  'the floor follows the out stepper down to 10px',
+  midpane[10].boxWidth < midpane[13].boxWidth - 20,
+  `${midpane[10].boxWidth}px at 10 against ${midpane[13].boxWidth}px at 13`,
+);
+// At `out` 20 the control step is 20 × 12/13 = 18.46px, so the floor is eighty
+// of THOSE: wider than at 13, and still the floor (two thirds of this pane is
+// 490px), but short of eighty of the 20px characters the page really drew --
+// which is what a ruler sized by the bare out size would produce. Measured:
+// the page's own 20px advance is ~8.59px, so eighty of them is ~687px of
+// content; the control-step floor is ~636px and the bare-out floor ~675px.
+// 96% of the page's own eighty (~660px) sits between the two.
+const twentyContent = midpane[20].content;
+const eightyAtTwenty = FLOOR_CHARACTERS * midpane[20].advance;
+check(
+  'and stops following it up past the pane’s smallest step',
+  midpane[20].boxWidth > midpane[13].boxWidth + 20 &&
+    midpane[20].boxWidth < midpane[20].paneWidth - 20 &&
+    twentyContent < eightyAtTwenty * 0.96,
+  `${twentyContent}px of content at 20 against eighty 20px characters = ${eightyAtTwenty.toFixed(0)}px (box ${midpane[20].boxWidth}px in a ${midpane[20].paneWidth}px pane; ${midpane[13].boxWidth}px at 13)`,
 );
 
 /* ── 4: A MAXIMUM IS NOT A FLOOR ─────────────────────────────────────────── */
 
 // 560px is a DESKTOP window one pixel-class above the phone breakpoint
 // (`SIDEBAR_MIN + DETAIL_MIN`), so the detail pane there is near vam's
-// narrowest legal one; 390px is the phone. At both, every maximum in this
-// feature is wider than the pane, so the capped body must be the very same
-// rectangle as the uncapped one.
+// narrowest legal one; 390px is the phone. Both are narrower than the floor,
+// so the capped body must be the very same rectangle as the uncapped one. A
+// BARE FRACTION WOULD FAIL BOTH OF THESE — the phone would go to 260px — which
+// is the whole reason the floor survived the rule change.
 for (const [label, viewport] of [
   ['a narrow desktop pane', { width: 560, height: 800 }],
   ['the phone', { width: 390, height: 844 }],
@@ -528,7 +537,7 @@ for (const [label, viewport] of [
   for (const narrowed of [false, true]) {
     const small = await browser.newPage({ viewport });
     small.on('pageerror', (err) => console.error('PAGE ERROR:', err));
-    await openDemo(small, narrowed, phone);
+    await openDemo(small, narrowed, { phone });
     if (!phone) {
       await small.locator(`[data-session-row="${DEMO_SESSION}"]`).first().click();
       await small.waitForTimeout(200);
@@ -562,7 +571,7 @@ term.on('pageerror', (err) => console.error('PAGE ERROR:', err));
  * A complete `PreloadSourceApi` stub whose `resize` RECORDS what it was asked.
  * Merely DEFINING `window.api` takes `App.tsx` off the `?demo=1` fixture and
  * onto `createSourceFromPreload(api)`, so it has to be complete or the page
- * reddens before a check runs -- the note `terminal-ime-shots.mjs` left and
+ * reddens before a check runs — the note `terminal-ime-shots.mjs` left and
  * `terminal-chrome-shots.mjs` repeats.
  */
 await term.addInitScript(
@@ -697,65 +706,214 @@ const readTerminal = () =>
     probe.remove();
     const px = (value) => Number.parseFloat(value) || 0;
     const asked = globalThis.window.__resized.at(-1) ?? null;
+    // The tab's containing block is the body's CONTENT box -- the body carries
+    // the pane's gutter, and a percentage resolves inside it. Read as such,
+    // rather than as `clientWidth`, which would include the gutter and put
+    // "two thirds" 19px off for a reason that is the measurement's, not the
+    // cap's.
+    const body = tab.parentElement;
+    const bodyStyle = getComputedStyle(body);
     return {
       tabWidth: tab.getBoundingClientRect().width,
-      paneWidth: tab.parentElement.getBoundingClientRect().width,
+      containerWidth: body.clientWidth - px(bodyStyle.paddingLeft) - px(bodyStyle.paddingRight),
+      paneWidth: body.parentElement.clientWidth,
       content: pane.clientWidth - px(style.paddingLeft) - px(style.paddingRight),
       drawn,
       columns: asked === null ? null : asked.columns,
     };
   });
 
-const terminalReport = [];
+// AT A WIDE PANE: two thirds, which is more than eighty columns, and within 3%
+// of the prose column at the same pane — the two caps resolve their
+// percentage against different boxes (the terminal's floor is in `ch` and can
+// only live on the mono-faced element INSIDE the body's gutter, so its two
+// thirds is of the content box: 871px against the prose's 890px at 1335px,
+// 2.1% apart), so they are held near each other rather than pinned equal.
+const wideReport = [];
 for (const size of SIZES) {
   await openTerminal(size, true);
-  const narrowed = await readTerminal();
-  terminalReport.push({ size, narrowed: narrowed.columns, content: narrowed.content });
-  // THE WHOLE CLAIM OF WRITING THE CAP IN `ch`: "narrowed" means the SAME
-  // column count at every size. A pixel maximum would mean 78 columns here and
-  // 59 there, which is one setting silently meaning four different things.
+  const seen = await readTerminal();
+  wideReport.push({ size, columns: seen.columns, tab: seen.tabWidth });
   check(
-    `narrowed, vam asks tmux for exactly ${MAX_CHARACTERS} columns at ${size}px`,
-    narrowed.columns === MAX_CHARACTERS,
-    `vam asked for ${narrowed.columns}; the box is ${narrowed.content}px at ${narrowed.drawn}px per cell`,
+    `at a wide pane the narrowed terminal is two thirds of its containing block at ${size}px`,
+    near(seen.tabWidth, seen.containerWidth * FRACTION, 1),
+    `tab ${seen.tabWidth}px in a ${seen.containerWidth}px content box`,
   );
   check(
-    `and the cap really bound at ${size}px rather than the pane being small`,
-    narrowed.tabWidth < narrowed.paneWidth - 100,
-    `tab ${narrowed.tabWidth}px in a ${narrowed.paneWidth}px pane`,
+    `and that is more than eighty columns at ${size}px`,
+    seen.columns !== null && seen.columns > FLOOR_CHARACTERS,
+    `vam asked for ${seen.columns}`,
+  );
+  check(
+    `and within 3% of the prose column at ${size}px`,
+    near(seen.tabWidth, narrow.boxWidth, narrow.boxWidth * 0.03),
+    `terminal ${seen.tabWidth}px against prose ${narrow.boxWidth}px`,
+  );
+  if (size === 12.5) {
+    await term.screenshot({ path: `${outDir}/view-width-terminal-narrow.png` });
+    console.log(`${outDir}/view-width-terminal-narrow.png`);
+  }
+}
+console.log('terminal, wide pane:', JSON.stringify(wideReport));
+
+// AT A MID PANE: the floor, exactly. A 1050px window puts the body's content
+// box at ~757px, where two thirds (~505px) is under the floor at every offered
+// size -- the 10.5px floor is the narrowest at ~535px -- so the eighty must
+// win; and the 14px floor, the widest at ~705px, still sits well inside the
+// box, so "the floor binds" is distinguishable from "the pane is small". The
+// window is chosen for that pair of margins: at 1000px the 14px floor filled
+// the box to within 3px, and at 1100px the fraction would have out-grown the
+// 10.5px floor. The whole claim of writing the floor in `ch` is that "eighty"
+// is the SAME count at 10.5px and at 14px alike.
+await term.setViewportSize({ width: 1050, height: 800 });
+const floorReport = [];
+for (const size of SIZES) {
+  await openTerminal(size, true);
+  const seen = await readTerminal();
+  floorReport.push({ size, columns: seen.columns, tab: seen.tabWidth, container: seen.containerWidth });
+  check(
+    `at a mid pane the floor binds at ${size}px rather than the pane being small`,
+    seen.tabWidth < seen.containerWidth - 20,
+    `tab ${seen.tabWidth}px in a ${seen.containerWidth}px content box`,
+  );
+  check(
+    `and vam asks tmux for exactly ${FLOOR_CHARACTERS} columns at ${size}px`,
+    seen.columns === FLOOR_CHARACTERS,
+    `vam asked for ${seen.columns}; the box is ${seen.content}px at ${seen.drawn}px per cell`,
   );
 }
+console.log('terminal, mid pane:', JSON.stringify(floorReport));
 
+// FULL-PANE: the count is still the box over the measured advance, unchanged
+// from what shipped. Without this, "narrowed" could be the only state that
+// works.
+await term.setViewportSize({ width: 1600, height: 900 });
 for (const size of SIZES) {
   await openTerminal(size, false);
   const wide = await readTerminal();
   const want = Math.floor(wide.content / wide.drawn);
-  const row = terminalReport.find((entry) => entry.size === size);
-  row.full = wide.columns;
-  // The unchanged half: full-pane is still the box over the measured advance,
-  // which is what shipped. Without this, "narrowed" could be the only state
-  // that works.
   check(
     `full-pane, vam still asks for the ${want} columns that fit at ${size}px`,
     wide.columns === want,
     `vam asked for ${wide.columns} over a ${wide.content}px box at ${wide.drawn}px per cell`,
-  );
-  check(
-    `and full-pane is wider than narrowed at ${size}px`,
-    wide.columns > MAX_CHARACTERS,
-    `${wide.columns} columns full-pane against ${row.narrowed} narrowed`,
   );
   if (size === 12.5) {
     await term.screenshot({ path: `${outDir}/view-width-terminal-full.png` });
     console.log(`${outDir}/view-width-terminal-full.png`);
   }
 }
-console.log('terminal columns per size:', JSON.stringify(terminalReport));
-
-await openTerminal(12.5, true);
-await term.screenshot({ path: `${outDir}/view-width-terminal-narrow.png` });
-console.log(`${outDir}/view-width-terminal-narrow.png`);
 await term.close();
+
+/* ── 6: THE PANE'S TEXT FOLLOWS THE READING SIZE ─────────────────────────── */
+
+/**
+ * Operator report, translated: "the font size of the other parts of the pane
+ * (in bubble, heading, choice popover, prompt input...) needs to be in
+ * proportion to the out font size; at `out` 15 the answers are comfortably
+ * large but the prompt's choice options are now very small."
+ *
+ * Four surfaces named, and each is read off a REAL element's computed
+ * `font-size` rather than off the stylesheet: `styles.css` re-declares
+ * `--text-body` and `--text-control` under `[data-reading-pane]`, and a selector
+ * that matches nothing reads exactly like one that works. The mechanism check
+ * is the RATIO: control must stay at 12/13 of body at every size, which is what
+ * separates "scaled by its own share" from "set to the reading size" and from
+ * "left alone". `text-meta` is read too, to prove it does NOT move — it is the
+ * scale's floor and the chrome annotating the reading, and the terminal's
+ * status rule wears it under a screen whose size has a setting of its own.
+ */
+const readType = (target) =>
+  target.evaluate(() => {
+    const size = (selector) => {
+      const el = document.querySelector(selector);
+      return el === null ? null : Number.parseFloat(getComputedStyle(el).fontSize);
+    };
+    return {
+      bubble: size('[data-detail-block="in"] p'),
+      question: size('[data-question-text]'),
+      option: size('[data-question-option] > span'),
+      chatKey: size('[data-question-chat-key]'),
+      // The composer, which a session with a question open withdraws -- so
+      // the loop below reads it off a second session, and the first read
+      // carries `null` here on purpose.
+      composer: size('[data-composer-bar] textarea'),
+      // Outside the pane: the sidebar's session title is `text-body` too
+      // (`data-row-title` in `SessionList.tsx`), and it must NOT follow a
+      // setting that is about the pane. Read off the title itself -- the row
+      // around it inherits a size no scale step sets, and read there this
+      // check stayed green with the scope keyed to `body`.
+      sidebar: size('[data-session-row] [data-row-title]'),
+    };
+  });
+const typeBySize = {};
+for (const size of [10, 13, 15, 20]) {
+  const p = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+  p.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await openDemo(p, false, { outFontSize: size });
+  const withQuestion = await readType(p);
+  await p.locator(`[data-session-row="${DEMO_COMPOSER_SESSION}"]`).first().click();
+  await p.waitForSelector('[data-composer-bar] textarea', { timeout: 5_000 });
+  const withComposer = await readType(p);
+  typeBySize[size] = { ...withQuestion, composer: withComposer.composer };
+  if (size === 15) {
+    await p.locator(`[data-session-row="${DEMO_SESSION}"]`).first().click();
+    await p.waitForSelector('[data-question-text]', { timeout: 5_000 });
+    await p.waitForTimeout(150);
+    await p.screenshot({ path: `${outDir}/view-type-out-15.png` });
+    console.log(`${outDir}/view-type-out-15.png`);
+  }
+  await p.close();
+}
+console.log('pane type by out size:', JSON.stringify(typeBySize));
+check(
+  'the named surfaces were all on the page, so nothing below is vacuous',
+  [10, 13, 15, 20].every((s) =>
+    ['bubble', 'question', 'option', 'chatKey', 'composer', 'sidebar'].every(
+      (k) => typeBySize[s][k] !== null,
+    ),
+  ),
+  JSON.stringify(typeBySize[13]),
+);
+check(
+  'at out 13 the pane draws the shipped scale exactly',
+  near(typeBySize[13].bubble, SCALE.body, 0.05) &&
+    near(typeBySize[13].question, SCALE.body, 0.05) &&
+    near(typeBySize[13].composer, SCALE.body, 0.05) &&
+    near(typeBySize[13].option, SCALE.control, 0.05) &&
+    near(typeBySize[13].chatKey, SCALE.meta, 0.05),
+  JSON.stringify(typeBySize[13]),
+);
+for (const size of [15, 20]) {
+  const t = typeBySize[size];
+  check(
+    `at out ${size} the in-bubble prompt, the question and the composer follow the reading size`,
+    near(t.bubble, size, 0.05) && near(t.question, size, 0.05) && near(t.composer, size, 0.05),
+    `bubble ${t.bubble}px, question ${t.question}px, composer ${t.composer}px`,
+  );
+  check(
+    `at out ${size} the option label is scaled by its own share of the scale`,
+    near(t.option, (size * SCALE.control) / SCALE.body, 0.05),
+    `option ${t.option}px; ${SCALE.control}/${SCALE.body} of ${size} is ${((size * SCALE.control) / SCALE.body).toFixed(2)}`,
+  );
+  check(
+    `and text-meta chrome does not move at out ${size}`,
+    near(t.chatKey, SCALE.meta, 0.05),
+    `chat key ${t.chatKey}px`,
+  );
+  check(
+    `and the sidebar outside the pane does not move at out ${size}`,
+    near(t.sidebar, SCALE.body, 0.05),
+    `sidebar title ${t.sidebar}px against the shipped ${SCALE.body}px`,
+  );
+}
+check(
+  'at out 10 nothing shrinks below the shipped scale',
+  near(typeBySize[10].bubble, SCALE.body, 0.05) &&
+    near(typeBySize[10].composer, SCALE.body, 0.05) &&
+    near(typeBySize[10].option, SCALE.control, 0.05) &&
+    near(typeBySize[10].chatKey, SCALE.meta, 0.05),
+  JSON.stringify(typeBySize[10]),
+);
 
 await browser.close();
 

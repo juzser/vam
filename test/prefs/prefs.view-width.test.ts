@@ -1,13 +1,22 @@
 // @vitest-environment happy-dom
 
 /**
- * THE WIDTH OF A VIEW: one stored flag, two measured maxima, and the store
+ * THE WIDTH OF A VIEW: one stored flag, one rule in two units, and the store
  * that puts the flag in force.
  *
- * NOT ONE PIXEL NUMBER IS PINNED HERE, AND THAT IS THE POINT. The first cut of
- * this file pinned `480`, derived from an advance measured once on macOS, and
- * the first Linux CI run put 83.95 characters on the line it produced. Both
- * maxima are measurements now -- the prose one off a ruler in the real face
+ * THE RULE MOVED AND SO DID THIS FILE. It was "no more than eighty characters
+ * on a line"; the operator used the build and asked for two thirds of the pane
+ * instead ("narrow width cần lớn hơn, khoảng 2/3 pane width"). The eighty is
+ * still here and still asserted -- as the FLOOR under that fraction, which is
+ * the half that keeps a 390px phone from being narrowed to 260px. Every
+ * assertion below was re-aimed at the role the number now has rather than
+ * deleted, because a guard that measured the old promise should measure the new
+ * one.
+ *
+ * NOT ONE PIXEL NUMBER IS PINNED HERE, AND THAT IS STILL THE POINT. The first
+ * cut pinned `480`, derived from an advance measured once on macOS, and the
+ * first Linux CI run put 83.95 characters on the line it produced. Both halves
+ * of the floor are measurements -- the prose one off a ruler in the real face
  * (`narrowProseMaxWidth`), the terminal one off `ch` -- so what is asserted
  * below is the ARITHMETIC and the DIRECTION, never a platform's answer.
  */
@@ -27,7 +36,8 @@ import {
 import {
   activeNarrowViews,
   DEFAULT_NARROW_VIEWS,
-  NARROW_MAX_CHARACTERS,
+  NARROW_FLOOR_CHARACTERS,
+  NARROW_PANE_FRACTION,
   NARROW_TERMINAL_MAX_WIDTH,
   narrowProseMaxWidth,
   PROSE_RULER_CLASS,
@@ -54,57 +64,76 @@ function fake(initial: string | null = null): StorageLike & { value: string | nu
 
 const stored = (payload: object) => readPrefs(fake(JSON.stringify(payload)));
 
-describe('the one promise the narrowed state makes', () => {
-  it('is eighty characters a line, which is a standard rather than a taste', () => {
-    // WCAG 2.2 SC 1.4.8 Visual Presentation: "Width is no more than 80
-    // characters or glyphs." Pinned because a changed number changes the
-    // shape of four views at once, and it should cost an edit here.
-    expect(NARROW_MAX_CHARACTERS).toBe(80);
+describe('the rule the narrowed state follows', () => {
+  it('is two thirds of the pane, written as the operator’s own fraction', () => {
+    // "narrow width cần lớn hơn, khoảng 2/3 pane width". A division rather
+    // than 66.6667% so the source carries the fraction they asked for and not
+    // a rounding of it -- and so that a reader can see at a glance that it IS
+    // two thirds.
+    expect(NARROW_PANE_FRACTION).toBe('calc(200% / 3)');
   });
 
-  it('turns that promise into prose pixels from a MEASURED advance, whatever it is', () => {
+  it('keeps the eighty as its FLOOR, which is the half that spares a narrow pane', () => {
+    // NOT THE PROMISE ANY MORE, and `view-width.ts`'s header carries what
+    // changed and who changed it. A bare percentage always binds: it would
+    // have taken the 390px phone to 260px and vam's narrowest legal pane to
+    // 213px, which is the one thing this setting must never do.
+    expect(NARROW_FLOOR_CHARACTERS).toBe(80);
+  });
+
+  it('spends both halves in one `max()`, so the wider of the two always wins', () => {
     // Swept rather than sampled: the advance is whatever the operator's
     // platform reports, so every plausible one has to come out right. 5.7180
     // is the Linux CI figure that broke the frozen constant; 6.0079 is this
     // macOS machine's.
     for (const advance of [3, 4.7089, 5.718, 5.893, 6.0079, 8.4402, 11.5]) {
       expect(narrowProseMaxWidth(advance), `${advance}`).toBe(
-        `calc(${Math.floor(NARROW_MAX_CHARACTERS * advance)}px + 1.75rem)`,
+        `max(${NARROW_PANE_FRACTION}, calc(${Math.floor(NARROW_FLOOR_CHARACTERS * advance)}px + 1.75rem))`,
       );
     }
   });
 
-  it('never rounds the cap UP past its own promise', () => {
+  it('never rounds the floor UP past the characters it is counting', () => {
     // THE INVARIANT, STATED WITHOUT NAMING A ROUNDING FUNCTION, because the
     // function is the implementation and this is the rule. 80 × 6.0079 is
-    // 480.63; `Math.round` shipped 481, and Chromium measured 80.4 characters
-    // on the line. A maximum rounds DOWN or it is not a maximum.
+    // 480.63; `Math.round` shipped 481 and Chromium measured 80.4 characters
+    // on the line, which is how the direction was found. The fraction has
+    // slack now, so this is the only place it is still held.
     for (const advance of [4.7089, 5.718, 5.893, 6.0079, 8.4402]) {
       const px = Number(/calc\((\d+)px/.exec(narrowProseMaxWidth(advance) ?? '')?.[1]);
-      expect(px, `${advance}`).toBeLessThanOrEqual(NARROW_MAX_CHARACTERS * advance);
+      expect(px, `${advance}`).toBeLessThanOrEqual(NARROW_FLOOR_CHARACTERS * advance);
       // And not short by a whole character, which is the other way to satisfy
       // the line above and be wrong.
-      expect(px, `${advance}`).toBeGreaterThan((NARROW_MAX_CHARACTERS - 1) * advance);
+      expect(px, `${advance}`).toBeGreaterThan((NARROW_FLOOR_CHARACTERS - 1) * advance);
     }
   });
 
   it('caps nothing at all until something has actually been measured', () => {
     // `fitPane`'s rule, in this file's terms: a ruler that has not been laid
-    // out reports a zero box, and a zero advance would produce a 28px column
-    // of nothing but padding. happy-dom reports exactly those zeros, and so
-    // does every real browser for one frame.
+    // out reports a zero box, and a zero advance would produce a 28px floor of
+    // nothing but padding. happy-dom reports exactly those zeros, and so does
+    // every real browser for one frame.
+    //
+    // NOT THE BARE FRACTION EITHER, which is the tempting wrong answer: the
+    // fraction needs no measurement and could be applied immediately, but the
+    // fraction without its floor is the half that narrows a phone.
     for (const nothing of [null, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(narrowProseMaxWidth(nothing as number | null), String(nothing)).toBeUndefined();
     }
   });
 
-  it('turns it into terminal columns through `ch`, which is the browser measuring for us', () => {
+  it('gives the terminal the same sentence, with columns for characters', () => {
     // `terminal-size.ts` warns in its own header that a plausible-looking
     // width-to-height RATIO is out by a column every seventeen. `ch` is the
     // advance of `0` as the engine measures it, so in a monospace face `80ch`
     // IS eighty columns at whatever size the screen is drawn at -- and the
     // half cell is rounding slack, argued in `view-width.ts`.
-    expect(NARROW_TERMINAL_MAX_WIDTH).toContain(`${NARROW_MAX_CHARACTERS + 0.5}ch`);
+    expect(NARROW_TERMINAL_MAX_WIDTH).toContain(`${NARROW_FLOOR_CHARACTERS + 0.5}ch`);
+    // THE SAME FRACTION, not a second opinion about the width: the terminal
+    // was the one view that might have kept the old rule, and the header
+    // argues why it did not.
+    expect(NARROW_TERMINAL_MAX_WIDTH).toContain(NARROW_PANE_FRACTION);
+    expect(NARROW_TERMINAL_MAX_WIDTH.startsWith('max(')).toBe(true);
     // And it must carry no pixel width of its own: the moment a platform's
     // prose answer were baked in here, "narrowed" would mean two things.
     expect(NARROW_TERMINAL_MAX_WIDTH).not.toMatch(/\d+px\s*\+\s*1\.75rem/);
@@ -112,13 +141,19 @@ describe('the one promise the narrowed state makes', () => {
 });
 
 describe('the ruler the prose cap is measured on', () => {
-  it('is rendered at the SMALLER of the two prose sizes a response pane draws', () => {
-    // `out` is the operator's stepper and `--text-body` is the type scale;
-    // the column is shared by both, so the cap has to hold for the narrower
-    // character or it is not a maximum. Derived from `OUT_FONT_SIZE_VAR`
-    // rather than restating the custom property, because a renamed variable
-    // that still LOOKED right in a string is how this becomes `min()` of one
-    // thing.
+  it('is rendered at the SMALLEST step anything read in the pane wears', () => {
+    // `out` is the operator's stepper and `--text-control` is the smallest of
+    // the pane's reading steps -- the option labels in the question card, the
+    // refusals, the hints. The floor is shared by both, so it has to be
+    // counted in the narrower or it is eighty of one and eighty-something of
+    // the other. Derived from `OUT_FONT_SIZE_VAR` rather than restating the
+    // custom property, because a renamed variable that still LOOKED right in a
+    // string is how this becomes `min()` of one thing.
+    //
+    // `--text-body` WOULD BE A DEAD BRANCH NOW: since `[data-reading-pane]`
+    // re-declares the scale in terms of the reading size, `min(out, body)`
+    // collapses to `out` at every setting, and a `min()` that can never pick
+    // its second argument is an expression no mutation can reach.
     //
     // A CONTENT SCAN, AND IT KNOWS IT. This repo has shipped a rule whose
     // selector matched nothing and read exactly like one that worked, so what
@@ -128,7 +163,7 @@ describe('the ruler the prose cap is measured on', () => {
     const rule = new RegExp(`\\.${PROSE_RULER_CLASS}\\s*\\{([^}]*)\\}`).exec(CSS)?.[1] ?? '';
     expect(rule, `no .${PROSE_RULER_CLASS} rule in styles.css`).not.toBe('');
     expect(rule).toContain(`var(${OUT_FONT_SIZE_VAR}`);
-    expect(rule).toContain('var(--text-body');
+    expect(rule).toContain('var(--text-control');
     expect(rule).toMatch(/font-size:\s*min\(/);
   });
 
