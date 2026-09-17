@@ -28,6 +28,7 @@ import {
   setActiveTerminalFontSize,
   TERMINAL_FONT_SIZES,
 } from '../../src/renderer/prefs/terminal-font.js';
+import { activeTerminalScheme } from '../../src/renderer/prefs/terminal-scheme.js';
 import {
   NARROW_FLOOR_CHARACTERS,
   NARROW_TERMINAL_MAX_WIDTH,
@@ -548,10 +549,20 @@ describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pix
   });
 });
 
-describe('the pane takes its colours from the theme', () => {
+describe('the pane takes its colours from the terminal scheme, not from the theme', () => {
+  /**
+   * THIS BLOCK USED TO HOLD THE OPPOSITE. It pinned `bg-panel text-ink` on
+   * the pane, forbade any hex in its markup, and drove `applyPalette` to
+   * prove an app-palette override recoloured the screen. All three were the
+   * design, and all three were replaced on purpose when the screen got a
+   * scheme of its own (`prefs/terminal-scheme.ts`): the colours are now DATA
+   * on the pane's inline style -- which is where the hexes come from -- and
+   * the app palette no longer reaches it. `TerminalTab.scheme.test.tsx` holds
+   * the new ownership in full; what stays here is the seam it moved across.
+   */
   const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
 
-  it('draws in tokens, never in a colour of its own', async () => {
+  it('draws its ink through a token of the scheme, and its ground from the scheme itself', async () => {
     render(
       <TerminalTab
         projectId={ATLAS}
@@ -563,31 +574,32 @@ describe('the pane takes its colours from the theme', () => {
     await settle();
     const pane = q<HTMLElement>('[data-terminal-pane]');
     const classes = pane?.getAttribute('class') ?? '';
-    expect(classes).toContain('bg-panel');
-    expect(classes).toContain('text-ink');
-    // `capture-pane` is called WITHOUT `-e`, so the text carries no colour of
-    // its own: every pixel in this pane is the theme's, and a literal would be
-    // a colour the theme could not reach.
-    expect(pane?.outerHTML).not.toMatch(/#[0-9a-f]{6}/i);
+    expect(classes).toContain('text-term-fg');
+    expect(classes).not.toContain('bg-panel');
+    expect(classes).not.toContain('text-ink');
+    // Every hex in the pane's markup is one of the scheme's own, on the pane
+    // element itself -- the spans below it still carry tokens and no value.
+    const pre = q<HTMLElement>('[data-terminal-pane] pre');
+    expect(pre?.outerHTML).not.toMatch(/#[0-9a-f]{6}/i);
+    expect(pane?.style.getPropertyValue('--vam-term-bg')).toBe(activeTerminalScheme().background);
   });
 
-  it('is wired to tokens the operator can actually override', () => {
-    // The chain that has to hold: the utility reads `--color-*`, which is
-    // defined as the `--vam-*` custom property, which is what the colour
-    // picker writes onto the root.
-    expect(css).toContain('--color-panel: var(--vam-panel);');
-    expect(css).toContain('--color-ink: var(--vam-ink);');
+  it('is wired to tokens the scheme can actually reach', () => {
+    // The chain that has to hold: the utility reads `--color-term-*`, which
+    // is defined as the `--vam-term-*` custom property, which is what the
+    // pane sets on itself from the scheme in force.
+    expect(css).toContain('--color-term-fg: var(--vam-term-fg);');
+    expect(css).toContain('--color-term-cursor: var(--vam-term-cursor);');
   });
 
-  it('changes colour when the operator overrides the token, not only on reload', async () => {
-    // VERIFIED RATHER THAN ASSUMED. The overrides are set as custom properties
-    // on the root at runtime, so a pane built from token classes should
-    // inherit them for free -- this drives the real `applyPalette` and reads
-    // the pane's computed colour back.
+  it('is left alone by an app-palette override, which used to move it', async () => {
+    // VERIFIED RATHER THAN ASSUMED, in the direction that changed. The
+    // overrides still go onto the root as custom properties; a pane that
+    // reads its own properties off itself does not see them.
     document.head.innerHTML = `<style>
       :root { --vam-panel: #141414; --vam-ink: #ededed; }
-      .bg-panel { background-color: var(--vam-panel); }
-      .text-ink { color: var(--vam-ink); }
+      [data-terminal-pane] { --vam-term-fg: var(--vam-ink); }
+      .text-term-fg { color: var(--vam-term-fg); }
     </style>`;
     render(
       <TerminalTab
@@ -599,13 +611,12 @@ describe('the pane takes its colours from the theme', () => {
     );
     await settle();
     const pane = q<HTMLElement>('[data-terminal-pane]') as HTMLElement;
-    expect(getComputedStyle(pane).backgroundColor).toBe('#141414');
-
+    const ground = pane.style.backgroundColor;
+    expect(ground).toMatch(/^rgba?\(30, 31, 41(, 1)?\)$/);
     applyPalette({ '--vam-panel': '#3b0764', '--vam-ink': '#f5d0fe' });
-    expect(getComputedStyle(pane).backgroundColor).toBe('#3b0764');
-    expect(getComputedStyle(pane).color).toBe('#f5d0fe');
-
+    await settle();
+    expect(pane.style.backgroundColor).toBe(ground);
+    expect(pane.style.getPropertyValue('--vam-term-fg')).toBe('#9a9b97');
     applyPalette({});
-    expect(getComputedStyle(pane).backgroundColor).toBe('#141414');
   });
 });

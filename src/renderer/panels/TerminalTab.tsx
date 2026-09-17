@@ -50,6 +50,7 @@
 import { GitBranch } from 'lucide-react';
 import {
   type CompositionEvent,
+  type CSSProperties,
   type FocusEvent,
   Fragment,
   type KeyboardEvent,
@@ -69,6 +70,11 @@ import {
   subscribeTerminalFontSize,
   TERMINAL_LINE_HEIGHT,
 } from '../prefs/terminal-font.js';
+import {
+  activeTerminalScheme,
+  subscribeTerminalScheme,
+  terminalSchemeStyle,
+} from '../prefs/terminal-scheme.js';
 import {
   activeNarrowViews,
   NARROW_TERMINAL_MAX_WIDTH,
@@ -418,9 +424,13 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
 }
 
 /**
- * What the cursor's cell looks like: a solid block, the character in it drawn
- * in the pane's own background colour. Reverse video, which is what a terminal
- * cursor has always been.
+ * What the cursor's cell looks like: a solid block in the scheme's `cursor`
+ * colour, the character in it drawn in `cursorAccent`. It WAS `bg-ink
+ * text-panel` -- reverse video off the app's own pair -- and moved onto the
+ * scheme's pair with the rest of the screen, because the operator's scheme
+ * names a caret colour (`hans` carries a violet one) and a caret in the app's
+ * ink over a ground the app did not choose is the one thing on the screen
+ * that would still look borrowed.
  *
  * A STATIC STRING for the reason `spanClasses` is a table of them: Tailwind
  * extracts class names by scanning source text, so anything template-built
@@ -429,16 +439,16 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
  * the RESOLVED background rather than reading this attribute back.
  *
  * IT REPLACES THE CELL'S OWN COLOURS RATHER THAN JOINING THEM. A cursor span
- * carrying both `text-ansi-red` and `text-panel` would resolve by stylesheet
- * order, not by the order they are written here, so which one won would be an
- * accident. The character under a block cursor is not readable in its own
- * colour anyway -- that is what the block is.
+ * carrying both `text-ansi-red` and `text-term-cursor-accent` would resolve
+ * by stylesheet order, not by the order they are written here, so which one
+ * won would be an accident. The character under a block cursor is not
+ * readable in its own colour anyway -- that is what the block is.
  *
  * NO ANIMATION. See the note at the top of this file: the screen behind it is
  * a one-second snapshot, and a blink is a claim about liveness that nothing
  * here can honour.
  */
-const CURSOR_CLASSES = 'bg-ink text-panel';
+const CURSOR_CLASSES = 'bg-term-cursor text-term-cursor-accent';
 
 const NO_BRIDGE: PaneView = {
   kind: 'unavailable',
@@ -662,6 +672,22 @@ export function TerminalTab({
     subscribeNarrowViews,
     activeNarrowViews,
     activeNarrowViews,
+  );
+  /**
+   * THE COLOURS THE SCREEN IS DRAWN IN, read the same way -- and this one IS
+   * only paint, which is why it is worth saying why it is a React value at
+   * all. The resolved scheme lands on the pane's OWN element as custom
+   * properties (`terminalSchemeStyle`), never on `:root`, because the sixteen
+   * `--vam-ansi-*` names are global tokens and a scheme put on the root would
+   * recolour anything else that reads them. An element's inline style is
+   * rendered, so the pane has to re-render for a change; `prefs/
+   * terminal-scheme.ts` carries the rest of the argument, including why the
+   * store is fed from `Canvas.tsx`'s theme effect as well as from every write.
+   */
+  const scheme = useSyncExternalStore(
+    subscribeTerminalScheme,
+    activeTerminalScheme,
+    activeTerminalScheme,
   );
   /**
    * Only a pane that is actually being drawn is measured -- and a pane is
@@ -1511,7 +1537,19 @@ export function TerminalTab({
 
              THE LINE HEIGHT IS A RATIO, not a pixel count, because it has to
              hold at four sizes rather than at one. */
-          style: { fontSize: `${fontSize}px`, lineHeight: TERMINAL_LINE_HEIGHT },
+          style: {
+            fontSize: `${fontSize}px`,
+            lineHeight: TERMINAL_LINE_HEIGHT,
+            /* THE SCHEME, ON THIS ELEMENT AND NO WIDER. Twenty-three custom
+               properties and the ground already composited with the opacity
+               (`terminalSchemeStyle` says why the compositing is arithmetic
+               here rather than a `color-mix()` in the stylesheet). Inline
+               for the same reason the size is: a chosen value has no class to
+               write at build time. The cast is React's: `CSSProperties` does
+               not name custom properties, and `style.setProperty` is what it
+               does with a `--` key regardless. */
+            ...(terminalSchemeStyle(scheme) as CSSProperties),
+          },
         }}
         /* THE RING FOLLOWS THE BOX. `focus-visible` on this element would
            never match: the keyboard is one element deeper, and a container has
@@ -1521,7 +1559,15 @@ export function TerminalTab({
            one every time somebody clicks the screen. The token is unchanged,
            and `SettingsOverlay.tsx` still names this file as the renderer's one
            `focus-visible`. */
-        className="relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-ink has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
+        /* `text-term-fg` AND NO `bg-*`: the default ink is the scheme's
+           foreground through its token, and the ground is the inline
+           composite above -- a `bg-term-bg` utility would paint the colour
+           and lose the opacity. The selection pair is the scheme's too:
+           `selection:` is Tailwind's `::selection` on this element and every
+           element inside it, which is exactly the scope the scheme has. What
+           was here before, `bg-panel text-ink`, made the screen the app's
+           panel; that is now a scheme called `vam`, one press away. */
+        className="relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line px-3 py-2 font-mono text-term-fg selection:bg-term-selection-bg selection:text-term-selection-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
       >
         {/* WHERE AN INPUT METHOD COMPOSES. See `inputRef` above for the whole
             of why this exists; what matters HERE is its shape.
@@ -1596,9 +1642,10 @@ export function TerminalTab({
         </span>
         {/* THE SCREEN, WITH THE AGENT'S OWN COLOURS. `capture-pane -e` keeps
             the SGR sequences and `terminal-ansi.ts` turns them into spans
-            whose classes are theme tokens -- so an error line is red in both
-            themes without vam choosing a red twice, and a sequence vam does
-            not model is dropped rather than drawn.
+            whose classes are tokens -- so an error line is red in every
+            scheme without vam choosing a red twice, the scheme in force
+            decides which red (the tokens are set on the pane above), and a
+            sequence vam does not model is dropped rather than drawn.
 
             The lines are joined by real newlines inside ONE `pre` rather than
             wrapped in a block each: the pane's width is measured in

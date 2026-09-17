@@ -159,6 +159,29 @@
   --color-ansi-bright-cyan: var(--vam-ansi-bright-cyan);
   --color-ansi-bright-white: var(--vam-ansi-bright-white);
 
+  /* THE REST OF THE TERMINAL'S SCHEME: its default ink, its bold ink, the
+     cursor's pair and the selection's pair. Named `term-*` beside the sixteen
+     `ansi-*` because they are the same family -- the screen's own colours,
+     not the app's -- and kept apart from them because the sixteen are what
+     the AGENT said and these are what the OPERATOR chose
+     (`prefs/terminal-scheme.ts`).
+
+     THESE HAVE NO VALUE IN EITHER THEME BLOCK, DELIBERATELY. The `--vam-term-*`
+     properties are declared on the screen's own element -- the
+     `[data-terminal-pane]` rule further down, and the Terminal tab's inline
+     style over it, from the scheme in force -- and the utilities resolve
+     against that element because `@theme inline` emits `var(--vam-term-fg)`
+     into the rule rather than a value read off `:root`. A pair on `:root`
+     would give every other surface a way to read the terminal's ink, and the
+     scheme is the terminal's alone (`TerminalTab.scheme.test.tsx` scans for
+     readers). */
+  --color-term-fg: var(--vam-term-fg);
+  --color-term-bold: var(--vam-term-bold);
+  --color-term-cursor: var(--vam-term-cursor);
+  --color-term-cursor-accent: var(--vam-term-cursor-accent);
+  --color-term-selection-bg: var(--vam-term-selection-bg);
+  --color-term-selection-fg: var(--vam-term-selection-fg);
+
   /* THE ICON TONES. Eight, orca's own set, for the glyph an operator picks for
      a project, a group or a session (`panels/icon-value.tsx`). They are named
      by TONE rather than by meaning for exactly the reason the ANSI ramp above
@@ -2120,6 +2143,38 @@ html {
 
 .vam-hit-24 {
   position: relative;
+}
+
+/*
+ * THE TERMINAL SCREEN'S OWN COLOURS, DECLARED ON THE SCREEN AND NOWHERE WIDER.
+ *
+ * The seven `--vam-term-*` properties the `term-*` utilities read (the
+ * `@theme inline` block says why they are not on `:root`). The values here
+ * are what the screen wore before it had a scheme -- the app's ink on the
+ * app's panel, the caret as `bg-ink text-panel`, a selection on the
+ * strongest neutral rule -- and they are a FALLBACK, not a default: the
+ * Terminal tab writes the scheme in force over every one of them as inline
+ * style on this same element (`prefs/terminal-scheme.ts`), so on a screen
+ * that has been drawn these never paint. What they buy is a screen that has
+ * somehow not been handed a scheme drawing in the app's colours rather than
+ * in nothing at all -- an unresolvable `var()` makes the declaration
+ * invalid at computed-value time, which for `color` is `inherit` and for a
+ * `background-color` is transparent.
+ *
+ * A RULE KEYED TO THE ELEMENT, LIKE `[data-reading-pane]` ABOVE IT, and for
+ * the same reason: a property declared on a scope moves everything inside
+ * the scope and nothing outside it. `focus-edge-removed.test.ts` holds that
+ * every `var()` in this file names a property declared in it, and this is
+ * where these seven are.
+ */
+[data-terminal-pane] {
+  --vam-term-bg: var(--vam-panel);
+  --vam-term-fg: var(--vam-ink);
+  --vam-term-bold: var(--vam-ink);
+  --vam-term-cursor: var(--vam-ink);
+  --vam-term-cursor-accent: var(--vam-panel);
+  --vam-term-selection-bg: var(--vam-line-strong);
+  --vam-term-selection-fg: var(--vam-ink);
 }
 
 .vam-hit-24::after {

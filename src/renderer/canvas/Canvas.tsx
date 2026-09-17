@@ -152,6 +152,7 @@ import {
   watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';
+import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
@@ -1518,17 +1519,22 @@ function CanvasInner({
   // appearance, and a flip that moved only the class would leave a light theme
   // wearing dark's canvas until the next write. `writePrefs` covers an edit;
   // only this covers the OS changing its mind with nothing else happening.
+  // The terminal's scheme is the third half of the same appearance and is
+  // stored per theme for the same reason, so it moves in the same statement:
+  // without this line an open terminal would keep its dark scheme after the
+  // OS flipped to light under `system`, with nothing else on screen wrong.
   const [effective, setEffective] = useState<EffectiveTheme>('dark');
   useEffect(() => {
     const show = (theme: Theme) => {
       const next = applyTheme(theme);
       setEffective(next);
       applyPalette(paletteFor(prefs.palette, next));
+      setActiveTerminalScheme(prefs.terminalScheme, next);
     };
     show(prefs.theme);
     if (prefs.theme !== 'system') return;
     return watchOsTheme(() => show('system'));
-  }, [prefs.theme, prefs.palette]);
+  }, [prefs.theme, prefs.palette, prefs.terminalScheme]);
 
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:

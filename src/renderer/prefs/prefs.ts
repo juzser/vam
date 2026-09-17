@@ -47,6 +47,12 @@ import {
   readTerminalFontSize,
   setActiveTerminalFontSize,
 } from './terminal-font.js';
+import {
+  DEFAULT_TERMINAL_SCHEME_PREF,
+  readTerminalSchemePref,
+  setActiveTerminalScheme,
+  type TerminalSchemePref,
+} from './terminal-scheme.js';
 import { DEFAULT_NARROW_VIEWS, readNarrowViews, setActiveNarrowViews } from './view-width.js';
 
 const KEY = 'vam.prefs.v1';
@@ -525,6 +531,28 @@ export type Prefs = {
    */
   readonly terminalFontSize: number;
   /**
+   * The colours the tmux screen is drawn in: a named theme per APP theme,
+   * the colours moved off each, and how opaque the ground is painted.
+   *
+   * ITS OWN FIELD AND NOT A BUCKET OF `palette`, because it is not an
+   * override layer over the stylesheet: `prefs/terminal-scheme.ts` argues
+   * that the screen owns its colours the way an emulator does, and a scheme
+   * is a whole table of twenty-three rather than a few tokens moved off
+   * `styles.css`. Per app theme for the reason `palette` is -- a scheme is
+   * chosen against the screen it will be worn on.
+   *
+   * GLOBAL, not per pane and not per session, for the reason
+   * `terminalFontSize` above gives, and read the same way: a store with a
+   * subscription, because the resolved colours land on the screen's OWN
+   * element as custom properties (never on `:root`, or every surface that
+   * reads `--vam-ansi-*` would move with them), and an element's inline
+   * style is a React value.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalScheme: TerminalSchemePref;
+  /**
    * Whether the Response, PRs, Agents and Terminal views are capped at a
    * readable line length instead of filling the pane.
    *
@@ -578,6 +606,7 @@ export const EMPTY_PREFS: Prefs = {
   editorIndent: DEFAULT_EDITOR_INDENT,
   filesTreeWidth: null,
   terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
   narrowViews: DEFAULT_NARROW_VIEWS,
 };
 
@@ -823,6 +852,12 @@ function parsePrefs(
     terminalFontSize: readTerminalFontSize(
       (parsed as { terminalFontSize?: unknown }).terminalFontSize,
     ),
+    // Per field like every line above it -- and per field INSIDE it as well:
+    // `readTerminalSchemePref` lets an unknown theme id cost the id, a bad
+    // override cost that override and a string opacity cost the opacity,
+    // each alone, because a hand-edited scheme is still mostly the
+    // operator's own colours.
+    terminalScheme: readTerminalSchemePref((parsed as { terminalScheme?: unknown }).terminalScheme),
     // Per field like every line above it, and normalised in the safe
     // direction `readNarrowViews` argues: a payload this vam cannot read must
     // not re-shape four views -- and re-wrap a running tmux session -- on the
@@ -2302,6 +2337,10 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActivePromptSubmitKey(prefs.promptSubmitKey);
   setActiveEditorSettings({ highlight: prefs.editorHighlight, indent: prefs.editorIndent });
   setActiveTerminalFontSize(prefs.terminalFontSize);
+  // Resolved for the theme ON SCREEN, the same `effectiveTheme` read the
+  // palette line above takes: `system` is a source for the appearance, not
+  // an appearance, and there is no scheme chosen against it.
+  setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
   setActiveNarrowViews(prefs.narrowViews);
   /**
    * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens

@@ -192,8 +192,27 @@ describe('the classes a span wears are tokens and nothing else', () => {
   });
 
   it('carries the attributes that are not colours', () => {
-    expect(spanClasses({ ...plain, bold: true, italic: true })).toBe('font-bold italic');
+    expect(spanClasses({ ...plain, bold: true, italic: true })).toBe(
+      'text-term-bold font-bold italic',
+    );
     expect(spanClasses({ ...plain, dim: true })).toBe('opacity-60');
     expect(spanClasses({ ...plain, underline: true, strike: true })).toContain('line-through');
+  });
+
+  it("gives bold the scheme's bold ink only when the run has no colour of its own", () => {
+    // iTerm2's rule: bold in the default ink takes the bold colour; bold in
+    // a colour the program chose keeps that colour and is merely heavier.
+    // `ESC[1;31m` is how an agent marks an error line, and the second half
+    // is what keeps it red.
+    expect(spanClasses({ ...plain, bold: true })).toBe('text-term-bold font-bold');
+    expect(spanClasses({ ...plain, bold: true, fg: 'red' })).toBe('text-ansi-red font-bold');
+    expect(spanClasses({ ...plain, bold: true, fg: 'red' })).not.toContain('text-term-bold');
+    // A background alone does not make the run coloured: the INK is still
+    // the default, so the bold ink applies.
+    expect(spanClasses({ ...plain, bold: true, bg: 'blue' })).toBe(
+      'text-term-bold bg-ansi-blue font-bold',
+    );
+    // And not-bold never wears it, whatever else the run carries.
+    expect(spanClasses({ ...plain, italic: true })).not.toContain('text-term-bold');
   });
 });

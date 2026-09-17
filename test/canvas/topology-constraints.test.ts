@@ -38,7 +38,7 @@ function listSrcFiles(dir: string): string[] {
 const allSrcFiles = listSrcFiles(SRC_DIR);
 
 /**
- * THE TWO FILES WHERE A HEX IS THE POINT, and why they are not holes in 13.1.
+ * THE THREE FILES WHERE A HEX IS THE POINT, and why they are not holes in 13.1.
  *
  * The rule is "every colour must come from a token". What it really catches is
  * a COMPONENT that paints `#fff` instead of reaching for one -- a call site
@@ -53,6 +53,13 @@ const allSrcFiles = listSrcFiles(SRC_DIR);
  *    values by definition: there is no token for it to reach for, because its
  *    entire content is the alternative set of values a token can take.
  *
+ *  - `renderer/prefs/terminal-scheme.ts` is where the TERMINAL'S SCHEMES
+ *    live: twelve tables of twenty-three colours each, the shape every
+ *    emulator publishes its themes in. It is values by definition in the
+ *    same way a template is, and more so -- a scheme is what the sixteen
+ *    `--vam-ansi-*` tokens are SET TO on the screen's own element, so there
+ *    is no token above it for a value to come from.
+ *
  * THE EXCLUSION IS PAID FOR RATHER THAN ASSERTED, which is the half that
  * matters. `test/prefs/palette-templates.test.ts` measures every value in that
  * file against every ink the stylesheet keeps -- 360 contrast pairs, plus the
@@ -60,10 +67,26 @@ const allSrcFiles = listSrcFiles(SRC_DIR);
  * template, per theme. That is strictly stronger than "contains no hex", so
  * the file is not leaving cover; it is moving to better cover.
  *
+ * The scheme file is paid for differently, and the difference is stated
+ * rather than hidden: its values are NOT measured against vam's floors,
+ * because they are not vam's -- the dark default is the operator's own
+ * scheme taken verbatim, and the rest are published palettes under their
+ * own names. What holds them is `test/prefs/terminal-scheme.test.ts`, which
+ * pins both defaults digit for digit, holds every table to twenty-three
+ * six-digit values, and holds the two `vam` themes to the stylesheet's own
+ * ramp; and `e2e/terminal-scheme-shots.mjs`, which reads what those values
+ * resolve to off a real paint and proves they reach nothing outside the
+ * screen.
+ *
  * NARROW, AND CHECKED TO STILL EXIST. An exclusion by path widens silently the
- * moment somebody renames the file, so both names are asserted present below.
+ * moment somebody renames the file, so all three names are asserted present
+ * below.
  */
-const COLOUR_DEFINITION_FILES = ['styles.css', 'renderer/prefs/palette-templates.ts'];
+const COLOUR_DEFINITION_FILES = [
+  'styles.css',
+  'renderer/prefs/palette-templates.ts',
+  'renderer/prefs/terminal-scheme.ts',
+];
 
 /**
  * THE OTHER KIND OF EXEMPTION: a colour that is not a colour.
