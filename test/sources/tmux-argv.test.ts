@@ -21,6 +21,7 @@ import {
   killSessionArgv,
   listSessionsArgv,
   newSessionArgv,
+  promptKeystrokes,
   sendBackspaceArgv,
   sendBackTabArgv,
   sendEnterArgv,
@@ -307,5 +308,123 @@ describe('the @vam-pid boundary', () => {
       '@vam-pid',
       '14709',
     ]);
+  });
+});
+
+/**
+ * Typing a WHOLE prompt into a pane, newlines and all.
+ *
+ * These are PROPERTY assertions, not a copy of the array the function returns:
+ * an argv test that asserts equality with the builder's own output cannot
+ * fail for a real reason. What is pinned instead is behaviour a wrong edit
+ * would break -- that a newline inside the prompt does NOT reach the pane as a
+ * bare submit, that the operator's text is always ONE argv element, that `-l`
+ * and `--` guard every literal chunk -- plus a round-trip that reconstructs
+ * the exact prompt from the keystrokes, which is what proves nothing was lost
+ * or interpreted.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket into a pty in RAW MODE
+ * (the mode Claude Code's input runs in, unlike a cooked-mode shell):
+ *   `send-keys Enter`          delivered 0x0d (CR)   -- the REPL reads submit
+ *   `send-keys -l -- $'a<LF>b'` delivered 0x61 0x0a 0x62 -- a raw newline is 0x0a
+ *   a literal backslash        delivered 0x5c        -- a plain byte under `-l --`
+ * and the CLI's own footer (version 2.1.274) advertises `\` + Return as the
+ * interactive prompt's universal newline (the one needing no `/terminal-setup`).
+ * So an internal line break is a literal backslash then an interpreted Enter:
+ * the REPL turns a trailing `\` + submit into an inserted newline, and the bare
+ * newline a single `send-keys -l` of the whole prompt would deliver would
+ * submit the first line and drop the rest.
+ */
+const PANE = '=vam-a1b2c3:';
+
+/** Replay the keystrokes the way the REPL would, to recover the typed buffer. */
+function reconstruct(steps: readonly (readonly string[])[]): string {
+  let buffer = '';
+  for (const step of steps) {
+    if (step.includes('-l')) {
+      // A literal chunk: the operator's text is the LAST element, whole.
+      buffer += step[step.length - 1] ?? '';
+    } else {
+      // An interpreted Enter. It is a NEWLINE only because the buffer ends in
+      // the escape backslash; the REPL consumes that `\` and inserts `\n`.
+      if (!buffer.endsWith('\\')) {
+        throw new Error('an Enter inside the prompt was not preceded by the newline escape');
+      }
+      buffer = `${buffer.slice(0, -1)}\n`;
+    }
+  }
+  return buffer;
+}
+
+const isLiteral = (step: readonly string[]): boolean => step.includes('-l');
+const isEnter = (step: readonly string[]): boolean =>
+  !step.includes('-l') && step[step.length - 1] === 'Enter';
+
+describe('promptKeystrokes', () => {
+  it('types a single-line prompt as one literal chunk and adds no submit of its own', () => {
+    const steps = promptKeystrokes('vam-a1b2c3', 'ship it');
+    expect(steps).toHaveLength(1);
+    const [only] = steps;
+    // The whole prompt is ONE element, guarded by `-l --`, exactly as
+    // `sendTextArgv` builds it.
+    expect(only).toEqual(['send-keys', '-t', PANE, '-l', '--', 'ship it']);
+    // The submit is the caller's to add, never buried in here: nothing that
+    // reaches the pane from this function may press Return.
+    expect(steps.some(isEnter)).toBe(false);
+  });
+
+  it('breaks each internal newline with a backslash escape, never a bare submit', () => {
+    const prompt = 'first line\nsecond line\nthird';
+    const steps = promptKeystrokes('vam-a1b2c3', prompt);
+
+    // One interpreted Enter per newline -- and each is the escape, so each must
+    // sit immediately after a chunk whose text ends in a backslash.
+    const enters = steps.filter(isEnter);
+    expect(enters).toHaveLength(2);
+    steps.forEach((step, index) => {
+      if (!isEnter(step)) return;
+      const before = steps[index - 1];
+      expect(before && isLiteral(before)).toBe(true);
+      expect(before?.[before.length - 1]?.endsWith('\\')).toBe(true);
+    });
+
+    // No literal chunk carries a raw newline: that is the byte that would
+    // submit, and it must have been decomposed into escape + Enter.
+    for (const step of steps.filter(isLiteral)) {
+      expect(step[step.length - 1]).not.toContain('\n');
+    }
+
+    // And the keystrokes reconstruct the operator's exact text.
+    expect(reconstruct(steps)).toBe(prompt);
+  });
+
+  it('keeps every chunk one `-l -- <text>` element, so text is never read as a flag or a key', () => {
+    // A prompt full of the things tmux, a shell, or the REPL might act on: a
+    // line that starts with `-`, a `;`, a `#`, backticks and a `$`.
+    const prompt = '-rf everything\nfoo; rm -rf /\n#!/bin/sh\n`id` and $HOME\nDone';
+    const steps = promptKeystrokes('vam-a1b2c3', prompt);
+
+    for (const step of steps.filter(isLiteral)) {
+      // `-l` then `--` then exactly one payload element, and in that order:
+      // `-l` makes tmux type the text instead of pressing it, `--` stops a
+      // leading `-` being read as an option, and one element means the text
+      // is never split across argv.
+      expect(step.slice(0, 5)).toEqual(['send-keys', '-t', PANE, '-l', '--']);
+      expect(step).toHaveLength(6);
+      const dashDash = step.indexOf('--');
+      const lit = step.indexOf('-l');
+      expect(lit).toBeGreaterThanOrEqual(0);
+      expect(lit).toBeLessThan(dashDash);
+    }
+
+    // The metacharacters survive byte-for-byte -- no shell ran, nothing was
+    // interpreted -- which the round-trip proves for the whole prompt at once.
+    expect(reconstruct(steps)).toBe(prompt);
+  });
+
+  it('addresses the pane exactly, with the `=`…`:` target every send-keys uses', () => {
+    for (const step of promptKeystrokes('vam-a1b2c3', 'a\nb')) {
+      expect(step).toContain(PANE);
+    }
   });
 });
