@@ -43,6 +43,12 @@ import {
   setActivePromptSubmitKey,
 } from './submit-key.js';
 import {
+  DEFAULT_TAB_INDICATORS,
+  readTabIndicators,
+  type TabIndicatorId,
+  withTabIndicator,
+} from './tab-indicators.js';
+import {
   DEFAULT_TERMINAL_FONT_SIZE,
   readTerminalFontSize,
   setActiveTerminalFontSize,
@@ -579,6 +585,23 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly narrowViews: boolean;
+  /**
+   * What a session tab draws beside its title: the indicator ids that are ON,
+   * out of the eight `prefs/tab-indicators.ts` offers. The strip never draws
+   * a mark for `idle`, and that is not a toggle -- the module header carries
+   * the operator's sentence and the argument.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView` and
+   * `narrowViews` above it give: every split leaf draws its own strip from
+   * the same rule, and a display choice keyed to a session id is one the TTL
+   * prunes. Exempt from the icon TTL like `theme` and `panes`: it describes
+   * the person, not a session that stopped existing.
+   *
+   * ONLY PAINT, unlike the two fields above it: nothing here reaches tmux or
+   * a session, so it is a prop from `CanvasInner` to the strip and not a
+   * store with a subscription.
+   */
+  readonly tabIndicators: readonly TabIndicatorId[];
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -608,6 +631,7 @@ export const EMPTY_PREFS: Prefs = {
   terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
   terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
   narrowViews: DEFAULT_NARROW_VIEWS,
+  tabIndicators: DEFAULT_TAB_INDICATORS,
 };
 
 /**
@@ -863,6 +887,12 @@ function parsePrefs(
     // not re-shape four views -- and re-wrap a running tmux session -- on the
     // strength of a choice nobody made.
     narrowViews: readNarrowViews((parsed as { narrowViews?: unknown }).narrowViews),
+    // Per field like every line above it, and normalised in the two directions
+    // `readTabIndicators` argues: not a list at all reads as the defaults the
+    // operator saw before they had a choice, a list reads as itself with the
+    // words this vam cannot draw dropped one at a time -- and an EMPTY list
+    // stays empty, because every switch off is a choice.
+    tabIndicators: readTabIndicators((parsed as { tabIndicators?: unknown }).tabIndicators),
   };
 }
 
@@ -1311,6 +1341,18 @@ export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
  *  future caller can send anything, and only a literal `true` may narrow. */
 export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
   return { ...prefs, narrowViews: readNarrowViews(narrow) };
+}
+
+/** One indicator on or off; the list comes back in canonical order however it
+ *  was built, so two payloads that mean the same set are the same list. */
+export function setTabIndicator(prefs: Prefs, id: TabIndicatorId, on: boolean): Prefs {
+  return { ...prefs, tabIndicators: withTabIndicator(prefs.tabIndicators, id, on) };
+}
+
+/** Back to the five the operator was shipped with. The dialog's "reset" and
+ *  nothing else calls it: a read never resets, it normalises. */
+export function resetTabIndicators(prefs: Prefs): Prefs {
+  return { ...prefs, tabIndicators: DEFAULT_TAB_INDICATORS };
 }
 
 /**

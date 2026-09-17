@@ -31,7 +31,7 @@
  * that same id again.
  */
 
-import { Box, Factory, FlaskConical, type LucideIcon, Plus } from 'lucide-react';
+import { Box, Factory, FlaskConical, type LucideIcon, Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
   type DragEvent as ReactDragEvent,
@@ -105,6 +105,7 @@ import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
 import { resolveSessionIcon } from '../panels/session-icon.js';
+import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
@@ -152,6 +153,7 @@ import {
   watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';
+import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
 import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
@@ -896,36 +898,87 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
 };
 
 /**
- * The dot every tab wears, and why the ink above is not simply extended to
- * the inactive ones.
+ * THE MARK A TAB WEARS, AND WHY A RESTING TAB WEARS NONE.
  *
  * `TAB_STATUS_INK` is applied only when a tab is ACTIVE, so three of its four
  * statuses could never be seen: the tab you are looking at is not the one
  * that needs to tell you something. And since every session of the project is
  * a tab, the strip is the densest status surface in the app — after a split
  * the operator's eyes are here, while the amber "needs you" mark lived only
- * in the sidebar.
+ * in the sidebar. So status gets a mark of its own on the tab, and the ink
+ * stays the active tab's: colouring an inactive tab's TITLE by status would
+ * put "which tab am I on" and "how is each session doing" in one ink,
+ * colliding with the three-channel active-tab treatment (accent underline,
+ * ground/ink, `opacity-85` on the neighbours).
  *
- * TWO CHANNELS, KEPT SEPARABLE: colouring an inactive tab's TITLE by status
- * would put "which tab am I on" and "how is each session doing" in one ink,
- * colliding with the deliberate three-channel active-tab treatment (accent
- * underline, ground/ink, `opacity-85` on the neighbours). So the ink stays
- * the active tab's and status gets a mark of its own on every tab — the
- * sidebar row's dot, a pixel smaller for an 11px row.
+ * THAT MARK USED TO BE A DOT ON EVERY TAB, idle included, and the operator
+ * read the result the way the sidebar's five dots had been read once before:
+ * "if a tab is idle (not running, not waiting for you, ...) there is no need
+ * to show the dot". A strip of mostly-idle tabs was a row of grey dots saying
+ * "nothing" eight times. Now a tab draws AT MOST ONE status mark -- the
+ * sidebar row's own glyph (`panels/status-mark.tsx`: a spinner, a bell, a
+ * triangle, a tick), so the two surfaces say one thing -- and only for a
+ * status whose switch is on (`prefs/tab-indicators.ts`). Idle is not a
+ * switch: a resting tab with no icon and no draft is its title and nothing
+ * else, and no empty lane is reserved for the mark it is not wearing. A quiet
+ * tab is narrower than a busy one; that is the point, not a cost.
+ *
+ * THE LANE IS `--text-control`, 12px, the tab label's own size -- and the
+ * glyph fills it. The sidebar row centres a 12px glyph in a 14px lane under a
+ * 13px title; a tab's title is 12px on a 16px line, and the session icon
+ * beside it already draws at exactly 12 (`IconMark size={12}` below, "the
+ * tab label's own size, so the two kinds of icon occupy the same height"). A
+ * mark at the same 12 sits in the same square as that icon and on the same
+ * centre line as the label, which is what makes the two read as one row of
+ * things rather than a big thing beside a small one. The two pixels of air
+ * the sidebar keeps inside its lane are for a triangle and a circle sitting
+ * centred beside each other in a COLUMN; on a tab the mark has no neighbour
+ * above or below to be centred against, and the lucide glyphs carry their own
+ * pixel of air inside the box (a 24-unit viewBox with 2 units of margin). The
+ * 16px line has two pixels above and below the lane; the row is 36 and does
+ * not move (measured in `e2e/tab-strip-shots.mjs`).
+ *
+ * Mark first, then the icon, then the title, then the marks about the
+ * OPERATOR's state in this tab -- an unsent draft, a prompt not yet recorded,
+ * sub-agents at work -- because reading order on a strip is left to right and
+ * what the session is doing outranks what you were doing here.
  */
-const TAB_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
-  running: 'bg-running',
-  waiting: 'bg-waiting',
-  idle: 'bg-idle',
-  done: 'bg-done',
-  failed: 'bg-failed',
-};
+export const TAB_MARK_LANE_PX = 12;
+/** The glyph is the lane: see above for why the tab keeps no air the sidebar
+ *  needs, and `status-mark.tsx` for why the sidebar does. */
+export const TAB_MARK_GLYPH_PX = TAB_MARK_LANE_PX;
+
+/** A status that may earn a mark. `idle` is not in it, by construction: the
+ *  type is the indicator vocabulary narrowed to the statuses, and idle is a
+ *  status that is not an indicator. */
+type TabStatusMark = Extract<TabIndicatorId, SessionStatus>;
+
+/** Which status mark, if any, this session's tab draws under these switches.
+ *  `null` for idle whatever the switches say, and for a status whose switch
+ *  is off. */
+function tabStatusMark(
+  status: SessionStatus,
+  indicators: readonly TabIndicatorId[],
+): TabStatusMark | null {
+  if (status === 'idle') return null;
+  return isTabIndicatorOn(indicators, status) ? status : null;
+}
+
+/** Is there an unsent draft worth a pencil? The composer's own send rule
+ *  (`sendPromptFor` returns on `trim() === ''`), so the pencil never marks a
+ *  draft the send would refuse. */
+export function hasDraft(text: string | undefined): boolean {
+  return text !== undefined && text.trim() !== '';
+}
 
 function TabStrip({
   orientation,
   tabs,
   activeId,
   paneFocused,
+  indicators,
+  drafts,
+  pending,
   onSelect,
   onClose,
   onTabContextMenu,
@@ -935,6 +988,26 @@ function TabStrip({
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
   readonly activeId: string | null;
+  /**
+   * Which indicators a tab may draw -- `prefs.tabIndicators`, passed as a
+   * prop rather than read from a store because this strip is rendered by the
+   * component that owns the prefs (`prefs/tab-indicators.ts` says why that
+   * makes it unlike `terminalFontSize`).
+   */
+  readonly indicators: readonly TabIndicatorId[];
+  /**
+   * Every session's unsent composer text, by session id -- the whole map
+   * rather than one flag per tab, because a draft belongs to a SESSION and a
+   * session may be a tab of any pane; the strip reads its own tabs' entries
+   * and ignores the rest. `hasDraft` decides what counts.
+   */
+  readonly drafts: Readonly<Record<string, string>>;
+  /**
+   * The prompts painted but not yet recorded (`domain/optimistic.ts`), for
+   * the `pending` indicator. The list is at most a few long and usually
+   * empty, so it is scanned per tab rather than indexed first.
+   */
+  readonly pending: readonly PendingPrompt[];
   /**
    * Does the pane this strip belongs to hold the keyboard? Since PR 268 took
    * the focus ring off the pane, "the active tab of a pane that does NOT have
@@ -1116,12 +1189,23 @@ function TabStrip({
         // tone), not a character, so the tone arrives here without this strip
         // knowing that colours exist -- see `session-icon.tsx` for why that is
         // one chain and not two.
-        const icon = resolveSessionIcon(entry);
+        const icon = isTabIndicatorOn(indicators, 'icon') ? resolveSessionIcon(entry) : null;
+        const mark = tabStatusMark(entry.session.status, indicators);
+        const draft = isTabIndicatorOn(indicators, 'draft') && hasDraft(drafts[entry.session.id]);
+        const queued =
+          isTabIndicatorOn(indicators, 'pending') &&
+          pending.some((one) => one.sessionId === entry.session.id);
+        const agents = isTabIndicatorOn(indicators, 'agents') ? entry.session.runningAgents : 0;
         return (
           <div
             key={entry.session.id}
             data-session-tab
             data-active={active ? 'true' : 'false'}
+            /* ON THE TAB, not on the mark: the 6px dot used to carry this and
+               the dot is gone, and an idle tab has no mark to hang it on. The
+               tests and the browser guard read "which status is this tab" off
+               the tab itself, whether or not anything is drawn for it. */
+            data-tab-status={entry.session.status}
             /*
               THREE CHANNELS ON THE ACTIVE TAB, not one (operator: "the
               focused tab should have a different opacity from the others,
@@ -1147,14 +1231,22 @@ function TabStrip({
                 : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
             }`}
           >
-            {/* Decorative to a screen reader, as the sidebar row's dot is:
+            {/* AT MOST ONE, and none for idle -- see `TAB_MARK_LANE_PX`.
+                Decorative to a screen reader, as the dot it replaces was:
                 labelling one per tab would read every session's status
-                before any of the titles. */}
-            <span
-              data-tab-status={entry.session.status}
-              aria-hidden="true"
-              className={`h-[6px] w-[6px] flex-none rounded-full ${TAB_STATUS_DOT[entry.session.status]}`}
-            />
+                before any of the titles, and the sidebar row already says
+                the word once. `announce={false}` keeps the sr-only word out;
+                the wrapper carries the tab's own hook. */}
+            {mark !== null && (
+              <span data-tab-mark={mark} aria-hidden="true" className="flex flex-none">
+                <StatusMark
+                  status={mark}
+                  announce={false}
+                  lane={TAB_MARK_LANE_PX}
+                  glyph={TAB_MARK_GLYPH_PX}
+                />
+              </span>
+            )}
             <button
               type="button"
               data-tab-select
@@ -1183,15 +1275,56 @@ function TabStrip({
                       same height. */}
                   <span
                     data-session-icon={entry.session.id}
+                    data-tab-mark="icon"
                     aria-hidden="true"
                     className="inline-flex items-center align-middle"
                   >
-                    <IconMark value={icon} size={12} fallback={null} />
+                    <IconMark value={icon} size={TAB_MARK_GLYPH_PX} fallback={null} />
                   </span>{' '}
                 </>
               )}
               {entry.session.title}
             </button>
+            {/* THE MARKS ABOUT YOU, after the title. Siblings of the select
+                button rather than children, so a long title's `truncate`
+                never clips them: the fact that a draft is waiting here is
+                exactly the thing a tab must not lose to an ellipsis. */}
+            {draft && (
+              /* NAMED, unlike the status mark, and `role="img"` so the name
+                 is announced: an unsent draft is a fact about the OPERATOR
+                 that no other surface reads aloud -- the sidebar row does not
+                 know about it -- so hiding it would leave a screen-reader
+                 user the only person who cannot tell which tab they were
+                 mid-sentence in. */
+              <span
+                data-tab-mark="draft"
+                role="img"
+                aria-label="unsent draft"
+                className="flex flex-none text-ink-dim"
+              >
+                <Pencil size={TAB_MARK_GLYPH_PX} strokeWidth={1.8} />
+              </span>
+            )}
+            {queued && (
+              /* A HOLLOW dot, deliberately unlike the filled one the strip
+                 used to draw for status: it means "something of yours is in
+                 flight", not "this session is in some state". `border-current`
+                 takes the tab's own ink, so it dims with the tab. 7px is the
+                 sidebar's idle dot; a ring smaller than that has no inside. */
+              <span
+                data-tab-mark="pending"
+                aria-hidden="true"
+                className="h-[7px] w-[7px] flex-none rounded-full border border-current"
+              />
+            )}
+            {agents > 0 && (
+              /* The same `●N` the command palette draws, in the same ink:
+                 one badge, three surfaces. Decorative here as the status mark
+                 is, and for the same reason. */
+              <span data-tab-mark="agents" aria-hidden="true" className="flex-none text-running">
+                ●{agents}
+              </span>
+            )}
             <button
               type="button"
               data-tab-close
@@ -5926,6 +6059,9 @@ function CanvasInner({
               tabs={paneTabs}
               activeId={leaf.sessionId}
               paneFocused={isFocused}
+              indicators={prefs.tabIndicators}
+              drafts={draftsBySession}
+              pending={pending}
               onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
@@ -6006,6 +6142,13 @@ function CanvasInner({
       newTabInPane,
       newSessionDecline,
       dropTarget,
+      // The strip's three indicator inputs. `buildDetailProps` above already
+      // re-derives on every draft keystroke, so `draftsBySession` costs this
+      // hook nothing it was not paying; `pending` and the switches change
+      // rarely. Without them the strip would draw a stale pencil.
+      prefs.tabIndicators,
+      draftsBySession,
+      pending,
     ],
   );
 
