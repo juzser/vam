@@ -69,6 +69,7 @@
 import {
   ArrowUp,
   Box,
+  ChevronDown,
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
@@ -157,6 +158,12 @@ import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
 import { type FileOpenRequest, FilesTab } from './FilesTab.js';
+import {
+  MODEL_CHOICES,
+  modelCommandLine,
+  modelCommandStrokes,
+  modelControlState,
+} from './model-command.js';
 import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
@@ -3862,20 +3869,40 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
   /**
-   * ONE KEYSTROKE, into this session's pane, shared by the mode row's own
-   * Shift-Tab AND every button of the phone keystroke strip -- they are the
-   * SAME channel (`window.api.terminal.send`) into the SAME pane, so one
-   * in-flight guard and one refusal caption serve both rather than each
-   * growing its own copy. `cycleNote` is the shared note; `sentText`/
-   * `busyText` are the one difference between a mode cycle and a keystroke.
+   * KEYSTROKES INTO THIS SESSION'S PANE, shared by the mode row's own
+   * Shift-Tab, every button of the phone keystroke strip, the composer's
+   * Escape AND the model picker's `/model <x>` line -- they are the SAME
+   * channel (`window.api.terminal.send`) into the SAME pane, so one in-flight
+   * guard and one refusal caption serve all of them rather than each growing
+   * its own copy. `cycleNote` is the shared note; `sentText`/`busyText` are
+   * the one difference between a mode cycle and a keystroke.
    *
-   * One press at a time, ACROSS BOTH CONTROLS: held down, a repeat here
+   * One press at a time, ACROSS EVERY CONTROL: held down, a repeat here
    * queued a `back-tab` per repeat into a live agent with nothing on screen
-   * counting them, and a phone tap repeated in a hurry is the same failure.
+   * counting them, a phone tap repeated in a hurry is the same failure, and a
+   * model picked twice while the first pick is still typing would interleave
+   * two lines in one pane.
+   *
+   * A RUN, NOT A KEY, since the model picker: `/model opus` is a line and an
+   * Enter rather than a chord, and `pressPaneKey` below is the one-stroke
+   * case of this. ONE STROKE AT A TIME, AWAITED, and the run STOPS at the
+   * first that does not land. The pane is a byte stream, so pieces sent in
+   * order arrive as one line; but a Return pressed after a refused piece
+   * would submit a mangled line into a running agent, so a refusal anywhere
+   * in the run ends it with the text sitting in the pane unsent -- `reply.ts`
+   * keeps exactly this rule for a prompt, and its refusal says so. Every
+   * stroke is aimed by main by the same rule as the first (`terminal/ipc.ts`
+   * reuses a proven pairing for two seconds, which is what makes a run of
+   * three not three listings).
+   *
    * `window.api` exists only in the Electron shell, and its absence is
    * reported rather than made into a no-op.
    */
-  const pressPaneKey = async (key: PaneKey, sentText: string, busyText: string) => {
+  const typePaneStrokes = async (
+    strokes: readonly PaneKey[],
+    sentText: string,
+    busyText: string,
+  ) => {
     if (entry === null) return;
     if (cycleNote?.kind === 'busy') return;
     const send = globalThis.window?.api?.terminal?.send;
@@ -3889,17 +3916,34 @@ export function DetailPanel(props: DetailPanelProps) {
     // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
     setCycleNote({ kind: 'busy', text: busyText });
     const mine = cycleAbout;
-    const landed = await send(entry.project.id, key, entry.session.id).catch(
-      (): PaneSendResult => 'refused',
-    );
+    let landed: PaneSendResult = 'sent';
+    let typed = 0;
+    for (const stroke of strokes) {
+      landed = await send(entry.project.id, stroke, entry.session.id).catch(
+        (): PaneSendResult => 'refused',
+      );
+      if (landed !== 'sent') break;
+      typed += 1;
+    }
     // Thirty seconds is long enough to move on, and an answer about the
     // session that was here then says nothing about the one that is here now.
     if (noteFor.current !== mine) return;
     const refusal = cycleWording(landed);
+    // A run that typed something and then stopped has left it on screen in
+    // the pane, and the caption must say so: "not sent" alone would send the
+    // operator looking for a pairing problem while the half-line sits there
+    // waiting for a Return that vam did not press.
+    const sitting =
+      refusal !== null && typed > 0 && strokes.length > 1
+        ? `${refusal} — what was typed is sitting in the pane unsent`
+        : refusal;
     setCycleNote(
-      refusal === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: refusal },
+      sitting === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: sitting },
     );
   };
+  /** The one-stroke case: the chord, the strip's keys, the composer's Escape. */
+  const pressPaneKey = (key: PaneKey, sentText: string, busyText: string) =>
+    typePaneStrokes([key], sentText, busyText);
   /**
    * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
    * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
@@ -3919,6 +3963,40 @@ export function DetailPanel(props: DetailPanelProps) {
   /** One keystroke-strip button's press, over the shared bridge above. */
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
     pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
+  /**
+   * Type `/model <choice>` and Enter into this session's pane -- the model
+   * picker's whole act, over the shared run above.
+   *
+   * WHAT VAM MAY CLAIM AFTERWARDS is the delivery and not the model:
+   * "typed /model opus into the terminal of <title>". The CLI answers in the
+   * pane ("Set model to Opus 5 and saved as your default for new sessions",
+   * measured on 2.1.274) and vam never reads that answer back, so the caption
+   * says the session answers THERE rather than naming a model here. Naming
+   * one would be the claim nothing checked -- the same rule `cycleMode` keeps
+   * for the mode it does not read back.
+   *
+   * A choice that is not one word is refused before a key is built
+   * (`modelCommandLine`): a space would hand the CLI two arguments and a
+   * newline would submit `/model` bare, which opens the CLI's own menu --
+   * the one thing vam must never drive.
+   */
+  const sendModel = (choice: string) => {
+    if (entry === null) return Promise.resolve();
+    const line = modelCommandLine(choice);
+    const strokes = modelCommandStrokes(choice);
+    if (line === null || strokes === null) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — a model is one word, and this has a space or a line break in it',
+      });
+      return Promise.resolve();
+    }
+    return typePaneStrokes(
+      strokes,
+      `typed ${line} into the terminal of ${entry.session.title} — the session answers there`,
+      `${line} · typing…`,
+    );
+  };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
@@ -4392,6 +4470,28 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const [modePickerOpen, setModePickerOpen] = useState(false);
   /**
+   * The model popover's open/closed state, per pane like the two above -- and
+   * the free-text row's own text, which is the ONE thing here that is not a
+   * copy of a fact elsewhere: a full model id the operator is still typing
+   * exists nowhere until Enter sends it, and it is cleared once it has gone.
+   * Neither is "the current model": vam never reads the CLI's answer back and
+   * so holds no opinion about which model a session is on.
+   */
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelIdText, setModelIdText] = useState('');
+  /**
+   * WHICH OF THE THREE FACES THE MODEL CONTROL WEARS for the focused session.
+   * `model-command.ts` carries the table and the argument; this reads it
+   * off the same three facts the rest of the composer reads: the source's
+   * `deliverPrompt` (`delivers`), its `terminal` capability, and whether vam
+   * started this session (`vamControlled` -- the two halves of `canCycleMode`).
+   */
+  const modelControl = modelControlState({
+    delivers,
+    terminal,
+    vamControlled: entry?.session.vamControlled,
+  });
+  /**
    * The mode ON SCREEN, read back out of the draft on every render. A draft
    * carrying some other word on its `mode:` line reads as the default: only
    * these three can be picked here, and an icon has no way to draw a fourth.
@@ -4499,18 +4599,20 @@ export function DetailPanel(props: DetailPanelProps) {
    *
    * Returns whether it CLOSED something, so every caller can answer the same
    * question the same way. The two typeahead lists answer Escape earlier in
-   * the box's own handler, where they already own the arrow keys; these two
-   * popovers are opened by a POINTER, which leaves the keyboard on a button
-   * rather than in the textarea, so they need the answer from there as well.
+   * the box's own handler, where they already own the arrow keys; these three
+   * popovers (provider, mode, model) are opened by a POINTER, which leaves the
+   * keyboard on a button rather than in the textarea, so they need the answer
+   * from there as well.
    *
    * Before this they closed only by picking a row or re-clicking their own
    * toggle. That was survivable while Escape merely left the box; it is not
    * now, because an Escape that reaches past an open popover stops an agent.
    */
   const closeOpenPopover = (): boolean => {
-    if (!modePickerOpen && !providerPickerOpen) return false;
+    if (!modePickerOpen && !providerPickerOpen && !modelPickerOpen) return false;
     setModePickerOpen(false);
     setProviderPickerOpen(false);
+    setModelPickerOpen(false);
     return true;
   };
   /**
@@ -6992,35 +7094,218 @@ export function DetailPanel(props: DetailPanelProps) {
                   )}
                 </div>
               )}
-              {/* The model field. Not a menu of names vam made up — vam has no
-              model API and the factory does the choosing — but not an inert
-              chip either: what is typed here becomes the prompt's first
-              line, in the recorded text a person reads. */}
-              <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
-                <input
-                  data-model-request
-                  value={readModelRequest(draft)}
-                  onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
-                  placeholder="model"
-                  aria-label="model requested in this prompt"
-                  /* `outline-none` is GONE, and `focus:text-ink` was never a
-                     substitute for it: recolouring TYPED TEXT says nothing on
-                     an empty field, which is the state this control is in
-                     every time it is first reached. Nothing else drew one
-                     either -- the phone stylesheet's replacement ring applies
-                     to `.vam-tap:has(> [data-tap-skin])` and this field has no
-                     inner skin -- so focusing it put a caret on screen and
-                     nothing more.
+              {/* THE MODEL CONTROL, IN THREE STATES -- `modelControlState`
+              (`model-command.ts`) carries the table and the measurements
+              behind it; this is what each row draws.
 
-                     `FOCUS_RING` is the app's own, in `ink`: measured on the
-                     painted node it is 13.4:1 in dark and 17.7:1 in light
-                     against the card behind it, well past the 3:1 WCAG 1.4.11
-                     asks, and it is a different colour from the composer box's
-                     armed border (`waiting`) so the two signals cannot be read
-                     as each other. */
-                  className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
-                />
-              </Note>
+                delivers   terminal    vamControlled   drawn
+                not true   any         any             the free-text request
+                                                       line, unchanged
+                true       !== false   true            a picker that types
+                                                       `/model <x>` + Enter
+                true       false       any             the picker, DISABLED
+                true       !== false   not true        the picker, DISABLED
+
+              WHY THE FIRST ROW SURVIVES. The field was written for a source
+              that only RECORDS: the prompt is filed, the factory picks the
+              model, and one leading `model: <x>` line is the request in the
+              words a reader of the log will read (`setModelRequest`). That
+              is still true there and it is kept there, note and all.
+
+              WHY THE OTHER ROWS ARE NOT THAT FIELD. On a source that DELIVERS
+              (`deliverPrompt`: Claude Code since PR 383), the draft is typed
+              into the session's tmux pane, so a `model:` line lands in the
+              CLI's prompt as words the agent reads -- it switches nothing.
+              What does switch it, measured on Claude Code 2.1.274, is
+              `/model <alias>` + Enter typed at the REPL, which is exactly one
+              line into the pane vam already types into. So the picker types
+              that, over `typePaneStrokes`, and NEVER touches the draft.
+
+              DISABLED, NOT ABSENT, WHERE VAM CANNOT TYPE -- and this is the
+              one place the control differs from the mode chip beside it,
+              which is ABSENT where no mode can be chosen. The operator asked
+              for disabled, and the two controls are about different things:
+              a mode is a property of vam's own prompt (the draft carries the
+              line), so where vam cannot set one there is nothing to show; a
+              model is a property of the SESSION, which has one whether or not
+              vam can reach it, and a greyed button says exactly that -- there
+              is a model here, and vam has no keyboard into this session to
+              change it. The note carries the remedy.
+
+              THE NOTE ON A DISABLED BUTTON HANGS ON A WRAPPER, and that is
+              not decoration: a disabled `<button>` takes no focus in any
+              browser, so a `Note` on the button itself would open on hover
+              and on nothing else -- the `title` this app deleted, unreadable
+              from the keyboard. The wrapper takes the tab stop (the
+              `StatusCell` precedent, suppression and all). HOVER NEEDS NO
+              HELP, and that is measured rather than assumed: the first draft
+              put `pointer-events-none` on the button on the belief that
+              Chromium delivers no pointer events over a disabled control, and
+              removing it reddened nothing -- on Chromium 153 (Playwright) the
+              hover reaches the wrapper's handlers and the note opens. Electron
+              44 carries a Chromium of the same generation. A rule the guard
+              cannot falsify is a rule nobody chose, so it is not here.
+              `e2e/model-picker-shots.mjs` measures that the note really
+              opens both ways, and what the dimmed label paints. */}
+              {modelControl === 'request' && (
+                <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                  <input
+                    data-model-request
+                    value={readModelRequest(draft)}
+                    onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                    placeholder="model"
+                    aria-label="model requested in this prompt"
+                    /* `outline-none` is GONE, and `focus:text-ink` was never a
+                       substitute for it: recolouring TYPED TEXT says nothing on
+                       an empty field, which is the state this control is in
+                       every time it is first reached. Nothing else drew one
+                       either -- the phone stylesheet's replacement ring applies
+                       to `.vam-tap:has(> [data-tap-skin])` and this field has no
+                       inner skin -- so focusing it put a caret on screen and
+                       nothing more.
+
+                       `FOCUS_RING` is the app's own, in `ink`: measured on the
+                       painted node it is 13.4:1 in dark and 17.7:1 in light
+                       against the card behind it, well past the 3:1 WCAG 1.4.11
+                       asks, and it is a different colour from the composer box's
+                       armed border (`waiting`) so the two signals cannot be read
+                       as each other. */
+                    className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                  />
+                </Note>
+              )}
+              {modelControl === 'picker' && (
+                <div className="relative flex-none">
+                  {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
+                      because it is one the operator did not ask for: measured
+                      on 2.1.274, `/model <alias>` answers "...and saved as your
+                      default for new sessions". vam cannot send the
+                      session-only form (that is the `s` key inside the
+                      interactive menu vam never drives), so the honest thing
+                      is to say what the line does. */}
+                  <Note text="model — typed into the pane vam started as /model <name>, which this session answers there; the CLI also saves the choice as its default for new sessions">
+                    <button
+                      type="button"
+                      data-model-picker
+                      data-model-picker-state="picker"
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-haspopup="listbox"
+                      aria-expanded={modelPickerOpen}
+                      /* LABELLED "model" AND NOT WITH A NAME: vam does not read
+                         the session's model back (the transcript's assistant
+                         rows carry `message.model`, but nothing surfaces it
+                         yet), and a button wearing "Opus" would be a claim
+                         nothing checked -- the same rule the mode chip keeps
+                         for the mode it does not read back. */
+                      aria-label="model — choose one for this session"
+                      onClick={() => setModelPickerOpen((open) => !open)}
+                      className="vam-tap flex h-6 shrink-0 cursor-pointer items-center text-ink-dim hover:text-ink"
+                    >
+                      <span
+                        aria-hidden="true"
+                        data-tap-skin
+                        className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                      >
+                        model
+                        <ChevronDown size={11} strokeWidth={2} />
+                      </span>
+                    </button>
+                  </Note>
+                  {modelPickerOpen && (
+                    <div
+                      data-model-picker-menu
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                    >
+                      {/* THE FIVE, as a listbox of their own rather than the
+                          popover being one: the free-text row below is an
+                          `<input>`, and an input is not an option, so a
+                          `role="listbox"` around both would be a listbox with
+                          a child no screen reader can place. */}
+                      <div
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="model for this session"
+                        className="flex flex-col gap-0.5"
+                      >
+                        {MODEL_CHOICES.map((choice) => (
+                          <button
+                            key={choice.id}
+                            type="button"
+                            data-model-option={choice.id}
+                            role="option"
+                            /* NONE IS MARKED SELECTED, for the label's reason
+                               above: vam holds no fact about which model the
+                               session is on, and `aria-selected` is a claim. */
+                            aria-selected={false}
+                            onClick={() => {
+                              setModelPickerOpen(false);
+                              void sendModel(choice.id);
+                            }}
+                            className="flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* A FULL MODEL ID, for what the five aliases cannot
+                          name: `claude --help` takes "an alias for the latest
+                          model ... or a model's full name". Enter sends it as
+                          the same line; a space in it is refused before a key
+                          is built (`sendModel`). */}
+                      <input
+                        data-model-id
+                        value={modelIdText}
+                        onChange={(event) => setModelIdText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') {
+                            dismissPopoverOnEscape(event);
+                            return;
+                          }
+                          // This box's own Enter, not the composer's: the
+                          // prompt box's handler submits the DRAFT on it.
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setModelPickerOpen(false);
+                          void sendModel(modelIdText);
+                          setModelIdText('');
+                        }}
+                        placeholder="full model id"
+                        aria-label="full model id — Enter to type /model with it"
+                        className={`h-6 w-[148px] rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {modelControl === 'disabled' && (
+                <Note text="vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal">
+                  <span
+                    data-model-picker-shell
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
+                    tabIndex={0}
+                    className={`inline-flex flex-none rounded-[6px] ${FOCUS_RING}`}
+                  >
+                    <button
+                      type="button"
+                      data-model-picker
+                      data-model-picker-state="disabled"
+                      disabled
+                      aria-disabled="true"
+                      aria-label="model — vam cannot choose one for this session"
+                      /* `text-ink-faint` is the disabled ink `SettingsOverlay`'s
+                         stepper buttons take (`disabled:text-ink-faint`), and it
+                         is measured against this card in
+                         `e2e/model-picker-shots.mjs`: the label must still
+                         clear 3:1, because a greyed control an operator cannot
+                         read is a control that is not there. */
+                      className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
+                    >
+                      model
+                      <ChevronDown size={11} strokeWidth={2} />
+                    </button>
+                  </span>
+                </Note>
+              )}
               {/* The mode, beside the model field the operator asked to put it
               next to, as ONE icon showing only the mode that is current —
               the three pills below the input are gone with the row they sat

@@ -103,7 +103,16 @@
  * screen's ground, ink, bold ink, caret and `::selection` RESOLVE to on a
  * real paint in both app themes (a utility a unit test can only name), and
  * whether the scheme follows the OS flipping under `system`, which no write
- * carries and only `emulateMedia` can drive.
+ * carries and only `emulateMedia` can drive,
+ * and -- since the composer's model field became a picker that is DISABLED
+ * where vam cannot type -- what the dimmed label of a disabled control
+ * actually paints against the composer (a token guard proves the value is in
+ * the stylesheet, only a browser proves it reaches the node), and whether the
+ * note on a disabled button can be opened at all: a disabled `<button>` takes
+ * no focus anywhere, so "the note is there" and "the note can be read" are
+ * two facts, and only a real hover and a real Tab press answer the second --
+ * and the hover half is where the guard buried an assumption of its own
+ * author's (see the script's header).
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -157,6 +166,7 @@ const GUARDS = [
   'tree-icon-shots',
   'out-links-shots',
   'view-width-shots',
+  'model-picker-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
