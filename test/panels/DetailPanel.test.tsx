@@ -3808,8 +3808,14 @@ describe('the out region shows live work while the session is running', () => {
     expect(reduced).toContain('.vam-ellipsis');
     expect(reduced).toMatch(/\.vam-ellipsis[^}]*\{[^}]*opacity:\s*1/s);
     expect(css).toContain('@keyframes vam-ellipsis');
-    // The cursor it replaces is gone from the stylesheet entirely.
-    expect(css).not.toContain('vam-term-cursor');
+    // The cursor it replaces is gone from the stylesheet entirely -- as the
+    // CLASS and the KEYFRAMES it shipped as (#103). The bare stem is no
+    // longer a safe substring to forbid: the terminal's colour scheme
+    // declares a custom PROPERTY `--vam-term-cursor` for the caret's colour
+    // (`prefs/terminal-scheme.ts`), which is a colour, not an animation.
+    expect(css).not.toContain('.vam-term-cursor');
+    expect(css).not.toContain('@keyframes vam-term-cursor');
+    expect(css).not.toMatch(/animation:[^;]*vam-term-cursor/);
   });
 
   /**

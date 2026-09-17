@@ -98,7 +98,12 @@
  * previously make: every element at that seam declared exactly the right
  * thing, and the line came from Tailwind's own preflight handing every `<hr>`
  * a `currentColor` top border back after the reset, so the class names, the
- * tokens and the content scans were all green while the line was on screen.
+ * tokens and the content scans were all green while the line was on screen,
+ * and -- since the terminal took a colour scheme of its own -- what the
+ * screen's ground, ink, bold ink, caret and `::selection` RESOLVE to on a
+ * real paint in both app themes (a utility a unit test can only name), and
+ * whether the scheme follows the OS flipping under `system`, which no write
+ * carries and only `emulateMedia` can drive.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -148,6 +153,7 @@ const GUARDS = [
   'sidebar-tree-shots',
   'sidebar-seam-shots',
   'terminal-chrome-shots',
+  'terminal-scheme-shots',
   'tree-icon-shots',
   'out-links-shots',
   'view-width-shots',

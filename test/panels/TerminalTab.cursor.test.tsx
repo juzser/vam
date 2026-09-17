@@ -30,10 +30,17 @@
  * on the monospace grid cell tmux named and not on a byte of the capture. The
  * glyphs after it were undisturbed: the tail run began exactly one advance
  * later than the same line rendered unsplit, which is the single cell that
- * moved into the caret's own span and nothing else. `bg-ink`/`text-panel`
- * resolved to #ededed on #141414 in dark and #18181b on #ffffff in light, and
- * `animationName` was `none` in both. A number in a comment is not a guard,
- * and this one is labelled as what it is.
+ * moved into the caret's own span and nothing else. `bg-ink`/`text-panel` --
+ * the pair the caret wore then -- resolved to #ededed on #141414 in dark and
+ * #18181b on #ffffff in light, and `animationName` was `none` in both. A
+ * number in a comment is not a guard, and this one is labelled as what it is.
+ *
+ * SINCE THEN THE CARET TOOK THE SCHEME'S PAIR (`bg-term-cursor
+ * text-term-cursor-accent`, `prefs/terminal-scheme.ts`), and the paragraph
+ * above about the web build is stale in the other direction too: the
+ * Terminal tab IS reachable there through the stubbed bridge
+ * `terminal-chrome-shots.mjs` injects, and `terminal-scheme-shots.mjs` reads
+ * the caret's resolved pair off Chromium in both app themes.
  */
 
 import { act, cleanup, render } from '@testing-library/react';
@@ -106,8 +113,8 @@ describe('the cursor is drawn on the cell tmux named', () => {
     // DOM test can hold.
     await open('$ ls\n', { kind: 'at', column: 2, row: 0 });
     const classes = cursors()[0]?.getAttribute('class') ?? '';
-    expect(classes).toContain('bg-ink');
-    expect(classes).toContain('text-panel');
+    expect(classes).toContain('bg-term-cursor');
+    expect(classes).toContain('text-term-cursor-accent');
   });
 
   it('does not blink, and the absence is the deliberate part', async () => {
