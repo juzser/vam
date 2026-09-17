@@ -281,6 +281,49 @@ console.log('type sizes:', JSON.stringify(sizes));
   );
 }
 
+// THE FACE, NOT ONLY THE SIZE. The operator, after the sizes moved: "use the
+// regular font, not mono". Both heading names were set in `--font-mono` over
+// rows titled in `--font-sans`, so the level that names the list was the one
+// thing in it written like a code sample. The property is that a heading is
+// set in the SAME face as the titles it heads, and `getComputedStyle().fontFamily`
+// is where a class's claim about that becomes what the eye gets -- read off
+// EVERY heading name, against the row title's own answer rather than a stack
+// spelled here, so a change of stack cannot silently pass this. The counts
+// beside the names are not read: they are meta, and meta is mono here.
+const faces = await page.evaluate(() => {
+  const face = (el) => getComputedStyle(el).fontFamily;
+  const nameIn = (heading) =>
+    [...heading.querySelectorAll('span')].find(
+      (s) => s.textContent.trim().length > 1 && s.querySelector('svg') === null,
+    );
+  const names = (selector) =>
+    [...document.querySelectorAll(selector)].map((heading) => {
+      const name = nameIn(heading);
+      return { text: name?.textContent.trim() ?? null, face: name === undefined ? null : face(name) };
+    });
+  const title = document.querySelector('[data-session-row] [data-row-title]');
+  return {
+    projects: names('[data-project-heading]'),
+    groups: names('[data-group-heading]'),
+    title: title === null ? null : face(title),
+  };
+});
+{
+  const headings = [...faces.projects, ...faces.groups];
+  check(
+    'a session title and every heading name were found, so the face check below is about something',
+    faces.title !== null && headings.length > 0 && headings.every((h) => h.face !== null),
+    JSON.stringify(faces),
+  );
+  check(
+    'every project and group heading is set in the same face as the session titles it heads, and that face is not a monospace one',
+    faces.title !== null &&
+      !/mono/i.test(faces.title) &&
+      headings.every((h) => h.face === faces.title),
+    JSON.stringify(faces),
+  );
+}
+
 // The rule above a group, which is the boundary the list's own even gaps could
 // not draw. Measured as a painted border rather than as a class.
 const rules = await page.evaluate(() =>

@@ -1866,14 +1866,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-ink-faint">
                   <Monitor size={11} strokeWidth={1.7} />
                 </span>
-                {/* Typed exactly like the real project heading below, upper
-                    case and letter-spacing dropped with it and `text-heading`
-                    taken with it: this row becomes one the moment the session
-                    arrives, and a change of case or of size at that moment
-                    would read as the name having been rewritten. */}
-                <span className="truncate font-mono text-heading text-ink-dim">
-                  {starting.projectName}
-                </span>
+                {/* Typed exactly like the real project heading below -- upper
+                    case and letter-spacing dropped with it, `text-heading`
+                    and the sans face taken with it: this row becomes one the
+                    moment the session arrives, and a change of case, of size
+                    or of face at that moment would read as the name having
+                    been rewritten. */}
+                <span className="truncate text-heading text-ink-dim">{starting.projectName}</span>
               </div>
               <div className="flex flex-col gap-[5px]" style={{ paddingLeft: SIDEBAR_STEP }}>
                 <div
@@ -1965,16 +1964,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
                       groupEditor
                     ) : (
-                      /* `text-heading`, one step above the rows under it. The
-                         argument is made once, on the project name below,
+                      /* `text-heading`, one step above the rows under it, and
+                         in the SANS face the rows are titled in. The argument
+                         for both is made once, on the project name below,
                          because the operator asked for both levels in one
-                         breath. The register is untouched: upper case and
-                         tracking are what separate this level from the
-                         project's, and at 15px a name the column cannot hold
-                         still clips to an ellipsis before the count and the
-                         controls, which do not move -- measured, at the
+                         breath each time. The register is untouched: upper
+                         case and tracking are what separate this level from
+                         the project's, and at 15px a name the column cannot
+                         hold still clips to an ellipsis before the count and
+                         the controls, which do not move -- measured, at the
                          default width, with a 531px name in a 117px box. */
-                      <span className="truncate font-mono text-heading text-ink uppercase tracking-[0.12em]">
+                      <span className="truncate text-heading text-ink uppercase tracking-[0.12em]">
                         {group.name}
                       </span>
                     )}
@@ -2266,8 +2266,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        and the same on the group above. The count beside the
                        name stays `text-meta`: it is subordinate to the name,
                        not a peer of the rows. `e2e/sidebar-tree-shots.mjs`
-                       reads both sizes off the paint and asserts the order. */
-                    <span className="truncate font-mono text-heading text-ink-dim">
+                       reads both sizes off the paint and asserts the order.
+
+                       AND NOT MONO. The operator, once the sizes had moved:
+                       "use the regular font, not mono". Both heading names
+                       were set in `--font-mono` over rows titled in
+                       `--font-sans`, so the level that names the list was the
+                       one thing in it written like a code sample -- and at
+                       15px a mono repo name is also the widest thing in the
+                       narrowest column, since every glyph takes the em. A
+                       heading is set in the face of the titles it heads; the
+                       count beside it stays mono, because a count is meta and
+                       every piece of meta here (branch, age, badge) is mono.
+                       The same guard reads `fontFamily` off every heading
+                       name against the row title's and asserts they agree. */
+                    <span className="truncate text-heading text-ink-dim">
                       {section.project.name}
                     </span>
                   )}
