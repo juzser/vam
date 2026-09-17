@@ -1999,11 +1999,18 @@ body {
  * `font-size` in at least one DOM implementation this repo tests against.
  *
  * `min()` OF THE TWO, because a response pane draws prose at two sizes and the
- * capped column is shared by both: `out` is the operator's stepper
- * (`--vam-out-font-size`, 10..20) and everything else the cap covers — PR
- * titles, agent turns, the question card, the draft being typed — is the type
- * scale's `--text-body`. A maximum has to hold for the NARROWER character, so
- * it is counted in whichever of the two that is.
+ * floor is shared by both: `out` is the operator's stepper
+ * (`--vam-out-font-size`, 10..20) and the smallest step anything READ in the
+ * pane wears is `--text-control` — the option labels in the question card, the
+ * refusals, the hints. A floor of eighty characters has to be counted in the
+ * NARROWER of the two or it is eighty of one and eighty-something of the other.
+ *
+ * IT IS `--text-control` AND NOT `--text-body` NOW, and the two answers really
+ * do differ: since `[data-reading-pane]` re-declares the scale in terms of the
+ * reading size, `min(out, --text-body)` collapses to `out` at every setting —
+ * a `min()` that can never pick its second argument is a dead expression no
+ * mutation could reach. `--text-control` is genuinely below `out` above 13px,
+ * so the expression still has two live branches.
  *
  * NO `var()` FALLBACK, because the property is declared right above instead.
  * A fallback inside the `min()` would have been the same pixels and a worse
@@ -2035,10 +2042,80 @@ body {
  */
 html {
   --vam-out-font-size: 13px;
+  /*
+   * THE PANE'S READING SIZE: the `out` size, but never below the step the type
+   * scale already sets. See `[data-reading-pane]` below for what reads it.
+   *
+   * COMPUTED HERE AND NOT IN THAT BLOCK, because that block re-declares
+   * `--text-body` and a `var(--text-body)` inside it would be reading the
+   * value it is defining. A custom property is substituted on the element that
+   * DECLARES it and inherits as the result, so this one carries the type
+   * scale's own body step down rather than the pane's overridden one.
+   *
+   * `max()` AND NOT THE BARE SIZE — the one decision in this line. The
+   * operator's report is that a LARGE `out` leaves the rest of the pane too
+   * small; nobody has asked for a small `out` to shrink the chrome around it,
+   * and doing that would walk the 11px floor (`type-scale.test.ts`, the
+   * operator's own request, twice) straight back through its own door: at
+   * `out` 10 the control step would be 9.2px. Scaling up only is also what
+   * keeps the four steps in order at every setting, which a per-step floor
+   * would not.
+   */
+  --vam-pane-size: max(var(--text-body), var(--vam-out-font-size));
+}
+
+/*
+ * THE PANE'S TYPE, FOLLOWING THE SIZE THE OPERATOR READS AT.
+ *
+ * Operator report, translated: "the font size of the other parts of the pane
+ * (in bubble, heading, choice popover, prompt input...) needs to be in
+ * proportion to the out font size; at `out` 15 the answers are comfortably
+ * large but the prompt's choice options are now very small." Measured on the
+ * shipped build: the answer prose is 15px, the option LABEL is `text-control`
+ * at a flat 12px and its number and description are `text-meta` at 11px.
+ *
+ * RE-DECLARING THE SCALE'S OWN PROPERTIES rather than adding a fifth step or
+ * touching call sites. Tailwind's `text-body` compiles to
+ * `font-size: var(--text-body)` — the type scale is deliberately NOT `@theme
+ * inline` so that "a stylesheet rule or a guard can read the scale rather than
+ * restate it" (its own note). So a scope that re-declares the property moves
+ * every `text-body` inside it and nothing outside it, and every call site keeps
+ * the ROLE it already picked. The alternative was a hundred call-site edits in
+ * one file for a decision that belongs in one place.
+ *
+ * TWO STEPS, NOT FOUR, and the two left out are the argument:
+ *
+ *  - `--text-meta` is subordinate text and the scale's own FLOOR: the eyebrow,
+ *    the count on an icon, the key cap, the timestamp, the path beside a name,
+ *    "never the only thing in its container". It is chrome ANNOTATING what is
+ *    being read rather than the thing being read, and it is pinned at 11px
+ *    because the operator asked twice for the small fonts to be bigger. Growing
+ *    it with the reading size would also grow the terminal's status rule, which
+ *    sits under a screen whose size has a setting of its own.
+ *  - `--text-heading` has no call site inside a response pane at all (`grep`:
+ *    zero). Scaling a step nothing here wears would be a declaration with no
+ *    reader, which is the shape `prefs.no-write-only-field.test.ts` exists to
+ *    catch one layer down.
+ *
+ * THE LINE HEIGHTS MOVE WITH THE SIZES, because the type scale says in its own
+ * header that the pair is one decision: every one of the 204 literals it
+ * replaced set a size and no leading, and that is how leading came to drift.
+ * A 20px body on a 20px leading is a wall of text.
+ *
+ * THE RATIOS ARE THE SCALE'S OWN NUMBERS over its body step, and
+ * `type-scale.test.ts` recomputes them from the declarations above rather than
+ * trusting this comment — two tables of type sizes is how one of them comes to
+ * be wrong.
+ */
+[data-reading-pane] {
+  --text-body: var(--vam-pane-size);
+  --text-body--line-height: calc(var(--vam-pane-size) * 20 / 13);
+  --text-control: calc(var(--vam-pane-size) * 12 / 13);
+  --text-control--line-height: calc(var(--vam-pane-size) * 16 / 13);
 }
 
 .vam-prose-ruler {
-  font-size: min(var(--vam-out-font-size), var(--text-body));
+  font-size: min(var(--vam-out-font-size), var(--text-control));
 }
 
 .vam-hit-24 {

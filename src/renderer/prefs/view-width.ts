@@ -7,31 +7,60 @@
  * agent's answer runs past a hundred characters, which is a length the eye
  * loses its place returning from.
  *
- * ── WHY ONE SETTING AND NOT TWO ──────────────────────────────────────────
- * The Terminal is not prose and it was worth asking whether it belongs with
- * the other three. It does, because the thing the operator is asking for is
- * not a pixel width — it is a LINE LENGTH, and a line length is a count of
- * characters in all four views. WCAG 2.2 SC 1.4.8 puts a number on it that is
- * not a taste: "Width is no more than 80 characters or glyphs." Eighty is also
- * what a terminal has been read at since the VT100, and what every CLI that
- * draws a box still assumes. So ONE flag, ONE promise — no more than eighty
- * characters on a line — and the pixel answers differ per view only because a
- * proportional character and a terminal cell are not the same width.
+ * ── THE RULE, AND THE ONE IT REPLACED ────────────────────────────────────
+ * TWO THIRDS OF THE PANE, AND NEVER NARROWER THAN EIGHTY CHARACTERS. One
+ * sentence, and both halves are the operator's.
  *
- * MEASURED, both of them, and NEITHER IS A CONSTANT IN THIS FILE. That is the
- * correction this module's first cut earned: the prose maximum shipped as
- * 480px, which was `80 × 6.0079px` measured on one macOS machine, and CI
- * caught it on the very first Linux run — the same font stack resolves there to
- * a face whose advance is 5.7180px, so the "eighty characters" the guard
- * measured came out at 83.95. AN ADVANCE IS A PROPERTY OF THE FACE THE APP
- * ACTUALLY PAINTS IN, and that is decided on the operator's machine. So it is
- * measured there, at run time, off a ruler — the shape `terminal-size.ts` has
- * always had, and for exactly the reason its header gives.
+ * This shipped first as "no more than eighty characters on a line" — WCAG 2.2
+ * SC 1.4.8, "Width is no more than 80 characters or glyphs", which is a number
+ * rather than a taste, and which is also what a terminal has been read at since
+ * the VT100. The operator used the build and asked for it back: "narrow width
+ * cần lớn hơn, khoảng 2/3 pane width" — the narrowed width needs to be bigger,
+ * around two thirds of the pane.
  *
- * The two answers still differ: on this macOS machine 471px of prose against
- * 509–704px of terminal screen. That gap is the evidence for the paragraph
- * above — a single shared pixel maximum would have been right for at most one
- * of the two.
+ * SO THE CITATION NO LONGER JUSTIFIES THE CAP, and this file will not pretend
+ * otherwise. Two thirds of the 1335px pane is 890px, which is about 148
+ * characters of answer prose — comfortably PAST 1.4.8's eighty, and past the
+ * 45–75 every typographic source gives. What the setting still does is halve
+ * the 217 characters an uncapped 1600px window draws. That is the operator's
+ * call to make about their own screen, it is what they asked for twice as
+ * plainly as anything in this repo, and the honest thing is to implement it and
+ * say what it costs rather than to keep a standard they did not ask for.
+ *
+ * THE EIGHTY SURVIVES AS THE FLOOR, in a role it is actually shaped for. Two
+ * thirds is an argument about WIDE panes; on a pane that is not wide it does
+ * not shorten a long line, it just makes a short line shorter — and a bare
+ * percentage would have taken the 390px phone down to 260px and vam's narrowest
+ * legal pane down to 213px. So the cap is `max(two thirds, eighty characters)`:
+ * the fraction while the pane is wide, the reading column while it is not, and
+ * on anything narrower than that column no cap at all. The boundary between
+ * "wide" and "not" is exactly a comfortable reading column, which is what the
+ * eighty always was.
+ *
+ * MEASURED, BOTH HALVES OF THE FLOOR, AND NEITHER IS A CONSTANT IN THIS FILE.
+ * That is the correction the first cut earned: the prose maximum shipped as
+ * 480px, which was `80 × 6.0079px` measured on one macOS machine, and CI caught
+ * it on the very first Linux run — the same font stack resolves there to a face
+ * whose advance is 5.7180px, so the "eighty characters" the guard measured came
+ * out at 83.95. AN ADVANCE IS A PROPERTY OF THE FACE THE APP ACTUALLY PAINTS
+ * IN, and that is decided on the operator's machine. So it is measured there,
+ * at run time, off a ruler — the shape `terminal-size.ts` has always had, and
+ * for exactly the reason its header gives. THAT IS WHY THE RULER SURVIVED THE
+ * rule change: a fraction of a pane needs no character measurement, but the
+ * floor under it does, and the floor is the half that keeps the phone whole.
+ *
+ * ── WHY THE TERMINAL FOLLOWS THE SAME SENTENCE ───────────────────────────
+ * It was worth asking whether it should, because eighty COLUMNS was the
+ * strongest part of the old design: a terminal's width is not a reading width,
+ * it is a composition width, and eighty is what every CLI that draws a box
+ * assumes. The answer is that the sentence is unchanged for it — two thirds of
+ * the pane, never narrower than eighty of ITS characters, which are cells. The
+ * alternative was to leave it at eighty columns while the prose views went to
+ * two thirds, and that inverts what the operator is looking at: at 12.5px the
+ * narrowed terminal is 606px where the narrowed prose column would be 890, so
+ * the one view they did not complain about would become the narrow one. The
+ * eighty columns are not lost; they are the floor, and they are what a
+ * mid-width pane still gets.
  *
  * ── WHY THE FILES TAB IS NOT IN IT ───────────────────────────────────────
  * The operator did not name it, and it is the one view that would be harmed:
@@ -53,21 +82,49 @@
  * ── A MAXIMUM, NEVER A FLOOR ─────────────────────────────────────────────
  * Every number here is spent as `max-width` and nothing else. vam's narrowest
  * legal pane is 320px (`DETAIL_MIN`) and the phone's whole screen is 390px,
- * both well under every maximum below, so at those widths the setting changes
- * no rectangle at all — which is the only correct behaviour: a cap that became
- * a floor would put a horizontal scrollbar under the one surface that cannot
- * afford one.
+ * both narrower than the eighty-character floor, so at those widths the cap is
+ * wider than the pane and changes no rectangle at all — which is the only
+ * correct behaviour: a cap that became a floor would put a horizontal scrollbar
+ * under the one surface that cannot afford one. NOTE THAT THE FRACTION ALONE
+ * WOULD NOT HAVE THIS PROPERTY. A percentage always binds. The floor is what
+ * makes the sentence above true, which is the second reason it is not
+ * decoration left over from the old rule.
  */
 
 /**
- * The line length the narrowed state promises, in characters.
+ * Two thirds of the pane — the operator's own fraction, and the rule.
  *
- * THE ONLY NUMBER — the prose maximum is derived from it below, the terminal's
- * `ch` maximum is derived from it below, and the tests derive theirs from
- * those, because two counts of eighty is how one of them comes to be
- * seventy-two.
+ * WRITTEN AS A DIVISION rather than `66.6667%` so the number in the source is
+ * the fraction they asked for rather than a rounding of it. `calc()` accepts a
+ * percentage over a number, and the engine keeps the exact value.
+ *
+ * A PERCENTAGE RESOLVES AGAINST THE CONTAINING BLOCK, which for the three prose
+ * views is the pane itself (the body carries the gutter) and for the Terminal
+ * is the body's CONTENT box, inside that gutter — so the terminal column lands
+ * two thirds of the gutter under the prose one: 871px against 890px at a
+ * 1335px pane, 2.1% apart, 9px a side. That is a consequence of where each cap
+ * has to live (the terminal's floor is in `ch` and only resolves on an element
+ * carrying the mono face) and not a second opinion about the width;
+ * `e2e/view-width-shots.mjs` measures each against its own containing block
+ * and holds the two to within 3% of each other rather than pinning a fudge
+ * factor between them.
  */
-export const NARROW_MAX_CHARACTERS = 80;
+export const NARROW_PANE_FRACTION = 'calc(200% / 3)';
+
+/**
+ * The floor, in characters — eighty.
+ *
+ * NO LONGER THE PROMISE. It was, and this file's header carries what changed
+ * and who changed it. As a FLOOR it is the boundary between a pane that is wide
+ * enough for two thirds to be about line length and one where two thirds is
+ * just a smaller rectangle, and a comfortable reading column is exactly where
+ * that boundary sits.
+ *
+ * STILL THE ONLY NUMBER — the prose floor is derived from it, the terminal's
+ * `ch` floor is derived from it, and the tests derive theirs from those,
+ * because two counts of eighty is how one of them comes to be seventy-two.
+ */
+export const NARROW_FLOOR_CHARACTERS = 80;
 
 /**
  * THE PROSE RULER'S TEXT — what one character of the pane's prose is measured
@@ -137,35 +194,49 @@ export const PROSE_RULER_TEXT =
 export const PROSE_RULER_CLASS = 'vam-prose-ruler';
 
 /**
- * The `max-width` a prose surface is given, from a measured advance — or
- * `undefined`, which means "not measured yet, so do not cap".
+ * The `max-width` a prose surface is given — two thirds of the pane, floored at
+ * eighty characters of the measured advance — or `undefined`, which means "not
+ * measured yet, so do not cap".
  *
  * `undefined` IS THE IMPORTANT RETURN, and it is `fitPane`'s rule in this
  * file's own terms: a ruler that has not been laid out reports a zero box, and
- * a zero advance would produce a 28px column. Answering "no cap" leaves the
- * pane exactly as it ships, for the one frame before the ruler is measured.
+ * a zero advance would produce a 28px column. IT RETURNS NOTHING RATHER THAN
+ * THE BARE FRACTION, which is the one thing worth pausing on here: the fraction
+ * needs no measurement and could be applied on the first frame, but the
+ * fraction WITHOUT its floor is not the rule — it is the rule's wrong half, the
+ * one that narrows a phone to 260px. Half a rule for one frame is a flicker in
+ * the shape of a bug, so the cap waits for the floor.
  *
  * FLOORED AND NOT ROUNDED, which is not a detail. With the old constant,
  * 80 × 6.0079 = 480.63 rounded UP to 481 and Chromium measured 80.06 characters
  * on the line — a maximum that breaks its own promise in the last place, found
- * by the guard. A cap rounds DOWN or it is not a cap.
+ * by the guard. A cap rounds DOWN or it is not a cap. (It has more slack now
+ * that the fraction is the rule; the direction is still the only correct one,
+ * and `prefs.view-width.test.ts` is where it is held.)
  *
  * THE `1.75rem` IS THE SURFACE'S OWN `px-3.5`, added rather than ignored
  * because `max-width` resolves against the BORDER box (Tailwind sets
- * `box-sizing: border-box` on everything): without it the cap would be 28px of
- * padding plus 443px of text, and the promise would quietly be 75 characters.
- * It is the one term here that mirrors a utility class in `DetailPanel.tsx`
- * rather than coming from a measurement — so the guard that holds this setting
- * honest counts CHARACTERS ON A RENDERED LINE and not this expression, and a
- * change to that padding reddens there.
+ * `box-sizing: border-box` on everything): without it the floor would be 28px
+ * of padding plus 443px of text, and it would sit at 75 characters instead of
+ * eighty. It is the one term here that mirrors a utility class in
+ * `DetailPanel.tsx` rather than coming from a measurement — so the guard that
+ * holds this setting honest measures RENDERED RECTANGLES and not this
+ * expression, and a change to that padding reddens there.
  */
 export function narrowProseMaxWidth(advance: number | null): string | undefined {
   if (advance === null || !Number.isFinite(advance) || advance <= 0) return undefined;
-  return `calc(${Math.floor(NARROW_MAX_CHARACTERS * advance)}px + 1.75rem)`;
+  const floor = `calc(${Math.floor(NARROW_FLOOR_CHARACTERS * advance)}px + 1.75rem)`;
+  return `max(${NARROW_PANE_FRACTION}, ${floor})`;
 }
 
 /**
- * What the Terminal tab is given as its `max-width` — eighty COLUMNS.
+ * What the Terminal tab is given as its `max-width` — two thirds of its pane,
+ * floored at eighty COLUMNS.
+ *
+ * THE SAME SENTENCE THE PROSE VIEWS GET, in the only unit a terminal has. The
+ * header argues why it did not stay at a flat eighty columns; what matters at
+ * this line is that the floor below is the eighty, unchanged, and that a
+ * mid-width pane still gets exactly it.
  *
  * `ch` IS THE BROWSER MEASURING FOR US, and that is the whole argument for
  * this expression. `terminal-size.ts` warns that a plausible-looking
@@ -183,7 +254,9 @@ export function narrowProseMaxWidth(advance: number | null): string | undefined 
  * so an exact `80ch` lands a fraction of a pixel short at some sizes and
  * `Math.floor` charges a whole column for it — 79 at 10.5px. Half a cell can
  * never buy an eighty-first column (that would take a full one) and always
- * pays for the rounding.
+ * pays for the rounding. It still earns its place under the fraction: the floor
+ * is what a mid-width pane gets, and 79 columns there would be the same defect
+ * in a smaller window.
  *
  * THE `1.5rem + 2px` IS THE PANE'S OWN `px-3` AND ITS 1px BORDER, added for
  * the reason `narrowProseMaxWidth` adds its padding: the cap is a border
@@ -192,7 +265,7 @@ export function narrowProseMaxWidth(advance: number | null): string | undefined 
  * `e2e/view-width-shots.mjs` reads the column count vam actually sent tmux, at
  * every offered size, rather than trusting any of this.
  */
-export const NARROW_TERMINAL_MAX_WIDTH = `calc(${NARROW_MAX_CHARACTERS + 0.5}ch + 1.5rem + 2px)`;
+export const NARROW_TERMINAL_MAX_WIDTH = `max(${NARROW_PANE_FRACTION}, calc(${NARROW_FLOOR_CHARACTERS + 0.5}ch + 1.5rem + 2px))`;
 
 /**
  * Full pane, as it shipped.

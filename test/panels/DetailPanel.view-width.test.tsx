@@ -22,6 +22,8 @@
  * is.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentQuestion, Decision, Project, Session } from '../../src/renderer/domain/model.js';
@@ -30,7 +32,7 @@ import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/De
 import { narrowsAsProse, TABS, type Tab } from '../../src/renderer/panels/tabs.js';
 import {
   DEFAULT_NARROW_VIEWS,
-  NARROW_MAX_CHARACTERS,
+  NARROW_FLOOR_CHARACTERS,
   narrowProseMaxWidth,
   PROSE_RULER_CLASS,
   setActiveNarrowViews,
@@ -203,8 +205,11 @@ describe('the cap is divided out of a ruler, never read from a constant', () => 
       draw();
       layout(advance);
       expect(body().style.maxWidth, `${advance}`).toBe(narrowProseMaxWidth(advance));
-      expect(body().style.maxWidth, `${advance}`).toBe(
-        `calc(${Math.floor(NARROW_MAX_CHARACTERS * advance)}px + 1.75rem)`,
+      // The floor is spelled out here independently of the helper, so a
+      // helper that forgot the floor and returned the bare fraction would
+      // still be caught.
+      expect(body().style.maxWidth, `${advance}`).toContain(
+        `calc(${Math.floor(NARROW_FLOOR_CHARACTERS * advance)}px + 1.75rem)`,
       );
       cleanup();
     }
@@ -330,5 +335,31 @@ describe('with the flag on', () => {
     expect(body().style.minWidth).toBe('');
     expect(body().style.maxWidth).toBe(narrowProseMaxWidth(6.0079));
     expect(q<HTMLElement>('[data-composer-bar]')?.style.width ?? '').toBe('');
+  });
+});
+
+describe('the reading-size scope', () => {
+  it('is worn by the pane the stylesheet keys it to, around everything the pane draws', () => {
+    // THE SELECTOR IS READ OUT OF THE STYLESHEET, not restated: `styles.css`
+    // re-declares `--text-body` and `--text-control` under one attribute
+    // selector, and this asks the rendered panel for THAT selector. A scope
+    // whose attribute was renamed on one side reads exactly like one that
+    // works in a content scan — `type-scale.test.ts` holds the declarations,
+    // this holds that an element really wears them, and
+    // `e2e/view-width-shots.mjs` holds that a computed font-size follows.
+    const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+    const selector = /^(\[data-[a-z-]+\])\s*\{\s*--text-body:/m.exec(css)?.[1];
+    expect(selector, 'no attribute-scoped --text-body block in styles.css').toBeDefined();
+    draw({}, [QUESTION]);
+    const scope = q<HTMLElement>(selector as string);
+    expect(scope, `nothing rendered wears ${selector}`).not.toBeNull();
+    // Around the transcript, the question card and the composer alike: the
+    // operator's report named all three, and a scope on the body alone would
+    // leave the card and the composer at the shipped size.
+    expect(scope?.contains(body())).toBe(true);
+    expect(scope?.contains(q('[data-question-bar]'))).toBe(true);
+    cleanup();
+    draw();
+    expect(q<HTMLElement>(selector as string)?.contains(q('[data-composer-bar]'))).toBe(true);
   });
 });

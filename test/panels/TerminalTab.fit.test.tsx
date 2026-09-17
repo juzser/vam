@@ -29,7 +29,7 @@ import {
   TERMINAL_FONT_SIZES,
 } from '../../src/renderer/prefs/terminal-font.js';
 import {
-  NARROW_MAX_CHARACTERS,
+  NARROW_FLOOR_CHARACTERS,
   NARROW_TERMINAL_MAX_WIDTH,
   setActiveNarrowViews,
 } from '../../src/renderer/prefs/view-width.js';
@@ -384,20 +384,34 @@ describe('the column count follows the size the screen is drawn at', () => {
   });
 });
 
-describe('the narrowed width is eighty COLUMNS, not a number of pixels', () => {
+describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pixels', () => {
   /**
-   * The cap resolved to pixels, the way an engine resolves it.
+   * The floor resolved to pixels, the way an engine resolves it.
+   *
+   * WHY THIS BLOCK IS ABOUT A FLOOR NOW. The cap was eighty columns; the
+   * operator asked for two thirds of the pane, so it is
+   * `max(two thirds, eighty columns)`. The fraction is a percentage no
+   * arithmetic here can resolve without a layout -- `e2e/view-width-shots.mjs`
+   * measures that half in Chromium -- and the eighty columns is the half this
+   * block was written for, unchanged in everything but its role.
    *
    * PARSED FROM THE SOURCE'S OWN EXPRESSION rather than restated: this repo
    * has paid four times for a width that existed in a module and again in a
-   * test. Every term of `NARROW_TERMINAL_MAX_WIDTH` is read here, so a change
-   * to the slack, the padding or the border moves this arithmetic with it.
+   * test. Every term of the floor is read here, so a change to the slack, the
+   * padding or the border moves this arithmetic with it. The floor is found by
+   * its UNIT rather than by its position, so re-ordering the `max()` cannot
+   * quietly make this parse the other half.
    */
   const term = /^([\d.]+)(ch|rem|px)$/;
+  const floorExpression = (expr: string): string => {
+    // No `\b` before `ch`: it is glued to a digit in `80.5ch`, where there is
+    // no word boundary at all.
+    const hit = /calc\(([^)]*ch[^)]*)\)/.exec(expr);
+    if (hit === null) throw new Error(`no cell-sized floor in the cap: ${expr}`);
+    return hit[1] as string;
+  };
   const terms = (expr: string): readonly { readonly n: number; readonly unit: string }[] =>
-    expr
-      .replace(/^calc\(/, '')
-      .replace(/\)$/, '')
+    floorExpression(expr)
       .split('+')
       .map((piece) => {
         const hit = term.exec(piece.trim());
@@ -445,7 +459,9 @@ describe('the narrowed width is eighty COLUMNS, not a number of pixels', () => {
         // `clientWidth` excludes the border and is rounded; `measurePane` then
         // subtracts the padding. Both are integers, so the two steps collapse.
         const content = Math.round(borderBox) - chrome;
-        expect(Math.floor(content / advance), `${size}px at ${ratio}`).toBe(NARROW_MAX_CHARACTERS);
+        expect(Math.floor(content / advance), `${size}px at ${ratio}`).toBe(
+          NARROW_FLOOR_CHARACTERS,
+        );
       }
     }
   });
@@ -458,7 +474,9 @@ describe('the narrowed width is eighty COLUMNS, not a number of pixels', () => {
       for (const size of TERMINAL_FONT_SIZES) {
         const advance = size * ratio;
         const content = Math.round(cells * advance + chrome) - chrome;
-        expect(content / advance, `${size}px at ${ratio}`).toBeLessThan(NARROW_MAX_CHARACTERS + 1);
+        expect(content / advance, `${size}px at ${ratio}`).toBeLessThan(
+          NARROW_FLOOR_CHARACTERS + 1,
+        );
       }
     }
   });
