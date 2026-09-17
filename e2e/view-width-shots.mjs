@@ -1,22 +1,30 @@
 /**
  * THE VIEWS' WIDTH AND THE PANE'S READING SIZE, MEASURED IN A REAL ENGINE.
  *
- * ── THE RULE THIS FILE MEASURES, AND THE ONE IT MEASURED BEFORE ──────────
- * Narrowed means TWO THIRDS OF THE PANE, AND NEVER NARROWER THAN EIGHTY
- * CHARACTERS. It used to mean "no more than eighty characters on a line"; the
- * operator used the build and asked for two thirds instead ("narrow width cần
- * lớn hơn, khoảng 2/3 pane width"), and the eighty became the floor under the
- * fraction rather than the promise. Every check below that used to measure the
- * old promise was re-aimed at the role its number now has, not deleted: a guard
- * that measured the old rule should measure the new one. `view-width.ts`'s
- * header carries what changed and who changed it.
+ * ── THE RULE THIS FILE MEASURES, AND THE TWO IT MEASURED BEFORE ──────────
+ * Narrowed means TWO THIRDS OF THE PANE, WHILE TWO THIRDS OF THE PANE IS AT
+ * LEAST EIGHTY CHARACTERS; OTHERWISE THE WHOLE PANE. It used to mean "no more
+ * than eighty characters on a line"; the operator used the build and asked for
+ * two thirds instead ("narrow width cần lớn hơn, khoảng 2/3 pane width"), and
+ * the eighty became the floor under the fraction rather than the promise. Then
+ * they split a pane and met the floor as a defect — a ~508px column pinned in
+ * the middle of a ~700px pane, margins shrinking around it — and asked that
+ * "once a certain size is reached, the split pane goes full width". So the
+ * eighty is now the THRESHOLD: a pane of at least one and a half floors is
+ * narrowed to two thirds, a narrower one is left whole, and a narrowed column
+ * is only ever one of those two rectangles. Every check below that used to
+ * measure an older rule was re-aimed at the role its number now has, not
+ * deleted: a guard that measured the old rule should measure the new one.
+ * `view-width.ts`'s header carries what changed and who changed it.
  *
  * ── WHY THIS CANNOT BE A UNIT TEST ────────────────────────────────────────
  * Every term of that sentence is a layout fact. happy-dom performs no layout,
  * so `test/panels/DetailPanel.view-width.test.tsx` can prove only WHICH element
  * the cap is put on; it cannot resolve a percentage, a `calc()`, a `ch` or a
- * rectangle. Worse, the halves of this feature fail in ways that look identical
- * to a DOM assertion:
+ * rectangle. `prefs.view-width.test.ts` resolves the step's arithmetic by hand,
+ * which says where it should land and nothing about where Chromium rounds it
+ * to. Worse, the halves of this feature fail in ways that look identical to a
+ * DOM assertion:
  *
  *   - the floor is derived from an advance MEASURED ON THE OPERATOR'S OWN
  *     MACHINE. The first cut froze one macOS measurement into a constant, every
@@ -24,14 +32,18 @@
  *     characters where it promised eighty. The independent measurement below
  *     is the whole reason that was caught, so it stays independent — it divides
  *     the prose the page really drew and shares nothing with the app's ruler.
- *   - `max(two thirds, floor)` and `two thirds` alone produce the SAME
- *     rectangle on a wide pane. Only a pane narrower than 1.5× the floor tells
- *     them apart, and only a pane narrower than the floor shows whether the cap
- *     still "never becomes a floor".
+ *   - the step, `max(two thirds, floor)` and `two thirds` alone all produce
+ *     the SAME rectangle on a wide pane. Only a pane between one floor and one
+ *     and a half tells the step from the old floor, and only a pane narrower
+ *     than the floor shows whether the cap still "never becomes a floor".
+ *   - the step is a ramp with a gain, not a discontinuity — CSS math has none
+ *     — and whether the ramp is narrower than a layout unit is a claim about
+ *     the engine, held here by sweeping a real pane across the boundary.
  *   - the terminal's floor is written in `ch`, which resolves against the
  *     ELEMENT'S OWN FONT. Moved onto a box drawn in the app's sans face it
- *     silently means the advance of a proportional `0` — 35% wider here — and
- *     the "eighty columns" comes out at 59 with every unit assertion green.
+ *     silently means the advance of a proportional `0` — 8% wider than a cell
+ *     here — and the "eighty columns" comes out at 84 with every unit
+ *     assertion green.
  *   - the pane's reading size is a scope that re-declares two custom
  *     properties. A selector that matches nothing reads exactly like one that
  *     works; only a computed `font-size` on a real element says which.
@@ -43,26 +55,40 @@
  *   2. ONE COLUMN. PRs and Agents, the composer and the question card must all
  *      land on the identical rectangle, on the operator's own instruction after
  *      the first screenshots. Compared to each other rather than to a number.
- *   3. THE FLOOR BINDS, AT A MID PANE. At an 800px window two thirds of the
- *      pane is under eighty characters, so the column must be the eighty and
- *      not the fraction. That is the check that separates `max(fraction,
- *      floor)` from a bare fraction — and it is where the floor's own mechanism
- *      is checked: stepped DOWN to `out` 10 the floor must get narrower, and
- *      stepped UP to 20 it must NOT, because the smallest step the pane reads
- *      at is then the scaled control step and the ruler follows that.
- *   4. A MAXIMUM IS NOT A FLOOR. At a 560px window and at a 390px phone the
- *      capped body must be the very same width as the uncapped one. A bare
- *      percentage would have failed this at both; the floor is why it holds.
+ *   3. THE STEP, AND WHAT IT FOLLOWS. The window is bisected to the narrowest
+ *      pane at which the narrowed body is not the whole pane: one pixel of
+ *      window below it the body must BE the whole pane, at it the body must be
+ *      two thirds — and that two thirds, the narrowest column this setting ever
+ *      draws, must be about eighty characters of the prose the page drew. That
+ *      is the check that separates the step from the old floor, and it is
+ *      where the floor's own mechanism is checked: stepped DOWN to `out` 10 the
+ *      threshold must move in, and stepped UP to 20 it must move out but NOT as
+ *      far as eighty of the 20px characters, because the smallest step the pane
+ *      reads at is then the scaled control step and the ruler follows that.
+ *   4. A MAXIMUM IS NOT A FLOOR. At a 560px window, at a 390px phone AND at a
+ *      900px window — whose pane sits squarely between one floor and one and a
+ *      half, where the old rule pinned the column — the capped body must be
+ *      the very same width as the uncapped one.
  *   5. THE TERMINAL FOLLOWS THE SAME SENTENCE. At a wide pane it is two thirds
  *      of its containing block — more than eighty columns, and within 3% of
  *      the prose column (2.1% measured: the two caps resolve inside and
- *      outside the body's gutter). At a 1050px window its floor binds and vam
- *      asks tmux for exactly eighty, at every offered text size. Full-pane,
- *      the count is the box over the advance, unchanged from what shipped.
+ *      outside the body's gutter). At a 1050px window, in the band where the
+ *      old rule pinned eighty, the cap lets go and vam asks tmux for the
+ *      columns that fit; bisected to ITS threshold, the narrowest narrowed
+ *      terminal is exactly eighty columns, at every offered text size.
+ *      Full-pane, the count is the box over the advance, unchanged.
  *   6. THE PANE'S TEXT FOLLOWS THE READING SIZE. At `out` 15 and 20 the
  *      in-bubble prompt, the question text, the option labels and the composer
  *      must scale, each by ITS OWN share of the scale; `text-meta` chrome must
  *      not; and at `out` 10 nothing may shrink below the shipped scale.
+ *   7. THE SPLIT, WHICH IS WHERE THE OPERATOR MET THE DEFECT. One pane at
+ *      1440, then `zv` into two, then at 2000 into three, and the terminal
+ *      split the same way at 3100: every pane's column must be exactly two
+ *      thirds of its pane or exactly the whole of it, decided by the threshold
+ *      measured in 3, and the three-way layout must show both answers at once.
+ *      A two-pane split at 1440 is the operator's own case — each pane wider
+ *      than the floor and narrower than one and a half of it — and it is the
+ *      screenshot committed under `docs/ui/narrow-split-two.png`.
  *
  * ── WHAT IS BEHIND THE PAGE ───────────────────────────────────────────────
  * The prose views run on `?demo=1`, vam's own invented fixture. The Terminal
@@ -73,21 +99,34 @@
  * path, host or branch here belongs to a real machine.
  *
  * Falsified, each mutation alone and restored after, against a real build:
- *   - replace `max(fraction, floor)` with the bare fraction -> `at a mid pane
- *     the column is the eighty-character floor, not two thirds` reddens, and so
- *     do both `the cap changes no rectangle` checks (the phone narrows to
- *     260px).
- *   - replace it with the bare floor -> `narrowed, the body is two thirds of
- *     the pane` reddens.
- *   - size the ruler by `--text-control` alone -> `the floor follows the out
- *     stepper down to 10px` reddens.
+ *   - put the old `max(fraction, floor)` back -> 25 checks redden. `at a pane
+ *     between one and one and a half floors the cap changes no rectangle`
+ *     (468px against a 635px pane); the bisection finds the FLOOR binding
+ *     instead of the step, so `at the threshold the body is two thirds of the
+ *     pane` reddens at 13 and 20 (468px in a 470px pane) and at 10 the range
+ *     no longer brackets anything (404px in a 435px pane at the low end); the
+ *     1050px terminal checks redden at every text size (the tab is 632px in a
+ *     757px box and tmux is asked for 80); and in the split both 1440 panes
+ *     come out `between` — 468px in 587px panes.
+ *   - move the threshold to 1.25 floors -> 14 checks redden, from the other
+ *     side: the bisection finds the step at a 585px pane, where two thirds is
+ *     60.3 characters, so `the narrowest column this setting draws is about
+ *     eighty characters` reddens; the terminal's `exactly 80 columns` reads 66
+ *     at every size; the 900px pane narrows to 423px; and the 1440 split's
+ *     587px panes land 2px from the moved threshold, which the 20px-margin
+ *     check refuses to judge.
+ *   - size the ruler by `--text-control` alone -> `the threshold follows the
+ *     out stepper down to 10px` reddens (702px at 10 against 702px at 13).
  *   - size it by `--vam-out-font-size` alone -> `and stops following it up
- *     past the pane's smallest step` reddens.
+ *     past the pane's smallest step` reddens (675px of content against 96% of
+ *     691).
  *   - take `font-mono` off the element the terminal's cap lands on -> every
- *     `vam asks tmux for exactly 80 columns at …` reddens.
- *   - drop the fraction from the terminal's cap (the old rule, quietly kept
- *     for one view) -> `at a wide pane the narrowed terminal is two thirds of
- *     its containing block` reddens at every size.
+ *     `at its threshold vam asks tmux for exactly 80 columns at …` reddens:
+ *     `ch` then means the sans face's `0`, and the count is 84 at every size.
+ *   - keep the flat eighty-column floor for the terminal alone (the old rule,
+ *     quietly kept for one view) -> `at a wide pane the narrowed terminal is
+ *     two thirds of its containing block` reddens at every size, and so do the
+ *     1050px band checks.
  *   - take the cap off the composer -> `narrowed, the composer bar is the same
  *     column the transcript is` reddens.
  *   - drop `Agents` from `narrowsAsProse` -> the agents rectangle check reddens.
@@ -421,104 +460,178 @@ await narrowPage.screenshot({ path: `${outDir}/view-width-narrow-composer.png` }
 console.log(`${outDir}/view-width-narrow-composer.png`);
 await narrowPage.close();
 
-/* ── 3: THE FLOOR, AT A MID PANE, AND WHAT IT FOLLOWS ────────────────────── */
+/* ── 3: THE STEP, AND WHAT IT FOLLOWS ───────────────────────────────────── */
 
 /**
- * THE CHECK THAT SEPARATES `max(fraction, floor)` FROM THE BARE FRACTION.
+ * THE CHECK THAT SEPARATES THE STEP FROM `max(fraction, floor)`.
  *
- * At an 800px window the pane is ~535px, two thirds of that is ~357px, and the
- * eighty-character floor is ~460px: the floor is the wider of the two, so the
- * column MUST be the floor. On the 1600px pane above the two implementations
- * produce the identical rectangle, which is why a wide pane alone would have
- * been green for a reason nobody chose.
+ * Under the old rule a pane between one floor and one and a half got the
+ * floor: at an 800px window the pane is ~535px, two thirds of that is ~357px,
+ * the eighty-character floor is ~508px, and the column was the 508 with the
+ * margins shrinking around it. Under the step that pane is left whole, and
+ * the floor shows up somewhere else: as the ONE PANE WIDTH at which the
+ * narrowed body stops being the whole pane. So rather than a window chosen to
+ * land where the floor binds, the window is BISECTED to that width — the
+ * narrowest at which the body is not its pane — and the rule is read off both
+ * sides of it. One pixel of window below, the body must be the pane; at it,
+ * two thirds; and that two thirds, being two thirds of one and a half floors,
+ * IS the floor, so it must be about eighty characters of the prose the page
+ * really drew.
  *
- * AND THE FLOOR'S OWN MECHANISM IS CHECKED HERE, because a pane where the
- * floor binds is the only place it shows. The floor is eighty characters of
- * the SMALLEST step the pane reads at, `min(out, --text-control)`, and the two
- * halves of that `min()` are told apart by stepping `out` to each end: at 10
- * the answers are the smallest step and the floor must follow them down; at 20
- * the control step (now scaled to 18.5px) is the smallest, so the floor must
- * stop short of eighty 20px characters.
+ * AND THE FLOOR'S OWN MECHANISM IS CHECKED HERE, because the threshold is now
+ * the only place it shows. The floor is eighty characters of the SMALLEST step
+ * the pane reads at, `min(out, --text-control)`, and the two halves of that
+ * `min()` are told apart by stepping `out` to each end: at 10 the answers are
+ * the smallest step and the threshold must move in with them; at 20 the
+ * control step (now scaled to 18.5px) is the smallest, so the threshold must
+ * move out — but stop short of one and a half times eighty of the 20px
+ * characters the page really drew, which is where a ruler sized by the bare
+ * out size would put it.
  *
- * THE `out` 20 PAGE IS A 1000px WINDOW, NOT 800, and that is a lesson rather
- * than a preference: at 800px the pane is 535px, and eighty characters at
- * EITHER 18.5px (~656px) or 20px (~703px) is wider than that, so the pane
- * clipped both answers to 535 and a ruler sized by the bare out size passed
- * the check as written first. At 1000px the pane is 735px, two thirds is
- * 490px, and both candidate floors fit inside — so the one the page really
- * drew can be told from the one it must not.
+ * WHY BISECT RATHER THAN PICK A WINDOW, given the old checks picked one: the
+ * two candidate floors at `out` 20 — the control step's and the bare out
+ * size's — are about 6% apart, so the band of panes that tells them apart is
+ * ~60px wide and sits ~50px lower on the Linux runner, whose face is 5%
+ * narrower, than on this machine. No fixed window lands in both bands. The
+ * threshold itself moves with the face, and measuring it moves with it too.
  */
-const midpane = {};
-for (const size of [10, 13, 20]) {
-  const mid = await browser.newPage({
-    viewport: { width: size === 20 ? 1000 : 800, height: 800 },
+const readBody = (target) =>
+  target.evaluate(() => {
+    const body = document.querySelector('[data-detail-body]');
+    return {
+      pane: body.parentElement.clientWidth,
+      box: body.getBoundingClientRect().width,
+    };
   });
+
+/**
+ * The narrowest window at which the narrowed body is not the whole pane,
+ * to the pixel, by bisection over the viewport width; and what the body
+ * measured one pixel either side of it.
+ *
+ * The predicate is "narrower than the pane by more than a pixel", read
+ * straight off rectangles; nothing here knows the threshold, the fraction or
+ * the floor. Both ends are checked before bisecting, so a rule that narrowed
+ * everywhere (the bare fraction) or nowhere fails LOUDLY here rather than
+ * converging on an end of the range and passing a comparison by accident.
+ */
+async function bisectThreshold(target, label, low, high) {
+  const at = async (width) => {
+    await target.setViewportSize({ width, height: 800 });
+    await target.waitForTimeout(60);
+    const seen = await readBody(target);
+    return { width, ...seen, narrowed: seen.box < seen.pane - 1 };
+  };
+  let lo = await at(low);
+  let hi = await at(high);
+  check(
+    `${label}: the range brackets the threshold — whole at ${low}px, narrowed at ${high}px`,
+    !lo.narrowed && hi.narrowed,
+    `at ${low}: body ${lo.box}px in ${lo.pane}px; at ${high}: body ${hi.box}px in ${hi.pane}px`,
+  );
+  if (!(!lo.narrowed && hi.narrowed)) return { below: lo, threshold: hi, bracketed: false };
+  while (hi.width - lo.width > 1) {
+    const mid = await at(Math.floor((lo.width + hi.width) / 2));
+    if (mid.narrowed) hi = mid;
+    else lo = mid;
+  }
+  return { below: lo, threshold: hi, bracketed: true };
+}
+
+const thresholds = {};
+for (const size of [10, 13, 20]) {
+  const mid = await browser.newPage({ viewport: { width: 700, height: 800 } });
   mid.on('pageerror', (err) => console.error('PAGE ERROR:', err));
   await openDemo(mid, true, { outFontSize: size });
   await mid.locator(`[data-session-row="${DEMO_SESSION}"]`).first().click();
   await mid.waitForTimeout(200);
-  midpane[size] = await readProse(mid);
-  if (size === 13) {
+  // 700..1500: the pane runs ~435..1235px, which brackets one and a half of
+  // every floor the three sizes produce on either platform (the 10px floor on
+  // the Linux face is ~386px, the 20px control-step floor here is ~664).
+  const found = await bisectThreshold(mid, `out ${size}`, 700, 1500);
+  // SETTLE ON THE THRESHOLD WINDOW BEFORE READING THE PROSE. The bisection
+  // leaves the viewport wherever its last probe landed, which is either side
+  // of the step; read there, the "narrowest column" below was once the whole
+  // pane -- 92 characters across -- and the check was green for the wrong
+  // state on one run and red for the wrong reason on another.
+  await mid.setViewportSize({ width: found.threshold.width, height: 800 });
+  await mid.waitForTimeout(100);
+  const prose = found.bracketed ? await readProse(mid) : null;
+  thresholds[size] = { ...found, prose };
+  console.log(
+    `out ${size}: threshold at a ${found.threshold.width}px window — body ${found.threshold.box}px in a ${found.threshold.pane}px pane; one pixel below, body ${found.below.box}px in a ${found.below.pane}px pane`,
+  );
+  if (size === 13 && found.bracketed) {
     await mid.screenshot({ path: `${outDir}/view-width-mid-pane.png` });
     console.log(`${outDir}/view-width-mid-pane.png`);
   }
   await mid.close();
 }
+for (const size of [10, 13, 20]) {
+  const { below, threshold } = thresholds[size];
+  check(
+    `out ${size}: one pixel of window below the threshold the body is the whole pane`,
+    near(below.box, below.pane, 1),
+    `body ${below.box}px in a ${below.pane}px pane`,
+  );
+  // THE STEP IS SHARP: the very next pixel of window is two thirds, and not
+  // a column somewhere on its way there. This is the ramp claim, measured.
+  check(
+    `out ${size}: at the threshold the body is two thirds of the pane, not a width between`,
+    near(threshold.box, threshold.pane * FRACTION, 1),
+    `body ${threshold.box}px in a ${threshold.pane}px pane; two thirds is ${(threshold.pane * FRACTION).toFixed(1)}`,
+  );
+}
+const atThirteen = thresholds[13].prose;
+// The floor, in the unit it is defined in — measured off the page's own prose
+// at the one pane where two thirds IS the floor. The app's ruler is ordinary
+// English against answers that run wider, and it is counted at the control
+// step rather than the body step, so the column holds somewhat FEWER than
+// eighty of the answer's own characters; what must hold is that it is a
+// reading column and not a fraction of a small pane. DIVIDED BY THE FULL-PANE
+// ADVANCE from section 1, for the reason given there: the face is the same
+// at both widths, and a 440px column keeps too few single-line runs for its
+// own average to be trusted (with the threshold mutated to 1.25 floors, the
+// 362px column's own sample read 3.9px a character and 92 across, where the
+// full-pane advance reads the same column as 60).
+const midCharacters = atThirteen === null ? 0 : atThirteen.content / full.advance;
 console.log(
-  'mid pane by out size:',
-  JSON.stringify(
-    Object.fromEntries(
-      Object.entries(midpane).map(([size, s]) => [
-        size,
-        { pane: s.paneWidth, box: s.boxWidth, content: s.content, advance: Number(s.advance.toFixed(4)) },
-      ]),
-    ),
-  ),
-);
-const mid = midpane[13];
-check(
-  'at a mid pane the cap still binds',
-  mid.boxWidth < mid.paneWidth - 20,
-  `body ${mid.boxWidth}px in a ${mid.paneWidth}px pane`,
+  `at the out-13 threshold: ${midCharacters.toFixed(2)} characters across ${atThirteen?.content}px of content`,
 );
 check(
-  'at a mid pane the column is the eighty-character floor, not two thirds',
-  mid.boxWidth > mid.paneWidth * FRACTION + 40,
-  `body ${mid.boxWidth}px; two thirds would be ${(mid.paneWidth * FRACTION).toFixed(1)}px`,
-);
-// The floor, in the unit it is defined in — measured off the page's own prose.
-// The app's ruler is ordinary English against answers that run wider, and it
-// is counted at the control step rather than the body step, so the column
-// holds somewhat FEWER than eighty of the answer's own characters; what must
-// hold is that it is a reading column and not a fraction of a small pane.
-const midCharacters = mid.content / mid.advance;
-console.log(`mid-pane capacity: ${midCharacters.toFixed(2)} characters across ${mid.content}px`);
-check(
-  'and that column is about eighty characters wide',
+  'the narrowest column this setting draws is about eighty characters wide',
   midCharacters > FLOOR_CHARACTERS - 14 && midCharacters <= FLOOR_CHARACTERS,
   `${midCharacters.toFixed(1)} characters`,
 );
 check(
-  'the floor follows the out stepper down to 10px',
-  midpane[10].boxWidth < midpane[13].boxWidth - 20,
-  `${midpane[10].boxWidth}px at 10 against ${midpane[13].boxWidth}px at 13`,
+  'the threshold follows the out stepper down to 10px',
+  thresholds[10].threshold.pane < thresholds[13].threshold.pane - 20,
+  `${thresholds[10].threshold.pane}px at 10 against ${thresholds[13].threshold.pane}px at 13`,
 );
 // At `out` 20 the control step is 20 × 12/13 = 18.46px, so the floor is eighty
-// of THOSE: wider than at 13, and still the floor (two thirds of this pane is
-// 490px), but short of eighty of the 20px characters the page really drew --
-// which is what a ruler sized by the bare out size would produce. Measured:
+// of THOSE: the threshold moves out past the 13px one, but stops short of one
+// and a half times eighty of the 20px characters the page really drew --
+// which is where a ruler sized by the bare out size would put it. Measured:
 // the page's own 20px advance is ~8.59px, so eighty of them is ~687px of
 // content; the control-step floor is ~636px and the bare-out floor ~675px.
-// 96% of the page's own eighty (~660px) sits between the two.
-const twentyContent = midpane[20].content;
-const eightyAtTwenty = FLOOR_CHARACTERS * midpane[20].advance;
+// 96% of the page's own eighty (~660px) sits between the two. The column at
+// the threshold is two thirds of one and a half floors, i.e. the floor, so it
+// is read directly rather than derived.
+const twenty = thresholds[20].prose;
+const twentyContent = twenty === null ? 0 : twenty.content;
+const eightyAtTwenty = twenty === null ? 0 : FLOOR_CHARACTERS * twenty.advance;
 check(
   'and stops following it up past the pane’s smallest step',
-  midpane[20].boxWidth > midpane[13].boxWidth + 20 &&
-    midpane[20].boxWidth < midpane[20].paneWidth - 20 &&
+  thresholds[20].threshold.pane > thresholds[13].threshold.pane + 20 &&
     twentyContent < eightyAtTwenty * 0.96,
-  `${twentyContent}px of content at 20 against eighty 20px characters = ${eightyAtTwenty.toFixed(0)}px (box ${midpane[20].boxWidth}px in a ${midpane[20].paneWidth}px pane; ${midpane[13].boxWidth}px at 13)`,
+  `${twentyContent}px of content at the out-20 threshold against eighty 20px characters = ${eightyAtTwenty.toFixed(0)}px (threshold pane ${thresholds[20].threshold.pane}px at 20; ${thresholds[13].threshold.pane}px at 13)`,
 );
+/** The out-13 floor in pixels, as the page really drew it: two thirds of the
+ *  threshold pane. Sections 4 and 7 use it to say a pane is "between one floor
+ *  and one and a half" with a measured number rather than an assumed one. */
+const FLOOR_PX = thresholds[13].threshold.pane * FRACTION;
+const THRESHOLD_PX = thresholds[13].threshold.pane;
+console.log(`floor ${FLOOR_PX.toFixed(1)}px, threshold ${THRESHOLD_PX}px, at out 13`);
 
 /* ── 4: A MAXIMUM IS NOT A FLOOR ─────────────────────────────────────────── */
 
@@ -528,9 +641,18 @@ check(
 // so the capped body must be the very same rectangle as the uncapped one. A
 // BARE FRACTION WOULD FAIL BOTH OF THESE — the phone would go to 260px — which
 // is the whole reason the floor survived the rule change.
-for (const [label, viewport] of [
-  ['a narrow desktop pane', { width: 560, height: 800 }],
-  ['the phone', { width: 390, height: 844 }],
+//
+// AND 900px IS THE OPERATOR'S DEFECT, on a single pane: its ~635px pane sits
+// between one floor and one and a half (~508 and ~762 here, ~485 and ~728 on
+// the Linux face), which is exactly the band where `max(two thirds, floor)`
+// pinned a 508px column with 64px of margin either side. The step leaves that
+// pane whole, so the same "changes no rectangle" holds there — and the check
+// says, from the threshold measured in 3, that the pane really is in the band
+// rather than under the floor, where the old rule would have passed it too.
+for (const [label, viewport, shot] of [
+  ['a narrow desktop pane', { width: 560, height: 800 }, 'view-width-narrow-pane'],
+  ['the phone', { width: 390, height: 844 }, 'view-width-phone'],
+  ['a pane between one and one and a half floors', { width: 900, height: 800 }, 'view-width-band'],
 ]) {
   const widths = [];
   const phone = viewport.width < 500;
@@ -542,23 +664,26 @@ for (const [label, viewport] of [
       await small.locator(`[data-session-row="${DEMO_SESSION}"]`).first().click();
       await small.waitForTimeout(200);
     }
-    widths.push(
-      await small.evaluate(
-        () => document.querySelector('[data-detail-body]').getBoundingClientRect().width,
-      ),
-    );
+    widths.push(await readBody(small));
     if (narrowed) {
-      const name = phone ? 'view-width-phone' : 'view-width-narrow-pane';
-      await small.screenshot({ path: `${outDir}/${name}.png` });
-      console.log(`${outDir}/${name}.png`);
+      await small.screenshot({ path: `${outDir}/${shot}.png` });
+      console.log(`${outDir}/${shot}.png`);
     }
     await small.close();
   }
-  console.log(`${label}: full ${widths[0]}px, narrowed ${widths[1]}px`);
+  const [full, capped] = widths;
+  console.log(`${label}: full ${full.box}px, narrowed ${capped.box}px, in a ${capped.pane}px pane`);
+  if (viewport.width === 900) {
+    check(
+      'that pane really is between one floor and one and a half, so the next check is about the band',
+      capped.pane > FLOOR_PX + 20 && capped.pane < THRESHOLD_PX - 20,
+      `pane ${capped.pane}px against a floor of ${FLOOR_PX.toFixed(1)}px and a threshold of ${THRESHOLD_PX}px`,
+    );
+  }
   check(
     `at ${label} the cap changes no rectangle — a maximum never becomes a floor`,
-    Math.abs(widths[0] - widths[1]) < 0.5 && widths[0] > 0,
-    `full ${widths[0]}px, narrowed ${widths[1]}px`,
+    Math.abs(full.box - capped.box) < 0.5 && full.box > 0,
+    `full ${full.box}px, narrowed ${capped.box}px`,
   );
 }
 
@@ -756,33 +881,109 @@ for (const size of SIZES) {
 }
 console.log('terminal, wide pane:', JSON.stringify(wideReport));
 
-// AT A MID PANE: the floor, exactly. A 1050px window puts the body's content
-// box at ~757px, where two thirds (~505px) is under the floor at every offered
-// size -- the 10.5px floor is the narrowest at ~535px -- so the eighty must
-// win; and the 14px floor, the widest at ~705px, still sits well inside the
-// box, so "the floor binds" is distinguishable from "the pane is small". The
-// window is chosen for that pair of margins: at 1000px the 14px floor filled
-// the box to within 3px, and at 1100px the fraction would have out-grown the
-// 10.5px floor. The whole claim of writing the floor in `ch` is that "eighty"
-// is the SAME count at 10.5px and at 14px alike.
+// AT A MID PANE: THE BAND, where the old rule pinned eighty. A 1050px window
+// puts the body's content box at ~757px, which is wider than every offered
+// size's floor (the 14px one is the widest at ~705px) and narrower than one
+// and a half of every one of them (the 10.5px threshold is the nearest at
+// ~802px) -- so at every size this is the band between one floor and one and a
+// half, the same band the operator met in a split. The old rule answered it
+// with eighty columns in the middle of the box; the step leaves the tab its
+// whole box and vam asks tmux for the columns that FIT, which is more than
+// eighty at every size. The window was chosen for the old rule's margins and
+// happens to sit inside the band at all four sizes, which is why it is kept.
 await term.setViewportSize({ width: 1050, height: 800 });
-const floorReport = [];
+const bandReport = [];
 for (const size of SIZES) {
   await openTerminal(size, true);
   const seen = await readTerminal();
-  floorReport.push({ size, columns: seen.columns, tab: seen.tabWidth, container: seen.containerWidth });
+  const fit = Math.floor(seen.content / seen.drawn);
+  bandReport.push({ size, columns: seen.columns, tab: seen.tabWidth, container: seen.containerWidth, fit });
   check(
-    `at a mid pane the floor binds at ${size}px rather than the pane being small`,
-    seen.tabWidth < seen.containerWidth - 20,
+    `in the band the cap lets go at ${size}px — the tab is its whole box`,
+    near(seen.tabWidth, seen.containerWidth, 1),
     `tab ${seen.tabWidth}px in a ${seen.containerWidth}px content box`,
   );
   check(
-    `and vam asks tmux for exactly ${FLOOR_CHARACTERS} columns at ${size}px`,
+    `and vam asks tmux for the ${fit} columns that fit at ${size}px, more than ${FLOOR_CHARACTERS}`,
+    seen.columns === fit && fit > FLOOR_CHARACTERS,
+    `vam asked for ${seen.columns}; the box is ${seen.content}px at ${seen.drawn}px per cell`,
+  );
+}
+console.log('terminal, in the band:', JSON.stringify(bandReport));
+
+/**
+ * AT ITS THRESHOLD: EXACTLY EIGHTY. The narrowest terminal vam ever narrows to
+ * is two thirds of a pane exactly one and a half of its floor wide, which is
+ * the floor -- eighty and a half cells plus the pane's chrome -- so at the
+ * narrowest window that narrows the tab at all, the column count sent to
+ * tmux must be exactly eighty. This is where the `ch` floor is checked in the
+ * unit it is written in, at every offered size: the threshold moves with the
+ * cell, and the count at it must not.
+ *
+ * BISECTED, like the prose threshold, and for the same reason: the threshold
+ * is a property of the face the screen is really drawn in. The predicate is
+ * the tab's rectangle against its containing block, which resolves in the
+ * same layout pass as the resize; only the column count is debounced, so it
+ * is read once, after the bisection settles on the threshold window.
+ */
+const readTab = () =>
+  term.evaluate(() => {
+    const tab = document.querySelector('[data-terminal]');
+    const body = tab.parentElement;
+    const style = getComputedStyle(body);
+    const px = (value) => Number.parseFloat(value) || 0;
+    return {
+      box: tab.getBoundingClientRect().width,
+      pane: body.clientWidth - px(style.paddingLeft) - px(style.paddingRight),
+    };
+  });
+const terminalThresholds = [];
+for (const size of SIZES) {
+  await term.setViewportSize({ width: 800, height: 800 });
+  await openTerminal(size, true);
+  const at = async (width) => {
+    await term.setViewportSize({ width, height: 800 });
+    await term.waitForTimeout(60);
+    const seen = await readTab();
+    return { width, ...seen, narrowed: seen.box < seen.pane - 1 };
+  };
+  // 800..1700: content boxes of ~507..1407px, bracketing one and a half of
+  // every size's floor (~802px at 10.5, ~1057px at 14 here).
+  let lo = await at(800);
+  let hi = await at(1700);
+  check(
+    `terminal at ${size}px: the range brackets the threshold — whole at 800px, narrowed at 1700px`,
+    !lo.narrowed && hi.narrowed,
+    `at 800: tab ${lo.box}px in ${lo.pane}px; at 1700: tab ${hi.box}px in ${hi.pane}px`,
+  );
+  if (!(!lo.narrowed && hi.narrowed)) continue;
+  while (hi.width - lo.width > 1) {
+    const mid = await at(Math.floor((lo.width + hi.width) / 2));
+    if (mid.narrowed) hi = mid;
+    else lo = mid;
+  }
+  // The count is debounced; settle on the threshold window and read it.
+  await term.setViewportSize({ width: hi.width, height: 800 });
+  await term.waitForTimeout(600);
+  const seen = await readTerminal();
+  terminalThresholds.push({ size, window: hi.width, tab: seen.tabWidth, container: seen.containerWidth, columns: seen.columns, below: lo });
+  check(
+    `terminal at ${size}px: one pixel of window below its threshold the tab is its whole box`,
+    near(lo.box, lo.pane, 1),
+    `tab ${lo.box}px in a ${lo.pane}px box at a ${lo.width}px window`,
+  );
+  check(
+    `terminal at ${size}px: at its threshold the tab is two thirds of its box`,
+    near(seen.tabWidth, seen.containerWidth * FRACTION, 1),
+    `tab ${seen.tabWidth}px in a ${seen.containerWidth}px box at a ${hi.width}px window`,
+  );
+  check(
+    `and at its threshold vam asks tmux for exactly ${FLOOR_CHARACTERS} columns at ${size}px`,
     seen.columns === FLOOR_CHARACTERS,
     `vam asked for ${seen.columns}; the box is ${seen.content}px at ${seen.drawn}px per cell`,
   );
 }
-console.log('terminal, mid pane:', JSON.stringify(floorReport));
+console.log('terminal thresholds:', JSON.stringify(terminalThresholds.map(({ below, ...rest }) => rest)));
 
 // FULL-PANE: the count is still the box over the measured advance, unchanged
 // from what shipped. Without this, "narrowed" could be the only state that
@@ -914,6 +1115,361 @@ check(
     near(typeBySize[10].chatKey, SCALE.meta, 0.05),
   JSON.stringify(typeBySize[10]),
 );
+
+/* ── 7: THE SPLIT, WHERE THE OPERATOR MET THE DEFECT ─────────────────────── */
+
+/**
+ * Operator report, translated: "with the narrowed view, the split should be
+ * computed against the min width, so the narrow width does not get too small
+ * when panes are split — once a certain size is reached, the split pane goes
+ * full width."
+ *
+ * A SPLIT IS THE ORDINARY WAY TO A PANE IN THE BAND. A single pane on a
+ * desktop window is almost always past one and a half floors; halve it and it
+ * is almost always between one floor and one and a half, which is exactly the
+ * band where the old rule pinned the column. So this section measures the
+ * rule where it was found wanting: every `[data-split-pane]` that draws a body
+ * is read against ITS OWN containing block, and each column must be exactly
+ * two thirds of that block or exactly the whole of it — nothing between, and
+ * which one is decided by the threshold section 3 measured, with 20px of
+ * margin either side so no pane is judged at the edge.
+ *
+ * `zv` MOVES the focused tab into the new pane (`splitFocused`'s own note),
+ * so after one split the source pane keeps the demo project's other two tabs
+ * and the new pane holds the one; after a second `zv` on the new pane, that
+ * one moves again and leaves an empty pane behind. A pane with no body is
+ * logged and skipped, not asserted about.
+ *
+ * WIDTHS: 1440 is where the operator's two-pane split lands in the band on
+ * either platform (~587px panes against floors of ~508/~485 and thresholds of
+ * ~762/~728); 2000 is where a two-way split is past the threshold (~867px)
+ * and a three-way split's quarter pane (~434px) is under it, so one layout
+ * shows both answers at once. `zv` on a 587px pane is refused — `MIN_PANE_PX`
+ * twice — which is why the three-way split is not attempted at 1440.
+ */
+const readPanes = (target) =>
+  target.evaluate(() => {
+    return [...document.querySelectorAll('[data-split-pane]')].map((pane, at) => {
+      const body = pane.querySelector('[data-detail-body]');
+      if (body === null) return { at, pane: pane.clientWidth, container: null, box: null };
+      return {
+        at,
+        pane: pane.clientWidth,
+        container: body.parentElement.clientWidth,
+        box: body.getBoundingClientRect().width,
+      };
+    });
+  });
+/** What a column measured as, against its own containing block. */
+const classify = ({ container, box }) =>
+  container === null
+    ? 'empty'
+    : near(box, container, 1)
+      ? 'whole'
+      : near(box, container * FRACTION, 1)
+        ? 'two-thirds'
+        : 'between';
+/**
+ * The rule, applied to one layout: every drawn column is whole or two thirds,
+ * and which is decided by the pane against the threshold. `expect` names the
+ * answers the layout was chosen to show, so a layout where a split was refused
+ * (one pane instead of two) fails on the count rather than passing vacuously.
+ */
+function checkLayout(label, panes, expect) {
+  const states = panes.map(classify);
+  console.log(
+    `${label}: ${panes
+      .map((p, i) => `pane ${i} ${p.pane}px` + (p.box === null ? ' (empty)' : `, body ${p.box}px in ${p.container}px → ${states[i]}`))
+      .join('; ')}`,
+  );
+  check(
+    `${label}: ${expect.panes} pane(s) were drawn`,
+    panes.length === expect.panes,
+    `${panes.length} panes`,
+  );
+  check(
+    `${label}: no column sits between two thirds of its pane and the whole of it`,
+    !states.includes('between'),
+    states.join(', '),
+  );
+  for (const [i, p] of panes.entries()) {
+    if (p.container === null) continue;
+    const want = p.container >= THRESHOLD_PX + 20 ? 'two-thirds' : p.container <= THRESHOLD_PX - 20 ? 'whole' : null;
+    check(
+      `${label}: pane ${i} is not within 20px of the threshold, so its answer is not a coin toss`,
+      want !== null,
+      `container ${p.container}px against a threshold of ${THRESHOLD_PX}px`,
+    );
+    if (want === null) continue;
+    check(
+      `${label}: pane ${i} (${p.container}px, ${want === 'whole' ? 'under' : 'past'} the threshold) is ${want}`,
+      states[i] === want,
+      `body ${p.box}px; two thirds is ${(p.container * FRACTION).toFixed(1)}px`,
+    );
+  }
+  const drawn = states.filter((s) => s !== 'empty');
+  for (const state of expect.states) {
+    check(`${label}: at least one pane came out ${state}`, drawn.includes(state), drawn.join(', '));
+  }
+}
+/** A screenshot of the panes alone — the sidebar cropped away with `clip`,
+ *  the height held to the top of the layout so the file stays small. */
+async function shootPanes(target, name) {
+  const boxes = await target.locator('[data-split-pane]').evaluateAll((els) =>
+    els.map((el) => el.getBoundingClientRect()).map((r) => ({ left: r.left, right: r.right, top: r.top })),
+  );
+  const left = Math.min(...boxes.map((b) => b.left));
+  const right = Math.max(...boxes.map((b) => b.right));
+  const top = Math.min(...boxes.map((b) => b.top));
+  await target.screenshot({
+    path: `${outDir}/${name}.png`,
+    clip: { x: left, y: top, width: right - left, height: 600 },
+  });
+  console.log(`${outDir}/${name}.png`);
+}
+const splitChord = async (target) => {
+  await target.keyboard.press('z');
+  await target.keyboard.press('v');
+  await target.waitForTimeout(250);
+};
+
+const split = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+split.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await openDemo(split, true);
+await split.locator(`[data-session-row="${DEMO_SESSION}"]`).first().click();
+await split.waitForTimeout(200);
+checkLayout('one pane at 1440', await readPanes(split), { panes: 1, states: ['two-thirds'] });
+await splitChord(split);
+// THE OPERATOR'S CASE: two panes, each between one floor and one and a half.
+const two1440 = await readPanes(split);
+for (const [i, p] of two1440.entries()) {
+  if (p.container === null) continue;
+  check(
+    `two panes at 1440: pane ${i} is wider than the floor, so this is the band and not a pane the floor never reached`,
+    p.container > FLOOR_PX + 20,
+    `container ${p.container}px against a floor of ${FLOOR_PX.toFixed(1)}px`,
+  );
+}
+checkLayout('two panes at 1440', two1440, { panes: 2, states: ['whole'] });
+await shootPanes(split, 'narrow-split-two');
+await split.setViewportSize({ width: 2000, height: 900 });
+await split.waitForTimeout(250);
+checkLayout('two panes at 2000', await readPanes(split), { panes: 2, states: ['two-thirds'] });
+await splitChord(split);
+checkLayout('three panes at 2000', await readPanes(split), { panes: 3, states: ['two-thirds', 'whole'] });
+await shootPanes(split, 'narrow-split-three');
+await split.close();
+
+/**
+ * AND THE TERMINAL, split the same way. Its floor is in cells, which are wider
+ * than characters, so both its floor and its threshold sit at a wider pane
+ * than the prose views' (~632px and ~948px of content box at 12.5px here,
+ * against ~468 and ~702): 3100 is where a two-way split (~1417px panes) is
+ * past the threshold with room to spare and a three-way split's quarter pane
+ * (~709px) is IN THE BAND — wider than the floor, narrower than one and a
+ * half of it — which is the operator's case for this view, and the one a
+ * 2600px window missed on the first run: its 584px quarter pane was under the
+ * floor, whole for the reason the phone is whole, and asked tmux for 70. The
+ * stub has one session, so each `zv` leaves an empty pane behind and the
+ * terminal is always in the newest, smallest one; the threshold is read off
+ * the bisection above at the same size rather than assumed.
+ */
+const termSplit = await browser.newPage({ viewport: { width: 3100, height: 900 } });
+termSplit.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await termSplit.addInitScript(
+  ({ session, branch }) => {
+    // The same stub `term` runs on -- see its own note for why it must be
+    // complete. Duplicated rather than hoisted because `addInitScript` takes
+    // a function it serialises, and a shared function would have to close
+    // over nothing, which this one already does not.
+    globalThis.window.__resized = [];
+    const unavailable = () =>
+      Promise.resolve({ kind: 'unavailable', error: { kind: 'unreachable', code: 'stub', message: 'stub source' } });
+    globalThis.window.api = {
+      describe: async () => ({
+        id: 'stub',
+        label: 'Stub',
+        capabilities: {
+          liveUpdates: false,
+          recordPrompt: false,
+          deliverPrompt: false,
+          promptAttachments: false,
+          slashCommands: false,
+          renameSession: false,
+          closeSession: false,
+          createSession: false,
+          governance: false,
+          pullRequests: false,
+          terminal: true,
+          agentRoster: false,
+        },
+        declines: {},
+        viewerScope: 'operator',
+      }),
+      load: async () => [
+        {
+          id: 'p1',
+          name: 'stub project',
+          sessions: [
+            {
+              id: session,
+              title: 'stub session',
+              icon: null,
+              epic: null,
+              branch,
+              status: 'waiting',
+              runningAgents: 0,
+              activity: null,
+              age: '2m',
+              decisions: [{ id: 'd1', label: 'step 1', input: 'a turn', output: 'an answer', commands: [] }],
+            },
+          ],
+        },
+      ],
+      subscribe: () => () => {},
+      recordPrompt: async () => {},
+      renameSession: async () => {},
+      closeSession: async () => {},
+      createSession: async () => {},
+      createSessionIn: async () => {},
+      pickImageAttachment: async () => null,
+      history: async () => unavailable(),
+      agentWork: async () => unavailable(),
+      applyWaivers: async () => {},
+      transitionLesson: async () => {},
+      usage: { get: async () => ({ kind: 'unavailable' }) },
+      terminal: {
+        read: async () => ({
+          kind: 'ok',
+          name: 'vam-atlas-width-a1b2c3',
+          text: Array.from({ length: 40 }, (_, i) => `${String(i).padStart(3, '0')}  $ composed at the width tmux was told`).join('\n'),
+          cursor: { kind: 'unreadable' },
+        }),
+        resize: async (_projectId, columns, rows) => {
+          globalThis.window.__resized.push({ columns, rows });
+          return true;
+        },
+        send: async () => 'sent',
+        answer: async () => ({ kind: 'unavailable' }),
+        prompt: async () => ({ kind: 'unavailable' }),
+      },
+    };
+  },
+  { session: STUB_SESSION, branch: STUB_BRANCH },
+);
+await termSplit.addInitScript(() => {
+  globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ terminalFontSize: 12.5, narrowViews: true }));
+});
+await termSplit.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+await termSplit.waitForSelector('[data-tab-strip]');
+await termSplit.locator(`[data-session-row="${STUB_SESSION}"]`).first().click();
+await termSplit.locator('[data-view="terminal"]').click();
+await termSplit.waitForSelector('[data-terminal-pane]', { timeout: 5_000 });
+await termSplit.waitForTimeout(450);
+const readTerminalPanes = (target) =>
+  target.evaluate(() => {
+    const px = (value) => Number.parseFloat(value) || 0;
+    return [...document.querySelectorAll('[data-split-pane]')].map((pane, at) => {
+      const tab = pane.querySelector('[data-terminal]');
+      if (tab === null) return { at, pane: pane.clientWidth, container: null, box: null };
+      const body = tab.parentElement;
+      const style = getComputedStyle(body);
+      // The box vam divided and the cell it divided by, read the way
+      // `readTerminal` reads them, so "what fits" is measured and not assumed.
+      const screen = pane.querySelector('[data-terminal-pane]');
+      const screenStyle = getComputedStyle(screen);
+      const probe = document.createElement('span');
+      probe.textContent = 'M'.repeat(10);
+      probe.style.whiteSpace = 'pre';
+      probe.style.position = 'absolute';
+      probe.style.visibility = 'hidden';
+      screen.querySelector('pre').appendChild(probe);
+      const drawn = probe.getBoundingClientRect().width / 10;
+      probe.remove();
+      return {
+        at,
+        pane: pane.clientWidth,
+        container: body.clientWidth - px(style.paddingLeft) - px(style.paddingRight),
+        box: tab.getBoundingClientRect().width,
+        content: screen.clientWidth - px(screenStyle.paddingLeft) - px(screenStyle.paddingRight),
+        drawn,
+        columns: globalThis.window.__resized.at(-1)?.columns ?? null,
+      };
+    });
+  });
+const twelveAndAHalf = terminalThresholds.find((t) => t.size === 12.5);
+const TERMINAL_THRESHOLD_PX = twelveAndAHalf === undefined ? Number.NaN : twelveAndAHalf.container;
+/** The terminal's floor at 12.5px as the page really drew it: two thirds of
+ *  its threshold box -- eighty and a half cells and the pane's chrome. */
+const TERMINAL_FLOOR_PX = TERMINAL_THRESHOLD_PX * FRACTION;
+function checkTerminalLayout(label, panes, expect) {
+  const states = panes.map(classify);
+  console.log(
+    `${label}: ${panes
+      .map((p, i) => `pane ${i} ${p.pane}px` + (p.box === null ? ' (empty)' : `, tab ${p.box}px in ${p.container}px, ${p.columns} columns → ${states[i]}`))
+      .join('; ')}`,
+  );
+  check(`${label}: ${expect.panes} pane(s) were drawn`, panes.length === expect.panes, `${panes.length} panes`);
+  check(
+    `${label}: the terminal is in exactly one pane`,
+    panes.filter((p) => p.box !== null).length === 1,
+    states.join(', '),
+  );
+  for (const p of panes) {
+    if (p.container === null) continue;
+    const want = p.container >= TERMINAL_THRESHOLD_PX + 20 ? 'two-thirds' : p.container <= TERMINAL_THRESHOLD_PX - 20 ? 'whole' : null;
+    check(
+      `${label}: the terminal's pane is not within 20px of its threshold`,
+      want !== null,
+      `container ${p.container}px against a threshold of ${TERMINAL_THRESHOLD_PX}px`,
+    );
+    check(
+      `${label}: the terminal (${p.container}px, ${expect.state === 'whole' ? 'under' : 'past'} its threshold) is ${expect.state}`,
+      classify(p) === expect.state && want === expect.state,
+      `tab ${p.box}px; two thirds is ${(p.container * FRACTION).toFixed(1)}px`,
+    );
+    // In both states the count is the box vam was given over the cell it
+    // drew -- the cap works by shrinking the box, nothing else.
+    const fit = Math.floor(p.content / p.drawn);
+    check(
+      `${label}: vam asked tmux for the ${fit} columns that fit the ${expect.state} box`,
+      p.columns === fit,
+      `${p.columns} columns; the box is ${p.content}px at ${p.drawn}px per cell`,
+    );
+    // And in both it is past eighty -- two thirds is only ever applied where
+    // it holds eighty, and a whole pane IN THE BAND holds more. The band is
+    // asserted, not assumed: under the floor a whole pane holds fewer, for the
+    // reason the phone does, and that would not be this view's defect.
+    if (expect.state === 'whole') {
+      check(
+        `${label}: the terminal's pane is wider than its floor, so this is the band`,
+        p.container > TERMINAL_FLOOR_PX + 20,
+        `container ${p.container}px against a floor of ${TERMINAL_FLOOR_PX.toFixed(1)}px`,
+      );
+    }
+    check(
+      `${label}: and those ${fit} columns are more than ${FLOOR_CHARACTERS}`,
+      fit > FLOOR_CHARACTERS,
+      `${fit} columns`,
+    );
+  }
+}
+checkTerminalLayout('terminal, one pane at 3100', await readTerminalPanes(termSplit), { panes: 1, state: 'two-thirds' });
+// Focus back on vam's own keyboard before the chord: a focused terminal pane
+// would SEND `z` and `v` to the stub rather than split.
+await termSplit.locator(`[data-session-row="${STUB_SESSION}"]`).first().click();
+await termSplit.waitForTimeout(100);
+await splitChord(termSplit);
+await termSplit.waitForTimeout(500);
+checkTerminalLayout('terminal, two panes at 3100', await readTerminalPanes(termSplit), { panes: 2, state: 'two-thirds' });
+await termSplit.locator(`[data-session-row="${STUB_SESSION}"]`).first().click();
+await termSplit.waitForTimeout(100);
+await splitChord(termSplit);
+await termSplit.waitForTimeout(500);
+checkTerminalLayout('terminal, three panes at 3100', await readTerminalPanes(termSplit), { panes: 3, state: 'whole' });
+await termSplit.screenshot({ path: `${outDir}/view-width-terminal-split.png` });
+console.log(`${outDir}/view-width-terminal-split.png`);
+await termSplit.close();
 
 await browser.close();
 

@@ -654,7 +654,9 @@ export function TerminalTab({
    * the argument, and the half that belongs here is that eighty of THIS view's
    * characters is a COLUMN COUNT. Capping the box is the whole mechanism: the
    * box shrinks, the observer below fires, `measurePane` divides the smaller
-   * box by the same advance, and tmux is told eighty.
+   * box by the same advance, and tmux is told the smaller count -- two thirds
+   * of what fit, and never fewer than eighty, because the cap lets go of a
+   * pane too narrow for two thirds of it to hold eighty.
    */
   const narrowViews = useSyncExternalStore(
     subscribeNarrowViews,
