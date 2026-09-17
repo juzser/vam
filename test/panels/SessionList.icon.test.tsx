@@ -22,7 +22,11 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Group, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import { HEADING_GLYPH_PX, SessionList } from '../../src/renderer/panels/SessionList.js';
+import {
+  HEADING_GLYPH_PX,
+  HEADING_SLOT_PX,
+  SessionList,
+} from '../../src/renderer/panels/SessionList.js';
 import { MARK_LANE_PX } from '../../src/renderer/panels/status-mark.js';
 import { baseProps } from './session-list-props.js';
 
@@ -205,7 +209,7 @@ describe('a heading icon is the larger mark, which is what the geometry always c
     ]);
     const slot = container.querySelector('[data-project-icon="p1"]');
     expect(slot, 'no project heading icon; the assertion below would be vacuous').not.toBe(null);
-    expect(glyphBox(slot)).toEqual({ w: String(MARK_LANE_PX), h: String(MARK_LANE_PX) });
+    expect(glyphBox(slot)).toEqual({ w: String(HEADING_GLYPH_PX), h: String(HEADING_GLYPH_PX) });
   });
 
   it('draws the placeholder at the same size, so "none picked" is not a smaller mark either', () => {
@@ -214,7 +218,7 @@ describe('a heading icon is the larger mark, which is what the geometry always c
     expect(placeholder, 'no placeholder rendered; the assertion below would be vacuous').not.toBe(
       null,
     );
-    expect(placeholder?.getAttribute('width')).toBe(String(MARK_LANE_PX));
+    expect(placeholder?.getAttribute('width')).toBe(String(HEADING_GLYPH_PX));
   });
 
   it('gives a group heading the same number, because a level is not a third kind of icon', () => {
@@ -231,13 +235,18 @@ describe('a heading icon is the larger mark, which is what the geometry always c
     });
     const slot = container.querySelector('[data-group-icon="g1"]');
     expect(slot, 'no group heading rendered; the assertion below would be vacuous').not.toBe(null);
-    expect(glyphBox(slot)).toEqual({ w: String(MARK_LANE_PX), h: String(MARK_LANE_PX) });
+    expect(glyphBox(slot)).toEqual({ w: String(HEADING_GLYPH_PX), h: String(HEADING_GLYPH_PX) });
   });
 
-  it('holds the glyph at the lane through ONE constant, so the two headings cannot drift', () => {
-    // The relationship, not a repeated literal: a change to the lane has to
-    // move the heading with it or this fails, which is the whole reason the
-    // number is derived rather than typed twice.
-    expect(HEADING_GLYPH_PX).toBe(MARK_LANE_PX);
+  it('derives the glyph from the slot and keeps it above the lane, so the two headings cannot drift', () => {
+    // The relationship, not a repeated literal: the glyph is the heading's
+    // slot less four pixels of air, and the slot is the name's own line box
+    // (`--text-heading--line-height`, 20). A change to either has to move
+    // the heading with it or this fails, which is the whole reason the
+    // number is derived rather than typed twice. And it stays ABOVE the
+    // status lane: the level above is never the smaller mark, which is the
+    // claim this whole file exists for.
+    expect(HEADING_GLYPH_PX).toBe(HEADING_SLOT_PX - 4);
+    expect(HEADING_GLYPH_PX).toBeGreaterThan(MARK_LANE_PX);
   });
 });

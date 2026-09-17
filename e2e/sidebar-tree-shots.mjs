@@ -601,17 +601,23 @@ const emojiType = await page.evaluate(() => {
       }
     : null;
 });
-// ABOVE THE FLOOR, NOT ABOVE THE CAPTION. This used to assert the emoji was
-// set larger than the caption beside it, and it was, at 12 over 11 -- until
-// the caption became a heading (`text-heading`, 15px: the size section above
-// says why). The emoji cannot follow it up: at 12px its ink already fills
-// the 16px slot (the spill check below), so "bigger" for the emoji is now
-// measured against the step it was lifted FROM. A slot put back at
-// `text-meta` -- the original defect -- reddens this; a slot that climbed
-// after the caption reddens the spill check.
+// AT THE NAME'S OWN SIZE. This has been three claims in turn: "above the
+// caption" (12 over 11), then "above the floor" when the caption became a
+// heading (`text-heading`, 15px) and the emoji stayed at 12 because its ink
+// filled the 16px slot -- and then the operator: "the emoji in the sidebar
+// needs to be a bit bigger". The slot is the name's line box now (20px) and
+// the emoji takes the name's own size, so the claim is the equality: a
+// picture set at the size of the word beside it, never the smaller thing.
+// Measured: a full-box emoji at 15px paints 19 tall inside the 20 (the spill
+// check below is what holds the slot honest), the lucide glyph 15, the row
+// still 22. A slot put back at `text-control` reddens this; a slot that
+// climbed past the name reddens it too, and would spill.
 check(
-  'the emoji is set above the scale\'s floor -- the step it was lifted from, and the one the caption used to share',
-  emojiType !== null && Number.isFinite(emojiType.floor) && emojiType.emoji > emojiType.floor,
+  "the emoji is set at the heading name's own size -- the picture is never the smaller thing beside the word",
+  emojiType !== null &&
+    Number.isFinite(emojiType.floor) &&
+    emojiType.emoji > emojiType.floor &&
+    emojiType.emoji === emojiType.caption,
   JSON.stringify(emojiType),
 );
 check(

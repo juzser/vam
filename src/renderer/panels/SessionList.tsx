@@ -160,37 +160,48 @@ export const SIDEBAR_STEP = 10;
  * ink, not the box, which is why the sidebar looked the way the operator said
  * it looked while every number in it was the number somebody chose.
  *
- * A HEADING'S GLYPH IS THEREFORE THE LANE ITSELF: as tall as the whole box the
- * mark below it is merely centred in. That makes it two pixels taller than the
- * mark's own ink rather than one shorter, which is the relation the geometry
- * has claimed all along, and it is the largest step that changes nothing else
- * -- the slot grew by one pixel to what was then the name's own line box
- * (16px, `text-meta`'s leading) and the row's `min-h` was never the binding
- * number. The name has since moved up to `text-heading`, a 20px line, and
- * the slot did NOT follow it: the emoji's ink already fills the 16 (below),
- * so a taller slot would hold either an emoji that spills it or a glyph
- * adrift in it. `items-center` centres the slot in the taller line.
+ * A HEADING'S GLYPH WAS THEREFORE MADE THE LANE ITSELF, 14: as tall as the
+ * whole box the mark below it is merely centred in, two pixels taller than
+ * the mark's own ink rather than one shorter -- the relation the geometry had
+ * claimed all along -- and at the time the largest step that changed nothing
+ * else: the slot grew by one pixel to what was then the name's own line box
+ * (16px, `text-meta`'s leading).
  *
- * DERIVED, NEVER COPIED. Moving the lane moves this, and
- * `SessionList.icon.test.tsx` asserts the equality rather than the value, so
- * the two cannot drift into two answers about one relationship.
+ * THE SLOT IS THE NAME'S LINE BOX AGAIN. The name moved up to `text-heading`
+ * (15px on a 20px line) and at first the slot stayed at 16, because the
+ * emoji's ink filled it. The operator, reading the result: "the emoji in the
+ * sidebar needs to be a bit bigger" -- a 12px picture beside a 15px name is
+ * the picture reading as the smaller thing, which is the same inversion as
+ * before at a new level. So the slot is `HEADING_SLOT_PX`, the line's own
+ * 20px (`--text-heading--line-height`), the emoji takes the name's own size
+ * (`text-heading`), and the glyph is the slot less four pixels of air -- a
+ * lucide glyph's ink is its `size` or a little under, and four is what keeps
+ * a full-height stroke off the slot's edge at every one of the eight tones.
+ * The row does not move: the slot is exactly the name's line, and the row is
+ * that line plus its bottom padding (the guard's `heading row` reads it).
+ *
+ * DERIVED, NEVER COPIED. The glyph reads the slot, and
+ * `SessionList.icon.test.tsx` asserts the DOM carries this number and that it
+ * stays ABOVE `MARK_LANE_PX` -- the level above is never the smaller mark --
+ * so the two cannot drift into two answers about one relationship.
  *
  * IT SIZES ONE OF THE TWO KINDS OF ICON, and that is a fact about the pixels
  * rather than an omission. An emoji is text: `IconMark` hands this number to a
  * lucide glyph and ignores it for an emoji, which takes the slot's own type
  * class. The two kinds do not paint the same size at the same number --
  * measured on the composited pixels, a full-box emoji's ink runs three to four
- * pixels PAST its font-size (11px drew 14 tall) while a lucide glyph's ink is
- * its `size` or a little under (`Monitor` at 11 drew 9, `Rocket` 11). So the
- * slot carries `text-control` (12px, ink 15) beside this 14 (ink 12 to 13),
- * which puts the two kinds two or three pixels apart instead of five, and
- * the emoji is the larger of the two by exactly the margin a picture has
- * over a stroke. Not every emoji is full-box -- a diagonal one like the
- * hammer paints eight or nine at any size, because that is the drawing --
- * and no font-size fixes that without overflowing the rest.
- * `e2e/sidebar-tree-shots.mjs` measures both inks against the mark's.
+ * pixels PAST its font-size (11px drew 14 tall, 12px drew 15) while a lucide
+ * glyph's ink is its `size` or a little under (`Monitor` at 11 drew 9,
+ * `Rocket` 11, `Rocket` at 14 drew 13). So the slot carries `text-heading`
+ * (15px) beside this 16, which keeps the two kinds a few pixels apart with
+ * the emoji the larger, by exactly the margin a picture has over a stroke.
+ * Not every emoji is full-box -- a diagonal one like the hammer paints eight
+ * or nine at any size, because that is the drawing -- and no font-size fixes
+ * that without overflowing the rest. `e2e/sidebar-tree-shots.mjs` measures
+ * both inks against the mark's and against the slot.
  */
-export const HEADING_GLYPH_PX = MARK_LANE_PX;
+export const HEADING_SLOT_PX = 20;
+export const HEADING_GLYPH_PX = HEADING_SLOT_PX - 4;
 
 /**
  * A branch name split so the END survives a narrow column.
@@ -1933,21 +1944,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     }
                     className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                   >
-                    {/* THE SLOT WAS THE NAME'S LINE BOX: 16px is
-                        `--text-meta--line-height`, the leading the caption
-                        beside it had when the slot was sized, so the icon
-                        stood as tall as the line it heads rather than
-                        two-thirds of it. The name is `text-heading` now (a
-                        20px line) and the slot stays at 16, centred in it by
-                        `items-center`: `text-control` is the EMOJI's size (an
-                        emoji is text and takes no `size`), the largest that
-                        keeps a full-box emoji's ink inside this slot -- see
-                        `HEADING_GLYPH_PX`, which owns the argument for both
-                        numbers and for why the slot did not grow with the
-                        name. */}
+                    {/* THE SLOT IS THE NAME'S LINE BOX: 20px is
+                        `--text-heading--line-height`, the leading of the name
+                        beside it, so the icon stands as tall as the line it
+                        heads rather than two-thirds of it (`HEADING_SLOT_PX`;
+                        the literal here is Tailwind's, the number is owned
+                        there). `text-heading` is the EMOJI's size (an emoji
+                        is text and takes no `size`): the name's own, so the
+                        picture is never the smaller thing beside it -- see
+                        `HEADING_GLYPH_PX`, which owns the argument for all
+                        three numbers and the measured inks. */}
                     <span
                       data-group-icon={group.id}
-                      className="flex h-[16px] w-[16px] flex-none items-center justify-center text-control leading-none text-ink-faint"
+                      className="flex h-[20px] w-[20px] flex-none items-center justify-center text-heading leading-none text-ink-faint"
                     >
                       {/* `text-ink-faint` on the span is the EMOJI's ink and
                           the placeholder's; a chosen glyph carries its own
@@ -2200,10 +2209,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       tip is the label alone. It replaces a native `title`,
                       which no browser opens on keyboard focus. */}
                   <ShortcutTip label="Change project icon">
-                    {/* Same slot as the group's above -- 16px, centred in the
-                        name's 20px line, `text-control` for the emoji -- and
-                        the same `HEADING_GLYPH_PX` for the glyph, because a
-                        level is not a third kind of icon. `vam-hit-24` hangs
+                    {/* Same slot as the group's above -- 20px, the name's own
+                        line, `text-heading` for the emoji -- and the same
+                        `HEADING_GLYPH_PX` for the glyph, because a level is
+                        not a third kind of icon. `vam-hit-24` hangs
                         the hit area off an `::after` and the phone floor is a
                         `min-`, so neither box moves with this one. */}
                     <button
@@ -2211,7 +2220,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       data-project-icon={section.project.id}
                       onClick={() => onPickIcon(section.project)}
                       aria-label={`change icon for ${section.project.name}`}
-                      className="vam-tap vam-hit-24 flex h-[16px] w-[16px] flex-none cursor-pointer items-center justify-center text-control leading-none text-ink-faint hover:text-ink-dim"
+                      className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-heading leading-none text-ink-faint hover:text-ink-dim"
                     >
                       <IconMark
                         value={parseIcon(section.project.icon)}
