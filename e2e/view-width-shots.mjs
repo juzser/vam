@@ -276,6 +276,40 @@ check(
   full.characters > MAX_CHARACTERS + 20,
   `${full.characters.toFixed(1)} characters across ${full.content}px`,
 );
+// THE PAGE ITSELF MUST NOT SCROLL SIDEWAYS, and nothing asked this until the
+// ruler shipped. `absolute` takes an element out of FLOW but not out of its
+// ancestor's SCROLLABLE OVERFLOW, so three hundred `whitespace-pre` characters
+// -- ~1750px of them -- put `scrollWidth` at 2015 against a 1280px window and
+// drew a scrollbar under the whole app. Every other check in this file passed
+// while that was true, because they all measure a rectangle rather than the
+// document. This one names the widest offender rather than only the number, so
+// the next one is found rather than hunted.
+const overflow = await page.evaluate(() => {
+  const de = document.documentElement;
+  const worst = [...document.querySelectorAll('*')]
+    .map((el) => ({ el, right: el.getBoundingClientRect().right }))
+    .filter((e) => e.right > de.clientWidth + 1)
+    .sort((a, b) => b.right - a.right)[0];
+  return {
+    scrollWidth: de.scrollWidth,
+    clientWidth: de.clientWidth,
+    widest:
+      worst === undefined
+        ? null
+        : `${worst.el.tagName.toLowerCase()}${[...worst.el.attributes]
+            .map((a) => a.name)
+            .filter((n) => n.startsWith('data-'))
+            .map((n) => `[${n}]`)
+            .join('')} to ${Math.round(worst.right)}px`,
+  };
+});
+console.log(`document: scrollWidth ${overflow.scrollWidth} vs clientWidth ${overflow.clientWidth}`);
+check(
+  'the page does not scroll sideways, whatever is measured off-screen',
+  overflow.scrollWidth <= overflow.clientWidth,
+  `${overflow.scrollWidth - overflow.clientWidth}px of horizontal overflow; widest is ${overflow.widest}`,
+);
+
 await page.screenshot({ path: `${outDir}/view-width-full.png` });
 console.log(`${outDir}/view-width-full.png`);
 

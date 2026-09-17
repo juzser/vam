@@ -5568,13 +5568,27 @@ export function DetailPanel(props: DetailPanelProps) {
             this body is `select-text`, and three hundred invisible characters
             inside it would otherwise land in the operator's clipboard every
             time they selected a turn. */}
-        <span
-          ref={proseRulerRef}
-          data-prose-ruler
-          aria-hidden="true"
-          className={`${PROSE_RULER_CLASS} pointer-events-none absolute top-0 left-0 select-none whitespace-pre opacity-0`}
-        >
-          {PROSE_RULER_TEXT}
+        {/* CLIPPED BY A ZERO-SIZED BOX, and that box is not decoration.
+            `absolute` takes the ruler out of FLOW but not out of its
+            ancestor's SCROLLABLE OVERFLOW: three hundred `whitespace-pre`
+            characters measure ~1750px, and on a 1280px window that put the
+            document's `scrollWidth` at 2015 and drew a horizontal scrollbar
+            across the whole app with an empty band at the right. Measured,
+            after it shipped.
+
+            A wrapper of `h-0 w-0 overflow-hidden` ends the overflow without
+            touching the measurement: clipping is visual, so the ruler's own
+            border box -- the thing `getBoundingClientRect` reports and the
+            cap divides -- is still its full natural width. Shrinking the
+            ruler instead would have been measuring a different string. */}
+        <span aria-hidden="true" className="absolute top-0 left-0 h-0 w-0 overflow-hidden">
+          <span
+            ref={proseRulerRef}
+            data-prose-ruler
+            className={`${PROSE_RULER_CLASS} pointer-events-none block w-max select-none whitespace-pre opacity-0`}
+          >
+            {PROSE_RULER_TEXT}
+          </span>
         </span>
         {/* A failed session says so here, not only in the dot's colour.
             Measured against the real CLI: a failed row carries `cwd, id,

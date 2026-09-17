@@ -174,8 +174,17 @@ describe('the cap is divided out of a ruler, never read from a constant', () => 
     draw();
     const ruler = q<HTMLElement>('[data-prose-ruler]');
     expect(ruler).not.toBeNull();
-    expect(ruler?.getAttribute('aria-hidden')).toBe('true');
-    expect(ruler?.className).toContain('absolute');
+    // ASKED AS A PROPERTY, not as an attribute on one element: the ruler is
+    // hidden from assistive technology if ANY ancestor hides it, and it moved
+    // inside a clipping wrapper the day the page learned not to scroll
+    // sideways. Spelling it `ruler.getAttribute('aria-hidden')` made this fail
+    // for a change that kept the property perfectly.
+    expect(ruler?.closest('[aria-hidden="true"]')).not.toBeNull();
+    // Out of the flow -- on the ruler itself or on the box that clips it.
+    expect(
+      ruler?.className.includes('absolute') === true ||
+        ruler?.parentElement?.className.includes('absolute') === true,
+    ).toBe(true);
     expect(ruler?.className).toContain('select-none');
     expect(ruler?.className).toContain('opacity-0');
     // And it wears the class that gives it a size — the rule itself is in
