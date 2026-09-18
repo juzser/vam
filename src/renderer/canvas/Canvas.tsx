@@ -5940,6 +5940,27 @@ function CanvasInner({
           source.kind === 'demo'
             ? async () => (await import('../fixtures/demo.js')).DEMO_PROMPT
             : globalThis.window?.api?.terminal?.prompt,
+        /**
+         * WHICH MODEL THE ROW'S SESSION IS RUNNING, read off its pane -- the
+         * fact the model button is labelled with and the picker ticks a row
+         * with. Wired beside `prompt` because it is the same kind of thing:
+         * a read of the session's own SCREEN, for a surface that would
+         * otherwise have to guess.
+         *
+         * THE DEMO ANSWERS FROM THE FIXTURE, exactly as the prompt above
+         * does, and for the same reason: the browser build has no `window.api`
+         * at all, so without this every screenshot and every web guard would
+         * photograph the fallback label and no tick -- a state added to a
+         * component with no gate in front of it (`fixtures/demo.ts` says this
+         * in full). The fixture names a model per ROW, including one row that
+         * cannot be read, because "vam cannot tell" is the state that must
+         * stay visible.
+         */
+        model:
+          source.kind === 'demo'
+            ? async (_projectId: string, rowId?: string) =>
+                (await import('../fixtures/demo.js')).demoSessionModel(rowId)
+            : globalThis.window?.api?.terminal?.model,
         terminal: terminalTab,
         files: filesTab,
         // A15.4 — the GLOBAL "what a new session starts with"

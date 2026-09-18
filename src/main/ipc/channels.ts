@@ -256,6 +256,27 @@ export const CHANNELS = {
    */
   terminalPrompt: 'vam:terminal:prompt',
   /**
+   * WHICH MODEL a session is running -- read off the CLI's own status line, in
+   * the pane vam started for that row.
+   *
+   * It exists because vam TYPES `/model <alias>` into a pane and has never
+   * read the answer back (`renderer/panels/model-command.ts`), so what vam
+   * asked for is not what the session is on: the operator can switch it in the
+   * pane themselves, and a session vam resumed was set by somebody else. The
+   * model button therefore either wears a name this channel read a moment ago
+   * or wears no name at all.
+   *
+   * Distinct from `terminalRead` for the reason `terminalPrompt` is: that one
+   * hands over a whole screen for the Terminal tab to draw, and this hands
+   * over one fact, out of a capture with no scrollback in it, to a control
+   * that is on screen whether or not that tab is open.
+   *
+   * Answers BARE, like the reads beside it: `SessionModel` carries its own
+   * "vam could not tell" branch (`shared/terminal.ts`), so an envelope would
+   * give the caller two ways to be told the same thing.
+   */
+  terminalModel: 'vam:terminal:model',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There

@@ -50,6 +50,7 @@
  */
 
 import type { PromptView } from '../../shared/answer.js';
+import type { SessionModel } from '../../shared/terminal.js';
 import type { CanvasModel } from '../domain/model.js';
 
 /**
@@ -73,6 +74,46 @@ export const DEMO_PROMPT: PromptView = {
     ],
   },
 };
+
+/**
+ * WHICH MODEL each demo session is "running" -- what `terminal.model` answers
+ * on the desktop, faked per ROW.
+ *
+ * INVENTED, like every value in this file, but the SHAPES are the ones a real
+ * CLI produces (`test/main/terminal/model-status-screens.ts` holds the
+ * captures they were taken from):
+ *
+ *  - `notes-1` is on a model exactly one row of the picker is -- the plain
+ *    case, one tick.
+ *  - `notes-2` is on `Sonnet 5`, which is BOTH the Sonnet row and the Default
+ *    row, because Default resolves to Sonnet 5 and the status line does not
+ *    say which alias set it. Two ticks, and a state that would otherwise have
+ *    no gate in front of it anywhere.
+ *  - every other row is `unknown`, including `factory-sse-1`, which is blocked
+ *    on a permission prompt -- and a permission prompt REPLACES the status
+ *    line, measured. So that row draws the fallback label, which is the
+ *    commonest real state there is and has to stay visible to the guards.
+ *
+ * A function rather than a map so a caller passes a row id and gets a total
+ * answer: a session this file says nothing about is one vam cannot tell about,
+ * which is exactly what the desktop answers for a pane it could not read.
+ */
+export function demoSessionModel(rowId?: string): SessionModel {
+  const running: Record<string, string> = {
+    'notes-1': 'Opus 5',
+    'notes-2': 'Sonnet 5',
+    // THE LONGEST REAL NAME THERE IS, and the reason it is in the fixture:
+    // this is what the status line reads on a session started on a full model
+    // id (`/model claude-sonnet-4-5-20250929` -> `Sonnet 4.5`, measured), and
+    // ten characters is the width at which the tools row at vam's narrowest
+    // legal pane used to push its own send button out of the box. It is also
+    // a name NONE of the five aliases is, so it ticks nothing -- a labelled
+    // button over an unmarked list, which no other row shows.
+    'notes-3': 'Sonnet 4.5',
+  };
+  const name = rowId === undefined ? undefined : running[rowId];
+  return name === undefined ? { kind: 'unknown' } : { kind: 'model', name };
+}
 
 export const DEMO_MODEL: CanvasModel = {
   projects: [

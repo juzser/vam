@@ -40,6 +40,7 @@ import { MAX_QUESTION_TEXT } from '../../shared/answer.js';
 import { sendDownArgv, sendEnterArgv, sendRightArgv } from '../sources/tmux/argv.js';
 import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.js';
 import { targetSession } from './pane.js';
+import { plain } from './plain.js';
 
 /** One row of the picker. `checked` is null when the row carries no box at all. */
 /** Every answer but `sent`: a stop, before `deliver` says how far it got. */
@@ -66,20 +67,11 @@ export type Picker = { readonly rows: readonly PickerRow[]; readonly cursor: num
  * row into one, because the number, the dot and the anchors are untouched.
  */
 /**
- * Every CSI sequence, so a screen can be read as text.
- *
- * `capturePaneArgv` asks for `-e`, which is what makes the Terminal tab
- * COLOURED -- and it means every capture arrives with escape sequences in it.
- * A row drawn as the cursor is exactly the row the CLI inverts, so the label
- * this parser lifts off it carries the sequence unless something takes it
- * off: the operator would be shown the bytes, and `text.includes(label)` on
- * the review screen would compare a coloured label against a differently
- * coloured line. Stripped once, at the two doors -- the parser and the read --
- * so nothing downstream has to remember.
+ * The escapes come off at the two doors -- the parser and the read -- so
+ * nothing downstream has to remember. The rule itself lives in `plain.ts`,
+ * shared with the status-line reader: see its header for why it is not a
+ * second regular expression here.
  */
-const CSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;:?]*[ -/]*[@-~]`, 'g');
-
-const plain = (text: string): string => text.replace(CSI, '');
 
 const ROW = /^\s*│?\s*(❯)?\s+(\d+)\.\s+(?:\[(.)\]\s+)?(\S.*?)\s*│?\s*$/;
 

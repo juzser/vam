@@ -126,6 +126,73 @@ export const MODEL_CHOICES: readonly {
 ];
 
 /**
+ * THE MODEL A ROW WOULD PUT ON THE STATUS LINE, in the CLI's own words.
+ *
+ * `Sonnet` + `5` is what the footer prints as `Sonnet 5`; `Default` has no
+ * version of its own and its column already carries the full name of the model
+ * it resolves to, so it IS that string. Both halves come out of the table the
+ * popover draws, which is the point: the name matched against the pane is the
+ * name the operator is reading in the row.
+ */
+const runningName = (choice: (typeof MODEL_CHOICES)[number]): string =>
+  choice.id === 'default' ? choice.version : `${choice.label} ${choice.version}`;
+
+/**
+ * WHICH ROWS OF THE PICKER THE SESSION'S OWN MODEL MARKS -- the ids, in the
+ * CLI's menu order, of every row whose model is the one `running` names.
+ *
+ * `running` is the string the CLI painted on its status line and vam read back
+ * (`main/terminal/model.ts`), or `null` for the many screens that do not carry
+ * one. It is NOT what vam last typed: a remembered choice is the claim this
+ * whole control was written to avoid.
+ *
+ * WHAT THE MARK MEANS, and it is not "selected". It means THIS ROW'S MODEL IS
+ * WHAT THE SESSION IS RUNNING, which is a fact about the model and not about
+ * the CLI's own menu cursor -- and the difference is load-bearing, because the
+ * two cannot be told apart from the pane:
+ *
+ *     /model default   ->  Set model to Sonnet 5 (default) and saved as ...
+ *     /model sonnet    ->  Set model to Sonnet 5 and saved as ...
+ *     both, after      ->  `  wd1 Sonnet 5 in:0 out:0`
+ *
+ * Measured on 2.1.276: the two commands leave the SAME footer, while the CLI's
+ * own `/model` menu ticks whichever of them was used. The CLI knows which
+ * alias is selected, the status line does not carry it, and vam has nothing
+ * else to read. So on `Sonnet 5` this answers BOTH rows -- which is what vam
+ * can defend, since Default's own column says it IS Sonnet 5, so the model in
+ * the pane is both rows' model. Picking one of the two would be right half the
+ * time and wrong the other half, with nothing on screen to say which.
+ *
+ * A MISS IS AN ANSWER TOO. `Sonnet 4.5` (a session switched to a full model
+ * id), `Opus 6` (the day the CLI ships it, before anyone re-captures the table
+ * above) and a name vam has never heard of all mark nothing: the button still
+ * SAYS the name, and no row claims to be it. A tick on `Sonnet` for a session
+ * running Sonnet 4.5 would be a lie the operator could act on -- that row
+ * sends `/model sonnet`, which would change the model.
+ */
+export function runningModelRows(running: string | null): readonly string[] {
+  if (running === null) return [];
+  return MODEL_CHOICES.filter((choice) => runningName(choice) === running).map(
+    (choice) => choice.id,
+  );
+}
+
+/**
+ * WHAT THE MODEL BUTTON SAYS: the model this session is running, or the word
+ * the control has always worn when vam cannot tell.
+ *
+ * THE FALLBACK IS THE OLD LABEL AND NOT A GUESS. The button was labelled
+ * `model` precisely because vam held no fact about the session's model; when
+ * the pane does not carry one -- a question is open, the CLI's own menu is up,
+ * the line is cut -- vam is back in exactly that position and says exactly
+ * what it said then. The one thing that may never appear here is a name no
+ * pane reported.
+ */
+export function modelButtonLabel(running: string | null): string {
+  return running ?? 'model';
+}
+
+/**
  * A choice is one word: an alias or a full model id, neither of which carries
  * whitespace. Anything else is refused BEFORE a key is built, because the two
  * things whitespace can be are both wrong on the wire -- a space hands the CLI
