@@ -184,12 +184,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
     // re-derived onto today's rungs -- see "the rung claim was prose" above;
     // the cast is the one this palette shipped with, the lightness is not.
     dark: {
-      '--vam-panel': '#1c242a',
-      '--vam-sidebar': '#22292f',
-      '--vam-pane': '#22292f',
-      '--vam-raised': '#282f35',
-      '--vam-card': '#2e353b',
-      '--vam-in-bubble': '#3a444d',
+      '--vam-panel': '#171f25',
+      '--vam-sidebar': '#1d242a',
+      '--vam-pane': '#1d242a',
+      '--vam-raised': '#232a30',
+      '--vam-card': '#293036',
+      '--vam-in-bubble': '#353f48',
       '--vam-ink': '#ebedf0',
     },
     light: {
@@ -210,12 +210,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
     studied: 'Nord',
     // hue 260°, chroma 9 (dark) / 4 (light). Dark re-derived onto the rungs.
     dark: {
-      '--vam-panel': '#19242f',
-      '--vam-sidebar': '#1e2935',
-      '--vam-pane': '#1e2935',
-      '--vam-raised': '#252f3b',
-      '--vam-card': '#2a3541',
-      '--vam-in-bubble': '#3b444d',
+      '--vam-panel': '#141f2a',
+      '--vam-sidebar': '#192430',
+      '--vam-pane': '#192430',
+      '--vam-raised': '#202a36',
+      '--vam-card': '#25303c',
+      '--vam-in-bubble': '#363f48',
       '--vam-ink': '#ebedf0',
     },
     light: {
@@ -236,12 +236,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
     studied: 'Monokai, Solarized Dark',
     // hue 65°, chroma 6 (dark) / 3 (light). Dark re-derived onto the rungs.
     dark: {
-      '--vam-panel': '#28221b',
-      '--vam-sidebar': '#2e2720',
-      '--vam-pane': '#2e2720',
-      '--vam-raised': '#342d26',
-      '--vam-card': '#3a332c',
-      '--vam-in-bubble': '#4b4139',
+      '--vam-panel': '#231d16',
+      '--vam-sidebar': '#29221b',
+      '--vam-pane': '#29221b',
+      '--vam-raised': '#2f2821',
+      '--vam-card': '#352e27',
+      '--vam-in-bubble': '#463c34',
       '--vam-ink': '#efedea',
     },
     light: {
@@ -262,12 +262,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
     studied: 'Dracula, Tokyo Night',
     // hue 320°, chroma 6 (dark) / 3 (light). Dark re-derived onto the rungs.
     dark: {
-      '--vam-panel': '#272128',
-      '--vam-sidebar': '#2c262e',
-      '--vam-pane': '#2c262e',
-      '--vam-raised': '#322c34',
-      '--vam-card': '#38323a',
-      '--vam-in-bubble': '#48404a',
+      '--vam-panel': '#221c23',
+      '--vam-sidebar': '#272129',
+      '--vam-pane': '#272129',
+      '--vam-raised': '#2d272f',
+      '--vam-card': '#332d35',
+      '--vam-in-bubble': '#433b45',
       '--vam-ink': '#eeecef',
     },
     light: {
@@ -313,12 +313,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
       "vam's own --vam-icon-teal (#2dd4bf, hue 181.7) and --vam-running (#4ade80, hue 149.6); Everforest and Night Owl were read first and measure blue at this lightness (hue 250 and 266)",
     // hue 176°, chroma 8 (dark) / 5 (light).
     dark: {
-      '--vam-panel': '#162622',
-      '--vam-sidebar': '#1c2b27',
-      '--vam-pane': '#1c2b27',
-      '--vam-raised': '#21312d',
-      '--vam-card': '#273732',
-      '--vam-in-bubble': '#324540',
+      '--vam-panel': '#11211d',
+      '--vam-sidebar': '#172622',
+      '--vam-pane': '#172622',
+      '--vam-raised': '#1c2c28',
+      '--vam-card': '#22322d',
+      '--vam-in-bubble': '#2d403b',
       '--vam-ink': '#e6eeec',
     },
     light: {
@@ -434,12 +434,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
       // was to let a palette set the ground; this is the whole of what that
       // bought, and it is the largest surface in the app.
       '--vam-ground': '#000000',
-      '--vam-panel': '#202424',
-      '--vam-sidebar': '#232a2a',
-      '--vam-pane': '#232a2a',
-      '--vam-raised': '#2a2f2f',
-      '--vam-card': '#2f3535',
-      '--vam-in-bubble': '#454d4d',
+      '--vam-panel': '#1b1f1f',
+      '--vam-sidebar': '#1e2525',
+      '--vam-pane': '#1e2525',
+      '--vam-raised': '#252a2a',
+      '--vam-card': '#2a3030',
+      '--vam-in-bubble': '#404848',
       '--vam-ink': '#ffffff',
     },
     light: {
@@ -512,12 +512,12 @@ export const PALETTE_TEMPLATES: readonly PaletteTemplate[] = [
       'Solarized (Ethan Schoonover): base03 #002b36 and base02 #073642 for the dark cast (hue 230, chroma 14.5), base2 #eee8d5 and base3 #fdf6e3 for the light',
     // hue 230°, chroma 14.5 (dark) / 10 (light).
     dark: {
-      '--vam-panel': '#002732',
-      '--vam-sidebar': '#042c39',
-      '--vam-pane': '#042c39',
-      '--vam-raised': '#07333c',
-      '--vam-card': '#103943',
-      '--vam-in-bubble': '#214652',
+      '--vam-panel': '#00222c',
+      '--vam-sidebar': '#002734',
+      '--vam-pane': '#002734',
+      '--vam-raised': '#012e37',
+      '--vam-card': '#09343e',
+      '--vam-in-bubble': '#1b414d',
       '--vam-ink': '#eee8d5',
     },
     light: {
