@@ -76,11 +76,6 @@ import {
   subscribeTerminalScheme,
   terminalSchemeStyle,
 } from '../prefs/terminal-scheme.js';
-import {
-  activeNarrowViews,
-  NARROW_TERMINAL_MAX_WIDTH,
-  subscribeNarrowViews,
-} from '../prefs/view-width.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
@@ -724,20 +719,13 @@ export function TerminalTab({
     activeTerminalFontSize,
   );
   /**
-   * WHETHER THE SCREEN IS CAPPED AT A READABLE WIDTH, read the same way and
-   * for the same reason as the size above it — `prefs/view-width.ts` carries
-   * the argument, and the half that belongs here is that eighty of THIS view's
-   * characters is a COLUMN COUNT. Capping the box is the whole mechanism: the
-   * box shrinks, the observer below fires, `measurePane` divides the smaller
-   * box by the same advance, and tmux is told the smaller count -- two thirds
-   * of what fit, and never fewer than eighty, because the cap lets go of a
-   * pane too narrow for two thirds of it to hold eighty.
+   * THERE IS NO `narrowViews` HERE ANY MORE, and the absence is deliberate
+   * enough to name. This component subscribed to it and put the result on its
+   * own `max-width`; the operator has since asked for the terminal to be the
+   * one view that setting does not reach ("even in narrow mode, the terminal
+   * still needs full width"), so the subscription went with the cap. The
+   * mechanism is described where the element used to carry it, below.
    */
-  const narrowViews = useSyncExternalStore(
-    subscribeNarrowViews,
-    activeNarrowViews,
-    activeNarrowViews,
-  );
   /**
    * THE COLOURS THE SCREEN IS DRAWN IN, read the same way -- and this one IS
    * only paint, which is why it is worth saying why it is a React value at
@@ -1405,31 +1393,28 @@ export function TerminalTab({
        -- is behaviour, not text: a key vam cannot deliver is not cancelled,
        so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
        still draws its own line, which is not one of the two removed. */
-    /* AND THE OPERATOR'S WIDTH CHOICE LANDS HERE, on the tab as a whole rather
-       than on the screen alone, so the status rule stays the width of the
-       screen it belongs to.
+    /* AND THE OPERATOR'S WIDTH CHOICE DOES NOT LAND HERE -- THIS VIEW IS THE
+       EXCEPTION, on their own instruction: "even in narrow mode, the terminal
+       still needs full width."
 
-       WHY THE FACE AND THE SIZE ARE ON THIS ELEMENT. The cap is written in
-       `ch` -- eighty of them, `prefs/view-width.ts` argues why -- and `ch`
-       resolves against the element's OWN font. Every child below re-declares
-       both (the pane inline, the status rule through `text-meta`, the two
-       sentences through `font-sans`), so this declaration paints nothing at
-       all: it exists so that one cell here is one cell down there. Computing
-       the pixels instead would mean multiplying the size by a monospace RATIO,
-       which is precisely the mistake `terminal-size.ts`'s header records
-       paying for -- "out by a column every seventeen".
+       A `max-width` of two thirds of the pane stood on this element, built in
+       `ch` off `prefs/view-width.ts` so that its floor was eighty COLUMNS.
+       It is gone, and the reason it had to go rather than be tuned is that a
+       cap is not a margin here: the box shrinks, the `ResizeObserver` below
+       fires, `measurePane` divides the smaller box, and tmux is told a smaller
+       column count -- which RE-WRAPS THE SCREEN OF A RUNNING AGENT. Every
+       other view the setting reaches is prose, where the only thing narrowing
+       costs is white space on either side. This one narrows somebody's work.
 
-       NOTHING TELLS THE MEASUREMENT ABOUT THIS, and that is correct rather
-       than an omission: unlike a font-size change, a cap change MOVES THIS
-       BOX, so the `ResizeObserver` the measuring effect installs fires on its
-       own and tmux is told the new column count by the ordinary path. */
+       THE FACE AND THE SIZE STAY. The size is the operator's
+       (`prefs/terminal-font.ts`) and has to be on the element the pane
+       inherits from; `font-mono` makes the tab's default face the terminal's,
+       so anything drawn in it that does not say otherwise is monospace -- the
+       two English sentences below say otherwise, by name. */
     <div
       data-terminal
       className="relative mx-auto flex w-full min-h-0 flex-1 flex-col gap-1.5 font-mono"
-      style={{
-        fontSize: `${fontSize}px`,
-        maxWidth: narrowViews ? NARROW_TERMINAL_MAX_WIDTH : undefined,
-      }}
+      style={{ fontSize: `${fontSize}px` }}
     >
       {/* THE THIRD EMPTY CASE, and the one `not-vam`/`unavailable` do not
           cover: a pane vam DID reach, showing nothing. That is a real screen

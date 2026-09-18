@@ -29,11 +29,7 @@ import {
   TERMINAL_FONT_SIZES,
 } from '../../src/renderer/prefs/terminal-font.js';
 import { activeTerminalScheme } from '../../src/renderer/prefs/terminal-scheme.js';
-import {
-  NARROW_FLOOR_CHARACTERS,
-  NARROW_TERMINAL_MAX_WIDTH,
-  setActiveNarrowViews,
-} from '../../src/renderer/prefs/view-width.js';
+import { setActiveNarrowViews } from '../../src/renderer/prefs/view-width.js';
 import type { PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
@@ -385,117 +381,26 @@ describe('the column count follows the size the screen is drawn at', () => {
   });
 });
 
-describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pixels', () => {
+describe('the terminal is the ONE view narrow mode does not narrow', () => {
   /**
-   * The floor resolved to pixels, the way an engine resolves it.
+   * THE OPERATOR'S SECOND SENTENCE: "even in narrow mode, the terminal still
+   * needs full width."
    *
-   * WHY THIS BLOCK IS ABOUT A FLOOR NOW. The cap was eighty columns; the
-   * operator asked for two thirds of the pane, so it became
-   * `max(two thirds, eighty columns)`; then they split a pane and the eighty
-   * became the THRESHOLD the fraction stops applying at, so it is now two
-   * thirds while that is at least eighty columns and the whole pane below.
-   * The fraction and the step are percentages no arithmetic here can resolve
-   * without a layout -- `e2e/view-width-shots.mjs` measures those in Chromium
-   * and `prefs.view-width.test.ts` resolves the step by hand -- and the eighty
-   * columns is the part this block was written for, unchanged in everything
-   * but its role: it is the narrowest terminal vam ever narrows TO, so it must
-   * still come out at exactly eighty cells of content.
+   * WHAT THIS REPLACES. A whole block stood here resolving
+   * `NARROW_TERMINAL_MAX_WIDTH` -- a `max()` of two thirds of the pane against
+   * a floor of eighty and a half `ch` -- to pixels at four sizes and four
+   * plausible monospace advances, to prove the narrowed terminal came out at
+   * exactly eighty columns. Every line of it was about a cap this view no
+   * longer has, so it is gone with the constant rather than re-aimed: the
+   * prose views keep theirs, and `prefs.view-width.test.ts` still holds the
+   * arithmetic they are built from.
    *
-   * PARSED FROM THE SOURCE'S OWN EXPRESSION rather than restated: this repo
-   * has paid four times for a width that existed in a module and again in a
-   * test. Every term of the floor is read here, so a change to the slack, the
-   * padding or the border moves this arithmetic with it. The floor is found by
-   * its UNIT rather than by its position, so re-ordering the `max()` cannot
-   * quietly make this parse the other half.
+   * WHY THE TERMINAL IS DIFFERENT, in one line: narrowing it is not a margin,
+   * it is a COLUMN COUNT sent to tmux, which re-wraps the screen of a session
+   * that is still running. Eighty columns of somebody's agent is a different
+   * screen, not a tidier one.
    */
-  const term = /^([\d.]+)(ch|rem|px)$/;
-  const floorExpression = (expr: string): string => {
-    // No `\b` before `ch`: it is glued to a digit in `80.5ch`, where there is
-    // no word boundary at all. And no parenthesis of either kind inside: the
-    // floor is a `calc()` NESTED in the step's, so the innermost one holding a
-    // `ch` is the floor and the one around it is the step.
-    const hit = /calc\(([^()]*ch[^()]*)\)/.exec(expr);
-    if (hit === null) throw new Error(`no cell-sized floor in the cap: ${expr}`);
-    return hit[1] as string;
-  };
-  const terms = (expr: string): readonly { readonly n: number; readonly unit: string }[] =>
-    floorExpression(expr)
-      .split('+')
-      .map((piece) => {
-        const hit = term.exec(piece.trim());
-        if (hit === null) throw new Error(`unreadable term in the cap: ${piece}`);
-        return { n: Number(hit[1]), unit: hit[2] as string };
-      });
-
-  /** The root font size every `rem` in this app resolves against. */
-  const REM = 16;
-  /** Everything in the cap that is NOT cells: the pane's own padding and its
-   *  1px border, which `measurePane` and `clientWidth` between them subtract
-   *  again. The whole claim of the expression is that these cancel. */
-  const chrome = terms(NARROW_TERMINAL_MAX_WIDTH)
-    .filter((piece) => piece.unit !== 'ch')
-    .reduce((sum, piece) => sum + (piece.unit === 'rem' ? piece.n * REM : piece.n), 0);
-  const cells = terms(NARROW_TERMINAL_MAX_WIDTH).find((piece) => piece.unit === 'ch')?.n ?? 0;
-
-  /**
-   * Monospace advances, as a fraction of the em.
-   *
-   * THREE OF THEM, AND NOT ONE, because the whole point of writing the cap in
-   * `ch` is that nothing here knows the ratio: `TerminalTab.tsx` records
-   * 6.6015625px at 10.5px from one browser (0.6287), `e2e/view-width-shots.mjs`
-   * measured 0.606 in the shipped bundle on another day, and the face is
-   * whatever the platform actually resolved. A test pinned to one of those
-   * numbers would be asserting the ratio rather than the arithmetic. What is
-   * asserted is that the rounding slack holds across the range a monospace
-   * face can plausibly land in -- which is the claim, and it is stronger than
-   * any single measurement.
-   */
-  const ADVANCE_RATIOS = [0.55, 0.606, 6.6015625 / 10.5, 0.7];
-
-  it('resolves to exactly eighty cells of content at every size the dialog offers', () => {
-    // WHAT THIS REPLACES A BROWSER FOR. `ch` is the engine's own measurement
-    // of one cell, so the cap scales with the text size on its own -- but the
-    // CONTENT box is what `measurePane` divides, and `clientWidth` is an
-    // INTEGER. An exact `80ch` lands a fraction short at some sizes and
-    // `Math.floor` charges a whole column for it. The half cell in the
-    // expression is what pays for that, and this is where the claim is
-    // checked at all four sizes at once.
-    for (const ratio of ADVANCE_RATIOS) {
-      for (const size of TERMINAL_FONT_SIZES) {
-        const advance = size * ratio;
-        const borderBox = cells * advance + chrome;
-        // `clientWidth` excludes the border and is rounded; `measurePane` then
-        // subtracts the padding. Both are integers, so the two steps collapse.
-        const content = Math.round(borderBox) - chrome;
-        expect(Math.floor(content / advance), `${size}px at ${ratio}`).toBe(
-          NARROW_FLOOR_CHARACTERS,
-        );
-      }
-    }
-  });
-
-  it('never buys an eighty-first column with its slack', () => {
-    // The other direction, and the reason the slack is half a cell rather
-    // than "some". A cap that rounded UP to 81 would be a promise of eighty
-    // that the screen quietly breaks.
-    for (const ratio of ADVANCE_RATIOS) {
-      for (const size of TERMINAL_FONT_SIZES) {
-        const advance = size * ratio;
-        const content = Math.round(cells * advance + chrome) - chrome;
-        expect(content / advance, `${size}px at ${ratio}`).toBeLessThan(
-          NARROW_FLOOR_CHARACTERS + 1,
-        );
-      }
-    }
-  });
-
-  it('puts the cap on an element that is actually measured in cells', async () => {
-    // THE MUTATION THIS CATCHES is the one that leaves every other assertion
-    // green: `ch` resolves against the element's OWN font, so a cap moved onto
-    // a box drawn in the app's sans face silently means the advance of a
-    // proportional `0` -- 35% wider here -- and the "narrowed" terminal comes
-    // out at 59 columns. The face and the size therefore travel WITH the cap,
-    // and are asserted with it.
+  it('takes its whole box while every other view is narrowed', async () => {
     setActiveNarrowViews(true);
     for (const size of TERMINAL_FONT_SIZES) {
       setActiveTerminalFontSize(size);
@@ -510,14 +415,21 @@ describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pix
       await settle();
       const tab = q<HTMLElement>('[data-terminal]');
       expect(tab, `${size}px`).not.toBeNull();
-      expect(tab?.style.maxWidth, `${size}px`).toBe(NARROW_TERMINAL_MAX_WIDTH);
+      // NO MAXIMUM AT ALL, at any size. `maxWidth` was the whole mechanism --
+      // the box shrinks, the observer fires, `measurePane` divides the smaller
+      // box and tmux is told the smaller count -- so its absence is the whole
+      // of the fix, and this is the assertion that reddens if the cap returns.
+      expect(tab?.style.maxWidth, `${size}px`).toBe('');
+      // The size still lands here, and so does the face: the tab's default is
+      // the terminal's own, and the two English sentences below opt out of it
+      // by name (`data-terminal-blank`, `data-terminal-refused`).
       expect(tab?.className, `${size}px`).toContain('font-mono');
       expect(tab?.style.fontSize, `${size}px`).toBe(`${size}px`);
       cleanup();
     }
   });
 
-  it('caps nothing while the operator has not asked for it', async () => {
+  it('is not capped with the setting off either, which is where it started', async () => {
     setActiveNarrowViews(false);
     render(
       <TerminalTab
@@ -531,10 +443,40 @@ describe('the narrowed terminal’s FLOOR is eighty COLUMNS, not a number of pix
     expect(q<HTMLElement>('[data-terminal]')?.style.maxWidth).toBe('');
   });
 
-  it('keeps the tab’s own sentences in the reading face the cap borrowed the other from', async () => {
-    // The cost of carrying `font-mono` for the sake of `ch`: every child that
-    // does not declare a family inherits it. The pane and its status rule are
-    // monospace anyway; these two are English sentences, and they say so.
+  it('asks tmux for the columns of the WHOLE box, narrowed or not', async () => {
+    // THE HALF THAT IS NOT A STYLE. The cap was never only paint: it moved the
+    // box `measurePane` divides, so a capped terminal told tmux a smaller
+    // column count and tmux re-wrapped a running agent's screen at it.
+    // happy-dom lays nothing out, so the box here is written by the test --
+    // what is pinned is that the setting does not change the count vam sends
+    // for the SAME box. The rectangle itself is measured in a real engine by
+    // `e2e/view-width-shots.mjs`.
+    const asked: (readonly unknown[] | undefined)[] = [];
+    for (const narrowed of [false, true]) {
+      setActiveNarrowViews(narrowed);
+      const resize = vi.fn(async () => true);
+      render(
+        <TerminalTab
+          projectId={ATLAS}
+          read={vi.fn(async () => ok())}
+          resize={resize}
+          send={undefined}
+        />,
+      );
+      await settle();
+      layout({ box: { width: 1000, height: 400 }, cell: 8 });
+      await fire();
+      asked.push(resize.mock.calls.at(-1)?.slice(1, 3));
+      cleanup();
+    }
+    expect(asked[0]).toEqual([125, 25]);
+    expect(asked[1]).toEqual(asked[0]);
+  });
+
+  it('keeps the tab’s own sentences in the reading face the rest of it is not', async () => {
+    // The cost of carrying `font-mono`: every child that does not declare a
+    // family inherits it. The pane and its status rule are monospace anyway;
+    // these two are English sentences, and they say so.
     setActiveNarrowViews(true);
     render(
       <TerminalTab

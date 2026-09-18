@@ -126,16 +126,19 @@ const EN = {
   // through more than the scheme's ground does (`prefs/terminal-scheme.ts`).
   'settings.appearance.terminalOpacity.hint':
     "how much of the scheme's ground is painted over the pane — the rest is the pane's own surface showing through, and it stops at 30% because every colour was chosen against that ground",
-  // THE VIEWS' WIDTH. The hint carries three facts an operator cannot guess and
-  // would otherwise meet as a fault: that the Terminal is one of the four views
-  // this reaches, that narrowing it tells tmux a new column count — which
-  // re-wraps the screen of a session that is still running — and that the
-  // fraction has a threshold, so a pane too narrow for two thirds of it to
-  // hold 80 characters is left whole rather than narrowed (the operator met
-  // the older floor as a defect in a split, `prefs/view-width.ts`).
+  // THE VIEWS' WIDTH. The hint carries two facts an operator cannot guess and
+  // would otherwise meet as a fault: that the fraction has a threshold, so a
+  // pane too narrow for two thirds of it to hold 80 characters is left whole
+  // rather than narrowed (the operator met the older floor as a defect in a
+  // split, `prefs/view-width.ts`), and that the Terminal is NOT one of the
+  // views this reaches. The exception is named rather than left silent: it
+  // WAS one of them, and an operator who saw the screen re-wrap on the last
+  // release needs to read that it will not again — narrowing the terminal
+  // meant telling tmux a smaller column count, which re-wraps the screen of a
+  // session that is still running.
   'settings.appearance.narrowViews.label': 'view width',
   'settings.appearance.narrowViews.hint':
-    'draw the response, PRs, agents and terminal views at two thirds of the pane instead of filling it, while that is at least 80 characters — a narrower pane, such as one side of a split, is left whole; the terminal is told the narrower column count, so tmux re-wraps its screen',
+    'draw the response, PRs and agents views at two thirds of the pane instead of filling it, while that is at least 80 characters — a narrower pane, such as one side of a split, is left whole; the terminal always fills its pane, so tmux is never asked to re-wrap a running screen',
   'settings.appearance.narrowViews.on': 'narrowed',
   'settings.appearance.narrowViews.off': 'full pane',
   'settings.appearance.focusView.label': 'focus view',

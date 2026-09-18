@@ -52,8 +52,6 @@ import {
   NARROW_FLOOR_CHARACTERS,
   NARROW_PANE_FRACTION,
   NARROW_STEP_GAIN,
-  NARROW_TERMINAL_FLOOR,
-  NARROW_TERMINAL_MAX_WIDTH,
   NARROW_THRESHOLD_FLOORS,
   narrowMaxWidth,
   narrowProseMaxWidth,
@@ -339,48 +337,36 @@ describe('the rule the narrowed state follows', () => {
     }
   });
 
-  it('gives the terminal the same sentence, with columns for characters', () => {
-    // `terminal-size.ts` warns in its own header that a plausible-looking
-    // width-to-height RATIO is out by a column every seventeen. `ch` is the
-    // advance of `0` as the engine measures it, so in a monospace face `80ch`
-    // IS eighty columns at whatever size the screen is drawn at -- and the
-    // half cell is rounding slack, argued in `view-width.ts`.
-    expect(NARROW_TERMINAL_MAX_WIDTH).toContain(`${NARROW_FLOOR_CHARACTERS + 0.5}ch`);
-    expect(NARROW_TERMINAL_FLOOR).toBe(`calc(${NARROW_FLOOR_CHARACTERS + 0.5}ch + 1.5rem + 2px)`);
-    // THE SAME FRACTION, not a second opinion about the width: the terminal
-    // was the one view that might have kept the old rule, and the header
-    // argues why it did not.
-    expect(NARROW_TERMINAL_MAX_WIDTH).toContain(NARROW_PANE_FRACTION);
-    expect(NARROW_TERMINAL_MAX_WIDTH.startsWith('max(')).toBe(true);
-    // AND THE SAME STEP, built by the same function from its own floor -- so
-    // a threshold moved for one view moves for both, and there is one rule
-    // and not two that happen to agree.
-    expect(NARROW_TERMINAL_MAX_WIDTH).toBe(narrowMaxWidth(NARROW_TERMINAL_FLOOR));
-    // And it must carry no pixel width of its own: the moment a platform's
-    // prose answer were baked in here, "narrowed" would mean two things.
-    expect(NARROW_TERMINAL_MAX_WIDTH).not.toMatch(/\d+px\s*\+\s*1\.75rem/);
-  });
-
-  it('steps the terminal at one and a half of ITS floor, whatever a cell measures', () => {
-    // The floor is in `ch`, so the boundary moves with the face and the size
-    // and nothing here may know where it is; it is resolved for three cells a
-    // monospace face plausibly measures and asked the same three questions the
-    // prose cap was. Below the boundary the tab is its whole box, at it the
-    // tab is eighty and a half cells plus its chrome, above it two thirds.
-    for (const cell of [5.775, CELL, 9.8]) {
-      const floor = resolveLength(NARROW_TERMINAL_FLOOR, { pane: 0, rem: REM, ch: cell });
-      const boundary = floor * RECIPROCAL;
-      expect(columnAt(NARROW_TERMINAL_MAX_WIDTH, boundary, cell), `${cell}`).toBeCloseTo(floor, 6);
-      const below = boundary - LAYOUT_UNIT;
-      expect(columnAt(NARROW_TERMINAL_MAX_WIDTH, below, cell), `${cell}`).toBe(below);
-      expect(columnAt(NARROW_TERMINAL_MAX_WIDTH, boundary * 2, cell), `${cell}`).toBeCloseTo(
-        (boundary * 4) / 3,
-        6,
-      );
-    }
+  it('gives the terminal no cap at all — it is the one view this rule skips', () => {
+    // TWO TESTS STOOD HERE and they are gone with what they measured. One
+    // resolved `NARROW_TERMINAL_MAX_WIDTH`'s `80.5ch` floor and checked it was
+    // built by `narrowMaxWidth` from the same fraction as the prose cap; the
+    // other stepped it across its boundary at three plausible cell widths.
+    // The operator has since taken the Terminal out of this setting — "even in
+    // narrow mode, the terminal still needs full width" — and the constants
+    // they were about no longer exist (`prefs/view-width.ts` records why: a
+    // narrowed terminal is a COLUMN COUNT sent to tmux, which re-wraps the
+    // screen of a running session).
+    //
+    // WHAT IS CHECKED INSTEAD is that nothing grew back. A module-level scan,
+    // because the failure this guards against is a constant quietly
+    // reintroduced and wired up somewhere else: `ch` is the unit only the
+    // terminal's cap was ever written in, and `TerminalTab.tsx` is the only
+    // file that could apply one.
+    const widths = readFileSync(resolve(process.cwd(), 'src/renderer/prefs/view-width.ts'), 'utf8');
+    const exported = [...widths.matchAll(/^export (?:const|function) (\w+)/gm)].map(
+      (hit) => hit[1],
+    );
+    expect(exported).not.toContain('NARROW_TERMINAL_MAX_WIDTH');
+    expect(exported).not.toContain('NARROW_TERMINAL_FLOOR');
+    const tab = readFileSync(resolve(process.cwd(), 'src/renderer/panels/TerminalTab.tsx'), 'utf8');
+    // Not a comment about the old cap — a `maxWidth` in code. The file
+    // discusses the removed one at length, which is why this looks for the
+    // property rather than for the words.
+    expect(tab).not.toMatch(/maxWidth:/);
+    expect(tab).not.toContain('narrowMaxWidth');
   });
 });
-
 describe('the ruler the prose cap is measured on', () => {
   it('is rendered at the SMALLEST step anything read in the pane wears', () => {
     // `out` is the operator's stepper and `--text-control` is the smallest of
