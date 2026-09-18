@@ -30,6 +30,16 @@
  *
  * `e2e/pane-colour-shots.mjs` re-measures the same ladder as PAINT, because a
  * token list cannot prove a CSS rule reached a real element.
+ *
+ * THREE PASSES HAVE SINCE ADDED THEIR OWN CLAIMS HERE and none has replaced
+ * the ones above: the fourth moved the ground and re-pinned it, the fifth
+ * named five surfaces and recorded where the fourth left each, and the sixth
+ * (`FIFTH_PASS_NAMED`, the ground pin at #0d0d0d, and the node-shadow test at
+ * the end) moves the room down again on an ask that named the sidebar, the
+ * pane and the card. Each table is a record of history rather than of the
+ * current palette, which is what lets them all be kept: a claim about where a
+ * value USED to be cannot go stale, and four of them together refuse a revert
+ * to any earlier pass.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
@@ -155,8 +165,26 @@ const SEGMENT_ON = '--vam-segment-on';
  * fourth uniform lift structurally unable to pass as a fix for separation.
  * That reasoning is about DRIFT, not about the value -- so the pin follows
  * the deliberate move and still refuses the accidental one.
+ *
+ * AND IT MOVES A SECOND TIME, FOR THE SIXTH PASS, which is the fourth pass's
+ * shape again: the whole room down, the spacing kept. The operator named the
+ * sidebar, the pane and the card; with the ground held at #141414 the darkest
+ * legal value for the pane is the one it already had (`leaves panel and pane
+ * at the darkest value the ladder can legally give them`, below, is what says
+ * so), and squeezing every gap to the bare JND would have bought the pane 0.59
+ * L* by spending the separation the operator has complained about twice. So
+ * the floor moves instead, and the pin travels with it.
+ *
+ * #0d0d0d IS NOT "ONE STEP DOWN", it is the darkest grey that still leaves
+ * `sunken` a JND above it -- and it is two 8-bit steps below where a uniform
+ * -5 on every channel would have landed, because a fixed sRGB step buys LESS
+ * lightness at the bottom of the ramp than it does in the middle. Measured:
+ * -5 on every channel leaves `ground -> sunken` at 2.00 L*, UNDER the JND,
+ * while every gap above it widens. That is the same "equal hex steps are not
+ * equal steps" argument `styles.css` makes for lifting, running in the other
+ * direction.
  */
-const GROUND_PINNED = '#141414';
+const GROUND_PINNED = '#0d0d0d';
 
 /**
  * THE FIFTH PASS'S ASK, AND THE ONLY ASSERTION IN THIS FILE THAT ENCODES IT.
@@ -192,6 +220,41 @@ const FOURTH_PASS_NAMED = {
   '--vam-in-bubble': '#464646',
 } as const;
 const DARKENED_BY = 2;
+
+/**
+ * THE SIXTH PASS'S ASK, IN THE SAME SHAPE, AND THE FIFTH'S IS KEPT BESIDE IT.
+ *
+ * Operator: "cho màu background default của sidebar, pane, card tối hơn" --
+ * make the default background colour of the sidebar, the pane and the card
+ * darker. THREE NAMES this time, all of them already named by the fifth pass,
+ * which is what makes the table below necessary rather than redundant:
+ * `FOURTH_PASS_NAMED` above is satisfied by any palette at least 2 L* under
+ * the FOURTH pass, and the fifth pass already spent all of that. A ladder that
+ * shipped the fifth pass's values unchanged passes every other assertion in
+ * this file, including that one. So this pass records where the FIFTH left the
+ * three, and requires each to have come down again.
+ *
+ * BOTH TABLES ARE KEPT, not replaced, and that is the point of adding one
+ * rather than editing the other. They are different claims -- "below the
+ * fourth pass" and "below the fifth" -- and the older one is the reason a
+ * revert to the fourth pass's palette cannot pass by satisfying the newer one
+ * through some other rearrangement. Neither can go stale: both are records of
+ * history, and history does not move.
+ *
+ * THE FLOOR IS STILL 2 L* for the reason the fifth pass gives above, and this
+ * pass runs up against the same cap from the other side: the ladder's own
+ * arithmetic allows the pane exactly 2.40 L* and the card 2.30 before a rung
+ * collapses (`styles.css` carries the derivation). The card's 2.30 clears a
+ * full JND by two thousandths -- a margin this file has refused to ship as a
+ * GAP three times -- so the claim stays the one that can be made honestly: the
+ * surface MOVED, by more than the 2 L* that separates a move from a rounding
+ * difference. `e2e/pane-colour-shots.mjs` re-asks it of the paint.
+ */
+const FIFTH_PASS_NAMED = {
+  '--vam-sidebar': '#282828',
+  '--vam-pane': '#282828',
+  '--vam-card': '#343434',
+} as const;
 
 /** The two HELD tokens, unmoved across all three passes, and why is in `styles.css`. */
 const HELD = {
@@ -240,7 +303,7 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
     }
   });
 
-  it('pins --vam-ground to the value the fourth pass placed it at', () => {
+  it('pins --vam-ground to the value the sixth pass placed it at', () => {
     expect(hex(dark, '--vam-ground')).toBe(GROUND_PINNED);
   });
 
@@ -253,6 +316,20 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
       by: Number((lightness(before) - lightness(hex(dark, name))).toFixed(2)),
     }));
     expect(moved.length).toBe(5);
+    expect(moved.filter((m) => m.by < DARKENED_BY)).toEqual([]);
+  });
+
+  it('takes the three surfaces the operator named again below where the fifth pass left them', () => {
+    // Same table shape as the fourth pass's, and read the same way: a failure
+    // names WHICH of the three stood still. The likely wrong answer to this
+    // ask is a palette that moves the pane and forgets the card, or that moves
+    // nothing at all -- the fifth pass's own values already satisfy every
+    // other assertion in this file.
+    const moved = Object.entries(FIFTH_PASS_NAMED).map(([name, before]) => ({
+      name,
+      by: Number((lightness(before) - lightness(hex(dark, name))).toFixed(2)),
+    }));
+    expect(moved.length).toBe(3);
     expect(moved.filter((m) => m.by < DARKENED_BY)).toEqual([]);
   });
 
@@ -355,6 +432,93 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
       { rung: '--vam-panel', clearsItsFloor: true, oneStepLowerWouldNot: true },
       { rung: '--vam-pane', clearsItsFloor: true, oneStepLowerWouldNot: true },
     ]);
+  });
+
+  /**
+   * WHAT A LOWER FLOOR COSTS THE DROP SHADOW -- THE ONE THING IN THIS PALETTE
+   * THAT A DARKER GROUND CAN ACTUALLY BREAK, and the reason it is asserted
+   * here rather than assumed away.
+   *
+   * `--vam-shadow-node` is BLACK at 0.4 (`styles.css`), and a black shadow on
+   * a black ground is not a shadow. `palette-templates.test.ts` already holds
+   * that trade for the one TEMPLATE that writes its own ground, and records
+   * the arithmetic: on the fifth pass's #141414 the darkest composite the halo
+   * can reach is 3.00 L* under the fill it falls on, and ONE 8-bit step darker
+   * it is 1.94 -- already invisible. This pass takes the ground seven steps
+   * down, so on that reading the halo would be spent.
+   *
+   * IT IS NOT, BECAUSE THAT READING MEASURES THE WRONG FILL, and the
+   * difference is the whole content of this test. Every one of the five panels
+   * that wears this shadow is a modal sitting inside a `bg-ground/70` SCRIM --
+   * the shadow never falls on the bare ground, it falls on a veil of the
+   * ground over the app's own surfaces, which is lighter than the ground by
+   * construction. Measured on the scrim it is really drawn over, the halo goes
+   * 4.58 -> 3.00 L*: narrower, and still over the JND.
+   *
+   * THE PAIRING IS SWEPT, NOT ASSERTED IN PROSE, because that is the premise
+   * the whole calculation rests on: if a sixth call site ever wears
+   * `shadow-node` WITHOUT a scrim, its halo is the bare-ground one and this
+   * pass has broken it. The sweep is over source text for the same reason the
+   * `header` sweep below is -- the question is which files NAME these two
+   * classes -- and it reddens if the two ever come apart.
+   *
+   * AND THE STEP THAT PAYS FOR THE NARROWING IS MEASURED TOO. The scrim is
+   * made of the ground, so a darker ground darkens the veil as well: the
+   * panel's own step over it goes 4.45 -> 4.95 L*. That is the same trade
+   * `palette-templates.ts` documents for the `contrast` template, made by the
+   * default palette this time, and asserted in both halves so a future edit
+   * cannot take the narrowing without the compensation.
+   */
+  it('keeps the node shadow over a JND on the scrim it is really drawn on, and widens the panel’s step over that scrim', () => {
+    const files = rendererSources().filter((f) => f.endsWith('.tsx'));
+    expect(files.length).toBeGreaterThan(20);
+    const wearing = files
+      .map((file) => ({ file, text: withoutComments(readFileSync(file, 'utf8')) }))
+      .filter((f) => /shadow-\[var\(--shadow-node\)\]/.test(f.text));
+    // A SWEEP THAT FOUND NO WEARERS PROVES NOTHING. Five panels wear it today.
+    expect(wearing.length).toBeGreaterThanOrEqual(5);
+    expect(
+      wearing.filter((f) => !/\bbg-ground\/(\d{2})\b/.test(f.text)).map((f) => f.file),
+    ).toEqual([]);
+
+    // The WEAKEST scrim declared anywhere in the renderer, not the strongest:
+    // the dialog behind the faintest veil is the one whose shadow has least to
+    // work with. (`palette-templates.test.ts` found that by mutation; the same
+    // reasoning applies to the halo as to the fill step.)
+    const alphas = [
+      ...files.flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/\bbg-ground\/(\d{2})\b/g)]),
+    ].map((m) => Number(m[1]));
+    expect(alphas.length).toBeGreaterThan(0);
+    const scrimAlpha = Math.min(...alphas) / 100;
+
+    const shadow = dark.get('--vam-shadow-node');
+    expect(shadow, 'styles.css defines --vam-shadow-node in :root').toBeDefined();
+    const shadowAlpha = Number(/rgb\(0 0 0 \/ ([0-9.]+)\)/.exec(shadow as string)?.[1]);
+    expect(shadowAlpha).toBeGreaterThan(0);
+
+    const over = (top: string, under: string, a: number): string => {
+      const mix = (i: number): number =>
+        Math.round(
+          Number.parseInt(top.slice(1 + i * 2, 3 + i * 2), 16) * a +
+            Number.parseInt(under.slice(1 + i * 2, 3 + i * 2), 16) * (1 - a),
+        );
+      return `#${[0, 1, 2].map((i) => mix(i).toString(16).padStart(2, '0')).join('')}`;
+    };
+
+    // The veil, over the surface with the most screen area behind it.
+    const scrim = over(hex(dark, '--vam-ground'), hex(dark, '--vam-pane'), scrimAlpha);
+    const halo = Number(
+      (lightness(scrim) - lightness(over('#000000', scrim, shadowAlpha))).toFixed(2),
+    );
+    const step = Number((lightness(hex(dark, '--vam-panel')) - lightness(scrim)).toFixed(2));
+    // THE PROPERTIES, NOT THE TWO NUMBERS. A pinned pair would redden at an
+    // 8-bit rounding difference and say nothing about which half broke; the
+    // numbers ride along in the message instead. 4.45 is what the FIFTH pass
+    // measured here -- a record of history, so it cannot go stale.
+    expect(
+      { haloClearsTheJND: halo >= JND, stepWiderThanTheFifthPassLeftIt: step > 4.45 },
+      `halo ${halo} L* on the scrim, panel over that scrim ${step} L*`,
+    ).toEqual({ haloClearsTheJND: true, stepWiderThanTheFifthPassLeftIt: true });
   });
 
   /**

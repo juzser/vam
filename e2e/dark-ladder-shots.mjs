@@ -1,9 +1,10 @@
 /**
- * THE THIRD PASS'S PICTURES: the dark theme before and after the ladder
- * widened, at two widths, off the same build.
+ * THE SIXTH PASS'S PICTURES: the dark theme before and after the room came
+ * down, at two widths, off the same build.
  *
- * Operator: "make the dark UI a bit lighter, and you may re-pick the default
- * colours." That is a judgement made by eye, so this file's job is to make
+ * Operator: "cho màu background default của sidebar, pane, card tối hơn" --
+ * make the default background colour of the sidebar, the pane and the card
+ * darker. That is a judgement made by eye, so this file's job is to make
  * the comparison easy and honest rather than to argue the numbers --
  * `e2e/pane-colour-shots.mjs` is the asserting guard and
  * `test/renderer/dark-ladder.test.ts` is the token one. Deliberately NOT in
@@ -11,25 +12,27 @@
  * screenshot script: it asserts nothing, so running it in CI would turn a
  * green tick into a broader claim than it is.
  *
- * THE PAIR IS THE THIRD PASS, not the first or second. "Before" here is the
- * palette the SECOND pass shipped -- the one that answered "too dark" and
- * still left the operator looking at a flat ladder -- rather than the
- * artboard, or the first pass's own output. What has to be judged is the
- * separation this pass adds, not two earlier passes of brightening it did
- * not do.
+ * THE PAIR IS RE-POINTED AT EVERY PASS, and it is the sixth's now. "Before"
+ * is the palette the FIFTH pass shipped -- the one directly behind this ask --
+ * and not the second pass's, which is what this file pictured until now. What
+ * has to be judged is the step THIS pass takes: a pair spanning three passes
+ * flatters it with somebody else's work, and the numbers printed below would
+ * have gone on describing a ladder the app stopped painting two passes ago.
  *
  * HOW "BEFORE" IS PRODUCED, because it matters that this is not a mock-up.
  * The same build is photographed twice, a few hundred milliseconds apart:
  * first with every token this pass moved pushed back to the exact value it
- * held after the SECOND pass, as inline custom properties on <html> -- the
+ * held after the FIFTH pass, as inline custom properties on <html> -- the
  * same mechanism the Appearance swatches use, so the "before" shot is the
  * shipped DOM painting the old palette rather than a rebuild of an old
  * branch. Only the palette moves between the two frames.
  *
  * IT PRINTS WHAT IT MEASURES IN BOTH STATES, so the reconstruction can be
  * checked rather than believed: the "before" ladder must come back at
- * L* 10.27 (ground) / 15.64 (pane) / 18.94 (card) and the "after" at
- * 10.27 / 22.62 / 27.97 -- ground UNCHANGED, pane and card widened.
+ * L* 6.32 (ground) / 16.11 (sidebar and pane) / 21.70 (card) / 27.53 (In
+ * bubble), and the "after" at 3.64 / 13.71 / 19.40 / 25.32 -- every rung down
+ * by about 2.3 L*, the ground with them, and not one of the gaps between them
+ * spent to pay for it.
  *
  * DARK ONLY. The light theme did not move -- asserted as paint in
  * `pane-colour-shots.mjs` and as tokens in `dark-ladder.test.ts` -- so a
@@ -44,43 +47,34 @@ const origin = process.argv[2] ?? 'http://localhost:5541';
 const outDir = process.argv[3] ?? 'e2e/test-results/web-guards';
 
 /**
- * Every token this pass moved, at the value it held after the SECOND pass --
- * the same table `test/renderer/dark-ladder.test.ts` measures the step from,
- * so the pictures and the assertions cannot come to disagree about what
- * "before" was. `--vam-ground` is deliberately NOT here: it did not move
- * this pass, so pushing it "back" would push it nowhere and the print-out
- * would say so.
+ * Every token this pass moved, at the value it held after the FIFTH pass --
+ * the same values `test/renderer/dark-ladder.test.ts` measures the step from
+ * (`FIFTH_PASS_NAMED`, plus the rungs that came down with them), so the
+ * pictures and the assertions cannot come to disagree about what "before" was.
+ *
+ * `--vam-ground` IS HERE THIS TIME, and that is the difference between this
+ * pass and the third: the floor moved, because with it pinned the pane and the
+ * panel were already at the darkest values the ladder allows. A "before" that
+ * left the ground alone would show the new rungs over the old floor, which is
+ * a palette that never existed.
+ *
+ * NOTHING ELSE MOVED, so nothing else is listed. The inks, the lines, the
+ * tints and the status hues are all HELD across this pass -- `styles.css` says
+ * why for each family -- and pushing a held token "back" would push it
+ * nowhere while implying it had travelled.
  */
 const BEFORE_THE_WIDEN = {
-  '--vam-sunken': '#1e1e1e',
-  '--vam-well': '#1f1f1f',
-  '--vam-header': '#202020',
-  '--vam-panel': '#242424',
-  '--vam-sidebar': '#272727',
-  '--vam-pane': '#272727',
-  '--vam-raised': '#2c2c2c',
-  '--vam-card': '#2e2e2e',
-  '--vam-segment-on': '#383838',
-  '--vam-in-bubble': '#354646',
-  '--vam-line': '#303030',
-  '--vam-line-strong': '#383838',
-  '--vam-line-loud': '#3d3d3d',
-  '--vam-line-loudest': '#595959',
-  '--vam-line-tip': '#7d7d7d',
-  '--vam-ink-dim': '#b4b4b4',
-  '--vam-ink-faint': '#969696',
-  '--vam-ink-quiet': '#969696',
-  '--vam-ink-ghost': '#4e4e4e',
-  '--vam-ansi-black': '#737373',
-  '--vam-idle': '#a1a1aa',
-  '--vam-done': '#60a5fa',
-  '--vam-failed': '#f87171',
-  '--vam-danger': '#fb7185',
-  '--vam-waiting-tint': '#4e3e1f',
-  '--vam-waiting-wash': '#27231c',
-  '--vam-done-tint': '#33445c',
-  '--vam-rule-progress': '#a78bfa',
-  '--vam-rule-out': '#f472b6',
+  '--vam-ground': '#141414',
+  '--vam-sunken': '#191919',
+  '--vam-well': '#1e1e1e',
+  '--vam-header': '#232323',
+  '--vam-panel': '#232323',
+  '--vam-sidebar': '#282828',
+  '--vam-pane': '#282828',
+  '--vam-raised': '#2e2e2e',
+  '--vam-card': '#343434',
+  '--vam-segment-on': '#3a3a3a',
+  '--vam-in-bubble': '#414141',
 };
 
 /** Two widths, because the pane and the sidebar divide the window differently. */
@@ -213,8 +207,8 @@ const composite = await page.evaluate(
     ctx.drawImage(b, a.width + 2, pad);
     ctx.fillStyle = '#ededed';
     ctx.font = '600 15px -apple-system, system-ui, sans-serif';
-    ctx.fillText('before (2nd pass)  ·  ground L* 10.27, pane 15.64, card 18.94', 10, 19);
-    ctx.fillText('after (3rd pass)  ·  ground 10.27, pane 22.62, card 27.97', a.width + 12, 19);
+    ctx.fillText('before (5th pass)  ·  ground L* 6.32, pane 16.11, card 21.70', 10, 19);
+    ctx.fillText('after (6th pass)  ·  ground 3.64, pane 13.71, card 19.40', a.width + 12, 19);
     return canvas.toDataURL('image/png');
   },
   [

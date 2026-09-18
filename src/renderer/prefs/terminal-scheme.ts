@@ -275,9 +275,13 @@ export const TERMINAL_THEMES: readonly TerminalTheme[] = [
      * ground and ink are `--vam-panel` and `--vam-ink` (the `bg-panel
      * text-ink` the pane carried), the cursor pair is the `bg-ink text-panel`
      * the caret carried, and the selection is `--vam-line-strong`: the
-     * strongest neutral in the ladder, 2.04:1 over the panel so it can be
-     * seen and 6.56:1 under the ink so the text on it can be read. Held to
-     * the stylesheet by test, see the file header.
+     * strongest neutral in the ladder, 2.13:1 over the panel so it can be
+     * seen and 6.67:1 under the ink so the text on it can be read. Held to
+     * the stylesheet by test, see the file header -- which is why the
+     * background here follows every move of `--vam-panel` (#1e1e1e since the
+     * sixth dark pass) rather than keeping a copy of an older one; the
+     * selection's two readings improve on their own as the panel descends,
+     * because neither `line-strong` nor `ink` is on the ladder.
      */
     id: 'vam',
     label: 'vam',
@@ -285,11 +289,11 @@ export const TERMINAL_THEMES: readonly TerminalTheme[] = [
     studied:
       "vam's own styles.css `:root` block: the ANSI ramp, panel, ink and line-strong; bold = foreground, cursor = ink, cursorAccent = panel",
     scheme: {
-      background: '#232323',
+      background: '#1e1e1e',
       foreground: '#ededed',
       bold: '#ededed',
       cursor: '#ededed',
-      cursorAccent: '#232323',
+      cursorAccent: '#1e1e1e',
       selectionBackground: '#525252',
       selectionForeground: '#ededed',
       black: '#808080',

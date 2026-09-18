@@ -984,20 +984,43 @@ console.log(`${outDir}/list-markers-dark.png`);
 // between each rung and the floor -- which is where it was always the real
 // claim. All four of those rows still pass on this palette, which is what
 // makes it safe to stop ratcheting here.
-const GROUND_IS = '#141414';
+//
+// AND THE SIXTH PASS TURNS IT OVER ONCE MORE, because the request changed
+// shape again: "cho màu background default của sidebar, pane, card tối hơn" --
+// the sidebar, the pane and the card, darker. The fifth pass had already taken
+// all three to the lowest values a #141414 ground allows (`dark-ladder.test.ts`
+// asserts exactly that, one rung at a time), so this pass moves the GROUND and
+// brings every rung down with it, which is the fourth pass's shape.
+//
+// THAT MAKES "CLOSER TO THE GROUND" UNASKABLE, not merely stale: this pass
+// keeps each rung's distance off the floor deliberately -- the spacing is the
+// thing it must not spend -- so a guard demanding the distance SHRINK would
+// fail on the correct fix, exactly as the fifth pass's own note says of the
+// fourth's version of this line. The question that survives is the ABSOLUTE
+// one, which is also the one the operator can see: each named surface must
+// PAINT at least `DARKENED_BY_AT_LEAST` L* darker than the fifth pass painted
+// it, and the ground with them.
+//
+// `wasPainted` IS MEASURED, NOT COPIED FROM THE STYLESHEET, which is the point
+// of recording it here at all: these four numbers are what this script printed
+// on the fifth pass's own build, off `getComputedStyle` on the real nodes. A
+// token list cannot prove a rule reached an element, and a `was` copied from
+// the token list would inherit the very assumption this file exists to test.
+const GROUND_IS = '#0d0d0d';
 const GROUND_TOLERANCE = 1; // pinned to the pixel; this is rounding room, not a floor.
-/** `wasAboveGround`: the FOURTH pass's own painted ΔL* off this same ground. */
+/** The FIFTH pass's own painted L*, read off these nodes by this script. */
+const GROUND_WAS_PAINTED = 6.32;
 const WIDENED_LADDER = [
-  { what: 'the sidebar', selector: '[data-sidebar-pane]', wasAboveGround: 12.15 },
-  { what: 'the detail pane', selector: '[data-action-pane]', wasAboveGround: 12.15 },
-  { what: 'a card on the pane', selector: '[data-question]', wasAboveGround: 17.65 },
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', wasPainted: 16.11 },
+  { what: 'the detail pane', selector: '[data-action-pane]', wasPainted: 16.11 },
+  { what: 'a card on the pane', selector: '[data-question]', wasPainted: 21.7 },
 ];
 /**
- * How much closer to the ground each of them has to have come. 2.0 L* rather
- * than the 2.3 JND for the reason `dark-ladder.test.ts` gives at length: with
- * the ground pinned and every gap still owing a JND, the ladder's arithmetic
- * caps the available move at 2.40 L* for the panel and 2.19 for the bubble,
- * so a floor of 2.3 could only be met by spending a gap.
+ * How much darker each of them has to have come. 2.0 L* rather than the 2.3
+ * JND for the reason `dark-ladder.test.ts` gives at length: the ladder's own
+ * arithmetic caps the available move -- 2.40 L* for the pane and 2.30 for the
+ * card this pass, 2.40 and 2.19 for the panel and bubble at the fifth -- and
+ * the only way to pay more is to spend a gap.
  */
 const DARKENED_BY_AT_LEAST = 2;
 /** What the LIGHT theme paints on ground plus these three nodes, unmoved. */
@@ -1051,7 +1074,7 @@ const widened = await widenedSeen();
 console.log(`  the page behind the panes: ${GROUND_IS} -> ${ground.fill} (L* ${ground.light}, step ${ground.step})`);
 for (const rung of widened) {
   const above = ground.light === null || rung.light === null ? null : Number((rung.light - ground.light).toFixed(2));
-  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, fourth pass had ${rung.wasAboveGround})`);
+  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, fifth pass painted ${rung.wasPainted})`);
 }
 check(
   'every surface the ladder covers is drawn, and paints an opaque fill',
@@ -1060,19 +1083,43 @@ check(
 );
 if (ground.painted && widened.every((r) => r.painted)) {
   check(
-    'the page behind the panes is exactly where the fourth pass pinned it',
+    'the page behind the panes is exactly where the sixth pass pinned it',
     Math.abs(ground.step) <= GROUND_TOLERANCE,
     `step ${ground.step} L* off ${GROUND_IS}`,
   );
-  const notDarker = widened
-    .map((r) => ({ ...r, above: Number((r.light - ground.light).toFixed(2)) }))
-    .filter((r) => r.above > r.wasAboveGround - DARKENED_BY_AT_LEAST);
+  // THE FLOOR MOVED TOO, AND IT IS ASSERTED AS A MOVE RATHER THAN AS A PIN.
+  // The line above would pass on a palette that never touched the ground --
+  // it only says "the paint agrees with the stylesheet", and the stylesheet
+  // is what an edit walking the value back up would have changed first.
   check(
-    'and every surface the operator named came DOWN towards the pinned ground',
+    'and the page itself came DOWN from where the fifth pass painted it',
+    GROUND_WAS_PAINTED - ground.light >= DARKENED_BY_AT_LEAST,
+    `ground paints ${ground.light} L*, fifth pass painted ${GROUND_WAS_PAINTED}`,
+  );
+  const notDarker = widened.filter((r) => r.wasPainted - r.light < DARKENED_BY_AT_LEAST);
+  check(
+    'and every surface the operator named PAINTS darker than the fifth pass left it',
     notDarker.length === 0,
     notDarker
-      .map((r) => `${r.what}: ${r.above} above ground, fourth pass had ${r.wasAboveGround}`)
+      .map((r) => `${r.what}: paints ${r.light} L*, fifth pass painted ${r.wasPainted}`)
       .join(' ; '),
+  );
+  // AND THE SPACING SURVIVED THE MOVE, which is the half an absolute check
+  // cannot see: a palette that darkened the three named surfaces by shrinking
+  // their distance off the floor passes every line above and is the one thing
+  // the operator has complained about twice. Each rung must stand at least as
+  // far above the ground as the FIFTH pass painted it.
+  const collapsed = widened
+    .map((r) => ({
+      ...r,
+      above: Number((r.light - ground.light).toFixed(2)),
+      wasAbove: Number((r.wasPainted - GROUND_WAS_PAINTED).toFixed(2)),
+    }))
+    .filter((r) => r.above < r.wasAbove);
+  check(
+    'and none of them bought that darkness out of its own distance off the floor',
+    collapsed.length === 0,
+    collapsed.map((r) => `${r.what}: ${r.above} above ground, was ${r.wasAbove}`).join(' ; '),
   );
   // AND THE ORDER SURVIVED IT. The ladder is ground < sidebar = pane < card,
   // and a lift that moved one rung past another would be a new design rather
@@ -1206,9 +1253,10 @@ if (separations.every((s) => s.bothOpaque)) {
 //
 // Every other shot this file takes is a locator screenshot of one element,
 // which is the right shape for measuring and the wrong shape for the only
-// review that actually decides a palette: a person looking at it. The five
-// surfaces the fifth pass moved are `pane`, `panel`, `sidebar`, `card` and
-// `in-bubble`, and four of the five are only judgeable NEXT TO each other --
+// review that actually decides a palette: a person looking at it. The fifth
+// pass moved `pane`, `panel`, `sidebar`, `card` and `in-bubble`; the sixth
+// moved those and the floor under them, on an ask that named the sidebar, the
+// pane and the card. Either way they are only judgeable NEXT TO each other --
 // a card is too light when it is too light FOR ITS PANE. So the pair below is
 // deliberately un-clipped, taken at the point in this script where the
 // sidebar, the detail pane, a question card and the In bubble are all on
