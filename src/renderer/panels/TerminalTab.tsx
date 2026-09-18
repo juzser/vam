@@ -57,6 +57,7 @@ import {
   type PointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -75,11 +76,6 @@ import {
   subscribeTerminalScheme,
   terminalSchemeStyle,
 } from '../prefs/terminal-scheme.js';
-import {
-  activeNarrowViews,
-  NARROW_TERMINAL_MAX_WIDTH,
-  subscribeNarrowViews,
-} from '../prefs/view-width.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
@@ -424,6 +420,63 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
 }
 
 /**
+ * Whether the operator was reading the LIVE END of the pane, measured against
+ * the height they were scrolling in rather than the height the pane has now.
+ *
+ * `height` IS THE PREVIOUS ONE, AND THAT IS THE WHOLE TRICK. This question can
+ * only be asked from a layout effect, which runs after React has already put
+ * the longer screen in the DOM -- so `pane.scrollHeight` is the new content's
+ * and tells us nothing about where the operator was. The browser preserves
+ * `scrollTop` across a content change that appends, so the position is still
+ * theirs; comparing it against the height it was taken in is what says whether
+ * it was the bottom. `null` is "nothing has been drawn yet", which pins: a tab
+ * just opened should show what the agent is doing now, not what it did first.
+ *
+ * `slack` IS ONE ROW, passed in rather than assumed for the reason
+ * `scrollPane` takes one: the row is measured from the pane's own ruler. A
+ * screen whose last line is half-drawn, and a rectangle the engine rounded,
+ * cost a pixel or two between them, and a terminal that stops following its
+ * own output because it is three pixels from the bottom is the defect wearing
+ * the other face.
+ */
+export function atBottom(
+  height: number | null,
+  pane: { readonly scrollTop: number; readonly clientHeight: number },
+  slack: number,
+): boolean {
+  return height === null || height - pane.scrollTop - pane.clientHeight <= slack;
+}
+
+/**
+ * Whether two answers are THE SAME SCREEN -- and so whether React has anything
+ * to do with the newer one.
+ *
+ * WHY THIS EXISTS AT ALL. Every read allocates a new `PaneView`, so the state
+ * changes identity once a second whether or not one pixel of the operator's
+ * terminal did, and the whole scrollback is re-parsed and re-reconciled for
+ * it. Measured in Chromium against the real bundle, on a 137x41 pane of
+ * densely coloured output: 5.7ms per update at the five hundred lines
+ * `PANE_HISTORY_LINES` asks for, against 0.9ms for the screen alone. Dropping
+ * an unchanged capture here makes an IDLE tab cost nothing at all rather than
+ * that every second, and it is what keeps a `scrollTop` the operator set from
+ * being disturbed by a screen that did not move.
+ *
+ * ONLY `ok` IS EVER THE SAME. A failure carries a message, and two failures
+ * that read alike are still two separate answers about a live tmux -- and
+ * `unavailable` in particular is the one state the operator most needs to see
+ * re-asserted. The caret is part of the comparison because the caret moving IS
+ * the screen changing: it is what a character typed at a prompt moves first.
+ */
+export function sameScreen(previous: PaneView | null, next: PaneView): boolean {
+  if (previous === null || previous.kind !== 'ok' || next.kind !== 'ok') return false;
+  if (previous.name !== next.name || previous.text !== next.text) return false;
+  const a = previous.cursor;
+  const b = next.cursor;
+  if (a.kind !== b.kind) return false;
+  return a.kind !== 'at' || b.kind !== 'at' || (a.column === b.column && a.row === b.row);
+}
+
+/**
  * What the cursor's cell looks like: a solid block in the scheme's `cursor`
  * colour, the character in it drawn in `cursorAccent`. It WAS `bg-ink
  * text-panel` -- reverse video off the app's own pair -- and moved onto the
@@ -573,7 +626,14 @@ export function TerminalTab({
       if (read === undefined || projectId === null) return;
       read(projectId, rowId)
         .then((next) => {
-          if (mine()) setView(next);
+          // AN UNCHANGED SCREEN IS NOT A STATE CHANGE. Returning the state it
+          // was given makes React bail out of the whole re-render -- the
+          // functional form rather than a ref so that the comparison is
+          // against what is actually on screen, and so that this callback
+          // keeps no dependency on `view` (one would restart the interval
+          // below on every read). See `sameScreen` for what it costs and
+          // saves.
+          if (mine()) setView((shown) => (sameScreen(shown, next) ? shown : next));
         })
         .catch((cause: unknown) => {
           // A rejected bridge call is vam not having asked. Reporting it as an
@@ -659,20 +719,13 @@ export function TerminalTab({
     activeTerminalFontSize,
   );
   /**
-   * WHETHER THE SCREEN IS CAPPED AT A READABLE WIDTH, read the same way and
-   * for the same reason as the size above it — `prefs/view-width.ts` carries
-   * the argument, and the half that belongs here is that eighty of THIS view's
-   * characters is a COLUMN COUNT. Capping the box is the whole mechanism: the
-   * box shrinks, the observer below fires, `measurePane` divides the smaller
-   * box by the same advance, and tmux is told the smaller count -- two thirds
-   * of what fit, and never fewer than eighty, because the cap lets go of a
-   * pane too narrow for two thirds of it to hold eighty.
+   * THERE IS NO `narrowViews` HERE ANY MORE, and the absence is deliberate
+   * enough to name. This component subscribed to it and put the result on its
+   * own `max-width`; the operator has since asked for the terminal to be the
+   * one view that setting does not reach ("even in narrow mode, the terminal
+   * still needs full width"), so the subscription went with the cap. The
+   * mechanism is described where the element used to carry it, below.
    */
-  const narrowViews = useSyncExternalStore(
-    subscribeNarrowViews,
-    activeNarrowViews,
-    activeNarrowViews,
-  );
   /**
    * THE COLOURS THE SCREEN IS DRAWN IN, read the same way -- and this one IS
    * only paint, which is why it is worth saying why it is a React value at
@@ -716,6 +769,51 @@ export function TerminalTab({
       ),
     [view],
   );
+
+  /**
+   * How tall the pane's content was the last time this ran. `null` until the
+   * first screen is drawn -- see `atBottom`, which is where both values mean
+   * something.
+   */
+  const drawnHeight = useRef<number | null>(null);
+
+  /**
+   * STICK TO THE BOTTOM WHILE OUTPUT IS LIVE, AND ONLY THEN.
+   *
+   * There was nothing to do here until this month, because there was nothing
+   * to scroll: `capture-pane` answered with the visible screen and the window
+   * was sized to exactly the rows the box could show, so `scrollHeight` was
+   * `clientHeight` and every read redrew the same rectangle. Now that the
+   * capture carries five hundred lines of scrollback above the screen
+   * (`sources/tmux/argv.ts`), the pane has a position -- and a terminal that
+   * jumps somewhere else on every poll is worse than one that cannot scroll.
+   *
+   * A LAYOUT EFFECT, not an effect: it runs after React has put the new lines
+   * in the DOM and BEFORE the browser paints, so the operator never sees the
+   * frame where the pane is at the old offset in the new content.
+   *
+   * ON `lines` AND ON THE SIZE. `lines` changes only when the capture really
+   * changed (`sameScreen`), which is what makes this cheap; `fontSize` is in
+   * the list because it moves the content height without changing a line, and
+   * the height this remembers has to follow it or the next comparison is made
+   * against a screen drawn at the other size.
+   *
+   * WHAT THIS DELIBERATELY DOES NOT DO. Once the session is more than five
+   * hundred lines deep the window slides: new output pushes the oldest line
+   * out of the capture, so a scrolled-back operator's fixed `scrollTop` shows
+   * slightly earlier content on each read. Correcting for that needs the count
+   * of lines that left, which is not in the DOM and would have to be carried
+   * from main; it is left undone rather than guessed at, and it is bounded by
+   * the output rate of the pane being read.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read here, it is read by the LAYOUT this measures -- the content height moves when the type does, and the remembered height has to move with it
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    if (pane === null) return;
+    const row = rulerRef.current?.getBoundingClientRect().height ?? 0;
+    if (atBottom(drawnHeight.current, pane, row)) scrollPane(pane, 'bottom', row);
+    drawnHeight.current = pane.scrollHeight;
+  }, [lines, fontSize]);
 
   /**
    * Whether the pane has the keyboard -- ANYWHERE INSIDE IT, which since the
@@ -1295,31 +1393,28 @@ export function TerminalTab({
        -- is behaviour, not text: a key vam cannot deliver is not cancelled,
        so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
        still draws its own line, which is not one of the two removed. */
-    /* AND THE OPERATOR'S WIDTH CHOICE LANDS HERE, on the tab as a whole rather
-       than on the screen alone, so the status rule stays the width of the
-       screen it belongs to.
+    /* AND THE OPERATOR'S WIDTH CHOICE DOES NOT LAND HERE -- THIS VIEW IS THE
+       EXCEPTION, on their own instruction: "even in narrow mode, the terminal
+       still needs full width."
 
-       WHY THE FACE AND THE SIZE ARE ON THIS ELEMENT. The cap is written in
-       `ch` -- eighty of them, `prefs/view-width.ts` argues why -- and `ch`
-       resolves against the element's OWN font. Every child below re-declares
-       both (the pane inline, the status rule through `text-meta`, the two
-       sentences through `font-sans`), so this declaration paints nothing at
-       all: it exists so that one cell here is one cell down there. Computing
-       the pixels instead would mean multiplying the size by a monospace RATIO,
-       which is precisely the mistake `terminal-size.ts`'s header records
-       paying for -- "out by a column every seventeen".
+       A `max-width` of two thirds of the pane stood on this element, built in
+       `ch` off `prefs/view-width.ts` so that its floor was eighty COLUMNS.
+       It is gone, and the reason it had to go rather than be tuned is that a
+       cap is not a margin here: the box shrinks, the `ResizeObserver` below
+       fires, `measurePane` divides the smaller box, and tmux is told a smaller
+       column count -- which RE-WRAPS THE SCREEN OF A RUNNING AGENT. Every
+       other view the setting reaches is prose, where the only thing narrowing
+       costs is white space on either side. This one narrows somebody's work.
 
-       NOTHING TELLS THE MEASUREMENT ABOUT THIS, and that is correct rather
-       than an omission: unlike a font-size change, a cap change MOVES THIS
-       BOX, so the `ResizeObserver` the measuring effect installs fires on its
-       own and tmux is told the new column count by the ordinary path. */
+       THE FACE AND THE SIZE STAY. The size is the operator's
+       (`prefs/terminal-font.ts`) and has to be on the element the pane
+       inherits from; `font-mono` makes the tab's default face the terminal's,
+       so anything drawn in it that does not say otherwise is monospace -- the
+       two English sentences below say otherwise, by name. */
     <div
       data-terminal
       className="relative mx-auto flex w-full min-h-0 flex-1 flex-col gap-1.5 font-mono"
-      style={{
-        fontSize: `${fontSize}px`,
-        maxWidth: narrowViews ? NARROW_TERMINAL_MAX_WIDTH : undefined,
-      }}
+      style={{ fontSize: `${fontSize}px` }}
     >
       {/* THE THIRD EMPTY CASE, and the one `not-vam`/`unavailable` do not
           cover: a pane vam DID reach, showing nothing. That is a real screen

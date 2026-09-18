@@ -1,11 +1,17 @@
 /**
- * HOW WIDE A VIEW IS ALLOWED TO BE — and why one flag covers four of them.
+ * HOW WIDE A VIEW IS ALLOWED TO BE — and why one flag covers three of them.
  *
  * The operator's ask, translated: "a setting for whether the width of the
  * Response view, Terminal, PRs and Agents is full-pane or narrowed". Those
- * four views fill their pane today, and on a wide monitor a line of the
- * agent's answer runs past a hundred characters, which is a length the eye
- * loses its place returning from.
+ * views fill their pane today, and on a wide monitor a line of the agent's
+ * answer runs past a hundred characters, which is a length the eye loses its
+ * place returning from.
+ *
+ * IT COVERED FOUR AND NOW COVERS THREE. The operator used the build and took
+ * the Terminal back out: "even in narrow mode, the terminal still needs full
+ * width." The section below that argued it in is kept, rewritten, because the
+ * reasoning it records is what makes the exception legible rather than
+ * arbitrary.
  *
  * ── THE RULE, AND THE TWO IT REPLACED ────────────────────────────────────
  * TWO THIRDS OF THE PANE, WHILE TWO THIRDS OF THE PANE IS AT LEAST EIGHTY
@@ -72,21 +78,30 @@
  * rule change: a fraction of a pane needs no character measurement, but the
  * floor under it does, and the floor is the half that keeps the phone whole.
  *
- * ── WHY THE TERMINAL FOLLOWS THE SAME SENTENCE ───────────────────────────
- * It was worth asking whether it should, because eighty COLUMNS was the
- * strongest part of the old design: a terminal's width is not a reading width,
- * it is a composition width, and eighty is what every CLI that draws a box
- * assumes. The answer is that the sentence is unchanged for it — two thirds of
- * the pane, while that is at least eighty of ITS characters, which are cells.
- * The alternative was to leave it at eighty columns while the prose views went
- * to two thirds, and that inverts what the operator is looking at: at 12.5px
- * the narrowed terminal is 606px where the narrowed prose column would be 890,
- * so the one view they did not complain about would become the narrow one. The
- * eighty columns are not lost; they are the threshold, and the narrowest
- * terminal vam ever narrows TO is exactly eighty of them. A cell is wider than
- * a character of prose (7.5px against 6 at 12.5px), so the terminal's
- * threshold sits at a wider pane than the prose views' — which is the rule
- * applied to its own unit and not a second opinion about the width.
+ * ── WHY THE TERMINAL DOES *NOT* FOLLOW THE SAME SENTENCE ─────────────────
+ * It followed it for one release. The sentence was applied in the terminal's
+ * own unit — two thirds of the pane while that is at least eighty CELLS — and
+ * the argument for it was symmetry: leaving the terminal at a flat eighty
+ * columns while the prose views went to two thirds would have made the one
+ * view the operator did not complain about the narrowest thing on screen (606px
+ * against 890px at 12.5px).
+ *
+ * THE OPERATOR ANSWERED THAT WITH USE, and the answer is this file's rule now:
+ * "even in narrow mode, the terminal still needs full width." What the
+ * symmetry argument missed is that the two views are not narrowed by the same
+ * ACT. A prose column is narrowed by leaving white space either side of text
+ * the app itself lays out, and nothing outside vam notices. The Terminal is
+ * narrowed by telling tmux a smaller number of columns — the tab measures its
+ * box, divides by a cell and sends the count (`panels/TerminalTab.tsx`) — and
+ * tmux re-wraps the screen of a session that is still running. The setting
+ * therefore reached out of vam and reformatted somebody's work: their agent's
+ * tables folded, its progress lines wrapped, and a screen composed for the
+ * pane came back composed for two thirds of it. That is not a reading
+ * preference expressed in a different unit; it is a different thing happening.
+ *
+ * So the Terminal is full-pane always, and `TerminalTab.tsx` carries no cap at
+ * all. Nothing is left here to configure it with — see where the two terminal
+ * constants stood, below.
  *
  * ── WHY THE STEP IS CSS AND NOT AN OBSERVER ──────────────────────────────
  * The rule compares the pane against the floor, and it was tempting to do that
@@ -94,12 +109,12 @@
  * a second one on the pane could toggle a class. It is not done there because
  * the comparison is between quantities THIS FILE HAS ARGUED MUST STAY IN THE
  * BROWSER'S UNITS: the prose floor is measured pixels plus `1.75rem` of
- * padding, the terminal's is `80.5ch` plus `1.5rem` and a border, and a pane
- * is whatever a percentage resolves against. An observer would have to turn
- * every one of those into a number in JS — a `rem` into 16, a `ch` into "the
- * size times a monospace ratio", which is precisely the arithmetic
- * `terminal-size.ts` records being out by a column every seventeen — and then
- * write the answer back a frame after the pane moved. A `max-width` that
+ * padding, and a pane is whatever a percentage resolves against. An observer
+ * would have to turn every one of those into a number in JS — a `rem` into 16,
+ * and, while the terminal was still capped, a `ch` into "the size times a
+ * monospace ratio", which is precisely the arithmetic `terminal-size.ts`
+ * records being out by a column every seventeen — and then write the answer
+ * back a frame after the pane moved. A `max-width` that
  * contains the comparison resolves in the same layout pass as the pane, on the
  * first frame, with no state, no listener and nothing to disconnect. The cost
  * is one expression that reads strangely, and `narrowMaxWidth` carries the
@@ -351,50 +366,29 @@ export function narrowProseMaxWidth(advance: number | null): string | undefined 
 }
 
 /**
- * The Terminal's floor — eighty COLUMNS, and the half cell and the chrome
- * that make the content box come out at exactly eighty.
+ * THE TERMINAL HAS NO CAP HERE ANY MORE, AND THAT IS A DECISION RATHER THAN AN
+ * OMISSION.
  *
- * `ch` IS THE BROWSER MEASURING FOR US, and that is the whole argument for
- * this expression. `terminal-size.ts` warns that a plausible-looking
- * width-to-height ratio "would have been out by a column every seventeen", so
- * a pixel maximum computed from `fontSize * 0.63` is exactly the mistake that
- * file already paid for. `ch` is the advance of `0` as the engine itself
- * measures it, and in a monospace face every glyph has that advance — so
- * `80ch` IS eighty columns, at 10.5px and at 14px alike, with nothing in this
- * repo doing the arithmetic. IT RESOLVES AGAINST THE ELEMENT'S OWN FONT, which
- * is why `TerminalTab.tsx` carries the pane's face and size on the element
- * this lands on even though every child re-declares both.
+ * Two constants stood at this line: `NARROW_TERMINAL_FLOOR`, eighty and a half
+ * `ch` plus the pane's own chrome, and `NARROW_TERMINAL_MAX_WIDTH`, the same
+ * `max(two thirds, floor)` step the prose views get, built from it. They were
+ * written with care — `ch` so that the floor was eighty COLUMNS measured by
+ * the engine rather than a pixel width guessed from a ratio — and the operator
+ * used the build and asked for the terminal to be the one view this setting
+ * does not reach: "even in narrow mode, the terminal still needs full width."
  *
- * THE HALF CELL IS ROUNDING SLACK, and it was measured rather than guessed:
- * `measurePane` divides `clientWidth`, which the engine rounds to an integer,
- * so an exact `80ch` lands a fraction of a pixel short at some sizes and
- * `Math.floor` charges a whole column for it — 79 at 10.5px. Half a cell can
- * never buy an eighty-first column (that would take a full one) and always
- * pays for the rounding. It still earns its place now that the floor is a
- * threshold: the narrowest terminal vam ever narrows to is two thirds of a
- * pane exactly one and a half floors wide, which is this floor, and 79
- * columns there would be the same defect at a different pane.
+ * WHY THE ASK IS RIGHT, and why nothing here should try to be clever about it
+ * later. Narrowing a prose view spends white space. Narrowing the Terminal
+ * spends a COLUMN COUNT: the tab measures its own box and tells tmux how many
+ * cells fit (`panels/TerminalTab.tsx`), and tmux re-wraps the screen of a
+ * session that is still running. Eighty columns of an agent's output is a
+ * different screen from a hundred and thirty, not a tidier one — the tables it
+ * prints fold, its progress lines wrap, and the operator did not ask for any
+ * of that when they asked for readable prose.
  *
- * THE `1.5rem + 2px` IS THE PANE'S OWN `px-3` AND ITS 1px BORDER, added for
- * the reason `narrowProseMaxWidth` adds its padding: the cap is a border
- * box and the measurement subtracts the padding again, so the two terms cancel
- * exactly and the content box is eighty cells wide.
+ * `narrowMaxWidth` stays, and so does `NARROW_FLOOR_CHARACTERS`: the prose
+ * views below still use both.
  */
-export const NARROW_TERMINAL_FLOOR = `calc(${NARROW_FLOOR_CHARACTERS + 0.5}ch + 1.5rem + 2px)`;
-
-/**
- * What the Terminal tab is given as its `max-width` — two thirds of its pane,
- * while that is at least eighty COLUMNS, and the whole pane below that.
- *
- * THE SAME SENTENCE THE PROSE VIEWS GET, built by the same function, in the
- * only unit a terminal has. The header argues why it did not stay at a flat
- * eighty columns; what matters at this line is that the floor is the eighty,
- * unchanged, and that the threshold it sets is measured off the face the
- * screen is really drawn in. `e2e/view-width-shots.mjs` reads the column
- * count vam actually sent tmux, at every offered size, rather than trusting
- * any of this.
- */
-export const NARROW_TERMINAL_MAX_WIDTH = narrowMaxWidth(NARROW_TERMINAL_FLOOR);
 
 /**
  * Full pane, as it shipped.

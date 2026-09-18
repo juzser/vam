@@ -39,11 +39,11 @@
  *   - the step is a ramp with a gain, not a discontinuity — CSS math has none
  *     — and whether the ramp is narrower than a layout unit is a claim about
  *     the engine, held here by sweeping a real pane across the boundary.
- *   - the terminal's floor is written in `ch`, which resolves against the
- *     ELEMENT'S OWN FONT. Moved onto a box drawn in the app's sans face it
- *     silently means the advance of a proportional `0` — 8% wider than a cell
- *     here — and the "eighty columns" comes out at 84 with every unit
- *     assertion green.
+ *   - the terminal's exemption is an ABSENCE, and a unit test can only read
+ *     the absence off one element's inline style. Whether the box it is drawn
+ *     in is really the whole of its container, and whether the count vam sent
+ *     tmux really follows THAT box rather than a capped one, are two
+ *     rectangles and an engine's rounding.
  *   - the pane's reading size is a scope that re-declares two custom
  *     properties. A selector that matches nothing reads exactly like one that
  *     works; only a computed `font-size` on a real element says which.
@@ -69,26 +69,30 @@
  *      900px window — whose pane sits squarely between one floor and one and a
  *      half, where the old rule pinned the column — the capped body must be
  *      the very same width as the uncapped one.
- *   5. THE TERMINAL FOLLOWS THE SAME SENTENCE. At a wide pane it is two thirds
- *      of its containing block — more than eighty columns, and within 3% of
- *      the prose column (2.1% measured: the two caps resolve inside and
- *      outside the body's gutter). At a 1050px window, in the band where the
- *      old rule pinned eighty, the cap lets go and vam asks tmux for the
- *      columns that fit; bisected to ITS threshold, the narrowest narrowed
- *      terminal is exactly eighty columns, at every offered text size.
- *      Full-pane, the count is the box over the advance, unchanged.
+ *   5. THE TERMINAL DOES NOT FOLLOW THE SENTENCE AT ALL — it is the one view
+ *      this setting does not reach, on the operator's instruction after the
+ *      release that made it: "even in narrow mode, the terminal still needs
+ *      full width." At four window widths spanning the old rule's whole range
+ *      and at every offered text size, the narrowed terminal must be its WHOLE
+ *      containing block, vam must ask tmux for the columns that fit it, and
+ *      narrowed and full must produce the identical rectangle AND the
+ *      identical column count. The last of those is the one that matters: a
+ *      column count is not a margin, it is sent to tmux, which re-wraps the
+ *      screen of a session that is still running.
  *   6. THE PANE'S TEXT FOLLOWS THE READING SIZE. At `out` 15 and 20 the
  *      in-bubble prompt, the question text, the option labels and the composer
  *      must scale, each by ITS OWN share of the scale; `text-meta` chrome must
  *      not; and at `out` 10 nothing may shrink below the shipped scale.
  *   7. THE SPLIT, WHICH IS WHERE THE OPERATOR MET THE DEFECT. One pane at
- *      1440, then `zv` into two, then at 2000 into three, and the terminal
- *      split the same way at 3100: every pane's column must be exactly two
- *      thirds of its pane or exactly the whole of it, decided by the threshold
- *      measured in 3, and the three-way layout must show both answers at once.
- *      A two-pane split at 1440 is the operator's own case — each pane wider
- *      than the floor and narrower than one and a half of it — and it is the
- *      screenshot committed under `docs/ui/narrow-split-two.png`.
+ *      1440, then `zv` into two, then at 2000 into three: every prose pane's
+ *      column must be exactly two thirds of its pane or exactly the whole of
+ *      it, decided by the threshold measured in 3, and the three-way layout
+ *      must show both answers at once. A two-pane split at 1440 is the
+ *      operator's own case — each pane wider than the floor and narrower than
+ *      one and a half of it — and it is the screenshot committed under
+ *      `docs/ui/narrow-split-two.png`. The terminal is split the same way at
+ *      3100 and must be the WHOLE of its pane in all three layouts, which is
+ *      the same sentence as 5 at three more pane widths.
  *
  * ── WHAT IS BEHIND THE PAGE ───────────────────────────────────────────────
  * The prose views run on `?demo=1`, vam's own invented fixture. The Terminal
@@ -98,35 +102,43 @@
  * real is behind it. Every string in the stub is invented — no session id,
  * path, host or branch here belongs to a real machine.
  *
- * Falsified, each mutation alone and restored after, against a real build:
+ * Falsified, each mutation alone and restored after, against a real build.
+ * THE FIRST FOUR WERE RUN AGAINST THE PROSE RULE AND STILL HOLD FOR IT; the
+ * terminal lines in them named checks that no longer exist, and are marked:
  *   - put the old `max(fraction, floor)` back -> 25 checks redden. `at a pane
  *     between one and one and a half floors the cap changes no rectangle`
  *     (468px against a 635px pane); the bisection finds the FLOOR binding
  *     instead of the step, so `at the threshold the body is two thirds of the
  *     pane` reddens at 13 and 20 (468px in a 470px pane) and at 10 the range
- *     no longer brackets anything (404px in a 435px pane at the low end); the
- *     1050px terminal checks redden at every text size (the tab is 632px in a
- *     757px box and tmux is asked for 80); and in the split both 1440 panes
- *     come out `between` — 468px in 587px panes.
+ *     no longer brackets anything (404px in a 435px pane at the low end). (The
+ *     terminal half of that run — the 1050px band checks, and both 1440 split
+ *     panes coming out `between` — was against the cap this view no longer
+ *     has.)
  *   - move the threshold to 1.25 floors -> 14 checks redden, from the other
  *     side: the bisection finds the step at a 585px pane, where two thirds is
  *     60.3 characters, so `the narrowest column this setting draws is about
- *     eighty characters` reddens; the terminal's `exactly 80 columns` reads 66
- *     at every size; the 900px pane narrows to 423px; and the 1440 split's
- *     587px panes land 2px from the moved threshold, which the 20px-margin
- *     check refuses to judge.
+ *     eighty characters` reddens, and the 900px pane narrows to 423px. (The
+ *     terminal's `exactly 80 columns` reading 66, likewise.)
  *   - size the ruler by `--text-control` alone -> `the threshold follows the
  *     out stepper down to 10px` reddens (702px at 10 against 702px at 13).
  *   - size it by `--vam-out-font-size` alone -> `and stops following it up
  *     past the pane's smallest step` reddens (675px of content against 96% of
  *     691).
- *   - take `font-mono` off the element the terminal's cap lands on -> every
- *     `at its threshold vam asks tmux for exactly 80 columns at …` reddens:
- *     `ch` then means the sans face's `0`, and the count is 84 at every size.
- *   - keep the flat eighty-column floor for the terminal alone (the old rule,
- *     quietly kept for one view) -> `at a wide pane the narrowed terminal is
- *     two thirds of its containing block` reddens at every size, and so do the
- *     1050px band checks.
+ *   - AND FOR THE TERMINAL'S EXEMPTION, run when it was made: put a
+ *     `max-width` back on `[data-terminal]` (the removed
+ *     `NARROW_TERMINAL_MAX_WIDTH`, rebuilt) -> 11 checks redden — the four
+ *     1600px `is its WHOLE box`, the four `the setting changes nothing about
+ *     it` (112 columns in 871px against 170 in 1307px at 12.5px), `wider than
+ *     the narrowed prose column` (871.3px against 890.0px — the old cap made
+ *     them nearly the same rectangle, which is what that check exists to
+ *     notice), and the one- and two-pane splits at 3100.
+ *
+ *     THE OTHER WIDTHS STAY GREEN UNDER IT, and that is the measurement
+ *     talking rather than a gap: at 1050px, 900px, 800px and in a three-way
+ *     split the old rule let go of its own accord, so the restored cap draws
+ *     the identical rectangle there. Widths where the two rules AGREE cannot
+ *     tell them apart, which is exactly why this block sweeps four of them
+ *     instead of trusting one.
  *   - take the cap off the composer -> `narrowed, the composer bar is the same
  *     column the transcript is` reddens.
  *   - drop `Agents` from `narrowsAsProse` -> the agents rectangle check reddens.
@@ -848,161 +860,93 @@ const readTerminal = () =>
     };
   });
 
-// AT A WIDE PANE: two thirds, which is more than eighty columns, and within 3%
-// of the prose column at the same pane — the two caps resolve their
-// percentage against different boxes (the terminal's floor is in `ch` and can
-// only live on the mono-faced element INSIDE the body's gutter, so its two
-// thirds is of the content box: 871px against the prose's 890px at 1335px,
-// 2.1% apart), so they are held near each other rather than pinned equal.
-const wideReport = [];
-for (const size of SIZES) {
-  await openTerminal(size, true);
-  const seen = await readTerminal();
-  wideReport.push({ size, columns: seen.columns, tab: seen.tabWidth });
-  check(
-    `at a wide pane the narrowed terminal is two thirds of its containing block at ${size}px`,
-    near(seen.tabWidth, seen.containerWidth * FRACTION, 1),
-    `tab ${seen.tabWidth}px in a ${seen.containerWidth}px content box`,
-  );
-  check(
-    `and that is more than eighty columns at ${size}px`,
-    seen.columns !== null && seen.columns > FLOOR_CHARACTERS,
-    `vam asked for ${seen.columns}`,
-  );
-  check(
-    `and within 3% of the prose column at ${size}px`,
-    near(seen.tabWidth, narrow.boxWidth, narrow.boxWidth * 0.03),
-    `terminal ${seen.tabWidth}px against prose ${narrow.boxWidth}px`,
-  );
-  if (size === 12.5) {
+/**
+ * THE TERMINAL IS THE EXCEPTION, AND IT IS MEASURED AS ONE.
+ *
+ * WHAT STOOD HERE. Three blocks of checks proving the terminal followed the
+ * same sentence as the prose views in its own unit: two thirds of a wide pane,
+ * the cap letting go in the band between one floor and one and a half, and --
+ * bisected at every offered text size -- exactly eighty columns at the
+ * threshold, which is where the `ch` floor was checked in the unit it was
+ * written in. They passed, and the operator used the build and took the view
+ * out of the setting: "even in narrow mode, the terminal still needs full
+ * width."
+ *
+ * WHAT REPLACES THEM IS ONE SENTENCE, MEASURED HARDER. Narrowing changes
+ * NOTHING about the terminal -- not its rectangle and not the column count vam
+ * sends tmux -- at every window width that used to decide the old rule and at
+ * every text size. The two states are compared to each other rather than to a
+ * number, which is what makes this a check on the setting rather than on the
+ * layout: a cap that came back in any form, at any of these widths, moves one
+ * of the two and not the other.
+ *
+ * THE WIDTHS ARE THE OLD RULE'S OWN. 1600px is where two thirds used to bind;
+ * 1050px is the band where the floor used to pin eighty in the middle of the
+ * box (the operator's split, at a window); 900px and 800px are below every
+ * size's threshold, where the cap already let go -- kept so that "narrowing
+ * changes nothing" is measured on both sides of the boundary it no longer has
+ * and cannot quietly become "the window was never wide enough".
+ */
+const terminalWidths = [1600, 1050, 900, 800];
+const terminalReport = [];
+for (const width of terminalWidths) {
+  await term.setViewportSize({ width, height: 800 });
+  for (const size of SIZES) {
+    await openTerminal(size, false);
+    const full = await readTerminal();
+    await openTerminal(size, true);
+    const narrowed = await readTerminal();
+    const fit = Math.floor(narrowed.content / narrowed.drawn);
+    terminalReport.push({
+      width,
+      size,
+      tab: narrowed.tabWidth,
+      container: narrowed.containerWidth,
+      columns: narrowed.columns,
+      full: full.columns,
+    });
+    check(
+      `at a ${width}px window the narrowed terminal is its WHOLE box at ${size}px`,
+      near(narrowed.tabWidth, narrowed.containerWidth, 1),
+      `tab ${narrowed.tabWidth}px in a ${narrowed.containerWidth}px content box`,
+    );
+    check(
+      `and vam asks tmux for the ${fit} columns that fit it at ${size}px`,
+      narrowed.columns === fit,
+      `vam asked for ${narrowed.columns}; the box is ${narrowed.content}px at ${narrowed.drawn}px per cell`,
+    );
+    // THE CHECK THE WHOLE BLOCK IS FOR. A column count is not a margin: it is
+    // sent to tmux, which re-wraps the screen of a session that is still
+    // running. The setting must not move it by one.
+    check(
+      `and the setting changes nothing about it — ${size}px at ${width}px, narrowed and full`,
+      narrowed.columns === full.columns && near(narrowed.tabWidth, full.tabWidth, 1),
+      `narrowed: ${narrowed.columns} columns in ${narrowed.tabWidth}px; full: ${full.columns} columns in ${full.tabWidth}px`,
+    );
+  }
+  if (width === 1600) {
+    await openTerminal(12.5, true);
     await term.screenshot({ path: `${outDir}/view-width-terminal-narrow.png` });
     console.log(`${outDir}/view-width-terminal-narrow.png`);
-  }
-}
-console.log('terminal, wide pane:', JSON.stringify(wideReport));
-
-// AT A MID PANE: THE BAND, where the old rule pinned eighty. A 1050px window
-// puts the body's content box at ~757px, which is wider than every offered
-// size's floor (the 14px one is the widest at ~705px) and narrower than one
-// and a half of every one of them (the 10.5px threshold is the nearest at
-// ~802px) -- so at every size this is the band between one floor and one and a
-// half, the same band the operator met in a split. The old rule answered it
-// with eighty columns in the middle of the box; the step leaves the tab its
-// whole box and vam asks tmux for the columns that FIT, which is more than
-// eighty at every size. The window was chosen for the old rule's margins and
-// happens to sit inside the band at all four sizes, which is why it is kept.
-await term.setViewportSize({ width: 1050, height: 800 });
-const bandReport = [];
-for (const size of SIZES) {
-  await openTerminal(size, true);
-  const seen = await readTerminal();
-  const fit = Math.floor(seen.content / seen.drawn);
-  bandReport.push({ size, columns: seen.columns, tab: seen.tabWidth, container: seen.containerWidth, fit });
-  check(
-    `in the band the cap lets go at ${size}px — the tab is its whole box`,
-    near(seen.tabWidth, seen.containerWidth, 1),
-    `tab ${seen.tabWidth}px in a ${seen.containerWidth}px content box`,
-  );
-  check(
-    `and vam asks tmux for the ${fit} columns that fit at ${size}px, more than ${FLOOR_CHARACTERS}`,
-    seen.columns === fit && fit > FLOOR_CHARACTERS,
-    `vam asked for ${seen.columns}; the box is ${seen.content}px at ${seen.drawn}px per cell`,
-  );
-}
-console.log('terminal, in the band:', JSON.stringify(bandReport));
-
-/**
- * AT ITS THRESHOLD: EXACTLY EIGHTY. The narrowest terminal vam ever narrows to
- * is two thirds of a pane exactly one and a half of its floor wide, which is
- * the floor -- eighty and a half cells plus the pane's chrome -- so at the
- * narrowest window that narrows the tab at all, the column count sent to
- * tmux must be exactly eighty. This is where the `ch` floor is checked in the
- * unit it is written in, at every offered size: the threshold moves with the
- * cell, and the count at it must not.
- *
- * BISECTED, like the prose threshold, and for the same reason: the threshold
- * is a property of the face the screen is really drawn in. The predicate is
- * the tab's rectangle against its containing block, which resolves in the
- * same layout pass as the resize; only the column count is debounced, so it
- * is read once, after the bisection settles on the threshold window.
- */
-const readTab = () =>
-  term.evaluate(() => {
-    const tab = document.querySelector('[data-terminal]');
-    const body = tab.parentElement;
-    const style = getComputedStyle(body);
-    const px = (value) => Number.parseFloat(value) || 0;
-    return {
-      box: tab.getBoundingClientRect().width,
-      pane: body.clientWidth - px(style.paddingLeft) - px(style.paddingRight),
-    };
-  });
-const terminalThresholds = [];
-for (const size of SIZES) {
-  await term.setViewportSize({ width: 800, height: 800 });
-  await openTerminal(size, true);
-  const at = async (width) => {
-    await term.setViewportSize({ width, height: 800 });
-    await term.waitForTimeout(60);
-    const seen = await readTab();
-    return { width, ...seen, narrowed: seen.box < seen.pane - 1 };
-  };
-  // 800..1700: content boxes of ~507..1407px, bracketing one and a half of
-  // every size's floor (~802px at 10.5, ~1057px at 14 here).
-  let lo = await at(800);
-  let hi = await at(1700);
-  check(
-    `terminal at ${size}px: the range brackets the threshold — whole at 800px, narrowed at 1700px`,
-    !lo.narrowed && hi.narrowed,
-    `at 800: tab ${lo.box}px in ${lo.pane}px; at 1700: tab ${hi.box}px in ${hi.pane}px`,
-  );
-  if (!(!lo.narrowed && hi.narrowed)) continue;
-  while (hi.width - lo.width > 1) {
-    const mid = await at(Math.floor((lo.width + hi.width) / 2));
-    if (mid.narrowed) hi = mid;
-    else lo = mid;
-  }
-  // The count is debounced; settle on the threshold window and read it.
-  await term.setViewportSize({ width: hi.width, height: 800 });
-  await term.waitForTimeout(600);
-  const seen = await readTerminal();
-  terminalThresholds.push({ size, window: hi.width, tab: seen.tabWidth, container: seen.containerWidth, columns: seen.columns, below: lo });
-  check(
-    `terminal at ${size}px: one pixel of window below its threshold the tab is its whole box`,
-    near(lo.box, lo.pane, 1),
-    `tab ${lo.box}px in a ${lo.pane}px box at a ${lo.width}px window`,
-  );
-  check(
-    `terminal at ${size}px: at its threshold the tab is two thirds of its box`,
-    near(seen.tabWidth, seen.containerWidth * FRACTION, 1),
-    `tab ${seen.tabWidth}px in a ${seen.containerWidth}px box at a ${hi.width}px window`,
-  );
-  check(
-    `and at its threshold vam asks tmux for exactly ${FLOOR_CHARACTERS} columns at ${size}px`,
-    seen.columns === FLOOR_CHARACTERS,
-    `vam asked for ${seen.columns}; the box is ${seen.content}px at ${seen.drawn}px per cell`,
-  );
-}
-console.log('terminal thresholds:', JSON.stringify(terminalThresholds.map(({ below, ...rest }) => rest)));
-
-// FULL-PANE: the count is still the box over the measured advance, unchanged
-// from what shipped. Without this, "narrowed" could be the only state that
-// works.
-await term.setViewportSize({ width: 1600, height: 900 });
-for (const size of SIZES) {
-  await openTerminal(size, false);
-  const wide = await readTerminal();
-  const want = Math.floor(wide.content / wide.drawn);
-  check(
-    `full-pane, vam still asks for the ${want} columns that fit at ${size}px`,
-    wide.columns === want,
-    `vam asked for ${wide.columns} over a ${wide.content}px box at ${wide.drawn}px per cell`,
-  );
-  if (size === 12.5) {
+    await openTerminal(12.5, false);
     await term.screenshot({ path: `${outDir}/view-width-terminal-full.png` });
     console.log(`${outDir}/view-width-terminal-full.png`);
   }
 }
+console.log('terminal, narrowed against full:', JSON.stringify(terminalReport));
+
+// AND IT IS STILL NOT THE PROSE COLUMN. The prose views ARE narrowed at a wide
+// pane, so a terminal that matched their rectangle would be a terminal that
+// had quietly kept a cap of its own -- measured against the column this file
+// already read off the page in section 1, at the same 1600px window.
+await term.setViewportSize({ width: 1600, height: 800 });
+await openTerminal(12.5, true);
+const wideTerminal = await readTerminal();
+check(
+  'the narrowed terminal is wider than the narrowed prose column, not equal to it',
+  wideTerminal.tabWidth > narrow.boxWidth * 1.1,
+  `terminal ${wideTerminal.tabWidth}px against prose ${narrow.boxWidth}px`,
+);
 await term.close();
 
 /* ── 6: THE PANE'S TEXT FOLLOWS THE READING SIZE ─────────────────────────── */
@@ -1261,18 +1205,17 @@ await shootPanes(split, 'narrow-split-three');
 await split.close();
 
 /**
- * AND THE TERMINAL, split the same way. Its floor is in cells, which are wider
- * than characters, so both its floor and its threshold sit at a wider pane
- * than the prose views' (~632px and ~948px of content box at 12.5px here,
- * against ~468 and ~702): 3100 is where a two-way split (~1417px panes) is
- * past the threshold with room to spare and a three-way split's quarter pane
- * (~709px) is IN THE BAND — wider than the floor, narrower than one and a
- * half of it — which is the operator's case for this view, and the one a
- * 2600px window missed on the first run: its 584px quarter pane was under the
- * floor, whole for the reason the phone is whole, and asked tmux for 70. The
- * stub has one session, so each `zv` leaves an empty pane behind and the
- * terminal is always in the newest, smallest one; the threshold is read off
- * the bisection above at the same size rather than assumed.
+ * AND THE TERMINAL, split the same way — which for this view is now a check
+ * that the split changes NOTHING, because the setting no longer reaches it.
+ *
+ * 3100 IS KEPT FROM WHEN IT DID, and what made it the right window then makes
+ * it the right one now: a two-way split gives ~1417px panes and a three-way
+ * split a ~709px quarter pane, and those brackets are exactly where the old
+ * rule's threshold fell — so a cap returning in any form shows in one of these
+ * three layouts. (A 2600px window was tried first and missed the band
+ * entirely: its 584px quarter pane was under the floor and whole for the
+ * reason the phone is whole.) The stub has one session, so each `zv` leaves an
+ * empty pane behind and the terminal is always in the newest, smallest one.
  */
 const termSplit = await browser.newPage({ viewport: { width: 3100, height: 900 } });
 termSplit.on('pageerror', (err) => console.error('PAGE ERROR:', err));
@@ -1397,56 +1340,54 @@ const readTerminalPanes = (target) =>
       };
     });
   });
-const twelveAndAHalf = terminalThresholds.find((t) => t.size === 12.5);
-const TERMINAL_THRESHOLD_PX = twelveAndAHalf === undefined ? Number.NaN : twelveAndAHalf.container;
-/** The terminal's floor at 12.5px as the page really drew it: two thirds of
- *  its threshold box -- eighty and a half cells and the pane's chrome. */
-const TERMINAL_FLOOR_PX = TERMINAL_THRESHOLD_PX * FRACTION;
+/**
+ * IN A SPLIT, THE TERMINAL IS ITS WHOLE PANE — every pane, every width.
+ *
+ * WHAT THIS CHECKED BEFORE. Each pane was classified against the terminal's
+ * own threshold, read off the bisection above: past it the tab had to be two
+ * thirds, under it the whole pane, and a pane within 20px of the boundary was
+ * refused as unjudgeable. The threshold is gone with the cap
+ * (`prefs/view-width.ts`), so there is one state left and no boundary to be
+ * near — which makes this block SHORTER and STRICTER at once: "whole" was
+ * previously the expected answer for one of the three layouts and is now the
+ * expected answer for all of them, at pane widths spanning 1417px down to
+ * ~709px.
+ *
+ * 3100 IS KEPT rather than retuned. It was chosen so that a two-way split
+ * (~1417px panes) sat past the old threshold with room to spare and a
+ * three-way split's quarter pane (~709px) sat in the band between one floor
+ * and one and a half — the operator's own case. Those are still the three
+ * most interesting widths for this view; what has changed is that the answer
+ * no longer depends on which of them it is, which is the whole point.
+ */
 function checkTerminalLayout(label, panes, expect) {
-  const states = panes.map(classify);
   console.log(
     `${label}: ${panes
-      .map((p, i) => `pane ${i} ${p.pane}px` + (p.box === null ? ' (empty)' : `, tab ${p.box}px in ${p.container}px, ${p.columns} columns → ${states[i]}`))
+      .map((p, i) => `pane ${i} ${p.pane}px` + (p.box === null ? ' (empty)' : `, tab ${p.box}px in ${p.container}px, ${p.columns} columns`))
       .join('; ')}`,
   );
   check(`${label}: ${expect.panes} pane(s) were drawn`, panes.length === expect.panes, `${panes.length} panes`);
   check(
     `${label}: the terminal is in exactly one pane`,
     panes.filter((p) => p.box !== null).length === 1,
-    states.join(', '),
+    `${panes.filter((p) => p.box !== null).length} panes hold one`,
   );
   for (const p of panes) {
     if (p.container === null) continue;
-    const want = p.container >= TERMINAL_THRESHOLD_PX + 20 ? 'two-thirds' : p.container <= TERMINAL_THRESHOLD_PX - 20 ? 'whole' : null;
     check(
-      `${label}: the terminal's pane is not within 20px of its threshold`,
-      want !== null,
-      `container ${p.container}px against a threshold of ${TERMINAL_THRESHOLD_PX}px`,
+      `${label}: the terminal (${p.container}px) is its whole pane`,
+      near(p.box, p.container, 1),
+      `tab ${p.box}px; two thirds would be ${(p.container * FRACTION).toFixed(1)}px`,
     );
-    check(
-      `${label}: the terminal (${p.container}px, ${expect.state === 'whole' ? 'under' : 'past'} its threshold) is ${expect.state}`,
-      classify(p) === expect.state && want === expect.state,
-      `tab ${p.box}px; two thirds is ${(p.container * FRACTION).toFixed(1)}px`,
-    );
-    // In both states the count is the box vam was given over the cell it
-    // drew -- the cap works by shrinking the box, nothing else.
+    // The count is the box vam was given over the cell it drew. This is the
+    // half that reaches out of the app: a smaller box here would be a smaller
+    // number sent to tmux, and a running agent's screen re-wrapped to it.
     const fit = Math.floor(p.content / p.drawn);
     check(
-      `${label}: vam asked tmux for the ${fit} columns that fit the ${expect.state} box`,
+      `${label}: vam asked tmux for the ${fit} columns that fit the whole box`,
       p.columns === fit,
       `${p.columns} columns; the box is ${p.content}px at ${p.drawn}px per cell`,
     );
-    // And in both it is past eighty -- two thirds is only ever applied where
-    // it holds eighty, and a whole pane IN THE BAND holds more. The band is
-    // asserted, not assumed: under the floor a whole pane holds fewer, for the
-    // reason the phone does, and that would not be this view's defect.
-    if (expect.state === 'whole') {
-      check(
-        `${label}: the terminal's pane is wider than its floor, so this is the band`,
-        p.container > TERMINAL_FLOOR_PX + 20,
-        `container ${p.container}px against a floor of ${TERMINAL_FLOOR_PX.toFixed(1)}px`,
-      );
-    }
     check(
       `${label}: and those ${fit} columns are more than ${FLOOR_CHARACTERS}`,
       fit > FLOOR_CHARACTERS,
@@ -1454,19 +1395,19 @@ function checkTerminalLayout(label, panes, expect) {
     );
   }
 }
-checkTerminalLayout('terminal, one pane at 3100', await readTerminalPanes(termSplit), { panes: 1, state: 'two-thirds' });
+checkTerminalLayout('terminal, one pane at 3100', await readTerminalPanes(termSplit), { panes: 1 });
 // Focus back on vam's own keyboard before the chord: a focused terminal pane
 // would SEND `z` and `v` to the stub rather than split.
 await termSplit.locator(`[data-session-row="${STUB_SESSION}"]`).first().click();
 await termSplit.waitForTimeout(100);
 await splitChord(termSplit);
 await termSplit.waitForTimeout(500);
-checkTerminalLayout('terminal, two panes at 3100', await readTerminalPanes(termSplit), { panes: 2, state: 'two-thirds' });
+checkTerminalLayout('terminal, two panes at 3100', await readTerminalPanes(termSplit), { panes: 2 });
 await termSplit.locator(`[data-session-row="${STUB_SESSION}"]`).first().click();
 await termSplit.waitForTimeout(100);
 await splitChord(termSplit);
 await termSplit.waitForTimeout(500);
-checkTerminalLayout('terminal, three panes at 3100', await readTerminalPanes(termSplit), { panes: 3, state: 'whole' });
+checkTerminalLayout('terminal, three panes at 3100', await readTerminalPanes(termSplit), { panes: 3 });
 await termSplit.screenshot({ path: `${outDir}/view-width-terminal-split.png` });
 console.log(`${outDir}/view-width-terminal-split.png`);
 await termSplit.close();

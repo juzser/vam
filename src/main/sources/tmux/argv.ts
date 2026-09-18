@@ -276,7 +276,7 @@ export function hasSessionArgv(name: string): readonly string[] {
 export const VAM_CURSOR_MARK = '@vam-cursor';
 
 /**
- * WHAT VAM ASKS ABOUT THE CURSOR, and the three fields are the whole of it.
+ * WHAT VAM ASKS ABOUT THE CURSOR, and the four fields are the whole of it.
  *
  * `cursor_flag` first because it can veto the other two: it is 0 when a
  * program in the pane turned the cursor off (DECTCEM), and a caret drawn over
@@ -289,11 +289,60 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
  * a stranger's session for no gain -- and the fewer bytes of somebody's
  * terminal that cross this boundary for decoration, the better.
  *
- * MEASURED on tmux 3.7b: all three keys exist and expand, and a key tmux does
+ * `history_size` IS THE FOURTH, AND IT IS NOT ABOUT THE CURSOR -- it is what
+ * makes `cursor_y` usable once the capture below carries scrollback. That row
+ * counts from the top of the SCREEN, and a capture that begins `n` lines above
+ * the screen makes it `n` rows out; `spawn.ts` adds the offset back. It rides
+ * this line rather than taking a command of its own because a second
+ * `display-message` would be a second answer to reconcile with the first, and
+ * this one is already read, already marked, and already free.
+ *
+ * MEASURED on tmux 3.7b: all four keys exist and expand, and a key tmux does
  * not know expands to the EMPTY STRING rather than failing -- which is what
  * makes an older tmux read as `unreadable` instead of as a crash.
  */
-const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y}`;
+const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}`;
+
+/**
+ * HOW FAR BACK THE TERMINAL TAB CAN SCROLL: five hundred lines above the
+ * screen, and the number is a budget rather than a preference.
+ *
+ * WHY THERE IS A NUMBER AT ALL. `capture-pane` with no `-S` returns the
+ * visible screen and NOTHING else (measured, 3.7b: an 80x10 pane with 40
+ * lines of output answers with 10 lines; `-S -200` answers with 85, which is
+ * all the history there was -- tmux clamps, it does not pad). Since
+ * `resizeWindowArgv` sizes the window to exactly the rows the pane can show,
+ * "the screen" and "the box" were the same height and the tab had nothing to
+ * scroll. That was the operator's report, and `-S` is the whole of the fix.
+ *
+ * WHY NOT ALL OF IT. tmux's own default `history-limit` is 2000 (measured on
+ * the same socket), and the cost of asking is paid on EVERY read -- the tab
+ * polls once a second, and ten times a second while the operator is typing
+ * (`panels/TerminalTab.tsx`, `ECHO_MS`). Both halves were measured on a
+ * 137x41 pane of densely coloured output, through the real bundle in
+ * Chromium:
+ *
+ *            bytes per read     renderer cost per changed read
+ *   screen         6,349                 0.9 ms
+ *   -S -200       37,549                 2.7 ms
+ *   -S -500       84,349                 5.7 ms
+ *   -S -1000     162,349                11.3 ms
+ *   -S -2000     297,985                21.9 ms
+ *
+ * At 2000 a single update outruns a 60Hz frame, so typing into a pane would
+ * stutter on its own scrollback; at 500 the whole update fits inside one
+ * frame with room to spare, and twelve screenfuls is a long way back through
+ * an agent's work. The idle cost of even that is zero rather than 5.7ms a
+ * second, because the tab drops a capture identical to the one it is already
+ * showing before React sees it (`TerminalTab.tsx`, `sameScreen`).
+ *
+ * THE OTHER CEILING, named so it is not discovered: `createTmuxRunner` gives
+ * execFile a 4MB buffer. Five hundred lines of vam's widest legal pane (500
+ * columns) are well under it for any screen a program actually draws, and a
+ * read that did exceed it would arrive as a classified failure rather than as
+ * a truncated screen.
+ */
+export const PANE_HISTORY_LINES = 500;
 
 /**
  * The RENDERED screen as plain text -- what the pane looks like right now --
@@ -337,8 +386,17 @@ const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y}
  * cannot read never costs the operator the screen. The other way round, tmux
  * exits 1 and the existing classifier reports it exactly as it did before this
  * line existed.
+ *
+ * `history` IS OPT-IN, AND THE DEFAULT IS THE OLD SHAPE ON PURPOSE. Only the
+ * Terminal tab wants the scrollback (`terminal/pane.ts`). `terminal/answer.ts`
+ * reads this same pane to find the picker a session is waiting on, and it
+ * identifies one by there being EXACTLY ONE `❯` on the screen -- hand it five
+ * hundred lines of history and every picker the session has ever drawn is in
+ * the text, so `readPicker` finds several cursors, refuses, and vam stops
+ * being able to answer a question at all. A default of "the screen" is what
+ * keeps that from being a thing a later caller can walk into.
  */
-export function capturePaneArgv(name: string): readonly string[] {
+export function capturePaneArgv(name: string, history = 0): readonly string[] {
   return [
     'display-message',
     '-p',
@@ -350,6 +408,10 @@ export function capturePaneArgv(name: string): readonly string[] {
     'capture-pane',
     '-p',
     '-e',
+    // `-S -n` is n lines ABOVE the top of the screen; the end stays the
+    // screen's bottom, so this is history AND screen in one answer, with no
+    // seam between two captures for a line to be lost in or counted twice.
+    ...(history > 0 ? ['-S', `-${Math.floor(history)}`] : []),
     '-t',
     paneTarget(name),
   ];
