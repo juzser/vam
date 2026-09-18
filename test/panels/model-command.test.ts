@@ -1,5 +1,6 @@
 /**
- * THE MODEL CONTROL'S THREE STATES, AND THE KEYS THE ENABLED ONE SENDS.
+ * THE MODEL CONTROL'S THREE STATES, AND WHAT THE ENABLED ONE IS ALLOWED TO ASK
+ * FOR.
  *
  * The operator's ask, translated: "re-check the model picker in the prompt
  * input. Confirm whether choosing a model in vam is possible or not. If a
@@ -15,8 +16,15 @@
  * on Claude Code 2.1.274: `/model sonnet` + Enter at the REPL answers "Set
  * model to Sonnet 5 and saved as your default for new sessions" and the status
  * line changes at once. So a session vam can type into CAN have its model
- * chosen, by typing that line; a session vam cannot type into cannot; and a
- * source that only records keeps the request-in-words it always had.
+ * chosen; a session vam cannot type into cannot; and a source that only
+ * records keeps the request-in-words it always had.
+ *
+ * AND THE SECOND HALF OF THAT ANSWER LINE IS WHY THIS MODULE NO LONGER BUILDS
+ * KEYS. "saved as your default for new sessions" is a change to
+ * `~/.claude/settings.json` nobody asked for, so main drives the CLI's own
+ * `/model` menu and presses `s` instead (`main/terminal/model-switch.ts`).
+ * What is left here is the decision table, the five rows the popover draws,
+ * and the one-word rule.
  *
  * `modelControlState` is the decision table, and it is asserted row by row so
  * that a change to one arm reddens here before it reaches the pane.
@@ -27,14 +35,10 @@ import {
   MODEL_CHOICES,
   modelButtonLabel,
   modelCommandLine,
-  modelCommandStrokes,
   modelControlState,
   runningModelRows,
 } from '../../src/renderer/panels/model-command.js';
-import { isPaneKey, MAX_KEY_TEXT, type PaneKey } from '../../src/shared/terminal.js';
-
-const texts = (strokes: readonly PaneKey[]): string[] =>
-  strokes.map((stroke) => (stroke.kind === 'text' ? stroke.text : `<${stroke.kind}>`));
+import { isModelChoice } from '../../src/shared/terminal.js';
 
 describe('which of the three controls a session gets', () => {
   it('keeps the request line for a source that only records, whatever the session says', () => {
@@ -204,11 +208,18 @@ describe('what the button says', () => {
   });
 });
 
-describe('what one choice becomes on the wire', () => {
-  it('is the CLI’s argument form, `/model <alias>`, never the bare command that opens a menu', () => {
-    // A bare `/model` opens an interactive picker in the REPL; vam must never
-    // drive that menu (it cannot read it back), so the argument form is the
-    // only line this ever produces.
+/**
+ * THE LINE THIS MODULE STILL OWNS IS THE ONE THE CAPTION PRINTS, and it used
+ * to be the one vam typed. A `modelCommandStrokes` stood beside it, cutting
+ * `/model <choice>` into `PaneKey`s for `terminal.send` -- and the CLI answers
+ * that form with "and saved as your default for new sessions", so every pick
+ * rewrote `~/.claude/settings.json`. It is gone; main drives the CLI's own
+ * menu, and types this line itself only for the one choice that has no menu
+ * row. What reaches the wire is asserted where it happens, in
+ * `test/main/terminal/model-switch.test.ts`.
+ */
+describe('what one choice becomes in the caption, and what is refused outright', () => {
+  it('is the CLI’s argument form, `/model <alias>`', () => {
     expect(modelCommandLine('opus')).toBe('/model opus');
     expect(modelCommandLine('default')).toBe('/model default');
     expect(modelCommandLine('  sonnet  ')).toBe('/model sonnet');
@@ -221,49 +232,36 @@ describe('what one choice becomes on the wire', () => {
   it('refuses an empty choice, and any choice with whitespace or a control character in it', () => {
     // A raw newline in a literal payload reaches the pane as 0x0a and the REPL
     // submits on it (`tmux/argv.ts`), so a choice carrying one would submit
-    // `/model` bare -- the menu -- and type the rest into the answer. A space
-    // would hand the CLI two arguments. Both are refused before any key is
-    // built, with `null` and never a shorter line.
+    // `/model` bare -- opening a menu with the rest typed into it. A space
+    // would hand the CLI two arguments. Both are refused before the bridge is
+    // touched, with `null` and never a shorter line.
     expect(modelCommandLine('')).toBeNull();
     expect(modelCommandLine('   ')).toBeNull();
     expect(modelCommandLine('opus\nhello')).toBeNull();
     expect(modelCommandLine('opus haiku')).toBeNull();
     expect(modelCommandLine('op\tus')).toBeNull();
     expect(modelCommandLine(`op${String.fromCharCode(27)}us`)).toBeNull();
-    expect(modelCommandStrokes('')).toBeNull();
-    expect(modelCommandStrokes('a b')).toBeNull();
   });
 
-  it('is typed as literal text and then a SEPARATE Enter, every stroke one the channel accepts', () => {
-    const strokes = modelCommandStrokes('opus');
-    expect(strokes).not.toBeNull();
-    expect(texts(strokes ?? [])).toEqual(['/model opus', '<enter>']);
-    for (const stroke of strokes ?? []) expect(isPaneKey(stroke)).toBe(true);
-  });
-
-  it('splits a long model id at the channel’s bound rather than sending one refused key', () => {
-    // `/model ` plus a full id runs past `MAX_KEY_TEXT` (sixteen). Handed over
-    // whole it fails `isPaneKey` in main, which answers `unaimed` -- a sentence
-    // about session PAIRING that would be false. `composedStrokes` exists for
-    // exactly this and is what splits it, so the pieces rejoin into the line
-    // and each one is within the bound.
-    const strokes = modelCommandStrokes('claude-opus-5-20260501') ?? [];
-    const pieces = strokes.filter((s) => s.kind === 'text');
-    expect(pieces.length).toBeGreaterThan(1);
-    for (const piece of pieces) {
-      expect(piece.kind === 'text' && piece.text.length <= MAX_KEY_TEXT).toBe(true);
-      expect(isPaneKey(piece)).toBe(true);
+  it('agrees with the rule MAIN enforces, so neither side can drift alone', () => {
+    // TWO COPIES, ONE RULE. The renderer's exists to WORD the refusal before
+    // the bridge is touched; main's is the enforcement, because the renderer
+    // is the least trusted process in the app. A choice one of them takes and
+    // the other refuses would be a control that reports a pairing problem for
+    // a line it built itself.
+    const cases = [
+      'opus',
+      'default',
+      'claude-opus-5-20260501',
+      '',
+      '   ',
+      'opus haiku',
+      'opus\nhello',
+      'op\tus',
+      `op${String.fromCharCode(27)}us`,
+    ];
+    for (const choice of cases) {
+      expect(isModelChoice(choice.trim()), choice).toBe(modelCommandLine(choice) !== null);
     }
-    expect(texts(strokes).slice(0, -1).join('')).toBe('/model claude-opus-5-20260501');
-    expect(strokes.at(-1)).toEqual({ kind: 'enter' });
-  });
-
-  it('ends with exactly one Enter, and nothing after it', () => {
-    // The submit is the last stroke so that a run failing midway leaves the
-    // line sitting in the pane UNSENT rather than half-submitted -- the same
-    // rule `reply.ts` keeps for a prompt.
-    const strokes = modelCommandStrokes('haiku') ?? [];
-    expect(strokes.filter((s) => s.kind === 'enter')).toHaveLength(1);
-    expect(strokes.at(-1)?.kind).toBe('enter');
   });
 });

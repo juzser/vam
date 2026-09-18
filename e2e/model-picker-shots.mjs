@@ -662,6 +662,17 @@ check(
   /default for new sessions/.test(labelTip ?? ''),
   JSON.stringify(labelTip),
 );
+// AND THE HALF THAT STOPPED BEING A SIDE EFFECT. vam drives the CLI's own
+// `/model` menu and presses `s` for an alias (`main/terminal/model-switch.ts`),
+// which the CLI answers "...for this session only" -- measured, with
+// `~/.claude/settings.json` byte-identical afterwards. The disclosure above is
+// now true of the FULL-ID row alone, and a note that dropped this half would
+// read as the old one, which told the operator every pick cost them a default.
+check(
+  'and saying which route does NOT cost the operator their default',
+  /this session only/.test(labelTip ?? ''),
+  JSON.stringify(labelTip),
+);
 await page.mouse.move(0, 0);
 await page.waitForTimeout(200);
 

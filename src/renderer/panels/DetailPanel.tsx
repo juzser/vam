@@ -107,7 +107,12 @@ import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import type { PrAction } from '../../shared/pr-action.js';
 import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
-import type { PaneKey, PaneSendResult, SessionModel } from '../../shared/terminal.js';
+import type {
+  ModelSwitchResult,
+  PaneKey,
+  PaneSendResult,
+  SessionModel,
+} from '../../shared/terminal.js';
 import { relativeTime } from '../adapter/relative-time.js';
 import type {
   AgentQuestion,
@@ -166,7 +171,6 @@ import {
   MODEL_CHOICES,
   modelButtonLabel,
   modelCommandLine,
-  modelCommandStrokes,
   modelControlState,
   runningModelRows,
 } from './model-command.js';
@@ -2601,6 +2605,93 @@ function cycleWording(result: PaneSendResult): string | null {
 }
 
 /**
+ * The model control's own note -- the two routes, and the one that costs the
+ * operator a settings change. See the `Note` it is handed to for the
+ * measurement, and `MAX_TIP` in `DetailPanel.tooltip-length.test.tsx` for why
+ * it is this short.
+ */
+const MODEL_PICKER_NOTE =
+  'drives this session’s own /model menu — an alias switches this session only; a full id also becomes the default for new sessions';
+
+/**
+ * WHAT THE MODEL PICKER MAY CLAIM after a switch, one sentence per outcome.
+ *
+ * THE SCOPE IS THE HEADLINE AND IT LEADS, because the caption is a single
+ * `truncate` line: whatever is said first is the part that survives a narrow
+ * pane. `session` is the whole reason this control changed -- vam drove the
+ * CLI's own menu and pressed `s`, which the CLI answers with `for this session
+ * only` -- and `default` is the fallback the free-text row takes, which the
+ * CLI ALSO saves as the operator's default for new sessions. That second
+ * sentence is a DISCLOSURE, not a footnote: it is a change to
+ * `~/.claude/settings.json` nobody asked for, and the surface that caused it
+ * is the surface that must say so.
+ *
+ * THE LAST FOUR ARE THE PANE CHANNEL'S OWN WORDS, said by calling
+ * `cycleWording` rather than by copying it: `unaimed`, `unavailable`,
+ * `mispaired` and `refused` are the same four states the mode chip and the
+ * keystroke strip meet, and two surfaces describing one state in different
+ * words is its own defect (`shared/terminal.ts` records that one being fixed).
+ */
+function modelSwitchNote(
+  result: ModelSwitchResult,
+  title: string,
+  choice: string,
+  line: string,
+): CycleNote {
+  switch (result.kind) {
+    case 'sent':
+      return result.scope === 'session'
+        ? {
+            kind: 'sent',
+            // NOT "typed /model opus": vam typed `/model` bare and walked the
+            // menu, and a caption naming a line vam did not type would be the
+            // kind of small lie this whole module exists to remove.
+            text: `${choice} set for this session only, on the /model menu in the terminal of ${title} — the session answers there`,
+          }
+        : {
+            kind: 'sent',
+            text: `${line} — also saved as the default for new sessions, typed into the terminal of ${title}`,
+          };
+    case 'question':
+      return {
+        kind: 'refused',
+        // The question in its OWN words: the operator has to know which one,
+        // and the pane may be off screen behind this tab. A picker with
+        // nothing above its rows leaves main no title to send, and vam says
+        // that rather than quoting an empty string.
+        text:
+          result.title === ''
+            ? `not sent — ${title} has a menu open; close or answer it first, then switch`
+            : `not sent — ${title} is asking “${result.title}”; answer it first, then switch`,
+      };
+    case 'no-menu':
+      return {
+        kind: 'refused',
+        // SAID PLAINLY, because it is what really happens when the REPL is
+        // busy: the text lands in the input and the Return submits it. A
+        // refusal claiming nothing was sent would be a claim vam cannot make.
+        text: `not sent — ${title} did not open its /model menu, and the /model line may have reached the agent as a prompt`,
+      };
+    case 'not-live':
+      return {
+        kind: 'refused',
+        text: `not sent — the /model menu of ${title} did not answer vam’s arrow, so vam closed it rather than press a row it had not read`,
+      };
+    case 'unmatched':
+      return {
+        kind: 'refused',
+        text: `not sent — ${result.label} is not a row on the /model menu of ${title}`,
+      };
+    case 'unreadable':
+      return { kind: 'refused', text: `not sent — vam could not read the screen of ${title}` };
+    default:
+      // `cycleWording` answers `null` for `sent` alone, which cannot reach
+      // here: the four kinds left are exactly the pane channel's refusals.
+      return { kind: 'refused', text: cycleWording(result.kind) ?? 'not sent' };
+  }
+}
+
+/**
  * The phone keystroke strip's five keys -- vam's real `PaneKey` shapes, not
  * orca's five: there is no `PaneKey` kind for a plain Tab (`terminal.ts`), so
  * it is refused outright rather than drawn as a button that always fails.
@@ -4283,12 +4374,19 @@ export function DetailPanel(props: DetailPanelProps) {
   const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
   /**
    * KEYSTROKES INTO THIS SESSION'S PANE, shared by the mode row's own
-   * Shift-Tab, every button of the phone keystroke strip, the composer's
-   * Escape AND the model picker's `/model <x>` line -- they are the SAME
-   * channel (`window.api.terminal.send`) into the SAME pane, so one in-flight
-   * guard and one refusal caption serve all of them rather than each growing
-   * its own copy. `cycleNote` is the shared note; `sentText`/`busyText` are
-   * the one difference between a mode cycle and a keystroke.
+   * Shift-Tab, every button of the phone keystroke strip and the composer's
+   * Escape -- they are the SAME channel (`window.api.terminal.send`) into the
+   * SAME pane, so one in-flight guard and one refusal caption serve all of
+   * them rather than each growing its own copy. `cycleNote` is the shared
+   * note; `sentText`/`busyText` are the one difference between a mode cycle
+   * and a keystroke.
+   *
+   * THE MODEL PICKER USED TO BE ON THIS LIST AND IS NOT ANY MORE. It typed
+   * `/model <alias>` + Enter, which is the form the CLI ALSO saves as the
+   * operator's default for new sessions; it goes down `terminal.switchModel`
+   * now, where main drives the CLI's own menu (`sendModel`). It still SHARES
+   * `cycleNote` -- one caption in the row, one in-flight guard -- because
+   * neither of those was ever about the channel.
    *
    * One press at a time, ACROSS EVERY CONTROL: held down, a repeat here
    * queued a `back-tab` per repeat into a live agent with nothing on screen
@@ -4377,27 +4475,40 @@ export function DetailPanel(props: DetailPanelProps) {
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
     pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
   /**
-   * Type `/model <choice>` and Enter into this session's pane -- the model
-   * picker's whole act, over the shared run above.
+   * Switch this session's model -- ONE CALL, because the whole policy lives in
+   * main now (`main/terminal/model-switch.ts`).
    *
-   * WHAT VAM MAY CLAIM AFTERWARDS is the delivery and not the model:
-   * "typed /model opus into the terminal of <title>". The CLI answers in the
-   * pane ("Set model to Opus 5 and saved as your default for new sessions",
-   * measured on 2.1.274) and vam never reads that answer back, so the caption
-   * says the session answers THERE rather than naming a model here. Naming
-   * one would be the claim nothing checked -- the same rule `cycleMode` keeps
-   * for the mode it does not read back.
+   * WHAT THIS FUNCTION USED TO DO, AND WHY IT STOPPED. It built the strokes for
+   * `/model <alias>` and typed them over `terminal.send`. Measured on Claude
+   * Code 2.1.276, that form answers:
    *
-   * A choice that is not one word is refused before a key is built
+   *     ⎿  Set model to Opus 5 and saved as your default for new sessions
+   *
+   * -- so every pick in vam silently rewrote `~/.claude/settings.json`, from a
+   * control the operator reached for to change ONE session. The CLI's own menu
+   * offers `s` for "this session only", and driving a menu means reading a
+   * screen and walking a cursor: that is `answer.ts`'s discipline, it belongs
+   * in main, and it may not be half here and half there. ONE RULE, ONE PLACE.
+   *
+   * THE ONE CHECK THAT STAYS HERE IS THE BRIDGE, AND THE ORDER IS THE POINT. A
+   * build with no keyboard into a pane -- the browser arm, where `window.api`
+   * is undefined -- cannot switch a model whatever is on the screen, so it must
+   * say so rather than report anything about a question the pane happens to be
+   * asking. The web guard `model-picker-shots.mjs` caught exactly that: it
+   * drives the browser build against a demo row that IS asking one, and the
+   * caption came back naming the question, which would send the operator off to
+   * answer something that would not have helped.
+   *
+   * A choice that is not one word is refused before the bridge is touched
    * (`modelCommandLine`): a space would hand the CLI two arguments and a
-   * newline would submit `/model` bare, which opens the CLI's own menu --
-   * the one thing vam must never drive.
+   * newline would submit `/model` bare. Main checks it again -- the renderer is
+   * the least trusted process in the app -- and the copy here exists to WORD
+   * the refusal, not to enforce it.
    */
   const sendModel = async (choice: string) => {
     if (entry === null) return;
     const line = modelCommandLine(choice);
-    const strokes = modelCommandStrokes(choice);
-    if (line === null || strokes === null) {
+    if (line === null) {
       setCycleNote({
         kind: 'refused',
         text: 'not sent — a model is one word, and this has a space or a line break in it',
@@ -4405,86 +4516,34 @@ export function DetailPanel(props: DetailPanelProps) {
       return;
     }
     if (cycleNote?.kind === 'busy') return;
-    /*
-      READ THE SCREEN BEFORE TYPING INTO IT, and refuse a pane that is showing
-      a picker.
-
-      MEASURED, against a real Claude Code 2.1.276 over a private tmux socket.
-      With the CLI's own `/model` menu open, this function's exact sequence --
-      `send-keys -l -- '/model haiku'` then `send-keys Enter` -- did not switch
-      to Haiku. The menu has no text buffer, so the literal text was swallowed
-      whole, and the Enter behind it COMMITTED WHICHEVER ROW THE CURSOR SAT ON:
-
-          ⎿  Set model to Opus 5 and saved as your default for new sessions
-
-      Opus was not asked for; it was merely under the cursor. That is the
-      harmless version. The same shape with a PERMISSION prompt on screen means
-      vam's Enter answers a question about somebody's files, and `answer.ts`
-      already holds the rule that breaks: nothing may press Return on a row it
-      has not just read. This control cannot read a row, so it does not press.
-
-      IT IS A READ AND NOT A LOCK, said plainly because the gap is real: the
-      pane is asked, then typed into, and a question that appears between the
-      two is not caught. There is no tmux primitive that would close that gap
-      -- `answer.ts` re-reads between every step for the same reason and still
-      cannot -- and the window it leaves is a fraction of the one this removes,
-      which was every question that was ALREADY on screen when the operator
-      picked a model.
-
-      ONLY A PICKER VAM ACTUALLY SAW STOPS THE SWITCH. `unaimed`, `mispaired`,
-      `unavailable` and `unreadable` all mean vam could not look, and every one
-      of them is a state the send path meets a moment later and words correctly
-      out of `PaneSendResult`. Refusing on those would replace an accurate
-      sentence about pairing with a guess about questions, and would brick the
-      button for as long as the reader hiccuped.
-    */
-    /*
-      NO BRIDGE, NO READ, AND THE ORDER IS THE WHOLE POINT. A build with no
-      keyboard into a pane -- the browser arm, where `window.api` is undefined
-      -- cannot switch a model whatever is on the screen, so reading the screen
-      there can only produce a refusal about a QUESTION when the true refusal
-      is about the BRIDGE. That would send the operator off to answer something
-      that would not help. The web guard `model-picker-shots.mjs` caught
-      exactly this: it drives the browser build against a demo row that is
-      asking one, and the caption came back naming the question.
-
-      The check is an existence test and not a second copy of the sentence:
-      falling through to `typePaneStrokes` lets the one place that owns that
-      wording say it.
-    */
-    if (prompt !== undefined && globalThis.window?.api?.terminal?.send !== undefined) {
-      // BEFORE THE AWAIT: a tmux spawn follows, at ten seconds' budget, and a
-      // control that looks idle through it reads as one that did nothing.
-      setCycleNote({ kind: 'busy', text: `${line} · reading the screen…` });
-      const looking = cycleAbout;
-      const view = await prompt(entry.project.id, entry.session.id).catch(
-        (): PromptView => ({ kind: 'unreadable' }),
-      );
-      // The row changed under the read; an answer about the session that was
-      // here then says nothing about the one that is here now.
-      if (noteFor.current !== looking) return;
-      if (view.kind === 'prompt') {
-        setCycleNote({
-          kind: 'refused',
-          text: `not sent — ${entry.session.title} is asking “${view.prompt.title}”; answer it first, then switch`,
-        });
-        return;
-      }
+    const switchModel = globalThis.window?.api?.terminal?.switchModel;
+    if (switchModel === undefined) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — this build has no keyboard into a session’s pane',
+      });
+      return;
     }
-    return typePaneStrokes(
-      strokes,
-      `typed ${line} into the terminal of ${entry.session.title} — the session answers there`,
-      `${line} · typing…`,
-    ).then(() => {
-      // LOOK AGAIN, AND DO NOT ASSUME. The line has just been typed, so this
-      // is the one moment the model is known to be about to change -- but what
-      // goes on the button is still whatever the PANE says next, which is what
-      // makes a CLI that refused the switch show the old model rather than the
-      // asked-for one. If this read is a beat early the interval corrects it;
-      // nothing here writes a name. `null` while no poll is running, which is
-      // every state where there was nothing to label anyway.
-      lookForModel.current?.();
-    });
+    // BEFORE THE AWAIT: main reads the pane, opens a menu and walks it, which
+    // is several tmux spawns at ten seconds each, and a control that looks
+    // idle through that reads as one that did nothing.
+    setCycleNote({ kind: 'busy', text: `${line} · switching…` });
+    const mine = cycleAbout;
+    const result = await switchModel(entry.project.id, choice, entry.session.id).catch(
+      (): ModelSwitchResult => ({ kind: 'refused' }),
+    );
+    // The row changed under the walk; an answer about the session that was
+    // here then says nothing about the one that is here now.
+    if (noteFor.current !== mine) return;
+    setCycleNote(modelSwitchNote(result, entry.session.title, choice, line));
+    // LOOK AGAIN, AND DO NOT ASSUME. The menu has just been driven, so this is
+    // the one moment the model is known to be about to change -- but what goes
+    // on the button is still whatever the PANE says next, which is what makes a
+    // CLI that refused the switch show the old model rather than the asked-for
+    // one. If this read is a beat early the interval corrects it; nothing here
+    // writes a name. `null` while no poll is running, which is every state
+    // where there was nothing to label anyway.
+    lookForModel.current?.();
   };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
@@ -5479,12 +5538,12 @@ export function DetailPanel(props: DetailPanelProps) {
    * WHICH MODEL THIS SESSION IS RUNNING -- the name the CLI paints on its own
    * status line, read back out of the pane, or `null` for "vam cannot tell".
    *
-   * THE FACT IS READ, NEVER REMEMBERED, and that is the whole design. vam types
-   * `/model <alias>` into a pane and nothing more: the operator can type their
-   * own `/model` there, a resumed session was set by somebody else, and the CLI
-   * can refuse. So the button below shows what the pane SAYS, and the two
-   * things it must never show are a name from a request vam sent and a name
-   * read from another row.
+   * THE FACT IS READ, NEVER REMEMBERED, and that is the whole design. vam
+   * drives the CLI's own `/model` menu and reads no answer line afterwards:
+   * the operator can type their own `/model` there, a resumed session was set
+   * by somebody else, and the CLI can refuse. So the button below shows what
+   * the pane SAYS, and the two things it must never show are a name from a
+   * switch vam asked for and a name read from another row.
    *
    * ASKED ONLY WHERE THE PICKER IS DRAWN, which is `delivers` and a pane vam
    * owns (`modelControlState`). On every other row vam does not look into a
@@ -7751,8 +7810,8 @@ export function DetailPanel(props: DetailPanelProps) {
                 delivers   terminal    vamControlled   drawn
                 not true   any         any             the free-text request
                                                        line, unchanged
-                true       !== false   true            a picker that types
-                                                       `/model <x>` + Enter
+                true       !== false   true            a picker that drives
+                                                       the CLI's /model menu
                 true       false       any             the picker, DISABLED
                 true       !== false   not true        the picker, DISABLED
 
@@ -7767,9 +7826,10 @@ export function DetailPanel(props: DetailPanelProps) {
               into the session's tmux pane, so a `model:` line lands in the
               CLI's prompt as words the agent reads -- it switches nothing.
               What does switch it, measured on Claude Code 2.1.274, is
-              `/model <alias>` + Enter typed at the REPL, which is exactly one
-              line into the pane vam already types into. So the picker types
-              that, over `typePaneStrokes`, and NEVER touches the draft.
+              `/model <alias>` + Enter typed at the REPL -- and the CLI ALSO
+              saves that as the operator's default for new sessions, which is
+              why the picker no longer types it. It asks main to drive the
+              CLI's own menu (`sendModel`), and NEVER touches the draft.
 
               DISABLED, NOT ABSENT, WHERE VAM CANNOT TYPE -- and this is the
               one place the control differs from the mode chip beside it,
@@ -7850,13 +7910,22 @@ export function DetailPanel(props: DetailPanelProps) {
                      against its wrapper rather than trusting the row. */
                   className="relative flex min-w-0 shrink"
                 >
-                  {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
-                      because it is one the operator did not ask for: measured
-                      on 2.1.274, `/model <alias>` answers "...and saved as your
-                      default for new sessions". vam cannot send the
-                      session-only form (that is the `s` key inside the
-                      interactive menu vam never drives), so the honest thing
-                      is to say what the line does.
+                  {/* THE NOTE SAYS WHICH OF THE TWO ROUTES A CHOICE TAKES, and
+                      the difference is a change to the operator's own
+                      `~/.claude/settings.json`. An ALIAS is walked onto the
+                      CLI's own `/model` menu and committed with `s`, which the
+                      CLI answers "...for this session only" -- measured, and
+                      the file was byte-identical afterwards. A FULL MODEL ID
+                      has no row on that menu, so it can only be sent as
+                      `/model <id>`, which the CLI answers "...and saved as your
+                      default for new sessions". That second one is a side
+                      effect the operator did not ask for, so vam says it here
+                      as well as in the caption afterwards.
+
+                      THE NOTE USED TO SAY THE SIDE EFFECT HAPPENED EVERY TIME,
+                      and it was right: vam typed the argument form for all six
+                      rows. `main/terminal/model-switch.ts` is what made the
+                      first half of this sentence true.
 
                       AND IT LEADS WITH THE MODEL WHEN THERE IS ONE, which is
                       not decoration: the label beside it may be CLIPPED at a
@@ -7871,8 +7940,8 @@ export function DetailPanel(props: DetailPanelProps) {
                   <Note
                     text={
                       running === null
-                        ? 'types /model <name> into this session’s pane — the CLI also makes it the default for new sessions'
-                        : `running ${running} · types /model <name> into this session’s pane — the CLI also makes it the default for new sessions`
+                        ? MODEL_PICKER_NOTE
+                        : `running ${running} · ${MODEL_PICKER_NOTE}`
                     }
                   >
                     <button
