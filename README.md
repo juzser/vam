@@ -64,9 +64,16 @@ and progress, not just the `●3` badge it collapses to elsewhere. Its PRs tab
 asks GitHub for open pull requests on the session's own branch, and says so
 plainly when it can't ask at all or asked and found none — never one empty
 list standing in for both. (A session started by vam also has a Terminal
-tab, a snapshot of the tmux pane vam started for it — the agent's own
-colours, not a live stream; see the keyboard reference below. That tab is
-withdrawn, not merely empty, for any source that cannot reach a terminal —
+tab, a polled snapshot of the tmux pane vam started for it rather than a
+live stream — the screen **and the last 500 lines of its scrollback**,
+fetched in one `capture-pane` so no line can fall between two reads. It
+stays pinned to the live end while the agent works and lets go the moment
+you scroll up, and `Mod-d` / `Mod-u`, the wheel and Home/End all move it.
+The colours are yours: Settings → Appearance carries a terminal theme —
+twelve of them, Hans in the dark and Tango Light in the light — every one
+of the scheme's 23 colours as its own swatch, and the ground's opacity.
+See the keyboard reference below. That tab is withdrawn, not merely empty,
+for any source that cannot reach a terminal —
 which the phone/remote endpoint deliberately never can: reading, sending,
 answering and resizing a running agent's pane each need their own rate
 limit and their own decision, so `src/main/remote/server.ts`'s own
