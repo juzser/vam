@@ -21,6 +21,7 @@ import {
   createMainErrorsApi,
   createPrefsBridge,
   createPreloadApi,
+  createPrsApi,
   createRemoteApi,
   createStreamSubscribe,
   createTerminalApi,
@@ -44,6 +45,14 @@ contextBridge.exposeInMainWorld('api', {
   // that lives in main (`src/main/link/ipc.ts`), never here: this forwarder
   // decides nothing, so nothing about what opens depends on it.
   link: createLinkApi(ipcRenderer),
+  // The PRs tab's own two: open a pull request on github.com, and merge one
+  // or delete its branch. Separate from `link` above because the allowlist is
+  // narrower -- one host, one scheme -- and separate from the source API
+  // because `act` WRITES to the operator's repositories: main resolves the
+  // directory from the session id and builds the argv itself, so neither a
+  // path nor a gh flag is expressible from this side. See
+  // `src/main/pr/ipc.ts`.
+  prs: createPrsApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
   // The file-editor tab's read and write, authorised against every live

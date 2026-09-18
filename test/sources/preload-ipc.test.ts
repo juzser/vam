@@ -25,6 +25,7 @@ import { createPreloadApi, type DesktopSourceApi } from '../../src/preload/api.j
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import { createSourceFromPreload } from '../../src/renderer/sources/preload-factory.js';
 import type { PreloadSourceApi } from '../../src/shared/preload-api.js';
+import { makePullRequest } from '../support/pull-request.js';
 
 /**
  * The factory's parameter type includes `subscribe`, which this task
@@ -106,11 +107,29 @@ const AGENT_SHAPE: Shape = {
  * no pull-request surface), so a source that omits it is correct, while a
  * source that sends it must send this exact shape.
  */
+const isCount = (v: unknown): boolean => typeof v === 'number' && Number.isInteger(v);
 const PR_SHAPE: Shape = {
-  number: (v) => typeof v === 'number' && Number.isInteger(v),
+  number: isCount,
   title: isString,
   state: oneOf('open', 'draft', 'merged', 'closed'),
   checks: oneOf('passing', 'failing', 'pending', 'none'),
+  // The descriptive half, added when the operator asked for "more
+  // information". EVERY ONE IS REQUIRED AND NULLABLE, which is the shape
+  // `model.ts` declares and the shape that matters at THIS seam: `null` means
+  // gh did not say, and a field that went missing on the way across the
+  // bridge would read as exactly the same thing while being a bug. The key-set
+  // check above is what turns "missing" back into a failure.
+  additions: nullable(isCount),
+  deletions: nullable(isCount),
+  changedFiles: nullable(isCount),
+  headRefName: nullable(isString),
+  baseRefName: nullable(isString),
+  author: nullable(isString),
+  review: nullable(oneOf('approved', 'changes-requested', 'review-required')),
+  updatedAt: nullable(isString),
+  labels: (v) => Array.isArray(v) && v.every(isString),
+  url: nullable(isString),
+  mergeable: nullable(oneOf('mergeable', 'conflicting')),
 };
 const isPullRequestList = (v: unknown): boolean => {
   if (v === null || typeof v !== 'object') return false;
@@ -486,7 +505,31 @@ describe('Session.pullRequests survives the boundary as itself', () => {
 
   it('carries a populated list, an empty list and a reason, each still itself', async () => {
     for (const value of [
-      { kind: 'ok', prs: [{ number: 128, title: 'a title', state: 'open', checks: 'passing' }] },
+      // A FULLY POPULATED row, deliberately: this test is about what survives
+      // the bridge unchanged, and the eleven descriptive fields the type grew
+      // are exactly the ones a serialisation seam could quietly drop.
+      {
+        kind: 'ok',
+        prs: [
+          makePullRequest({
+            number: 128,
+            title: 'a title',
+            state: 'open',
+            checks: 'passing',
+            additions: 12,
+            deletions: 3,
+            changedFiles: 2,
+            headRefName: 'feature/x',
+            baseRefName: 'main',
+            author: 'juzser',
+            review: 'approved',
+            updatedAt: '2026-09-18T10:58:08Z',
+            labels: ['bug'],
+            url: 'https://github.com/juzser/atlas/pull/128',
+            mergeable: 'mergeable',
+          }),
+        ],
+      },
       { kind: 'ok', prs: [] },
       { kind: 'unavailable', code: 'cli-missing', message: 'no gh on this machine' },
       undefined,

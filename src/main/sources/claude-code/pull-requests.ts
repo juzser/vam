@@ -16,8 +16,29 @@
  *    every ten seconds; a broken setup that spawned a process per poll would
  *    be this feature's real cost. See `createPullRequestReader`.
  *
- * Only `gh pr list` is ever run: a read. Opening a pull request in a browser
- * is a second outbound capability and is deliberately not here.
+ * Only `gh pr list` is ever run IN THIS FILE: a read. That is still true, and
+ * it is now a statement about this module rather than about vam.
+ *
+ * THIS FILE USED TO SAY that opening a pull request in a browser "is a second
+ * outbound capability and is deliberately not here". THE OPERATOR ASKED FOR IT
+ * ON 2026-09-18, reviewing this tab: clicking a pull request should open it,
+ * and there should be actions -- merge, delete branch. Both exist now, by
+ * request, and both live NEXT DOOR rather than here, because the distinction
+ * the old sentence was protecting is real and worth keeping visible:
+ *
+ *  - `../../pr/ipc.ts` opens one, through `shell.openExternal`, and what pays
+ *    for that capability is `src/shared/pr-link.ts` -- https, on github.com,
+ *    no credentials -- enforced in MAIN. This file runs the same check while
+ *    parsing, so a row whose address vam would refuse carries `url: null` and
+ *    draws no link at all rather than one that refuses under a finger.
+ *  - `./pr-actions.ts` merges and deletes, never with `--admin` and never with
+ *    `--auto`, one at a time, each behind a confirm that names the pull
+ *    request.
+ *
+ * The date is recorded rather than the sentence deleted: a rule that was right
+ * for as long as it held is worth being able to read afterwards, and "who
+ * decided this, and when" is the question a future reader of a security bound
+ * actually has.
  *
  * As in `deliver.ts`, argv construction, failure classification and parsing
  * are pure and separately testable, because the one thing that cannot be
@@ -32,6 +53,7 @@ import type {
   PullRequestChecks,
   PullRequestList,
 } from '../../../renderer/domain/model.js';
+import { checkPrLink } from '../../../shared/pr-link.js';
 import { cliMissingMessage } from '../../env/cli-missing.js';
 
 /**
@@ -64,8 +86,54 @@ const MAX_CLI_MESSAGE = 400;
  */
 const PR_LIMIT = 10;
 
-/** The fields the pane draws, and no others. */
-const PR_FIELDS = ['number', 'title', 'state', 'isDraft', 'statusCheckRollup'] as const;
+/**
+ * The fields the pane draws, and no others.
+ *
+ * EVERY NAME HERE WAS CHECKED AGAINST `gh pr list --help`'s own JSON FIELDS
+ * list before it was written down, and that is not fussiness: an invented
+ * field name is not ignored, it makes gh exit non-zero, so a single typo here
+ * turns the whole pane into `gh-failed` for every session at once.
+ *
+ * THE LIST GREW ON THE OPERATOR'S REPORT (2026-09-18): "it does not show line
+ * changes (+/-)" and "it needs more information". What was added, and what
+ * each one is FOR -- a field nobody draws is a field nobody should be paying
+ * an API for:
+ *
+ *  - `additions`/`deletions`/`changedFiles` -- the size of the thing, which is
+ *    the first question anyone asks of a pull request they did not write.
+ *  - `headRefName`/`baseRefName` -- WHERE it goes. A row reading `411 open`
+ *    does not say whether it targets `main` or an integration branch, and on
+ *    a stacked branch that is the difference between merged and merged into
+ *    something that is itself unmerged.
+ *  - `author` -- whose it is. An object; the login is inside it.
+ *  - `reviewDecision` -- whether a human has said yes. The EMPTY STRING when
+ *    nobody has; see `reviewOf`.
+ *  - `labels` -- the repository's own vocabulary for this row.
+ *  - `updatedAt` -- whether this is live or abandoned.
+ *  - `url` -- so the row can be opened. See this file's header.
+ *  - `mergeable` -- whether it would go in. `UNKNOWN` far more often than not.
+ *
+ * The cost is one GraphQL query with more fields in it, at the same rate:
+ * `MIN_PR_READ_INTERVAL_MS` is untouched and is what governs the spend.
+ */
+const PR_FIELDS = [
+  'number',
+  'title',
+  'state',
+  'isDraft',
+  'statusCheckRollup',
+  'author',
+  'additions',
+  'deletions',
+  'changedFiles',
+  'headRefName',
+  'baseRefName',
+  'updatedAt',
+  'url',
+  'reviewDecision',
+  'labels',
+  'mergeable',
+] as const;
 
 /**
  * The exact argv. The branch is ONE element and is never interpolated:
@@ -245,6 +313,123 @@ export function summarizeChecks(rollup: unknown): PullRequestChecks {
   return pending ? 'pending' : 'passing';
 }
 
+/**
+ * THE TOLERANT HALF OF THE PARSER, and the reason it is a separate set of
+ * functions from the strict half below.
+ *
+ * `parsePrList` fails the WHOLE list when a row has no number, title or known
+ * state: those are the row's identity, and a silently shortened list is
+ * indistinguishable from a true one. Nothing added for the operator's "it
+ * needs more information" works that way. A pull request with no reviewer, no
+ * labels and an unknown mergeability is an ORDINARY pull request, and
+ * rejecting the answer because one adornment was missing would turn this
+ * file's own rule -- not knowing is a state -- against the person reading it.
+ *
+ * So each of these answers `null` for every shape it does not positively
+ * recognise, and `null` reaches the pane as "gh did not say" rather than as a
+ * zero, a blank or a guess. The shapes they are written against were MEASURED
+ * off `gh pr list --json` on a real repository, not reasoned about; the
+ * measurements are recorded in `pull-requests-detail.test.ts`.
+ */
+
+/**
+ * A count of lines or files: a finite, non-negative WHOLE number, or nothing.
+ *
+ * `0` is a real answer and must survive -- a pull request that only deletes
+ * has `additions: 0` -- so this cannot be written as a truthiness test, which
+ * is exactly how a zero would become "unknown".
+ */
+const countOf = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
+
+/** A non-empty string, or nothing. An empty branch name is not a branch name. */
+const textOf = (value: unknown): string | null =>
+  typeof value === 'string' && value !== '' ? value : null;
+
+/**
+ * The author's LOGIN, out of the object gh nests it in.
+ *
+ * MEASURED: `author` is `{ id, is_bot, login, name }`. `name` is the display
+ * name and is not what anything is attributed to, so the login is what is
+ * taken. A deleted account, a payload from an older gh, or an empty object all
+ * arrive here and all answer `null`.
+ */
+const authorOf = (value: unknown): string | null =>
+  typeof value === 'object' && value !== null
+    ? textOf((value as Record<string, unknown>)['login'])
+    : null;
+
+/**
+ * Label NAMES, in gh's own order.
+ *
+ * MEASURED: `labels` is a list of `{ id, name, description, color }`. An entry
+ * with no usable name is dropped rather than drawn as a blank pill; a `labels`
+ * that is not a list at all yields the empty list, because the caller must
+ * never have to ask whether it may iterate.
+ */
+const labelsOf = (value: unknown): readonly string[] => {
+  if (!Array.isArray(value)) return [];
+  const names: string[] = [];
+  for (const entry of value) {
+    const name =
+      typeof entry === 'object' && entry !== null
+        ? textOf((entry as Record<string, unknown>)['name'])
+        : null;
+    if (name !== null) names.push(name);
+  }
+  return names;
+};
+
+/**
+ * gh's `reviewDecision`, in the three words `PullRequestReview` has.
+ *
+ * THE EMPTY STRING IS THE MEASUREMENT THAT MATTERS. On a repository with no
+ * review rules gh answers `""` -- not `null`, not an absent key -- for every
+ * row. It means "GitHub has no decision to report", and folding it onto
+ * `review-required` would stamp "review required" across every pull request
+ * the operator owns, which is a sentence about their repository that is not
+ * true. Anything unrecognised answers `null` for the same reason
+ * `summarizeChecks` reports an unknown conclusion as pending: a word this
+ * function has never seen is not evidence of approval.
+ */
+const REVIEWS: Record<string, NonNullable<PullRequest['review']>> = {
+  APPROVED: 'approved',
+  CHANGES_REQUESTED: 'changes-requested',
+  REVIEW_REQUIRED: 'review-required',
+};
+const reviewOf = (value: unknown): PullRequest['review'] =>
+  (typeof value === 'string' ? REVIEWS[value] : undefined) ?? null;
+
+/**
+ * gh's `mergeable`, with `UNKNOWN` kept as not knowing.
+ *
+ * MEASURED: `UNKNOWN` is what most rows carry, INCLUDING ones that have
+ * already merged, because GitHub computes mergeability lazily and nobody had
+ * asked. Drawing that as `conflicting` would put a red word on a healthy
+ * branch; drawing it as `mergeable` would promise a merge vam cannot know
+ * about. It is neither, so it is `null` and the pane draws nothing.
+ */
+const MERGEABLE: Record<string, NonNullable<PullRequest['mergeable']>> = {
+  MERGEABLE: 'mergeable',
+  CONFLICTING: 'conflicting',
+};
+const mergeableOf = (value: unknown): PullRequest['mergeable'] =>
+  (typeof value === 'string' ? MERGEABLE[value] : undefined) ?? null;
+
+/**
+ * The pull request's address, and ONLY when it is one vam would open.
+ *
+ * Checked HERE, at the read, as well as at the channel that opens it, so a row
+ * vam would refuse draws no link at all rather than a link that refuses under
+ * the operator's finger -- absent, not dimmed, this file's neighbours' rule.
+ * `src/main/pr/ipc.ts` runs the same check on its own side of the process
+ * boundary and that one is the guarantee; this one is a courtesy to the eye.
+ */
+const urlOf = (value: unknown): string | null => {
+  const outcome = checkPrLink(value);
+  return outcome.ok ? outcome.url : null;
+};
+
 const STATES: Record<string, PullRequest['state']> = {
   OPEN: 'open',
   MERGED: 'merged',
@@ -291,6 +476,21 @@ export function parsePrList(stdout: string): PullRequestList {
       title,
       state: state === 'open' && pr['isDraft'] === true ? 'draft' : state,
       checks: summarizeChecks(pr['statusCheckRollup']),
+      // Everything below is TOLERANT: see the helpers above. A row that
+      // carries only the five fields this reader originally asked for parses
+      // here with nulls, which is what keeps an older gh, a cached answer or
+      // a future field rename from taking the whole list down with it.
+      additions: countOf(pr['additions']),
+      deletions: countOf(pr['deletions']),
+      changedFiles: countOf(pr['changedFiles']),
+      headRefName: textOf(pr['headRefName']),
+      baseRefName: textOf(pr['baseRefName']),
+      author: authorOf(pr['author']),
+      review: reviewOf(pr['reviewDecision']),
+      updatedAt: textOf(pr['updatedAt']),
+      labels: labelsOf(pr['labels']),
+      url: urlOf(pr['url']),
+      mergeable: mergeableOf(pr['mergeable']),
     });
   }
   return { kind: 'ok', prs };

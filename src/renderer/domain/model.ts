@@ -355,13 +355,73 @@ export type SessionAgent = {
  */
 export type PullRequestChecks = 'passing' | 'failing' | 'pending' | 'none';
 
-/** One pull request, narrowed to what the pane draws and nothing else. */
+/**
+ * Where a pull request stands with its reviewers, in the three words GitHub
+ * itself has. `null` is the fourth state and the common one: a repository with
+ * no review rules answers the EMPTY STRING here, measured, on every row --
+ * see `pull-requests-detail.test.ts`. Folding that into `review-required`
+ * would print "review required" over every pull request the operator owns.
+ */
+export type PullRequestReview = 'approved' | 'changes-requested' | 'review-required';
+
+/**
+ * Whether GitHub thinks this would merge cleanly. `null` is not a fourth
+ * answer invented here: gh's own `UNKNOWN` is what most rows carry, because
+ * GitHub computes mergeability lazily and had not been asked. It is emphatic-
+ * ally not `conflicting`.
+ */
+export type PullRequestMergeable = 'mergeable' | 'conflicting';
+
+/**
+ * One pull request, narrowed to what the pane draws and nothing else.
+ *
+ * TWO CLASSES OF FIELD, AND THE TYPE SAYS WHICH IS WHICH. The first four are
+ * the row's IDENTITY and are never absent: a payload that cannot supply them
+ * fails the whole list as `bad-response` (`pull-requests.ts`), because a
+ * shortened list is indistinguishable from a true one. Everything below them
+ * is DESCRIPTION, is `| null`, and `null` means gh did not say -- it is a
+ * state, exactly as `PullRequestList`'s `unavailable` arm is, and it is never
+ * a zero. `additions: 0` is a pull request that only deletes; `additions:
+ * null` is a payload that never mentioned lines. A pane drawing "+0" for the
+ * second would be this file's own rule broken one field down.
+ *
+ * They grew on the operator's report -- "it does not show line changes (+/-)"
+ * and "it needs more information" -- and every name was checked against
+ * `gh pr list --help`'s own JSON field list before it was asked for.
+ */
 export type PullRequest = {
   readonly number: number;
   readonly title: string;
   /** `draft` is its own state, not a flavour of `open`. */
   readonly state: 'open' | 'draft' | 'merged' | 'closed';
   readonly checks: PullRequestChecks;
+  /** Lines added, lines removed, files touched. `null` is "gh did not say". */
+  readonly additions: number | null;
+  readonly deletions: number | null;
+  readonly changedFiles: number | null;
+  /** The branch this merges FROM -- and the one a delete-branch action names. */
+  readonly headRefName: string | null;
+  /** The branch it merges INTO. Drawn as `head -> base`, which is the sentence. */
+  readonly baseRefName: string | null;
+  /** The author's LOGIN, out of the object gh nests it in; not the display name. */
+  readonly author: string | null;
+  readonly review: PullRequestReview | null;
+  /** ISO 8601, as gh wrote it. Turned into "3h ago" at the point of drawing,
+   *  because a relative time is a fact about NOW and must not be frozen into
+   *  the model on a ten-second poll. */
+  readonly updatedAt: string | null;
+  /** Label names, in gh's order. ALWAYS a list -- never `null` -- so nothing
+   *  downstream has to ask whether it may iterate. */
+  readonly labels: readonly string[];
+  /**
+   * The pull request's own address, and `null` unless it is one vam would
+   * actually open (`src/shared/pr-link.ts`: https, on github.com). A row with
+   * `null` here draws no link rather than a link that refuses when pressed --
+   * absent, not dimmed. Main checks again at the channel; this is convenience,
+   * and the process boundary is the guarantee.
+   */
+  readonly url: string | null;
+  readonly mergeable: PullRequestMergeable | null;
 };
 
 /**

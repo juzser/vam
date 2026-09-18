@@ -67,6 +67,42 @@ export function narrowsAsProse(tab: Tab): boolean {
 }
 
 /**
+ * Does this view draw the PROMPT BOX — the composer that writes to the agent?
+ *
+ * HERE, BESIDE `narrowsAsProse`, FOR THE SAME REASON: it is a fact about a
+ * NAME, and a sixth tab appended to `TABS` must be classified once, here,
+ * rather than inheriting whatever a `!==` chain at the render site happens to
+ * give it. `DetailPanel` asks this; `DetailPanel.composer-tabs.test.tsx`
+ * derives its whole expectation from it and fails until a new name is
+ * answered for.
+ *
+ * THE QUESTION IS "IS THIS VIEW A CONVERSATION WITH THE AGENT", and only
+ * that. Three names say no, for three different reasons, and none of them is
+ * "it is a list":
+ *
+ *  - `Terminal` has its OWN keyboard. A second insert scope underneath it
+ *    would compete for the same keystrokes a person is typing into tmux.
+ *  - `Files` has its own keyboard too -- the editor is a full-pane surface,
+ *    and a composer prompting the agent below it is the same collision.
+ *  - `PRs` is the operator's own report: "it does not need the prompt input."
+ *    This view is a list of pull requests on GitHub. Nothing typed here is
+ *    addressed to anything: the box would take a sentence, record it against
+ *    the session, and show the operator nothing about the list in front of
+ *    them. A control that cannot act on what it stands under is worse than no
+ *    control -- this file's neighbours state that rule and this is the view
+ *    that was breaking it. The actions the operator DOES want here (merge,
+ *    delete the branch) are buttons on the row they act on, where the number
+ *    and the title they name are already on screen.
+ *
+ * It is NOT "does this view have a keyboard of its own": `Response` and
+ * `Agents` both draw one, and both are places where a typed sentence reaches
+ * the agent.
+ */
+export function drawsComposer(tab: Tab): boolean {
+  return tab === 'Response' || tab === 'Agents';
+}
+
+/**
  * The tabs actually drawn, given whether the source has a terminal to show
  * and whether this build can show a file editor at all.
  *
