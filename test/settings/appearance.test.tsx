@@ -15,6 +15,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { type BindingRow, buildBindingSheet } from '../../src/renderer/keyboard/keysheet.js';
+import { EDITOR_LANGS, type EditorLang } from '../../src/renderer/panels/files-highlight.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../../src/renderer/prefs/editor.js';
 import {
   type EffectiveTheme,
@@ -571,6 +572,37 @@ describe('the file editor has its own settings, one per panel', () => {
     expect(note).toMatch(/json/i);
     expect(note).toContain('.env');
     expect(note).toMatch(/plain text/i);
+  });
+
+  /**
+   * AND THE LIST IS READ OFF THE HIGHLIGHTER, never typed here or there.
+   *
+   * The note said "JSON, .env and .ini" for as long as those were the three
+   * formats the editor knew. `EDITOR_LANGS` has four in it: markdown was added
+   * to `files-highlight.ts` and the sentence on screen was not, so the panel
+   * has been promising plain text for a file it colours -- exactly the fault
+   * this caption exists to prevent, one format further along.
+   *
+   * THE MAP IS TOTAL OVER `EditorLang`, which is the half that keeps this
+   * honest. A fifth language cannot be added to the highlighter without
+   * deciding what the operator should be told it is called: this file stops
+   * compiling until somebody writes it down.
+   */
+  it('names every format the editor really colours, read off the highlighter', () => {
+    const SPOKEN: Record<EditorLang, string> = {
+      json: 'json',
+      env: '.env',
+      ini: '.ini',
+      md: 'markdown',
+    };
+    // The corpus: a sweep over an empty list would assert nothing at all.
+    expect(EDITOR_LANGS.length).toBeGreaterThan(3);
+    open();
+    const note = (
+      document.querySelector('[data-editor-highlight-note]')?.textContent ?? ''
+    ).toLowerCase();
+    const unsaid = EDITOR_LANGS.filter((lang) => !note.includes(SPOKEN[lang]));
+    expect(unsaid, `the note colours ${note} but does not name ${unsaid.join(', ')}`).toEqual([]);
   });
 
   /** And the indent's own caption has to say SPACES — "indent: 4" reads as a

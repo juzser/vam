@@ -784,16 +784,35 @@ export function SettingsOverlay({
                     letter and the product is spelled `vam`.
                     `e2e/settings-chrome-shots.mjs` holds exactly that
                     invariant, and caught this sentence when it opened with the
-                    name. */}
+                    name.
+
+                    WHY THE OTHER FILES ARE PLAIN IS NOT ON SCREEN ANY MORE.
+                    This paragraph used to carry the argument -- a regex
+                    literal defeats a scanner this size, and a wrong colour
+                    asserts a structure that is not in the file -- which is
+                    true, is why `panels/files-highlight.ts` refuses `.ts` and
+                    `.sh`, and is not something the operator can act on. What
+                    they can act on is the LIST, so a `.ts` file with no
+                    colours reads as a deliberate refusal rather than a fault.
+                    The row's caption lost "for the formats vam can read
+                    without guessing" for the same reason: this sentence names
+                    them.
+
+                    AND MARKDOWN IS ONE OF THEM, which this note did not say
+                    while it was three formats long. `EDITOR_LANGS` has four in
+                    it: the fourth arrived in `files-highlight.ts` and the
+                    sentence here did not follow, so the panel was promising
+                    plain text for a file it colours -- the fault this caption
+                    exists to prevent, one format along. `appearance.test.tsx`
+                    reads the list off that module now instead of repeating
+                    it. */}
                 <p
                   data-editor-highlight-note
                   className="mt-3 max-w-[52ch] text-control text-ink-dim"
                 >
-                  colours are drawn for the formats vam can tokenise without guessing — JSON,{' '}
-                  <code className="text-ink">.env</code> and <code className="text-ink">.ini</code>.
-                  Every other file is drawn as plain text on purpose: a regex literal defeats a
-                  scanner this size, and a wrong colour asserts a structure that is not in the file.
-                  The width of one indent step is under Behaviour.
+                  only JSON, <code className="text-ink">.env</code>,{' '}
+                  <code className="text-ink">.ini</code> and markdown are coloured — every other
+                  file is drawn as plain text. The indent width is under Behaviour.
                 </p>
               </Block>
             </Panel>
@@ -887,13 +906,21 @@ export function SettingsOverlay({
                     only in the source is one the person making the choice
                     cannot read -- so what `drawsProgressLine` holds back, and
                     what `drawsUnfoldControl` restores, are both named here, in
-                    the words the column draws them in. */}
+                    the words the column draws them in.
+
+                    WHAT WENT, IN THE CONCISENESS PASS: "on its own", which
+                    repeated what pressing the control plainly does, and the
+                    enumeration of what an unfolded turn keeps ("its line and
+                    its `· N failed` count"). A turn that is never folded keeps
+                    everything by definition; spelling out which parts survive
+                    was describing the mechanism of an exemption whose whole
+                    content is that there is no folding. Both exemptions -- a
+                    failed turn, and the newest one while the session works --
+                    stay, because those are the promise. */}
                 <p data-focus-view-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
                   A folded turn keeps <code className="text-ink">···</code> where its working was —
-                  press it and that turn comes back, on its own. Nothing is folded from a turn whose
-                  tools failed: it keeps its line and its{' '}
-                  <code className="text-ink">· N failed</code> count, and so does the newest turn
-                  while the session is working or waiting.
+                  press it and the turn comes back. Nothing is folded from a turn whose tools
+                  failed, or from the newest turn while the session is working or waiting.
                 </p>
               </Block>
 
@@ -956,6 +983,18 @@ export function SettingsOverlay({
                     is, so it is written where the person who needs it will
                     look.
 
+                    TIGHTENED, NEVER DROPPED, in the conciseness pass. All four
+                    facts are still here and they are still the reason this is
+                    the longest note in the dialog; what went was the
+                    elaboration around them -- "where you can read exactly what
+                    was asked" (which is what "in your transcript" means) and
+                    "to ask every session afresh" (which is what re-asking is).
+                    A disclosure is the one kind of copy this pass may not
+                    shorten by removing a fact, and
+                    `test/settings/concise-output.test.tsx` holds each of the
+                    four separately so that shortening it any further has to
+                    redden something.
+
                     AND IT DOES NOT OPEN WITH "vam", which is the rule the
                     editor-colours note above carries and the same guard that
                     catches it: this panel upper-cases a paragraph's first
@@ -966,13 +1005,11 @@ export function SettingsOverlay({
                     `data-verbatim` opt-out -- that attribute means "somebody
                     chose these letters", and this is prose. */}
                 <p data-concise-output-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                  the request goes in at the start of the <span className="text-ink">first</span>{' '}
-                  prompt vam sends to each session, so it is in your transcript where you can read
-                  exactly what was asked, and it costs those tokens once. After a{' '}
-                  <code className="text-ink">/clear</code> or a compaction the agent has forgotten
-                  it and vam cannot tell — turn this off and on again to ask every session afresh.
-                  Turning it off stops vam asking; it cannot un-say what a session has already been
-                  told.
+                  the request rides the <span className="text-ink">first</span> prompt vam sends to
+                  each session, so it is in your transcript and costs those tokens once. A{' '}
+                  <code className="text-ink">/clear</code> or a compaction empties it and vam cannot
+                  tell — turn this off and on again to re-ask. Turning it off stops the asking, not
+                  what a session was already told.
                 </p>
               </Block>
 
