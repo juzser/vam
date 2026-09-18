@@ -13,3 +13,9 @@ docs/design/mockup/
 out/
 dist-app/
 dist-web/
+
+# Local agent scaffolding. Untracked by design: juzser/vam is public and none
+# of this is part of the app — the tooling that writes it lives elsewhere.
+.blacksmith/
+.claude/
+state/
