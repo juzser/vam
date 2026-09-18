@@ -113,6 +113,15 @@
  * two facts, and only a real hover and a real Tab press answer the second --
  * and the hover half is where the guard buried an assumption of its own
  * author's (see the script's header),
+ * and -- since the operator asked the Terminal view to stop taking the
+ * keyboard on arrival -- WHO HOLDS IT after a real key press: that arriving at
+ * the pane leaves it on the shell, that `i` and `I` both put it on the pane's
+ * own input, that Escape typed there is still SENT into the session rather
+ * than used as an exit, and that a session switch does not take it back. Every
+ * one of those is `document.activeElement` after a keystroke a browser
+ * delivered -- in a unit environment `activeElement` is whatever the test last
+ * focused by hand, so the whole family of "the mode reads Insert while the
+ * body holds the keyboard" is invisible there,
  * and -- since the terminal learned to keep its scrollback -- whether the
  * pane OVERFLOWS AT ALL once the capture is longer than the box (it did not,
  * and the operator reported exactly that: `scrollHeight === clientHeight` is
@@ -177,6 +186,7 @@ const GUARDS = [
   'view-width-shots',
   'model-picker-shots',
   'terminal-scrollback-shots',
+  'terminal-insert-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

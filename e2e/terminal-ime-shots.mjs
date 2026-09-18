@@ -242,6 +242,15 @@ await page.waitForSelector('[data-terminal-pane]', { timeout: 5_000 });
 // `attached`, not `visible`: the box is `sr-only`, which is the whole point of
 // it -- one clipped pixel that takes the keyboard and draws nothing.
 await page.waitForSelector('[data-terminal-input]', { state: 'attached', timeout: 5_000 });
+// AND THE OPERATOR ASKS FOR THE KEYBOARD, which they did not have to until
+// the Terminal view stopped taking it on arrival at their request ("can I
+// still have to press `i` to focus the terminal input?",
+// `e2e/terminal-insert-shots.mjs`). Nothing else here changes: `i` is the key
+// `Canvas.tsx` routes through `focusInsertStop` to this pane, so every
+// composition case below still begins from a box that really holds the
+// keyboard -- it is now asked for rather than assumed.
+await page.keyboard.press('i');
+await page.waitForTimeout(150);
 
 const cdp = await page.context().newCDPSession(page);
 
@@ -294,9 +303,9 @@ const keyDown = (key, code, keyCode) =>
 // that the insert scope on the PANE covers the box Chromium focused.
 
 const arrived = await keyboardAt();
-console.log('on arrival:', JSON.stringify(arrived));
+console.log('after `i`:', JSON.stringify(arrived));
 check(
-  'the tab hands the keyboard to a real editable box, which is what an IME needs',
+  '`i` hands the keyboard to a real editable box, which is what an IME needs',
   arrived.isBox && arrived.tag === 'TEXTAREA',
   `activeElement is <${arrived.tag}>`,
 );

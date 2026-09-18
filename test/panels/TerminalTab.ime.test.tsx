@@ -81,6 +81,19 @@ const keys = (send: { mock: { calls: unknown[][] } }): PaneKey[] =>
   send.mock.calls.map((call) => call[1] as PaneKey);
 
 /**
+ * THE OPERATOR'S WAY IN, and the only one there is now. Nothing focuses this
+ * pane on arrival any more (`TerminalTab.tsx`); `i` and `I` reach it through
+ * `focusInsertStop`, which focuses the pane's first insert stop -- the pane
+ * itself -- and the pane forwards the keyboard to this box a microtask later.
+ * Every case below that needs the box to HOLD the keyboard says so by calling
+ * this.
+ */
+async function enter() {
+  (pane() as HTMLElement).focus();
+  await settle();
+}
+
+/**
  * One composition event, carrying its `data`.
  *
  * BUILT BY HAND BECAUSE happy-dom's `CompositionEvent` DROPS IT. Measured:
@@ -447,6 +460,7 @@ describe('the hidden box does not take the pane’s place', () => {
 
   it('hands the keyboard to the hidden box, which is where a composition can happen', async () => {
     await open();
+    await enter();
     // THE WHOLE POINT OF THE BOX. A `<section>` is not editable, so an input
     // method has nothing to compose into and the operator's syllable never
     // exists. What holds the keyboard has to be a real editable element.
@@ -478,6 +492,7 @@ describe('the hidden box does not take the pane’s place', () => {
     // The corner hint is the only thing on screen that says where the keys
     // are going. Focus moved one element deeper; the claim must not.
     await open();
+    await enter();
     expect(q('[data-terminal-exit-hint]')).not.toBeNull();
     (input() as HTMLTextAreaElement).blur();
     await settle();

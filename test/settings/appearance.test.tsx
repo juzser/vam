@@ -14,6 +14,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { type BindingRow, buildBindingSheet } from '../../src/renderer/keyboard/keysheet.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../../src/renderer/prefs/editor.js';
 import {
   type EffectiveTheme,
@@ -312,11 +313,20 @@ describe('a binding is edited by pressing the key', () => {
   });
 
   it('refuses a conflicting key and names the action it collides with', () => {
+    // THE CAPTION IS ASKED OF THE SHEET, not restated here. A literal copy
+    // went stale the day `i` grew a second surface to land on, and the drift
+    // reddened this case for a reason that had nothing to do with what it is
+    // about -- which is that the refusal NAMES the collision rather than only
+    // reporting one.
+    const caption = buildBindingSheet(EMPTY_PREFS.keyBindings)
+      .flatMap((group) => group.rows)
+      .find((row: BindingRow) => row.id === 'prompt')?.label;
+    expect(caption).not.toBeUndefined();
     const { onChange } = open();
     fireEvent.click(slot('rename', 0) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'i' });
     expect(onChange).not.toHaveBeenCalled();
-    expect(message()).toContain('write a prompt to this session');
+    expect(message()).toContain(caption as string);
   });
 
   it('takes a second binding on the same action', () => {

@@ -311,4 +311,47 @@ describe('i puts the caret in the box, and the mode follows the caret', () => {
     pressFocused('j');
     expect(focusedSession()).toBe('a2');
   });
+
+  /**
+   * AND THE PANE THAT HAS NO BOX TO OPEN — the operator's terminal report,
+   * reduced to the part a unit environment can hold.
+   *
+   * `i` called `beginComposing()` whatever the pane was showing, and
+   * `beginComposing` only sets a flag the COMPOSER reads. A pane drawing no
+   * composer — the Terminal view, the Files view, or a Response view whose
+   * open question has withdrawn it (`DetailPanel.tsx`, `composerHidden`) —
+   * set the flag, focused nothing and said nothing. On the Terminal view that
+   * was the one key that could still have got in, which is what made it worth
+   * fixing in the same breath as the auto-focus that was removed: delete the
+   * grab alone and the pane is reachable by mouse and by nothing else.
+   *
+   * THE QUESTION CARD STANDS IN FOR THE TERMINAL PANE here — the substitution
+   * `Canvas.select-digit-view.test.tsx` and `Canvas.half-page.test.tsx`
+   * already make, for their reason: both are an insert scope that is no text
+   * box, drawn INSTEAD of the composer. The terminal itself needs a real
+   * browser (`e2e/terminal-insert-shots.mjs`), because where focus is after a
+   * key press is the whole claim and happy-dom's `activeElement` is whatever
+   * the test last focused by hand.
+   *
+   * IT IS THE RULE THE CODE ALREADY CLAIMED. `focus-scope.ts` says of its stop
+   * order: "that is exactly the rule `i` already follows — the prompt box,
+   * unless the session is asking something". It was not. This is that sentence
+   * made true.
+   */
+  it('lands on the pane’s own stop when the pane draws no composer at all', () => {
+    // A PIN ON AN UNCHANGED OUTCOME THROUGH A CHANGED ROUTE, and it is worth
+    // saying which. This case was green before the fix: `beginComposing` set
+    // a flag, and `DetailPanel`'s own `composing` effect focused the first
+    // option. It is green after it by a different road — `Canvas.tsx` lands
+    // the keyboard itself, through the same `focusInsertStop` `I` uses — and
+    // what this holds is that the road change cost the operator nothing.
+    render(<Canvas model={ASKING} />);
+    // The premise, asserted rather than assumed: with the question open there
+    // is no box for `i` to open, so this case is about the other branch.
+    expect(composer()).toBeNull();
+    press('i');
+    expect(mode()).toBe('Insert');
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement?.hasAttribute('data-question-option')).toBe(true);
+  });
 });
