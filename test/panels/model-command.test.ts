@@ -100,6 +100,36 @@ describe('the five choices are the CLI’s own aliases', () => {
       'Haiku',
     ]);
   });
+
+  it('carries each alias’s VERSION, in the values the CLI’s own menu printed', () => {
+    // Operator: "in the model picker, put the version on the right as well".
+    //
+    // RE-MEASURED RATHER THAN RECALLED, and the measurement contradicted the
+    // request's own example ("Opus has version 5.1"). Captured from Claude
+    // Code 2.1.276 on 2026-09-18 -- `claude` in an empty directory over a
+    // private tmux socket, a bare `/model`, `capture-pane -p`:
+    //
+    //     ❯ 1. Default (recommended) ✔  Sonnet 5 · Efficient for routine tasks
+    //       2. Sonnet                   Sonnet 5 · Efficient for routine tasks
+    //       3. Fable                    Fable 5.1 · Most capable for your ...
+    //       4. Opus                     Opus 5 · Best for everyday, complex ...
+    //       5. Haiku                    Haiku 4.5 · Fastest for quick answers
+    //
+    // So FABLE is 5.1 and OPUS is 5, which is the way round the request had
+    // them reversed. A literal list because the CLI is the only authority for
+    // these and nothing in vam can derive them.
+    expect(MODEL_CHOICES.map((choice) => choice.version)).toEqual([
+      // `Default` has no version OF ITS OWN -- it is whichever model the CLI
+      // currently recommends -- so it carries that model's name and number,
+      // exactly as the CLI's own right-hand column does. "Default 5" would be
+      // a version of a thing that has none.
+      'Sonnet 5',
+      '5',
+      '5.1',
+      '5',
+      '4.5',
+    ]);
+  });
 });
 
 describe('what one choice becomes on the wire', () => {

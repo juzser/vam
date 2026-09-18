@@ -4482,30 +4482,91 @@ export function DetailPanel(props: DetailPanelProps) {
     if (draft === '') setAttachedImage(null);
   }, [draft]);
   /**
-   * A15.4: whether the default-provider picker is open. Component state,
-   * same register as `dismissed`/`pick` below for the bang/slash lists — a
-   * second `DetailPanel` instance (a split pane, A15.1) gets its own copy,
-   * never a shared one, which matters because this popover's open/closed
-   * state is about THIS pane's own composer, not a fact about the provider
-   * itself.
+   * WHICH OF THE TOOLS ROW'S POPOVERS IS OPEN -- provider, model or mode --
+   * and `null` for none. ONE NAME, NOT THREE BOOLEANS, and that is the fix for
+   * a defect the operator reported rather than a tidy-up.
+   *
+   * Reported: "when I open the auto/manual mode picker, clicking outside or
+   * clicking over to the model picker does not close it, so the popovers end
+   * up overlapping each other."
+   *
+   * TWO ROUTES WERE REPORTED AND SIX WERE MEASURED, in Chromium against the
+   * shipped bundle before anything here changed. Each popover held its own
+   * `useState` boolean and no toggle knew the other two existed, so every
+   * ordered pair stacked -- and `provider -> mode` with the model already
+   * stuck open put all THREE on screen at once. Patching the reported
+   * direction would have left four.
+   *
+   * SO THE STATE IS THE RULE. "Two of these are open" is no longer a state
+   * that exists to be reached: a name can only hold one value, and opening one
+   * IS closing the others. Nothing is subscribed to anything, and there is no
+   * ordering between three setters to get wrong.
+   *
+   * Component state, same register as `dismissed`/`pick` below for the bang
+   * and slash lists -- a second `DetailPanel` (a split pane, A15.1) gets its
+   * own copy, which matters because this is about THIS pane's composer and not
+   * a fact about the provider, the model or the mode. In particular it is NOT
+   * a copy of the mode: the mode lives in the draft, which is the text that
+   * actually gets recorded.
    */
-  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  type ToolsPopover = 'provider' | 'model' | 'mode';
+  const [openPopover, setOpenPopover] = useState<ToolsPopover | null>(null);
+  /** A toggle in one place: the same click that opens closes, as it always did. */
+  const togglePopover = (name: ToolsPopover) =>
+    setOpenPopover((open) => (open === name ? null : name));
+  const providerPickerOpen = openPopover === 'provider';
+  const modePickerOpen = openPopover === 'mode';
+  const modelPickerOpen = openPopover === 'model';
   /**
-   * The mode popover's open/closed state — per pane, for the same reason the
-   * provider one above is, and NOT a copy of the mode itself: the mode lives
-   * in the draft, which is the text that actually gets recorded.
-   */
-  const [modePickerOpen, setModePickerOpen] = useState(false);
-  /**
-   * The model popover's open/closed state, per pane like the two above -- and
-   * the free-text row's own text, which is the ONE thing here that is not a
-   * copy of a fact elsewhere: a full model id the operator is still typing
+   * The model popover's free-text row, which is the ONE thing here that is not
+   * a copy of a fact elsewhere: a full model id the operator is still typing
    * exists nowhere until Enter sends it, and it is cleared once it has gone.
-   * Neither is "the current model": vam never reads the CLI's answer back and
-   * so holds no opinion about which model a session is on.
+   * It is not "the current model" either: vam never reads the CLI's answer
+   * back and so holds no opinion about which model a session is on.
    */
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelIdText, setModelIdText] = useState('');
+  /**
+   * AND A POINTER LANDING ANYWHERE ELSE CLOSES IT -- the other half of the
+   * report, and the half that had no code at all: nothing anywhere listened
+   * for a click outside, so a popover opened by a pointer could be dismissed
+   * only by picking a row or by hitting its own toggle again.
+   *
+   * ON `pointerdown` AND NOT `click`, because the two answer different
+   * questions. `click` fires after the button is released and only where press
+   * and release landed on the same element, so a press that begins a text
+   * selection in the transcript would leave the popover up over the drag. The
+   * popover should be gone the moment a pointer goes down somewhere else,
+   * which is when the operator has visibly aimed elsewhere.
+   *
+   * IN THE CAPTURE PHASE, so a handler that stops propagation on its own way
+   * up cannot keep this from running -- the transcript's links and the
+   * keystroke strip both stop events, and a dismissal that works everywhere
+   * except over those would be the same defect in a smaller box.
+   *
+   * THE BOUNDARY IS THE OPEN POPOVER'S OWN ROOT, marked `data-popover-root`:
+   * the wrapper that holds a toggle and its layer. Inside it -- the toggle,
+   * the listbox, the free-text field -- nothing is dismissed here (the
+   * toggle's own click still closes it, and typing in the field must not).
+   * Outside it, including on a PEER's toggle, the layer goes: the peer's own
+   * click then opens its own, which is the reported route, arriving closed.
+   *
+   * Only while something is open: no listener sits on the document at rest.
+   */
+  useEffect(() => {
+    if (openPopover === null) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(`[data-popover-root="${openPopover}"]`) !== null
+      ) {
+        return;
+      }
+      setOpenPopover(null);
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  }, [openPopover]);
   /**
    * WHICH OF THE THREE FACES THE MODEL CONTROL WEARS for the focused session.
    * `model-command.ts` carries the table and the argument; this reads it
@@ -4634,12 +4695,14 @@ export function DetailPanel(props: DetailPanelProps) {
    * Before this they closed only by picking a row or re-clicking their own
    * toggle. That was survivable while Escape merely left the box; it is not
    * now, because an Escape that reaches past an open popover stops an agent.
+   *
+   * ONE NAME MAKES THIS ONE LINE. It used to clear three booleans in a row,
+   * which is three chances to add a fourth popover and forget one; `null` is
+   * now the whole of "none of them".
    */
   const closeOpenPopover = (): boolean => {
-    if (!modePickerOpen && !providerPickerOpen && !modelPickerOpen) return false;
-    setModePickerOpen(false);
-    setProviderPickerOpen(false);
-    setModelPickerOpen(false);
+    if (openPopover === null) return false;
+    setOpenPopover(null);
     return true;
   };
   /**
@@ -5454,7 +5517,7 @@ export function DetailPanel(props: DetailPanelProps) {
           // no echo that the turn landed (`sources/claude-code/reply.ts`), so
           // this claims the keystroke, not the answer.
           title:
-            'types the prompt into this session’s terminal — it appears when the session records it',
+            'types the prompt into this session’s terminal — it shows once the session records it',
         }
       : {
           Glyph: NotepadText,
@@ -6949,7 +7012,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 onChange={(event) => void takeFile(event.currentTarget)}
                 className="hidden"
               />
-              <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
+              <Note text="puts the file’s text into the prompt text — vam uploads nothing">
                 <button
                   type="button"
                   data-attach
@@ -7002,7 +7065,7 @@ export function DetailPanel(props: DetailPanelProps) {
               bytes itself off that path; vam still uploads nothing. See
               `state/artifacts/vam-image-attach/findings.md`. */}
               {pickImageAttachment !== undefined && entry !== null && (
-                <Note text="opens a file picker, checks the file is really an image inside this session's own directory, and puts its path on its own line in the prompt text — vam uploads nothing">
+                <Note text="puts an image’s path into the prompt — it must sit inside this session’s own directory; vam uploads nothing">
                   <button
                     type="button"
                     data-attach-image
@@ -7057,8 +7120,16 @@ export function DetailPanel(props: DetailPanelProps) {
               persist a change (`onSetDefaultProvider`), the same rule
               `pickImageAttachment` follows two blocks up. */}
               {onSetDefaultProvider !== undefined && (
-                <div className="relative flex-none">
-                  <Note text="which agent a NEW session starts with — vam's own Settings, reachable here; it does not change this session, which is already running">
+                /* `data-popover-root` IS THE DISMISSAL BOUNDARY, not decoration
+                   and not a test hook: the document-level `pointerdown` handler
+                   above asks whether the press landed inside the OPEN popover's
+                   own root, and a press anywhere else closes it. On the WRAPPER
+                   because the wrapper holds both halves -- the toggle and the
+                   layer that floats out of it -- and a boundary drawn round
+                   only one of them would dismiss on a press inside the very
+                   thing being pressed. */
+                <div data-popover-root="provider" className="relative flex-none">
+                  <Note text="the agent NEW sessions start with — not this one, which is already running">
                     <button
                       type="button"
                       data-provider-picker-toggle
@@ -7066,7 +7137,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       aria-haspopup="listbox"
                       aria-expanded={providerPickerOpen}
                       aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
-                      onClick={() => setProviderPickerOpen((open) => !open)}
+                      onClick={() => togglePopover('provider')}
                       className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                     >
                       <span
@@ -7104,7 +7175,7 @@ export function DetailPanel(props: DetailPanelProps) {
                             aria-selected={selected}
                             onClick={() => {
                               onSetDefaultProvider(provider.id);
-                              setProviderPickerOpen(false);
+                              setOpenPopover(null);
                             }}
                             className={[
                               'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
@@ -7175,7 +7246,7 @@ export function DetailPanel(props: DetailPanelProps) {
               `e2e/model-picker-shots.mjs` measures that the note really
               opens both ways, and what the dimmed label paints. */}
               {modelControl === 'request' && (
-                <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                <Note text="vam cannot switch models here — the factory chooses; this writes your request into the prompt">
                   <input
                     data-model-request
                     value={readModelRequest(draft)}
@@ -7202,7 +7273,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 </Note>
               )}
               {modelControl === 'picker' && (
-                <div className="relative flex-none">
+                <div data-popover-root="model" className="relative flex-none">
                   {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
                       because it is one the operator did not ask for: measured
                       on 2.1.274, `/model <alias>` answers "...and saved as your
@@ -7210,7 +7281,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       session-only form (that is the `s` key inside the
                       interactive menu vam never drives), so the honest thing
                       is to say what the line does. */}
-                  <Note text="model — typed into the pane vam started as /model <name>, which this session answers there; the CLI also saves the choice as its default for new sessions">
+                  <Note text="types /model <name> into this session’s pane — the CLI also makes it the default for new sessions">
                     <button
                       type="button"
                       data-model-picker
@@ -7225,7 +7296,7 @@ export function DetailPanel(props: DetailPanelProps) {
                          nothing checked -- the same rule the mode chip keeps
                          for the mode it does not read back. */
                       aria-label="model — choose one for this session"
-                      onClick={() => setModelPickerOpen((open) => !open)}
+                      onClick={() => togglePopover('model')}
                       className="vam-tap flex h-6 shrink-0 cursor-pointer items-center text-ink-dim hover:text-ink"
                     >
                       <span
@@ -7265,12 +7336,51 @@ export function DetailPanel(props: DetailPanelProps) {
                                session is on, and `aria-selected` is a claim. */
                             aria-selected={false}
                             onClick={() => {
-                              setModelPickerOpen(false);
+                              setOpenPopover(null);
                               void sendModel(choice.id);
                             }}
-                            className="flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
-                            {choice.label}
+                            <span data-model-name>{choice.label}</span>
+                            {/* THE VERSION, ON THE RIGHT, at the operator's
+                                ask — and in the CLI's own layout: its menu
+                                prints the number in a second column beside the
+                                alias, so vam's picker reads the way the thing
+                                it types into does.
+
+                                `ml-auto` AND NOT A GRID: the rows are a
+                                `flex-col`, whose default `align-items:
+                                stretch` already gives every button the width
+                                of the widest, so one auto margin per row
+                                lands the five numbers in one lane. A grid
+                                would be a second opinion about a width the
+                                column already has.
+
+                                NO COLOUR OF ITS OWN, deliberately. The CLI
+                                pairs each version with a sentence ("Best for
+                                everyday, complex tasks"); those are 40-55
+                                characters and this popover floats inside a
+                                pane whose floor is 320px (`DETAIL_MIN`), so
+                                carrying them would either wrap the rows or
+                                push the popover past its own pane. The number
+                                is the part the operator asked for and the part
+                                that fits. It is subordinate text, so it takes
+                                `text-meta` — the scale's floor, the size the
+                                question card's own option numbers take — and
+                                INHERITS the row's ink rather than dimming
+                                itself: `ink-quiet` measures 3.718:1 on this
+                                card, under the 4.5:1 WCAG 1.4.3 asks of text
+                                that says something, and this says which model
+                                you are about to switch to. Inheriting also
+                                means it brightens with the label on hover
+                                instead of being the one word that does not.
+
+                                `font-mono` because it is a version number,
+                                which is the same reason the model id field
+                                below it is monospaced. */}
+                            <span data-model-version className="ml-auto font-mono text-meta">
+                              {choice.version}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -7292,7 +7402,7 @@ export function DetailPanel(props: DetailPanelProps) {
                           // prompt box's handler submits the DRAFT on it.
                           event.preventDefault();
                           event.stopPropagation();
-                          setModelPickerOpen(false);
+                          setOpenPopover(null);
                           void sendModel(modelIdText);
                           setModelIdText('');
                         }}
@@ -7305,7 +7415,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {modelControl === 'disabled' && (
-                <Note text="vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal">
+                <Note text="vam owns no terminal here — open the session in a vam terminal to send /model">
                   <span
                     data-model-picker-shell
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
@@ -7367,9 +7477,9 @@ export function DetailPanel(props: DetailPanelProps) {
               on every render, never mirrored in state, because a mirror is a
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
-                <div className="relative flex-none">
+                <div data-popover-root="mode" className="relative flex-none">
                   <Note
-                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. It belongs to the session: this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started.`}
+                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ⇧Tab cycles the session’s own.`}
                   >
                     <button
                       type="button"
@@ -7378,7 +7488,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       aria-haspopup="listbox"
                       aria-expanded={modePickerOpen}
                       aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
-                      onClick={() => setModePickerOpen((open) => !open)}
+                      onClick={() => togglePopover('mode')}
                       className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                     >
                       {/* The glyph carries the ink now (`MODE_SKIN`), so the
@@ -7415,7 +7525,7 @@ export function DetailPanel(props: DetailPanelProps) {
                             aria-selected={selected}
                             onClick={() => {
                               onDraftChange(setModeRequest(draft, mode));
-                              setModePickerOpen(false);
+                              setOpenPopover(null);
                             }}
                             className={[
                               'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
@@ -7482,8 +7592,8 @@ export function DetailPanel(props: DetailPanelProps) {
                 <Note
                   text={
                     listening
-                      ? 'listening — press again to stop; what is heard is appended to the prompt'
-                      : "dictates into the prompt using this device's own speech recognition — vam records no audio and uploads none"
+                      ? 'listening — press again to stop; speech goes into the prompt'
+                      : 'dictates into the prompt — on-device speech recognition; vam records and uploads nothing'
                   }
                 >
                   <button

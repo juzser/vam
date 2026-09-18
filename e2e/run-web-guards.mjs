@@ -134,7 +134,13 @@
  * which no unit environment can be asked at all: every panel in that dialog is
  * mounted and `hidden`, so a `querySelector` finds a row in the tree whether
  * or not the operator could ever see it, and only a real box with a real
- * width tells the two apart.
+ * width tells the two apart,
+ * and -- since the operator found the composer's popovers stacking on top of
+ * each other -- whether pressing OUTSIDE an open popover really closes it,
+ * which is a real `pointerdown` reaching a document listener from a real hit
+ * test at a real coordinate: a unit environment can only fire a synthetic
+ * event at a node it picked itself, which says the handler exists and nothing
+ * about whether a pointer ever gets there.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -194,6 +200,7 @@ const GUARDS = [
   'model-picker-shots',
   'terminal-scrollback-shots',
   'terminal-insert-shots',
+  'prompt-popovers-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
