@@ -27,12 +27,18 @@
  * the cost of not driving it was the second half of the sentence above: EVERY
  * model pick rewrote `~/.claude/settings.json`. `main/terminal/model-switch.ts`
  * owns the whole route, in main, where `answer.ts`'s rules already live; this
- * module keeps the TABLE the popover draws and the one-word rule, and types
- * nothing at all. `claude --help` says `--model` takes "an alias for the latest
- * model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name", which is
- * why the picker offers the five aliases AND a free-text row for a full id --
- * and the full id is the one choice with no menu row, so it is also the only
- * one that still costs the operator their default.
+ * module keeps the TABLE the popover draws, and types nothing at all.
+ *
+ * AND THE TABLE IS THE WHOLE OFFER NOW -- five rows, no sixth. `claude --help`
+ * says `--model` takes "an alias for the latest model (e.g. 'fable', 'opus',
+ * or 'sonnet') or a model's full name", and the picker used to carry a
+ * free-text row for that second half. But a full name has NO ROW on the CLI's
+ * own menu, so it could only go in as `/model <id>` + Return -- the form that
+ * also saves it as the operator's default. vam disclosed that cost and took
+ * the route anyway; offered the fallback or an outright refusal, the operator
+ * chose refusal. The row is gone, main answers `not-in-menu` having typed
+ * nothing, and the one-word rule that lived here is `isModelChoice` in
+ * `shared/terminal.ts` alone -- see the comment where the builder used to be.
  *
  * SO THE TABLE IS:
  *
@@ -197,38 +203,30 @@ export function modelButtonLabel(running: string | null): string {
   return running ?? 'model';
 }
 
-/**
- * A choice is one word: an alias or a full model id, neither of which carries
- * whitespace. Anything else is refused BEFORE a key is built, because the two
- * things whitespace can be are both wrong on the wire -- a space hands the CLI
- * a second argument, and a newline in a literal payload reaches the pane as
- * 0x0a, which the REPL submits on (`tmux/argv.ts`): `/model` would go in bare,
- * opening the menu, and the rest would be typed into it. Control characters
- * are refused for the same reason `sendTextArgv` types with `-l`: the line is
- * text, never keys.
- */
-const ONE_WORD = /^[^\s\p{Cc}]+$/u;
+/*
+  NO BUILDER FOR `/model <choice>` LIVES HERE ANY MORE, and the absence is the
+  point.
 
-/**
- * `/model <choice>`, or `null` when the choice is not one word.
- *
- * IT IS NO LONGER WHAT VAM TYPES, AND THAT IS THE POINT. A `modelCommandStrokes`
- * stood beside this, cutting the line into sixteen-character `PaneKey`s for
- * `terminal.send` -- and `/model <alias>` + Return is exactly the form the CLI
- * answers with "and saved as your default for new sessions", so every pick
- * rewrote `~/.claude/settings.json`. Main drives the CLI's own menu now
- * (`main/terminal/model-switch.ts`), and it types the argument form ITSELF for
- * the one choice that has no menu row -- a full model id -- where it also says
- * `scope: 'default'` out loud. That builder is gone rather than left lying
- * about: a renderer-side way to type this line is a loaded gun.
- *
- * WHAT IS LEFT IS THE ONE-WORD RULE AND THE STRING THE CAPTION PRINTS. The rule
- * is enforced again in main (`isModelChoice`), because the renderer is the
- * least trusted process in the app; the copy here exists to WORD the refusal
- * before the bridge is touched.
- */
-export function modelCommandLine(choice: string): string | null {
-  const word = choice.trim();
-  if (!ONE_WORD.test(word)) return null;
-  return `/model ${word}`;
-}
+  TWO WENT, ONE AT A TIME. `modelCommandStrokes` cut the line into
+  sixteen-character `PaneKey`s for `terminal.send`, and `/model <alias>` +
+  Return is exactly the form the CLI answers with "and saved as your default
+  for new sessions" -- so every pick rewrote `~/.claude/settings.json`. That
+  one went when main took over the route and drove the CLI's own menu instead
+  (`main/terminal/model-switch.ts`). `modelCommandLine` outlived it by one
+  change: main still typed the argument form for the one choice with no menu
+  row, a full model id, and the renderer still printed that line in the
+  caption while refusing a choice that was not one word.
+
+  BOTH OF THOSE REASONS ARE GONE. The operator chose refusal over the
+  fallback, so main types the argument form for nothing at all; with the
+  free-text row removed with it, every choice the picker can send is one of
+  `MODEL_CHOICES`' own ids, so no input exists that the one-word rule could
+  refuse. The rule itself did not move -- `isModelChoice` in
+  `shared/terminal.ts` enforces it on whatever crosses the bridge, which is
+  where enforcement belonged. What is left here is the decision table, the
+  five rows the popover draws, and the label the button wears.
+
+  AND IT IS NOT LEFT LYING ABOUT, deliberately: a renderer-side way to spell
+  the line that costs somebody their default is a loaded gun, and the next
+  hand to need "just the string" would find it already written.
+*/

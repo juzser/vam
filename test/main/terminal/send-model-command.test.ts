@@ -18,8 +18,8 @@
  *    argument up as a KEY NAME -- measured on 3.7b, `send-keys Escape`
  *    delivers `^[` while `send-keys -l -- Escape` delivers six letters -- and
  *    `--` is what lets text beginning with `-` reach the pane rather than
- *    being read as an option. `/model` starts with a slash, and a full model
- *    id typed into the free-text row is whatever the operator wrote.
+ *    being read as an option. `/model` starts with a slash, which is reason
+ *    enough on its own.
  *
  *  - THE RETURN IS A SEPARATE, INTERPRETED KEY, and it is LAST of the pair
  *    that opens the menu. `-l` forbids interpretation, so Return cannot ride
@@ -70,7 +70,6 @@ describe('the menu route, as tmux receives it', () => {
     const { run, argvs } = runner([AFTER_ESCAPE, MENU_ON_OPUS, MENU_ON_HAIKU]);
     expect(await switchSessionModel(run, ATLAS, 'haiku')).toEqual({
       kind: 'sent',
-      scope: 'session',
     });
     expect(sends(argvs)).toEqual([
       ['send-keys', '-t', PANE, '-l', '--', '/model'],
@@ -107,20 +106,22 @@ describe('the menu route, as tmux receives it', () => {
   });
 });
 
-describe('the full-model-id route, as tmux receives it', () => {
-  it('types the whole line in ONE literal send, then one Return', async () => {
-    // `/model claude-opus-5-20260501` used to be cut into sixteen-character
-    // pieces to fit `MAX_KEY_TEXT`, a bound that belongs to the one-keystroke
-    // channel. Main types its own line and has no such bound.
+describe('the full-model-id route, as tmux receives it: it does not receive it', () => {
+  it('hands tmux no send-keys at all for an id the menu has no row for', async () => {
+    // WHAT THIS ASSERTED BEFORE. `/model claude-opus-5-20260501` went in as one
+    // literal send and one Return -- the argument form, which the CLI answers
+    // "...and saved as your default for new sessions". It was disclosed rather
+    // than hidden; the operator chose refusal over disclosure, so the line is
+    // not built for any input at all and this file's subject is what tmux is
+    // NOT handed.
     const { run, argvs } = runner([AFTER_ESCAPE]);
     expect(await switchSessionModel(run, ATLAS, 'claude-opus-5-20260501')).toEqual({
-      kind: 'sent',
-      scope: 'default',
+      kind: 'not-in-menu',
+      choice: 'claude-opus-5-20260501',
     });
-    expect(sends(argvs)).toEqual([
-      ['send-keys', '-t', PANE, '-l', '--', '/model claude-opus-5-20260501'],
-      ['send-keys', '-t', PANE, 'Enter'],
-    ]);
+    expect(sends(argvs)).toEqual([]);
+    // Not even the Escape the post-menu refusals press: no menu was opened.
+    expect(argvs.map((argv) => argv[0])).toEqual(['list-sessions', 'display-message']);
   });
 });
 

@@ -116,27 +116,31 @@ export type SessionModel =
   | { readonly kind: 'unknown' };
 
 /**
- * WHAT BECAME OF A MODEL SWITCH, and the TWO SCOPES a successful one can have.
+ * WHAT BECAME OF A MODEL SWITCH -- one success, and a refusal for every way it
+ * can fail to be one.
  *
  * Beside `SessionModel` because it is the write to that read's fact, and here
  * rather than in main for the same reason: main produces it, the preload
  * forwards it and the renderer draws a different sentence for every arm.
  *
- * `scope` IS THE WHOLE POINT OF THE TYPE. Measured on Claude Code 2.1.276:
- * `/model <alias>` + Return answers `Set model to Opus 5 and saved as your
- * default for new sessions`, and the CLI's own menu header says the same
- * thing in advance. So a switch vam made through the argument form CHANGED THE
- * OPERATOR'S `~/.claude/settings.json`, from a control whose note claimed it
- * switched this session. The menu's `s` key does not -- `Set model to Haiku
- * 4.5 for this session only`, and that file byte-identical afterwards -- and
- * `main/terminal/model-switch.ts` drives it. The two are different facts about
- * the operator's machine, so they are two values and the caption says which.
- * `default` is not a failure and is not hidden; it is disclosed.
+ * `sent` CARRIES NO SCOPE, AND THAT IS A DECISION RATHER THAN AN OMISSION. It
+ * used to: `session` was the menu's `s` key and `default` was the argument
+ * form, which vam took for a full model id while DISCLOSING that the CLI had
+ * also rewritten `~/.claude/settings.json`. Offered that fallback or an
+ * outright refusal, the operator chose refusal -- so one route is left, it is
+ * the menu, and every switch vam performs is this session's alone. A field
+ * with one possible value is a field that lies about there being a choice, and
+ * a caption reading the scope off it would be reading a constant. Measured on
+ * Claude Code 2.1.276: the menu's `s` answers `Set model to Haiku 4.5 for this
+ * session only` and leaves that file byte-identical -- same sha256, same mtime
+ * -- while `/model <alias>` + Return answers `Set model to Opus 5 and saved as
+ * your default for new sessions`.
  *
  * EVERY REFUSAL IS ITS OWN KIND, for the reason `PaneView` and `AnswerResult`
  * keep theirs apart: each sends a person somewhere different. `question` is a
  * picker that already has the keyboard -- vam looked and will not type past
- * it. `no-menu` is vam having asked for the menu and having no menu to drive
+ * it. `not-in-menu` is a choice the CLI's own menu cannot express. `no-menu`
+ * is vam having asked for the menu and having no menu to drive
  * afterwards, which means the `/model` line may have landed in the agent's
  * prompt instead. `not-live` is a menu that was there and stopped behaving
  * like one: the probe arrow moved nothing, or it left the screen mid-walk.
@@ -145,10 +149,26 @@ export type SessionModel =
  * words, spelled the same because they are the same states.
  */
 export type ModelSwitchResult =
-  /** It went in. `session` is the menu's `s`; `default` is the argument form. */
-  | { readonly kind: 'sent'; readonly scope: 'session' | 'default' }
+  /** It went in, on the menu's `s`: this session, and no later one. */
+  | { readonly kind: 'sent' }
   /** A picker already has the keyboard. `title` is the line above its rows. */
   | { readonly kind: 'question'; readonly title: string }
+  /**
+   * The choice has no row on the CLI's own `/model` menu, so vam typed
+   * NOTHING. `choice` is what was asked for, so a caption can name it.
+   *
+   * WHY THIS ARM EXISTS AT ALL. The menu is the only route that keeps a switch
+   * to one session, and it carries the five aliases and nothing else -- so a
+   * full model id such as `claude-opus-5-20260501` has no row to walk onto.
+   * The one form the CLI offers for such an id is `/model <id>` + Return, and
+   * that form ALSO saves the pick as the operator's default for new sessions:
+   * a write to `~/.claude/settings.json` made from a control reached for to
+   * change ONE session. vam does not make that write on somebody's behalf,
+   * disclosed or not, so it refuses instead -- and the caption names the
+   * remedy, because an operator who wants it can type the line themselves in
+   * the Terminal tab, knowing what it costs.
+   */
+  | { readonly kind: 'not-in-menu'; readonly choice: string }
   /** `/model` went in and no menu came up. It may have gone in as a prompt. */
   | { readonly kind: 'no-menu' }
   /** A menu that will not take an arrow is one no key may be pressed on. */

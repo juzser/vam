@@ -25,9 +25,10 @@
  *
  * Also kept, being claims rather than prose: "vam uploads nothing" on both
  * attachments, "vam records and uploads nothing" on dictation, "not this one"
- * on the provider default, and the CLI's own side effect on the model picker
- * (choosing a model there also makes it the default for new sessions -- a
- * consequence the operator did not ask for, so vam says it).
+ * on the provider default, and the model picker's own scope -- which used to
+ * be the CLI's side effect ("choosing a model there also makes it the default
+ * for new sessions"), and is now the sentence that replaced it once vam
+ * stopped taking the route that had one: the switch is this session's only.
  *
  * THE CAP IS A FENCE, NOT THE PROOF. `Note` paints into a 260px box at
  * `text-control` (12px), so a line of tip holds roughly forty characters and
@@ -203,8 +204,16 @@ describe('and shorter did not mean emptier', () => {
     expect(tip('[data-attach-image]')).toMatch(/this session’s own directory/);
     expect(tip('[data-provider-picker-toggle]')).toMatch(/NEW sessions/);
     expect(tip('[data-provider-picker-toggle]')).toMatch(/not this one/);
-    // The CLI's own side effect, which the operator did not ask for.
-    expect(tip('[data-model-picker]')).toMatch(/default for new sessions/);
+    // THE MODEL PICKER'S CLAIM CHANGED SIDES, and it is still a claim. It used
+    // to disclose the CLI's own side effect -- "a full id also becomes the
+    // default for new sessions" -- true while vam typed `/model <id>` for a
+    // full model id. vam refuses that route now
+    // (`main/terminal/model-switch.ts`), so the honest sentence is the scope
+    // itself, and the old one would promise a settings change vam will not
+    // make. The rule this file holds is unchanged: the claim may be corrected,
+    // never dropped.
+    expect(tip('[data-model-picker]')).toMatch(/this session only/);
+    expect(tip('[data-model-picker]')).not.toMatch(/default for new sessions/);
     expect(tip('[data-model-picker]')).toMatch(/\/model/);
   });
 
