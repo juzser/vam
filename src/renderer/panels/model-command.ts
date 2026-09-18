@@ -18,7 +18,8 @@
  * and saved as your default for new sessions", and the status line changes at
  * once. `/model default` answers the same for the default. A BARE `/model`
  * opens an interactive menu (Default · Sonnet · Fable · Opus · Haiku, "Enter to
- * set as default · s to use this session only · Esc to cancel") -- vam never
+ * set as default · s to use this session only · Esc to cancel" -- both still
+ * word for word on 2.1.276, re-captured with the versions below) -- vam never
  * drives that menu, because it cannot read it back; it sends the argument form
  * and nothing else. `claude --help` says `--model` takes "an alias for the
  * latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name",
@@ -79,16 +80,49 @@ export function modelControlState(input: {
 
 /**
  * The CLI's own five, in the order its own menu prints them. `id` is what is
- * typed after `/model `; `label` is the menu's word for it. A list rather than
- * something derived, because the CLI is the authority and this is a copy of
- * what it printed on 2.1.274.
+ * typed after `/model `; `label` is the menu's word for it; `version` is the
+ * number its right-hand column prints beside that word. A list rather than
+ * something derived, because the CLI is the authority and this is a COPY of
+ * what it printed.
+ *
+ * THIS COPY IS FROM CLAUDE CODE 2.1.276, TAKEN 2026-09-18 -- `claude` in an
+ * empty directory over a private tmux socket, a bare `/model`, `capture-pane`:
+ *
+ *     ❯ 1. Default (recommended) ✔  Sonnet 5 · Efficient for routine tasks
+ *       2. Sonnet                   Sonnet 5 · Efficient for routine tasks
+ *       3. Fable                    Fable 5.1 · Most capable for your hardest…
+ *       4. Opus                     Opus 5 · Best for everyday, complex tasks
+ *       5. Haiku                    Haiku 4.5 · Fastest for quick answers
+ *
+ * AND THESE STRINGS GO STALE BY DESIGN. Every one of them is a fact about the
+ * CLI on the day above, and vam has no way to check any of them: it never
+ * reads a session's model back, and `claude --help` says each id is "an alias
+ * for the LATEST model" -- so what `/model opus` SENDS stays correct forever
+ * while what this table PRINTS beside it goes wrong the day Anthropic ships
+ * the next Opus. The date and the version above are the whole remedy: whoever
+ * next finds a number here that disagrees with the CLI should re-capture all
+ * five and move the date, not patch the one that was noticed. The labels have
+ * carried this habit since 2.1.274; the versions join it.
+ *
+ * THE MEASUREMENT OVERRULED THE REQUEST, which is why it was taken. The ask
+ * arrived as "for example Opus has version 5.1"; the menu says Opus is 5 and
+ * FABLE is 5.1. The capture is the authority here, not the recollection.
+ *
+ * `default` CARRIES A NAME AND NOT A BARE NUMBER because it has no version of
+ * its own -- it is whichever model the CLI currently recommends, and its own
+ * right-hand column says "Sonnet 5" for exactly that reason. "Default 5" would
+ * be a version of a thing that has none.
  */
-export const MODEL_CHOICES: readonly { readonly id: string; readonly label: string }[] = [
-  { id: 'default', label: 'Default' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'fable', label: 'Fable' },
-  { id: 'opus', label: 'Opus' },
-  { id: 'haiku', label: 'Haiku' },
+export const MODEL_CHOICES: readonly {
+  readonly id: string;
+  readonly label: string;
+  readonly version: string;
+}[] = [
+  { id: 'default', label: 'Default', version: 'Sonnet 5' },
+  { id: 'sonnet', label: 'Sonnet', version: '5' },
+  { id: 'fable', label: 'Fable', version: '5.1' },
+  { id: 'opus', label: 'Opus', version: '5' },
+  { id: 'haiku', label: 'Haiku', version: '4.5' },
 ];
 
 /**

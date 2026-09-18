@@ -7268,9 +7268,48 @@ export function DetailPanel(props: DetailPanelProps) {
                               setModelPickerOpen(false);
                               void sendModel(choice.id);
                             }}
-                            className="flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
-                            {choice.label}
+                            <span data-model-name>{choice.label}</span>
+                            {/* THE VERSION, ON THE RIGHT, at the operator's
+                                ask — and in the CLI's own layout: its menu
+                                prints the number in a second column beside the
+                                alias, so vam's picker reads the way the thing
+                                it types into does.
+
+                                `ml-auto` AND NOT A GRID: the rows are a
+                                `flex-col`, whose default `align-items:
+                                stretch` already gives every button the width
+                                of the widest, so one auto margin per row
+                                lands the five numbers in one lane. A grid
+                                would be a second opinion about a width the
+                                column already has.
+
+                                NO COLOUR OF ITS OWN, deliberately. The CLI
+                                pairs each version with a sentence ("Best for
+                                everyday, complex tasks"); those are 40-55
+                                characters and this popover floats inside a
+                                pane whose floor is 320px (`DETAIL_MIN`), so
+                                carrying them would either wrap the rows or
+                                push the popover past its own pane. The number
+                                is the part the operator asked for and the part
+                                that fits. It is subordinate text, so it takes
+                                `text-meta` — the scale's floor, the size the
+                                question card's own option numbers take — and
+                                INHERITS the row's ink rather than dimming
+                                itself: `ink-quiet` measures 3.718:1 on this
+                                card, under the 4.5:1 WCAG 1.4.3 asks of text
+                                that says something, and this says which model
+                                you are about to switch to. Inheriting also
+                                means it brightens with the label on hover
+                                instead of being the one word that does not.
+
+                                `font-mono` because it is a version number,
+                                which is the same reason the model id field
+                                below it is monospaced. */}
+                            <span data-model-version className="ml-auto font-mono text-meta">
+                              {choice.version}
+                            </span>
                           </button>
                         ))}
                       </div>

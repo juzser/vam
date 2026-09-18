@@ -333,9 +333,45 @@ const menu = await page.evaluate(() => {
   // ON TOP, at its own centre: a popover drawn under the transcript column
   // would pass every DOM check and be unclickable.
   const atCentre = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  // THE VERSION COLUMN, AS RECTANGLES. "On the right" is a layout fact and
+  // nothing else can answer it: in a unit environment no stylesheet loads, so
+  // `ml-auto` resolves to nothing and every box measures 0 -- a DOM-order
+  // check there would be asserting a proxy. Measured per row: the version's
+  // left edge past the name's right edge (that is "to the right of it"), and
+  // its right edge inside the row's padding box.
+  const columns = options.map((el) => {
+    const name = el.querySelector('[data-model-name]');
+    const version = el.querySelector('[data-model-version]');
+    if (name === null || version === null) return null;
+    const n = name.getBoundingClientRect();
+    const v = version.getBoundingClientRect();
+    const row = el.getBoundingClientRect();
+    return {
+      id: el.getAttribute('data-model-option'),
+      text: (version.textContent ?? '').trim(),
+      rightOfName: Math.round(v.left - n.right),
+      rightEdge: Math.round(row.right - v.right),
+      painted: v.width > 0 && v.height > 0,
+      // The ink is INHERITED on purpose -- a dimmer version would be the one
+      // word in the row that does not brighten on hover, and `ink-quiet` is
+      // under the 4.5:1 text owes. So it must equal the name's resolved ink.
+      sameInk: getComputedStyle(version).color === getComputedStyle(name).color,
+    };
+  });
   return {
     ids: options.map((el) => el.getAttribute('data-model-option')),
-    labels: options.map((el) => (el.textContent ?? '').trim()),
+    labels: options.map((el) => (el.querySelector('[data-model-name]')?.textContent ?? '').trim()),
+    columns,
+    // The five numbers in ONE lane, which is what `ml-auto` in a stretched
+    // `flex-col` is for: a column that stair-steps is not a column.
+    //
+    // `null` RATHER THAN 1 WHEN A ROW IS MISSING ITS VERSION, because a `Set`
+    // of five nulls also has size 1 -- the check would pass hardest exactly
+    // when there is no column at all. (Observed: the first red run of this
+    // guard had every other version assertion failing and this one green.)
+    lane: columns.some((c) => c === null)
+      ? null
+      : new Set(columns.map((c) => Math.round(c.rightEdge))).size,
     inListbox: options.every((el) => listbox !== null && listbox.contains(el)),
     inputInListbox: listbox?.querySelector('[data-model-id]') !== null,
     freeText: popover.querySelector('[data-model-id]') !== null,
@@ -353,6 +389,39 @@ check(
     menu.ids.join(',') === 'default,sonnet,fable,opus,haiku' &&
     menu.labels.join(',') === 'Default,Sonnet,Fable,Opus,Haiku',
   JSON.stringify(menu?.labels),
+);
+// ---------------------------------------------------------------------------
+// THE VERSIONS, ON THE RIGHT. Operator: "in the model picker, add the version
+// on the right as well." The values are `MODEL_CHOICES`' own, re-captured from
+// Claude Code 2.1.276 (see `model-command.ts` for the capture and its date);
+// what is measured here is the two things a unit test cannot say -- that they
+// PAINT, and that they paint to the RIGHT of the name rather than merely after
+// it in the markup.
+// ---------------------------------------------------------------------------
+check(
+  'every row draws a version beside its name',
+  menu !== null && menu.columns.every((c) => c !== null && c.painted),
+  JSON.stringify(menu?.columns),
+);
+check(
+  'carrying the CLI’s own numbers — Fable 5.1 and Opus 5, not the other way round',
+  menu !== null && menu.columns.map((c) => c?.text).join(',') === 'Sonnet 5,5,5.1,5,4.5',
+  JSON.stringify(menu?.columns?.map((c) => `${c?.id}=${c?.text}`)),
+);
+check(
+  'and each one really is to the RIGHT of its name, by rectangle',
+  menu !== null && menu.columns.every((c) => c !== null && c.rightOfName > 0),
+  JSON.stringify(menu?.columns?.map((c) => `${c?.id}: +${c?.rightOfName}px`)),
+);
+check(
+  'in one lane: the five right edges line up, so the column is a column',
+  menu?.lane === 1,
+  JSON.stringify(menu?.columns?.map((c) => `${c?.id}: ${c?.rightEdge}px from the row’s edge`)),
+);
+check(
+  'painting the row’s own ink, not a quieter one that would owe 4.5:1 and miss it',
+  menu !== null && menu.columns.every((c) => c !== null && c.sameInk),
+  JSON.stringify(menu?.columns),
 );
 check('the five are options of one listbox, and the free-text row is outside it', menu?.inListbox === true && menu?.inputInListbox === false);
 check('with a free-text row for a full model id', menu?.freeText === true);

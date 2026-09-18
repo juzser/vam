@@ -200,17 +200,42 @@ describe('a session vam can type into gets a real picker', () => {
       'opus',
       'haiku',
     ]);
-    expect(all('[data-model-option]').map((el) => el.textContent?.trim())).toEqual([
-      'Default',
-      'Sonnet',
-      'Fable',
-      'Opus',
-      'Haiku',
-    ]);
+    expect(
+      all('[data-model-option]').map((el) =>
+        el.querySelector('[data-model-name]')?.textContent?.trim(),
+      ),
+    ).toEqual(['Default', 'Sonnet', 'Fable', 'Opus', 'Haiku']);
     for (const option of all('[data-model-option]')) {
       expect(option.getAttribute('role')).toBe('option');
     }
     expect(q('[data-model-id]')?.tagName).toBe('INPUT');
+  });
+
+  it('prints each alias’s version beside its name, in the CLI’s own values', () => {
+    // Operator: "in the model picker, add the version on the right as well".
+    // The values are `MODEL_CHOICES`' own, re-measured on Claude Code 2.1.276
+    // (see `model-command.ts`); what this holds is that they REACH the row --
+    // a table nothing renders is a table nobody reads.
+    //
+    // THE COLUMN IS SECOND IN THE ROW, which is all a unit environment can
+    // honestly say about "on the right": no stylesheet is loaded here, so
+    // `ml-auto` resolves to nothing and every box measures 0. That the version
+    // really PAINTS to the right of the name is measured on the shipped bundle
+    // in `e2e/model-picker-shots.mjs`, against real rectangles.
+    draw({ delivers: true, terminal: true });
+    act(() => picker()?.click());
+    expect(
+      all('[data-model-option]').map((el) =>
+        el.querySelector('[data-model-version]')?.textContent?.trim(),
+      ),
+    ).toEqual(['Sonnet 5', '5', '5.1', '5', '4.5']);
+    for (const option of all('[data-model-option]')) {
+      const kids = [...option.children];
+      expect(kids.map((kid) => kid.getAttribute('data-model-name') !== null)).toEqual([
+        true,
+        false,
+      ]);
+    }
   });
 
   it('types `/model opus` literally and then Enter, into THIS session, and closes', async () => {
