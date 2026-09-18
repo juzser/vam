@@ -34,6 +34,7 @@
  */
 
 import type { SourceError } from '../../ipc/channels.js';
+import { withConciseLead } from '../../terminal/concise.js';
 import { promptKeystrokes, sendEnterArgv } from '../tmux/argv.js';
 import {
   classifyTmuxFailure,
@@ -280,7 +281,33 @@ export async function replyToSession(input: {
   const listed = await listVamSessions(run);
   const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row, input.panes) : null;
   if (pane !== null) {
-    return typeIntoPane(run, pane, prompt);
+    /**
+     * THE CONCISE-OUTPUT RULES, IF THE OPERATOR HAS THEM ON AND THIS SESSION
+     * HAS NOT BEEN TOLD YET.
+     *
+     * HERE, AND NOT IN THE CALLER. This is the last point at which the prompt
+     * is still a string and the first at which vam knows there IS a pane to
+     * type into: `recordPrompt` above could not tell a delivery from a refusal
+     * without re-deriving the pairing, and the composer in the renderer
+     * could not tell either. It is `main/terminal/concise.ts`'s decision --
+     * what the rules say, who has had them, what the switch does -- and this
+     * line is only the seam it is applied at.
+     *
+     * KEYED BY THE SESSION ID rather than by `rowId`: the row carries the pid
+     * of the process serving it (`<sessionId>#<pid>`) and a session resumed by
+     * a second process is the same conversation with the same context. Priming
+     * per row would type the rules into a context that already has them.
+     *
+     * `delivered()` IS CALLED ONLY ON A CLEAN SEND. `typeIntoPane` answers
+     * non-null when a keystroke failed -- including the case where the text
+     * landed but Return did not -- and in every one of those the session has
+     * not read anything, so the rules must still be waiting for the prompt
+     * that does arrive.
+     */
+    const lead = withConciseLead(sessionId, prompt);
+    const error = await typeIntoPane(run, pane, lead.prompt);
+    if (error === null) lead.delivered();
+    return error;
   }
   // NO PANE, NO DELIVERY, AND THE REFUSAL SAYS SO. There is no second channel
   // to fall through to (see the header): a session vam did not start, or one it

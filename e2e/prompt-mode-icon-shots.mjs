@@ -102,11 +102,24 @@ if (label === null || !label.includes('mode:')) {
 // for.
 // ---------------------------------------------------------------------------
 await toggle.hover();
-const tip = await page
+const tipBox = await page
   .waitForSelector('[role="tooltip"]', { timeout: 3000 })
-  .then((h) => h.evaluate((el) => el.textContent ?? ''))
+  .then((h) =>
+    h.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return {
+        text: el.textContent ?? '',
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+        lineHeight: Number.parseFloat(cs.lineHeight),
+        padding: Number.parseFloat(cs.paddingTop) + Number.parseFloat(cs.paddingBottom),
+      };
+    }),
+  )
   .catch(() => null);
-console.log('mode icon tooltip:', JSON.stringify(tip));
+const tip = tipBox?.text ?? null;
+console.log('mode icon tooltip:', JSON.stringify(tipBox));
 if (tip === null || !/mode:\s*(Auto|Manual|Plan)\b/.test(tip)) {
   throw new Error(
     `the mode tooltip does not name the current mode: ${JSON.stringify(tip)} — the operator ` +
@@ -118,6 +131,32 @@ if (tip === null || !/mode:\s*(Auto|Manual|Plan)\b/.test(tip)) {
 // DOES and not only what it is called.
 if (!/decides its own next step|a hand on each step|writes the list before/.test(tip)) {
   throw new Error(`the mode tooltip names the mode but not what it means: ${JSON.stringify(tip)}`);
+}
+// RE-AIMED AT THE SHORTER WORDING, not deleted. The tooltip was cut from 212
+// characters to 112 at the operator's ask ("the tooltips on the buttons in the
+// prompt input are a bit long"); what the cut was NOT allowed to spend is the
+// pair of mechanisms -- the line this control writes into the prompt, and the
+// chord that presses the session's own -- because an operator who knows only
+// one is left believing the other is broken.
+if (!/prompt/.test(tip) || !/⇧Tab|Shift\+Tab/.test(tip)) {
+  throw new Error(
+    `the mode tooltip lost one of its two mechanisms: ${JSON.stringify(tip)} — it must still ` +
+      'say that picking here goes into the prompt AND that a chord cycles the session’s own.',
+  );
+}
+// AND HOW MANY LINES IT REALLY PAINTS, which is the property "too long" is
+// actually about and the one a character count cannot answer: the tip box is
+// 260px wide and a character's width is not the same number on every machine
+// (measured here at ~6.0px on macOS and ~5.7px on the CI runner), so the same
+// string wraps differently in the two places. Read off the painted box.
+const tipLines = Math.round((tipBox.height - tipBox.padding) / tipBox.lineHeight);
+console.log(`the mode tip paints ${tipLines} line(s) in a ${tipBox.width}px box`);
+if (tipLines > 3) {
+  throw new Error(
+    `the mode tooltip paints ${tipLines} lines (${tipBox.height}px tall) — the operator asked ` +
+      'for these to be shorter, and a tip that runs past three lines of its own box is the ' +
+      'thing they were looking at.',
+  );
 }
 await page.mouse.move(0, 0);
 await page.waitForTimeout(150);
@@ -297,6 +336,46 @@ for (const mode of ['auto', 'manual', 'plan']) {
     clip: { x: box.x - 12, y: box.y - 10, width: box.width + 24, height: box.height + 20 },
   });
   console.log(`${outDir}/prompt-mode-icon-${mode}.png`);
+  // AND THE TIP'S HEIGHT FOR *THIS* MODE. The measurement above was of `Auto`,
+  // whose `means` is the middle of the three; `Plan`'s is the longest, and the
+  // longest is the one that decides whether this tooltip fits. Measuring only
+  // the mode the pane happens to open on is a check that passes on the easy
+  // case -- so every mode is measured, in the box it really paints in.
+  if ((await page.locator('[data-mode-picker]').count()) > 0) {
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(120);
+  }
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(120);
+  await toggle.hover();
+  const perMode = await page
+    .waitForSelector('[role="tooltip"]', { timeout: 3000 })
+    .then((h) =>
+      h.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        return {
+          text: el.textContent ?? '',
+          height: Math.round(r.height),
+          lineHeight: Number.parseFloat(cs.lineHeight),
+          padding: Number.parseFloat(cs.paddingTop) + Number.parseFloat(cs.paddingBottom),
+        };
+      }),
+    )
+    .catch(() => null);
+  if (perMode === null) {
+    throw new Error(`no tooltip opened on the ${mode} toggle, so its height was never measured.`);
+  }
+  const lines = Math.round((perMode.height - perMode.padding) / perMode.lineHeight);
+  console.log(`  the ${mode} tip is ${perMode.text.length} chars and paints ${lines} line(s)`);
+  if (lines > 3) {
+    throw new Error(
+      `the ${mode} tooltip paints ${lines} lines: ${JSON.stringify(perMode.text)} — the ` +
+        'operator asked for these to be shorter.',
+    );
+  }
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(120);
 }
 
 // --- The same three hues in LIGHT, which is a separate set of values and not

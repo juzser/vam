@@ -18,6 +18,7 @@ import {
   isPaneSize,
   type PaneSendResult,
   type PaneView,
+  type SessionModel,
 } from '../../shared/terminal.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
@@ -25,6 +26,8 @@ import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import { answerQuestion, readSessionPrompt } from './answer.js';
+import { setConciseOutput } from './concise.js';
+import { readSessionModel } from './model.js';
 import { readSessionPane, resizeSessionPane, sendToPane, targetSession } from './pane.js';
 
 /**
@@ -96,6 +99,28 @@ export function registerTerminalIpc(
    * the right one's name.
    */
   const aims = new Map<string, Aim>();
+
+  /**
+   * THE CONCISE-OUTPUT SWITCH, pushed from the renderer's prefs on every write
+   * and every read (`prefs.ts`'s `activatePrefs`).
+   *
+   * REGISTERED HERE rather than beside `setPrRepos` in `ipc/handlers.ts`,
+   * because the module it feeds is this directory's: what the switch changes
+   * is what vam types into a pane, which is the subject of every other channel
+   * on this registration. It answers through the `IpcResult` envelope all the
+   * same, so the preload's one `unwrap` covers both preference channels.
+   *
+   * NO VALIDATION TABLE AND NO CAPABILITY GATE, for the reason `setPrRepos`
+   * needs neither: it asks the source for nothing, and `setConciseOutput` is
+   * TOTAL -- anything that is not exactly `true` lands as off, which is what
+   * vam did before this existed. The check is on this side of the bridge
+   * because the renderer is the least trusted process in the app.
+   */
+  ipcMain.handle(CHANNELS.setConciseOutput, async (_event, ...args: unknown[]) => {
+    setConciseOutput(args[0]);
+    return { ok: true, value: undefined } as const;
+  });
+
   ipcMain.handle(CHANNELS.terminalRead, async (_event, ...args: unknown[]): Promise<PaneView> => {
     const [projectId, rowId] = args;
     // The row is OPTIONAL: a caller that names only a project still gets the
@@ -302,6 +327,45 @@ export function registerTerminalIpc(
         return { kind: 'unaimed' };
       }
       return readSessionPrompt(
+        run,
+        projectId,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
+
+  /**
+   * The model on the pane. A READ like the prompt above it, aimed by the same
+   * rule, and the one channel here whose answer is drawn while no tab of its
+   * own is open: the model button sits in the composer, so this is asked for a
+   * row the operator is merely LOOKING at.
+   *
+   * IT DOES NOT TOUCH THE AIM CACHE, and that is deliberate. The tab's read
+   * refreshes a proven pairing because it resolves the same pane a keystroke
+   * would go to, a second apart, while somebody types. This one runs on its
+   * own slower clock for a control that sends nothing by itself, and an aim
+   * refreshed by a poll nobody is typing behind would widen the window
+   * `AIM_TTL_MS` exists to bound (see its note) for no gain -- the first key
+   * of a run proves its own pairing, which is what that constant is for.
+   *
+   * `unknown` IS EVERY REFUSAL, including a malformed ask. A label cannot draw
+   * a reason: it either has a name to show or wears the word it always wore.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalModel,
+    async (_event, ...args: unknown[]): Promise<SessionModel> => {
+      const [projectId, rowId] = args;
+      if (
+        args.length < 1 ||
+        args.length > 2 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return { kind: 'unknown' };
+      }
+      return readSessionModel(
         run,
         projectId,
         rowId,

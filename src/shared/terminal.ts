@@ -92,6 +92,30 @@ export type PaneView =
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 /**
+ * WHICH MODEL A SESSION IS RUNNING, or vam's inability to say so.
+ *
+ * Here for the reason `PaneView` is here: main reads it off a captured screen
+ * (`main/terminal/model.ts`), the preload forwards it and the renderer paints
+ * it on the model button, so it cannot live in any one of the three.
+ *
+ * TWO KINDS, AND `unknown` IS A COMMON ONE. The name comes off the CLI's own
+ * status line, which is not always on the screen: a permission prompt, the
+ * CLI's `/model` menu and the trust prompt all replace it, a narrow pane cuts
+ * it, and a pane vam cannot pair to a session was never read at all. The
+ * reasons are collapsed into one kind on purpose -- `main/terminal/model.ts`
+ * argues it where the collapse happens -- because the one surface that draws
+ * this draws the same thing for every one of them: the label it wore before.
+ *
+ * `name` IS THE CLI'S OWN STRING, never one of vam's five aliases. It is
+ * whatever the footer printed -- `Sonnet 5`, `Opus 5`, and `Sonnet 4.5` for a
+ * session started on a full model id -- so a model vam has never heard of
+ * still reaches the button.
+ */
+export type SessionModel =
+  | { readonly kind: 'model'; readonly name: string }
+  | { readonly kind: 'unknown' };
+
+/**
  * A terminal size, in tmux's own units.
  *
  * Here rather than beside the arithmetic that produces it (`renderer/panels/

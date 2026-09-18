@@ -94,13 +94,22 @@ declare global {
        */
       readonly mainErrors: MainErrorsApi;
       /**
-       * PREFERENCES MAIN NEEDS A COPY OF -- one today: where to ask GitHub
-       * from, per project. Desktop-only, and OPTIONAL in this type rather than
-       * merely absent at runtime, because `activatePrefs` runs in the browser
-       * build too and must be able to see that it is not there.
+       * PREFERENCES MAIN NEEDS A COPY OF -- two: where to ask GitHub from, per
+       * project, and whether vam asks the agent for a shorter answer before it
+       * types a prompt into that agent's pane. Desktop-only, and OPTIONAL in
+       * this type rather than merely absent at runtime, because
+       * `activatePrefs` runs in the browser build too and must be able to see
+       * that it is not there.
+       *
+       * EACH MEMBER IS OPTIONAL AS WELL AS THE OBJECT, which the browser build
+       * alone would not justify: a test or a packaged app whose bridge predates
+       * one of these has the object with one member on it, and `activatePrefs`
+       * pushes both. Optional-call syntax at the call site is what makes that a
+       * no-op rather than a `TypeError` on every prefs write.
        */
       readonly prefs?: {
-        setPrRepos(map: unknown): Promise<void>;
+        setPrRepos?(map: unknown): Promise<void>;
+        setConciseOutput?(on: unknown): Promise<void>;
       };
     };
   }

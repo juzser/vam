@@ -14,6 +14,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { type BindingRow, buildBindingSheet } from '../../src/renderer/keyboard/keysheet.js';
+import { EDITOR_LANGS, type EditorLang } from '../../src/renderer/panels/files-highlight.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../../src/renderer/prefs/editor.js';
 import {
   type EffectiveTheme,
@@ -312,11 +314,20 @@ describe('a binding is edited by pressing the key', () => {
   });
 
   it('refuses a conflicting key and names the action it collides with', () => {
+    // THE CAPTION IS ASKED OF THE SHEET, not restated here. A literal copy
+    // went stale the day `i` grew a second surface to land on, and the drift
+    // reddened this case for a reason that had nothing to do with what it is
+    // about -- which is that the refusal NAMES the collision rather than only
+    // reporting one.
+    const caption = buildBindingSheet(EMPTY_PREFS.keyBindings)
+      .flatMap((group) => group.rows)
+      .find((row: BindingRow) => row.id === 'prompt')?.label;
+    expect(caption).not.toBeUndefined();
     const { onChange } = open();
     fireEvent.click(slot('rename', 0) as HTMLElement);
     fireEvent.keyDown(capture() as HTMLElement, { key: 'i' });
     expect(onChange).not.toHaveBeenCalled();
-    expect(message()).toContain('write a prompt to this session');
+    expect(message()).toContain(caption as string);
   });
 
   it('takes a second binding on the same action', () => {
@@ -495,27 +506,37 @@ describe('the terminal text size is an appearance setting', () => {
 });
 
 /**
- * THE FILE EDITOR'S OWN TWO SETTINGS, in the section the operator asked for
- * them in ("thêm setting riêng cho tab đó trong phần appearance").
+ * THE FILE EDITOR'S OWN TWO SETTINGS, which the operator first asked for as a
+ * pair in Appearance (translated: "if needed, add settings of its own for that
+ * tab under appearance") and then split along with everything else in that
+ * panel (translated: "can you separate the appearance and colour settings from
+ * the feature settings?").
+ *
+ * SO THE PAIR IS IN TWO PANELS NOW, and that is the assertion rather than an
+ * exception to one. `settings/sections.ts` carries the rule that decides a
+ * row: the colour switch is a colour and stayed, the indent is a count of
+ * spaces written into the operator's own file and moved.
+ * `test/settings/behaviour-section.test.tsx` holds the same claim from the
+ * other side, in both directions.
  *
  * The pair is proven three ways across this repo and each way is needed: the
  * STORE round-trips them (`test/prefs/prefs.editor.test.ts`), the EDITOR
  * honours them without a remount (`test/panels/DetailPanel.files-tab.test.tsx`),
- * and this file proves the two controls exist, sit in Appearance, and write
- * the pref the other two read. A setting nobody can reach is the storage-shaped
- * version of a control that changes nothing.
+ * and this file proves the two controls exist, sit where they are meant to, and
+ * write the pref the other two read. A setting nobody can reach is the
+ * storage-shaped version of a control that changes nothing.
  */
-describe('the file editor has its own settings in Appearance', () => {
+describe('the file editor has its own settings, one per panel', () => {
   const highlight = () => document.querySelector<HTMLElement>('[data-switch="editor-highlight"]');
   const indent = () => screen.getByLabelText('editor indent') as HTMLInputElement;
 
-  it('puts both of them under Appearance, beside the theme and the colours', () => {
+  it('keeps the colour switch in Appearance and puts the indent under Behaviour', () => {
     open();
     expect(highlight()).not.toBeNull();
     expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe(
       'Appearance',
     );
-    expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
+    expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Behaviour');
   });
 
   it('shows the colour setting in force and writes the one you pick', () => {
@@ -551,6 +572,37 @@ describe('the file editor has its own settings in Appearance', () => {
     expect(note).toMatch(/json/i);
     expect(note).toContain('.env');
     expect(note).toMatch(/plain text/i);
+  });
+
+  /**
+   * AND THE LIST IS READ OFF THE HIGHLIGHTER, never typed here or there.
+   *
+   * The note said "JSON, .env and .ini" for as long as those were the three
+   * formats the editor knew. `EDITOR_LANGS` has four in it: markdown was added
+   * to `files-highlight.ts` and the sentence on screen was not, so the panel
+   * has been promising plain text for a file it colours -- exactly the fault
+   * this caption exists to prevent, one format further along.
+   *
+   * THE MAP IS TOTAL OVER `EditorLang`, which is the half that keeps this
+   * honest. A fifth language cannot be added to the highlighter without
+   * deciding what the operator should be told it is called: this file stops
+   * compiling until somebody writes it down.
+   */
+  it('names every format the editor really colours, read off the highlighter', () => {
+    const SPOKEN: Record<EditorLang, string> = {
+      json: 'json',
+      env: '.env',
+      ini: '.ini',
+      md: 'markdown',
+    };
+    // The corpus: a sweep over an empty list would assert nothing at all.
+    expect(EDITOR_LANGS.length).toBeGreaterThan(3);
+    open();
+    const note = (
+      document.querySelector('[data-editor-highlight-note]')?.textContent ?? ''
+    ).toLowerCase();
+    const unsaid = EDITOR_LANGS.filter((lang) => !note.includes(SPOKEN[lang]));
+    expect(unsaid, `the note colours ${note} but does not name ${unsaid.join(', ')}`).toEqual([]);
   });
 
   /** And the indent's own caption has to say SPACES — "indent: 4" reads as a

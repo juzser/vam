@@ -15,7 +15,15 @@
  * people from. `PaneVisibility` went with them (`prefs/panes.ts`).
  */
 
-import { Bot, Keyboard, type LucideIcon, Palette, RefreshCw, Smartphone } from 'lucide-react';
+import {
+  Bot,
+  Keyboard,
+  type LucideIcon,
+  Palette,
+  RefreshCw,
+  SlidersHorizontal,
+  Smartphone,
+} from 'lucide-react';
 import {
   type BindingGroup,
   type BindingRow,
@@ -24,20 +32,26 @@ import {
   MODE_TITLES,
 } from '../keyboard/keysheet.js';
 
-export type SectionId = 'appearance' | 'sessions' | 'remote' | 'keyboard' | 'update';
+export type SectionId = 'appearance' | 'behaviour' | 'sessions' | 'remote' | 'keyboard' | 'update';
 
 /**
  * WHAT A PHONE MAY SEE OF THIS OVERLAY, and why it is almost none of it.
  *
  * Operator instruction: "on mobile the settings part can be removed; remote
  * only needs to show the paired devices". The reason it is right is stronger
- * than the screen being small. Appearance, Sessions and Keyboard read and
- * write `prefs`, which is `localStorage` ON WHICHEVER DEVICE IS LOOKING -- so
- * a theme chosen on the phone changes the phone, not the machine the sessions
- * run on, and a shortcut edited there binds keys for a device with no
- * keyboard. Update reaches `window.api.update`, which the browser build does
- * not have at all. Four controls that look like they configure vam and
+ * than the screen being small. Appearance, Behaviour, Sessions and Keyboard
+ * read and write `prefs`, which is `localStorage` ON WHICHEVER DEVICE IS
+ * LOOKING -- so a theme chosen on the phone changes the phone, not the machine
+ * the sessions run on, and a shortcut edited there binds keys for a device
+ * with no keyboard. Update reaches `window.api.update`, which the browser
+ * build does not have at all. Controls that look like they configure vam and
  * configure a copy of vam nobody is watching.
+ *
+ * BEHAVIOUR INHERITS THAT ARGUMENT UNCHANGED, and it is worth writing down
+ * rather than leaving to be re-derived: its rows are `prefs`, so a phone that
+ * folded a turn away or chose an indent width would be configuring the copy of
+ * vam in its own browser. It is left out for the reason Appearance is, not by
+ * default.
  *
  * Remote is the one whose subject is the DESKTOP rather than the device
  * holding it, which is exactly what a phone has a reason to look at.
@@ -53,6 +67,35 @@ export const PHONE_SECTIONS: readonly SectionId[] = ['remote'];
  * operator is a nav nobody learns. `appearance` is first because it is where
  * the overlay opens, which is also what keeps the theme assertions in
  * `Canvas.settings` reachable without navigating.
+ *
+ * ── WHERE THE LINE BETWEEN APPEARANCE AND BEHAVIOUR IS ────────────────────
+ * Operator, translated: "can you separate the appearance and colour settings
+ * from the feature settings?" Appearance had grown two unrelated kinds of row
+ * and the comments in `SettingsOverlay.tsx` had to argue, once per row, that a
+ * switch which folds half a turn away was "really" paint. Four such arguments
+ * in a row is the shape of a section that is two sections.
+ *
+ * THE RULE THAT DECIDES A ROW, and it is one rule with no exceptions: NAME THE
+ * THING THE OPERATOR IS CHOOSING, NOT THE MACHINERY IT MOVES. Appearance is
+ * where COLOUR and TYPE live -- the theme, the templates, the swatches, the
+ * two text sizes, the terminal's own scheme. Behaviour is where the rows whose
+ * subject is what vam DOES live: what it draws of a turn, how far it lets a
+ * line run, what Tab puts in a file, and what it asks the agent for.
+ *
+ * The rule is worth stating because two rows LOOK like counter-examples and
+ * are not. `terminal text` changes how many columns tmux is told to compose
+ * at -- but the operator is choosing a glyph size and the column count
+ * follows, so it is type, and it stays. `file editor colours` also stops a
+ * tokeniser running -- but the operator is choosing whether a file is
+ * coloured, and its own name says so, so it is colour, and it stays. Against
+ * them: `view width` IS a width (nothing else is being chosen), `file editor
+ * indent` is bytes in the operator's own file, and `focus view` decides which
+ * parts of a turn exist on screen at all.
+ *
+ * THE COST, NAMED: the file editor's two rows now sit in different panels.
+ * That is the price of an Appearance panel that keeps every row called
+ * "colours", which is the thing the operator actually asked for, and each row
+ * points at the other in its own note.
  */
 export const SECTIONS: readonly {
   readonly id: SectionId;
@@ -60,6 +103,15 @@ export const SECTIONS: readonly {
   readonly Icon: LucideIcon;
 }[] = [
   { id: 'appearance', label: 'Appearance', Icon: Palette },
+  // IMMEDIATELY AFTER APPEARANCE, and that is an argument rather than a shrug.
+  // Every row in it was in Appearance until this split, so an operator who
+  // learned where focus view lives finds it one step from where it was -- and
+  // the pair reads as the two halves of one question ("how does vam look" /
+  // "what does vam do") rather than as a section filed between Sessions and
+  // Remote. `SlidersHorizontal` over `ToggleLeft`: most of its rows are
+  // switches today and one is a stepper, so a glyph that draws a switch would
+  // be naming the controls it happens to hold rather than the section.
+  { id: 'behaviour', label: 'Behaviour', Icon: SlidersHorizontal },
   // Before Keyboard rather than after it: Keyboard is the reference section
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.

@@ -195,11 +195,19 @@ describe('the terminal theme rows', () => {
   });
 
   it('say on the row which theme is the default for that mode', () => {
+    // THE CAPTION, NOT THE WHOLE ROW -- and that narrowing is the assertion.
+    // This read the block's entire `textContent`, which includes the chips;
+    // one of those chips IS the default and carries its own name, so the
+    // check was satisfied by the control it was meant to be about and would
+    // have passed for a caption that said nothing. Measured, by deleting
+    // "{default} unless you choose another" from the string: 24 tests green
+    // with the sentence gone from the screen. Scoped to the `<p>` it reddens.
     open();
     const hintOf = (on: EffectiveTheme) =>
       document
         .querySelector(`[data-terminal-theme-row="${on}"]`)
-        ?.closest('[data-settings-rows] > *')?.textContent ?? '';
+        ?.closest('[data-settings-rows] > *')
+        ?.querySelector('p')?.textContent ?? '';
     const label = (id: string) => TERMINAL_THEMES.find((t) => t.id === id)?.label ?? '';
     expect(hintOf('dark')).toContain(label(DEFAULT_TERMINAL_THEME.dark));
     expect(hintOf('light')).toContain(label(DEFAULT_TERMINAL_THEME.light));

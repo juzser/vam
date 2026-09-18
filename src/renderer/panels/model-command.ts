@@ -18,7 +18,8 @@
  * and saved as your default for new sessions", and the status line changes at
  * once. `/model default` answers the same for the default. A BARE `/model`
  * opens an interactive menu (Default · Sonnet · Fable · Opus · Haiku, "Enter to
- * set as default · s to use this session only · Esc to cancel") -- vam never
+ * set as default · s to use this session only · Esc to cancel" -- both still
+ * word for word on 2.1.276, re-captured with the versions below) -- vam never
  * drives that menu, because it cannot read it back; it sends the argument form
  * and nothing else. `claude --help` says `--model` takes "an alias for the
  * latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name",
@@ -79,17 +80,117 @@ export function modelControlState(input: {
 
 /**
  * The CLI's own five, in the order its own menu prints them. `id` is what is
- * typed after `/model `; `label` is the menu's word for it. A list rather than
- * something derived, because the CLI is the authority and this is a copy of
- * what it printed on 2.1.274.
+ * typed after `/model `; `label` is the menu's word for it; `version` is the
+ * number its right-hand column prints beside that word. A list rather than
+ * something derived, because the CLI is the authority and this is a COPY of
+ * what it printed.
+ *
+ * THIS COPY IS FROM CLAUDE CODE 2.1.276, TAKEN 2026-09-18 -- `claude` in an
+ * empty directory over a private tmux socket, a bare `/model`, `capture-pane`:
+ *
+ *     ❯ 1. Default (recommended) ✔  Sonnet 5 · Efficient for routine tasks
+ *       2. Sonnet                   Sonnet 5 · Efficient for routine tasks
+ *       3. Fable                    Fable 5.1 · Most capable for your hardest…
+ *       4. Opus                     Opus 5 · Best for everyday, complex tasks
+ *       5. Haiku                    Haiku 4.5 · Fastest for quick answers
+ *
+ * AND THESE STRINGS GO STALE BY DESIGN. Every one of them is a fact about the
+ * CLI on the day above, and vam has no way to check any of them: it never
+ * reads a session's model back, and `claude --help` says each id is "an alias
+ * for the LATEST model" -- so what `/model opus` SENDS stays correct forever
+ * while what this table PRINTS beside it goes wrong the day Anthropic ships
+ * the next Opus. The date and the version above are the whole remedy: whoever
+ * next finds a number here that disagrees with the CLI should re-capture all
+ * five and move the date, not patch the one that was noticed. The labels have
+ * carried this habit since 2.1.274; the versions join it.
+ *
+ * THE MEASUREMENT OVERRULED THE REQUEST, which is why it was taken. The ask
+ * arrived as "for example Opus has version 5.1"; the menu says Opus is 5 and
+ * FABLE is 5.1. The capture is the authority here, not the recollection.
+ *
+ * `default` CARRIES A NAME AND NOT A BARE NUMBER because it has no version of
+ * its own -- it is whichever model the CLI currently recommends, and its own
+ * right-hand column says "Sonnet 5" for exactly that reason. "Default 5" would
+ * be a version of a thing that has none.
  */
-export const MODEL_CHOICES: readonly { readonly id: string; readonly label: string }[] = [
-  { id: 'default', label: 'Default' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'fable', label: 'Fable' },
-  { id: 'opus', label: 'Opus' },
-  { id: 'haiku', label: 'Haiku' },
+export const MODEL_CHOICES: readonly {
+  readonly id: string;
+  readonly label: string;
+  readonly version: string;
+}[] = [
+  { id: 'default', label: 'Default', version: 'Sonnet 5' },
+  { id: 'sonnet', label: 'Sonnet', version: '5' },
+  { id: 'fable', label: 'Fable', version: '5.1' },
+  { id: 'opus', label: 'Opus', version: '5' },
+  { id: 'haiku', label: 'Haiku', version: '4.5' },
 ];
+
+/**
+ * THE MODEL A ROW WOULD PUT ON THE STATUS LINE, in the CLI's own words.
+ *
+ * `Sonnet` + `5` is what the footer prints as `Sonnet 5`; `Default` has no
+ * version of its own and its column already carries the full name of the model
+ * it resolves to, so it IS that string. Both halves come out of the table the
+ * popover draws, which is the point: the name matched against the pane is the
+ * name the operator is reading in the row.
+ */
+const runningName = (choice: (typeof MODEL_CHOICES)[number]): string =>
+  choice.id === 'default' ? choice.version : `${choice.label} ${choice.version}`;
+
+/**
+ * WHICH ROWS OF THE PICKER THE SESSION'S OWN MODEL MARKS -- the ids, in the
+ * CLI's menu order, of every row whose model is the one `running` names.
+ *
+ * `running` is the string the CLI painted on its status line and vam read back
+ * (`main/terminal/model.ts`), or `null` for the many screens that do not carry
+ * one. It is NOT what vam last typed: a remembered choice is the claim this
+ * whole control was written to avoid.
+ *
+ * WHAT THE MARK MEANS, and it is not "selected". It means THIS ROW'S MODEL IS
+ * WHAT THE SESSION IS RUNNING, which is a fact about the model and not about
+ * the CLI's own menu cursor -- and the difference is load-bearing, because the
+ * two cannot be told apart from the pane:
+ *
+ *     /model default   ->  Set model to Sonnet 5 (default) and saved as ...
+ *     /model sonnet    ->  Set model to Sonnet 5 and saved as ...
+ *     both, after      ->  `  wd1 Sonnet 5 in:0 out:0`
+ *
+ * Measured on 2.1.276: the two commands leave the SAME footer, while the CLI's
+ * own `/model` menu ticks whichever of them was used. The CLI knows which
+ * alias is selected, the status line does not carry it, and vam has nothing
+ * else to read. So on `Sonnet 5` this answers BOTH rows -- which is what vam
+ * can defend, since Default's own column says it IS Sonnet 5, so the model in
+ * the pane is both rows' model. Picking one of the two would be right half the
+ * time and wrong the other half, with nothing on screen to say which.
+ *
+ * A MISS IS AN ANSWER TOO. `Sonnet 4.5` (a session switched to a full model
+ * id), `Opus 6` (the day the CLI ships it, before anyone re-captures the table
+ * above) and a name vam has never heard of all mark nothing: the button still
+ * SAYS the name, and no row claims to be it. A tick on `Sonnet` for a session
+ * running Sonnet 4.5 would be a lie the operator could act on -- that row
+ * sends `/model sonnet`, which would change the model.
+ */
+export function runningModelRows(running: string | null): readonly string[] {
+  if (running === null) return [];
+  return MODEL_CHOICES.filter((choice) => runningName(choice) === running).map(
+    (choice) => choice.id,
+  );
+}
+
+/**
+ * WHAT THE MODEL BUTTON SAYS: the model this session is running, or the word
+ * the control has always worn when vam cannot tell.
+ *
+ * THE FALLBACK IS THE OLD LABEL AND NOT A GUESS. The button was labelled
+ * `model` precisely because vam held no fact about the session's model; when
+ * the pane does not carry one -- a question is open, the CLI's own menu is up,
+ * the line is cut -- vam is back in exactly that position and says exactly
+ * what it said then. The one thing that may never appear here is a name no
+ * pane reported.
+ */
+export function modelButtonLabel(running: string | null): string {
+  return running ?? 'model';
+}
 
 /**
  * A choice is one word: an alias or a full model id, neither of which carries

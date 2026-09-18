@@ -365,6 +365,17 @@ const readPills = () =>
       // The paragraph's own ink, so "the link wears the prose's colour" is a
       // comparison rather than a literal.
       proseInk: el.parentElement === null ? null : getComputedStyle(el.parentElement).color,
+      // SIZE AND PADDING AS COMPARISONS, for the same reason the ink is one.
+      // The out size is the operator's own stepper, so "smaller than the out
+      // text" can only be asked of the two numbers together -- a literal here
+      // would be right at one setting of that stepper and wrong at the rest.
+      fontSize: Number.parseFloat(cs.fontSize),
+      proseFont:
+        el.parentElement === null
+          ? null
+          : Number.parseFloat(getComputedStyle(el.parentElement).fontSize),
+      padX: Number.parseFloat(cs.paddingLeft),
+      padY: Number.parseFloat(cs.paddingTop),
       ground: groundOf(el),
       box: box(el),
       line,
@@ -382,6 +393,40 @@ const readPills = () =>
   });
   });
 const pills = await readPills();
+
+// THE SAME QUESTION AT THE OTHER END OF THE OPERATOR'S STEPPER, asked here
+// while the answer is still the thing on screen.
+//
+// `--vam-out-font-size` is a 10..20 setting, and "the source is smaller than
+// the out text" is a claim about the RELATIONSHIP, not about a size. One
+// reading cannot tell a proportional step from a literal that happens to sit
+// under the default: a pill pinned at a flat 12px would pass every check in
+// this file at the shipped size and be BIGGER than the prose at the bottom of
+// the stepper. So the size is driven to both ends and the comparison re-asked.
+//
+// Driven the way `applyOutFontSize` drives it -- an inline custom property on
+// the document element -- because that property IS the mechanism; going
+// through the settings overlay would be testing the overlay instead. The
+// property is removed again afterwards so every later check in this file reads
+// the shipped size.
+for (const size of [10, 20]) {
+  await page.evaluate((px) => {
+    document.documentElement.style.setProperty('--vam-out-font-size', `${px}px`);
+  }, size);
+  await page.waitForTimeout(120);
+  const stepped = await readPills();
+  check(
+    `at --vam-out-font-size: ${size}px the pill is STILL smaller than the prose`,
+    stepped.length > 0 &&
+      stepped.every((p) => p.proseFont !== null && p.fontSize < p.proseFont && p.fontSize > 0),
+    JSON.stringify(stepped.map((p) => [p.printed, p.fontSize, p.proseFont])),
+  );
+}
+await page.evaluate(() => {
+  document.documentElement.style.removeProperty('--vam-out-font-size');
+});
+await page.waitForTimeout(120);
+
 const within = (inner, outer) =>
   inner.left >= outer.left - 0.5 &&
   inner.right <= outer.right + 0.5 &&
@@ -413,6 +458,24 @@ check(
   pills.every((p) => p.box.height <= p.line && p.box.height >= 0.8 * p.line),
   JSON.stringify(pills.map((p) => [p.box.height, p.line])),
 );
+check(
+  'a pill is SMALLER than the prose it sits in, at whatever size that prose is',
+  // The operator: "the source needs to be smaller than the out font size."
+  // Asked as a comparison against the paragraph's own computed size, because
+  // `--vam-out-font-size` is a 10..20 stepper the operator sets -- the check
+  // below re-asks it at another setting, which is the half a single reading
+  // cannot answer.
+  pills.every((p) => p.proseFont !== null && p.fontSize < p.proseFont),
+  JSON.stringify(pills.map((p) => [p.printed, p.fontSize, p.proseFont])),
+);
+check(
+  'and it has padding on BOTH axes, so the wash is not flush against the word',
+  // "the pill needs more padding" -- and a pill with horizontal padding alone
+  // is a wash that touches the ascenders, which is the state this replaces.
+  pills.every((p) => p.padX >= 4 && p.padY > 0),
+  JSON.stringify(pills.map((p) => [p.printed, p.padX, p.padY])),
+);
+
 check(
   `the runbook pill is a THIRD of the ${OLD_RUNBOOK_WIDTH}px its text + address used to take`,
   // It was "a fifth or more" when the pill still carried a host caption; the

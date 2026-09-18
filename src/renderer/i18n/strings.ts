@@ -87,13 +87,21 @@ const EN = {
   'settings.close': 'close',
 
   // ── Appearance ───────────────────────────────────────────────────────────
-  'settings.appearance.hint':
-    "theme, colours, the size of the text in out and in the terminal, the terminal's own colour scheme, how much of a turn the transcript draws, and the file editor",
+  // COLOUR AND TYPE, and nothing else -- `settings/sections.ts` carries the
+  // rule that decides which rows those are, and why the two that look like
+  // exceptions are not. The tail this hint used to end with ("how much of a
+  // turn the transcript draws, and the file editor") is what moved.
+  //
+  // WHICH text sizes is not spelled out here any more ("the size of the text in
+  // out and in the terminal"): a panel hint names the FAMILIES a section holds
+  // so the operator knows whether to open it, and the two rows say which
+  // surface they size in their own labels, one screen below.
+  'settings.appearance.hint': "theme, colours, text sizes, and the terminal's own colour scheme",
   'settings.appearance.theme.label': 'theme',
   'settings.appearance.theme.hint': 'system follows what the operating system asks for',
   'settings.appearance.templates.label': 'templates',
   'settings.appearance.templates.hint':
-    'a whole {theme} palette in one press — the swatches below still edit it afterwards',
+    'a whole {theme} palette in one press — the swatches below still edit it',
   'settings.appearance.colours.label': 'colours — {theme}',
   'settings.appearance.colours.hint': 'unset follows the stylesheet, and {other} keeps its own',
   'settings.appearance.colours.reset': 'reset {theme} colours',
@@ -102,9 +110,15 @@ const EN = {
     "how large the agent's answer is drawn, in every response pane",
   // THE TERMINAL'S OWN SIZE. The label says which surface, because vam draws
   // text in more than one and only this one is measured in columns.
+  //
+  // THE HINT KEEPS THE CONSEQUENCE AND DROPS THE MECHANISM. What happens is
+  // that a running screen re-wraps, and an operator not told that reads it as
+  // vam having broken their session; HOW it happens -- vam measures the pane
+  // and sends tmux a new column count (`terminal-size.ts`) -- is machinery the
+  // operator cannot act on, and it lives there and here rather than on screen.
   'settings.appearance.terminalText.label': 'terminal text',
   'settings.appearance.terminalText.hint':
-    'how large the tmux screen is drawn — a bigger size fits fewer columns, and vam tells tmux the new width',
+    'how large the terminal screen is drawn — a bigger size fits fewer columns, and a running screen re-wraps',
   // THE TERMINAL'S OWN SCHEME, in four rows. One theme row per APP theme
   // rather than one for the theme on screen, because a scheme is a published
   // palette chosen by name and previewed on its chip -- there is nothing to
@@ -113,19 +127,57 @@ const EN = {
   // against the ground it will be worn on. Each theme hint names that mode's
   // DEFAULT, read off the model rather than typed, so the caption cannot say
   // Hans after somebody changes the table.
+  //
+  // THE TAIL IS GONE FROM BOTH ROWS ("the colours below still edit it
+  // afterwards"), and it cost nothing: the row immediately under them is
+  // `terminalColours`, whose own caption says it edits each colour over the
+  // scheme chosen above. That is the same fact from the side that does the
+  // editing, and this one was paying for it twice -- once per app theme.
   'settings.appearance.terminalTheme.label': 'terminal theme — {on}',
   'settings.appearance.terminalTheme.hint':
-    'the scheme the tmux screen wears while the app is {on} — {default} unless you choose another; the colours below still edit it afterwards',
+    'the scheme the terminal wears while the app is {on} — {default} unless you choose another',
   'settings.appearance.terminalColours.label': 'terminal colours — {theme}',
   'settings.appearance.terminalColours.hint':
-    'each colour of the {theme} scheme, over the theme chosen above — unset follows the theme, and {other} keeps its own',
+    'each colour of the {theme} scheme — unset follows the scheme above, and {other} keeps its own',
   'settings.appearance.terminalColours.reset': 'reset {theme} terminal colours',
   'settings.appearance.terminalOpacity.label': 'terminal background',
   // THE FLOOR IS SAID, because a slider that stops at 30% with no word about
   // it reads as a slider that is stuck: under it the pane's own grey shows
   // through more than the scheme's ground does (`prefs/terminal-scheme.ts`).
+  // WHY it stops there -- every colour in the scheme was chosen against that
+  // ground -- is the argument for the floor, not the floor; it is written in
+  // `prefs/terminal-scheme.ts`, and what the operator needs on screen is that
+  // the slider ends where it ends on purpose.
   'settings.appearance.terminalOpacity.hint':
-    "how much of the scheme's ground is painted over the pane — the rest is the pane's own surface showing through, and it stops at 30% because every colour was chosen against that ground",
+    "how much of the scheme's ground is painted over the pane — the rest is the pane showing through; it stops at 30%",
+  // WHAT A SESSION TAB DRAWS. One caption per indicator, and each caption is
+  // the whole documentation of its glyph: three of the eight are not
+  // guessable from a name (`draft` is text you have NOT sent, `pending` is a
+  // prompt the transcript has NOT recorded yet, `agents` is a count), so
+  // every caption says what the mark MEANS rather than what it looks like.
+  // The hint carries the one rule that is not a switch: idle draws nothing.
+  // THE FILE EDITOR'S COLOURS, and only those: its INDENT is in Behaviour,
+  // because a count of spaces is bytes in the operator's file rather than a
+  // colour. The label says which editor, because vam has more than one text
+  // box and only this one has a gutter to keep level.
+  // The tail this hint had ("for the formats vam can read without guessing")
+  // is the note's first sentence, which then NAMES those formats. One of the
+  // two had to go and it is this one: a caption that hedges without saying
+  // which formats leaves the operator no better off than silence.
+  'settings.appearance.editorHighlight.label': 'file editor colours',
+  'settings.appearance.editorHighlight.hint': 'syntax colours in the Files tab',
+  'settings.appearance.editorHighlight.on': 'on',
+  'settings.appearance.editorHighlight.off': 'off',
+
+  // ── Behaviour ────────────────────────────────────────────────────────────
+  // KEYS MOVE WITH THEIR ROW, because this catalogue is namespaced by WHERE A
+  // STRING IS READ (see the header). `settings.appearance.focusView.label`
+  // read in a Behaviour panel would be the one thing the naming scheme exists
+  // to prevent -- a key that names the wrong screen is a key a translator
+  // cannot file. The STRINGS themselves are unchanged: this is a move of rows
+  // between panels, not a rewrite of what they say.
+  'settings.behaviour.hint':
+    'what vam draws of a turn, how far a line runs, and what Tab puts in a file — colours and text sizes are in Appearance',
   // THE VIEWS' WIDTH. The hint carries two facts an operator cannot guess and
   // would otherwise meet as a fault: that the fraction has a threshold, so a
   // pane too narrow for two thirds of it to hold 80 characters is left whole
@@ -136,34 +188,45 @@ const EN = {
   // release needs to read that it will not again — narrowing the terminal
   // meant telling tmux a smaller column count, which re-wraps the screen of a
   // session that is still running.
-  'settings.appearance.narrowViews.label': 'view width',
-  'settings.appearance.narrowViews.hint':
-    'draw the response, PRs and agents views at two thirds of the pane instead of filling it, while that is at least 80 characters — a narrower pane, such as one side of a split, is left whole; the terminal always fills its pane, so tmux is never asked to re-wrap a running screen',
-  'settings.appearance.narrowViews.on': 'narrowed',
-  'settings.appearance.narrowViews.off': 'full pane',
-  'settings.appearance.focusView.label': 'focus view',
-  'settings.appearance.focusView.hint':
+  //
+  // THAT LAST CLAUSE IS THE REASON AND NOT THE FACT, so it stays here. On
+  // screen the row says the terminal always fills its pane, which is what an
+  // operator can see and act on; "so tmux is never asked to re-wrap a running
+  // screen" is why the exception exists, and it was the longest clause in the
+  // panel. "instead of filling it" went with it -- the switch's own off label
+  // is `full pane` -- and so did "such as one side of a split", an example of
+  // a rule the sentence had already stated.
+  'settings.behaviour.narrowViews.label': 'view width',
+  'settings.behaviour.narrowViews.hint':
+    'draw the response, PRs and agents views at two thirds of the pane, while that is at least 80 characters — a narrower pane is left whole. The terminal always fills its pane',
+  'settings.behaviour.narrowViews.on': 'narrowed',
+  'settings.behaviour.narrowViews.off': 'full pane',
+  'settings.behaviour.focusView.label': 'focus view',
+  'settings.behaviour.focusView.hint':
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",
-  'settings.appearance.focusView.on': 'on',
-  'settings.appearance.focusView.off': 'off',
-  // WHAT A SESSION TAB DRAWS. One caption per indicator, and each caption is
-  // the whole documentation of its glyph: three of the eight are not
-  // guessable from a name (`draft` is text you have NOT sent, `pending` is a
-  // prompt the transcript has NOT recorded yet, `agents` is a count), so
-  // every caption says what the mark MEANS rather than what it looks like.
-  // The hint carries the one rule that is not a switch: idle draws nothing.
-  // THE FILE EDITOR'S OWN TWO. The label says which editor, because vam has
-  // more than one text box and only this one has a gutter to keep level.
-  'settings.appearance.editorHighlight.label': 'file editor colours',
-  'settings.appearance.editorHighlight.hint':
-    'syntax colours in the Files tab, for the formats vam can read without guessing',
-  'settings.appearance.editorHighlight.on': 'on',
-  'settings.appearance.editorHighlight.off': 'off',
-  'settings.appearance.editorIndent.label': 'file editor indent',
+  'settings.behaviour.focusView.on': 'on',
+  'settings.behaviour.focusView.off': 'off',
+  // CONCISE OUTPUT. The label names what the operator gets, never the skill it
+  // is vam's wording of: `i-have-adhd` is the source and is credited in
+  // `main/terminal/concise.ts`, but a settings row that named a third-party
+  // skill would be asking the operator to know what that is before they could
+  // decide anything.
+  //
+  // THE HINT SAYS WHO IS ASKING AND WHEN, because both are surprising. vam has
+  // no model: the only thing it can do is TYPE A REQUEST into the session, and
+  // it does that once per session rather than on every prompt. An operator who
+  // read this as "vam shortens the answers it draws" would be wrong about the
+  // whole product.
+  'settings.behaviour.conciseOutput.label': 'concise output',
+  'settings.behaviour.conciseOutput.hint':
+    'ask the agent for shorter, clearer answers — vam types the request into the session, it never rewrites what it draws',
+  'settings.behaviour.conciseOutput.on': 'on',
+  'settings.behaviour.conciseOutput.off': 'off',
+  'settings.behaviour.editorIndent.label': 'file editor indent',
   // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
   // the text, so the caption says it rather than leaving "indent" to be read
   // as "a tab".
-  'settings.appearance.editorIndent.hint':
+  'settings.behaviour.editorIndent.hint':
     'how many spaces one Tab inserts in the Files tab, and what a format indents by',
 
   // ── Update ───────────────────────────────────────────────────────────────

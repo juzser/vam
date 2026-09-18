@@ -69,6 +69,7 @@
 import {
   ArrowUp,
   Box,
+  Check,
   ChevronDown,
   ChevronsDown,
   ChevronsUp,
@@ -105,7 +106,7 @@ import remarkGfm from 'remark-gfm';
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
-import type { PaneKey, PaneSendResult } from '../../shared/terminal.js';
+import type { PaneKey, PaneSendResult, SessionModel } from '../../shared/terminal.js';
 import type {
   AgentQuestion,
   Command,
@@ -160,9 +161,11 @@ import { type DictationHandle, dictationAvailable, startDictation } from './dict
 import { type FileOpenRequest, FilesTab } from './FilesTab.js';
 import {
   MODEL_CHOICES,
+  modelButtonLabel,
   modelCommandLine,
   modelCommandStrokes,
   modelControlState,
+  runningModelRows,
 } from './model-command.js';
 import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
@@ -193,6 +196,28 @@ import {
  * that vam started.
  */
 const PROMPT_POLL_MS = 2_000;
+
+/**
+ * How often the pane is re-read for the model the session is running.
+ *
+ * SLOWER THAN THE PROMPT ABOVE IT, because it is a slower fact: a model
+ * changes when somebody types `/model`, where a prompt appears and vanishes on
+ * its own. What it buys at all is that vam is not the only one who can type
+ * that line -- the operator can switch the model in their own terminal, and
+ * the status line is HIDDEN behind any open question, so a read that never
+ * repeated would leave the button unlabelled until the row changed.
+ *
+ * IT IS ALSO THE BOUND ON HOW STALE THE LABEL CAN BE, which is why it is not
+ * slower still: four seconds is the longest the button can name a model the
+ * session has stopped running. A pick vam makes itself does not wait for it
+ * (`sendModel` looks again at once).
+ *
+ * WHAT IT COSTS: two tmux invocations per tick per pane showing a composer for
+ * a session vam started -- the listing that proves the pairing and the capture
+ * -- measured at 5.7ms and 5.4ms on a private socket. It runs nowhere else:
+ * the recording source and every session vam did not start ask for nothing.
+ */
+const MODEL_POLL_MS = 4_000;
 
 /**
  * One empty turn list, shared. A frozen constant rather than a fresh `[]` at
@@ -648,6 +673,22 @@ export type DetailPanelProps = {
    * refuses when pressed.
    */
   readonly prompt?: (projectId: string, rowId?: string) => Promise<PromptView>;
+  /**
+   * The bridge that reads WHICH MODEL this row's session is running, off the
+   * CLI's own status line in the pane vam started for it.
+   *
+   * Injected here rather than reached for inside the control, exactly as
+   * `prompt` and the Terminal tab's three members are: a member wired
+   * invisibly is one refactor away from being dropped with nothing to notice,
+   * and a test that cannot hand this a fake would have to fake a global to say
+   * anything at all.
+   *
+   * `undefined` in the browser build, and then the model button wears the word
+   * it has always worn -- structural absence, never a name vam made up. The
+   * same is true of every answer that is not a name (`shared/terminal.ts`):
+   * this control has ONE fallback, not two.
+   */
+  readonly model?: (projectId: string, rowId?: string) => Promise<SessionModel>;
   /**
    * Whether the focused session's source has a terminal surface --
    * `capabilities.terminal`, passed down exactly as `delivers` is.
@@ -3668,6 +3709,7 @@ export function DetailPanel(props: DetailPanelProps) {
     delivers,
     answer,
     prompt,
+    model,
     terminal,
     files,
     pickImageAttachment,
@@ -4022,7 +4064,16 @@ export function DetailPanel(props: DetailPanelProps) {
       strokes,
       `typed ${line} into the terminal of ${entry.session.title} — the session answers there`,
       `${line} · typing…`,
-    );
+    ).then(() => {
+      // LOOK AGAIN, AND DO NOT ASSUME. The line has just been typed, so this
+      // is the one moment the model is known to be about to change -- but what
+      // goes on the button is still whatever the PANE says next, which is what
+      // makes a CLI that refused the switch show the old model rather than the
+      // asked-for one. If this read is a beat early the interval corrects it;
+      // nothing here writes a name. `null` while no poll is running, which is
+      // every state where there was nothing to label anyway.
+      lookForModel.current?.();
+    });
   };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
@@ -4482,30 +4533,91 @@ export function DetailPanel(props: DetailPanelProps) {
     if (draft === '') setAttachedImage(null);
   }, [draft]);
   /**
-   * A15.4: whether the default-provider picker is open. Component state,
-   * same register as `dismissed`/`pick` below for the bang/slash lists — a
-   * second `DetailPanel` instance (a split pane, A15.1) gets its own copy,
-   * never a shared one, which matters because this popover's open/closed
-   * state is about THIS pane's own composer, not a fact about the provider
-   * itself.
+   * WHICH OF THE TOOLS ROW'S POPOVERS IS OPEN -- provider, model or mode --
+   * and `null` for none. ONE NAME, NOT THREE BOOLEANS, and that is the fix for
+   * a defect the operator reported rather than a tidy-up.
+   *
+   * Reported: "when I open the auto/manual mode picker, clicking outside or
+   * clicking over to the model picker does not close it, so the popovers end
+   * up overlapping each other."
+   *
+   * TWO ROUTES WERE REPORTED AND SIX WERE MEASURED, in Chromium against the
+   * shipped bundle before anything here changed. Each popover held its own
+   * `useState` boolean and no toggle knew the other two existed, so every
+   * ordered pair stacked -- and `provider -> mode` with the model already
+   * stuck open put all THREE on screen at once. Patching the reported
+   * direction would have left four.
+   *
+   * SO THE STATE IS THE RULE. "Two of these are open" is no longer a state
+   * that exists to be reached: a name can only hold one value, and opening one
+   * IS closing the others. Nothing is subscribed to anything, and there is no
+   * ordering between three setters to get wrong.
+   *
+   * Component state, same register as `dismissed`/`pick` below for the bang
+   * and slash lists -- a second `DetailPanel` (a split pane, A15.1) gets its
+   * own copy, which matters because this is about THIS pane's composer and not
+   * a fact about the provider, the model or the mode. In particular it is NOT
+   * a copy of the mode: the mode lives in the draft, which is the text that
+   * actually gets recorded.
    */
-  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  type ToolsPopover = 'provider' | 'model' | 'mode';
+  const [openPopover, setOpenPopover] = useState<ToolsPopover | null>(null);
+  /** A toggle in one place: the same click that opens closes, as it always did. */
+  const togglePopover = (name: ToolsPopover) =>
+    setOpenPopover((open) => (open === name ? null : name));
+  const providerPickerOpen = openPopover === 'provider';
+  const modePickerOpen = openPopover === 'mode';
+  const modelPickerOpen = openPopover === 'model';
   /**
-   * The mode popover's open/closed state — per pane, for the same reason the
-   * provider one above is, and NOT a copy of the mode itself: the mode lives
-   * in the draft, which is the text that actually gets recorded.
-   */
-  const [modePickerOpen, setModePickerOpen] = useState(false);
-  /**
-   * The model popover's open/closed state, per pane like the two above -- and
-   * the free-text row's own text, which is the ONE thing here that is not a
-   * copy of a fact elsewhere: a full model id the operator is still typing
+   * The model popover's free-text row, which is the ONE thing here that is not
+   * a copy of a fact elsewhere: a full model id the operator is still typing
    * exists nowhere until Enter sends it, and it is cleared once it has gone.
-   * Neither is "the current model": vam never reads the CLI's answer back and
-   * so holds no opinion about which model a session is on.
+   * It is not "the current model" either: vam never reads the CLI's answer
+   * back and so holds no opinion about which model a session is on.
    */
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [modelIdText, setModelIdText] = useState('');
+  /**
+   * AND A POINTER LANDING ANYWHERE ELSE CLOSES IT -- the other half of the
+   * report, and the half that had no code at all: nothing anywhere listened
+   * for a click outside, so a popover opened by a pointer could be dismissed
+   * only by picking a row or by hitting its own toggle again.
+   *
+   * ON `pointerdown` AND NOT `click`, because the two answer different
+   * questions. `click` fires after the button is released and only where press
+   * and release landed on the same element, so a press that begins a text
+   * selection in the transcript would leave the popover up over the drag. The
+   * popover should be gone the moment a pointer goes down somewhere else,
+   * which is when the operator has visibly aimed elsewhere.
+   *
+   * IN THE CAPTURE PHASE, so a handler that stops propagation on its own way
+   * up cannot keep this from running -- the transcript's links and the
+   * keystroke strip both stop events, and a dismissal that works everywhere
+   * except over those would be the same defect in a smaller box.
+   *
+   * THE BOUNDARY IS THE OPEN POPOVER'S OWN ROOT, marked `data-popover-root`:
+   * the wrapper that holds a toggle and its layer. Inside it -- the toggle,
+   * the listbox, the free-text field -- nothing is dismissed here (the
+   * toggle's own click still closes it, and typing in the field must not).
+   * Outside it, including on a PEER's toggle, the layer goes: the peer's own
+   * click then opens its own, which is the reported route, arriving closed.
+   *
+   * Only while something is open: no listener sits on the document at rest.
+   */
+  useEffect(() => {
+    if (openPopover === null) return;
+    const dismiss = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(`[data-popover-root="${openPopover}"]`) !== null
+      ) {
+        return;
+      }
+      setOpenPopover(null);
+    };
+    document.addEventListener('pointerdown', dismiss, true);
+    return () => document.removeEventListener('pointerdown', dismiss, true);
+  }, [openPopover]);
   /**
    * WHICH OF THE THREE FACES THE MODEL CONTROL WEARS for the focused session.
    * `model-command.ts` carries the table and the argument; this reads it
@@ -4634,12 +4746,14 @@ export function DetailPanel(props: DetailPanelProps) {
    * Before this they closed only by picking a row or re-clicking their own
    * toggle. That was survivable while Escape merely left the box; it is not
    * now, because an Escape that reaches past an open popover stops an agent.
+   *
+   * ONE NAME MAKES THIS ONE LINE. It used to clear three booleans in a row,
+   * which is three chances to add a fourth popover and forget one; `null` is
+   * now the whole of "none of them".
    */
   const closeOpenPopover = (): boolean => {
-    if (!modePickerOpen && !providerPickerOpen && !modelPickerOpen) return false;
-    setModePickerOpen(false);
-    setProviderPickerOpen(false);
-    setModelPickerOpen(false);
+    if (openPopover === null) return false;
+    setOpenPopover(null);
     return true;
   };
   /**
@@ -4950,6 +5064,79 @@ export function DetailPanel(props: DetailPanelProps) {
       clearInterval(timer);
     };
   }, [readable, prompt, projectId, rowId]);
+  /**
+   * WHICH MODEL THIS SESSION IS RUNNING -- the name the CLI paints on its own
+   * status line, read back out of the pane, or `null` for "vam cannot tell".
+   *
+   * THE FACT IS READ, NEVER REMEMBERED, and that is the whole design. vam types
+   * `/model <alias>` into a pane and nothing more: the operator can type their
+   * own `/model` there, a resumed session was set by somebody else, and the CLI
+   * can refuse. So the button below shows what the pane SAYS, and the two
+   * things it must never show are a name from a request vam sent and a name
+   * read from another row.
+   *
+   * ASKED ONLY WHERE THE PICKER IS DRAWN, which is `delivers` and a pane vam
+   * owns (`modelControlState`). On every other row vam does not look into a
+   * pane it may not act in -- the same rule the prompt read above keeps -- and
+   * the disabled button keeps its old word.
+   *
+   * READ ON THE ROW, ON AN INTERVAL, AND ON DEMAND. The row because a new
+   * session is a new pane; the interval because the operator can switch the
+   * model in their own terminal and because the status line is hidden behind
+   * every open question, so a single read would leave the button unlabelled
+   * until the row changed; on demand because a `/model` line vam has just
+   * typed is the one moment the answer is known to be about to change.
+   *
+   * THE ON-DEMAND ROUTE IS A REF AND NOT A DEPENDENCY, which is `TerminalTab`'s
+   * own arrangement (`readNow`): the poll publishes its reader while it is
+   * running and takes it back when it stops, so nothing outside can ask a read
+   * of a row that is no longer being polled -- and the effect keeps the
+   * dependencies it actually reads.
+   */
+  const [running, setRunning] = useState<string | null>(null);
+  /** Published only while the poll below is live; see `sendModel`. */
+  const lookForModel = useRef<(() => void) | null>(null);
+  const modelReadable = modelControl === 'picker' && model !== undefined;
+  useEffect(() => {
+    if (!modelReadable || model === undefined) {
+      // A row change lands here first, and this line is what stops the last
+      // session's model being drawn under this one's title for one frame.
+      setRunning(null);
+      return;
+    }
+    let live = true;
+    /**
+     * WHICH READ'S ANSWER IS STILL WANTED. `live` alone covers unmount, but
+     * two reads can be in flight at once -- a hidden window's throttled
+     * interval releases a burst when it comes back -- and an older one
+     * answering last would paint a model the session had seconds ago.
+     * `TerminalTab`'s own poll makes exactly this argument; only the most
+     * recently ISSUED read may write.
+     */
+    let issued = 0;
+    const look = async () => {
+      issued += 1;
+      const mine = issued;
+      const view = await model(projectId, rowId);
+      if (!live || mine !== issued) return;
+      // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
+      // tell -- a question over the status line, a cut pane, a pairing it
+      // refused -- lands on the word the button wore before, because the one
+      // thing worse than an unlabelled button is a label that has quietly
+      // stopped being true.
+      setRunning(view.kind === 'model' ? view.name : null);
+    };
+    lookForModel.current = () => void look();
+    void look();
+    const timer = setInterval(() => void look(), MODEL_POLL_MS);
+    return () => {
+      live = false;
+      lookForModel.current = null;
+      clearInterval(timer);
+    };
+  }, [modelReadable, model, projectId, rowId]);
+  /** The rows the pane's answer marks; two when it cannot separate them. */
+  const runningRows = runningModelRows(running);
   /**
    * THE RECORD WINS. A transcript question carries the tool's own
    * `multiSelect`, its descriptions and its previews; a screen carries none of
@@ -5454,7 +5641,7 @@ export function DetailPanel(props: DetailPanelProps) {
           // no echo that the turn landed (`sources/claude-code/reply.ts`), so
           // this claims the keystroke, not the answer.
           title:
-            'types the prompt into this session’s terminal — it appears when the session records it',
+            'types the prompt into this session’s terminal — it shows once the session records it',
         }
       : {
           Glyph: NotepadText,
@@ -6949,7 +7136,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 onChange={(event) => void takeFile(event.currentTarget)}
                 className="hidden"
               />
-              <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
+              <Note text="puts the file’s text into the prompt text — vam uploads nothing">
                 <button
                   type="button"
                   data-attach
@@ -7002,7 +7189,7 @@ export function DetailPanel(props: DetailPanelProps) {
               bytes itself off that path; vam still uploads nothing. See
               `state/artifacts/vam-image-attach/findings.md`. */}
               {pickImageAttachment !== undefined && entry !== null && (
-                <Note text="opens a file picker, checks the file is really an image inside this session's own directory, and puts its path on its own line in the prompt text — vam uploads nothing">
+                <Note text="puts an image’s path into the prompt — it must sit inside this session’s own directory; vam uploads nothing">
                   <button
                     type="button"
                     data-attach-image
@@ -7057,8 +7244,16 @@ export function DetailPanel(props: DetailPanelProps) {
               persist a change (`onSetDefaultProvider`), the same rule
               `pickImageAttachment` follows two blocks up. */}
               {onSetDefaultProvider !== undefined && (
-                <div className="relative flex-none">
-                  <Note text="which agent a NEW session starts with — vam's own Settings, reachable here; it does not change this session, which is already running">
+                /* `data-popover-root` IS THE DISMISSAL BOUNDARY, not decoration
+                   and not a test hook: the document-level `pointerdown` handler
+                   above asks whether the press landed inside the OPEN popover's
+                   own root, and a press anywhere else closes it. On the WRAPPER
+                   because the wrapper holds both halves -- the toggle and the
+                   layer that floats out of it -- and a boundary drawn round
+                   only one of them would dismiss on a press inside the very
+                   thing being pressed. */
+                <div data-popover-root="provider" className="relative flex-none">
+                  <Note text="the agent NEW sessions start with — not this one, which is already running">
                     <button
                       type="button"
                       data-provider-picker-toggle
@@ -7066,7 +7261,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       aria-haspopup="listbox"
                       aria-expanded={providerPickerOpen}
                       aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
-                      onClick={() => setProviderPickerOpen((open) => !open)}
+                      onClick={() => togglePopover('provider')}
                       className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                     >
                       <span
@@ -7104,7 +7299,7 @@ export function DetailPanel(props: DetailPanelProps) {
                             aria-selected={selected}
                             onClick={() => {
                               onSetDefaultProvider(provider.id);
-                              setProviderPickerOpen(false);
+                              setOpenPopover(null);
                             }}
                             className={[
                               'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
@@ -7175,7 +7370,7 @@ export function DetailPanel(props: DetailPanelProps) {
               `e2e/model-picker-shots.mjs` measures that the note really
               opens both ways, and what the dimmed label paints. */}
               {modelControl === 'request' && (
-                <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                <Note text="vam cannot switch models here — the factory chooses; this writes your request into the prompt">
                   <input
                     data-model-request
                     value={readModelRequest(draft)}
@@ -7202,15 +7397,56 @@ export function DetailPanel(props: DetailPanelProps) {
                 </Note>
               )}
               {modelControl === 'picker' && (
-                <div className="relative flex-none">
+                <div
+                  data-popover-root="model"
+                  /* `min-w-0 shrink` AND NOT `flex-none`, AND `flex` -- three
+                     classes that only work together, each of which was put
+                     here by a measurement at 520px (the button's own comment
+                     carries the first one).
+
+                     `flex-none` MEANT THE BUTTON NEVER GOT THE CHANCE to give
+                     way: the row still overflowed by 8px with the button
+                     already willing to shrink. `min-w-0` is the second half --
+                     a flex item's floor is its content width unless it is told
+                     otherwise, and an ellipsis is precisely the case that needs
+                     telling.
+
+                     AND `flex` IS THE THIRD, which the first draft did not
+                     have and which cost the fix its point: a `relative` BLOCK
+                     wrapper shrank to 93px while the button inside it stayed
+                     101px and simply painted over the mode chip beside it. The
+                     row measured clean -- no overflow, every direct child
+                     inside -- while the control was visibly on top of its
+                     neighbour. A flex wrapper makes the button an item that
+                     shrinks WITH it, and the guard now measures the button
+                     against its wrapper rather than trusting the row. */
+                  className="relative flex min-w-0 shrink"
+                >
                   {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
                       because it is one the operator did not ask for: measured
                       on 2.1.274, `/model <alias>` answers "...and saved as your
                       default for new sessions". vam cannot send the
                       session-only form (that is the `s` key inside the
                       interactive menu vam never drives), so the honest thing
-                      is to say what the line does. */}
-                  <Note text="model — typed into the pane vam started as /model <name>, which this session answers there; the CLI also saves the choice as its default for new sessions">
+                      is to say what the line does.
+
+                      AND IT LEADS WITH THE MODEL WHEN THERE IS ONE, which is
+                      not decoration: the label beside it may be CLIPPED at a
+                      narrow pane (the button's own comment carries that
+                      measurement), and this is where an eye gets the whole
+                      name back. A screen reader already had it in the
+                      accessible name; the mode chip next door made exactly
+                      this correction, for exactly this reason. It says
+                      "running", never "chosen": the name came off the
+                      session's status line, and vam does not know which alias
+                      put it there. */}
+                  <Note
+                    text={
+                      running === null
+                        ? 'types /model <name> into this session’s pane — the CLI also makes it the default for new sessions'
+                        : `running ${running} · types /model <name> into this session’s pane — the CLI also makes it the default for new sessions`
+                    }
+                  >
                     <button
                       type="button"
                       data-model-picker
@@ -7218,23 +7454,65 @@ export function DetailPanel(props: DetailPanelProps) {
                       onKeyDown={dismissPopoverOnEscape}
                       aria-haspopup="listbox"
                       aria-expanded={modelPickerOpen}
-                      /* LABELLED "model" AND NOT WITH A NAME: vam does not read
-                         the session's model back (the transcript's assistant
-                         rows carry `message.model`, but nothing surfaces it
-                         yet), and a button wearing "Opus" would be a claim
-                         nothing checked -- the same rule the mode chip keeps
-                         for the mode it does not read back. */
-                      aria-label="model — choose one for this session"
-                      onClick={() => setModelPickerOpen((open) => !open)}
-                      className="vam-tap flex h-6 shrink-0 cursor-pointer items-center text-ink-dim hover:text-ink"
+                      /* LABELLED WITH THE MODEL THE PANE REPORTS, and with the
+                         old word when there is none.
+
+                         WHAT CHANGED. This said "model" and nothing else,
+                         under a comment reading "vam does not read the
+                         session's model back ... a button wearing 'Opus' would
+                         be a claim nothing checked". The claim is checked now:
+                         the CLI paints the model on a PERSISTENT status line
+                         in this very pane, and vam reads it back every few
+                         seconds (`main/terminal/model.ts`). What the operator
+                         reads here is therefore the session's own screen, not
+                         the last thing vam typed -- which is the distinction
+                         that comment was protecting, and it still holds: the
+                         moment the pane stops saying, so does this.
+
+                         THE NAME LEADS THE ACCESSIBLE LABEL, the way the mode
+                         chip's does, so a screen reader is told the fact the
+                         eye is told rather than only what the control does. */
+                      aria-label={
+                        running === null
+                          ? 'model — choose one for this session'
+                          : `model: ${running} — choose one for this session`
+                      }
+                      onClick={() => togglePopover('model')}
+                      /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
+                         THAT CAN -- because it is the only thing in the row
+                         whose width is not vam's to choose. Everything else
+                         here is a 24px glyph; this wears whatever the CLI
+                         calls the model.
+
+                         MEASURED, AND THE MEASUREMENT IS WHY THIS IS NOT
+                         `shrink-0` ANY MORE. At 520px -- `SIDEBAR_MIN +
+                         DETAIL_MIN`, the narrowest window vam still draws two
+                         columns in -- the tools row is 265px and the word
+                         `model` fitted it with a few pixels to spare. A TEN
+                         character label did not: `e2e/model-picker-shots.mjs`
+                         measured 16px of overflow and the SEND BUTTON pushed
+                         outside the row's own box. Ten characters is not a
+                         hypothetical -- `Sonnet 4.5` is what the status line
+                         reads on a session started on a full model id, and
+                         `Sonnet 5` is what it reads on the CLI's default.
+                         So the label gives way instead of the row bursting:
+                         it clips with an ellipsis, the way the CLI's own
+                         status line does when its pane is narrow, and the
+                         whole name stays one hover or one Tab away in the
+                         accessible name above and the note around it. */
+                      className="vam-tap flex h-6 min-w-0 shrink cursor-pointer items-center text-ink-dim hover:text-ink"
                     >
                       <span
                         aria-hidden="true"
                         data-tap-skin
-                        className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                        className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
                       >
-                        model
-                        <ChevronDown size={11} strokeWidth={2} />
+                        <span data-model-label className="truncate">
+                          {modelButtonLabel(running)}
+                        </span>
+                        {/* The chevron never gives way: a picker with no
+                            affordance left on it is a label. */}
+                        <ChevronDown size={11} strokeWidth={2} className="flex-none" />
                       </span>
                     </button>
                   </Note>
@@ -7260,17 +7538,124 @@ export function DetailPanel(props: DetailPanelProps) {
                             type="button"
                             data-model-option={choice.id}
                             role="option"
-                            /* NONE IS MARKED SELECTED, for the label's reason
-                               above: vam holds no fact about which model the
-                               session is on, and `aria-selected` is a claim. */
+                            /* STILL NOT `aria-selected`, AND THAT IS THE POINT
+                               RATHER THAN AN OMISSION. Selection is the CLI's
+                               own menu cursor -- which alias was chosen -- and
+                               that is precisely the fact the status line does
+                               NOT carry: `/model default` and `/model sonnet`
+                               leave the same line (`runningModelRows`). What
+                               vam can see is which row's MODEL is running, and
+                               that is what the tick says. `aria-selected` on a
+                               row would be a claim about the menu, and on the
+                               Sonnet 5 pair it would be a coin toss; the mark
+                               is carried in the row's own words instead, where
+                               it can say what it actually means. */
                             aria-selected={false}
                             onClick={() => {
-                              setModelPickerOpen(false);
+                              setOpenPopover(null);
                               void sendModel(choice.id);
                             }}
-                            className="flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="flex cursor-pointer items-center gap-3 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
-                            {choice.label}
+                            <span data-model-name>{choice.label}</span>
+                            {/* THE TICK ON THE MODEL THIS SESSION IS RUNNING,
+                                at the operator's ask -- and in the CLI's own
+                                glyph, which its `/model` menu already shows
+                                this operator (`❯ 2. Sonnet ✔`).
+
+                                IT IS THE ONLY THING THAT MARKS THE ROW, which
+                                is WCAG 1.4.1 taken seriously: a shape rather
+                                than a colour, so the row is not distinguished
+                                by ink at all and there is nothing to fail for
+                                a reader who cannot separate two hues. The row
+                                keeps its own ink and its own hover exactly as
+                                the other four do.
+
+                                AND IT IS SAID IN WORDS TOO. The glyph is
+                                `aria-hidden` and an `sr-only` clause carries
+                                the same fact into the row's accessible name --
+                                this file's rule for every icon that means
+                                something (`ViewIcons`), and the reason
+                                `aria-selected` is not the vehicle is directly
+                                above.
+
+                                IT IS DRAWN ONLY WHERE IT IS TRUE, AND NOTHING
+                                MOVES WHEN IT APPEARS -- measured, not reasoned.
+                                The first draft reserved a `w-3` slot on every
+                                row on the theory that a mark coming and going
+                                would shift the version column PR 407 measured
+                                into one lane. It does not: the popover's width
+                                is set by the free-text row below (`w-[148px]`),
+                                the rows have slack inside it, and `ml-auto`
+                                pins every version to the same right edge
+                                whether or not a glyph sits before it. Both
+                                shapes were built and photographed, and the
+                                popover measured 158x164 with the lane intact
+                                either way -- so the reservation was a rule
+                                nothing could falsify, and this file's own
+                                header says what happens to those. What the
+                                guard DOES hold is the outcome: the box does
+                                not grow and the lane does not break. */}
+                            {runningRows.includes(choice.id) && (
+                              <Check
+                                data-model-current
+                                size={11}
+                                strokeWidth={2.5}
+                                aria-hidden="true"
+                              />
+                            )}
+                            {runningRows.includes(choice.id) && (
+                              <span className="sr-only">
+                                {runningRows.length > 1
+                                  ? // BOTH ROWS OF THE PAIR SAY THE SAME
+                                    // TRUE THING, and neither claims to be the
+                                    // one that was chosen: Default IS Sonnet 5
+                                    // today, so a session on Sonnet 5 is
+                                    // running both rows' model and the pane
+                                    // cannot say which alias set it.
+                                    ' — this session is running this model; the pane cannot say whether it was set as Default or by name'
+                                  : ' — this session is running this model'}
+                              </span>
+                            )}
+                            {/* THE VERSION, ON THE RIGHT, at the operator's
+                                ask — and in the CLI's own layout: its menu
+                                prints the number in a second column beside the
+                                alias, so vam's picker reads the way the thing
+                                it types into does.
+
+                                `ml-auto` AND NOT A GRID: the rows are a
+                                `flex-col`, whose default `align-items:
+                                stretch` already gives every button the width
+                                of the widest, so one auto margin per row
+                                lands the five numbers in one lane. A grid
+                                would be a second opinion about a width the
+                                column already has.
+
+                                NO COLOUR OF ITS OWN, deliberately. The CLI
+                                pairs each version with a sentence ("Best for
+                                everyday, complex tasks"); those are 40-55
+                                characters and this popover floats inside a
+                                pane whose floor is 320px (`DETAIL_MIN`), so
+                                carrying them would either wrap the rows or
+                                push the popover past its own pane. The number
+                                is the part the operator asked for and the part
+                                that fits. It is subordinate text, so it takes
+                                `text-meta` — the scale's floor, the size the
+                                question card's own option numbers take — and
+                                INHERITS the row's ink rather than dimming
+                                itself: `ink-quiet` measures 3.718:1 on this
+                                card, under the 4.5:1 WCAG 1.4.3 asks of text
+                                that says something, and this says which model
+                                you are about to switch to. Inheriting also
+                                means it brightens with the label on hover
+                                instead of being the one word that does not.
+
+                                `font-mono` because it is a version number,
+                                which is the same reason the model id field
+                                below it is monospaced. */}
+                            <span data-model-version className="ml-auto font-mono text-meta">
+                              {choice.version}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -7292,7 +7677,7 @@ export function DetailPanel(props: DetailPanelProps) {
                           // prompt box's handler submits the DRAFT on it.
                           event.preventDefault();
                           event.stopPropagation();
-                          setModelPickerOpen(false);
+                          setOpenPopover(null);
                           void sendModel(modelIdText);
                           setModelIdText('');
                         }}
@@ -7305,7 +7690,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {modelControl === 'disabled' && (
-                <Note text="vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal">
+                <Note text="vam owns no terminal here — open the session in a vam terminal to send /model">
                   <span
                     data-model-picker-shell
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
@@ -7367,9 +7752,9 @@ export function DetailPanel(props: DetailPanelProps) {
               on every render, never mirrored in state, because a mirror is a
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
-                <div className="relative flex-none">
+                <div data-popover-root="mode" className="relative flex-none">
                   <Note
-                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. It belongs to the session: this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started.`}
+                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ⇧Tab cycles the session’s own.`}
                   >
                     <button
                       type="button"
@@ -7378,7 +7763,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       aria-haspopup="listbox"
                       aria-expanded={modePickerOpen}
                       aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
-                      onClick={() => setModePickerOpen((open) => !open)}
+                      onClick={() => togglePopover('mode')}
                       className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                     >
                       {/* The glyph carries the ink now (`MODE_SKIN`), so the
@@ -7415,7 +7800,7 @@ export function DetailPanel(props: DetailPanelProps) {
                             aria-selected={selected}
                             onClick={() => {
                               onDraftChange(setModeRequest(draft, mode));
-                              setModePickerOpen(false);
+                              setOpenPopover(null);
                             }}
                             className={[
                               'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
@@ -7482,8 +7867,8 @@ export function DetailPanel(props: DetailPanelProps) {
                 <Note
                   text={
                     listening
-                      ? 'listening — press again to stop; what is heard is appended to the prompt'
-                      : "dictates into the prompt using this device's own speech recognition — vam records no audio and uploads none"
+                      ? 'listening — press again to stop; speech goes into the prompt'
+                      : 'dictates into the prompt — on-device speech recognition; vam records and uploads nothing'
                   }
                 >
                   <button

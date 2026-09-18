@@ -240,7 +240,14 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   search: { group: 'navigation', label: () => 'search sessions' },
   searchNext: { group: 'navigation', label: () => 'next match' },
   searchPrev: { group: 'navigation', label: () => 'previous match' },
-  prompt: { group: 'session', label: () => 'write a prompt to this session' },
+  // NAMES THE PANE, NOT ONE OF ITS SURFACES, because `i` goes wherever this
+  // pane takes typing: the prompt box on a Response view, the screen on a
+  // Terminal view, the editor on a Files view (`Canvas.tsx`, `case 'prompt'`).
+  // The caption said "write a prompt to this session" while the key was doing
+  // nothing at all on two of the five views -- and once it reached them, a
+  // sheet still promising a prompt would be the same untruth from the other
+  // side.
+  prompt: { group: 'session', label: () => 'type into this pane — its box, or its screen' },
   rename: { group: 'session', label: () => 'rename this session' },
   icon: { group: 'session', label: () => 'pick this session’s icon' },
   close: { group: 'session', label: () => 'close this session' },

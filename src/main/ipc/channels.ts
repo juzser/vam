@@ -81,6 +81,23 @@ export const CHANNELS = {
    */
   setPrRepos: 'vam:source:set-pr-repos',
   /**
+   * DESKTOP-ONLY, the same standing as `setPrRepos` above, and the second
+   * preference main needs a copy of: whether vam asks the agent for a shorter,
+   * clearer answer.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, for a reason that is stronger here
+   * than for the map. The rules are typed into a tmux pane ON THIS MACHINE;
+   * putting the switch on the routes `remote/server.ts` registers would let a
+   * paired phone change what vam types into an agent running on the desktop,
+   * which is a remote capability nobody asked for. The phone still gets the
+   * effect -- a prompt SENT from the phone travels through the same
+   * `DESKTOP_SOURCE.recordPrompt` -- it just cannot change the setting.
+   *
+   * Answers through the `IpcResult` envelope like `setPrRepos`, so a caller
+   * has one shape to read. See `main/terminal/concise.ts`.
+   */
+  setConciseOutput: 'vam:terminal:set-concise-output',
+  /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */
@@ -238,6 +255,27 @@ export const CHANNELS = {
    * the labels vam will match on the pane.
    */
   terminalPrompt: 'vam:terminal:prompt',
+  /**
+   * WHICH MODEL a session is running -- read off the CLI's own status line, in
+   * the pane vam started for that row.
+   *
+   * It exists because vam TYPES `/model <alias>` into a pane and has never
+   * read the answer back (`renderer/panels/model-command.ts`), so what vam
+   * asked for is not what the session is on: the operator can switch it in the
+   * pane themselves, and a session vam resumed was set by somebody else. The
+   * model button therefore either wears a name this channel read a moment ago
+   * or wears no name at all.
+   *
+   * Distinct from `terminalRead` for the reason `terminalPrompt` is: that one
+   * hands over a whole screen for the Terminal tab to draw, and this hands
+   * over one fact, out of a capture with no scrollback in it, to a control
+   * that is on screen whether or not that tab is open.
+   *
+   * Answers BARE, like the reads beside it: `SessionModel` carries its own
+   * "vam could not tell" branch (`shared/terminal.ts`), so an envelope would
+   * give the caller two ways to be told the same thing.
+   */
+  terminalModel: 'vam:terminal:model',
   /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled

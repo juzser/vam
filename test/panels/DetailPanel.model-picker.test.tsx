@@ -36,7 +36,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
-import type { PaneKey, PaneSendResult } from '../../src/shared/terminal.js';
+import type { PaneKey, PaneSendResult, SessionModel } from '../../src/shared/terminal.js';
 
 const DECISION: Decision = {
   id: 'd1',
@@ -200,17 +200,49 @@ describe('a session vam can type into gets a real picker', () => {
       'opus',
       'haiku',
     ]);
-    expect(all('[data-model-option]').map((el) => el.textContent?.trim())).toEqual([
-      'Default',
-      'Sonnet',
-      'Fable',
-      'Opus',
-      'Haiku',
-    ]);
+    expect(
+      all('[data-model-option]').map((el) =>
+        el.querySelector('[data-model-name]')?.textContent?.trim(),
+      ),
+    ).toEqual(['Default', 'Sonnet', 'Fable', 'Opus', 'Haiku']);
     for (const option of all('[data-model-option]')) {
       expect(option.getAttribute('role')).toBe('option');
     }
     expect(q('[data-model-id]')?.tagName).toBe('INPUT');
+  });
+
+  it('prints each alias’s version beside its name, in the CLI’s own values', () => {
+    // Operator: "in the model picker, add the version on the right as well".
+    // The values are `MODEL_CHOICES`' own, re-measured on Claude Code 2.1.276
+    // (see `model-command.ts`); what this holds is that they REACH the row --
+    // a table nothing renders is a table nobody reads.
+    //
+    // THE NAME IS FIRST IN THE ROW AND THE VERSION IS LAST, which is all a
+    // unit environment can honestly say about "on the right": no stylesheet is
+    // loaded here, so `ml-auto` resolves to nothing and every box measures 0.
+    // That the version really PAINTS to the right of the name is measured on
+    // the shipped bundle in `e2e/model-picker-shots.mjs`, against real
+    // rectangles.
+    //
+    // BETWEEN THEM GOES THE TICK, on the row whose model the session is
+    // running and on no other -- so an unmarked picker is exactly the two
+    // boxes it always was. That marking a row does not move the version
+    // column is a rectangle question, and the browser guard answers it.
+    draw({ delivers: true, terminal: true });
+    act(() => picker()?.click());
+    expect(
+      all('[data-model-option]').map((el) =>
+        el.querySelector('[data-model-version]')?.textContent?.trim(),
+      ),
+    ).toEqual(['Sonnet 5', '5', '5.1', '5', '4.5']);
+    for (const option of all('[data-model-option]')) {
+      const kids = [...option.children];
+      expect(kids[0]?.getAttribute('data-model-name')).not.toBeNull();
+      expect(kids.at(-1)?.getAttribute('data-model-version')).not.toBeNull();
+      // Nothing here reads a model, so no row may claim to be running one.
+      expect(kids).toHaveLength(2);
+      expect(option.querySelector('[data-model-current]')).toBeNull();
+    }
   });
 
   it('types `/model opus` literally and then Enter, into THIS session, and closes', async () => {
@@ -345,7 +377,7 @@ describe('a session vam can type into gets a real picker', () => {
 
 describe('a session vam cannot type into gets the same button, disabled', () => {
   const DISABLED_NOTE =
-    'vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal';
+    'vam owns no terminal here — open the session in a vam terminal to send /model';
 
   it('is disabled where vam did not start the session', () => {
     draw({
@@ -408,5 +440,186 @@ describe('a session vam cannot type into gets the same button, disabled', () => 
     expect(q('[data-model-picker-menu]')).toBeNull();
     expect(sent).toEqual([]);
     expect(q('[data-mode-cycle]')).toBeNull();
+  });
+});
+
+/**
+ * WHAT THE BUTTON SAYS AND WHICH ROW IS MARKED -- the session's own model,
+ * read back off the pane rather than remembered.
+ *
+ * The operator's ask, translated: "the model switcher button's label also
+ * needs to show the model that is currently selected, and there should be a
+ * tick icon on the currently selected model in the popover."
+ *
+ * Both halves are one fact -- `SessionModel`, off the CLI's status line
+ * (`main/terminal/model.ts`) -- and the rule that turns it into ticks is
+ * `runningModelRows`, asserted on its own in `test/panels/model-command.test.ts`.
+ * What is held HERE is the wiring: that the panel asks for it, for the right
+ * row, only where a model could be read at all; that what comes back reaches
+ * the label and the row; and that nothing invented reaches either. Whether the
+ * tick and the label really PAINT -- and that the tick does not push the
+ * version column off the popover -- is measured on the shipped bundle in
+ * `e2e/model-picker-shots.mjs`, against real rectangles.
+ */
+describe('the button names the model the session is running', () => {
+  /** A model bridge that records what it was asked, answering `answer`. */
+  const reader = (answer: SessionModel | (() => SessionModel)) => {
+    const asked: unknown[][] = [];
+    return {
+      asked,
+      model: async (projectId: string, rowId?: string) => {
+        asked.push([projectId, rowId]);
+        return typeof answer === 'function' ? answer() : answer;
+      },
+    };
+  };
+
+  const label = () => picker()?.textContent?.trim() ?? null;
+  const ticked = () =>
+    all('[data-model-option]')
+      .filter((el) => el.querySelector('[data-model-current]') !== null)
+      .map((el) => el.getAttribute('data-model-option'));
+
+  it('reads the model of THIS row, in THIS project', async () => {
+    const { asked, model } = reader({ kind: 'model', name: 'Opus 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(asked).toEqual([['p1', 's1']]);
+  });
+
+  it('wears the name it read, where the word "model" used to be', async () => {
+    const { model } = reader({ kind: 'model', name: 'Opus 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(label()).toBe('Opus 5');
+    // And a screen reader is told what the eye is told, which is this file's
+    // own rule for every icon-and-label control in the row.
+    expect(picker()?.getAttribute('aria-label')).toContain('Opus 5');
+  });
+
+  it('names it in the tooltip too, where a clipped label can be read back', async () => {
+    // The label gives way at a narrow pane rather than bursting the row
+    // (measured in `e2e/model-picker-shots.mjs`), so the note is the eye's way
+    // back to the whole name -- the screen reader already had it above. It
+    // says "running" and not "chosen": vam read the pane, it did not pick.
+    const { model } = reader({ kind: 'model', name: 'Sonnet 4.5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(picker()?.getAttribute('data-note')).toContain('running Sonnet 4.5');
+    // And the disclosure it has always carried is still there beside it.
+    expect(picker()?.getAttribute('data-note')).toContain('default for new sessions');
+  });
+
+  it('says nothing about a model in the tooltip when it has not read one', async () => {
+    const { model } = reader({ kind: 'unknown' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(picker()?.getAttribute('data-note') ?? '').not.toContain('running');
+  });
+
+  it('ticks the row whose model that is, and no other', async () => {
+    const { model } = reader({ kind: 'model', name: 'Opus 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    act(() => picker()?.click());
+    expect(ticked()).toEqual(['opus']);
+    // The mark is in the ROW's accessible name too, not only in a glyph.
+    const opus = q<HTMLElement>('[data-model-option="opus"]');
+    expect(opus?.textContent).toMatch(/running/i);
+    expect(q<HTMLElement>('[data-model-option="haiku"]')?.textContent ?? '').not.toMatch(
+      /running/i,
+    );
+  });
+
+  it('ticks BOTH Default and Sonnet on Sonnet 5, because the pane cannot tell them apart', async () => {
+    // MEASURED on Claude Code 2.1.276: `/model default` and `/model sonnet`
+    // leave the same status line. The CLI's own menu ticks whichever was
+    // chosen; vam has no way to know which, and marking one would be wrong
+    // half the time with nothing on screen to say when.
+    const { model } = reader({ kind: 'model', name: 'Sonnet 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    act(() => picker()?.click());
+    expect(ticked()).toEqual(['default', 'sonnet']);
+  });
+
+  it('keeps the word "model" and ticks nothing when the pane does not say', async () => {
+    // The commonest case there is: a session with a question open is not
+    // painting its status line at all.
+    const { model } = reader({ kind: 'unknown' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(label()).toBe('model');
+    act(() => picker()?.click());
+    expect(ticked()).toEqual([]);
+  });
+
+  it('keeps the word "model" when this build has no reader at all', async () => {
+    draw({ delivers: true, terminal: true });
+    await settle();
+    expect(label()).toBe('model');
+    act(() => picker()?.click());
+    expect(ticked()).toEqual([]);
+  });
+
+  it('never carries one row’s model onto another', async () => {
+    // The lie this guards: the panel is one component that different sessions
+    // pass through. A name held across a row change would be drawn under a
+    // title it was never read for.
+    const seen = ['Opus 5', 'Haiku 4.5'];
+    let at = 0;
+    const { model } = reader(() => ({ kind: 'model', name: seen[at] ?? '' }));
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(label()).toBe('Opus 5');
+    at = 1;
+    cleanup();
+    draw({
+      delivers: true,
+      terminal: true,
+      model,
+      entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'another row' } },
+    });
+    // Before the answer for the new row lands, the label is the fallback and
+    // NOT the last row's model.
+    expect(label()).toBe('model');
+    await settle();
+    expect(label()).toBe('Haiku 4.5');
+  });
+
+  it('looks again after vam types a /model line, rather than waiting out the poll', async () => {
+    withBridge();
+    const { asked, model } = reader({ kind: 'model', name: 'Opus 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(asked).toHaveLength(1);
+    await choose('haiku');
+    await settle();
+    expect(asked.length).toBeGreaterThan(1);
+  });
+
+  it('asks nothing at all on a source that only records', async () => {
+    // There is no pane to read there, and the control is the request field.
+    const { asked, model } = reader({ kind: 'model', name: 'Opus 5' });
+    draw({ model });
+    await settle();
+    expect(request()).not.toBeNull();
+    expect(asked).toEqual([]);
+  });
+
+  it('asks nothing for a session vam did not start', async () => {
+    // vam does not look into a pane it may not act in -- the same rule the
+    // pane-prompt read keeps.
+    const { asked, model } = reader({ kind: 'model', name: 'Opus 5' });
+    draw({
+      delivers: true,
+      terminal: true,
+      model,
+      entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } },
+    });
+    await settle();
+    expect(picker()?.disabled).toBe(true);
+    expect(label()).toBe('model');
+    expect(asked).toEqual([]);
   });
 });

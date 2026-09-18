@@ -45,7 +45,7 @@ import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.j
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
-import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
+import type { PaneKey, PaneSendResult, PaneView, SessionModel } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
@@ -135,19 +135,26 @@ export const unwrapAgentWork = (pending: Promise<unknown>): Promise<AgentWork> =
   unwrapIntoArm(pending) as Promise<AgentWork>;
 
 /**
- * The per-project pull-request directories, pushed into main.
+ * THE PREFERENCES MAIN NEEDS A COPY OF. Two, now.
  *
  * ITS OWN FACTORY, AND NOT PART OF `DesktopSourceApi`, which is the whole
  * point. `DesktopSourceApi` is `PreloadSourceApi` minus one member -- the
- * shape a paired phone also implements over HTTP -- and adding this there
- * would put "a directory this machine spawns a process in" on the remote
- * routes. It is a preference main happens to need, not a thing the source can
- * do, so it sits beside `clipboard` and `dialog` as its own desktop-only
- * member. See `main/sources/claude-code/pr-repos.ts` for the argument.
+ * shape a paired phone also implements over HTTP -- and adding either of these
+ * there would put a desktop-only act on the remote routes: "a directory this
+ * machine spawns a process in" for the first, and "what vam types into an
+ * agent running on this machine" for the second. They are preferences main
+ * happens to need, not things the source can do, so they sit beside
+ * `clipboard` and `dialog` as their own desktop-only member. See
+ * `main/sources/claude-code/pr-repos.ts` and `main/terminal/concise.ts`.
+ *
+ * NEITHER DECIDES ANYTHING HERE. Both forward a value main validates on its
+ * own side, because the renderer is the least trusted process in the app and a
+ * check in the preload is a check the renderer could have skipped.
  */
 export function createPrefsBridge(ipc: InvokerLike) {
   return {
     setPrRepos: (map: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setPrRepos, map)),
+    setConciseOutput: (on: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setConciseOutput, on)),
   };
 }
 
@@ -384,6 +391,21 @@ export type TerminalApi = {
    * same screen.
    */
   prompt(projectId: string, rowId?: string): Promise<PromptView>;
+  /**
+   * WHICH MODEL the session in that pane is running, read off the CLI's own
+   * status line.
+   *
+   * A read like `prompt`, and beside it for the same reason those two are one
+   * act: this is the fact the model BUTTON is drawn from, and the picker
+   * underneath types `/model <alias>` down `send`. Before this member existed
+   * vam typed a request and never looked, so the button could only ever be
+   * labelled with the word "model".
+   *
+   * `{ kind: 'unknown' }` is a normal answer and not a failure: a session with
+   * a question open is not painting its status line at all
+   * (`shared/terminal.ts`).
+   */
+  model(projectId: string, rowId?: string): Promise<SessionModel>;
 };
 
 /**
@@ -414,6 +436,10 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalPrompt, projectId)
         : ipc.invoke(CHANNELS.terminalPrompt, projectId, rowId)) as Promise<PromptView>,
+    model: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalModel, projectId)
+        : ipc.invoke(CHANNELS.terminalModel, projectId, rowId)) as Promise<SessionModel>,
   };
 }
 
