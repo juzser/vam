@@ -354,6 +354,18 @@
   --color-chip: var(--vam-chip);
   /* Quoted text: someone else's words inside the agent's. */
   --color-quote: var(--vam-quote);
+  /* The wash under a link an agent wrote. A CHIP GROUND, NOT A SURFACE STEP:
+     it is black at a low alpha rather than one of the `raised`/`card` rungs,
+     because a link sits inside a paragraph and the paragraph sits on whatever
+     surface its pane happens to wear -- the pane, a bubble, a table cell. An
+     opaque rung would be right on one of those and wrong on the rest; a wash
+     darkens whatever is behind it by the same amount everywhere. */
+  --color-out-pill: var(--vam-out-pill);
+  /* And the hover, which is the same wash again rather than a rung: two of
+     the same alpha over one another darkens by the same rule on every
+     surface, where a `raised` on hover would jump a pill in a bubble and do
+     nothing to one in a table. */
+  --color-out-pill-hover: var(--vam-out-pill-hover);
 
   /* The detail pane's three section rules. Own names again, for the same
      reason as the palette above: `in`, `progress` and `out` are REGIONS of a
@@ -1173,6 +1185,15 @@
 
   --vam-chip: #d2a8ff;
   --vam-quote: #56d4ca;
+  /* 32% black over the pane (#363636) computes to #252525: a patch the eye
+     reads as one object without a border, and 1.30:1 against the pane -- far
+     under 3:1, and deliberately so. THE PILL'S GROUND CARRIES NO MEANING ON
+     ITS OWN: the glyph at its end is what says "this opens something", which
+     is the non-colour indicator WCAG 1.4.1 asks for, and the words keep the
+     paragraph's own ink and its 4.5:1. A ground loud enough to pass 1.4.11
+     would be a second border in a paragraph that asked for none. */
+  --vam-out-pill: rgb(0 0 0 / 0.32);
+  --vam-out-pill-hover: rgb(0 0 0 / 0.5);
 
   /* Section rules, dark. Measured against `--vam-panel` (#303030): teal
      7.09:1, violet 4.99:1, pink 5.03:1 -- and 6.49 / 4.57 / 4.61 on
@@ -1419,6 +1440,13 @@ html.light {
 
   --vam-chip: #6639ba;
   --vam-quote: #0f6b62;
+  /* Light keeps the wash BLACK and drops it to 7%: over #ffffff that computes
+     to #eeeeee, the same one-step-down patch the dark value draws, where the
+     dark theme's 32% would be a hole in the page. Black either way, because
+     "a shade darker than whatever is behind it" is the rule; only the amount
+     is a theme fact. */
+  --vam-out-pill: rgb(0 0 0 / 0.07);
+  --vam-out-pill-hover: rgb(0 0 0 / 0.13);
 
   /* Section rules, light. Not the dark values dimmed: the pane is #ffffff
      here, so each hue is taken to its dark-on-white step -- teal 5.47:1,

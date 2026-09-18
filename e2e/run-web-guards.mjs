@@ -164,6 +164,7 @@ const GUARDS = [
   'terminal-chrome-shots',
   'terminal-scheme-shots',
   'terminal-settings-shots',
+  'command-palette-shots',
   'tree-icon-shots',
   'out-links-shots',
   'view-width-shots',

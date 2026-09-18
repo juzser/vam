@@ -30,6 +30,7 @@ import {
   linkParts,
   linkWhere,
   textIsAddress,
+  textLooksLikeAddress,
 } from '../../src/renderer/panels/link-face.js';
 
 describe('foldMiddle -- a long path, shortened where the reader loses least', () => {
@@ -139,5 +140,37 @@ describe('linkWhere -- the quiet half of a named link', () => {
     expect([...(linkWhere('x'.repeat(60)) ?? '')]).toHaveLength(FOLD_LIMIT);
     expect(linkWhere('')).toBeNull();
     expect(linkWhere('   ')).toBeNull();
+  });
+});
+
+describe('textLooksLikeAddress -- the one thing the quiet pill still derives', () => {
+  it.each([
+    'https://github.com/juzser/vam',
+    'http://example.test',
+    'javascript:alert(1)',
+    'example.test',
+    'docs.example.test/retries',
+  ])('%s is address-shaped, so it is not a name', (text) => {
+    expect(textLooksLikeAddress(text)).toBe(true);
+  });
+
+  it.each([
+    'runbook',
+    'the PR',
+    'see this',
+    '',
+    '   ',
+    // A sentence that happens to end in a full stop is not a domain.
+    'Fixed.',
+  ])('%s is a name, and is printed as the agent wrote it', (text) => {
+    expect(textLooksLikeAddress(text)).toBe(false);
+  });
+
+  it('is generous rather than strict, and the asymmetry is the argument', () => {
+    // A false positive costs a link named after a host its name and shows
+    // the same host instead; a false negative paints a destination the
+    // control does not have. Pinned so the next reader sees which way it
+    // leans and why.
+    expect(textLooksLikeAddress('example.test')).toBe(true);
   });
 });

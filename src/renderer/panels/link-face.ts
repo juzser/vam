@@ -132,3 +132,32 @@ export function linkWhere(href: string): string | null {
   if (parts.host !== '') return parts.host;
   return new URL(href).protocol;
 }
+
+/**
+ * Whether a link's TEXT is itself address-shaped -- `https://…`, or a bare
+ * `host/path` an agent wrote without a scheme.
+ *
+ * WHY THIS EXISTS, AND IT IS THE ONE THING THE QUIET PILL STILL DERIVES FROM
+ * THE ADDRESS. `[https://github.com/juzser/vam](https://evil.test/phish)` is
+ * one line of markdown, and the pill prints a NAME (`OutLink`): print that
+ * text and the control paints a destination it does not have. The old pill
+ * could not be fooled -- it printed the real host beside the name -- and the
+ * operator has since asked for the caption to go. So the caption goes and
+ * this takes its place, for the narrow case that needed it: a text that LOOKS
+ * like an address but is not THIS address is not a name, and the pill prints
+ * the real host instead. A text that is not address-shaped at all ("runbook",
+ * "the PR") is a name and is printed untouched, which is every ordinary link.
+ *
+ * DELIBERATELY GENEROUS ABOUT WHAT COUNTS AS ADDRESS-SHAPED. A false positive
+ * costs a link named `example.test` its name and shows the same host instead;
+ * a false negative paints a lie. The two errors are not the same size.
+ */
+export function textLooksLikeAddress(text: string): boolean {
+  const t = text.trim();
+  if (t === '' || /\s/.test(t)) return false;
+  if (/^[a-z][a-z\d+.-]*:/i.test(t)) return true;
+  // A bare `host.tld` or `host.tld/path`: a dot inside a leading label that is
+  // not a sentence. `foo.ts:42` is handled before this ever runs (`FileRef`),
+  // and a trailing full stop is punctuation, not a domain.
+  return /^[a-z\d-]+(\.[a-z\d-]+)+(\/|$)/i.test(t);
+}

@@ -6,18 +6,23 @@
  * for you, ...) there is no need to show the dot on the tab. A tab should
  * only show certain indicators." Every tab used to wear a 6px dot coloured by
  * its status, idle included, and a strip of mostly-idle tabs was a row of
- * grey dots saying "nothing" eight times. The dot is gone. What a tab may
- * draw instead is a short list of INDICATORS, each one a switch in Settings,
- * and this module is the list, the defaults, and the total reader that stands
- * between the store and the strip.
+ * grey dots saying "nothing" eight times. The dot is gone. What a tab draws
+ * instead is a short list of INDICATORS, and this module is that list.
+ *
+ * IT WAS A PREF WITH A SWITCH PER ID FOR ONE DAY. The operator, reading the
+ * panel the switches had landed in: "there is no need for a session tab
+ * indicator setting". So the pref, its reader, its two setters, its Settings
+ * block and the tests for all of them are gone, and the five the operator
+ * picked are a constant. A stored `tabIndicators` from that day is simply
+ * ignored -- `parsePrefs` no longer looks for the key, and an unknown key in
+ * the stored document has always been dropped.
  *
  * ── IDLE IS NOT ON THE LIST, AND CANNOT BE PUT THERE ──────────────────────
  * `idle` is a status the model has (`SessionStatus`) and is deliberately not
- * an indicator id. The operator's sentence is that a quiet tab needs no mark;
- * making that a toggle would offer them a switch whose "on" position is the
- * clutter they asked to be rid of. So a resting tab with no icon and no draft
- * is its title and nothing else, whatever the store holds -- the reader drops
- * the word if it ever arrives, and `TabIndicatorId` does not spell it.
+ * an indicator id. The operator's sentence is that a quiet tab needs no mark,
+ * and `TabIndicatorId` does not spell `idle`, so a resting tab with no icon
+ * and no draft is its title and nothing else -- there is now no value
+ * anywhere, stored or typed, that could ask for one.
  *
  * ── ONE STATUS MARK, AT MOST ──────────────────────────────────────────────
  * `running`, `waiting`, `failed` and `done` are the four status glyphs
@@ -77,11 +82,23 @@ export const TAB_INDICATOR_IDS = [
 export type TabIndicatorId = (typeof TAB_INDICATOR_IDS)[number];
 
 /**
- * What ships on: the five the operator chose from the list they were offered.
- * `done`, `pending` and `agents` are the three they left off, and the header
- * says why each one stays available.
+ * WHAT A TAB DRAWS, AND IT IS NOT A SETTING.
+ *
+ * The operator chose these five from the eight the model can answer --
+ * running, waiting, failed, the session's own icon, and an unsent draft --
+ * and then, reading the settings panel they had appeared in: "there is no
+ * need for a session tab indicator setting". So the list is a constant and
+ * the switches are gone. `done` is not here on purpose: a finished turn with
+ * nothing pending is the resting state of most tabs, and a mark on all of
+ * them is a mark that says nothing. `pending` and `agents` are the two the
+ * operator did not pick.
+ *
+ * THE OTHER THREE IDS STAY IN THE UNION, and that is not dead code: they are
+ * what `tabStatusMark` and the strip are written against, so adding one back
+ * is one entry in this list rather than a new branch, and the tests that
+ * cover "an indicator that is off draws nothing" have something to be about.
  */
-export const DEFAULT_TAB_INDICATORS: readonly TabIndicatorId[] = [
+export const TAB_INDICATORS: readonly TabIndicatorId[] = [
   'running',
   'waiting',
   'failed',
@@ -89,55 +106,7 @@ export const DEFAULT_TAB_INDICATORS: readonly TabIndicatorId[] = [
   'draft',
 ];
 
-const KNOWN: ReadonlySet<string> = new Set<string>(TAB_INDICATOR_IDS);
-
-/**
- * A stored value, reduced to a list of ids this vam draws, in canonical order.
- *
- * TOTAL, AND IN TWO SAFE DIRECTIONS. A value that is not a list at all -- a
- * payload predating the field, a hand edit, a word -- answers the DEFAULTS,
- * because that is what the operator saw before they had a choice. A list
- * answers ITSELF, filtered: an unknown id is dropped alone rather than
- * costing the seven choices around it, and an EMPTY list stays empty, because
- * "every switch off" is a choice an operator can make and must not be undone
- * by the read that follows it.
- *
- * Never throws: `Array.isArray` is the only question asked of the value, and
- * every element is compared by identity against a set of strings.
- */
-export function readTabIndicators(raw: unknown): readonly TabIndicatorId[] {
-  if (!Array.isArray(raw)) return DEFAULT_TAB_INDICATORS;
-  const present = new Set<string>();
-  for (const entry of raw) {
-    if (typeof entry === 'string' && KNOWN.has(entry)) present.add(entry);
-  }
-  // Walked in canonical order, so the answer is ordered whatever order the
-  // payload was in -- and so a duplicate cannot survive, since each id is
-  // asked about exactly once.
-  return TAB_INDICATOR_IDS.filter((id) => present.has(id));
-}
-
-/** Is this indicator on? A membership test, named so the strip reads as the
- *  rule it applies rather than as `includes` on a list. */
-export function isTabIndicatorOn(
-  indicators: readonly TabIndicatorId[],
-  id: TabIndicatorId,
-): boolean {
-  return indicators.includes(id);
-}
-
-/**
- * The list with one indicator turned on or off. Idempotent: throwing a switch
- * that is already thrown is the same list. Normalised through the reader on
- * the way out, so the result is in canonical order however it was built.
- */
-export function withTabIndicator(
-  indicators: readonly TabIndicatorId[],
-  id: TabIndicatorId,
-  on: boolean,
-): readonly TabIndicatorId[] {
-  const next = new Set(indicators);
-  if (on) next.add(id);
-  else next.delete(id);
-  return readTabIndicators([...next]);
+/** Whether the tab strip draws `id`. */
+export function isTabIndicatorOn(id: TabIndicatorId): boolean {
+  return TAB_INDICATORS.includes(id);
 }

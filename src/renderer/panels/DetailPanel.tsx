@@ -1440,7 +1440,12 @@ function AgentTurn({ turn }: { readonly turn: Decision }) {
       </div>
       <div
         data-agent-turn-out
-        className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-body text-ink-soft"
+        /* `text-ink-dim`: there is no `--color-ink-soft` token and never was,
+           so this class named nothing and the line simply inherited whatever
+           ink its parent wore -- the quieter tone it asks for was never
+           painted. Found by the sweep that `test/renderer/colour-tokens.test.ts`
+           now runs on every build. */
+        className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-body text-ink-dim"
       >
         {/* ABSENT IS ITS OWN SENTENCE. An agent that has been asked and has
             not answered is the commonest live case, and a blank space there
