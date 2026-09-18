@@ -25,9 +25,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   MODEL_CHOICES,
+  modelButtonLabel,
   modelCommandLine,
   modelCommandStrokes,
   modelControlState,
+  runningModelRows,
 } from '../../src/renderer/panels/model-command.js';
 import { isPaneKey, MAX_KEY_TEXT, type PaneKey } from '../../src/shared/terminal.js';
 
@@ -129,6 +131,76 @@ describe('the five choices are the CLI’s own aliases', () => {
       '5',
       '4.5',
     ]);
+  });
+});
+
+describe('which rows the session’s own model marks', () => {
+  // The operator's ask, translated: "the model switcher button's label also
+  // needs to show the model that is currently selected, and there should be a
+  // tick icon on the currently selected model in the popover."
+  //
+  // The fact behind both halves is `SessionModel`, read off the CLI's status
+  // line in the session's pane (`main/terminal/model.ts`). What follows is the
+  // one rule that turns that string into ticks -- including the pair the
+  // status line cannot tell apart, which was MEASURED rather than assumed:
+  // `/model default` and `/model sonnet` both leave `wd1 Sonnet 5 in:0 out:0`
+  // on screen, while the CLI's own menu ticks whichever was chosen.
+
+  it('marks the one row whose model the CLI is naming', () => {
+    expect(runningModelRows('Opus 5')).toEqual(['opus']);
+    expect(runningModelRows('Fable 5.1')).toEqual(['fable']);
+    expect(runningModelRows('Haiku 4.5')).toEqual(['haiku']);
+  });
+
+  it('marks BOTH Default and Sonnet when the CLI says Sonnet 5, because it cannot say which', () => {
+    // Default IS Sonnet 5 today -- the CLI's own right-hand column says so --
+    // so both rows' model is what this session is running, and both marks are
+    // true. Which ALIAS was selected is the part the status line does not
+    // carry, and vam does not claim it: the surface marks both rather than
+    // picking one and being wrong half the time.
+    expect(runningModelRows('Sonnet 5')).toEqual(['default', 'sonnet']);
+  });
+
+  it('marks nothing at all when vam could not read the line', () => {
+    // The common case: a session with a question open is not painting its
+    // status line at all.
+    expect(runningModelRows(null)).toEqual([]);
+  });
+
+  it('marks nothing for a model none of the five is', () => {
+    // MEASURED: a session switched to a full model id
+    // (`/model claude-sonnet-4-5-20250929`) reads `Sonnet 4.5` on the footer.
+    // Ticking the `Sonnet` row there would be a lie the operator could act on
+    // -- that row is Sonnet 5, and picking it would CHANGE the model.
+    expect(runningModelRows('Sonnet 4.5')).toEqual([]);
+    expect(runningModelRows('Quartz 9')).toEqual([]);
+    expect(runningModelRows('')).toEqual([]);
+    // And the version drift `MODEL_CHOICES` documents: the day the CLI ships
+    // the next Opus the footer says `Opus 6`, and no row matches until someone
+    // re-captures the five. No tick beats a tick on the wrong number.
+    expect(runningModelRows('Opus 6')).toEqual([]);
+  });
+
+  it('is not fooled by a name that is merely a prefix of a row’s', () => {
+    expect(runningModelRows('Opus')).toEqual([]);
+    expect(runningModelRows('Opus 5.1')).toEqual([]);
+    expect(runningModelRows('Sonnet 51')).toEqual([]);
+  });
+});
+
+describe('what the button says', () => {
+  it('names the model the session is running', () => {
+    expect(modelButtonLabel('Opus 5')).toBe('Opus 5');
+    // Not one of the five, and still named: the button reports the pane, it
+    // does not pick from vam's list.
+    expect(modelButtonLabel('Sonnet 4.5')).toBe('Sonnet 4.5');
+  });
+
+  it('falls back to the word it always wore when vam could not read one', () => {
+    // NOT a remembered choice and not a guess: "model" is what the control
+    // said before it could read anything, and it is what an operator who
+    // cannot be told the truth is shown.
+    expect(modelButtonLabel(null)).toBe('model');
   });
 });
 
