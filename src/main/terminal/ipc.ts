@@ -14,8 +14,10 @@
 
 import { type AnswerResult, isAnswerRequest, type PromptView } from '../../shared/answer.js';
 import {
+  isModelChoice,
   isPaneKey,
   isPaneSize,
+  type ModelSwitchResult,
   type PaneSendResult,
   type PaneView,
   type SessionModel,
@@ -28,6 +30,7 @@ import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import { answerQuestion, readSessionPrompt } from './answer.js';
 import { setConciseOutput } from './concise.js';
 import { readSessionModel } from './model.js';
+import { switchSessionModel } from './model-switch.js';
 import { readSessionPane, resizeSessionPane, sendToPane, targetSession } from './pane.js';
 
 /**
@@ -368,6 +371,45 @@ export function registerTerminalIpc(
       return readSessionModel(
         run,
         projectId,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
+
+  /**
+   * CHANGING the model, which is the one channel here that drives a MENU in
+   * somebody's running agent -- so the ask is validated by shape on this side
+   * of the bridge, exactly as `terminalAnswer` is and for the same reason: the
+   * renderer is the least trusted process in the app, and the choice it sends
+   * becomes text typed into a pane.
+   *
+   * `unaimed` IS EVERY REFUSAL THIS HANDLER MAKES ITSELF -- nothing was read,
+   * nothing was aimed, nothing sent -- and that is `terminalAnswer`'s own
+   * rule, kept rather than re-decided. Everything below it is passed through
+   * unchanged, because the composer draws a different sentence for each: a
+   * question already on screen, a menu that never opened, a menu that would
+   * not take an arrow and a row that is not there are four different things to
+   * a person, and only one of them means the operator should go and look.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalSwitchModel,
+    async (_event, ...args: unknown[]): Promise<ModelSwitchResult> => {
+      const [projectId, choice, rowId] = args;
+      if (
+        args.length < 2 ||
+        args.length > 3 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        !isModelChoice(choice) ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return { kind: 'unaimed' };
+      }
+      return switchSessionModel(
+        run,
+        projectId,
+        choice,
         rowId,
         rowId === undefined ? undefined : await readPanes(),
       );

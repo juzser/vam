@@ -1,9 +1,9 @@
 /**
  * WHICH MODEL A SESSION IS ACTUALLY RUNNING, read off the screen it paints.
  *
- * THE PROBLEM THIS SOLVES. vam does not run the agent: it types `/model
- * <alias>` and Enter into a tmux pane (`renderer/panels/model-command.ts`) and
- * has never read the answer back. So what vam last ASKED FOR is not what the
+ * THE PROBLEM THIS SOLVES. vam does not run the agent: it drives the CLI's own
+ * `/model` menu in a tmux pane (`model-switch.ts` next door) and has never
+ * read the ANSWER LINE back. So what vam last ASKED FOR is not what the
  * session is on -- the operator can type `/model opus` in the pane themselves,
  * a CLI can refuse, and a session vam resumed was started by somebody else
  * entirely. A button wearing a remembered choice would be a claim nothing

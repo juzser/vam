@@ -116,6 +116,84 @@ export type SessionModel =
   | { readonly kind: 'unknown' };
 
 /**
+ * WHAT BECAME OF A MODEL SWITCH, and the TWO SCOPES a successful one can have.
+ *
+ * Beside `SessionModel` because it is the write to that read's fact, and here
+ * rather than in main for the same reason: main produces it, the preload
+ * forwards it and the renderer draws a different sentence for every arm.
+ *
+ * `scope` IS THE WHOLE POINT OF THE TYPE. Measured on Claude Code 2.1.276:
+ * `/model <alias>` + Return answers `Set model to Opus 5 and saved as your
+ * default for new sessions`, and the CLI's own menu header says the same
+ * thing in advance. So a switch vam made through the argument form CHANGED THE
+ * OPERATOR'S `~/.claude/settings.json`, from a control whose note claimed it
+ * switched this session. The menu's `s` key does not -- `Set model to Haiku
+ * 4.5 for this session only`, and that file byte-identical afterwards -- and
+ * `main/terminal/model-switch.ts` drives it. The two are different facts about
+ * the operator's machine, so they are two values and the caption says which.
+ * `default` is not a failure and is not hidden; it is disclosed.
+ *
+ * EVERY REFUSAL IS ITS OWN KIND, for the reason `PaneView` and `AnswerResult`
+ * keep theirs apart: each sends a person somewhere different. `question` is a
+ * picker that already has the keyboard -- vam looked and will not type past
+ * it. `no-menu` is vam having asked for the menu and having no menu to drive
+ * afterwards, which means the `/model` line may have landed in the agent's
+ * prompt instead. `not-live` is a menu that was there and stopped behaving
+ * like one: the probe arrow moved nothing, or it left the screen mid-walk.
+ * `unmatched` is a menu with no row of that name on it. `unaimed`,
+ * `unavailable`, `mispaired` and `refused` are the pane channel's own four
+ * words, spelled the same because they are the same states.
+ */
+export type ModelSwitchResult =
+  /** It went in. `session` is the menu's `s`; `default` is the argument form. */
+  | { readonly kind: 'sent'; readonly scope: 'session' | 'default' }
+  /** A picker already has the keyboard. `title` is the line above its rows. */
+  | { readonly kind: 'question'; readonly title: string }
+  /** `/model` went in and no menu came up. It may have gone in as a prompt. */
+  | { readonly kind: 'no-menu' }
+  /** A menu that will not take an arrow is one no key may be pressed on. */
+  | { readonly kind: 'not-live' }
+  /** No row of the menu carries this name. `label` is the name looked for. */
+  | { readonly kind: 'unmatched'; readonly label: string }
+  | { readonly kind: 'unaimed' }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'mispaired' }
+  /** vam could not read the screen, so it would not press a key on it. */
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'refused' };
+
+/**
+ * The longest model choice vam will carry. A CLI alias is one short word and a
+ * full model id is `claude-opus-5-20260501`; the bound is far above either and
+ * keeps a renderer that is no longer vam's from handing tmux a megabyte to
+ * type into somebody's agent.
+ */
+export const MAX_MODEL_CHOICE = 100;
+
+/**
+ * Whether a value off the bridge is a model choice vam will act on.
+ *
+ * ONE WORD, and the two things whitespace can be are both wrong on the wire:
+ * a space hands the CLI a second argument, and a newline in a literal payload
+ * reaches the pane as 0x0a, which the REPL submits on (`tmux/argv.ts`) -- so
+ * `/model` would go in bare, opening the menu, and the rest would be typed
+ * into it. Control characters go for the reason `sendTextArgv` types with
+ * `-l`: the line is text, never keys.
+ *
+ * CHECKED IN MAIN AS WELL AS IN THE RENDERER, and that is not a duplicate: the
+ * renderer is the least trusted process in the app, and the copy there exists
+ * to word the refusal, not to enforce it.
+ */
+export function isModelChoice(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_MODEL_CHOICE &&
+    /^[^\s\p{Cc}]+$/u.test(value)
+  );
+}
+
+/**
  * A terminal size, in tmux's own units.
  *
  * Here rather than beside the arithmetic that produces it (`renderer/panels/

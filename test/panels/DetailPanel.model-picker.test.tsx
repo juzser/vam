@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 /**
- * The model control, in its three states -- and the keys the enabled one sends.
+ * The model control, in its three states -- and what the enabled one ASKS FOR.
  *
  * The operator's ask, translated: "re-check the model picker in the prompt
  * input. Confirm whether choosing a model in vam is possible or not. If a
@@ -16,19 +16,22 @@
  *    thing there. `readModelRequest`/`setModelRequest` are pinned in
  *    `DetailPanel.test.tsx` and must not move.
  *  - PICKER (delivers, a pane, vam's own session): a button opening a listbox
- *    of the CLI's own five aliases plus a free-text row; a choice types
- *    `/model <x>` and Enter into the session's pane over the SAME channel,
- *    with the SAME in-flight guard and refusal caption, as the mode chip's
- *    Shift-Tab. It never writes a `model:` line into the draft: on this
- *    source the draft is typed into the CLI's prompt, where that line is
- *    words the agent reads and switches nothing.
+ *    of the CLI's own five aliases plus a free-text row; a choice goes down ONE
+ *    bridge call -- `terminal.switchModel` -- with the SAME in-flight guard and
+ *    the SAME refusal captions as the mode chip's Shift-Tab. It never writes a
+ *    `model:` line into the draft: on this source the draft is typed into the
+ *    CLI's prompt, where that line is words the agent reads and switches
+ *    nothing.
  *  - DISABLED (delivers, but no pane vam owns): the same button, disabled and
  *    dimmed, under a note that says why and what to do.
  *
- * `window.api.terminal.send` is faked at the boundary, so what is asserted is
- * the EXACT text and key order the bridge was handed -- a guard that only
- * checked "something was sent" would pass `model: opus`, which is the lie this
- * control replaces.
+ * THE BRIDGE MEMBER CHANGED, AND THAT IS THE POINT OF THE CHANGE THIS FILE
+ * RECORDS. It used to be `terminal.send`, carrying `/model <alias>` + Enter --
+ * the form the CLI answers with "and saved as your default for new sessions",
+ * so every pick rewrote `~/.claude/settings.json`. Main drives the CLI's own
+ * menu now and presses `s` (`main/terminal/model-switch.ts`). So this file
+ * asserts the ASK and the CAPTION; the keys are asserted against a fake tmux
+ * in `test/main/terminal/model-switch.test.ts`, on real captured screens.
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
@@ -36,8 +39,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
-import type { PromptView } from '../../src/shared/answer.js';
-import type { PaneKey, PaneSendResult, SessionModel } from '../../src/shared/terminal.js';
+import type { ModelSwitchResult, SessionModel } from '../../src/shared/terminal.js';
 
 const DECISION: Decision = {
   id: 'd1',
@@ -88,28 +90,43 @@ const all = (selector: string) => [...document.querySelectorAll(selector)];
 const picker = () => q<HTMLButtonElement>('[data-model-picker]');
 const request = () => q<HTMLInputElement>('[data-model-request]');
 
-type Sent = { readonly projectId: unknown; readonly key: PaneKey; readonly rowId: unknown };
+type Asked = { readonly projectId: unknown; readonly choice: string; readonly rowId: unknown };
 
-/** A bridge that records every key, answering each with `answer`. */
-function withBridge(answer: (key: PaneKey) => Promise<PaneSendResult> = async () => 'sent') {
-  const sent: Sent[] = [];
+/**
+ * A bridge that records every switch it is asked for, answering with `answer`.
+ *
+ * `switchModel` AND NOT `send`, and that swap is the whole shape of this
+ * change: the picker used to build `/model <alias>` strokes and type them over
+ * the keystroke channel, which is the form the CLI ALSO saves as the operator's
+ * default. Main owns the route end to end now
+ * (`main/terminal/model-switch.ts`). So what is asserted here is the ASK -- the
+ * project, the choice and the row -- and what the panel does with each answer;
+ * what reaches tmux is asserted against a fake one in
+ * `test/main/terminal/model-switch.test.ts`.
+ */
+function withBridge(
+  answer: (choice: string) => Promise<ModelSwitchResult> = async () => ({
+    kind: 'sent',
+    scope: 'session',
+  }),
+) {
+  const asked: Asked[] = [];
   Object.defineProperty(window, 'api', {
     configurable: true,
     value: {
       terminal: {
-        send: (projectId: unknown, key: PaneKey, rowId: unknown) => {
-          sent.push({ projectId, key, rowId });
-          return answer(key);
+        switchModel: (projectId: unknown, choice: string, rowId: unknown) => {
+          asked.push({ projectId, choice, rowId });
+          return answer(choice);
         },
       },
     },
   });
-  return sent;
+  return asked;
 }
 
-/** The text and key order the bridge saw -- `<enter>` for the interpreted key. */
-const wire = (sent: readonly Sent[]) =>
-  sent.map((s) => (s.key.kind === 'text' ? s.key.text : `<${s.key.kind}>`));
+/** Just the choices, in order -- what the operator picked, as main saw it. */
+const chosen = (asked: readonly Asked[]) => asked.map((one) => one.choice);
 
 async function settle() {
   await act(async () => {
@@ -246,17 +263,13 @@ describe('a session vam can type into gets a real picker', () => {
     }
   });
 
-  it('types `/model opus` literally and then Enter, into THIS session, and closes', async () => {
-    const sent = withBridge();
+  it('asks main to switch THIS session, naming the alias, and closes', async () => {
+    const asked = withBridge();
     draw({ delivers: true, terminal: true });
     await choose('opus');
-    // EXACT: the argument form, as text, then the interpreted key. `model:
-    // opus` -- the old draft line -- would be words in the prompt.
-    expect(wire(sent)).toEqual(['/model opus', '<enter>']);
-    for (const s of sent) {
-      expect(s.projectId).toBe('p1');
-      expect(s.rowId).toBe('s1');
-    }
+    // THE ALIAS, NOT A LINE. Main decides what is typed: an alias is walked
+    // onto the CLI's own menu, which is the whole point of the channel.
+    expect(asked).toEqual([{ projectId: 'p1', choice: 'opus', rowId: 's1' }]);
     expect(q('[data-model-picker-menu]')).toBeNull();
   });
 
@@ -268,21 +281,23 @@ describe('a session vam can type into gets a real picker', () => {
     expect(seen).toEqual([]);
   });
 
-  it('says what vam can honestly claim: typed into the terminal, the session answers there', async () => {
+  it('says what vam can honestly claim: this session only, and the session answers there', async () => {
     withBridge();
     draw({ delivers: true, terminal: true });
     await choose('opus');
     const note = q<HTMLElement>('[data-mode-cycle]');
     expect(note?.getAttribute('data-mode-cycle-state')).toBe('sent');
-    expect(note?.textContent).toContain('/model opus');
+    expect(note?.textContent).toContain('opus');
     expect(note?.textContent).toContain('Sprint board reorder');
+    // THE SCOPE IS THE CLAIM THIS CONTROL EXISTS TO MAKE HONEST.
+    expect(note?.textContent).toContain('this session only');
     expect(note?.textContent).toContain('the session answers there');
-    // Not a claim the model changed: vam never reads the answer back.
-    expect(note?.textContent ?? '').not.toMatch(/switched|changed to|now opus/i);
+    // And it must NOT say the thing the old route made true.
+    expect(note?.textContent ?? '').not.toMatch(/default for new sessions/i);
   });
 
-  it('takes a full model id from the free-text row on Enter, and sends it in pieces', async () => {
-    const sent = withBridge();
+  it('takes a full model id from the free-text row on Enter, and sends it whole', async () => {
+    const asked = withBridge(async () => ({ kind: 'sent', scope: 'default' }));
     draw({ delivers: true, terminal: true });
     act(() => picker()?.click());
     const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
@@ -292,14 +307,30 @@ describe('a session vam can type into gets a real picker', () => {
       await Promise.resolve();
     });
     await settle();
-    const typed = wire(sent);
-    expect(typed.at(-1)).toBe('<enter>');
-    expect(typed.slice(0, -1).join('')).toBe('/model claude-opus-5-20260501');
-    expect(typed.slice(0, -1).length).toBeGreaterThan(1);
+    expect(chosen(asked)).toEqual(['claude-opus-5-20260501']);
   });
 
-  it('refuses a free-text id with a space in it before any key is built', async () => {
-    const sent = withBridge();
+  /**
+   * THE ONE ROUTE THAT STILL COSTS THE OPERATOR THEIR DEFAULT, disclosed.
+   *
+   * A full model id has no row on the CLI's menu, so it can only go in as
+   * `/model <id>` -- which the CLI answers `...and saved as your default for
+   * new sessions`. Main says `scope: 'default'` for exactly that case, and a
+   * caption that wore the session-only sentence there would be the lie this
+   * whole change removes, moved one row down the popover.
+   */
+  it('discloses the default when main says the switch had to take the argument form', async () => {
+    withBridge(async () => ({ kind: 'sent', scope: 'default' }));
+    draw({ delivers: true, terminal: true });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    expect(note?.getAttribute('data-mode-cycle-state')).toBe('sent');
+    expect(note?.textContent).toMatch(/default for new sessions/);
+    expect(note?.textContent ?? '').not.toContain('this session only');
+  });
+
+  it('refuses a free-text id with a space in it before the bridge is touched', async () => {
+    const asked = withBridge();
     draw({ delivers: true, terminal: true });
     act(() => picker()?.click());
     const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
@@ -308,14 +339,14 @@ describe('a session vam can type into gets a real picker', () => {
       fireEvent.keyDown(field, { key: 'Enter' });
       await Promise.resolve();
     });
-    expect(sent).toEqual([]);
+    expect(asked).toEqual([]);
     expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe(
       'refused',
     );
   });
 
   it('shares the mode chip’s refusal caption when tmux would not deliver', async () => {
-    withBridge(async () => 'refused');
+    withBridge(async () => ({ kind: 'refused' }));
     draw({ delivers: true, terminal: true });
     await choose('haiku');
     const note = q<HTMLElement>('[data-mode-cycle]');
@@ -324,18 +355,40 @@ describe('a session vam can type into gets a real picker', () => {
     expect(note?.textContent).toContain('tmux');
   });
 
-  it('stops at the first stroke that does not land, so the Return is never pressed after a refusal', async () => {
-    const sent = withBridge(async () => 'refused');
-    draw({ delivers: true, terminal: true });
-    await choose('opus');
-    expect(wire(sent)).toEqual(['/model opus']);
+  /**
+   * EVERY REFUSAL GETS ITS OWN SENTENCE, because each sends a person somewhere
+   * different: a question to answer, a busy REPL that may have EATEN the
+   * `/model` line as a prompt, a menu that stopped taking keys, a row that is
+   * not there, and a screen vam could not read. One shared "not sent" would
+   * make four of the five unactionable.
+   */
+  it('words each of main’s refusals as its own thing', async () => {
+    const cases: readonly { result: ModelSwitchResult; says: RegExp }[] = [
+      { result: { kind: 'no-menu' }, says: /may have reached the agent as a prompt/ },
+      { result: { kind: 'not-live' }, says: /did not answer vam’s arrow/ },
+      { result: { kind: 'unmatched', label: 'Opus' }, says: /Opus is not a row/ },
+      { result: { kind: 'unreadable' }, says: /could not read the screen/ },
+      { result: { kind: 'unaimed' }, says: /could not name one session/ },
+      { result: { kind: 'mispaired' }, says: /pane vam cannot use/ },
+      { result: { kind: 'unavailable' }, says: /could not ask tmux/ },
+    ];
+    for (const { result, says } of cases) {
+      withBridge(async () => result);
+      draw({ delivers: true, terminal: true });
+      await choose('opus');
+      const note = q<HTMLElement>('[data-mode-cycle]');
+      expect(note?.getAttribute('data-mode-cycle-state'), result.kind).toBe('refused');
+      expect(note?.textContent ?? '', result.kind).toMatch(says);
+      cleanup();
+      Reflect.deleteProperty(window, 'api');
+    }
   });
 
   it('shares the in-flight guard: a second choice while one is out sends nothing', async () => {
-    let land: (r: PaneSendResult) => void = () => {};
-    const sent = withBridge(
+    let land: (r: ModelSwitchResult) => void = () => {};
+    const asked = withBridge(
       () =>
-        new Promise<PaneSendResult>((resolve) => {
+        new Promise<ModelSwitchResult>((resolve) => {
           land = resolve;
         }),
     );
@@ -351,13 +404,14 @@ describe('a session vam can type into gets a real picker', () => {
       q<HTMLButtonElement>('[data-model-option="haiku"]')?.click();
       await Promise.resolve();
     });
-    expect(wire(sent)).toEqual(['/model opus']);
+    expect(chosen(asked)).toEqual(['opus']);
     await act(async () => {
-      land('sent');
+      land({ kind: 'sent', scope: 'session' });
       await Promise.resolve();
     });
     await settle();
-    expect(wire(sent)).toEqual(['/model opus', '<enter>']);
+    expect(chosen(asked)).toEqual(['opus']);
+    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe('sent');
   });
 
   it('reports a build with no bridge rather than pretending', async () => {
@@ -368,10 +422,13 @@ describe('a session vam can type into gets a real picker', () => {
     expect(note?.textContent).toContain('no keyboard');
   });
 
-  it('discloses the CLI’s side effect in its note: the choice becomes the default for new sessions', () => {
+  it('says in its note which route each choice takes, including the one with a side effect', () => {
     draw({ delivers: true, terminal: true });
     const note = picker()?.getAttribute('data-note') ?? '';
     expect(note).toContain('/model');
+    // An alias is the session-only route -- the whole reason main drives the
+    // CLI's menu -- and a full id is the one that still costs the default.
+    expect(note).toMatch(/this session only/);
     expect(note).toMatch(/default for new sessions/);
   });
 });
@@ -626,10 +683,10 @@ describe('the button names the model the session is running', () => {
 });
 
 /**
- * THE SWITCH LOOKS AT THE SCREEN FIRST, and this is the family it exists for.
+ * A QUESTION ON THE SCREEN STOPS THE SWITCH -- and the rule lives in MAIN now.
  *
  * Measured against a real Claude Code 2.1.276 over a private tmux socket: with
- * the CLI's own `/model` menu open, vam's exact sequence -- `send-keys -l --
+ * the CLI's own `/model` menu open, vam's old sequence -- `send-keys -l --
  * '/model haiku'` then `send-keys Enter` -- did NOT switch to Haiku. The
  * literal text was swallowed by the menu, which has no text buffer, and the
  * Enter behind it COMMITTED THE ROW THE CURSOR HAPPENED TO SIT ON:
@@ -641,27 +698,23 @@ describe('the button names the model the session is running', () => {
  * about somebody's files, and `answer.ts` already holds the rule this breaks:
  * "nothing here may ever press Return on a row it has not just read."
  *
- * So the switch reads the pane before it types, over the reader that already
- * knows what a picker looks like, and refuses when one has the keyboard.
+ * THE RENDERER USED TO MAKE THAT CHECK ITSELF, over `readSessionPrompt`, and it
+ * moved: main reads the pane before it types anything and answers
+ * `{kind:'question', title}` (`main/terminal/model-switch.ts`), where the same
+ * read is also the first step of the walk. ONE RULE, ONE PLACE -- and a rule
+ * that types is a rule that belongs in main, not in the least trusted process
+ * in the app. What stays here is the SENTENCE the refusal is drawn as, and the
+ * ordering the web guard caught.
  */
-describe('a question on the screen stops the switch before a key is built', () => {
-  const asking = async (): Promise<PromptView> => ({
-    kind: 'prompt',
-    prompt: { title: 'Do you want to make this edit to argv.ts?', options: ['Yes', 'No'] },
-  });
-
-  it('sends nothing at all when the pane is showing a picker', async () => {
-    const sent = withBridge();
-    draw({ delivers: true, terminal: true, prompt: asking });
-    await choose('opus');
-    // Not "the text but not the Return": NOTHING. A half-typed `/model opus`
-    // sitting inside an open permission prompt is its own mess.
-    expect(wire(sent)).toEqual([]);
-  });
+describe('a question on the screen is drawn as a question, not as a tmux problem', () => {
+  const asking: ModelSwitchResult = {
+    kind: 'question',
+    title: 'Do you want to make this edit to argv.ts?',
+  };
 
   it('says a question is open and names it, rather than blaming tmux', async () => {
-    withBridge();
-    draw({ delivers: true, terminal: true, prompt: asking });
+    withBridge(async () => asking);
+    draw({ delivers: true, terminal: true });
     await choose('opus');
     const note = q<HTMLElement>('[data-mode-cycle]');
     expect(note?.getAttribute('data-mode-cycle-state')).toBe('refused');
@@ -677,9 +730,21 @@ describe('a question on the screen stops the switch before a key is built', () =
     expect(note?.textContent ?? '').not.toMatch(/tmux|pairing|not sent — this build/i);
   });
 
-  it('refuses the free-text row on the same reading, not only the five aliases', async () => {
-    const sent = withBridge();
-    draw({ delivers: true, terminal: true, prompt: asking });
+  it('still says something useful when the picker main saw had no title above it', async () => {
+    // A menu with nothing above its rows leaves main no title to send, and a
+    // caption quoting an empty string would read as a question with no words.
+    withBridge(async () => ({ kind: 'question', title: '' }));
+    draw({ delivers: true, terminal: true });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    expect(note?.getAttribute('data-mode-cycle-state')).toBe('refused');
+    expect(note?.textContent).toContain('has a menu open');
+    expect(note?.textContent ?? '').not.toContain('“”');
+  });
+
+  it('sends the free-text row down the same channel, so main’s rule covers it too', async () => {
+    const asked = withBridge(async () => asking);
+    draw({ delivers: true, terminal: true });
     act(() => picker()?.click());
     const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
     fireEvent.change(field, { target: { value: 'claude-opus-5-20260501' } });
@@ -688,51 +753,39 @@ describe('a question on the screen stops the switch before a key is built', () =
       await Promise.resolve();
     });
     await settle();
-    expect(wire(sent)).toEqual([]);
-  });
-
-  it('types as before on a pane vam LOOKED at and found no picker on', async () => {
-    const sent = withBridge();
-    draw({ delivers: true, terminal: true, prompt: async () => ({ kind: 'none' }) });
-    await choose('opus');
-    expect(wire(sent)).toEqual(['/model opus', '<enter>']);
+    expect(chosen(asked)).toEqual(['claude-opus-5-20260501']);
+    expect(q<HTMLElement>('[data-mode-cycle]')?.textContent).toContain('is asking');
   });
 
   /**
-   * THE OTHER FOUR ANSWERS ARE NOT A REFUSAL HERE, deliberately. `unaimed`,
-   * `mispaired`, `unavailable` and `unreadable` all mean vam could not read
-   * the pane -- and every one of them is a state the SEND path meets a moment
-   * later and words correctly out of `PaneSendResult`. Refusing here would
-   * replace an accurate sentence about pairing with a guess about questions,
-   * and would brick the button for as long as the reader hiccuped. Only a
-   * picker vam actually SAW stops the switch.
+   * THE SEAM MOVED, AND THIS IS THE ASSERTION THAT IT REALLY DID. A switch that
+   * still read `readSessionPrompt` here would be a SECOND opinion about what is
+   * on the pane, taken a tmux spawn before main takes its own -- two reads, two
+   * windows in which the screen can change, and two places to keep the rule.
    */
-  it('lets the send path speak for every answer that is not a picker', async () => {
-    for (const kind of ['unaimed', 'mispaired', 'unavailable', 'unreadable'] as const) {
-      const sent = withBridge();
-      draw({ delivers: true, terminal: true, prompt: async () => ({ kind }) });
-      await choose('opus');
-      expect(wire(sent), kind).toEqual(['/model opus', '<enter>']);
-      cleanup();
-      Reflect.deleteProperty(window, 'api');
-    }
-  });
-
-  it('types as before in a build that has no reader at all', async () => {
-    const sent = withBridge();
-    draw({ delivers: true, terminal: true, prompt: undefined });
+  it('spends no read of its own: the prompt channel is not consulted at all', async () => {
+    let looked = false;
+    withBridge();
+    draw({
+      delivers: true,
+      terminal: true,
+      prompt: async () => {
+        looked = true;
+        return { kind: 'none' };
+      },
+    });
     await choose('opus');
-    expect(wire(sent)).toEqual(['/model opus', '<enter>']);
+    expect(looked).toBe(false);
   });
 
   /**
-   * THE BRIDGE IS CHECKED BEFORE THE SCREEN IS, and the web guard found this
-   * before this test existed: `model-picker-shots.mjs` drives the BROWSER
-   * build -- no `window.api` at all -- against a demo row that happens to be
-   * asking a question, and the caption came back naming the question. A build
-   * with no keyboard into a pane cannot switch a model however the screen
-   * looks, so the refusal that is true must win over the one that is merely
-   * visible; answering the question would not have helped.
+   * THE BRIDGE IS CHECKED FIRST, and the web guard found this before this test
+   * existed: `model-picker-shots.mjs` drives the BROWSER build -- no
+   * `window.api` at all -- against a demo row that happens to be asking a
+   * question, and the caption came back naming the question. A build with no
+   * keyboard into a pane cannot switch a model however the screen looks, so the
+   * refusal that is true must win over the one that is merely visible;
+   * answering the question would not have helped.
    */
   it('names the missing bridge, not the question, when there is no keyboard at all', async () => {
     let looked = false;
@@ -754,17 +807,9 @@ describe('a question on the screen stops the switch before a key is built', () =
   });
 
   it('asks about THIS row, not the project at large', async () => {
-    const asked: unknown[][] = [];
-    withBridge();
-    draw({
-      delivers: true,
-      terminal: true,
-      prompt: async (projectId, rowId) => {
-        asked.push([projectId, rowId]);
-        return { kind: 'none' };
-      },
-    });
+    const asked = withBridge();
+    draw({ delivers: true, terminal: true });
     await choose('opus');
-    expect(asked).toContainEqual(['p1', 's1']);
+    expect(asked).toEqual([{ projectId: 'p1', choice: 'opus', rowId: 's1' }]);
   });
 });

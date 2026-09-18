@@ -1,6 +1,6 @@
 /**
- * The model control's decision table, and the keystrokes its enabled state
- * types. Pure: no React, no bridge, so the table and the line can be asserted
+ * The model control's decision table, its five rows, and the line its caption
+ * prints. Pure: no React, no bridge, so the table and the line can be asserted
  * row by row without mounting the pane.
  *
  * WHY THERE ARE THREE STATES AND NOT ONE FIELD. The composer's model control
@@ -19,12 +19,20 @@
  * once. `/model default` answers the same for the default. A BARE `/model`
  * opens an interactive menu (Default · Sonnet · Fable · Opus · Haiku, "Enter to
  * set as default · s to use this session only · Esc to cancel" -- both still
- * word for word on 2.1.276, re-captured with the versions below) -- vam never
- * drives that menu, because it cannot read it back; it sends the argument form
- * and nothing else. `claude --help` says `--model` takes "an alias for the
- * latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name",
- * which is why the picker offers the five aliases AND a free-text row for a
- * full id.
+ * word for word on 2.1.276, re-captured with the versions below).
+ *
+ * VAM DRIVES THAT MENU NOW, and this header used to say it never would. The
+ * reason given was that vam could not read it back -- which stopped being true
+ * when `main/terminal/answer.ts` learned to read a picker off a capture, and
+ * the cost of not driving it was the second half of the sentence above: EVERY
+ * model pick rewrote `~/.claude/settings.json`. `main/terminal/model-switch.ts`
+ * owns the whole route, in main, where `answer.ts`'s rules already live; this
+ * module keeps the TABLE the popover draws and the one-word rule, and types
+ * nothing at all. `claude --help` says `--model` takes "an alias for the latest
+ * model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name", which is
+ * why the picker offers the five aliases AND a free-text row for a full id --
+ * and the full id is the one choice with no menu row, so it is also the only
+ * one that still costs the operator their default.
  *
  * SO THE TABLE IS:
  *
@@ -34,9 +42,9 @@
  *                                             line and its note, unchanged:
  *                                             nothing vam types reaches an
  *                                             agent on this source.
- *   true       !== false      true            `picker`   -- vam can type
- *                                             `/model <x>` + Enter into the
- *                                             pane it started.
+ *   true       !== false      true            `picker`   -- vam can drive
+ *                                             the CLI's own /model menu in
+ *                                             the pane it started.
  *   true       false          any             `disabled` -- the source
  *                                             delivers but has no pane
  *                                             surface here.
@@ -61,9 +69,6 @@
  * and vam has no keyboard into this session to change it. The note on the
  * disabled control carries the remedy.
  */
-
-import type { PaneKey } from '../../shared/terminal.js';
-import { composedStrokes } from './terminal-compose.js';
 
 /** The three faces the control can wear; see the table above. */
 export type ModelControlState = 'request' | 'picker' | 'disabled';
@@ -204,33 +209,26 @@ export function modelButtonLabel(running: string | null): string {
  */
 const ONE_WORD = /^[^\s\p{Cc}]+$/u;
 
-/** `/model <choice>`, or `null` when the choice is not one word. */
+/**
+ * `/model <choice>`, or `null` when the choice is not one word.
+ *
+ * IT IS NO LONGER WHAT VAM TYPES, AND THAT IS THE POINT. A `modelCommandStrokes`
+ * stood beside this, cutting the line into sixteen-character `PaneKey`s for
+ * `terminal.send` -- and `/model <alias>` + Return is exactly the form the CLI
+ * answers with "and saved as your default for new sessions", so every pick
+ * rewrote `~/.claude/settings.json`. Main drives the CLI's own menu now
+ * (`main/terminal/model-switch.ts`), and it types the argument form ITSELF for
+ * the one choice that has no menu row -- a full model id -- where it also says
+ * `scope: 'default'` out loud. That builder is gone rather than left lying
+ * about: a renderer-side way to type this line is a loaded gun.
+ *
+ * WHAT IS LEFT IS THE ONE-WORD RULE AND THE STRING THE CAPTION PRINTS. The rule
+ * is enforced again in main (`isModelChoice`), because the renderer is the
+ * least trusted process in the app; the copy here exists to WORD the refusal
+ * before the bridge is touched.
+ */
 export function modelCommandLine(choice: string): string | null {
   const word = choice.trim();
   if (!ONE_WORD.test(word)) return null;
   return `/model ${word}`;
-}
-
-/**
- * The strokes that type the line and submit it: the text in pieces the channel
- * accepts, then ONE interpreted Enter, last.
- *
- * SPLIT, NOT WIDENED. `/model ` plus a full model id runs past `MAX_KEY_TEXT`,
- * the sixteen-character bound `shared/terminal.ts` puts on a `text` key so the
- * channel cannot become an unbounded paste. Handed over whole it would fail
- * `isPaneKey` in main, which answers `unaimed` -- drawn as a sentence about
- * session PAIRING that would be false. `composedStrokes` was written for an IME
- * commit that has the same shape (one string, longer than a keystroke) and it
- * is used unchanged: each piece is its own `send-keys -l --`, sent in order on
- * the same aimed channel, and the pane receives the bytes of one line.
- *
- * THE ENTER IS SEPARATE AND LAST, for the reason `promptKeystrokes` keeps it
- * out of the text: `-l` types and forbids interpretation, so Return has to be
- * its own key; and it comes after every piece so a run that fails midway
- * leaves the line sitting in the pane unsent rather than half-submitted.
- */
-export function modelCommandStrokes(choice: string): readonly PaneKey[] | null {
-  const line = modelCommandLine(choice);
-  if (line === null) return null;
-  return [...composedStrokes(line), { kind: 'enter' }];
 }

@@ -45,7 +45,13 @@ import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.j
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
-import type { PaneKey, PaneSendResult, PaneView, SessionModel } from '../shared/terminal.js';
+import type {
+  ModelSwitchResult,
+  PaneKey,
+  PaneSendResult,
+  PaneView,
+  SessionModel,
+} from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
@@ -397,7 +403,7 @@ export type TerminalApi = {
    *
    * A read like `prompt`, and beside it for the same reason those two are one
    * act: this is the fact the model BUTTON is drawn from, and the picker
-   * underneath types `/model <alias>` down `send`. Before this member existed
+   * underneath sends its choice down `switchModel`. Before this member existed
    * vam typed a request and never looked, so the button could only ever be
    * labelled with the word "model".
    *
@@ -406,6 +412,23 @@ export type TerminalApi = {
    * (`shared/terminal.ts`).
    */
   model(projectId: string, rowId?: string): Promise<SessionModel>;
+  /**
+   * CHANGE the model that session is running -- the write to `model`'s read.
+   *
+   * NOT BUILT OUT OF `send`, and that is the whole reason this member exists.
+   * The picker used to type `/model <alias>` and Return over `send`, which the
+   * CLI answers with `Set model to Opus 5 and saved as your default for new
+   * sessions` -- so every pick rewrote `~/.claude/settings.json`. Main drives
+   * the CLI's own menu instead and presses `s`, which keeps the change to this
+   * session; there is deliberately no way to express a model switch as a
+   * keystroke on this bridge.
+   *
+   * `choice` is one word: one of the CLI's five aliases, which main walks the
+   * menu for, or a full model id, which has no menu row -- that one falls back
+   * to the argument form and comes back as `scope: 'default'`, which the
+   * caption must disclose.
+   */
+  switchModel(projectId: string, choice: string, rowId?: string): Promise<ModelSwitchResult>;
 };
 
 /**
@@ -440,6 +463,15 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalModel, projectId)
         : ipc.invoke(CHANNELS.terminalModel, projectId, rowId)) as Promise<SessionModel>,
+    switchModel: (projectId, choice, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalSwitchModel, projectId, choice)
+        : ipc.invoke(
+            CHANNELS.terminalSwitchModel,
+            projectId,
+            choice,
+            rowId,
+          )) as Promise<ModelSwitchResult>,
   };
 }
 
