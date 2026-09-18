@@ -36,6 +36,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import type { PromptView } from '../../src/shared/answer.js';
 import type { PaneKey, PaneSendResult, SessionModel } from '../../src/shared/terminal.js';
 
 const DECISION: Decision = {
@@ -621,5 +622,149 @@ describe('the button names the model the session is running', () => {
     expect(picker()?.disabled).toBe(true);
     expect(label()).toBe('model');
     expect(asked).toEqual([]);
+  });
+});
+
+/**
+ * THE SWITCH LOOKS AT THE SCREEN FIRST, and this is the family it exists for.
+ *
+ * Measured against a real Claude Code 2.1.276 over a private tmux socket: with
+ * the CLI's own `/model` menu open, vam's exact sequence -- `send-keys -l --
+ * '/model haiku'` then `send-keys Enter` -- did NOT switch to Haiku. The
+ * literal text was swallowed by the menu, which has no text buffer, and the
+ * Enter behind it COMMITTED THE ROW THE CURSOR HAPPENED TO SIT ON:
+ *
+ *     ⎿  Set model to Opus 5 and saved as your default for new sessions
+ *
+ * Opus was merely the row the cursor was on. That is the benign case. The same
+ * shape with a PERMISSION prompt on screen means vam's Enter answers a question
+ * about somebody's files, and `answer.ts` already holds the rule this breaks:
+ * "nothing here may ever press Return on a row it has not just read."
+ *
+ * So the switch reads the pane before it types, over the reader that already
+ * knows what a picker looks like, and refuses when one has the keyboard.
+ */
+describe('a question on the screen stops the switch before a key is built', () => {
+  const asking = async (): Promise<PromptView> => ({
+    kind: 'prompt',
+    prompt: { title: 'Do you want to make this edit to argv.ts?', options: ['Yes', 'No'] },
+  });
+
+  it('sends nothing at all when the pane is showing a picker', async () => {
+    const sent = withBridge();
+    draw({ delivers: true, terminal: true, prompt: asking });
+    await choose('opus');
+    // Not "the text but not the Return": NOTHING. A half-typed `/model opus`
+    // sitting inside an open permission prompt is its own mess.
+    expect(wire(sent)).toEqual([]);
+  });
+
+  it('says a question is open and names it, rather than blaming tmux', async () => {
+    withBridge();
+    draw({ delivers: true, terminal: true, prompt: asking });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    expect(note?.getAttribute('data-mode-cycle-state')).toBe('refused');
+    expect(note?.getAttribute('data-mode-refusal')).toBe('true');
+    // The question in its OWN words, not "a question is open": the operator
+    // has to know which one, and the pane may be off screen behind this tab.
+    expect(note?.textContent).toContain('is asking');
+    expect(note?.textContent).toContain('Do you want to make this edit to argv.ts?');
+    // The remedy: the question is answerable, here, and then the switch works.
+    expect(note?.textContent).toContain('answer it');
+    // It must not read as a pairing or delivery problem -- those send the
+    // operator looking in the wrong place entirely.
+    expect(note?.textContent ?? '').not.toMatch(/tmux|pairing|not sent — this build/i);
+  });
+
+  it('refuses the free-text row on the same reading, not only the five aliases', async () => {
+    const sent = withBridge();
+    draw({ delivers: true, terminal: true, prompt: asking });
+    act(() => picker()?.click());
+    const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: 'claude-opus-5-20260501' } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: 'Enter' });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(wire(sent)).toEqual([]);
+  });
+
+  it('types as before on a pane vam LOOKED at and found no picker on', async () => {
+    const sent = withBridge();
+    draw({ delivers: true, terminal: true, prompt: async () => ({ kind: 'none' }) });
+    await choose('opus');
+    expect(wire(sent)).toEqual(['/model opus', '<enter>']);
+  });
+
+  /**
+   * THE OTHER FOUR ANSWERS ARE NOT A REFUSAL HERE, deliberately. `unaimed`,
+   * `mispaired`, `unavailable` and `unreadable` all mean vam could not read
+   * the pane -- and every one of them is a state the SEND path meets a moment
+   * later and words correctly out of `PaneSendResult`. Refusing here would
+   * replace an accurate sentence about pairing with a guess about questions,
+   * and would brick the button for as long as the reader hiccuped. Only a
+   * picker vam actually SAW stops the switch.
+   */
+  it('lets the send path speak for every answer that is not a picker', async () => {
+    for (const kind of ['unaimed', 'mispaired', 'unavailable', 'unreadable'] as const) {
+      const sent = withBridge();
+      draw({ delivers: true, terminal: true, prompt: async () => ({ kind }) });
+      await choose('opus');
+      expect(wire(sent), kind).toEqual(['/model opus', '<enter>']);
+      cleanup();
+      Reflect.deleteProperty(window, 'api');
+    }
+  });
+
+  it('types as before in a build that has no reader at all', async () => {
+    const sent = withBridge();
+    draw({ delivers: true, terminal: true, prompt: undefined });
+    await choose('opus');
+    expect(wire(sent)).toEqual(['/model opus', '<enter>']);
+  });
+
+  /**
+   * THE BRIDGE IS CHECKED BEFORE THE SCREEN IS, and the web guard found this
+   * before this test existed: `model-picker-shots.mjs` drives the BROWSER
+   * build -- no `window.api` at all -- against a demo row that happens to be
+   * asking a question, and the caption came back naming the question. A build
+   * with no keyboard into a pane cannot switch a model however the screen
+   * looks, so the refusal that is true must win over the one that is merely
+   * visible; answering the question would not have helped.
+   */
+  it('names the missing bridge, not the question, when there is no keyboard at all', async () => {
+    let looked = false;
+    draw({
+      delivers: true,
+      terminal: true,
+      prompt: async () => {
+        looked = true;
+        return { kind: 'prompt', prompt: { title: 'Run this command?', options: ['Yes'] } };
+      },
+    });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    expect(note?.getAttribute('data-mode-cycle-state')).toBe('refused');
+    expect(note?.textContent).toContain('no keyboard into a session');
+    expect(note?.textContent ?? '').not.toContain('Run this command?');
+    // And it did not spend a tmux read to find that out.
+    expect(looked).toBe(false);
+  });
+
+  it('asks about THIS row, not the project at large', async () => {
+    const asked: unknown[][] = [];
+    withBridge();
+    draw({
+      delivers: true,
+      terminal: true,
+      prompt: async (projectId, rowId) => {
+        asked.push([projectId, rowId]);
+        return { kind: 'none' };
+      },
+    });
+    await choose('opus');
+    expect(asked).toContainEqual(['p1', 's1']);
   });
 });
