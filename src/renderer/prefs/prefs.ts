@@ -42,7 +42,6 @@ import {
   readPromptSubmitKey,
   setActivePromptSubmitKey,
 } from './submit-key.js';
-import {} from './tab-indicators.js';
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   readTerminalFontSize,
