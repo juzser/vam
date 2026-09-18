@@ -16,12 +16,22 @@
  *    thing there. `readModelRequest`/`setModelRequest` are pinned in
  *    `DetailPanel.test.tsx` and must not move.
  *  - PICKER (delivers, a pane, vam's own session): a button opening a listbox
- *    of the CLI's own five aliases plus a free-text row; a choice goes down ONE
+ *    of the CLI's own five aliases AND NOTHING ELSE; a choice goes down ONE
  *    bridge call -- `terminal.switchModel` -- with the SAME in-flight guard and
  *    the SAME refusal captions as the mode chip's Shift-Tab. It never writes a
  *    `model:` line into the draft: on this source the draft is typed into the
  *    CLI's prompt, where that line is words the agent reads and switches
  *    nothing.
+ *
+ *    THE FIVE USED TO BE FIVE PLUS A FREE-TEXT ROW, which took a full model id
+ *    -- a choice the CLI's own menu has no row for, so it fell back to `/model
+ *    <id>` + Return, the form that ALSO rewrites `~/.claude/settings.json`,
+ *    and the caption disclosed it. Offered that fallback or an outright
+ *    refusal, the operator chose refusal. A row whose every outcome would now
+ *    be a refusal is a control that can only say no, so it is gone -- and the
+ *    tests that drove it are below, holding it ABSENT, because this file is
+ *    the specification for this control and an absence nobody asserts is an
+ *    absence that grows its row back.
  *  - DISABLED (delivers, but no pane vam owns): the same button, disabled and
  *    dimmed, under a note that says why and what to do.
  *
@@ -200,12 +210,12 @@ describe('a session vam can type into gets a real picker', () => {
     expect(button?.closest('[data-prompt-tools]')).not.toBeNull();
   });
 
-  it('opens Default · Sonnet · Fable · Opus · Haiku and a free-text row, the provider picker’s pattern', () => {
+  it('opens Default · Sonnet · Fable · Opus · Haiku, the provider picker’s pattern', () => {
     draw({ delivers: true, terminal: true });
     expect(q('[data-model-picker-menu]')).toBeNull();
     act(() => picker()?.click());
-    // The five are a listbox OF THEIR OWN inside the popover, because the
-    // free-text row is an `<input>` and an input is not an option.
+    // The five are a listbox, and now the popover is nothing BUT that listbox:
+    // the `<input>` the five used to sit above is gone with the route it fed.
     const listbox = q('[data-model-picker-menu] [role="listbox"]');
     expect(listbox).not.toBeNull();
     expect(listbox?.querySelectorAll('[data-model-option]')).toHaveLength(5);
@@ -226,7 +236,7 @@ describe('a session vam can type into gets a real picker', () => {
     for (const option of all('[data-model-option]')) {
       expect(option.getAttribute('role')).toBe('option');
     }
-    expect(q('[data-model-id]')?.tagName).toBe('INPUT');
+    expect(q('[data-model-id]')).toBeNull();
   });
 
   it('prints each alias’s version beside its name, in the CLI’s own values', () => {
@@ -257,8 +267,14 @@ describe('a session vam can type into gets a real picker', () => {
       const kids = [...option.children];
       expect(kids[0]?.getAttribute('data-model-name')).not.toBeNull();
       expect(kids.at(-1)?.getAttribute('data-model-version')).not.toBeNull();
-      // Nothing here reads a model, so no row may claim to be running one.
-      expect(kids).toHaveLength(2);
+      // THREE, AND THE MIDDLE ONE IS EMPTY. The tick's slot is always drawn so
+      // that a mark coming and going cannot move the popover -- which it did,
+      // measured at 23px, once the free-text row stopped setting the width
+      // (`e2e/model-picker-shots.mjs` holds the outcome). Nothing here reads a
+      // model, so the slot is present and the glyph inside it is not.
+      expect(kids).toHaveLength(3);
+      expect(kids[1]?.getAttribute('data-model-tick-slot')).not.toBeNull();
+      expect(kids[1]?.children).toHaveLength(0);
       expect(option.querySelector('[data-model-current]')).toBeNull();
     }
   });
@@ -296,53 +312,101 @@ describe('a session vam can type into gets a real picker', () => {
     expect(note?.textContent ?? '').not.toMatch(/default for new sessions/i);
   });
 
-  it('takes a full model id from the free-text row on Enter, and sends it whole', async () => {
-    const asked = withBridge(async () => ({ kind: 'sent', scope: 'default' }));
-    draw({ delivers: true, terminal: true });
-    act(() => picker()?.click());
-    const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
-    fireEvent.change(field, { target: { value: 'claude-opus-5-20260501' } });
-    await act(async () => {
-      fireEvent.keyDown(field, { key: 'Enter' });
-      await Promise.resolve();
-    });
-    await settle();
-    expect(chosen(asked)).toEqual(['claude-opus-5-20260501']);
-  });
-
   /**
-   * THE ONE ROUTE THAT STILL COSTS THE OPERATOR THEIR DEFAULT, disclosed.
+   * THE ROW THAT TOOK A FULL MODEL ID IS GONE, and this used to be the test
+   * that typed one into it and watched it reach main whole.
    *
-   * A full model id has no row on the CLI's menu, so it can only go in as
-   * `/model <id>` -- which the CLI answers `...and saved as your default for
-   * new sessions`. Main says `scope: 'default'` for exactly that case, and a
-   * caption that wore the session-only sentence there would be the lie this
-   * whole change removes, moved one row down the popover.
+   * Its outcome would now be a refusal every single time -- main answers
+   * `not-in-menu` for anything that is not one of the five (see
+   * `main/terminal/model-switch.ts`) -- and a control whose only possible
+   * answer is no is worse than no control: it invites the ask, spends the
+   * operator's attention and gives nothing back. So what is held here is the
+   * ABSENCE, which is the part a later hand could undo without noticing.
    */
-  it('discloses the default when main says the switch had to take the argument form', async () => {
-    withBridge(async () => ({ kind: 'sent', scope: 'default' }));
-    draw({ delivers: true, terminal: true });
-    await choose('opus');
-    const note = q<HTMLElement>('[data-mode-cycle]');
-    expect(note?.getAttribute('data-mode-cycle-state')).toBe('sent');
-    expect(note?.textContent).toMatch(/default for new sessions/);
-    expect(note?.textContent ?? '').not.toContain('this session only');
-  });
-
-  it('refuses a free-text id with a space in it before the bridge is touched', async () => {
+  it('has no free-text row to take a full model id from, anywhere in the popover', async () => {
     const asked = withBridge();
     draw({ delivers: true, terminal: true });
     act(() => picker()?.click());
-    const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
-    fireEvent.change(field, { target: { value: 'opus haiku' } });
-    await act(async () => {
-      fireEvent.keyDown(field, { key: 'Enter' });
-      await Promise.resolve();
-    });
+    const popover = q('[data-model-picker-menu]');
+    expect(popover).not.toBeNull();
+    expect(q('[data-model-id]')).toBeNull();
+    // Not just that ONE attribute is gone: no text box of any kind is in
+    // there, so a row renamed rather than removed does not slip through.
+    expect(popover?.querySelectorAll('input, textarea, [contenteditable]')).toHaveLength(0);
     expect(asked).toEqual([]);
-    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe(
-      'refused',
+  });
+
+  /**
+   * AND WHAT MAIN SAYS WHEN ONE REACHES IT ANYWAY, because main validates what
+   * the renderer sends rather than trusting the renderer's list -- so this arm
+   * is reachable from an older renderer, a replayed call, or the next hand.
+   *
+   * THE CAPTION NAMES THE REMEDY AND NOT ONLY THE REFUSAL. Typing `/model
+   * <id>` at the REPL is still the operator's own to do, knowing it also
+   * becomes their default for new sessions; what vam will not do is make that
+   * write on their behalf. A refusal that stopped at "no" would leave someone
+   * who really wants a full model id with nowhere to go.
+   */
+  it('names the remedy when main refuses a choice with no row on the CLI’s menu', async () => {
+    withBridge(async () => ({ kind: 'not-in-menu', choice: 'claude-opus-5-20260501' }));
+    draw({ delivers: true, terminal: true });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    expect(note?.getAttribute('data-mode-cycle-state')).toBe('refused');
+    expect(note?.getAttribute('data-mode-refusal')).toBe('true');
+    // The choice in its own words, the way out, and where the way out is.
+    expect(note?.textContent).toContain('claude-opus-5-20260501');
+    expect(note?.textContent).toContain('/model claude-opus-5-20260501');
+    expect(note?.textContent).toMatch(/Terminal tab/);
+    // It may not read as a success, and it may not promise what vam refuses.
+    expect(note?.textContent ?? '').not.toContain('this session only');
+  });
+
+  /**
+   * AND THE REMEDY HAS TO BE WHERE THE EYE IS, which the first draft of that
+   * caption was not.
+   *
+   * The caption is drawn in a `truncate whitespace-nowrap` line, so about
+   * forty characters of it are ever on screen at a composer's width. The
+   * sentence shipped at 220 characters with "type /model <id> in the Terminal
+   * tab" starting at character 163 -- every word of the remedy past the clip,
+   * on the one caption whose entire purpose is to say what to do instead.
+   *
+   * TWO RULES, BECAUSE ONE OF THEM ALONE WOULD ROT. Front-loading is about
+   * this sentence and a later hand may rewrite it; the `title` is about the
+   * ELEMENT and holds for every caption this row will ever draw -- a question
+   * quoted back, a model id, whatever comes next. It is the model button's own
+   * rule one control to the left: clip yourself, and stay one hover away.
+   */
+  it('puts the verb of the remedy inside the first clip, and the rest one hover away', async () => {
+    withBridge(async () => ({ kind: 'not-in-menu', choice: 'claude-opus-5-20260501' }));
+    draw({ delivers: true, terminal: true });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    const text = note?.textContent ?? '';
+    // What the operator DOES is in the part that survives truncation.
+    expect(text.slice(0, 45)).toContain('type /model');
+    // And nothing is lost for good: the whole sentence is on the element.
+    expect(note?.getAttribute('title')).toBe(text);
+    expect(text.length).toBeGreaterThan(45);
+  });
+
+  it('holds exactly the five aliases in the listbox, and no text box beside them', async () => {
+    // WHAT THIS REPLACES: a free-text id with a space in it, refused before the
+    // bridge was touched. There is no field to put a space into now, so the
+    // rule it stood for is main's alone (`isModelChoice`) and what is left
+    // here is the shape of the offer -- five aliases, each a button, each one
+    // of `MODEL_CHOICES`, and nothing that can carry an arbitrary string.
+    const asked = withBridge();
+    draw({ delivers: true, terminal: true });
+    act(() => picker()?.click());
+    const popover = q('[data-model-picker-menu]');
+    expect(all('[data-model-picker-menu] [data-model-option]').map((el) => el.tagName)).toEqual(
+      Array(5).fill('BUTTON'),
     );
+    // Every interactive thing in the popover IS one of the five.
+    expect(popover?.querySelectorAll('button, input, textarea, select, a')).toHaveLength(5);
+    expect(asked).toEqual([]);
   });
 
   it('shares the mode chip’s refusal caption when tmux would not deliver', async () => {
@@ -406,7 +470,7 @@ describe('a session vam can type into gets a real picker', () => {
     });
     expect(chosen(asked)).toEqual(['opus']);
     await act(async () => {
-      land({ kind: 'sent', scope: 'session' });
+      land({ kind: 'sent' });
       await Promise.resolve();
     });
     await settle();
@@ -422,14 +486,18 @@ describe('a session vam can type into gets a real picker', () => {
     expect(note?.textContent).toContain('no keyboard');
   });
 
-  it('says in its note which route each choice takes, including the one with a side effect', () => {
+  it('says in its note that the switch is this session’s, and promises no default rewrite', () => {
     draw({ delivers: true, terminal: true });
     const note = picker()?.getAttribute('data-note') ?? '';
     expect(note).toContain('/model');
-    // An alias is the session-only route -- the whole reason main drives the
-    // CLI's menu -- and a full id is the one that still costs the default.
     expect(note).toMatch(/this session only/);
-    expect(note).toMatch(/default for new sessions/);
+    // THE CLAUSE THAT HAD TO GO. The note used to end "...a full id also
+    // becomes the default for new sessions", which was true of the one route
+    // that no longer exists. A note still saying it would send the operator
+    // looking for a row that is not there, and would describe a write to
+    // `~/.claude/settings.json` that vam now refuses to make.
+    expect(note).not.toMatch(/default for new sessions/);
+    expect(note).not.toMatch(/full id|full model id/i);
   });
 });
 
@@ -564,8 +632,11 @@ describe('the button names the model the session is running', () => {
     draw({ delivers: true, terminal: true, model });
     await settle();
     expect(picker()?.getAttribute('data-note')).toContain('running Sonnet 4.5');
-    // And the disclosure it has always carried is still there beside it.
-    expect(picker()?.getAttribute('data-note')).toContain('default for new sessions');
+    // AND THE NOTE'S OWN SENTENCE SURVIVES THE PREFIX. It used to be the
+    // CLI's side effect that was checked here; that clause is false now (vam
+    // refuses the route that had it), and what must not be lost when the
+    // running name is prepended is the scope claim that replaced it.
+    expect(picker()?.getAttribute('data-note')).toContain('this session only');
   });
 
   it('says nothing about a model in the tooltip when it has not read one', async () => {
@@ -742,18 +813,23 @@ describe('a question on the screen is drawn as a question, not as a tmux problem
     expect(note?.textContent ?? '').not.toContain('“”');
   });
 
-  it('sends the free-text row down the same channel, so main’s rule covers it too', async () => {
+  it('has ONE way in, so main’s read covers every switch this control can make', async () => {
+    // WHAT THIS ASSERTED BEFORE: the free-text row went down the same bridge
+    // call as the five, so main's pane read guarded it too. The row is gone,
+    // and the same claim is now a claim about the popover's shape -- there is
+    // no second route to forget to route through main.
     const asked = withBridge(async () => asking);
     draw({ delivers: true, terminal: true });
     act(() => picker()?.click());
-    const field = q<HTMLInputElement>('[data-model-id]') as HTMLInputElement;
-    fireEvent.change(field, { target: { value: 'claude-opus-5-20260501' } });
+    expect(
+      q('[data-model-picker-menu]')?.querySelectorAll('button, input, textarea, select, a'),
+    ).toHaveLength(5);
     await act(async () => {
-      fireEvent.keyDown(field, { key: 'Enter' });
+      q<HTMLButtonElement>('[data-model-option="opus"]')?.click();
       await Promise.resolve();
     });
     await settle();
-    expect(chosen(asked)).toEqual(['claude-opus-5-20260501']);
+    expect(chosen(asked)).toEqual(['opus']);
     expect(q<HTMLElement>('[data-mode-cycle]')?.textContent).toContain('is asking');
   });
 

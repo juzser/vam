@@ -243,26 +243,50 @@ for (const name of NAMES) {
 
 // --------------------------------------- 3. A PRESS INSIDE DOES *NOT* CLOSE IT
 // The other direction of the same rule, and the one a too-eager dismissal
-// breaks: typing a full model id into the popover's own field must not shut
-// the popover under the operator's hands.
+// breaks: a pointer that goes down inside the open layer must not shut it
+// under the operator's hands.
+//
+// IT USED TO BE PRESSED ON THE FREE-TEXT ROW -- click the field, type a full
+// model id, and the popover had to still be there. That row is gone: a full id
+// has no row on the CLI's own `/model` menu, so the only form that takes one
+// also rewrites `~/.claude/settings.json`, and the operator chose refusal over
+// that fallback (`main/terminal/model-switch.ts`). So the press lands on the
+// layer's own PADDING instead -- inside the boundary the dismissal reads
+// (`data-popover-root`), and on nothing that would close it by doing its job.
+// THE POINT IS CHECKED BEFORE IT IS CLICKED, because a coordinate that had
+// drifted onto an option would make "it stayed open" mean the opposite.
 if (await reachOnly('model')) {
-  await page.locator('[data-model-id]').click();
-  await page.waitForTimeout(150);
-  await page.keyboard.type('claude-x');
-  await page.waitForTimeout(100);
-  const afterTyping = await openNow();
-  const typed = await page.locator('[data-model-id]').inputValue();
+  const layer = await page.locator('[data-model-picker-menu]').boundingBox();
+  const inside = { x: Math.round(layer.x + 2), y: Math.round(layer.y + 2) };
+  const insideHit = await page.evaluate((p) => {
+    const el = document.elementFromPoint(p.x, p.y);
+    return {
+      inPopover: (el?.closest('[data-popover-root="model"]') ?? null) !== null,
+      onOption: (el?.closest('[data-model-option]') ?? null) !== null,
+      tag: el?.tagName ?? null,
+    };
+  }, inside);
   check(
-    'pressing INSIDE the popover leaves it open — the free-text row still takes a click and keys',
-    afterTyping.join(',') === 'model' && typed === 'claude-x',
-    `[${afterTyping}], field=${JSON.stringify(typed)}`,
+    'the inside press really lands in the model layer and on none of its options',
+    insideHit.inPopover === true && insideHit.onOption === false,
+    JSON.stringify({ inside, insideHit }),
+  );
+  await page.mouse.click(inside.x, inside.y);
+  await page.waitForTimeout(150);
+  const afterInside = await openNow();
+  check(
+    'pressing INSIDE the popover leaves it open',
+    afterInside.join(',') === 'model',
+    `[${afterInside}]`,
   );
 
   // --------------------------------------------------- 4. ESCAPE STILL CLOSES
   // It did before this change (`DetailPanel.composer-escape.test.tsx`), on the
   // toggle and on the listbox. Held here as well because the state it reads
   // was replaced: a rule that peels the layer must keep peeling it. Pressed
-  // from the free-text field, which is where the keyboard is by now.
+  // from a row of the listbox, which is where the keyboard used to be handed
+  // to the free-text field.
+  await page.locator('[data-model-option="opus"]').focus();
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
   const afterEscape = await openNow();

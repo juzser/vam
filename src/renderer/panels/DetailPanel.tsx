@@ -170,7 +170,6 @@ import { type FileOpenRequest, FilesTab } from './FilesTab.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
-  modelCommandLine,
   modelControlState,
   runningModelRows,
 } from './model-command.js';
@@ -2605,26 +2604,38 @@ function cycleWording(result: PaneSendResult): string | null {
 }
 
 /**
- * The model control's own note -- the two routes, and the one that costs the
- * operator a settings change. See the `Note` it is handed to for the
- * measurement, and `MAX_TIP` in `DetailPanel.tooltip-length.test.tsx` for why
- * it is this short.
+ * The model control's own note -- ONE route now, and what it costs, which is
+ * nothing beyond this session.
+ *
+ * IT USED TO NAME TWO. "an alias switches this session only; a full id also
+ * becomes the default for new sessions" was true while the picker carried a
+ * free-text row and main fell back to `/model <id>` + Return for it. The
+ * operator chose refusal over that fallback, so the second clause describes a
+ * route that does not exist -- and a note promising a settings change vam will
+ * not make is worse than one that never mentioned it.
+ *
+ * See the `Note` it is handed to for the measurement, and `MAX_TIP` in
+ * `DetailPanel.tooltip-length.test.tsx` for why it is this short.
  */
 const MODEL_PICKER_NOTE =
-  'drives this session’s own /model menu — an alias switches this session only; a full id also becomes the default for new sessions';
+  'drives this session’s own /model menu — it switches this session only, and changes nothing for later ones';
 
 /**
  * WHAT THE MODEL PICKER MAY CLAIM after a switch, one sentence per outcome.
  *
  * THE SCOPE IS THE HEADLINE AND IT LEADS, because the caption is a single
  * `truncate` line: whatever is said first is the part that survives a narrow
- * pane. `session` is the whole reason this control changed -- vam drove the
- * CLI's own menu and pressed `s`, which the CLI answers with `for this session
- * only` -- and `default` is the fallback the free-text row takes, which the
- * CLI ALSO saves as the operator's default for new sessions. That second
- * sentence is a DISCLOSURE, not a footnote: it is a change to
- * `~/.claude/settings.json` nobody asked for, and the surface that caused it
- * is the surface that must say so.
+ * pane. And there is one scope to lead with now -- vam drives the CLI's own
+ * menu and presses `s`, which the CLI answers with `for this session only`.
+ * The second success sentence this used to have, "also saved as the default
+ * for new sessions", belonged to the argument form vam took for a full model
+ * id; the operator chose refusal over that disclosure, so what was a second
+ * kind of success is `not-in-menu`, a refusal that names the remedy.
+ *
+ * A REFUSAL NAMES THE WAY OUT WHERE THERE IS ONE, which is why `not-in-menu`
+ * spells the line rather than merely declining: typing `/model <id>` at the
+ * REPL is still the operator's to do, and doing it knowingly is their call.
+ * What vam will not do is make that write on their behalf.
  *
  * THE LAST FOUR ARE THE PANE CHANNEL'S OWN WORDS, said by calling
  * `cycleWording` rather than by copying it: `unaimed`, `unavailable`,
@@ -2632,26 +2643,32 @@ const MODEL_PICKER_NOTE =
  * keystroke strip meet, and two surfaces describing one state in different
  * words is its own defect (`shared/terminal.ts` records that one being fixed).
  */
-function modelSwitchNote(
-  result: ModelSwitchResult,
-  title: string,
-  choice: string,
-  line: string,
-): CycleNote {
+function modelSwitchNote(result: ModelSwitchResult, title: string, choice: string): CycleNote {
   switch (result.kind) {
     case 'sent':
-      return result.scope === 'session'
-        ? {
-            kind: 'sent',
-            // NOT "typed /model opus": vam typed `/model` bare and walked the
-            // menu, and a caption naming a line vam did not type would be the
-            // kind of small lie this whole module exists to remove.
-            text: `${choice} set for this session only, on the /model menu in the terminal of ${title} — the session answers there`,
-          }
-        : {
-            kind: 'sent',
-            text: `${line} — also saved as the default for new sessions, typed into the terminal of ${title}`,
-          };
+      return {
+        kind: 'sent',
+        // NOT "typed /model opus": vam typed `/model` bare and walked the
+        // menu, and a caption naming a line vam did not type would be the
+        // kind of small lie this whole module exists to remove.
+        text: `${choice} set for this session only, on the /model menu in the terminal of ${title} — the session answers there`,
+      };
+    case 'not-in-menu':
+      return {
+        kind: 'refused',
+        // THE WAY OUT COMES FIRST, and that is not a style choice. This
+        // caption is drawn in a `truncate whitespace-nowrap` line (see
+        // `data-mode-cycle` below), so roughly forty characters of it are
+        // ever on screen at a composer's width -- and the first draft of
+        // this sentence put the remedy at character 163 of 220, where no
+        // operator would have read the one part that tells them what to do.
+        // `title` on that span is what keeps the rest reachable.
+        //
+        // `choice` is read off the RESULT and not off the closure: main
+        // answers about what it was asked, and a caption naming the local
+        // variable would drift the day the two stop being the same string.
+        text: `not sent — type /model ${result.choice} in the Terminal tab yourself: it has no row on the /model menu, and the form that takes one also saves it as your default`,
+      };
     case 'question':
       return {
         kind: 'refused',
@@ -4499,22 +4516,17 @@ export function DetailPanel(props: DetailPanelProps) {
    * caption came back naming the question, which would send the operator off to
    * answer something that would not have helped.
    *
-   * A choice that is not one word is refused before the bridge is touched
-   * (`modelCommandLine`): a space would hand the CLI two arguments and a
-   * newline would submit `/model` bare. Main checks it again -- the renderer is
-   * the least trusted process in the app -- and the copy here exists to WORD
-   * the refusal, not to enforce it.
+   * AND THE ONE-WORD CHECK IS GONE FROM HERE WITH THE FIELD THAT COULD FAIL
+   * IT. `modelCommandLine` refused a choice carrying a space or a newline
+   * before the bridge was touched, because the free-text row let an operator
+   * type either. Every caller is now one of `MODEL_CHOICES`' own five ids, so
+   * that branch had no input left that could reach it -- and a refusal nothing
+   * can produce is a refusal nothing can test. The rule itself did not move:
+   * `isModelChoice` in main enforces it on whatever the renderer sends, which
+   * is where enforcement belonged all along.
    */
   const sendModel = async (choice: string) => {
     if (entry === null) return;
-    const line = modelCommandLine(choice);
-    if (line === null) {
-      setCycleNote({
-        kind: 'refused',
-        text: 'not sent — a model is one word, and this has a space or a line break in it',
-      });
-      return;
-    }
     if (cycleNote?.kind === 'busy') return;
     const switchModel = globalThis.window?.api?.terminal?.switchModel;
     if (switchModel === undefined) {
@@ -4527,7 +4539,12 @@ export function DetailPanel(props: DetailPanelProps) {
     // BEFORE THE AWAIT: main reads the pane, opens a menu and walks it, which
     // is several tmux spawns at ten seconds each, and a control that looks
     // idle through that reads as one that did nothing.
-    setCycleNote({ kind: 'busy', text: `${line} · switching…` });
+    // NAMED BY THE ALIAS, NOT BY A `/model <alias>` LINE. This used to print
+    // one, which was true while a full id really was typed that way; vam types
+    // `/model` bare and walks the menu for every choice it accepts now, so a
+    // busy caption quoting the argument form would name a line vam never sends
+    // -- the same small lie the `sent` caption below refuses to tell.
+    setCycleNote({ kind: 'busy', text: `${choice} · switching…` });
     const mine = cycleAbout;
     const result = await switchModel(entry.project.id, choice, entry.session.id).catch(
       (): ModelSwitchResult => ({ kind: 'refused' }),
@@ -4535,7 +4552,7 @@ export function DetailPanel(props: DetailPanelProps) {
     // The row changed under the walk; an answer about the session that was
     // here then says nothing about the one that is here now.
     if (noteFor.current !== mine) return;
-    setCycleNote(modelSwitchNote(result, entry.session.title, choice, line));
+    setCycleNote(modelSwitchNote(result, entry.session.title, choice));
     // LOOK AGAIN, AND DO NOT ASSUME. The menu has just been driven, so this is
     // the one moment the model is known to be about to change -- but what goes
     // on the button is still whatever the PANE says next, which is what makes a
@@ -5038,14 +5055,6 @@ export function DetailPanel(props: DetailPanelProps) {
   const providerPickerOpen = openPopover === 'provider';
   const modePickerOpen = openPopover === 'mode';
   const modelPickerOpen = openPopover === 'model';
-  /**
-   * The model popover's free-text row, which is the ONE thing here that is not
-   * a copy of a fact elsewhere: a full model id the operator is still typing
-   * exists nowhere until Enter sends it, and it is cleared once it has gone.
-   * It is not "the current model" either: vam never reads the CLI's answer
-   * back and so holds no opinion about which model a session is on.
-   */
-  const [modelIdText, setModelIdText] = useState('');
   /**
    * AND A POINTER LANDING ANYWHERE ELSE CLOSES IT -- the other half of the
    * report, and the half that had no code at all: nothing anywhere listened
@@ -7910,22 +7919,23 @@ export function DetailPanel(props: DetailPanelProps) {
                      against its wrapper rather than trusting the row. */
                   className="relative flex min-w-0 shrink"
                 >
-                  {/* THE NOTE SAYS WHICH OF THE TWO ROUTES A CHOICE TAKES, and
-                      the difference is a change to the operator's own
-                      `~/.claude/settings.json`. An ALIAS is walked onto the
-                      CLI's own `/model` menu and committed with `s`, which the
-                      CLI answers "...for this session only" -- measured, and
-                      the file was byte-identical afterwards. A FULL MODEL ID
-                      has no row on that menu, so it can only be sent as
-                      `/model <id>`, which the CLI answers "...and saved as your
-                      default for new sessions". That second one is a side
-                      effect the operator did not ask for, so vam says it here
-                      as well as in the caption afterwards.
+                  {/* THE NOTE SAYS WHAT THE ONE ROUTE COSTS, which is nothing
+                      beyond this session. An ALIAS is walked onto the CLI's own
+                      `/model` menu and committed with `s`, which the CLI
+                      answers "...for this session only" -- measured, with
+                      `~/.claude/settings.json` byte-identical afterwards.
 
-                      THE NOTE USED TO SAY THE SIDE EFFECT HAPPENED EVERY TIME,
-                      and it was right: vam typed the argument form for all six
-                      rows. `main/terminal/model-switch.ts` is what made the
-                      first half of this sentence true.
+                      IT NAMED TWO ROUTES UNTIL NOW, AND ONE BAD ONE BEFORE
+                      THAT. vam typed `/model <choice>` + Return for all six
+                      rows, which the CLI answers "...and saved as your default
+                      for new sessions", so the note disclosed a settings
+                      rewrite on every pick. `main/terminal/model-switch.ts`
+                      made that false for the five aliases and left the
+                      disclosure true of the free-text row alone; the operator
+                      then chose refusal over that last fallback. The row is
+                      gone, no input reaches the argument form, and a note
+                      still mentioning a default would promise a write vam
+                      declines to make.
 
                       AND IT LEADS WITH THE MODEL WHEN THERE IS ONE, which is
                       not decoration: the label beside it may be CLIPPED at a
@@ -8019,10 +8029,16 @@ export function DetailPanel(props: DetailPanelProps) {
                       className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
                     >
                       {/* THE FIVE, as a listbox of their own rather than the
-                          popover being one: the free-text row below is an
-                          `<input>`, and an input is not an option, so a
-                          `role="listbox"` around both would be a listbox with
-                          a child no screen reader can place. */}
+                          popover being one. That began as a necessity -- a
+                          free-text `<input>` sat below them, and an input is
+                          not an option, so a `role="listbox"` around both
+                          would have been a listbox with a child no screen
+                          reader can place. The input is gone and the nesting
+                          stays, because the popover is a positioned layer with
+                          its own border, padding and shadow: collapsing the
+                          two would make the listbox the thing that paints the
+                          card, and every guard that asks "are the options
+                          inside the listbox" would then be asking nothing. */}
                       <div
                         role="listbox"
                         onKeyDown={dismissPopoverOnEscape}
@@ -8077,30 +8093,49 @@ export function DetailPanel(props: DetailPanelProps) {
                                 above.
 
                                 IT IS DRAWN ONLY WHERE IT IS TRUE, AND NOTHING
-                                MOVES WHEN IT APPEARS -- measured, not reasoned.
-                                The first draft reserved a `w-3` slot on every
-                                row on the theory that a mark coming and going
-                                would shift the version column PR 407 measured
-                                into one lane. It does not: the popover's width
-                                is set by the free-text row below (`w-[148px]`),
-                                the rows have slack inside it, and `ml-auto`
-                                pins every version to the same right edge
-                                whether or not a glyph sits before it. Both
-                                shapes were built and photographed, and the
-                                popover measured 158x164 with the lane intact
-                                either way -- so the reservation was a rule
-                                nothing could falsify, and this file's own
-                                header says what happens to those. What the
-                                guard DOES hold is the outcome: the box does
-                                not grow and the lane does not break. */}
-                            {runningRows.includes(choice.id) && (
-                              <Check
-                                data-model-current
-                                size={11}
-                                strokeWidth={2.5}
-                                aria-hidden="true"
-                              />
-                            )}
+                                MOVES WHEN IT APPEARS -- measured, not reasoned,
+                                and the measurement CHANGED SIDES when the
+                                free-text row was removed.
+
+                                THE SLOT IS RESERVED, AND IT WAS NOT. PR 407's
+                                first draft reserved a `w-3` box on every row so
+                                that a mark coming and going could not shift
+                                anything; it was cut as a rule nothing could
+                                falsify, because the popover's width was set by
+                                the free-text row's own `w-[148px]` and the five
+                                rows had slack inside it whatever was ticked.
+                                That input is gone with the full-id route, so
+                                the WIDEST ROW sets the width now -- and the
+                                measurement came back 132x138 unticked against
+                                155x138 with Default and Sonnet both ticked.
+                                Twenty-three pixels, which is the glyph plus its
+                                gap: the popover really did grow, the rows under
+                                the pointer really did move, and `running` is
+                                POLLED while the picker is open, so a read that
+                                comes back `unknown` for one beat narrows the
+                                box under somebody's hand.
+
+                                So the reservation is back, on the falsification
+                                that was missing the first time. The slot is
+                                always drawn and always `w-3`; the glyph goes
+                                inside it or does not. `aria-hidden` sits on the
+                                slot rather than the glyph -- same effect, one
+                                element -- and the `sr-only` clause below still
+                                carries the fact in words, being `position:
+                                absolute` and so no part of this row's width.
+                                `model-picker-shots.mjs` holds the OUTCOME
+                                rather than a number off this machine: the box
+                                is the same box with no tick, one tick and two.
+                                */}
+                            <span
+                              data-model-tick-slot
+                              aria-hidden="true"
+                              className="flex w-3 flex-none items-center justify-center"
+                            >
+                              {runningRows.includes(choice.id) && (
+                                <Check data-model-current size={11} strokeWidth={2.5} />
+                              )}
+                            </span>
                             {runningRows.includes(choice.id) && (
                               <span className="sr-only">
                                 {runningRows.length > 1
@@ -8156,32 +8191,29 @@ export function DetailPanel(props: DetailPanelProps) {
                           </button>
                         ))}
                       </div>
-                      {/* A FULL MODEL ID, for what the five aliases cannot
-                          name: `claude --help` takes "an alias for the latest
-                          model ... or a model's full name". Enter sends it as
-                          the same line; a space in it is refused before a key
-                          is built (`sendModel`). */}
-                      <input
-                        data-model-id
-                        value={modelIdText}
-                        onChange={(event) => setModelIdText(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Enter') {
-                            dismissPopoverOnEscape(event);
-                            return;
-                          }
-                          // This box's own Enter, not the composer's: the
-                          // prompt box's handler submits the DRAFT on it.
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setOpenPopover(null);
-                          void sendModel(modelIdText);
-                          setModelIdText('');
-                        }}
-                        placeholder="full model id"
-                        aria-label="full model id — Enter to type /model with it"
-                        className={`h-6 w-[148px] rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
-                      />
+                      {/* A FREE-TEXT ROW FOR A FULL MODEL ID STOOD HERE, and
+                          it is gone rather than disabled.
+
+                          `claude --help` really does take "an alias for the
+                          latest model ... or a model's full name", so the row
+                          was not a mistake -- but the CLI's own `/model` menu
+                          carries the five aliases and nothing else, and the
+                          menu is the only route that keeps a switch to ONE
+                          session. A full id could go in only as `/model <id>`
+                          + Return, which the CLI answers "...and saved as your
+                          default for new sessions": a write to
+                          `~/.claude/settings.json` from a control reached for
+                          to change one session. Offered that fallback with the
+                          cost disclosed, or an outright refusal, the operator
+                          chose refusal (`main/terminal/model-switch.ts`).
+
+                          SO THE ROW'S ONLY POSSIBLE OUTCOME BECAME A REFUSAL,
+                          and a control that can only say no is worse than no
+                          control: it invites the ask and spends the attention
+                          before answering. An operator who still wants a full
+                          id can type the line themselves in the Terminal tab,
+                          knowing what it costs -- which is what the
+                          `not-in-menu` caption tells them. */}
                     </div>
                   )}
                 </div>
@@ -8336,6 +8368,18 @@ export function DetailPanel(props: DetailPanelProps) {
                     'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
+                  /*
+                    TRUNCATION MAY NOT BE THE END OF A SENTENCE. This line
+                    clips at the composer's width -- about forty characters --
+                    and some of these captions carry a remedy, a question's own
+                    words, or a model id that runs past it. The model button
+                    beside it already holds this rule ("it gives way by
+                    clipping itself instead ... and the whole name is still
+                    there for a reader, and one hover away for an eye"); the
+                    caption is the surface where clipping costs the most,
+                    because what it hides is usually what to DO.
+                  */
+                  title={cycleNote.text}
                 >
                   {cycleNote.text}
                 </span>

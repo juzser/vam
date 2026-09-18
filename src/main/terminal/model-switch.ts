@@ -33,6 +33,15 @@
  * SO RETURN IS THE ONE KEY THIS MODULE MAY NEVER PRESS ON A MENU. It presses
  * exactly one, the one that OPENS the menu, and `s` is literal text at the end.
  *
+ * AND THE MENU IS THE ONLY ROUTE, WHICH MAKES ITS FIVE ROWS THE WHOLE OFFER.
+ * A choice with no row -- a full model id like `claude-opus-5-20260501` -- was
+ * typed as `/model <id>` + Return until now, with the caller DISCLOSING that
+ * the CLI had saved it as the default too. Offered that fallback or an
+ * outright refusal, the operator chose refusal: `not-in-menu` comes back and
+ * not one key is pressed. A disclosed rewrite of somebody's
+ * `~/.claude/settings.json` is still a rewrite they did not ask for, and the
+ * operator who wants one can type the line themselves, knowing what it costs.
+ *
  * IT INHERITS `answer.ts`'s RULES RATHER THAN RESTATING THEM, and reuses its
  * reader: nothing here presses a key on a row it has not just read, and
  * POSITIONS ARE NEVER COUNTED -- the cursor is walked until the row it is ON
@@ -91,12 +100,15 @@ const MENU_ROWS: readonly { readonly id: string; readonly name: string }[] = [
 /**
  * The menu row an alias names, or `null` for a choice that has no row.
  *
- * `null` IS THE COMMON, CORRECT ANSWER for a full model id -- the free-text
- * row of vam's own picker exists because `claude --help` says `--model` takes
- * "an alias for the latest model ... or a model's full name", and the CLI's
- * menu offers only the five aliases. There is no row to walk onto for
- * `claude-opus-5-20260501`, so that choice takes the argument form and the
- * caller DISCLOSES that the CLI made it the default too.
+ * `null` IS A REFUSAL NOW, NOT A FORK. `claude --help` says `--model` takes
+ * "an alias for the latest model ... or a model's full name", and vam's own
+ * picker used to carry a free-text row for the second half -- which the CLI's
+ * menu has no row for, so that choice fell back to `/model <id>` + Return and
+ * the caller disclosed that the CLI had made it the default too. The operator
+ * chose refusal over that disclosure, so a `null` here ends the switch having
+ * typed nothing, and the picker no longer offers a way to produce one. Main
+ * keeps the check anyway: it validates whatever the renderer sends, and it
+ * does not assume the renderer's list is still five rows long.
  */
 export function menuRowName(choice: string): string | null {
   const id = choice.trim().toLowerCase();
@@ -202,24 +214,27 @@ export async function switchSessionModel(
     return { kind: 'question', title: readPrompt(before)?.title ?? '' };
   }
 
-  const row = menuRowName(choice);
-  if (row === null) {
-    /*
-      NO MENU ROW EXISTS FOR A FULL MODEL ID, so this cannot be walked to. The
-      argument form is the only route the CLI offers -- and it is the route
-      that ALSO writes the operator's default, which is why the answer says
-      `default` out loud rather than passing for the honest one.
+  /*
+    NO MENU ROW, NO SWITCH -- AND NOT ONE KEY PRESSED.
 
-      Typed whole, in one `send-keys -l --`: the renderer used to cut this
-      into sixteen-character pieces to satisfy `MAX_KEY_TEXT`, a bound that
-      belongs to the one-keystroke channel and has nothing to do with a line
-      main types itself. The Return is separate and LAST, so a line that fails
-      to go in is never submitted half-written.
-    */
-    if (!(await press(sendTextArgv(name, `/model ${choice}`)))) return { kind: 'refused' };
-    if (!(await press(sendEnterArgv(name)))) return { kind: 'refused' };
-    return { kind: 'sent', scope: 'default' };
-  }
+    A full model id such as `claude-opus-5-20260501` has no row on the CLI's
+    menu, so there is nothing to walk onto. The one form the CLI offers for it
+    is `/model <id>` + Return, and vam TOOK that fallback until now, answering
+    `scope: 'default'` so the caption could disclose that the CLI had also
+    rewritten `~/.claude/settings.json`. Offered the fallback or an outright
+    refusal, the operator chose refusal: a disclosed settings rewrite is still
+    a settings rewrite nobody asked for, and vam does not make it on their
+    behalf. So the argument form is not built here, anywhere, for anything.
+
+    IT RETURNS BEFORE THE PANE IS TYPED INTO AND AFTER IT HAS BEEN READ, which
+    is the order the whole module is built on. The picker check above stays
+    FIRST -- a question already holding the keyboard is the more urgent refusal
+    and the one whose remedy is different -- and this one presses no Escape,
+    because the refusals that escape are the ones that opened a menu. There is
+    nothing here to close.
+  */
+  const row = menuRowName(choice);
+  if (row === null) return { kind: 'not-in-menu', choice };
 
   // THE ONE RETURN THIS MODULE PRESSES. It opens the menu; every key after it
   // is an arrow or the letter `s`.
@@ -260,7 +275,7 @@ export async function switchSessionModel(
       // `s`, AS LITERAL TEXT. `send-keys -l -- 's'` is what was measured;
       // without `-l` tmux looks `s` up as a key name.
       if (!(await press(sendTextArgv(name, 's')))) return closing({ kind: 'refused' });
-      return { kind: 'sent', scope: 'session' };
+      return { kind: 'sent' };
     }
     if (!(await press(sendDownArgv(name)))) return closing({ kind: 'refused' });
     const text = await read();

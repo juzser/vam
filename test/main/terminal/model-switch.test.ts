@@ -122,7 +122,6 @@ describe('the walk onto a menu row, and the `s` that keeps it to this session', 
     ]);
     expect(await switchSessionModel(run, PROJECT, 'sonnet', 's1', ROW)).toEqual({
       kind: 'sent',
-      scope: 'session',
     });
     expect(keys(argv)).toEqual(['«/model»', 'Enter', 'Down', 'Down', 'Down', '«s»']);
   });
@@ -158,7 +157,6 @@ describe('the walk onto a menu row, and the `s` that keeps it to this session', 
     ]);
     expect(await switchSessionModel(run, PROJECT, 'opus', 's1', ROW)).toEqual({
       kind: 'sent',
-      scope: 'session',
     });
     expect(keys(argv)).toEqual([
       '«/model»',
@@ -180,7 +178,6 @@ describe('the walk onto a menu row, and the `s` that keeps it to this session', 
     const { run, argv } = server([AFTER_ESCAPE, MENU_ON_HAIKU, MENU_ON_DEFAULT, MENU_ON_SONNET]);
     expect(await switchSessionModel(run, PROJECT, 'sonnet', 's1', ROW)).toEqual({
       kind: 'sent',
-      scope: 'session',
     });
     expect(keys(argv)).toEqual(['«/model»', 'Enter', 'Down', 'Down', '«s»']);
   });
@@ -338,41 +335,66 @@ describe('every refusal after the menu is asked for closes it again', () => {
   });
 });
 
-describe('the full model id has no row, so it takes the argument form and says so', () => {
-  it('types the whole line literally, presses Return, and calls the scope what it is', async () => {
+/**
+ * A FULL MODEL ID IS REFUSED, AND THE REFUSAL TYPES NOTHING.
+ *
+ * WHAT STOOD HERE. `menuRowName` answers `null` for anything that is not one
+ * of the CLI's five aliases, and this module used to fall back to the argument
+ * form for those -- `/model <id>` + Return -- answering `{kind:'sent',
+ * scope:'default'}` and leaving the caption to DISCLOSE that the CLI had also
+ * rewritten `~/.claude/settings.json`.
+ *
+ * THE OPERATOR CHOSE REFUSAL OVER DISCLOSURE, offered both. So the fallback is
+ * gone: there is no longer any input to vam that makes it type the form that
+ * costs somebody their default. A disclosed settings rewrite is still a
+ * settings rewrite nobody asked for.
+ *
+ * NOT ONE KEY, AND THAT IS THE ASSERTION. A refusal that typed the line and
+ * then declined to press Return would leave `/model claude-...` sitting in a
+ * running agent's prompt; a refusal that pressed Escape would be a key in a
+ * pane vam had no business touching. The pane is READ -- the picker check that
+ * guards every route -- and then nothing happens to it at all.
+ */
+describe('a full model id has no row on the menu, so vam refuses and types nothing', () => {
+  it('answers not-in-menu with the choice, having sent not one key', async () => {
     const { run, argv } = server([AFTER_ESCAPE]);
     expect(await switchSessionModel(run, PROJECT, 'claude-opus-5-20260501', 's1', ROW)).toEqual({
-      kind: 'sent',
-      scope: 'default',
+      kind: 'not-in-menu',
+      choice: 'claude-opus-5-20260501',
     });
-    expect(keys(argv)).toEqual(['«/model claude-opus-5-20260501»', 'Enter']);
-    // Literally, with `--`: without `-l` tmux looks the argument up as a KEY
-    // NAME, and `--` is what lets text beginning with `-` reach the pane.
-    expect(argv.find((asked) => asked[0] === 'send-keys')).toEqual([
-      'send-keys',
-      '-t',
-      `=${PANE}:`,
-      '-l',
-      '--',
-      '/model claude-opus-5-20260501',
-    ]);
-    // It reads once -- the picker check -- and never opens a menu it cannot
-    // find this id on.
+    // NOT `keys(argv)`, which reads the LAST argument of each `send-keys` and
+    // would be an empty list for a `send-keys` with no argument at all. The
+    // claim is that tmux was never asked to press anything.
+    expect(argv.filter((asked) => asked[0] === 'send-keys')).toEqual([]);
+    expect(keys(argv)).toEqual([]);
+    // It read the pane once -- the picker check, which runs before this -- and
+    // opened no menu it could not have found the id on.
     expect(captures(argv)).toBe(1);
   });
 
-  it('does not press the Return when the line itself would not go in', async () => {
-    const argv: (readonly string[])[] = [];
-    const run: TmuxRun = async (asked) => {
-      argv.push(asked);
-      if (asked[0] === 'list-sessions') return ok(LISTING);
-      if (asked.includes('capture-pane')) return ok(AFTER_ESCAPE);
-      return fail('lost server');
-    };
-    expect(await switchSessionModel(run, PROJECT, 'claude-opus-5', 's1', ROW)).toEqual({
-      kind: 'refused',
-    });
-    expect(keys(argv)).toEqual(['«/model claude-opus-5»']);
+  it('refuses every shape of id that is not one of the five, by the same rule', async () => {
+    for (const choice of ['claude-opus-5-20260501', 'claude-3-5-haiku-latest', 'Opusish']) {
+      const { run, argv } = server([AFTER_ESCAPE]);
+      expect(await switchSessionModel(run, PROJECT, choice, 's1', ROW), choice).toEqual({
+        kind: 'not-in-menu',
+        choice,
+      });
+      expect(
+        argv.filter((asked) => asked[0] === 'send-keys'),
+        choice,
+      ).toEqual([]);
+    }
+  });
+
+  it('never opens the menu for one, so there is nothing to Escape either', async () => {
+    // The refusals that come AFTER the menu is asked for all press Escape,
+    // because leaving the CLI's menu open in somebody's session is not an
+    // acceptable failure state. This one comes BEFORE, so an Escape here would
+    // be a key pressed into a pane vam decided not to touch.
+    const { run, argv } = server([AFTER_ESCAPE]);
+    await switchSessionModel(run, PROJECT, 'claude-opus-5-20260501', 's1', ROW);
+    expect(keys(argv)).not.toContain('Escape');
+    expect(argv.map((asked) => asked[0])).toEqual(['list-sessions', 'display-message']);
   });
 });
 
@@ -442,7 +464,6 @@ describe('the channel the renderer reaches it through', () => {
     const { run, argv } = server([AFTER_ESCAPE, MENU_ON_OPUS, MENU_ON_HAIKU]);
     expect(await harness(run)(null, PROJECT, 'haiku', 's1')).toEqual({
       kind: 'sent',
-      scope: 'session',
     });
     expect(keys(argv)).toEqual(['«/model»', 'Enter', 'Down', '«s»']);
   });
@@ -472,7 +493,6 @@ describe('the channel the renderer reaches it through', () => {
     const { run } = server([AFTER_ESCAPE, MENU_ON_OPUS, MENU_ON_HAIKU]);
     expect(await harness(run, new Map())(null, PROJECT, 'haiku')).toEqual({
       kind: 'sent',
-      scope: 'session',
     });
   });
 
@@ -481,10 +501,10 @@ describe('the channel the renderer reaches it through', () => {
     const api = createTerminalApi({
       invoke: async (channel: string, ...args: unknown[]) => {
         asked.push([channel, ...args]);
-        return { kind: 'sent', scope: 'session' };
+        return { kind: 'sent' };
       },
     });
-    expect(await api.switchModel(PROJECT, 'opus')).toEqual({ kind: 'sent', scope: 'session' });
+    expect(await api.switchModel(PROJECT, 'opus')).toEqual({ kind: 'sent' });
     await api.switchModel(PROJECT, 'opus', 's1');
     expect(asked).toEqual([
       [CHANNELS.terminalSwitchModel, PROJECT, 'opus'],
