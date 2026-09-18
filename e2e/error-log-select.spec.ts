@@ -33,9 +33,21 @@ test('the error log is selectable text', async ({ page }) => {
   // spells `e`, which is bound to nothing, and this spec watched the error log
   // never open. CI could not see that when the fix merged: this lane was not
   // wired yet, which is the gap this branch closes.
-  await page.keyboard.press('Shift+E');
+  //
+  // PRESSED UNTIL IT LANDS, and that is not belt-and-braces. The chord table
+  // is installed by an effect in `Canvas.tsx` (`window.addEventListener
+  // ('keydown', ...)`), and React flushes passive effects AFTER paint -- so
+  // there is a real window in which the page is drawn, Playwright considers
+  // it actionable, and the key still falls on no listener. Measured here on
+  // 2026-09-18: a bare `goto` then `press` failed 3 of 5 runs, while the same
+  // press after the shell was drawn passed 5 of 5. `toPass` closes the window
+  // without a sleep, and repeating is safe because `E` OPENS the log
+  // (`setErrorLogOpen(true)`) rather than toggling it.
   const dialog = page.locator('[data-error-log]');
-  await expect(dialog).toBeVisible();
+  await expect(async () => {
+    await page.keyboard.press('Shift+E');
+    await expect(dialog).toBeVisible({ timeout: 250 });
+  }).toPass({ timeout: 10_000 });
 
   const empty = page.getByTestId('error-log-empty');
   await expect(empty).toBeVisible();
