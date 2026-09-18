@@ -249,7 +249,17 @@ for (const ink of inks) {
         `fill=${ink.fill}`,
     );
   }
-  if (Number.parseFloat(ink.strokeWidth) < (wantsFill ? 1.7 : 2.2)) {
+  // FILLED OR STROKED, NEVER BOTH -- the operator's own ask, "when the mode is
+  // filled it should not have a stroke, or the icon looks too thick". A fill
+  // and a stroke of the same colour on the same shape lay ink twice, and at
+  // 12px the second lot is most of a pixel outside every edge. Measured as
+  // computed style rather than as an attribute, so a stylesheet that put the
+  // stroke back would redden here.
+  const stroke = Number.parseFloat(ink.strokeWidth);
+  if (wantsFill && stroke !== 0) {
+    throw new Error(`${ink.mode} is filled AND stroked at ${ink.strokeWidth} — that is the blob`);
+  }
+  if (!wantsFill && stroke < 2.2) {
     throw new Error(`${ink.mode} draws a lighter stroke than it was measured at: ${ink.strokeWidth}`);
   }
 }

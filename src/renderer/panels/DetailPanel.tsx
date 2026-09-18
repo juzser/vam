@@ -951,6 +951,27 @@ type Mode = (typeof MODES)[number];
  * one weight heavier so the three read as one control rather than as a solid
  * mark beside two hairlines.
  *
+ * A FILLED GLYPH CARRIES NO STROKE, at the operator's second ask: "in the
+ * mode switch in the prompt input, when the mode is filled it should not have
+ * a stroke, or the icon looks too thick." It was drawn both ways at once --
+ * `Sparkles` was filled in `currentColor` AND stroked at 1.7 on top of the
+ * fill, which at 12px puts most of a pixel of extra ink outside every edge of
+ * a shape that is already solid. The star read as a blob beside two hairline
+ * glyphs. So the two channels are now exclusive, and that is the invariant
+ * `DetailPanel.mode-icon.test.tsx` states over the RENDERED glyphs and
+ * `e2e/prompt-mode-icon-shots.mjs` re-asks of the paint: FILLED means
+ * `strokeWidth: 0`, STROKED means `fill: 'none'`. Nothing is drawn twice.
+ *
+ * WHAT DROPPING THE STROKE COSTS, measured in the browser rather than guessed:
+ * `Sparkles` is four shapes, and `getBBox` gives them as 20x20 (the star), 0x4,
+ * 4x0 and a 4x4 circle. The two middle ones are ZERO-AREA -- they exist only as
+ * a stroke, the little cross above the star -- so at `strokeWidth: 0` they paint
+ * nothing and the mark becomes the star and its dot. That is a real loss and it
+ * is accepted rather than unnoticed: at the shipped 12px those accents were two
+ * four-unit hairlines, and the star is what carries the glyph. The same
+ * arithmetic is why `ListChecks` could never be filled -- three of its five
+ * shapes are zero-area, so a fill paints almost nothing at all.
+ *
  * THE SENTENCE, which used to be this comment's own gloss and is now shipped:
  * the tooltip says which mode is current and what that mode does, because a
  * hue means nothing until something names it.
@@ -961,6 +982,7 @@ type ModeSkin = {
   readonly ink: string;
   /** `currentColor` where the glyph survives being filled, `none` where it does not. */
   readonly fill: 'currentColor' | 'none';
+  /** Zero wherever `fill` is `currentColor` -- the two channels are exclusive. */
   readonly strokeWidth: number;
   /** What the mode does, in the operator's terms, for the tooltip. */
   readonly means: string;
@@ -971,7 +993,7 @@ const MODE_SKIN: Readonly<Record<Mode, ModeSkin>> = {
     Glyph: Sparkles,
     ink: 'text-mode-auto',
     fill: 'currentColor',
-    strokeWidth: 1.7,
+    strokeWidth: 0,
     means: 'the agent decides its own next step',
   },
   Manual: {
