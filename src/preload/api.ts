@@ -44,6 +44,8 @@ import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
+import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
+import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type {
   ModelSwitchResult,
@@ -343,6 +345,41 @@ export type LinkApi = {
 export function createLinkApi(ipc: InvokerLike): LinkApi {
   return {
     open: (url) => ipc.invoke(CHANNELS.linkOpen, url) as Promise<LinkOutcome>,
+  };
+}
+
+/**
+ * The bridge's pull-request member: open one, or act on one.
+ *
+ * SEPARATE FROM `link` ABOVE, ON PURPOSE, and the reason is the allowlist
+ * rather than the plumbing -- `CHANNELS.prsOpen` carries it. `link.open` may
+ * go anywhere on the web because an agent's prose may reference anywhere;
+ * `prs.open` may only go to github.com, because the promise a clickable ROW
+ * makes is that the operator knows where it goes without reading an address.
+ * Sending pull requests through `link.open` would have quietly widened that.
+ *
+ * `act` IS THE ONLY MEMBER OF THIS WHOLE BRIDGE THAT CHANGES SOMETHING ON
+ * GITHUB. What it does NOT carry is as load-bearing as what it does: no
+ * directory (main resolves it from the session id, so a pane cannot act on a
+ * repository its session is not in) and no argv (main builds it, so `--admin`
+ * is not expressible from this side at all). Like every forwarder here it
+ * decides nothing; main validates the number, the branch and the method on its
+ * own side of the boundary, whatever this file believes.
+ *
+ * Both forward straight through: the channels answer a bare outcome, not an
+ * `IpcResult`, because a refusal here is a SENTENCE the pane draws beside the
+ * row rather than an error to reject with.
+ */
+export type PrsApi = {
+  open(url: string): Promise<PrLinkOutcome>;
+  act(sessionId: string, action: PrAction): Promise<PrActionOutcome>;
+};
+
+export function createPrsApi(ipc: InvokerLike): PrsApi {
+  return {
+    open: (url) => ipc.invoke(CHANNELS.prsOpen, url) as Promise<PrLinkOutcome>,
+    act: (sessionId, action) =>
+      ipc.invoke(CHANNELS.prsAction, sessionId, action) as Promise<PrActionOutcome>,
   };
 }
 
