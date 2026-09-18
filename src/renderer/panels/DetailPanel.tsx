@@ -4049,8 +4049,8 @@ export function DetailPanel(props: DetailPanelProps) {
    * newline would submit `/model` bare, which opens the CLI's own menu --
    * the one thing vam must never drive.
    */
-  const sendModel = (choice: string) => {
-    if (entry === null) return Promise.resolve();
+  const sendModel = async (choice: string) => {
+    if (entry === null) return;
     const line = modelCommandLine(choice);
     const strokes = modelCommandStrokes(choice);
     if (line === null || strokes === null) {
@@ -4058,7 +4058,74 @@ export function DetailPanel(props: DetailPanelProps) {
         kind: 'refused',
         text: 'not sent — a model is one word, and this has a space or a line break in it',
       });
-      return Promise.resolve();
+      return;
+    }
+    if (cycleNote?.kind === 'busy') return;
+    /*
+      READ THE SCREEN BEFORE TYPING INTO IT, and refuse a pane that is showing
+      a picker.
+
+      MEASURED, against a real Claude Code 2.1.276 over a private tmux socket.
+      With the CLI's own `/model` menu open, this function's exact sequence --
+      `send-keys -l -- '/model haiku'` then `send-keys Enter` -- did not switch
+      to Haiku. The menu has no text buffer, so the literal text was swallowed
+      whole, and the Enter behind it COMMITTED WHICHEVER ROW THE CURSOR SAT ON:
+
+          ⎿  Set model to Opus 5 and saved as your default for new sessions
+
+      Opus was not asked for; it was merely under the cursor. That is the
+      harmless version. The same shape with a PERMISSION prompt on screen means
+      vam's Enter answers a question about somebody's files, and `answer.ts`
+      already holds the rule that breaks: nothing may press Return on a row it
+      has not just read. This control cannot read a row, so it does not press.
+
+      IT IS A READ AND NOT A LOCK, said plainly because the gap is real: the
+      pane is asked, then typed into, and a question that appears between the
+      two is not caught. There is no tmux primitive that would close that gap
+      -- `answer.ts` re-reads between every step for the same reason and still
+      cannot -- and the window it leaves is a fraction of the one this removes,
+      which was every question that was ALREADY on screen when the operator
+      picked a model.
+
+      ONLY A PICKER VAM ACTUALLY SAW STOPS THE SWITCH. `unaimed`, `mispaired`,
+      `unavailable` and `unreadable` all mean vam could not look, and every one
+      of them is a state the send path meets a moment later and words correctly
+      out of `PaneSendResult`. Refusing on those would replace an accurate
+      sentence about pairing with a guess about questions, and would brick the
+      button for as long as the reader hiccuped.
+    */
+    /*
+      NO BRIDGE, NO READ, AND THE ORDER IS THE WHOLE POINT. A build with no
+      keyboard into a pane -- the browser arm, where `window.api` is undefined
+      -- cannot switch a model whatever is on the screen, so reading the screen
+      there can only produce a refusal about a QUESTION when the true refusal
+      is about the BRIDGE. That would send the operator off to answer something
+      that would not help. The web guard `model-picker-shots.mjs` caught
+      exactly this: it drives the browser build against a demo row that is
+      asking one, and the caption came back naming the question.
+
+      The check is an existence test and not a second copy of the sentence:
+      falling through to `typePaneStrokes` lets the one place that owns that
+      wording say it.
+    */
+    if (prompt !== undefined && globalThis.window?.api?.terminal?.send !== undefined) {
+      // BEFORE THE AWAIT: a tmux spawn follows, at ten seconds' budget, and a
+      // control that looks idle through it reads as one that did nothing.
+      setCycleNote({ kind: 'busy', text: `${line} · reading the screen…` });
+      const looking = cycleAbout;
+      const view = await prompt(entry.project.id, entry.session.id).catch(
+        (): PromptView => ({ kind: 'unreadable' }),
+      );
+      // The row changed under the read; an answer about the session that was
+      // here then says nothing about the one that is here now.
+      if (noteFor.current !== looking) return;
+      if (view.kind === 'prompt') {
+        setCycleNote({
+          kind: 'refused',
+          text: `not sent — ${entry.session.title} is asking “${view.prompt.title}”; answer it first, then switch`,
+        });
+        return;
+      }
     }
     return typePaneStrokes(
       strokes,
