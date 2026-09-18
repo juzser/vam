@@ -118,17 +118,27 @@ describe('the appearance section offers the views’ width', () => {
     expect(off.toLowerCase()).toContain('width');
   });
 
-  it('says on the row which views it reaches, and what it costs the terminal', () => {
+  it('says on the row which views it reaches, and that the terminal is not one', () => {
     // THE ROW IS THE WHOLE DOCUMENTATION. Two facts an operator cannot guess:
-    // that the Terminal is one of the four, and that narrowing it tells tmux
-    // a new column count — which re-wraps a RUNNING agent's screen. An
-    // operator not told that reads the re-wrap as vam having broken their
-    // session.
+    // that the fraction has a THRESHOLD, so a pane too narrow for two thirds
+    // of it to hold 80 characters is left whole (the operator met the older
+    // floor as a defect in a split), and that the Terminal is NOT one of the
+    // views this reaches -- it was one of them a release ago, and an operator
+    // who watched a running screen re-wrap then needs to read that it will
+    // not again.
+    //
+    // RE-AIMED, NOT LOOSENED. This asserted the word `tmux`, from the clause
+    // "so tmux is never asked to re-wrap a running screen" -- which is the
+    // REASON for the exception and went in the conciseness pass, into
+    // `strings.ts`'s own comment beside the string. What the operator has to
+    // be able to read is the exception itself, so that is what is asserted
+    // now: the terminal, and what it does with its pane. Deleting that
+    // sentence still reddens this; naming the plumbing again is no longer
+    // required to keep it green.
     open();
     const row = toggle()?.closest('section, div')?.parentElement?.textContent?.toLowerCase() ?? '';
-    expect(row).toContain('terminal');
     expect(row).toContain('80 characters');
-    expect(row).toContain('tmux');
+    expect(row).toMatch(/terminal[^.;—]*fills its pane/);
   });
 
   it('writes the choice, disturbing no neighbour', () => {
