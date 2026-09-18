@@ -85,13 +85,23 @@ const sizedControls = () => [
 describe('the phone shell’s hit areas', () => {
   it('gives every control it renders a 44px floor, hosted panels included', () => {
     phone();
+    // OPENED, because a menu that is shut renders no items and a sweep over
+    // what is on screen would be green having examined none of them. This is
+    // not a detour: the per-project "new session" USED to be a 19px `+` on the
+    // heading, listed among the hooks below, and it is the first item of this
+    // menu now -- so the one route a phone has to creating a session in a
+    // named project is inside here. A control that changes surface keeps its
+    // floor or it has been quietly dropped.
+    act(() => {
+      (document.querySelector('[data-phone-shell] [data-project-menu]') as HTMLElement).click();
+    });
     const controls = sizedControls();
     // Two rules answer for this between them, and the split is the point. The
     // shell's own header, footer and chips are ENUMERATED in `styles.css`; the
-    // project icon, collapse, menu and per-project new session below belong to
-    // `SessionList`, and each opts in at the component by wearing `vam-tap`.
-    // Every one of the hosted ones measured under 44 at 390px while the
-    // enumeration alone was green -- and widening the enumeration to
+    // project icon, collapse, menu and the project menu's own items below
+    // belong to `SessionList`, and each opts in at the component by wearing
+    // `vam-tap`. Every one of the hosted ones measured under 44 at 390px while
+    // the enumeration alone was green -- and widening the enumeration to
     // `[data-phone-shell] button` is not the fix: that form burst a 21px
     // heading row by reaching markup it could not know the shape of. What this
     // assertion holds is the OUTCOME, so either mistake fails it.
@@ -100,7 +110,7 @@ describe('the phone shell’s hit areas', () => {
       'data-project-icon',
       'data-project-collapse',
       'data-project-menu',
-      'data-new-session-in-project',
+      'data-project-menu-item',
       'data-session-row',
     ]) {
       expect(document.querySelector(`[data-phone-shell] [${hook}]`), hook).not.toBeNull();

@@ -125,15 +125,25 @@ import type {
 import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
+import {
+  renderedTreeWidth,
+  TREE_WIDTH_DEFAULT,
+  TREE_WIDTH_MAX,
+  TREE_WIDTH_MIN,
+  treeWidthCeiling,
+} from '../prefs/files-tree-width.js';
+import { PANE_RESIZE_STEP } from '../prefs/panes.js';
 import type { SourceError } from '../sources/port.js';
-import { applyTab, isMarkdownPath, relativeLabel } from './files-editor-text.js';
+import { applyTab, isMarkdownPath, lineStartOffset, relativeLabel } from './files-editor-text.js';
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
-import { OUT_MARKDOWN } from './out-markdown.js';
+import { OverlayScroll } from './OverlayScroll.js';
+import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
+import { type PointerDragHandlers, RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 import {
   encodeUnsaved,
   NO_UNSAVED_FILES,
@@ -151,7 +161,8 @@ export type WriteFile = (
 export type ListFiles = (sessionId: string) => Promise<FileListResult>;
 
 /**
- * HOW WIDE THE TREE IS, and why it is a clamp rather than a number.
+ * HOW WIDE THE TREE IS WHEN NOBODY HAS SAID, and why that is still a clamp
+ * rather than a number.
  *
  * A SHARE, so a wide pane gives the tree room to show a real path and a
  * narrow one does not hand it a third of nothing. FLOORED at 7.5rem because
@@ -161,15 +172,84 @@ export type ListFiles = (sessionId: string) => Promise<FileListResult>;
  * against at vam's narrowest legal pane (`DETAIL_MIN`, 320px) in
  * `e2e/files-tab-keyboard-shots.mjs`: the editor keeps the larger half there.
  *
- * NO RESIZER. orca's own file tree has one (`use-combined-diff-file-tree-
- * resize.ts`, a stored width clamped against the container) and vam has the
- * parts for it -- `SplitResizer` and `PaneResizer` both exist. It is left out
- * deliberately: a drag handle is a third resizable boundary in a pane that
- * already has two, with its own keyboard story, its own persistence and its
- * own narrow-pane arithmetic, and none of that is what the operator asked
- * for. A clamp needs no guard beyond the two measurements above.
+ * THIS IS NOW THE DEFAULT AND NOT THE WHOLE STORY. The paragraph that stood
+ * here said NO RESIZER, and listed four costs a drag handle would bring: its
+ * own keyboard story, its own persistence, its own narrow-pane arithmetic,
+ * and a third resizable boundary in a pane that already has two. The operator
+ * has since asked for the handle, so the paragraph is re-argued rather than
+ * deleted -- every one of those four is a real cost and every one of them is
+ * now PAID, here, in the order it was raised:
+ *
+ *   1. ITS OWN KEYBOARD STORY. `FilesTreeResizer` below is the same ARIA
+ *      slider `PaneResizer` is, answering the same keys through the same
+ *      `PANE_RESIZE_STEP`: bare arrows, Shift for the larger jump, Home/End
+ *      for the two extremes. It is reached by Tab and by nothing else, it
+ *      carries NEITHER insert mark (so the status bar never calls a drag
+ *      Insert and `focusInsertStop` never lands `I` on a separator), and it
+ *      `preventDefault()`s exactly the keys it answers -- which is how
+ *      `Canvas.tsx`'s window grammar keeps hearing every bare letter while
+ *      the handle holds focus, the same contract the tree rows already use.
+ *      It is one new Tab stop, not a trap: every key it does not own falls
+ *      through untouched.
+ *
+ *   2. ITS OWN PERSISTENCE. `prefs.filesTreeWidth` -- global, for the reason
+ *      `editorIndent` and `focusView` are (one `FilesTab` per split leaf plus
+ *      `PhoneShell`'s, and no dialogue in which a pane opened by a keystroke
+ *      could be asked which width it wanted). `null` means "never dragged",
+ *      which is what keeps THIS constant load-bearing: an operator who never
+ *      touches the handle gets the share, pixel for pixel, on every pane.
+ *
+ *   3. ITS OWN NARROW-PANE ARITHMETIC. `files-tree-width.ts` restates the
+ *      13.5rem cap as the invariant it was standing in for -- the tree may
+ *      never take more than half of what the two columns share, so the editor
+ *      keeps at least as much as the tree at every pane width, including
+ *      `DETAIL_MIN`. The floor still wins last, exactly as `min-width` beats
+ *      `max-width` in CSS, so nothing about the narrowest pane changes for an
+ *      operator who has dragged nothing. `e2e/files-tree-resize-shots.mjs`
+ *      measures both as rectangles, after a real drag to the maximum at
+ *      `DETAIL_MIN` -- and it caught two defects no unit test could see while
+ *      this was being built.
+ *
+ *   4. A THIRD RESIZABLE BOUNDARY. What happens when the PANE is resized
+ *      under a tree whose width was chosen by hand: the chosen width is kept,
+ *      and only what is DRAWN shrinks. `renderedTreeWidth` is pure and lives
+ *      on the render path only; nothing on a resize, a split, or a tab switch
+ *      writes. Widen the pane again and the operator's own number comes back
+ *      -- asserted by narrowing a real window and widening it, which is the
+ *      only check in the suite that sees a write-back, because a hidden tab
+ *      is never measured at all.
+ *      The one trap this arrangement has is that a hidden pane measures 0px
+ *      and this tab is hidden with `display: none` rather than unmounted --
+ *      see `files-tree-width.ts`'s header, which is entirely about that.
  */
 const TREE_WIDTH = 'w-[38%] min-w-[7.5rem] max-w-[13.5rem]';
+
+/** A Shift-held arrow moves further than a bare one -- the WAI-ARIA APG
+ *  slider pattern, and the same multiplier `PaneResizer` uses so the two
+ *  handles do not teach an operator's hands two different numbers. */
+const TREE_JUMP_MULTIPLIER = 4;
+
+/**
+ * "OPEN THIS FILE, AT THIS LINE" -- the one thing outside this tab that can
+ * drive it, and it arrives already authorised.
+ *
+ * A REQUEST, NOT A SELECTION, exactly as `DetailPanel.tsx`'s `tabRequest` is,
+ * and a fresh object per press for the same reason: asking twice for the same
+ * file is two asks, which a `{path, line}` compared by value could not say.
+ *
+ * IT CARRIES THE SESSION IT WAS RESOLVED FOR. The path came out of main
+ * authorised against ONE session's working directory (`resolve-ipc.ts`), and
+ * this tab keeps its open file per session -- so a request that arrives after
+ * the operator has walked to another session is dropped rather than filed
+ * under the session now showing.
+ */
+export type FileOpenRequest = {
+  readonly sessionId: string;
+  /** Absolute, already `realpath`-resolved by main. */
+  readonly path: string;
+  /** 1-based. See `src/shared/file-ref.ts`. */
+  readonly line: number;
+};
 
 export type FilesTabProps = {
   /**
@@ -225,6 +305,33 @@ export type FilesTabProps = {
    * clicks an element's CENTRE and the centre was clear.
    */
   readonly reserveCornerHeight: number;
+  /**
+   * The width the operator last DRAGGED the tree to, in pixels, or `null` for
+   * "never dragged" -- which is a real value and not a missing one: it draws
+   * the clamped share `TREE_WIDTH` has always drawn. See `prefs.filesTreeWidth`.
+   *
+   * This is the STORED number, not the rendered one. What reaches the DOM is
+   * `renderedTreeWidth(stored, columnsWidth)`, computed on every render and
+   * written back NOWHERE -- see `files-tree-width.ts`.
+   */
+  readonly filesTreeWidth: number | null;
+  /**
+   * Persists a new tree width, or `undefined` to withdraw the handle
+   * entirely -- ABSENT, NOT DISABLED, the same rule `onSetDefaultProvider`
+   * follows in `DetailPanel.tsx`: a caller with nowhere to put the number
+   * should not draw a grip that looks draggable and springs back on release.
+   *
+   * Called ONCE per gesture, at pointerup, and once per key press -- never on
+   * a pointermove, for `PaneResizer`'s reason: a preference written sixty
+   * times a second is sixty `localStorage` writes for one decision.
+   */
+  readonly onFilesTreeWidth: ((width: number) => void) | undefined;
+  /**
+   * A file to open, named by something outside this tab -- today, a
+   * `path:line` control in an agent's own answer (`out-markdown.tsx`).
+   * `null` at rest, and `undefined` from any caller that cannot produce one.
+   */
+  readonly openRequest?: FileOpenRequest | null;
 };
 
 type SaveState =
@@ -270,6 +377,9 @@ export function FilesTab({
   reportUnsaved,
   reserveCorner,
   reserveCornerHeight,
+  filesTreeWidth,
+  onFilesTreeWidth,
+  openRequest = null,
 }: FilesTabProps) {
   const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
   const [activeBySession, setActiveBySession] = useState<Record<string, string | null>>({});
@@ -728,6 +838,177 @@ export function FilesTab({
   // typed for the wrong tag is a type that quietly stops describing the DOM.
   const previewRef = useRef<HTMLElement | null>(null);
 
+  /* -------------------------------------------------------------------------
+   * HOW WIDE THE TREE IS DRAWN, AND THE ONE RULE THAT MAKES IT SAFE.
+   *
+   * Two measurements and one piece of state, and the state is the SMALLEST
+   * one that buys live feedback: `dragWidth` holds the in-progress gesture so
+   * the column follows the pointer without a `localStorage` write per frame,
+   * and it is cleared the moment the gesture ends -- the same division
+   * `PaneResizer`/`Canvas.tsx` already draw between `onChange` and
+   * `onCommit`.
+   *
+   * NOTHING ON THIS PATH WRITES. `renderedTreeWidth` is pure and is called on
+   * every render; the container it clamps against is whatever is on screen
+   * now. A pane narrowed, a split opened, or -- the one that matters -- THIS
+   * TAB HIDDEN behind another one, which measures 0px because `hidden` here
+   * is `display: none` and not an unmount, must all change what is DRAWN and
+   * nothing else. `files-tree-width.ts`'s header is entirely about that 0.
+   * ---------------------------------------------------------------------- */
+  const treeBoxRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * A CALLBACK REF, NOT A `useRef`, AND THAT IS A BUG THIS FILE ALREADY HAD.
+   *
+   * This component returns EARLY -- "No session selected", "the file editor
+   * is only available in the vam desktop app" -- and the shell mounts it
+   * before any session is focused, so the first render draws neither column.
+   * A `useRef` read from a layout effect keyed on `hidden` would find `null`
+   * on that first pass and never look again, and the measurement would stay 0
+   * for the life of the tab. It did: the e2e guard caught a tree rendering its
+   * whole stored 480px inside a 291px pane, with the editor squeezed to
+   * nothing, because an unmeasured container reads as "unknown" and an
+   * unknown container clamps nothing.
+   *
+   * A callback ref re-fires the effect the moment the node attaches, whenever
+   * that is.
+   */
+  const [columnsEl, setColumnsEl] = useState<HTMLDivElement | null>(null);
+  const [columnsWidth, setColumnsWidth] = useState(0);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+
+  /**
+   * `clientWidth`, not `getBoundingClientRect().width`: it ignores ancestor
+   * transforms, so a pane mid-animation cannot report a width the layout does
+   * not have (orca's own measured note, and the reason it uses the same one).
+   *
+   * Re-run when `hidden` flips so the first frame after a tab switch measures
+   * before it paints rather than a `ResizeObserver` callback later -- the
+   * flash it saves is only visible when a stored width is wider than the
+   * ceiling, which is exactly the case an operator who drags will be in.
+   */
+  useLayoutEffect(() => {
+    if (columnsEl === null || hidden) {
+      // NO COLUMNS ON SCREEN IS NO MEASUREMENT, and so is a hidden tab -- one
+      // has nothing to measure and the other would measure 0px, which is not
+      // a narrow container (`files-tree-width.ts`). Said here rather than left
+      // to a `ResizeObserver` that would report the same 0 a beat later: this
+      // way `hidden` is a real dependency, the observer is not kept alive over
+      // a box nobody is looking at, and coming BACK re-measures inside a
+      // layout effect -- before paint -- rather than a frame after it.
+      setColumnsWidth(0);
+      return;
+    }
+    const measure = () => setColumnsWidth(columnsEl.clientWidth);
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(columnsEl);
+    return () => observer?.disconnect();
+  }, [columnsEl, hidden]);
+
+  const storedTreeWidth = dragWidth ?? filesTreeWidth;
+  /** What reaches the DOM, or `null` for "nobody has dragged this -- keep the
+   *  share `TREE_WIDTH` has always drawn". */
+  const drawnTreeWidth =
+    storedTreeWidth === null ? null : renderedTreeWidth(storedTreeWidth, columnsWidth);
+
+  /**
+   * The width a gesture STARTS from, which is not always a stored number: a
+   * tree still on its share has no stored width at all, and an arrow press
+   * there must move from what is on screen rather than from a constant the
+   * operator has never seen.
+   */
+  const treeWidthNow = useCallback((): number => {
+    if (drawnTreeWidth !== null) return drawnTreeWidth;
+    const measured = treeBoxRef.current?.clientWidth ?? 0;
+    return measured > 0 ? measured : TREE_WIDTH_DEFAULT;
+  }, [drawnTreeWidth]);
+
+  /**
+   * Store a width the operator CHOSE.
+   *
+   * Clamped against the live ceiling as well as the floor, and that is not a
+   * contradiction of the render-only rule: the ceiling is the edge the handle
+   * physically could not be dragged past, so committing it commits what was
+   * on screen under the pointer. What must never be written is a clamp
+   * NOBODY PERFORMED -- a narrowing the operator did not do, applied behind
+   * their back on a resize or a tab switch. Nothing calls this on a render.
+   */
+  const commitTreeWidth = useCallback(
+    (width: number) => {
+      const ceiling = treeWidthCeiling(columnsWidth);
+      onFilesTreeWidth?.(Math.round(Math.max(TREE_WIDTH_MIN, Math.min(ceiling, width))));
+    },
+    [columnsWidth, onFilesTreeWidth],
+  );
+
+  /**
+   * The gesture is `usePointerDrag`'s, shared with `PaneResizer` and
+   * `SplitResizer` -- held entirely by `setPointerCapture`/
+   * `releasePointerCapture` on the handle, with no document-wide overlay and
+   * no boolean that a pointerup delivered somewhere else would leave set
+   * forever. See `pane-drag.ts`, whose own tests are the contract.
+   *
+   * The handle sits on the tree's LEFT edge and the tree is the RIGHT-hand
+   * column, so travel to the left (a negative delta) is what GROWS it -- the
+   * same sign `PaneResizer` uses for the detail pane, and for the same reason.
+   */
+  const { dragging: resizingTree, handlers: treeResizeHandlers } = usePointerDrag<
+    HTMLHRElement,
+    number
+  >({
+    axis: 'x',
+    onStart: () => treeWidthNow(),
+    onMove: (startWidth, delta) => setDragWidth(startWidth - delta),
+    onEnd: (startWidth, delta) => {
+      setDragWidth(null);
+      commitTreeWidth(startWidth - delta);
+    },
+  });
+
+  /**
+   * THE KEYBOARD HALF OF THE ARIA CONTRACT the handle claims -- a slider that
+   * Tab reaches and that answers no key is a trap dressed as a control.
+   *
+   * `PANE_RESIZE_STEP` rather than a step of its own: vam now has three
+   * routes to a resize (the `<`/`>` chord, `PaneResizer`'s arrows, and these)
+   * and that constant exists precisely so they cannot drift into three
+   * different ideas of how far one press moves.
+   *
+   * Every key that is NOT one of these returns without `preventDefault()`,
+   * which is the whole of how the handle declines what it does not own:
+   * `Canvas.tsx`'s window listener stands down on `event.defaultPrevented`,
+   * so a bare `j` pressed while this has focus still reaches the grammar. A
+   * handle that claimed every key would swallow the bare-letter vocabulary
+   * for as long as the operator left focus on it.
+   */
+  const onTreeResizeKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      switch (event.key) {
+        case 'ArrowLeft':
+        case 'ArrowRight': {
+          event.preventDefault();
+          const magnitude = PANE_RESIZE_STEP * (event.shiftKey ? TREE_JUMP_MULTIPLIER : 1);
+          commitTreeWidth(
+            event.key === 'ArrowLeft' ? treeWidthNow() + magnitude : treeWidthNow() - magnitude,
+          );
+          return;
+        }
+        case 'Home':
+          event.preventDefault();
+          commitTreeWidth(TREE_WIDTH_MIN);
+          return;
+        case 'End':
+          event.preventDefault();
+          commitTreeWidth(treeWidthCeiling(columnsWidth));
+          return;
+        default:
+          return;
+      }
+    },
+    [columnsWidth, commitTreeWidth, treeWidthNow],
+  );
+
   const focusCursorRow = useCallback((): boolean => {
     const row = treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]') ?? null;
     if (row === null) return false;
@@ -793,6 +1074,74 @@ export function FilesTab({
     },
     [openFile],
   );
+
+  /**
+   * THE LINE A REQUEST ASKED FOR, held until the file is actually there to
+   * put a caret in.
+   *
+   * It cannot ride on `pendingSelection` above: that one is applied and
+   * CLEARED by the very next render, which is right for a Tab keystroke (the
+   * text is already on screen) and wrong here -- a file opened for the first
+   * time spends one or more renders in `loading`, with no `<textarea>` to
+   * aim at, and a selection cleared during those is a caret that silently
+   * never moved. This one survives until the buffer is editable, and gives up
+   * the moment the buffer turns out to be something a caret cannot go into --
+   * the same bargain `wantEditorFocus` makes just above.
+   */
+  const pendingLine = useRef<{ path: string; line: number } | null>(null);
+
+  /**
+   * SOMEBODY OUTSIDE THIS TAB NAMED A FILE. The path arrived authorised
+   * (`main/files/resolve-ipc.ts`) and is opened through the SAME `openFile`
+   * a tree row goes through -- never a second path into the editor, which is
+   * what keeps an already-open buffer's unsaved text from being re-read out
+   * from under the operator.
+   *
+   * Keyed on the request OBJECT alone. `openFile` is a `useCallback` over the
+   * session id, so listing it too would only re-run this for a request the
+   * operator pressed once -- `DetailPanel.tsx`'s own `tabRequest` effect
+   * carries the same scar.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a request is an act, not a value to re-apply
+  useEffect(() => {
+    if (openRequest === null || sessionId === null) return;
+    // A request resolved for another session is not this tab's to honour --
+    // see `FileOpenRequest`.
+    if (openRequest.sessionId !== sessionId) return;
+    setNote(null);
+    setCursorPath(openRequest.path);
+    pendingLine.current = { path: openRequest.path, line: openRequest.line };
+    wantEditorFocus.current = true;
+    openFile(openRequest.path);
+  }, [openRequest]);
+
+  /**
+   * Puts the caret on the requested line once there is a textarea holding the
+   * file, and scrolls it to the middle of the view.
+   *
+   * THE SCROLL IS SEPARATE FROM THE CARET because a `<textarea>` does not
+   * scroll for a programmatic `setSelectionRange` -- only for typing. Line
+   * height is read off the element rather than assumed: this editor's own
+   * `leading` is a token, and a constant here would be a second copy of it
+   * that drifts the first time the type scale moves. A browser that answers
+   * something unmeasurable (happy-dom answers `''`) leaves the caret right
+   * and the scroll alone, which is the safe half to lose.
+   */
+  useLayoutEffect(() => {
+    const pending = pendingLine.current;
+    if (pending === null) return;
+    if (pending.path !== activePath) return;
+    const buffer = buffers[pending.path];
+    if (buffer?.kind === 'loading') return;
+    pendingLine.current = null;
+    const area = textareaRef.current;
+    if (area === null || buffer?.kind !== 'editable') return;
+    const at = lineStartOffset(buffer.content, pending.line);
+    area.setSelectionRange(at, at);
+    const lineHeight = Number.parseFloat(getComputedStyle(area).lineHeight);
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
+    area.scrollTop = Math.max(0, (pending.line - 1) * lineHeight - area.clientHeight / 2);
+  });
 
   const toggleDir = useCallback((path: string, open: boolean) => {
     setNote(null);
@@ -1264,8 +1613,14 @@ export function FilesTab({
 
       {/* THE TWO COLUMNS. Editor in the middle, tree on the right — the
           operator's own arrangement, and orca's. `min-w-0` on the editor is
-          what lets it shrink rather than push the tree off the pane. */}
-      <div className="flex min-h-0 flex-1 gap-1.5">
+          what lets it shrink rather than push the tree off the pane.
+
+          AND THE BOX THE TREE'S WIDTH IS CLAMPED AGAINST. This element, not
+          the pane and not the window: it is the space the two columns
+          actually share, which is the only quantity "the editor keeps the
+          larger half" can be written against. Measured with `clientWidth`
+          through a `ResizeObserver` — see the block that owns `columnsRef`. */}
+      <div ref={setColumnsEl} className="flex min-h-0 flex-1 gap-1.5">
         <div data-files-editor-column className="flex min-h-0 min-w-0 flex-1 flex-col">
           {activePath === null && (
             <p className="text-control text-ink-faint">
@@ -1334,6 +1689,22 @@ export function FilesTab({
 
         <Tree
           treeRef={treeRef}
+          boxRef={treeBoxRef}
+          widthPx={drawnTreeWidth}
+          resizer={
+            // ABSENT, NOT DISABLED. A caller with nowhere to store a width
+            // draws no grip at all rather than one that springs back on
+            // release — `onSetDefaultProvider`'s own rule in `DetailPanel`.
+            onFilesTreeWidth === undefined ? null : (
+              <FilesTreeResizer
+                width={treeWidthNow()}
+                ceiling={treeWidthCeiling(columnsWidth)}
+                dragging={resizingTree}
+                handlers={treeResizeHandlers}
+                onKeyDown={onTreeResizeKeyDown}
+              />
+            )
+          }
           filterRef={filterRef}
           rows={rows}
           cursorPath={cursorRow?.path ?? null}
@@ -1467,7 +1838,14 @@ function MarkdownPreview({
       onKeyDown={onKeyDown}
       className="vam-no-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2 break-words focus-visible:border-line-strong focus-visible:outline-none"
     >
-      <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+      {/* The same `urlTransform` the transcript uses, for the same reason:
+          one scheme list, vam's own, strictly narrower than react-markdown's
+          default. See `OUT_URL_TRANSFORM`. */}
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={OUT_MARKDOWN}
+        urlTransform={OUT_URL_TRANSFORM}
+      >
         {content}
       </Markdown>
     </section>
@@ -1630,6 +2008,9 @@ function Editor({
 
 function Tree({
   treeRef,
+  boxRef,
+  widthPx,
+  resizer,
   filterRef,
   rows,
   cursorPath,
@@ -1650,6 +2031,13 @@ function Tree({
   onNewFile,
 }: {
   readonly treeRef: React.RefObject<HTMLDivElement | null>;
+  /** The tree's OUTER box — what a gesture that starts on a tree still using
+   *  the share has to measure, because there is no stored number to read. */
+  readonly boxRef: React.RefObject<HTMLDivElement | null>;
+  /** A dragged width in pixels, or `null` to keep `TREE_WIDTH`'s share. */
+  readonly widthPx: number | null;
+  /** The drag handle, or `null` when no caller can store a width. */
+  readonly resizer: React.ReactNode;
   readonly filterRef: React.RefObject<HTMLInputElement | null>;
   readonly rows: readonly FileTreeRow[];
   readonly cursorPath: string | null;
@@ -1671,9 +2059,24 @@ function Tree({
 }) {
   return (
     <div
+      ref={boxRef}
       data-files-tree
-      className={`flex min-h-0 flex-none flex-col overflow-hidden rounded-[9px] border border-line bg-panel ${TREE_WIDTH}`}
+      // `relative`, so the handle can straddle this column's own left border
+      // the way `PaneResizer` straddles a pane's — one absolutely positioned
+      // hit zone inside the thing it moves, and no document-wide overlay.
+      //
+      // The share and the pixel width are EXCLUSIVE: a tree that has been
+      // dragged keeps neither `w-[38%]` nor the two CSS bounds, because the
+      // clamp those express is now `renderedTreeWidth`'s job and two clamps
+      // disagreeing about one column is the bug this avoids rather than the
+      // belt to its braces. A tree nobody has dragged keeps all three and is
+      // pixel-identical to what shipped.
+      className={`relative flex min-h-0 flex-none flex-col overflow-hidden rounded-[9px] border border-line bg-panel ${
+        widthPx === null ? TREE_WIDTH : ''
+      }`}
+      style={widthPx === null ? undefined : { width: widthPx }}
     >
+      {resizer}
       <div className="flex flex-none items-center gap-1 border-line border-b px-2 py-1.5">
         <Search
           size={12}
@@ -1747,7 +2150,18 @@ function Tree({
           element for both would have made those notices either invalid
           children of the tree or `presentation`al -- and `presentation` would
           have hidden the words. */}
-      <div className="vam-no-scrollbar min-h-0 flex-1 overflow-y-auto p-1">
+      {/* `OverlayScroll`, not a bare `overflow-y-auto`, and this is the
+          SECOND half of what the operator asked for. The cap and the scroll
+          were already right -- measured against real Chromium at four pane
+          sizes with 159 rows, the tree's bottom lands on the pane's and the
+          list's `scrollHeight` is five times its `clientHeight` -- but
+          `vam-no-scrollbar` hid the only thing on screen that SAID so, so a
+          tree clipped at the pane's bottom edge was indistinguishable from a
+          tree that simply stopped. The sidebar's own list has answered this
+          since `OverlayScroll` was written: a thumb painted OVER the content,
+          `pointer-events-none`, so it takes no width from a column that is
+          already short of it and cannot interfere with `j`/`k`. */}
+      <OverlayScroll className="min-h-0 flex-1 overflow-y-auto p-1">
         {listing?.kind === 'loading' && (
           <p data-files-listing-pending className="px-2 py-3 text-control text-ink-faint">
             Reading the directory…
@@ -1832,7 +2246,76 @@ function Tree({
             has more.
           </p>
         )}
-      </div>
+      </OverlayScroll>
     </div>
+  );
+}
+
+/**
+ * THE GRIP ON THE TREE'S LEFT EDGE.
+ *
+ * Presentational on purpose: every number and every callback is decided in
+ * `FilesTab` beside the arithmetic that produces them, so this element cannot
+ * hold a second opinion about what a drag means. It is `PaneResizer`'s
+ * vocabulary verbatim -- a native `<hr>` (the `separator` role by element,
+ * which is what biome's `a11y/useSemanticElements` asks for in place of a
+ * bare `role`), `cursor-col-resize`, transparent at rest and
+ * `bg-line-loudest` on hover and while held -- because an operator who has
+ * learned one of vam's three resize boundaries should not have to learn a
+ * second grammar for the third. `RESIZE_HANDLE_RESET` is the part of that
+ * vocabulary that is now a constant rather than a copied string: preflight
+ * gives every `<hr>` a 1px `currentColor` top border, so all three handles had
+ * been drawing a hairline across their own top edge, and a copied class list
+ * is how all three came to have the identical defect.
+ *
+ * NEITHER INSERT MARK, deliberately, and it is worth saying why rather than
+ * merely doing it: `keyboard/focus-scope.ts` derives the cursor mode from
+ * whether DOM focus sits inside a `data-insert-scope`, so a handle carrying
+ * one would make the status bar announce Insert for a column drag, and
+ * `focusInsertStop`'s blind `.focus()` would send `I` to a separator. It is a
+ * new Tab stop and nothing more -- see `onTreeResizeKeyDown` for how it hands
+ * back every key that is not its own.
+ *
+ * OUTSIDE `role="tree"`, which is why it is rendered here at the top of the
+ * column rather than beside the rows: a `tree` may own only `treeitem`s and
+ * `group`s, and a separator among the files would be both invalid and
+ * something a screen reader met between two filenames.
+ */
+function FilesTreeResizer({
+  width,
+  ceiling,
+  dragging,
+  handlers,
+  onKeyDown,
+}: {
+  readonly width: number;
+  readonly ceiling: number;
+  readonly dragging: boolean;
+  readonly handlers: PointerDragHandlers<HTMLHRElement>;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
+}) {
+  return (
+    <hr
+      aria-orientation="vertical"
+      aria-label="file tree width"
+      // The RENDERED width, which is what the operator can see and what the
+      // next arrow press will move from. `aria-valuemax` is the STORED cap
+      // rather than the live ceiling: a screen reader reading a maximum that
+      // changed every time the pane moved would be describing the window, not
+      // the control. The live ceiling is what `End` actually lands on.
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={TREE_WIDTH_MIN}
+      aria-valuemax={TREE_WIDTH_MAX}
+      aria-valuetext={`${Math.round(width)} pixels, at most ${Math.round(ceiling)} in this pane`}
+      tabIndex={0}
+      data-files-tree-resize={dragging ? 'dragging' : 'idle'}
+      className={[
+        `absolute top-0 -left-[2px] z-10 h-full w-1 ${RESIZE_HANDLE_RESET}`,
+        'cursor-col-resize',
+        dragging ? 'bg-line-loudest' : 'bg-transparent hover:bg-line-loudest',
+      ].join(' ')}
+      onKeyDown={onKeyDown}
+      {...handlers}
+    />
   );
 }

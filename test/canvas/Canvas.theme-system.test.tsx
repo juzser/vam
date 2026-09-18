@@ -23,6 +23,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import { PALETTE_TOKENS, type Prefs } from '../../src/renderer/prefs/prefs.js';
+import { activeTerminalScheme } from '../../src/renderer/prefs/terminal-scheme.js';
 
 function session(id: string): Session {
   return {
@@ -238,5 +239,38 @@ describe('the palette in force follows the theme in force', () => {
     expect(inForce()).toBe(BLUE);
     os.flip(true);
     expect(inForce(), 'an unset token falls through to the stylesheet').toBe('');
+  });
+});
+
+/**
+ * The terminal's scheme is stored per theme for the same reason the palette
+ * is, and it is a STORE rather than a property on the document -- so nothing
+ * that moves the class or the palette moves it by accident. Under `system`
+ * the OS flip is the one write-free path, and this is where it is held: the
+ * three halves of an appearance move in one statement or an open terminal
+ * keeps a dark scheme in a light dashboard.
+ */
+describe('the terminal scheme in force follows the theme in force', () => {
+  it('resolves the stored theme’s bucket at mount', () => {
+    seed({
+      theme: 'light',
+      terminalScheme: { light: { theme: 'github-light', overrides: {} } },
+    } as Partial<Prefs>);
+    render(<Canvas model={MODEL} />);
+    expect(activeTerminalScheme().foreground).toBe('#24292e');
+  });
+
+  it('swaps the scheme when the OS flips under system', () => {
+    seed({ theme: 'system' });
+    render(<Canvas model={MODEL} />);
+    // Hans in dark, Tango Light in light: the shipped defaults.
+    expect(activeTerminalScheme().background).toBe('#1e1f29');
+    os.flip(true);
+    expect(isLight()).toBe(true);
+    expect(activeTerminalScheme().background, 'the class moved; the scheme must move with it').toBe(
+      '#ffffff',
+    );
+    os.flip(false);
+    expect(activeTerminalScheme().background).toBe('#1e1f29');
   });
 });

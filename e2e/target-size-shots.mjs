@@ -28,8 +28,10 @@
  * and is drawn only where a directory picker exists -- `window.api.dialog` is
  * a preload bridge, so `App.tsx` routes every browser to `DemoCanvas`. Its
  * hit areas are asserted by class in `test/panels/DetailPanel.pr-repo.test.tsx`
- * and the class's behaviour is measured HERE, on the twelve sidebar controls
- * that do reach a browser. That chain is the whole of the proof available
+ * and the class's behaviour is measured HERE, on the nine sidebar controls
+ * that do reach a browser -- twelve until the per-project `+` moved into the
+ * project's own menu, where it is a full-width item and no longer a control
+ * this rule has anything to say about. That chain is the whole of the proof available
  * without an Electron harness.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
@@ -108,7 +110,7 @@ const onCanvas = await probe();
 if (onCanvas.length < 6) {
   throw new Error(
     `only ${onCanvas.length} hit-area controls were found on the canvas -- ` +
-      `the sidebar alone draws four per project, so this probe is measuring the wrong page`,
+      `the sidebar alone draws three per project, so this probe is measuring the wrong page`,
   );
 }
 

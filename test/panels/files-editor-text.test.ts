@@ -12,6 +12,7 @@ import {
   applyTab,
   editorFileKind,
   extensionOf,
+  lineStartOffset,
   relativeLabel,
 } from '../../src/renderer/panels/files-editor-text.js';
 
@@ -111,5 +112,39 @@ describe('relativeLabel — what a list row shows for an absolute path', () => {
 
   it('handles the root itself named with a trailing slash', () => {
     expect(relativeLabel('/home/s1/', '/home/s1/.env')).toBe('.env');
+  });
+});
+
+/**
+ * WHERE A LINE STARTS, for the caret an agent's `path:line` reference asks
+ * for. A jump that landed one character out would be wrong on every file with
+ * a CRLF in it, and it has no loud symptom -- the caret is simply in the wrong
+ * place, which is indistinguishable from the reference itself being wrong.
+ */
+describe('lineStartOffset -- where an agent-named line begins', () => {
+  const TEXT = 'alpha\nbravo\ncharlie\n';
+
+  it('answers the offset the caret goes to for a 1-based line', () => {
+    expect(lineStartOffset(TEXT, 1)).toBe(0);
+    expect(lineStartOffset(TEXT, 2)).toBe(6);
+    expect(lineStartOffset(TEXT, 3)).toBe(12);
+  });
+
+  it('clamps a line past the end to the last line rather than past the text', () => {
+    expect(lineStartOffset(TEXT, 99)).toBe(20);
+    expect(lineStartOffset('one line', 4)).toBe(0);
+  });
+
+  it('treats a line at or below zero as the first line', () => {
+    expect(lineStartOffset(TEXT, 0)).toBe(0);
+    expect(lineStartOffset(TEXT, -3)).toBe(0);
+  });
+
+  it('counts a CRLF file the way the editor draws it', () => {
+    expect(lineStartOffset('alpha\r\nbravo\r\n', 2)).toBe(7);
+  });
+
+  it('answers 0 for an empty file', () => {
+    expect(lineStartOffset('', 5)).toBe(0);
   });
 });

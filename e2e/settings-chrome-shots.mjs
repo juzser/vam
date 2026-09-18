@@ -670,7 +670,7 @@ console.log('\n=== the settings case ladder');
   if (sectionIds.length < 4) {
     throw new Error(`the nav offers ${sectionIds.length} sections, so this sweep is about nothing`);
   }
-  const seen = { headings: 0, labels: 0, hints: 0, controls: 0, descriptions: 0 };
+  const seen = { headings: 0, labels: 0, hints: 0, controls: 0, descriptions: 0, properNames: 0 };
   /** Paragraphs that BEGIN with the product name, across the whole sweep. */
   let brandStarts = 0;
   for (const sectionId of sectionIds) {
@@ -720,10 +720,25 @@ console.log('\n=== the settings case ladder');
           // Both are checked below, in the rank they belong to.
           return (
             el.closest('[data-settings-unit]') === null &&
-            el.closest('[data-binding-label]') === null
+            el.closest('[data-binding-label]') === null &&
+            el.closest('[data-verbatim]') === null
           );
         })
         .map(read),
+      // A PROPER NAME IS A RANK OF ITS OWN, and it is the one rank that must
+      // NOT be transformed. `capitalize` uppercases the first letter of every
+      // word and leaves the rest as authored, which is right for a control
+      // named in prose (`dark`, `high contrast`) and wrong for a name its
+      // author wrote: `vam Light` would paint `Vam Light`, and a scheme called
+      // `iTerm` would paint `ITerm`. `data-verbatim` is the codebase's own
+      // word for "somebody chose these letters" -- the Update section's
+      // version line already carries it, for the product's own lower-case
+      // name, and its exception is measured further down this file. The
+      // terminal theme chips carry it for the same reason, and this rank
+      // holds every one of them to the OPPOSITE rule -- `none`, never a
+      // transform -- so the attribute buys a stricter check rather than an
+      // exemption from one.
+      properNames: [...(panel?.querySelectorAll('[data-verbatim]') ?? [])].map(read),
     };
   });
   console.log(`  [${sectionId}] heading: ${JSON.stringify(cased.heading)}`);
@@ -742,6 +757,7 @@ console.log('\n=== the settings case ladder');
   seen.labels += cased.labels.length;
   seen.hints += cased.hints.length;
   seen.controls += cased.controls.length;
+  seen.properNames += cased.properNames.length;
 
   // THE BIG HEADING SHOUTS. It is the one piece of text on this surface that
   // names where you are rather than what you are changing.
@@ -773,6 +789,20 @@ console.log('\n=== the settings case ladder');
   if (shouted.length > 0) {
     throw new Error(
       `[${sectionId}] control names not capitalised: ${JSON.stringify(shouted.map((c) => `${c.text}=${c.transform}`))}`,
+    );
+  }
+
+  // AND A PROPER NAME IS PRINTED AS ITS AUTHOR WROTE IT. See the corpus above
+  // for why this is a rule and not an exemption.
+  if (cased.properNames.length > 0) {
+    console.log(
+      `  [${sectionId}] proper names: ${JSON.stringify(cased.properNames.map((c) => c.text))}`,
+    );
+  }
+  const transformed = cased.properNames.filter((c) => c.transform !== 'none');
+  if (transformed.length > 0) {
+    throw new Error(
+      `[${sectionId}] proper names are being transformed: ${JSON.stringify(transformed.map((c) => `${c.text}=${c.transform}`))}`,
     );
   }
 
@@ -925,7 +955,11 @@ console.log('\n=== the settings case ladder');
   if (seen.descriptions < 40) {
     throw new Error(`the keyboard list drew ${seen.descriptions} rows, so its rank is untested`);
   }
-  if (seen.labels < 7 || seen.hints < 7 || seen.controls < 24) {
+  // `properNames` has a floor of its own for the reason every other rank here
+  // does: "no proper name is transformed" over zero proper names is the same
+  // sentence as "there are none", and the twelve terminal themes are exactly
+  // the corpus that rule exists for.
+  if (seen.labels < 7 || seen.hints < 7 || seen.controls < 24 || seen.properNames < 12) {
     throw new Error(`the sweep found too little to be about the surface: ${JSON.stringify(seen)}`);
   }
   await page.close();

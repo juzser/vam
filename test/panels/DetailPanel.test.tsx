@@ -136,10 +136,11 @@ const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 /**
  * In-flight delivery.
  *
- * `claude --resume` is a subprocess with a 120-SECOND timeout
- * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`). Before this the composer showed
- * nothing while it ran: Enter appeared to do nothing for up to two minutes,
- * and every further Enter was swallowed by `Canvas`'s `writing` guard without
+ * A reply is a run of tmux `send-keys` into the session's pane (`reply.ts`),
+ * plus the listing that resolves the pane first -- quick, but not instant.
+ * Before this the composer showed nothing while it ran: Enter appeared to do
+ * nothing, and every further Enter was swallowed by `Canvas`'s `writing` guard
+ * without
  * a word. The flag existed; it just never left `Canvas`.
  */
 describe('the composer says when a prompt is in flight', () => {
@@ -181,10 +182,10 @@ describe('the composer says when a prompt is in flight', () => {
 /**
  * TWO OUTCOMES MUST NOT SHARE A FACE.
  *
- * `main/sources/claude-code/deliver.ts` runs `claude --resume <id> -p
- * "<prompt>"` and genuinely appends a turn to a running session; the factory
- * source appends to a log nothing reads back. "Sent to the agent" and "filed
- * for later" are different things to have done, and the button painted one
+ * `main/sources/claude-code/reply.ts` types the prompt into the pane of a
+ * session vam started, genuinely reaching a running session; the factory
+ * source appends to a log nothing reads back. "Typed into the terminal" and
+ * "filed for later" are different things to have done, and the button painted one
  * `ArrowUp` for both -- the whole distinction lived in an `aria-label` and a
  * native `title`, neither of which is on screen.
  *
@@ -264,7 +265,10 @@ describe('the composer submit paints which outcome it will produce', () => {
     // unopenable from the keyboard.
     draw({ draft: 'ship it', delivers: true });
     expect(submit()?.hasAttribute('title')).toBe(false);
-    expect(submit()?.getAttribute('data-note')).toMatch(/running agent session/i);
+    // The delivering note now names the terminal it types into, not a delivery
+    // it cannot confirm.
+    expect(submit()?.getAttribute('data-note')).toMatch(/terminal/i);
+    expect(submit()?.getAttribute('data-note')).not.toMatch(/delivered/i);
     cleanup();
     draw({ draft: 'ship it', delivers: false });
     expect(submit()?.hasAttribute('title')).toBe(false);
@@ -3804,8 +3808,14 @@ describe('the out region shows live work while the session is running', () => {
     expect(reduced).toContain('.vam-ellipsis');
     expect(reduced).toMatch(/\.vam-ellipsis[^}]*\{[^}]*opacity:\s*1/s);
     expect(css).toContain('@keyframes vam-ellipsis');
-    // The cursor it replaces is gone from the stylesheet entirely.
-    expect(css).not.toContain('vam-term-cursor');
+    // The cursor it replaces is gone from the stylesheet entirely -- as the
+    // CLASS and the KEYFRAMES it shipped as (#103). The bare stem is no
+    // longer a safe substring to forbid: the terminal's colour scheme
+    // declares a custom PROPERTY `--vam-term-cursor` for the caret's colour
+    // (`prefs/terminal-scheme.ts`), which is a colour, not an animation.
+    expect(css).not.toContain('.vam-term-cursor');
+    expect(css).not.toContain('@keyframes vam-term-cursor');
+    expect(css).not.toMatch(/animation:[^;]*vam-term-cursor/);
   });
 
   /**

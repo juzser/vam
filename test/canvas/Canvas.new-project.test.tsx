@@ -46,6 +46,22 @@ const MODEL: CanvasModel = {
 /** A directory that is nobody's home: this repo is public. */
 const CHOSEN = '/srv/work/orchard';
 
+/** Start a session in a named project: the first item of that project's own
+ *  menu, which is where the heading's `+` went (one icon less per heading, at
+ *  the operator's request). */
+async function addInProject(projectId: string) {
+  await act(async () => {
+    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
+  });
+  await act(async () => {
+    (
+      document.querySelector(
+        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
+      ) as HTMLElement
+    ).click();
+  });
+}
+
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 
 async function clickNewProject() {
@@ -335,9 +351,7 @@ describe('new project — feedback and the in-flight guard', () => {
       inner.write.createSession = () => gate.promise;
       const picker = withDialog(async () => CHOSEN);
       render(<Canvas model={MODEL} source={source} />);
-      await act(async () => {
-        screen.getByLabelText('new session in alpha').click();
-      });
+      await addInProject('p1');
       // The Projects `+` is not the pending control, so it is still live.
       expect(control().disabled).toBe(false);
 
@@ -533,9 +547,7 @@ describe('new project — the chord', () => {
     inner.write.createSession = () => gate;
     const picker = withDialog(async () => CHOSEN);
     render(<Canvas model={MODEL} source={source} />);
-    await act(async () => {
-      screen.getByLabelText('new session in alpha').click();
-    });
+    await addInProject('p1');
     await pressNewProject();
     expect(picker.count).toBe(0);
     expect(spawned).toEqual([]);

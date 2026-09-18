@@ -56,9 +56,11 @@ import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { IconMark, parseIcon } from './icon-value.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
+import { MARK_LANE_PX, StatusMark } from './status-mark.js';
 
 /**
  * What `pendingAction` holds while "new project" is running.
@@ -86,6 +88,15 @@ const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
  *  a fresh reference per render is a prop that always looks changed. */
 const NO_JUMP_LABELS: ReadonlyMap<string, string> = new Map();
 
+/**
+ * The status hue, for the surfaces that paint a BAND rather than a mark.
+ *
+ * One caller left: the focused row's cursor stripe, which is a 2px bar and has
+ * no room to be a shape. The marks themselves moved to `status-mark.tsx` when
+ * the dots became five distinct glyphs -- a colour is the channel that is
+ * missing for somebody, and five circles differing only in hue is the reading
+ * the operator called samey.
+ */
 const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
@@ -93,6 +104,104 @@ const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   done: 'bg-done',
   failed: 'bg-failed',
 };
+
+/**
+ * ONE INDENT UNIT FOR THE WHOLE TREE, in px.
+ *
+ * The sidebar draws three levels -- group, project, session -- and used to
+ * indent them by two unrelated numbers written five hundred lines apart: a
+ * grouped project stepped 8px in from its group, and that project's rows
+ * stepped 6px in from it. A ladder whose rungs get CLOSER as it descends does
+ * not read as a ladder, which is precisely the report this constant answers
+ * ("the indent between project, group and session is not clear").
+ *
+ * So: one unit, and each level at a whole multiple of it.
+ *
+ *   group   0 -- the datum. Nothing is drawn above a group, so an indent here
+ *                would be measured from the pane's edge and mean nothing.
+ *   project 1 -- but ONLY inside a group. Depth is what a level is, and a
+ *                project belonging to no group has no parent on screen to be
+ *                indented from; spending width on a hierarchy that is not
+ *                there is how the flat sidebar (every store that has never
+ *                made a group) would pay for a feature it does not use.
+ *   session 2 -- always one unit inside its own project, whatever depth that
+ *                project sits at. This is the step the operator actually
+ *                follows down the column, so it is the one that must never be
+ *                the smaller of the two.
+ *
+ * TEN, because the row already carries ten of its own left padding
+ * (`px-2.5`): the indent and the row's internal rhythm are then the same
+ * number, and the focused row's slab and its cursor stripe land exactly on
+ * the indent line rather than a pixel or two off it. Two units is 20px of a
+ * 200px column at the sidebar's minimum width, which is the most a column
+ * where the title and the branch already truncate can afford to give.
+ *
+ * SPENT AS AN INLINE `style`, never as a `pl-[10px]` class: Tailwind's scanner
+ * reads source text, so a class assembled from a constant is one it never
+ * generates -- the same trap `BRANCH_TAIL_MAX_CHARS` documents below.
+ */
+export const SIDEBAR_STEP = 10;
+
+/**
+ * How big a HEADING's glyph is — a project's and a group's, which are the only
+ * icons the sidebar draws.
+ *
+ * Operator: "Icon ở sidebar cần lớn hơn." The number is not a preference, and
+ * it is not new either: it is `MARK_LANE_PX`, the box every session's status
+ * mark below is centred in, and taking it fixes an inversion that was already
+ * written down as the opposite.
+ *
+ * WHAT WAS INVERTED. `status-mark.tsx` picks 14 for its lane and says why: it
+ * is "one pixel under" the heading's slot, "so a session's mark reads as a
+ * smaller relative of the heading's glyph rather than as its equal". That is a
+ * claim about two BOXES, and it held. The GLYPHS inside them went the other
+ * way -- the mark draws at 12 inside its 14, the heading drew at 11 inside its
+ * 15 -- so on screen the level above was the smaller mark. The eye reads the
+ * ink, not the box, which is why the sidebar looked the way the operator said
+ * it looked while every number in it was the number somebody chose.
+ *
+ * A HEADING'S GLYPH WAS THEREFORE MADE THE LANE ITSELF, 14: as tall as the
+ * whole box the mark below it is merely centred in, two pixels taller than
+ * the mark's own ink rather than one shorter -- the relation the geometry had
+ * claimed all along -- and at the time the largest step that changed nothing
+ * else: the slot grew by one pixel to what was then the name's own line box
+ * (16px, `text-meta`'s leading).
+ *
+ * THE SLOT IS THE NAME'S LINE BOX AGAIN. The name moved up to `text-heading`
+ * (15px on a 20px line) and at first the slot stayed at 16, because the
+ * emoji's ink filled it. The operator, reading the result: "the emoji in the
+ * sidebar needs to be a bit bigger" -- a 12px picture beside a 15px name is
+ * the picture reading as the smaller thing, which is the same inversion as
+ * before at a new level. So the slot is `HEADING_SLOT_PX`, the line's own
+ * 20px (`--text-heading--line-height`), the emoji takes the name's own size
+ * (`text-heading`), and the glyph is the slot less four pixels of air -- a
+ * lucide glyph's ink is its `size` or a little under, and four is what keeps
+ * a full-height stroke off the slot's edge at every one of the eight tones.
+ * The row does not move: the slot is exactly the name's line, and the row is
+ * that line plus its bottom padding (the guard's `heading row` reads it).
+ *
+ * DERIVED, NEVER COPIED. The glyph reads the slot, and
+ * `SessionList.icon.test.tsx` asserts the DOM carries this number and that it
+ * stays ABOVE `MARK_LANE_PX` -- the level above is never the smaller mark --
+ * so the two cannot drift into two answers about one relationship.
+ *
+ * IT SIZES ONE OF THE TWO KINDS OF ICON, and that is a fact about the pixels
+ * rather than an omission. An emoji is text: `IconMark` hands this number to a
+ * lucide glyph and ignores it for an emoji, which takes the slot's own type
+ * class. The two kinds do not paint the same size at the same number --
+ * measured on the composited pixels, a full-box emoji's ink runs three to four
+ * pixels PAST its font-size (11px drew 14 tall, 12px drew 15) while a lucide
+ * glyph's ink is its `size` or a little under (`Monitor` at 11 drew 9,
+ * `Rocket` 11, `Rocket` at 14 drew 13). So the slot carries `text-heading`
+ * (15px) beside this 16, which keeps the two kinds a few pixels apart with
+ * the emoji the larger, by exactly the margin a picture has over a stroke.
+ * Not every emoji is full-box -- a diagonal one like the hammer paints eight
+ * or nine at any size, because that is the drawing -- and no font-size fixes
+ * that without overflowing the rest. `e2e/sidebar-tree-shots.mjs` measures
+ * both inks against the mark's and against the slot.
+ */
+export const HEADING_SLOT_PX = 20;
+export const HEADING_GLYPH_PX = HEADING_SLOT_PX - 4;
 
 /**
  * A branch name split so the END survives a narrow column.
@@ -1768,11 +1877,15 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-ink-faint">
                   <Monitor size={11} strokeWidth={1.7} />
                 </span>
-                <span className="truncate font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-                  {starting.projectName}
-                </span>
+                {/* Typed exactly like the real project heading below -- upper
+                    case and letter-spacing dropped with it, `text-heading`
+                    and the sans face taken with it: this row becomes one the
+                    moment the session arrives, and a change of case, of size
+                    or of face at that moment would read as the name having
+                    been rewritten. */}
+                <span className="truncate text-heading text-ink-dim">{starting.projectName}</span>
               </div>
-              <div className="flex flex-col gap-[5px] pl-1.5">
+              <div className="flex flex-col gap-[5px]" style={{ paddingLeft: SIDEBAR_STEP }}>
                 <div
                   data-session-starting
                   aria-live="polite"
@@ -1786,12 +1899,34 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               </div>
             </li>
           )}
-          {drawn.map((item) => {
+          {drawn.map((item, index) => {
             if (item.kind === 'group') {
               const { group, count } = item;
               const isGroupCollapsed = groupCollapsed.includes(group.id);
               return (
-                <li key={group.id} className="flex flex-col gap-[5px]">
+                <li
+                  key={group.id}
+                  /* A RULE AND SOME AIR ABOVE EACH GROUP. The list's own
+                     `gap-3.5` separates every sibling by the same amount, so a
+                     group boundary -- the one boundary in this column that
+                     ends a whole subtree -- looked exactly like the gap
+                     between two projects inside one. The line is what says
+                     "everything above here belonged to something else".
+
+                     NOT above the first, and the exception is about what is
+                     above it rather than about which group it is: the search
+                     chrome already draws a border a few pixels up, and a
+                     second line under it reads as a double rule rather than as
+                     a separator. (Two transient rows can precede it -- the
+                     new-group editor and a project being created -- and for
+                     the seconds they exist the first group keeps its bare top.
+                     Drawing the rule for them would mean recomputing this from
+                     state that is about to vanish.) */
+                  className={[
+                    'flex flex-col gap-[5px]',
+                    index === 0 ? '' : 'border-line border-t pt-3.5',
+                  ].join(' ')}
+                >
                   {/* A caption over captions. Same <div>, same reasons as the
                       project heading below: not a control, not focusable,
                       never a stop for `j`. A second caption level adds no
@@ -1809,16 +1944,46 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     }
                     className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
                   >
+                    {/* THE SLOT IS THE NAME'S LINE BOX: 20px is
+                        `--text-heading--line-height`, the leading of the name
+                        beside it, so the icon stands as tall as the line it
+                        heads rather than two-thirds of it (`HEADING_SLOT_PX`;
+                        the literal here is Tailwind's, the number is owned
+                        there). `text-heading` is the EMOJI's size (an emoji
+                        is text and takes no `size`): the name's own, so the
+                        picture is never the smaller thing beside it -- see
+                        `HEADING_GLYPH_PX`, which owns the argument for all
+                        three numbers and the measured inks. */}
                     <span
                       data-group-icon={group.id}
-                      className="flex h-[15px] w-[15px] flex-none items-center justify-center text-meta leading-none text-ink-faint"
+                      className="flex h-[20px] w-[20px] flex-none items-center justify-center text-heading leading-none text-ink-faint"
                     >
-                      {group.icon ?? <Folder size={11} strokeWidth={1.7} />}
+                      {/* `text-ink-faint` on the span is the EMOJI's ink and
+                          the placeholder's; a chosen glyph carries its own
+                          tone class, which wins on the element itself. The two
+                          agree when the tone is `neutral`, which is the value
+                          `--vam-icon-neutral` holds for exactly that reason
+                          (`styles.css`). */}
+                      <IconMark
+                        value={parseIcon(group.icon)}
+                        size={HEADING_GLYPH_PX}
+                        fallback={<Folder size={HEADING_GLYPH_PX} strokeWidth={1.7} />}
+                      />
                     </span>
                     {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
                       groupEditor
                     ) : (
-                      <span className="truncate font-mono text-meta text-ink uppercase tracking-[0.12em]">
+                      /* `text-heading`, one step above the rows under it, and
+                         in the SANS face the rows are titled in. The argument
+                         for both is made once, on the project name below,
+                         because the operator asked for both levels in one
+                         breath each time. The register is untouched: upper
+                         case and tracking are what separate this level from
+                         the project's, and at 15px a name the column cannot
+                         hold still clips to an ellipsis before the count and
+                         the controls, which do not move -- measured, at the
+                         default width, with a 531px name in a 117px box. */
+                      <span className="truncate text-heading text-ink uppercase tracking-[0.12em]">
                         {group.name}
                       </span>
                     )}
@@ -1952,7 +2117,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               setGroupDraft({ kind: 'rename', group });
                               setOpenGroupMenu(null);
                             }}
-                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             Rename project
                           </button>
@@ -1966,7 +2131,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               onPickGroupIcon(group);
                               setOpenGroupMenu(null);
                             }}
-                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             Change project icon
                           </button>
@@ -1993,7 +2158,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               onUngroup(group);
                               setOpenGroupMenu(null);
                             }}
-                            className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                           >
                             Ungroup
                           </button>
@@ -2009,13 +2174,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               <li
                 key={section.project.id}
                 {...(section.group === null ? {} : { 'data-in-group': section.group.id })}
-                className={[
-                  'flex flex-col gap-[5px]',
-                  // The indent the level above buys, on the container rather
-                  // than per row -- the same decision `data-project-rows` already
-                  // documents one level down, for the same reason.
-                  section.group === null ? '' : 'pl-2',
-                ].join(' ')}
+                // The indent the level above buys, on the container rather
+                // than per row -- the same decision `data-project-rows` already
+                // documents one level down, for the same reason. ONE unit, and
+                // only for a project that has a group above it to be indented
+                // FROM: see `SIDEBAR_STEP`.
+                style={section.group === null ? undefined : { paddingLeft: SIDEBAR_STEP }}
+                className="flex flex-col gap-[5px]"
               >
                 {/* A caption, not a stop. A plain <div>, so nothing can focus it
                 and `j` never lands on a heading. */}
@@ -2044,28 +2209,87 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       tip is the label alone. It replaces a native `title`,
                       which no browser opens on keyboard focus. */}
                   <ShortcutTip label="Change project icon">
+                    {/* Same slot as the group's above -- 20px, the name's own
+                        line, `text-heading` for the emoji -- and the same
+                        `HEADING_GLYPH_PX` for the glyph, because a level is
+                        not a third kind of icon. `vam-hit-24` hangs
+                        the hit area off an `::after` and the phone floor is a
+                        `min-`, so neither box moves with this one. */}
                     <button
                       type="button"
                       data-project-icon={section.project.id}
                       onClick={() => onPickIcon(section.project)}
                       aria-label={`change icon for ${section.project.name}`}
-                      className="vam-tap vam-hit-24 flex h-[15px] w-[15px] flex-none cursor-pointer items-center justify-center text-meta leading-none text-ink-faint hover:text-ink-dim"
+                      className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-heading leading-none text-ink-faint hover:text-ink-dim"
                     >
-                      {section.project.icon ?? (
-                        /* A monitor, not a middot. The glyph has to read as "this
-                         is a machine you can name" — the middot read as a bullet
-                         and gave a clickable control no affordance at all. It is
-                         a placeholder in the literal sense: the picker replaces
-                         it with whatever emoji you choose, and choosing nothing
-                         leaves something that still looks deliberate. */
-                        <Monitor data-project-icon-placeholder size={11} strokeWidth={1.7} />
-                      )}
+                      <IconMark
+                        value={parseIcon(section.project.icon)}
+                        size={HEADING_GLYPH_PX}
+                        fallback={
+                          /* A monitor, not a middot. The glyph has to read as "this
+                           is a machine you can name" — the middot read as a bullet
+                           and gave a clickable control no affordance at all. It is
+                           a placeholder in the literal sense: the picker replaces
+                           it with whatever icon you choose, and choosing nothing
+                           leaves something that still looks deliberate. It is also
+                           what a value this build cannot draw falls back to, so an
+                           icon named by a newer vam looks like "none picked"
+                           rather than like a printed storage key. */
+                          <Monitor
+                            data-project-icon-placeholder
+                            size={HEADING_GLYPH_PX}
+                            strokeWidth={1.7}
+                          />
+                        }
+                      />
                     </button>
                   </ShortcutTip>
                   {projectDraft?.id === section.project.id ? (
                     projectEditor
                   ) : (
-                    <span className="truncate font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
+                    /* NOT UPPER CASE, and not letter-spaced. Both are a
+                       caption's loudest register, and this heading was wearing
+                       them directly under a group heading wearing the same --
+                       so the two levels shouted in one voice and the eye had
+                       nothing to sort them by. The group keeps the register
+                       (it is the level above and says so); a repo is written
+                       the way its directory is written, which is also the way
+                       the operator typed it. Upper case cost legibility too:
+                       a repo name is mostly lower-case letters with
+                       distinctive ascenders, and capitalising them throws that
+                       shape away in the narrowest column in the app.
+
+                       ONE STEP ABOVE THE ROWS IT HEADS. The operator, reading
+                       the column: "make the font size of the project and the
+                       group a bit larger than the session". It was the other
+                       way round -- this name sat at `text-meta` (11px) over
+                       rows titled at `text-body` (13px), so the level that
+                       groups the list was the smallest type in it. "A bit
+                       larger than the session" is the scale's own next step
+                       up from the row, `text-heading` (15px), and not a new
+                       number between the two: the scale has four steps and
+                       `test/renderer/type-scale.test.ts` holds it to four.
+                       The cost is one pixel of row: `text-heading` carries a
+                       20px line where `text-meta` carried 16, and 20 plus the
+                       `pb-0.5` is 22 against the 21px `min-h` -- measured,
+                       and the same on the group above. The count beside the
+                       name stays `text-meta`: it is subordinate to the name,
+                       not a peer of the rows. `e2e/sidebar-tree-shots.mjs`
+                       reads both sizes off the paint and asserts the order.
+
+                       AND NOT MONO. The operator, once the sizes had moved:
+                       "use the regular font, not mono". Both heading names
+                       were set in `--font-mono` over rows titled in
+                       `--font-sans`, so the level that names the list was the
+                       one thing in it written like a code sample -- and at
+                       15px a mono repo name is also the widest thing in the
+                       narrowest column, since every glyph takes the em. A
+                       heading is set in the face of the titles it heads; the
+                       count beside it stays mono, because a count is meta and
+                       every piece of meta here (branch, age, badge) is mono.
+                       The same guard reads `fontFamily` off every heading
+                       name against the row title's and asserts they agree. */
+                    <span className="truncate text-heading text-ink-dim">
                       {section.project.name}
                     </span>
                   )}
@@ -2130,73 +2354,26 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     <MoreHorizontal size={12} strokeWidth={1.8} />
                   </button>
 
-                  {/* Real now: `createSession` starts a detached tmux session in
-                  the project's own directory, so the caption says that. It
-                  said "Sessions are created from the CLI" for a while after
-                  that stopped being true, and carried `data-placeholder` on a
-                  live control — a tooltip is a claim, and a wrong one costs
-                  more than none. When a source genuinely cannot create, the
-                  caption is that source's own refusal and the click still
-                  answers on the status bar: refusing on click and saying why
-                  is honest; refusing by being unclickable just reads as
-                  broken. */}
-                  {/* This used to render only for the project holding focus, on
-                  the reasoning that one `+` per heading meant a column of
-                  boxes standing over the session names at all times, for a
-                  control that "can only mean the project holding focus". Half
-                  of that has expired: since the add genuinely creates a
-                  session in the project it names, adding to a project you are
-                  not currently in is an ordinary thing to want, and gating on
-                  focus read to the operator as the button having disappeared.
-                  So it follows the menu's idiom now -- always in the DOM,
-                  revealed on hover of its own heading, and left opaque for the
-                  project that holds focus. The column-of-boxes objection is
-                  answered by the reveal, not by absence. The cost the old
-                  comment was buying off is real and accepted: every heading is
-                  a tab stop again, so Tab through a sidebar of N projects
-                  passes 3N heading controls before the rows. `focus:opacity-100`
-                  keeps each stop visible when you land on it, and the keyboard
-                  path that matters -- `j`/`k` down the sessions, `p` to the
-                  focused project's controls -- does not go through Tab at
-                  all. */}
-                  {/* Last in the row, and last in tab order with it. The two
-                  controls that act on the heading itself come first; the one
-                  that adds something to the project comes after them. DOM
-                  order is the only thing setting tab order here -- there is no
-                  tabindex anywhere in this row -- so moving the markup moved
-                  the keyboard path, and that is the intent, not a side
-                  effect. */}
-                  {/* The refusal rides in the TOOLTIP, not a `title`: the
-                  `aria-label` promises a new session unconditionally, so
-                  without this a keyboard user pressed the button, got silence,
-                  and had no route to why. Same treatment as New session
-                  above. The chord is offered only when there is a route --
-                  `o` declines identically, so naming it beside the refusal
-                  would read as "press this instead". */}
-                  <ShortcutTip
-                    label={newSessionDecline ?? `New session in ${section.project.name}`}
-                    action={newSessionDecline === null ? { kind: 'newSession' } : undefined}
-                  >
-                    <button
-                      type="button"
-                      data-new-session-in-project={section.project.id}
-                      onClick={() => onAddInProject(section.project)}
-                      aria-label={`new session in ${section.project.name}`}
-                      className={[
-                        'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
-                        isRevealed ||
-                        section.items.some((entry) => entry.session.id === focusedSessionId)
-                          ? 'opacity-100'
-                          : 'opacity-0',
-                      ].join(' ')}
-                      {...pending(
-                        section.project.id,
-                        `Starting a session in ${section.project.name}…`,
-                      )}
-                    >
-                      <Plus size={13} strokeWidth={1.7} />
-                    </button>
-                  </ShortcutTip>
+                  {/* THE `+` THAT USED TO STAND HERE IS IN THE MENU NOW, and
+                  the whole argument for that is the column it left. Every
+                  heading carried three controls -- fold, menu, add -- over a
+                  narrow list whose rows are mostly quiet, and the operator
+                  read the result as clutter. Two of the three are about the
+                  heading itself; the third is the only one that makes
+                  something, and a menu is where a made thing belongs.
+
+                  What the move costs is one click, and what it buys back is
+                  more than that: the menu focuses its first item on open, and
+                  the add is that item, so `...` then Enter is the pointer-free
+                  gesture that the hover-revealed `+` never had. It also gets
+                  room for words -- see the refusal at the item itself, which
+                  used to need a tooltip because an icon button has nowhere to
+                  put a sentence.
+
+                  The reveal-on-hover reasoning this replaced is not lost, it
+                  is answered: the objection to a permanent `+` was a column of
+                  boxes standing over the session names, and no box now stands
+                  there at all. */}
 
                   {/* There is still no "Project settings": vam has no
                     per-project setting to open.
@@ -2211,7 +2388,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     it -- so the item can end what it is entitled to end,
                     persist a removal for the remainder, and state both counts
                     instead of reporting its own inability. It is destructive
-                    and it is last, behind a confirm. */}
+                    and it is last, behind a confirm.
+
+                    EVERY ITEM IN BOTH MENUS WEARS `vam-tap` NOW, which is
+                    inert on a desktop and a 44px floor on a phone. They did
+                    not, because on a phone these menus held nothing on the
+                    critical path -- a 28px "Change project icon" is a target
+                    somebody misses, not a task they cannot do. Moving the
+                    per-project new session in here changed that: it was a
+                    control with the floor, and the ONLY route to starting a
+                    session in a named project. A control that changes surface
+                    keeps its floor, and one item at 44px beside four at 28
+                    would be a menu that looks broken -- so the floor is the
+                    menu's, not the item's. */}
                   {openMenu === section.project.id && (
                     <div
                       ref={projectPanelRef}
@@ -2226,6 +2415,57 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       }}
                       className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
                     >
+                      {/* FIRST, and first is a decision rather than an
+                          accident of when it was added. Everything else in
+                          this menu arranges the project or ends it; this is
+                          the only item that makes something, and the panel
+                          puts focus on its first item when it opens -- so
+                          first is what turns `...`+Enter into the accelerator
+                          the hover-revealed `+` could never be for a keyboard.
+                          It is also as far as the list can put it from the one
+                          red item at the bottom.
+
+                          The heading's own DOM order said the opposite ("the
+                          controls acting on the heading come first, the one
+                          that adds comes after them"), and that rule does not
+                          carry across: it was about TAB ORDER through a row of
+                          icons nothing focuses by default, where being last
+                          costs nothing. Here the first position is the focused
+                          one.
+
+                          THE REFUSAL IS THE ITEM'S OWN SECOND LINE. It used to
+                          need a tooltip -- an icon button has nowhere to put a
+                          sentence, and a `title` opens on hover and nothing
+                          else, so a keyboard user pressed and got silence. A
+                          menu item has the room, and visible text is the one
+                          channel that reaches everybody. The item stays
+                          clickable either way: refusing on click and saying
+                          why is honest, while a control that cannot be pressed
+                          just reads as broken.
+
+                          No chord is offered beside it. `o` starts a session
+                          in the FOCUSED session's project, which is a
+                          different project from the one this menu names
+                          whenever it matters -- printing it here would read as
+                          "press this instead" for a key that does something
+                          else. */}
+                      <button
+                        type="button"
+                        role="menuitem"
+                        data-project-menu-item="new-session"
+                        onClick={() => {
+                          onAddInProject(section.project);
+                          setOpenMenu(null);
+                        }}
+                        className="vam-tap flex cursor-pointer flex-col justify-center gap-0.5 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                      >
+                        New session
+                        {newSessionDecline !== null && (
+                          <span data-new-session-decline className="text-ink-faint text-meta">
+                            {newSessionDecline}
+                          </span>
+                        )}
+                      </button>
                       {/* "Rename repo", not "Rename project" -- the group
                           menu already owns that label one level up (UI
                           "project" is the code's `Group`), and the
@@ -2243,7 +2483,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             setProjectDraft(section.project);
                             setOpenMenu(null);
                           }}
-                          className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                          className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                         >
                           Rename repo
                         </button>
@@ -2256,7 +2496,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           toggleCollapse(section.project);
                           setOpenMenu(null);
                         }}
-                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                       >
                         {isCollapsed ? 'Expand project' : 'Collapse project'}
                       </button>
@@ -2268,7 +2508,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           onPickIcon(section.project);
                           setOpenMenu(null);
                         }}
-                        className="cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                       >
                         Change project icon
                       </button>
@@ -2284,7 +2524,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           setConfirming(section.project);
                           setOpenMenu(null);
                         }}
-                        className="flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-danger hover:bg-line-strong"
+                        className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-danger hover:bg-line-strong"
                       >
                         <Trash2 size={12} strokeWidth={1.8} />
                         Remove project
@@ -2305,16 +2545,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   to that heading". Full-bleed highlight was the alternative
                   and it is the wrong one -- a background wider than the row
                   it highlights re-erases the grouping the indent just drew.
-                  Six pixels, because the sidebar is narrow: the rows already
-                  carry 10px of their own left padding, so this is a visible
-                  step without spending a tab stop of a column where the
-                  title and the branch already truncate -- the age never
-                  does, on purpose (`BRANCH_TAIL_MAX_CHARS`), which is the
-                  one thing worth spending a pixel to keep readable. */}
+                  ONE `SIDEBAR_STEP`, which is the same unit the project
+                  heading above takes from its group -- it used to be six
+                  pixels here against that heading's eight, so the deeper of
+                  the two levels stepped LESS than the shallower one and the
+                  column read flat. The narrowness argument that chose six
+                  survives in the size of the unit, not in a second number:
+                  see `SIDEBAR_STEP`. */}
                 {!isCollapsed && (
                   <div
                     data-project-rows={section.project.id}
-                    className="flex flex-col gap-[5px] pl-1.5"
+                    style={{ paddingLeft: SIDEBAR_STEP }}
+                    className="flex flex-col gap-[5px]"
                   >
                     {/* A SESSION THAT DOES NOT EXIST YET, and says so.
                         It is NOT a `data-session-row`: those are things the
@@ -2512,13 +2754,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 )}
 
                                 <span className="flex items-center gap-2">
-                                  <span
-                                    className={[
-                                      'h-[7px] w-[7px] flex-none rounded-full',
-                                      STATUS_DOT[session.status],
-                                      needsYou || session.status === 'running' ? 'vam-breathe' : '',
-                                    ].join(' ')}
-                                  />
+                                  {/* A MARK, not a dot. Five statuses drawn as
+                                    five circles differing only in hue is the
+                                    reading the operator called samey -- and
+                                    hue is the one channel that is missing for
+                                    somebody (WCAG 1.4.1). Each status is a
+                                    shape now, in a lane that does not resize
+                                    when one becomes another, and the motion
+                                    each carries is its own: see
+                                    `status-mark.tsx` for which and why. The
+                                    `vam-breathe` that used to pulse the
+                                    running and waiting dots went with them --
+                                    a spinner that also breathes is two
+                                    animations saying one thing.
+                                    SILENT ON A PHONE: `data-row-meta` below
+                                    prints the status as visible text there,
+                                    and a second invisible copy is read
+                                    twice. */}
+                                  <StatusMark status={session.status} announce={!phone} />
                                   {/* No session icon here. The row drew one --
                                     the shared chain, always occupying its slot
                                     -- and the operator removed it: an icon per
@@ -2647,9 +2900,59 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 channel over data no source supplies, so a row at
                                 rest read as a dashboard reporting nothing. */}
                                 {!phone && (
-                                  <span className="flex items-center gap-1.5 font-mono text-meta text-ink-faint">
+                                  /*
+                                   * QUIETER THAN `ink-faint`, AND BY OPACITY RATHER THAN BY A
+                                   * DIMMER TOKEN. The operator asked for the age and the branch
+                                   * to recede. `--vam-ink-faint` cannot carry that: it is in
+                                   * `TEXT_TOKENS` and so owes WCAG 1.4.3's 4.5:1 on every surface
+                                   * it is painted on, and its worst pairing
+                                   * (`--vam-in-bubble`) is already 4.71:1 -- 0.21 of headroom.
+                                   * One step down fails that guard everywhere the token is worn,
+                                   * most of it nowhere near this row.
+                                   *
+                                   * Opacity composites against whatever surface the row is
+                                   * actually on, so the pair stays in tone wherever the row is
+                                   * drawn. The value is picked from a MEASUREMENT rather than
+                                   * from arithmetic over the token a reader would guess at: all
+                                   * seven rows composite over `--vam-raised`, not over
+                                   * `--vam-sidebar` and not over the selected row's fill. On that
+                                   * ground 0.82 lands at 4.74:1. The floor is 0.80
+                                   * (4.59:1) and 0.78 fails, so this keeps roughly a fifth of a
+                                   * point in hand -- which is the budget a future palette has to
+                                   * move `--vam-raised` within before the guard below stops it.
+                                   *
+                                   * `token-contrast.test.ts` CANNOT SEE THIS. It parses the
+                                   * stylesheet and compares two declarations, so an opacity on an
+                                   * element is invisible to it and it stays green at any value.
+                                   * The real measurement is therefore an e2e guard that reads
+                                   * `getComputedStyle` on this span and composites it by hand --
+                                   * `sidebar-tree-shots.mjs`. Dimming further without moving that
+                                   * guard's number is how this silently becomes unreadable.
+                                   */
+                                  <span
+                                    // Its own hook rather than `data-row-meta`, which is the
+                                    // PHONE row's and is asserted absent here. The guard needs to
+                                    // find the element the opacity sits on, not one of its
+                                    // children, because compositing is a property of this node.
+                                    data-row-meta-line
+                                    className="flex items-center gap-1.5 font-mono text-meta text-ink-faint opacity-[0.82]"
+                                  >
                                     <span className="flex min-w-0 flex-1 items-center gap-1">
-                                      <GitBranch size={10} strokeWidth={1.6} />
+                                      {/* THE GLYPH GOES WITH THE NAME. A branch
+                                          icon beside an em-dash is a row
+                                          announcing that it has nothing to
+                                          announce -- two marks spent on an
+                                          absence, on every row of every source
+                                          that cannot report a branch, which is
+                                          most of them. Nothing is lost by
+                                          drawing neither: there was no name to
+                                          print either way, and the sentence
+                                          that says WHOSE gap it is stays below
+                                          in the row's accessible name, where
+                                          it was the only copy anyway. */}
+                                      {session.branch !== null && (
+                                        <GitBranch size={10} strokeWidth={1.6} />
+                                      )}
                                       <span
                                         data-session-branch
                                         // `title` survives ONLY for the non-null case, where it
@@ -2672,12 +2975,20 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                         className="flex min-w-0 items-center overflow-hidden"
                                       >
                                         {session.branch === null ? (
-                                          <>
-                                            —
-                                            <span className="sr-only">
-                                              this source cannot say which branch the session is on
-                                            </span>
-                                          </>
+                                          /* The em-dash is gone and the
+                                             sentence is not: a screen reader
+                                             still learns which fact is missing
+                                             and why, from the one place that
+                                             ever carried it. The age cell
+                                             below KEEPS its dash, and the
+                                             difference is deliberate -- it
+                                             holds a column open on the right
+                                             edge that a number will land in,
+                                             where the branch dash held nothing
+                                             open at all. */
+                                          <span className="sr-only">
+                                            this source cannot say which branch the session is on
+                                          </span>
                                         ) : (
                                           <>
                                             <span data-branch-head className="truncate">

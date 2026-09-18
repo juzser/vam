@@ -88,7 +88,7 @@ const EN = {
 
   // ── Appearance ───────────────────────────────────────────────────────────
   'settings.appearance.hint':
-    'theme, colours, the size of the text in out, how much of a turn the transcript draws, and the file editor',
+    "theme, colours, the size of the text in out and in the terminal, the terminal's own colour scheme, how much of a turn the transcript draws, what a session tab shows, and the file editor",
   'settings.appearance.theme.label': 'theme',
   'settings.appearance.theme.hint': 'system follows what the operating system asks for',
   'settings.appearance.templates.label': 'templates',
@@ -100,11 +100,71 @@ const EN = {
   'settings.appearance.outText.label': 'out text',
   'settings.appearance.outText.hint':
     "how large the agent's answer is drawn, in every response pane",
+  // THE TERMINAL'S OWN SIZE. The label says which surface, because vam draws
+  // text in more than one and only this one is measured in columns.
+  'settings.appearance.terminalText.label': 'terminal text',
+  'settings.appearance.terminalText.hint':
+    'how large the tmux screen is drawn — a bigger size fits fewer columns, and vam tells tmux the new width',
+  // THE TERMINAL'S OWN SCHEME, in four rows. One theme row per APP theme
+  // rather than one for the theme on screen, because a scheme is a published
+  // palette chosen by name and previewed on its chip -- there is nothing to
+  // judge blind. The colour grid IS for the theme on screen only, for the
+  // reason the app palette's grid gives: a single colour can only be judged
+  // against the ground it will be worn on. Each theme hint names that mode's
+  // DEFAULT, read off the model rather than typed, so the caption cannot say
+  // Hans after somebody changes the table.
+  'settings.appearance.terminalTheme.label': 'terminal theme — {on}',
+  'settings.appearance.terminalTheme.hint':
+    'the scheme the tmux screen wears while the app is {on} — {default} unless you choose another; the colours below still edit it afterwards',
+  'settings.appearance.terminalColours.label': 'terminal colours — {theme}',
+  'settings.appearance.terminalColours.hint':
+    'each colour of the {theme} scheme, over the theme chosen above — unset follows the theme, and {other} keeps its own',
+  'settings.appearance.terminalColours.reset': 'reset {theme} terminal colours',
+  'settings.appearance.terminalOpacity.label': 'terminal background',
+  // THE FLOOR IS SAID, because a slider that stops at 30% with no word about
+  // it reads as a slider that is stuck: under it the pane's own grey shows
+  // through more than the scheme's ground does (`prefs/terminal-scheme.ts`).
+  'settings.appearance.terminalOpacity.hint':
+    "how much of the scheme's ground is painted over the pane — the rest is the pane's own surface showing through, and it stops at 30% because every colour was chosen against that ground",
+  // THE VIEWS' WIDTH. The hint carries three facts an operator cannot guess and
+  // would otherwise meet as a fault: that the Terminal is one of the four views
+  // this reaches, that narrowing it tells tmux a new column count — which
+  // re-wraps the screen of a session that is still running — and that the
+  // fraction has a threshold, so a pane too narrow for two thirds of it to
+  // hold 80 characters is left whole rather than narrowed (the operator met
+  // the older floor as a defect in a split, `prefs/view-width.ts`).
+  'settings.appearance.narrowViews.label': 'view width',
+  'settings.appearance.narrowViews.hint':
+    'draw the response, PRs, agents and terminal views at two thirds of the pane instead of filling it, while that is at least 80 characters — a narrower pane, such as one side of a split, is left whole; the terminal is told the narrower column count, so tmux re-wraps its screen',
+  'settings.appearance.narrowViews.on': 'narrowed',
+  'settings.appearance.narrowViews.off': 'full pane',
   'settings.appearance.focusView.label': 'focus view',
   'settings.appearance.focusView.hint':
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",
   'settings.appearance.focusView.on': 'on',
   'settings.appearance.focusView.off': 'off',
+  // WHAT A SESSION TAB DRAWS. One caption per indicator, and each caption is
+  // the whole documentation of its glyph: three of the eight are not
+  // guessable from a name (`draft` is text you have NOT sent, `pending` is a
+  // prompt the transcript has NOT recorded yet, `agents` is a count), so
+  // every caption says what the mark MEANS rather than what it looks like.
+  // The hint carries the one rule that is not a switch: idle draws nothing.
+  'settings.appearance.tabIndicators.label': 'session tabs',
+  'settings.appearance.tabIndicators.hint':
+    'what a tab shows beside its title. A tab that is idle shows only its title — that is not a switch',
+  'settings.appearance.tabIndicators.reset': 'reset tab marks',
+  'settings.appearance.tabIndicators.running': 'running — a spinner while the agent is working',
+  'settings.appearance.tabIndicators.waiting':
+    'waiting — a bell when a question or permission prompt is open for you',
+  'settings.appearance.tabIndicators.failed':
+    'failed — a triangle when the session stopped on an error',
+  'settings.appearance.tabIndicators.done': 'done — a tick when the session has finished',
+  'settings.appearance.tabIndicators.icon': 'icon — the emoji or glyph you gave the session',
+  'settings.appearance.tabIndicators.draft':
+    'draft — a pencil when this tab’s prompt box holds unsent text',
+  'settings.appearance.tabIndicators.pending':
+    'pending — a hollow dot when a prompt was sent but the transcript has not yet recorded it',
+  'settings.appearance.tabIndicators.agents': 'agents — ●N, the number of sub-agents running',
   // THE FILE EDITOR'S OWN TWO. The label says which editor, because vam has
   // more than one text box and only this one has a gutter to keep level.
   'settings.appearance.editorHighlight.label': 'file editor colours',

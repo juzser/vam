@@ -159,9 +159,55 @@ describe('Ctrl belongs to the terminal, because every Ctrl+letter is a control c
 describe('everything else modified is still vam’s, and reaches vam', () => {
   it.each([
     ['Ctrl and a digit, which is no control character', { key: '1', ctrlKey: true }],
+    // THE VIEW CHORD, which has to cross this pane to reach the grammar: it is
+    // `Ctrl-Alt-<digit>` since the operator asked for a three-key chord, and
+    // the pane declines it here on the `altKey` half of the rule rather than on
+    // the letters half. Without this row, a branch that claimed every Ctrl+Alt
+    // keystroke would take the one chord that switches a view from inside a
+    // terminal and type a control character into somebody's agent instead.
+    ['Ctrl+Alt and a digit, which vam binds to a view', { key: '1', ctrlKey: true, altKey: true }],
     ['Ctrl and an arrow', { key: 'ArrowUp', ctrlKey: true }],
     ['Ctrl and Tab, which is how the settings overlay steps', { key: 'Tab', ctrlKey: true }],
-    ['Ctrl+Shift and a letter', { key: 'P', ctrlKey: true, shiftKey: true }],
+    // THE SHIFTED CTRL KEYSTROKES THAT ARE STILL VAM'S, and they are rows
+    // rather than a sentence because they are what `!event.shiftKey` was
+    // SUSPECTED of protecting when it came out of the chord branch. It was
+    // protecting none of them: `controlStrokeFor` answers `null` for every key
+    // that is not one of the twenty-six letters, so a shifted Ctrl press of a
+    // named key, a digit, a bracket or an arrow goes back to vam by the
+    // LETTERS rule now exactly as it went back by the SHIFT rule before. Each
+    // of these was green before the branch widened and is green after, which
+    // is the only way to say that out loud rather than argue it from the shape
+    // of a condition.
+    [
+      'Ctrl+Shift and Tab, which still steps the settings overlay backwards',
+      { key: 'Tab', ctrlKey: true, shiftKey: true },
+    ],
+    [
+      'Ctrl+Shift and a digit, which arrives as the symbol above it',
+      { key: '!', ctrlKey: true, shiftKey: true },
+    ],
+    // `Mod-Shift-[` is vam's previous-tab gesture and `Mod-` IS Ctrl on Linux
+    // and Windows, so this row is what keeps stepping the tab ring reachable
+    // from inside a terminal on those platforms.
+    [
+      'Ctrl+Shift and a bracket, which vam binds to the previous session tab',
+      { key: '{', ctrlKey: true, shiftKey: true },
+    ],
+    ['Ctrl+Shift and an arrow', { key: 'ArrowUp', ctrlKey: true, shiftKey: true }],
+    [
+      'Ctrl+Alt+Shift and a letter, because Alt is still the compose key',
+      { key: 'E', ctrlKey: true, altKey: true, shiftKey: true },
+    ],
+    // THE ESCAPE HATCH, AT THE PANE'S OWN LEVEL. This element does not know
+    // which platform it is on and does not ask: it declines the COMMAND
+    // modifier, which `normalizeKey` spells `Mod-` from Cmd on macOS and from
+    // Super on Linux and Windows alike. So the two chords the pane now takes
+    // the Ctrl spelling of keep a spelling that still reaches vam from inside
+    // a terminal, on every platform.
+    [
+      'Cmd+Shift and a letter, which is how `focusList` is still reached from here',
+      { key: 'H', metaKey: true, shiftKey: true },
+    ],
     // A BRACKET FOR VAM'S OWN `Mod-Alt-[`, AND A LETTER FOR THE RULE ITSELF.
     // Only the second can catch a branch that stopped checking `altKey`: `[`
     // is not a control letter under any modifier, so the bracket case stayed
@@ -179,7 +225,7 @@ describe('everything else modified is still vam’s, and reaches vam', () => {
     ['Cmd and a letter', { key: 'k', metaKey: true }],
     ['Cmd and a digit', { key: '1', metaKey: true }],
     ['Cmd+Ctrl together, where Cmd wins', { key: 'u', metaKey: true, ctrlKey: true }],
-    ['Alt and a digit, which vam binds to a view', { key: '1', altKey: true }],
+    ['Alt and a digit, which vam binds to nothing at all now', { key: '1', altKey: true }],
     ['Alt and a letter, which macOS composes with', { key: 'e', altKey: true }],
   ])('leaves %s alone', async (_why, init) => {
     const { sent, heard } = await press(init);
@@ -243,6 +289,136 @@ describe('a chord vam cannot deliver goes back to vam rather than being eaten', 
       expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'u', ctrlKey: true })).toBe(true);
       await settle();
       expect(heard).toEqual(['u']);
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
+});
+
+/**
+ * THE SHIFTED CONTROL CHORD, AND THE HOLE IT CLOSES.
+ *
+ * MEASURED, on the revision before PR 366, by driving this component with a
+ * real window listener attached:
+ *
+ *   Ctrl+k        pane sent [control k], vam heard nothing      clean
+ *   Ctrl+w        pane sent [control w], vam heard nothing      clean
+ *   Ctrl+Shift+H  pane sent NOTHING,     vam fired focusList    double meaning
+ *   Ctrl+Shift+P  pane sent NOTHING,     vam fired newProject   double meaning
+ *
+ * PR 366 took Ctrl off vam's six application commands on macOS, so the second
+ * half of those two rows stopped happening -- and the first half never
+ * started, because the pane's rule was `ctrlKey && !altKey && !shiftKey`. The
+ * keystroke went from doing the WRONG thing to doing NOTHING AT ALL, inside a
+ * surface whose entire job is carrying a keystroke to a shell.
+ *
+ * NO TERMINAL DISTINGUISHES `Ctrl+Shift+P` FROM `Ctrl+P` -- both are 0x10, and
+ * `Ctrl+Shift+U` and `Ctrl+U` are both 0x15. A terminal that swallows a
+ * shifted control chord is simply wrong about what the wire carries, so the
+ * pane takes it and sends the same control character the unshifted chord
+ * sends. `controlStrokeFor` already lower-cases, which is what makes `'P'` a
+ * `ControlLetter` without a second rule being written anywhere.
+ *
+ * WHAT THE OLD `!event.shiftKey` TURNED OUT TO BE PROTECTING: nothing else.
+ * With Ctrl held, no branch BELOW the chord branch is reachable -- the next
+ * line returns on `ctrlKey || altKey` -- so the clause only ever decided who
+ * got `Ctrl+Shift+<letter>`, and every OTHER shifted Ctrl keystroke behaves
+ * identically under both spellings of the handler. That is a claim about
+ * behaviour, so the `leaves ... alone` table above carries it as rows:
+ * Ctrl+Shift+Tab, Ctrl+Shift and a digit, Ctrl+Shift and a bracket.
+ *
+ * LINUX AND WINDOWS PAY FOR IT, AND THE BILL IS THE ONE PR 361 ALREADY SENT.
+ * `Mod-` is Ctrl there, so `Ctrl+Shift+H` is `focusList` and `Ctrl+Shift+P` is
+ * `newProject` -- and the pane now claims both while it holds the keyboard,
+ * exactly as it has claimed `Ctrl+K`/`Ctrl+W`/`Ctrl+N`/`Ctrl+T` there since PR
+ * 361. The pane does not ask which platform it is on, and giving it a platform
+ * branch would make one surface answer one keystroke two ways for no
+ * terminal's benefit. The escape hatch is the same one macOS has: the COMMAND
+ * modifier returns above this branch, and on Linux and Windows `normalizeKey`
+ * spells Super as `Mod-` too, so Super+Shift+H still reaches the session list
+ * from inside a terminal -- `test/keyboard/ctrl-letters.test.ts` pins that,
+ * and the `Cmd+Shift and a letter` row below pins the pane's half of it.
+ */
+describe('Ctrl+Shift and a letter is the terminal’s too, because the wire cannot tell', () => {
+  it('sends Ctrl+Shift+P as C-p, the chord that had stopped doing anything at all', async () => {
+    const { sent, heard, notPrevented } = await press({
+      key: 'P',
+      ctrlKey: true,
+      shiftKey: true,
+    });
+    expect(sent).toEqual([{ kind: 'control', letter: 'p' }]);
+    // vam must not ALSO hear it. On Linux and Windows this keystroke is
+    // `newProject`, and a directory picker opening over a terminal the
+    // operator was typing into is the double meaning this closes.
+    expect(heard).toEqual([]);
+    // Cancelled, for the same reason the unshifted chord is: in a focused text
+    // control on macOS Chromium honours Cocoa's own bindings, and the shifted
+    // spellings are the selection-extending half of that family -- they would
+    // edit the hidden composition box on the way to the agent.
+    expect(notPrevented).toBe(false);
+  });
+
+  it('sends Ctrl+Shift+H as C-h, which a terminal reads as backspace', async () => {
+    const { sent, heard } = await press({ key: 'H', ctrlKey: true, shiftKey: true });
+    expect(sent).toEqual([{ kind: 'control', letter: 'h' }]);
+    expect(heard).toEqual([]);
+  });
+
+  it('sends the same control character the unshifted chord sends, for all 26', async () => {
+    for (const letter of 'abcdefghijklmnopqrstuvwxyz') {
+      const { sent } = await press({
+        key: letter.toUpperCase(),
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      expect(sent, `Ctrl+Shift+${letter.toUpperCase()}`).toEqual([{ kind: 'control', letter }]);
+      cleanup();
+    }
+  });
+
+  it('claims it by the CHARACTER, so a CapsLock+Shift press is the same chord', async () => {
+    // CapsLock and Shift cancel: the browser hands back a LOWERCASE letter
+    // with `shiftKey: true`. `controlStrokeFor` reads the character and folds
+    // the case, so both spellings of one physical press arrive as `C-p`.
+    const { sent } = await press({ key: 'p', ctrlKey: true, shiftKey: true });
+    expect(sent).toEqual([{ kind: 'control', letter: 'p' }]);
+  });
+
+  it('still loses to a composing input method, which pages with modified keys', async () => {
+    const send = await open();
+    fireEvent.keyDown(pane() as HTMLElement, {
+      key: 'P',
+      ctrlKey: true,
+      shiftKey: true,
+      isComposing: true,
+    });
+    await settle();
+    expect(keys(send)).toEqual([]);
+  });
+
+  it('goes back to vam when there is no bridge to deliver it', async () => {
+    // The browser build has no main process, and a key vam cannot deliver is
+    // not vam's to eat -- the rule the plain letters and the plain chords both
+    // already keep.
+    const heard: string[] = [];
+    const onKey = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', onKey);
+    try {
+      render(
+        <TerminalTab
+          projectId={ATLAS}
+          rowId={ATLAS}
+          read={vi.fn(async () => ok())}
+          resize={undefined}
+          send={undefined}
+        />,
+      );
+      await settle();
+      expect(
+        fireEvent.keyDown(pane() as HTMLElement, { key: 'P', ctrlKey: true, shiftKey: true }),
+      ).toBe(true);
+      await settle();
+      expect(heard).toEqual(['P']);
     } finally {
       window.removeEventListener('keydown', onKey);
     }

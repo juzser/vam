@@ -8,18 +8,26 @@
  * DOWN wherever the keyboard is inside something being typed into.
  *
  * ─────────────────────────────────────────────────────────────────────────
- * `Cmd+D` AND `Ctrl+D` ARE ONE CHORD HERE, AND THAT IS ACCEPTED, NOT MISSED.
+ * `Cmd+D` AND `Ctrl+D` ARE ONE CHORD HERE — AND THESE TWO LETTERS ARE NOW THE
+ * ONLY ONES IN THE GRAMMAR OF WHICH THAT IS TRUE.
  *
- * `normalizeKey` computes `const mod = event.ctrlKey === true || event.metaKey
- * === true` — Ctrl and Cmd fold into one `Mod-` token, deliberately and for
- * every binding in the table ("vam runs on one machine at a time, both
- * spellings mean the same intent"). So `Mod-d` is `Cmd+D` as well, the same
- * way `Mod-p` is `Cmd+P` as well as the `Cmd+Shift+P` the operator asked for.
- * The operator was told. Splitting the two would be a change to the grammar's
- * spelling rules touching every binding in it, not a change to this one.
+ * IT WAS THE RULE AND IT BECAME THE EXCEPTION, which is why this paragraph is
+ * worth reading before changing anything below. `normalizeKey` used to fold
+ * Ctrl and Cmd into one `Mod-` token for every binding in the table ("vam runs
+ * on one machine at a time, both spellings mean the same intent"), so this
+ * pair's Cmd alias was a side effect quoted as a cost.
  *
- * It is asserted below rather than left to be discovered, so that a later
- * attempt to give the two modifiers separate meanings reddens here.
+ * The operator ended that fold on PR 361 — "Ctrl + a letter applies only to
+ * the terminal, like the default terminal shortcuts" — because four of vam's
+ * eight letter chords are readline's own. Asked about these two specifically,
+ * they kept them: "keep them in the Response view; drop them in the terminal."
+ * So the pair is `CTRL_GESTURES` in `chords.ts`, a two-letter list, and the
+ * Cmd alias is now DELIBERATE rather than inherited: `Mod-d` is the command
+ * modifier like every other chord, and Control on top of that is the vim
+ * spelling the operator asked for by name.
+ *
+ * Both halves are asserted below rather than left to be discovered, so that
+ * removing either spelling reddens here.
  * ─────────────────────────────────────────────────────────────────────────
  *
  * Everything here goes through `normalizeKey` + `resolveChord` and the
@@ -51,8 +59,8 @@ const CMD_D: KeyEventLike = { key: 'd', code: 'KeyD', metaKey: true };
 const CMD_U: KeyEventLike = { key: 'u', code: 'KeyU', metaKey: true };
 
 /** The whole path a keystroke takes: normalized, then resolved. */
-function actionFor(event: KeyEventLike): KeyAction | null {
-  const key = normalizeKey(event);
+function actionFor(event: KeyEventLike, mac = true): KeyAction | null {
+  const key = normalizeKey(event, mac);
   return key === null ? null : resolveChord(EMPTY_CHORD, key).action;
 }
 
@@ -66,11 +74,30 @@ describe('Ctrl-D and Ctrl-U scroll half a screen', () => {
     expect(actionFor(CTRL_U)).toEqual({ kind: 'scrollHalf', delta: -1 });
   });
 
-  it('answers Cmd+D and Cmd+U identically — one folded chord, quoted as the cost', () => {
-    expect(normalizeKey(CTRL_D)).toBe('Mod-d');
-    expect(normalizeKey(CMD_D)).toBe('Mod-d');
-    expect(actionFor(CMD_D)).toEqual({ kind: 'scrollHalf', delta: 1 });
-    expect(actionFor(CMD_U)).toEqual({ kind: 'scrollHalf', delta: -1 });
+  it('answers Cmd+D and Cmd+U identically — the two-letter exception, on purpose', () => {
+    // THE FLAG IS PASSED, on the macOS side especially: this is the one pair
+    // whose Ctrl spelling survived PR 361, so an ambient read would prove
+    // nothing about the platform the exception was written for.
+    for (const mac of [true, false]) {
+      expect(normalizeKey(CTRL_D, mac)).toBe('Mod-d');
+      expect(normalizeKey(CMD_D, mac)).toBe('Mod-d');
+      expect(actionFor(CMD_D, mac)).toEqual({ kind: 'scrollHalf', delta: 1 });
+      expect(actionFor(CMD_U, mac)).toEqual({ kind: 'scrollHalf', delta: -1 });
+      expect(actionFor(CTRL_U, mac)).toEqual({ kind: 'scrollHalf', delta: -1 });
+    }
+  });
+
+  it('is an exception of exactly two, and the other six commands left Ctrl', () => {
+    // THE OTHER SIDE OF THE SAME DECISION, asserted here because this file is
+    // where a future reader will come to ask why `d` and `u` are special. On
+    // macOS the six application commands answer the command modifier alone;
+    // `test/keyboard/ctrl-letters.test.ts` carries the full argument and the
+    // Linux/Windows half.
+    for (const key of ['k', 'n', 't', 'w']) {
+      expect(normalizeKey({ key, code: `Key${key.toUpperCase()}`, ctrlKey: true }, true)).toBe(
+        `Ctrl-${key}`,
+      );
+    }
   });
 
   it('leaves bare `d` and `u` free, because a modified letter has its own spelling', () => {
@@ -146,23 +173,34 @@ describe('the generated key sheet names both, and names the scope', () => {
   });
 
   /**
-   * THE FOLD, PRINTED WHERE IT IS FOUND OUT. `Mod-` means Ctrl OR Cmd for
-   * every binding in the grammar, and this is the one family where that fold
-   * arrives as a surprise: the operator asked for vim's `Ctrl-D`, and `Cmd+D`
-   * — bookmark, in the browser build — now scrolls with it. The sheet is
-   * where that should be read, not discovered by pressing the key.
+   * BOTH SPELLINGS, PRINTED WHERE THEY ARE FOUND OUT. `Mod-` is the platform's
+   * command modifier for every other letter in the grammar, and this is the one
+   * family that also answers Control — so the row means more than its
+   * neighbours do and nothing in the sheet's layout can show that. The caption
+   * is the whole disclosure, in both directions: an operator who asked for
+   * vim's `Ctrl-D` must not be left guessing whether it survived, and one
+   * reaching for `Cmd+D` (bookmark, in the browser build) must not be
+   * surprised by it.
    *
    * Asserted over the GENERATED rows, both in the sheet's own captions and in
    * the plain label the settings editor shows, so it cannot fall out of one
    * of the two and stay in the other.
    */
-  it('names the Cmd alias, because Mod-d IS Cmd+D', () => {
-    expect(rowFor('Mod-d', 'select')?.label).toMatch(/cmd\+d/i);
-    expect(rowFor('Mod-u', 'select')?.label).toMatch(/cmd\+u/i);
+  it('names both spellings, because Mod-d is Ctrl+D and Cmd+D alike', () => {
+    for (const [keys, pattern] of [
+      ['Mod-d', /ctrl\+d/i],
+      ['Mod-d', /cmd\+d/i],
+      ['Mod-u', /ctrl\+u/i],
+      ['Mod-u', /cmd\+u/i],
+    ] as const) {
+      expect(rowFor(keys, 'select')?.label, keys).toMatch(pattern);
+    }
     const editorRows = buildBindingSheet().flatMap((group) => group.rows);
     expect(editorRows.length).toBeGreaterThan(30);
     expect(editorRows.find((row) => row.id === 'scrollHalf:1')?.label).toMatch(/cmd\+d/i);
+    expect(editorRows.find((row) => row.id === 'scrollHalf:1')?.label).toMatch(/ctrl\+d/i);
     expect(editorRows.find((row) => row.id === 'scrollHalf:-1')?.label).toMatch(/cmd\+u/i);
+    expect(editorRows.find((row) => row.id === 'scrollHalf:-1')?.label).toMatch(/ctrl\+u/i);
   });
 
   it('and prints an Insert row that promises no scroll at all', () => {

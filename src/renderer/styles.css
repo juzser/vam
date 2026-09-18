@@ -159,6 +159,54 @@
   --color-ansi-bright-cyan: var(--vam-ansi-bright-cyan);
   --color-ansi-bright-white: var(--vam-ansi-bright-white);
 
+  /* THE REST OF THE TERMINAL'S SCHEME: its default ink, its bold ink, the
+     cursor's pair and the selection's pair. Named `term-*` beside the sixteen
+     `ansi-*` because they are the same family -- the screen's own colours,
+     not the app's -- and kept apart from them because the sixteen are what
+     the AGENT said and these are what the OPERATOR chose
+     (`prefs/terminal-scheme.ts`).
+
+     THESE HAVE NO VALUE IN EITHER THEME BLOCK, DELIBERATELY. The `--vam-term-*`
+     properties are declared on the screen's own element -- the
+     `[data-terminal-pane]` rule further down, and the Terminal tab's inline
+     style over it, from the scheme in force -- and the utilities resolve
+     against that element because `@theme inline` emits `var(--vam-term-fg)`
+     into the rule rather than a value read off `:root`. A pair on `:root`
+     would give every other surface a way to read the terminal's ink, and the
+     scheme is the terminal's alone (`TerminalTab.scheme.test.tsx` scans for
+     readers). */
+  --color-term-fg: var(--vam-term-fg);
+  --color-term-bold: var(--vam-term-bold);
+  --color-term-cursor: var(--vam-term-cursor);
+  --color-term-cursor-accent: var(--vam-term-cursor-accent);
+  --color-term-selection-bg: var(--vam-term-selection-bg);
+  --color-term-selection-fg: var(--vam-term-selection-fg);
+
+  /* THE ICON TONES. Eight, orca's own set, for the glyph an operator picks for
+     a project, a group or a session (`panels/icon-value.tsx`). They are named
+     by TONE rather than by meaning for exactly the reason the ANSI ramp above
+     is: `--color-failed` is a SESSION STATE, and an icon painted with it would
+     be vam saying something about a session the operator only meant to
+     decorate. Nothing derives one of these -- a tone is chosen by a person and
+     means whatever they decided -- so they must not borrow a name that already
+     makes a claim.
+
+     A GLYPH IS A NON-TEXT MARK, so these owe WCAG 1.4.11's 3:1 rather than
+     1.4.3's 4.5:1, on the four fills a chosen icon really sits on: `sidebar`
+     (the two headings), `pane` and `ground` (an inactive and an active tab)
+     and `panel` (the picker). `test/renderer/token-contrast.test.ts` holds all
+     thirty-two pairs per theme and argues the choice of floor where it makes
+     it. The tone is only ever given to an `<svg>`; an emoji takes none,
+     because `color` cannot reach one. */
+  --color-icon-neutral: var(--vam-icon-neutral);
+  --color-icon-red: var(--vam-icon-red);
+  --color-icon-orange: var(--vam-icon-orange);
+  --color-icon-yellow: var(--vam-icon-yellow);
+  --color-icon-green: var(--vam-icon-green);
+  --color-icon-teal: var(--vam-icon-teal);
+  --color-icon-purple: var(--vam-icon-purple);
+  --color-icon-pink: var(--vam-icon-pink);
+
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
@@ -548,6 +596,74 @@
  * both of which are DERIVED FROM a surface that moved and would otherwise
  * have been left behind by it — see their own comments. The light block did
  * not move; `dark-ladder.test.ts` still pins all 24 of its values.
+ *
+ * ── THE FIFTH PASS: THE FURNITURE, NOT THE FLOOR ───────────────────────────
+ *
+ * Operator, naming five surfaces: the pane, the panel, the sidebar, the card
+ * and the bubble should be darker. NOT the ground, which is what the fourth
+ * pass was about and which nobody has complained about since — so this pass
+ * is the opposite shape to that one. The floor stays where it is; what comes
+ * down is what sits on it.
+ *
+ * AND "SUBTRACT N FROM THE FIVE" IS NOT AVAILABLE, which is the whole
+ * difficulty. Every one of the five is in the upper half of the ladder, the
+ * unnamed rungs are interleaved with them, and after the fourth pass the gaps
+ * were 2.36–2.78 L* against a 2.3 JND. There is no slack in any of them:
+ * lower `panel` by more than 0.1 and it closes on `header`; lower `card` and
+ * it closes on `raised`. A compression that the operator could actually SEE
+ * — one JND, 2.3 L* — would have put two rungs inside a tenth of a JND of
+ * each other. Compression is not expensive here, it is arithmetically dead.
+ *
+ * SO THE LADDER HAD TO GET SHORTER, AND IT HAD ONE RUNG TO SPARE. `--vam-
+ * header` is defined in both themes, emitted as `--color-header`, and PAINTED
+ * BY NOTHING. It was vacated deliberately -- `DetailPanel.tsx` says so at the
+ * call site it was removed from: "Nothing else in the app wears `header` now;
+ * the token stays defined, unworn, rather than being deleted out from under a
+ * theme that still names it." Keeping the token was right. Keeping it a rung
+ * of its own was the part nobody re-read: an unworn fill was holding 2.45 L*
+ * of a ladder whose every other rung was arguing over tenths, and that is
+ * exactly the budget the five named surfaces needed.
+ *
+ * SO IT SHARES `--vam-panel`'S VALUE, the same "two names, one rung" the
+ * sidebar and the pane have had since they were split (see `--color-pane`).
+ * Nothing on screen changes colour because of that line — nothing was drawing
+ * it. What changes is that `panel` may now descend onto #232323, and every
+ * rung above it follows: panel −2.40, sidebar/pane −2.36, raised −2.31, card
+ * −2.27, segment-on −3.11, in-bubble −2.19 L*. `dark-ladder.test.ts` holds
+ * the share to the reason for it, by sweeping the renderer for a `header`
+ * painter and reddening if one appears; the day something wears it again, it
+ * needs its own rung back and this pass has to be re-derived.
+ *
+ * THE SPACING IS NOT WHAT PAID. Every gap is at or above where the fourth
+ * pass left it and the TIGHTEST one in the room improves: 2.36 → 2.40 L*.
+ * The ladder's one sub-JND pair, `segment-on` → `in-bubble` at 2.19, is also
+ * fixed on the way past (3.11). Span ground→card 17.65 → 15.39 over one
+ * fewer gap — 1.115 JND per gap, where the fourth pass ran 1.096.
+ *
+ * PANEL AND PANE ARE AT THE FLOOR, not merely lower: #222222 would put
+ * `panel` 1.97 L* off `well` and #272727 would put the pane 1.93 off `panel`,
+ * both under the JND. With the ground pinned there is no darker legal value
+ * for either, and `dark-ladder.test.ts` asserts that as its own claim so a
+ * later edit that walks one back up has to answer for it.
+ *
+ * EVERY INK GAINS AGAIN, for the fourth pass's reason: the surfaces went down
+ * and the inks did not. All 63 pairs `token-contrast.test.ts` sweeps improve
+ * or hold — none gets worse — and the worst of them goes 5.325:1 → 5.741:1.
+ * THE LINE TOKENS DELIBERATELY DO NOT FOLLOW: they are boundaries, and a
+ * boundary over a darker fill is a more visible boundary, not a lost one
+ * (`--vam-line` on the pane 1.414 → 1.514, `--vam-line-loudest` on the panel
+ * 3.435 → 3.662, `--vam-line-tip` on `raised` 4.060 → 4.364). `--vam-line-
+ * strong` is held for a second, sharper reason: it is the fill under the
+ * KEYBOARD CURSOR in the file tree, and `token-contrast.test.ts` records
+ * `--vam-syn-comment`'s 2.54:1 on it as the measurement that rejected that
+ * ink. Darkening the cursor row would have walked that reading up towards
+ * the 3:1 it was rejected for, quietly retiring a finding.
+ *
+ * THE LIGHT BLOCK IS UNTOUCHED, again, and this pass adds the assertion that
+ * says so structurally rather than by listing values: `html.light` IS
+ * `:root`, so a dark value left unpaired falls THROUGH rather than
+ * disappearing, and a guard that only checks "the dark values changed" passes
+ * while light is broken.
  */
 :root {
   /* MOVED, on the operator's fourth ask -- "cả nền cũng cần tối hơn", the
@@ -560,26 +676,59 @@
   --vam-ground: #141414;
   --vam-sunken: #191919;
   /* A dialog's own floor, and the fill the modal scrim is judged against:
-     9.80 L* above `ground` (9.60 before the room was darkened, 3.93 before the
-     third pass). It is also the rung a settings option recesses out of
-     (`sunken`, 7.36 L* below it, where it was 7.13, and 2.93 before that). */
-  --vam-panel: #282828;
-  /* 2.78 L* above the pane and the sidebar -- 2.70 before the room was
-     darkened, 2.36 before the third pass -- clearing the just-noticeable
-     difference with more room than before, which is the same as saying a
-     hovered row, a tooltip and an inline code chip stay visibly raised rather
-     than only barely so. The darker pass did not spend this: the gap grew by
-     0.08 L*, because the same 8-bit steps are worth slightly more in L* lower
-     down the curve. */
-  --vam-raised: #333333;
+     7.40 L* above `ground` (9.80 before the fifth pass took the furniture
+     down, 9.60 before the room was darkened, 3.93 before the third pass). It
+     is also the rung a settings option recesses out of (`sunken`, 4.96 L*
+     below it, where it was 7.36, then 7.13, and 2.93 before that).
+
+     AND IT IS AT THE FLOOR NOW, which is a different kind of statement from
+     the distances above and the reason the fifth pass could go no further.
+     `well` sits at 11.26 and owes it a JND, so 13.56 is the lowest legal
+     lightness this token has; #232323 is 13.71 and the next step down,
+     #222222, is 13.23 -- 1.97 off `well`, under the JND. There is no darker
+     value for this fill that does not collapse a rung, and
+     `dark-ladder.test.ts` asserts exactly that rather than leaving it here as
+     prose. */
+  --vam-panel: #232323;
+  /* 2.82 L* above the pane and the sidebar -- 2.78 before the fifth pass,
+     2.70 before the room was darkened, 2.36 before the third pass -- clearing
+     the just-noticeable difference with more room than before, which is the
+     same as saying a hovered row, a tooltip and an inline code chip stay
+     visibly raised rather than only barely so.
+
+     THE FIFTH PASS COULD NOT SIMPLY SLIDE THIS DOWN A RUNG. #2d2d2d would
+     have put it 2.36 L* off the pane -- still over the JND, and still EXACTLY
+     the distance `pane-colour-shots.mjs` records as this pair's `was`, which
+     that guard requires a pass to improve on rather than merely match. So it
+     stops one 8-bit step higher, at 2.82, and the hover stays the widest gap
+     in the lower ladder. */
+  --vam-raised: #2e2e2e;
+  /* UNWORN, AND SHARING `--vam-panel` BECAUSE OF IT. Nothing in the renderer
+     paints this fill -- see the fifth pass's note in the block header, and
+     `DetailPanel.tsx` at the call site it was taken out of. The token stays
+     defined because a theme may still name it and because deleting it would
+     take `bg-header` out from under anything that ever reaches for it; what
+     it stops doing is standing on a rung of its own, 2.45 L* of a ladder
+     arguing over tenths, spent on a colour nobody draws.
+
+     THE SHARE IS GUARDED BY ITS OWN REASON, not by this comment:
+     `dark-ladder.test.ts` sweeps the renderer for a `header` painter and
+     reddens when one appears. Something wearing this again needs its rung
+     back, and the five surfaces above it have to be re-derived to pay for
+     it. */
   --vam-header: #232323;
   --vam-well: #1e1e1e;
-  --vam-sidebar: #2d2d2d;
-  /* The same value as `sidebar`, deliberately: see `--color-pane` above. */
-  --vam-pane: #2d2d2d;
+  --vam-sidebar: #282828;
+  /* The same value as `sidebar`, deliberately: see `--color-pane` above.
 
-  /* 1.192:1 and 5.50 L* above the pane and the sidebar (1.202:1 / 5.36 L*
-     before the room was darkened), where `panel` used to paint 1.028:1 BELOW
+     AT THE FLOOR, like `panel` below which it sits one rung: #272727 would
+     read 1.93 L* off the panel, under the JND. With the ground pinned, this
+     is the darkest the surface carrying most of vam's text can legally be. */
+  --vam-pane: #282828;
+
+  /* 1.199:1 and 5.59 L* above the pane and the sidebar (1.192:1 / 5.50 L*
+     before the furniture came down, 1.202:1 / 5.36 L* before the room was
+     darkened), where `panel` used to paint 1.028:1 BELOW
      them before the first lift. THE CEILING BELOW IS NO LONGER WHAT BINDS
      THIS VALUE, and that is worth saying rather than deleting: the whole
      ladder came down about 4 L*, so the quiet inks now read 5.325:1 here
@@ -598,8 +747,17 @@
      ink to #b0b0b0 (see the block header) is what buys the step, with margin
      rather than by exactly matching the old reading: an exact match
      (#aaaaaa) would have cleared this fill by 0.03, indistinguishable from a
-     future regression. */
-  --vam-card: #393939;
+     future regression.
+
+     DOWN AGAIN WITH THE FIFTH PASS, #393939 -> #343434 (23.97 -> 21.70 L*),
+     one of the five surfaces the operator named. It does not slide a whole
+     rung: #333333 would sit 2.31 L* off `raised`, clearing the JND by a
+     hundredth, which is the bare minimum three passes have refused to ship.
+     At #343434 it keeps 2.76 above `raised` and widens its own step off the
+     pane, 5.50 -> 5.59 L*. The quiet inks read 5.741:1 here where they read
+     5.325:1, so the ceiling this comment is about is further away than
+     ever -- and still worth keeping, for the same reason. */
+  --vam-card: #343434;
 
   /* THE IN BUBBLE, DARK. RE-DERIVED AGAIN, not carried through -- and this
      round drops what every earlier one kept: the hue. Operator: "drop the
@@ -631,31 +789,72 @@
      still measures under floor here (4.352:1, up from 3.718:1 and still short
      of 4.5) and MUST NOT be painted in the bubble -- `e2e/pane-colour-
      shots.mjs` reads the ink the bubble is really drawn with, so an edit
-     that reaches for a quieter grey still fails there. */
-  --vam-in-bubble: #464646;
+     that reaches for a quieter grey still fails there.
 
-  /* 3.56 L* above `--vam-card` (3.48 before the room was darkened, 4.58
-     before the third pass) -- still comfortably clear of the JND, and still
-     the lightest surface on the ladder: nothing that reads `--vam-card` as a
-     ceiling reads this one. It came down with the ladder rather than staying
-     put, which would have left the selected segment floating 7.49 L* clear of
-     a card it is meant to sit one step above. */
-  --vam-segment-on: #414141;
+     DOWN AGAIN WITH THE FIFTH PASS, #464646 -> #414141 (29.72 -> 27.53 L*),
+     and this is the one of the five named surfaces the ladder could pay the
+     least for. It is not held up by a gap but by a MULTIPLE: `surface-
+     elevation.test.ts` requires its ΔE off the pane to beat FOUR TIMES
+     `raised`'s, which is how "much more visible than the fill it replaced"
+     was written down. `raised` had to stop at 2.82 L* off the pane (see its
+     own comment), so that floor reads 11.29 and this fill may not come below
+     16.11 + 11.29 = 27.40 L*. #414141 is 27.53, ΔE 11.42, margin 0.13 where
+     the fourth pass shipped 0.15 -- the tightest constraint in the palette,
+     and the reason the bubble moves 2.19 L* while the card moves 2.27.
+     Buying it more would have meant narrowing its own standoff from the pane,
+     which is the complaint it was created for. */
+  --vam-in-bubble: #414141;
+
+  /* 2.72 L* above `--vam-card` (3.56 before the fifth pass, 3.48 before the
+     room was darkened, 4.58 before the third pass) -- still comfortably clear
+     of the JND, and still the lightest surface on the ladder: nothing that
+     reads `--vam-card` as a ceiling reads this one. It came down with the
+     ladder rather than staying put, which would have left the selected
+     segment floating 5.83 L* clear of a card it is meant to sit one step
+     above. It also stops shadowing the In bubble on the way: those two were
+     2.19 L* apart, the only sub-JND pair in the room, and are 3.11 now. */
+  --vam-segment-on: #3a3a3a;
 
   /* DERIVED FROM THE STACK'S TOP, not from its reading on the pane, and it is
      the one line weight where those two answers differ -- see `--vam-card`
      above for why lining up with the pane's reading would land this token ON
-     `--vam-card`'s own new value. It is placed one step above `card` instead,
-     the same whisper it has always been there (0.88 L*, where it was 0.93),
-     and reads 1.241:1 on the pane where it read 1.132. */
+     `--vam-card`'s own new value. It was placed one step above `card`
+     instead, the same whisper it had always been there (0.88 L*, where it was
+     0.93), reading 1.241:1 on the pane where it read 1.132.
+
+     THAT DESCRIPTION STOPPED BEING TRUE AT THE FOURTH PASS AND IS CORRECTED
+     HERE RATHER THAN RE-STATED. The value has not moved since the third pass
+     set it; `--vam-card` came down 4 L* under it in the fourth and another
+     2.27 in the fifth, so "one step above the card" is now seven (7.15 L*)
+     and the reading on the pane is 1.514:1, not 1.241. The stale half was a
+     comment, not a colour -- but a border described as a whisper while it
+     paints a step is how the next hand picks the wrong neighbour for it.
+
+     AND NOT FOLLOWING THE LADDER DOWN IS THE DECISION, not an oversight. A
+     line is a BOUNDARY, and a boundary over a darker fill is a more visible
+     boundary: every `--vam-line*` token reads higher against every surface it
+     bounds after this pass than before it (this one 1.414 -> 1.514 on the
+     pane). A ladder that darkened and dragged its lines down with it would
+     have held those readings flat and bought nothing. */
   --vam-line: #444444;
   /* DERIVED FROM ITS FLOOR: this is the fill a touched option takes inside a
      card, and `surface-elevation.test.ts` holds it to "at least as visible a
-     step as the card makes over the pane". That step grew again with this
-     pass (ΔE 3.30 -> 5.36), so a value that merely kept its reading on the
-     pane would have shrunk the option's own margin against its floor. At
-     #525252 the option clears its card by 6.90 L*, where it cleared it by
-     4.58 -- proportionally similar room, ~29% over the floor both times. */
+     step as the card makes over the pane". That step grew again with the
+     fourth pass (ΔE 3.30 -> 5.36, and 5.59 after the fifth), so a value that
+     merely kept its reading on the pane would have shrunk the option's own
+     margin against its floor.
+
+     HELD BY A SECOND, SHARPER REASON THAN THE OTHER LINES, and it is worth
+     spelling out because it looks like a surface and would otherwise be an
+     obvious candidate to take down with the room. THIS IS THE FILL UNDER THE
+     KEYBOARD CURSOR in the file tree -- one of the three fills a row can
+     have, and the lightest of them. `token-contrast.test.ts` records
+     `--vam-syn-comment` reading 2.54:1 on it as the measurement that REJECTED
+     that ink for a tree glyph, having passed 4.79:1 on the panel. Darkening
+     this fill walks that reading up towards the 3:1 it was rejected for, and
+     retires a finding by moving the thing it was measured against. So it
+     stays, and the cursor row clears its card by 13.18 L* where it cleared it
+     by 10.91. */
   --vam-line-strong: #525252;
   --vam-line-loud: #595959;
   --vam-line-loudest: #7a7a7a;
@@ -806,6 +1005,30 @@
   --vam-ansi-bright-magenta: #f0abfc;
   --vam-ansi-bright-cyan: #67e8f9;
   --vam-ansi-bright-white: #fafafa;
+
+  /* The icon tones, dark. Measured on the LIGHTEST fill one of these is drawn
+     on -- `sidebar`/`pane` at #282828, since a light tone loses contrast as its
+     ground climbs -- the eight run 5.330:1 (red) to 8.832:1 (yellow), all well
+     clear of the 3:1 a glyph owes and all clear of 4.5 besides. There is
+     headroom on purpose: an icon is 11px, and 11px of a saturated hue at the
+     bare floor is the size at which "passes WCAG" and "can be seen" stop being
+     the same sentence.
+
+     NEUTRAL IS `--vam-ink-faint`'S OWN VALUE, under its own name, the way
+     `--vam-filter-badge` carries `--vam-waiting`'s: the first swatch in the
+     row means "no colour", and the colour of no colour is the one the
+     unpainted `Monitor` and `Folder` placeholders already wear. A literal
+     rather than `var(--vam-ink-faint)` for the reason `--color-pane` gives;
+     the drift that buys is closed by an assertion in
+     `test/renderer/token-contrast.test.ts` rather than by hope. */
+  --vam-icon-neutral: #b0b0b0;
+  --vam-icon-red: #f87171;
+  --vam-icon-orange: #fb923c;
+  --vam-icon-yellow: #fbbf24;
+  --vam-icon-green: #4ade80;
+  --vam-icon-teal: #2dd4bf;
+  --vam-icon-purple: #c084fc;
+  --vam-icon-pink: #f472b6;
 
   --vam-running: #4ade80;
   /* A near-black on dark's bright green: 11.36:1. Taken under its own name
@@ -1106,6 +1329,34 @@ html.light {
   --vam-ansi-bright-cyan: #0891b2;
   --vam-ansi-bright-white: #27272a;
 
+  /* The icon tones, light -- REMAPPED, not reproduced, which is the principle
+     `panels/terminal-ansi.ts` states for the ANSI ramp above ("ANSI white on a
+     white panel has to become a dark grey or it stops being text"). Every hue
+     here is the same NAME as its dark counterpart and none is the same value:
+     dark's tones are bright, because they are drawn on near-black, and every
+     one of them would be invisible on this theme's #f0eeea sidebar -- dark's
+     yellow measures 1.25:1 there. So the eight are re-picked at a deep
+     lightness against the DARKEST fill they land on, and run 4.249:1 (yellow)
+     to 6.027:1 (purple), against the 3:1 a glyph owes.
+
+     THAT IS WHY THE STORED VALUE IS A TONE NAME AND NOT A COLOUR. An operator
+     who picks "teal" has picked a word; the theme decides what teal is, and
+     switching themes keeps their choice legible instead of carrying a hex
+     chosen on the other screen. A colour in the prefs file would have made the
+     light theme an accessibility regression that only the person who used it
+     ever saw.
+
+     Neutral is `--vam-ink-faint`'s value here too, for the reason the dark
+     block gives. */
+  --vam-icon-neutral: #6a6a6f;
+  --vam-icon-red: #b91c1c;
+  --vam-icon-orange: #c2410c;
+  --vam-icon-yellow: #a16207;
+  --vam-icon-green: #15803d;
+  --vam-icon-teal: #0f766e;
+  --vam-icon-purple: #7e22ce;
+  --vam-icon-pink: #be185d;
+
   --vam-running: #166534;
   /* Light's running green is a DEEP one -- it has to read as text on white --
      so the ink on it inverts with the fill: white, at 7.13:1. This is the
@@ -1292,6 +1543,52 @@ body {
 
 .vam-breathe {
   animation: vam-breathe 1.8s ease-in-out infinite;
+}
+
+/* A bell rung ONCE, for a session that has just stopped and wants an answer.
+   Finite on purpose: the sidebar is a thing the operator leaves on screen all
+   day, and a permanent motion in the corner of the eye is the exact complaint
+   this pass came from. It plays when the mark MOUNTS -- which is when the
+   status flips, since the glyph before it was a different element -- and
+   afterwards the bell holds the pose its last frame leaves it in, so that
+   frame is upright rather than leaning (`status-mark.tsx`).
+
+   The pivot is the bell's crown rather than its centre: a bell hangs. */
+@keyframes vam-swing {
+  0% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(11deg);
+  }
+  55% {
+    transform: rotate(-8deg);
+  }
+  80% {
+    transform: rotate(4deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.vam-swing {
+  transform-origin: 50% 20%;
+  animation: vam-swing 820ms ease-in-out 2;
+}
+
+/* THE RUNNING MARK HAS TWO BODIES AND THIS PICKS ONE. CSS cannot choose a
+   React component, so `status-mark.tsx` draws both the turning arc and a whole
+   ring and exactly one of them is displayed. The default is the arc; the
+   reduced-motion block below swaps them, because a STOPPED `LoaderCircle` is
+   not a paused spinner -- it is a ring with a bite out of it, which reads as
+   damage rather than as rest.
+
+   Scoped to the mark, so which one shows is decided by these two rules rather
+   than by declaration order: `.vam-spin` already carries a `display` of its
+   own at equal specificity to a bare attribute selector. */
+[data-status-mark] [data-mark-motion='rest'] {
+  display: none;
 }
 
 /* A control whose action is running. The SAME breathe the running dots use --
@@ -1487,6 +1784,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .vam-spin,
   .vam-breathe,
+  /* The waiting bell. It parks upright wherever it is stopped -- its first
+     frame IS its resting pose -- so unlike the spinner above it needs no
+     second body, only silence. */
+  .vam-swing,
   [data-pending='true'],
   .vam-ellipsis > span,
   .vam-running-edge::after,
@@ -1511,6 +1812,18 @@ body {
      cannot be pressed and says why in `aria-busy` and its own tooltip. */
   [data-pending='true'] {
     opacity: 1;
+  }
+  /* THE ONE MARK THAT CANNOT SIMPLY STOP. `animation: none` on the spinner
+     above leaves a gapped arc frozen at whatever angle it reached, which is a
+     broken ring rather than a resting one -- so the running mark swaps bodies
+     here instead: the arc goes and the whole ring it was drawn beside takes
+     its place. Same hue, same size, same lane; the only difference is that it
+     is a shape somebody chose rather than a frame somebody stopped on. */
+  [data-status-mark] [data-mark-motion='spin'] {
+    display: none;
+  }
+  [data-status-mark] [data-mark-motion='rest'] {
+    display: inline-block;
   }
   /* The sheen paints the word by clipping a gradient to its glyphs, so simply
      stopping it would leave transparent text. Off, the word is its own colour
@@ -1696,8 +2009,172 @@ body {
  * selector that works.
  */
 
+/*
+ * THE PROSE RULER'S SIZE — what `DetailPanel.tsx` divides to learn how wide one
+ * character of this pane's prose really is.
+ *
+ * A STYLESHEET RULE AND NOT AN INLINE STYLE, which is the opposite of the
+ * choice `TerminalTab.tsx` makes for its own screen, and the difference is
+ * worth the two lines: that one is a value the operator PICKED, so there is no
+ * class to write at build time. This is a fixed DECLARATION — the smaller of
+ * the pane's two prose steps — and nothing in the renderer computes it. Written
+ * inline it would also have to survive the CSSOM, which rejects a `min()` in
+ * `font-size` in at least one DOM implementation this repo tests against.
+ *
+ * `min()` OF THE TWO, because a response pane draws prose at two sizes and the
+ * floor is shared by both: `out` is the operator's stepper
+ * (`--vam-out-font-size`, 10..20) and the smallest step anything READ in the
+ * pane wears is `--text-control` — the option labels in the question card, the
+ * refusals, the hints. A floor of eighty characters has to be counted in the
+ * NARROWER of the two or it is eighty of one and eighty-something of the other.
+ *
+ * IT IS `--text-control` AND NOT `--text-body` NOW, and the two answers really
+ * do differ: since `[data-reading-pane]` re-declares the scale in terms of the
+ * reading size, `min(out, --text-body)` collapses to `out` at every setting —
+ * a `min()` that can never pick its second argument is a dead expression no
+ * mutation could reach. `--text-control` is genuinely below `out` above 13px,
+ * so the expression still has two live branches.
+ *
+ * NO `var()` FALLBACK, because the property is declared right above instead.
+ * A fallback inside the `min()` would have been the same pixels and a worse
+ * fact: it would leave this the only rule in the file reading a property no
+ * rule in the file writes, which is exactly the orphan
+ * `focus-edge-removed.test.ts` exists to catch.
+ *
+ * `prefs/view-width.ts` carries why this is measured at all rather than
+ * written down: a frozen advance is a claim about somebody else's machine, and
+ * CI proved it on the first Linux run.
+ */
+/*
+ * DECLARED HERE, THOUGH NOTHING IN THIS FILE SETS IT AT RUN TIME.
+ * `applyOutFontSize` writes `--vam-out-font-size` onto `document.documentElement`
+ * as an inline style, which beats this every time — so this is the value before
+ * prefs have been read once, and it is `DEFAULT_OUT_FONT_SIZE` so that frame
+ * shows the size the app ships at rather than a fallback nobody chose.
+ *
+ * It is also what keeps the rule below honest rather than orphaned:
+ * `focus-edge-removed.test.ts` holds that every `var()` in this stylesheet
+ * names a property this stylesheet declares, because a `var()` whose property
+ * was deleted resolves to nothing and paints as if it had worked. Reading a
+ * property only ever written by JavaScript is the same shape of trap, and the
+ * ruler is the first rule in this file to do it.
+ *
+ * `html` rather than `:root` deliberately: the `:root` blocks above are the
+ * PALETTE, paired dark and light, and several guards parse them as such. A
+ * size is neither.
+ */
+html {
+  --vam-out-font-size: 13px;
+  /*
+   * THE PANE'S READING SIZE: the `out` size, but never below the step the type
+   * scale already sets. See `[data-reading-pane]` below for what reads it.
+   *
+   * COMPUTED HERE AND NOT IN THAT BLOCK, because that block re-declares
+   * `--text-body` and a `var(--text-body)` inside it would be reading the
+   * value it is defining. A custom property is substituted on the element that
+   * DECLARES it and inherits as the result, so this one carries the type
+   * scale's own body step down rather than the pane's overridden one.
+   *
+   * `max()` AND NOT THE BARE SIZE — the one decision in this line. The
+   * operator's report is that a LARGE `out` leaves the rest of the pane too
+   * small; nobody has asked for a small `out` to shrink the chrome around it,
+   * and doing that would walk the 11px floor (`type-scale.test.ts`, the
+   * operator's own request, twice) straight back through its own door: at
+   * `out` 10 the control step would be 9.2px. Scaling up only is also what
+   * keeps the four steps in order at every setting, which a per-step floor
+   * would not.
+   */
+  --vam-pane-size: max(var(--text-body), var(--vam-out-font-size));
+}
+
+/*
+ * THE PANE'S TYPE, FOLLOWING THE SIZE THE OPERATOR READS AT.
+ *
+ * Operator report, translated: "the font size of the other parts of the pane
+ * (in bubble, heading, choice popover, prompt input...) needs to be in
+ * proportion to the out font size; at `out` 15 the answers are comfortably
+ * large but the prompt's choice options are now very small." Measured on the
+ * shipped build: the answer prose is 15px, the option LABEL is `text-control`
+ * at a flat 12px and its number and description are `text-meta` at 11px.
+ *
+ * RE-DECLARING THE SCALE'S OWN PROPERTIES rather than adding a fifth step or
+ * touching call sites. Tailwind's `text-body` compiles to
+ * `font-size: var(--text-body)` — the type scale is deliberately NOT `@theme
+ * inline` so that "a stylesheet rule or a guard can read the scale rather than
+ * restate it" (its own note). So a scope that re-declares the property moves
+ * every `text-body` inside it and nothing outside it, and every call site keeps
+ * the ROLE it already picked. The alternative was a hundred call-site edits in
+ * one file for a decision that belongs in one place.
+ *
+ * TWO STEPS, NOT FOUR, and the two left out are the argument:
+ *
+ *  - `--text-meta` is subordinate text and the scale's own FLOOR: the eyebrow,
+ *    the count on an icon, the key cap, the timestamp, the path beside a name,
+ *    "never the only thing in its container". It is chrome ANNOTATING what is
+ *    being read rather than the thing being read, and it is pinned at 11px
+ *    because the operator asked twice for the small fonts to be bigger. Growing
+ *    it with the reading size would also grow the terminal's status rule, which
+ *    sits under a screen whose size has a setting of its own.
+ *  - `--text-heading` has no call site inside a response pane at all (`grep`:
+ *    zero). Scaling a step nothing here wears would be a declaration with no
+ *    reader, which is the shape `prefs.no-write-only-field.test.ts` exists to
+ *    catch one layer down.
+ *
+ * THE LINE HEIGHTS MOVE WITH THE SIZES, because the type scale says in its own
+ * header that the pair is one decision: every one of the 204 literals it
+ * replaced set a size and no leading, and that is how leading came to drift.
+ * A 20px body on a 20px leading is a wall of text.
+ *
+ * THE RATIOS ARE THE SCALE'S OWN NUMBERS over its body step, and
+ * `type-scale.test.ts` recomputes them from the declarations above rather than
+ * trusting this comment — two tables of type sizes is how one of them comes to
+ * be wrong.
+ */
+[data-reading-pane] {
+  --text-body: var(--vam-pane-size);
+  --text-body--line-height: calc(var(--vam-pane-size) * 20 / 13);
+  --text-control: calc(var(--vam-pane-size) * 12 / 13);
+  --text-control--line-height: calc(var(--vam-pane-size) * 16 / 13);
+}
+
+.vam-prose-ruler {
+  font-size: min(var(--vam-out-font-size), var(--text-control));
+}
+
 .vam-hit-24 {
   position: relative;
+}
+
+/*
+ * THE TERMINAL SCREEN'S OWN COLOURS, DECLARED ON THE SCREEN AND NOWHERE WIDER.
+ *
+ * The seven `--vam-term-*` properties the `term-*` utilities read (the
+ * `@theme inline` block says why they are not on `:root`). The values here
+ * are what the screen wore before it had a scheme -- the app's ink on the
+ * app's panel, the caret as `bg-ink text-panel`, a selection on the
+ * strongest neutral rule -- and they are a FALLBACK, not a default: the
+ * Terminal tab writes the scheme in force over every one of them as inline
+ * style on this same element (`prefs/terminal-scheme.ts`), so on a screen
+ * that has been drawn these never paint. What they buy is a screen that has
+ * somehow not been handed a scheme drawing in the app's colours rather than
+ * in nothing at all -- an unresolvable `var()` makes the declaration
+ * invalid at computed-value time, which for `color` is `inherit` and for a
+ * `background-color` is transparent.
+ *
+ * A RULE KEYED TO THE ELEMENT, LIKE `[data-reading-pane]` ABOVE IT, and for
+ * the same reason: a property declared on a scope moves everything inside
+ * the scope and nothing outside it. `focus-edge-removed.test.ts` holds that
+ * every `var()` in this file names a property declared in it, and this is
+ * where these seven are.
+ */
+[data-terminal-pane] {
+  --vam-term-bg: var(--vam-panel);
+  --vam-term-fg: var(--vam-ink);
+  --vam-term-bold: var(--vam-ink);
+  --vam-term-cursor: var(--vam-ink);
+  --vam-term-cursor-accent: var(--vam-panel);
+  --vam-term-selection-bg: var(--vam-line-strong);
+  --vam-term-selection-fg: var(--vam-ink);
 }
 
 .vam-hit-24::after {
@@ -1728,6 +2205,43 @@ body {
 .vam-swatch::-webkit-color-swatch {
   border: none;
   border-radius: 9999px;
+}
+
+/*
+ * A range input drawn from the tokens, with none of the OS's chrome.
+ *
+ * `Stepper` in `SettingsOverlay.tsx` refused a range input because its track
+ * and thumb take the OS accent colour, which no `--vam-*` token reaches. With
+ * `appearance: none` on the element AND on the thumb neither is painted by
+ * the OS, and the two parts are drawn here in the tokens the switch uses for
+ * the same reason it gives: no line token clears WCAG 1.4.11's 3:1 on the
+ * panel, so the parts that carry the state borrow the inks. The thumb's
+ * negative margin centres 14px on a 4px track -- a thumb with `appearance:
+ * none` is laid out at the track's top edge.
+ *
+ * Structural, like `.vam-swatch` above it, and here rather than as arbitrary
+ * `[&::-webkit-slider-thumb]:` utilities for the reason that made it move:
+ * `target-size.test.ts` reads every `h-[Npx]` on a line with `cursor-pointer`
+ * as the CONTROL's height, and the track's 4px on the same line read as a
+ * 4px control with no hit area. The control is 24px; its track is not the
+ * control.
+ */
+.vam-slider {
+  appearance: none;
+  background: transparent;
+}
+.vam-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--vam-ink-faint);
+}
+.vam-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 9999px;
+  background: var(--vam-ink);
 }
 
 /*
@@ -2036,10 +2550,39 @@ body {
  * is above the fold, and unsafe when a nested scroller pushes it below -- and
  * the icon picker is the one host here with a nested scroller.
  *
- * `flex: 1 1 0` is how the grid grows: `emoji-picker-react` writes its height
- * as an INLINE style, and flex-basis outranks the height property for the main
- * size of a flex item, so no `!important` is needed. Its width comes from the
- * component's own prop, which a stylesheet could not have overridden.
+ * THAT FIX DEPENDED ON THE CHROME ABOVE THE GRID STAYING SHORT, AND THE FIRST
+ * ROW ADDED ABOVE IT BROKE IT. `flex: 1 1 0` made the grid fill EXACTLY the
+ * space the header left, which meant the panel's content was always exactly
+ * 85dvh: its `overflow-y: auto` had nothing to scroll, and the grid's own
+ * scroller sat wherever the chrome happened to put it. Adding the glyph grid
+ * (109px) and the tone row (83px) pushed that scroller from 296px to 489px and
+ * the first emoji's bottom to 529px -- 21px under a 336px keyboard's fold, with
+ * no sheet scroll to recover it. Caught by
+ * `e2e/phone-shell.pw.ts`, `the icon picker can bring an emoji above an iOS
+ * keyboard`, which is run by `test:e2e:phone` and by CI.
+ *
+ * SO THE GRID IS A WHOLE SHEET TALL, and the fix stops depending on the
+ * arithmetic. `min-height: 85dvh` is the sheet's own height, so the grid ALONE
+ * fills it and everything above the grid is overflow -- which gives the sheet
+ * exactly the chrome's worth of scroll, whatever the chrome is. The invariant
+ * is now statable without a measurement: however many rows sit above the emoji
+ * grid, the sheet can scroll all of them away and bring the grid's own top edge
+ * to the sheet's. Measured after the change, same 390x844: 245px of slack
+ * against 231px of chrome, and the first emoji lands at 244-284px -- 224px
+ * clear of the fold, where it was 21px under it. The old version passed with a
+ * margin it had not chosen; this one has no margin to lose, because the slack
+ * grows with the chrome that consumes it.
+ *
+ * `flex: 1 1 0` STAYS, and still for its own reason: `emoji-picker-react`
+ * writes its height as an INLINE style, and flex-basis outranks the height
+ * property for the main size of a flex item, so no `!important` is needed. The
+ * `min-height` then clamps that resolved size up, because a min always wins
+ * over a used size. Its width comes from the component's own prop, which a
+ * stylesheet could not have overridden.
+ *
+ * `test/phone/overlay-sheets.test.ts` holds that the declaration is TYPED,
+ * which is all a content scan can say; that it WORKS is the Playwright
+ * measurement named above, and that one is not in the six-command gate.
  */
 .vam-phone [data-overlay-host] > [data-icon-picker] {
   height: 85dvh;
@@ -2048,5 +2591,5 @@ body {
 }
 .vam-phone [data-icon-picker] > .epr-main {
   flex: 1 1 0;
-  min-height: 0;
+  min-height: 85dvh;
 }

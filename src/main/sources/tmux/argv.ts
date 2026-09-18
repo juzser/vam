@@ -396,10 +396,15 @@ export function resizeWindowArgv(name: string, columns: number, rows: number): r
  * six characters. The same probe confirmed `--` is honoured here, so text
  * beginning with `-` reaches the pane instead of being read as an option.
  *
- * NEWLINES INSIDE THE TEXT ARE TYPED AS TYPED. A pane running a TUI will
- * generally act on each one, so a multi-line reply can arrive as several
- * submissions. Nothing here silently rewrites the operator's text to hide
- * that.
+ * ONE LINE ONLY, AND THAT IS WHY THIS IS NOT THE PROMPT BUILDER. A raw newline
+ * in `text` reaches the pane as a single 0x0a byte (measured: `send-keys -l --
+ * $'a<LF>b'` delivered `0x61 0x0a 0x62`), and Claude Code's REPL -- reading a
+ * raw-mode pty -- treats that byte as a submit, so a multi-line prompt sent
+ * through here alone would submit its first line and drop the rest. A whole
+ * prompt goes through `promptKeystrokes`, which breaks each newline the way the
+ * REPL actually accepts one. This stays the single-line primitive it always
+ * was, and the callers that press one key at a time (answering a picker) still
+ * want exactly it.
  */
 export function sendTextArgv(name: string, text: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), '-l', '--', text];
@@ -408,9 +413,63 @@ export function sendTextArgv(name: string, text: string): readonly string[] {
 /**
  * Press Return -- a SEPARATE call, because it is the one key that must be
  * interpreted rather than typed, and `-l` above forbids exactly that.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket into a RAW-MODE pty (the
+ * mode Claude Code's input runs in): this delivered 0x0d (CR), which the REPL
+ * reads as submit. That is the byte a bare newline is NOT (a bare newline is
+ * 0x0a), and the whole reason `promptKeystrokes` exists to keep the two apart.
  */
 export function sendEnterArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'Enter'];
+}
+
+/**
+ * Type a WHOLE prompt into the pane, with its internal newlines intact -- the
+ * ordered keystrokes to enter the text, but NOT the submit that follows it.
+ *
+ * THE NEWLINE IS THE ONLY HARD PART, and it is a fact about Claude Code's REPL
+ * rather than about tmux. Measured on tmux 3.7b over a private `-L` socket into
+ * a raw-mode pty: `send-keys Enter` delivers 0x0d (CR), a raw newline in a
+ * literal payload delivers 0x0a (LF), and a lone backslash delivers 0x5c. The
+ * REPL reads a raw pty, so both CR and a bare LF submit; there is no byte that,
+ * sent on its own, inserts a newline without submitting. What the REPL DOES
+ * accept -- and advertises in its own footer (`\` + Return, the universal
+ * newline that needs no `/terminal-setup`, unlike Shift+Enter or Option+Enter)
+ * -- is a trailing backslash followed by Return: it consumes the `\` and
+ * inserts a newline instead of submitting. So each internal line break becomes
+ * a literal backslash appended to the line, then an interpreted Enter.
+ *
+ * THIS IS INFERENCE FROM THE FOOTER AND THE BYTES, NOT A MEASUREMENT OF THE
+ * REPL, and it is flagged for the reason the control-chord table is: measuring
+ * what the REPL does with a keystroke means typing into a running Claude Code,
+ * which no test here may do (`deliver`'s retirement note, and reply.ts). The
+ * footer string and the byte deliveries are the evidence; that the REPL builds
+ * a two-line buffer from `line\` + Enter + `next` is what follows from them.
+ *
+ * THE ONE INPUT THIS CANNOT ROUND-TRIP is a line whose own text ends in a
+ * backslash: vam's escape is itself a trailing backslash, so the operator's
+ * `\` and vam's `\` arrive as a pair, which the REPL may read as one escaped
+ * backslash and a submit rather than a newline. Bracketed paste would frame
+ * the whole prompt and avoid this, but it was rejected upstream for a reason
+ * that still holds (`renderer/domain/optimistic.ts`): a pasted burst is echoed
+ * back by a booting TUI differently than typed keys, which broke the optimistic
+ * paint's exact-match reconciliation. A rare mangled line beats that.
+ *
+ * The submit is deliberately NOT here. The caller presses Return once, after
+ * the whole prompt has landed, so that a keystroke that fails midway leaves the
+ * text sitting in the pane UNSENT rather than half-submitted (`reply.ts`).
+ */
+export function promptKeystrokes(name: string, prompt: string): readonly (readonly string[])[] {
+  const lines = prompt.split('\n');
+  const steps: (readonly string[])[] = [];
+  lines.forEach((line, index) => {
+    const last = index === lines.length - 1;
+    // Every line but the last carries the escape backslash the REPL turns,
+    // together with the Enter that follows, into an inserted newline.
+    steps.push(sendTextArgv(name, last ? line : `${line}\\`));
+    if (!last) steps.push(sendEnterArgv(name));
+  });
+  return steps;
 }
 
 /**
@@ -621,13 +680,24 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
  * is another string to get wrong, and the rows are already in hand.
  *
  * Tabs separate them because a session name cannot contain one -- tmux rejects
- * it -- a project id is a digest (`project-id.ts`), and a pid is digits only
+ * it (measured, 3.7b: `invalid session name`; a space or a `:` it accepts) --
+ * a project id is a digest (`project-id.ts`), and a pid is digits only
  * (`PANE_PID_FORMAT`), so no field can swallow another. An unset option
  * arrives as an empty field, which is precisely the answer "vam did not
  * record this" -- "did not start this one" for the project field, "an older
  * vam, or the tag call itself failed" for the pid field (`createVamSession`
  * degrades silently rather than refusing when that happens; see
  * `VAM_PID_OPTION`).
+ *
+ * THE TABS ONLY SURVIVE A UTF-8 CLIENT. Measured on the same tmux: when the
+ * client's LC_CTYPE is not a UTF-8 locale -- and a GUI launch sets none --
+ * every control character in a `-F` expansion is printed as `_`, so this
+ * listing comes back with no tab on any line. `env/utf8-ctype.ts` gives the
+ * process a UTF-8 LC_CTYPE at startup so that never happens from vam; and
+ * `listVamSessions` refuses a line without its two tabs rather than skipping
+ * it, so if it ever does the answer is "could not ask", not "no sessions".
+ * This is the ONE format here that leans on a control character, and the
+ * argv test counts it.
  */
 export function listSessionsArgv(): readonly string[] {
   return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`];

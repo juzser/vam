@@ -9,10 +9,13 @@
  * makes it the densest status surface in the app, and it reported nothing.
  *
  * The active tab keeps the ink so the two channels stay separable; every tab
- * gets the dot. The dot's COLOUR is a painted fact, measured against the
- * dimmed `opacity-85` treatment in a real browser by
- * `e2e/tab-strip-shots.mjs`; pinned here is only that each tab carries a mark
- * of its own status.
+ * REPORTS its status, on the tab element itself. What it DRAWS for it is the
+ * subject of `Canvas.tab-indicators.test.tsx`: the dot this file was named
+ * for is gone, a busy tab wears the sidebar's own mark and a resting one
+ * wears nothing. The mark's paint -- its contrast against the dimmed
+ * `opacity-85` treatment -- is measured in a real browser by
+ * `e2e/tab-strip-shots.mjs`; pinned here is only that each tab carries its
+ * own status, and that the ink stays the active tab's.
  */
 
 import { cleanup, render } from '@testing-library/react';
@@ -56,7 +59,7 @@ function statuses(): Record<string, string | null> {
   const out: Record<string, string | null> = {};
   for (const tab of document.querySelectorAll('[data-session-tab]')) {
     const title = tab.querySelector('[data-tab-select]')?.textContent ?? '';
-    out[title] = tab.querySelector('[data-tab-status]')?.getAttribute('data-tab-status') ?? null;
+    out[title] = tab.getAttribute('data-tab-status');
   }
   return out;
 }

@@ -350,7 +350,18 @@ and fails `vitest run` the moment either side names something the other
 doesn't — the same source the in-app `?` sheet is generated from. `hjkl`
 mean different things in Select and Insert — there is no node-graph left for
 them to move a cursor on, only the session list and the question card — and
-`Mod` means Ctrl or Cmd, whichever your platform uses.
+`Mod` means **your platform's command modifier**: Cmd on macOS, Ctrl on Linux
+and Windows.
+
+**On macOS, Ctrl belongs to the terminal.** `Ctrl+K`, `Ctrl+W`, `Ctrl+U`,
+`Ctrl+N` and `Ctrl+T` are readline's own chords, and vam answers none of them —
+they reach the shell in the Terminal tab and the text box everywhere else.
+`Ctrl+number` is bound to nothing either. The two exceptions are deliberate and
+are named in the table: `Mod-d` / `Mod-u` also answer **Ctrl+D / Ctrl+U**,
+because those are vim's gestures for reading a transcript rather than commands,
+and `Ctrl-[` still leaves the prompt box, because that is vim's own Escape. On
+Linux and Windows there is no Cmd key, so Ctrl is the command modifier and
+every `Mod-` chord answers it as it always did.
 
 | Key | Action |
 |---|---|
@@ -376,12 +387,13 @@ them to move a cursor on, only the session list and the question card — and
 | `p` | Reveal the focused session's project in the sidebar |
 | `Enter` | **Select:** nothing to open — the whole detail is already in the right pane, and it says so. **Insert:** marks the option under the cursor, or opens the prompt box |
 | `Mod-k` | Open the command palette |
-| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, counting ACROSS every pane on screen in the order the strips draw them — the same meaning wherever the keyboard is, and picking a tab another pane holds moves the keyboard there with it. `Mod-9` is always the last one. Past nine open tabs the digits stop covering everything: that is the price of counting one list rather than one per strip, and `Mod-Shift-[` / `]` is how you reach the rest |
+| `Mod-1` `Mod-2` `Mod-3` `Mod-4` `Mod-5` `Mod-6` `Mod-7` `Mod-8` `Mod-9` | Select a session tab by position, counting ACROSS every pane on screen in the order the strips draw them — the same meaning wherever the keyboard is, and picking a tab another pane holds moves the keyboard there with it. `Mod-9` is always the last one. Past nine open tabs the digits stop covering everything: that is the price of counting one list rather than one per strip, and `Mod-Shift-[` / `]` is how you reach the rest. On macOS this row is **Cmd only**: Ctrl+number used to reach it too and is bound to nothing now, so the digit row means one thing and the view row below means another |
 | `Mod-Shift-[` / `Mod-Shift-]` | Previous / next session tab, over that same across-panes list, wrapping at both ends — the browser's own tab gesture, and it fires from inside the prompt box |
 | `Mod-Alt-[` / `Mod-Alt-]` | Previous / next pane — one modifier up from the tab pair, and the same act as `zw` / `zW` |
-| `Alt-1` `Alt-2` `Alt-3` `Alt-4` `Alt-5` | Show a view in the focused pane — Response, PRs, Terminal, Agents, Files, in that fixed order. A digit always names the SAME view: if this source has no terminal, `Alt-3` says so rather than opening whatever sits third, and `Alt-5` says the same on a build without the desktop file bridge |
-| `Alt-6` `Alt-7` `Alt-8` `Alt-9` | Nothing — bound only so they say there is no sixth view instead of reaching the browser |
-| `Mod-d` / `Mod-u` | Half a screen down / up the FOCUSED PANE's transcript — vim's own `Ctrl-D` / `Ctrl-U`. Half the column's visible height per press, instant, clamped at both ends; scrolling to the top is what reads earlier turns in, exactly as a trackpad scroll there does. **Select only:** with the caret in the prompt box, on a question card or in the terminal these two stay that surface's own, where `Ctrl-D` is delete-forward (and EOF) and `Ctrl-U` deletes to the start of the line. `Mod` is Ctrl or Cmd as everywhere in this table, so `Cmd+D` scrolls as well |
+| `Ctrl-Alt-1` `Ctrl-Alt-2` `Ctrl-Alt-3` `Ctrl-Alt-4` `Ctrl-Alt-5` | Show a view in the focused pane — Response, PRs, Terminal, Agents, Files, in that fixed order. Ctrl+Option+number on macOS, Ctrl+Alt+number elsewhere: one three-key chord, the same physical keys on every platform. A digit always names the SAME view: if this source has no terminal, `Ctrl-Alt-3` says so rather than opening whatever sits third, and `Ctrl-Alt-5` says the same on a build without the desktop file bridge. Plain Alt+number used to do this and is bound to nothing now — switching a view is the three-key chord alone |
+| `Ctrl-Alt-6` `Ctrl-Alt-7` `Ctrl-Alt-8` `Ctrl-Alt-9` | Nothing — bound only so they say there is no sixth view instead of reaching the browser |
+| `1` `2` `3` `4` `5` `6` `7` `8` `9` | **Select only:** the same views on one key — `3` is Terminal because Terminal is view 3, exactly as `Ctrl-Alt-3` is, and a digit past the last view refuses aloud in the same words. **In Insert a digit is text** and goes to whatever holds the caret: the prompt box, the search line, a rename field, the Files filter, a question card's option marks, and the terminal, where it is typed into the session. That is the whole difference between the two spellings, and the reason the three-key chord is still here: `Ctrl-Alt-3` switches a view *while you are writing a prompt*, and a bare `3` cannot. Matched by the KEY'S POSITION, so an AZERTY digit row works unshifted; `Shift+number` is a different keystroke and is bound to nothing. A bare `0` is bound to nothing either — the zero is `z0`'s and `Mod-0`'s |
+| `Mod-d` / `Mod-u` | Half a screen down / up the FOCUSED PANE's transcript — vim's own `Ctrl-D` / `Ctrl-U`. Half the column's visible height per press, instant, clamped at both ends; scrolling to the top is what reads earlier turns in, exactly as a trackpad scroll there does. **Select only:** with the caret in the prompt box, on a question card or in the terminal these two stay that surface's own, where `Ctrl-D` is delete-forward (and EOF) and `Ctrl-U` deletes to the start of the line. **The one letter pair that answers Ctrl as well as Cmd** — every other `Mod-<letter>` is the command modifier alone, and these two kept Control because that is where a vim user's hand goes |
 | `<` / `>` | Narrow / widen the focused side pane |
 | `Escape` | Cancel whatever is half-typed |
 
@@ -448,6 +460,13 @@ switching it does. Where one of them matters there is another way in:
 session as well as `Mod-w`, `o` starts one as well as `Mod-n`, and the tab
 ring is walkable with `zw` / `zW`. Leaving the prompt box is `Ctrl-[` — vim's
 own Escape, and no browser binds it.
+
+The digit row is the one place that list got HARDER rather than easier. It
+used to answer Ctrl+number as well, which Chrome and Safari do not want on
+macOS, so an operator in a browser tab had a spelling that got through; the
+row is Cmd-only there now and the browser wins every one of the nine.
+`Mod-Shift-[` / `]` is contested too, so `zw` / `zW` and `h` / `l` are the
+ways to a tab in that deployment. Nothing changes in the desktop app.
 
 This list is held against the grammar by
 `test/keyboard/browser-contested-chords.test.ts`, so a new binding that lands

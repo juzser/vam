@@ -39,15 +39,19 @@
  *
  * WHAT IS NOT IN THE ANSWER, said here so the gap is on the record rather than
  * in the operator's surprise: commands that only exist in an interactive
- * TERMINAL -- `/resume`, `/status`, `/help` -- are not in this list. That is
- * not an omission, it is the right list for this feature: vam's own delivery
- * runs `claude --resume <id> -p "<prompt>"` (`deliver.ts`), which is precisely
- * the mode where those commands answer "isn't available in this environment".
- * Offering one would offer a command vam's own channel is guaranteed to
- * refuse. (Measured: `claude -p "/resume"` answers "/resume isn't available in
- * this environment", `claude -p "/zzz"` answers "Unknown command: /zzz" -- the
- * CLI is an ORACLE for a name you already have and never an enumerator, which
- * is why no list is written by hand here.)
+ * TERMINAL -- `/resume`, `/status`, `/help` -- are not in this list, because
+ * this list is the CLI's own non-interactive built-ins (measured: `claude -p
+ * "/resume"` answers "/resume isn't available in this environment", `claude -p
+ * "/zzz"` answers "Unknown command: /zzz" -- the CLI is an ORACLE for a name
+ * you already have and never an enumerator, which is why no list is written by
+ * hand here).
+ *
+ * A STANDING QUESTION, NOT A SETTLED ONE: vam's reply channel is no longer that
+ * `-p` mode. It TYPES into the session's interactive pane (`reply.ts`), where
+ * `/resume` and `/status` DO answer. So the exclusion above is now
+ * conservative rather than correct, and widening this list to the interactive
+ * built-ins is a real follow-up -- deliberately left out of the delivery-
+ * channel change that noticed it, not folded in unscoped.
  *
  * ONE QUESTION PER PROCESS. See `createBuiltinCommandReader`.
  *

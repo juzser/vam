@@ -1,16 +1,17 @@
 /**
- * Enter, and where it actually goes.
+ * Enter, and the ONE channel it now has.
  *
- * THE BUG THIS FILE EXISTS FOR. `recordPrompt` ran `claude --resume <id> -p`
- * and nothing else, and that CLI declines while the target session is running
- * -- which, for a session the operator is sitting in front of and wants to
- * reply to, is every time. So Enter reliably produced a refusal and never a
- * reply, and the operator read it as "Enter does nothing".
+ * THE RULE THIS FILE EXISTS FOR. vam is a projection of the terminal: it types
+ * the operator's prompt into the tmux pane of a session vam started, and the
+ * Response view shows the turn when the session's own transcript shows it.
+ * There is no second channel. The old `claude --resume <id> -p` path was
+ * retired (`deliver.ts`) -- it refused while the target was running, which is
+ * every session the operator wants to reply to, and it could not resume a
+ * fresh session at all -- so a row with no pane vam owns is not delivered to a
+ * different way. It is refused, in words that say why and what to do.
  *
- * What changed is that vam now STARTS sessions, in tmux panes it owns, and
- * typing into a pane vam owns is a real channel. The tests below pin the
- * routing between the two paths and, more importantly, pin the negatives: a
- * reply vam cannot place must SEND NOTHING, not merely say something.
+ * The tests below pin that routing and, above all, the negatives: a reply vam
+ * cannot type must SEND NOTHING to tmux and must claim nothing was delivered.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,8 +21,9 @@ import type { TmuxRun, TmuxRunResult } from '../../src/main/sources/tmux/spawn.j
 
 const CWD = '/work/atlas';
 const OTHER = '/work/other';
+// Invented, not a real session id: vam is public.
 const SESSION = '11111111-2222-3333-4444-555555555555';
-const PANE = `vam-atlas-a1b2c3`;
+const PANE = 'vam-atlas-a1b2c3';
 
 const ok = (stdout = ''): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 
@@ -36,27 +38,31 @@ function fakeTmux(listing: string, results: Partial<Record<string, TmuxRunResult
   return { run, calls, sent: () => calls.filter((argv) => argv[0] === 'send-keys') };
 }
 
+/**
+ * A bare `send-keys … Enter` -- and note that the newline ESCAPE and the final
+ * SUBMIT are byte-identical here. The REPL tells them apart only by the
+ * backslash the escape leaves on the line before it, which is exactly why a
+ * newline cannot be asserted "not a submit" by argv shape alone; the preceding
+ * chunk is what carries the distinction.
+ */
+const isBareEnter = (argv: string[]): boolean =>
+  argv[0] === 'send-keys' && !argv.includes('-l') && argv[argv.length - 1] === 'Enter';
+
 const agents = [{ key: `${SESSION}#7`, sessionId: SESSION, cwd: CWD }];
 
-/** A `deliver` that must not be reached, and says so loudly if it is. */
-const noDeliver = async () => {
-  throw new Error('the CLI delivery path was called when it must not have been');
-};
-
 describe('replyToSession', () => {
-  it('types the reply into the pane of a session vam started, and never spawns the CLI', async () => {
+  it('types the reply into the pane of a session vam started, then submits once', async () => {
     const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`);
     const error = await replyToSession({
       agents,
       rowId: `${SESSION}#7`,
       prompt: 'ship it',
       run: tmux.run,
-      deliver: noDeliver,
     });
 
     expect(error).toBeNull();
-    // Literal text, then Return as a separate call: `-l` is what stops tmux
-    // reading the operator's words as key NAMES, and under `-l` the word
+    // Literal text (`-l`), then Return as a separate call: `-l` is what stops
+    // tmux reading the operator's words as key NAMES, and under `-l` the word
     // `Enter` would be typed rather than pressed.
     expect(tmux.sent()).toEqual([
       ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'ship it'],
@@ -64,80 +70,95 @@ describe('replyToSession', () => {
     ]);
   });
 
-  it('sends NOTHING to tmux for a session vam did not start, and falls back to the CLI', async () => {
+  it('breaks a multi-line prompt with the escape, so only the final Enter submits', async () => {
+    const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`);
+    const error = await replyToSession({
+      agents,
+      rowId: `${SESSION}#7`,
+      prompt: 'line one\nline two',
+      run: tmux.run,
+    });
+
+    expect(error).toBeNull();
+    const sent = tmux.sent();
+    // The whole sequence: type line one WITH the escape backslash, press Enter
+    // (a NEWLINE, because of that backslash), type line two, then the ONE final
+    // Enter that submits (no backslash before it).
+    expect(sent).toEqual([
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'line one\\'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'line two'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+    ]);
+    // The final keystroke is the submit; the only OTHER bare Enter is the
+    // newline escape, and it sits after a chunk ending in a backslash.
+    const last = sent.length - 1;
+    expect(isBareEnter(sent[last] as string[])).toBe(true);
+    sent.forEach((argv, index) => {
+      if (index !== last && isBareEnter(argv)) {
+        const before = sent[index - 1];
+        expect(before?.[before.length - 1]?.endsWith('\\')).toBe(true);
+      }
+    });
+  });
+
+  it('REFUSES a session vam has no pane for, and types nothing at all', async () => {
     // A tmux server with sessions on it, none of them vam's for this project.
     const tmux = fakeTmux(`\t\tnotes\n${projectIdOf(OTHER)}\t\tvam-other-999999\n`);
-    let asked: { sessionId: string; cwd: string } | null = null;
     const error = await replyToSession({
       agents,
       rowId: `${SESSION}#7`,
       prompt: 'ship it',
       run: tmux.run,
-      deliver: async (input) => {
-        asked = { sessionId: input.sessionId, cwd: input.cwd };
-        return {
-          kind: 'refused',
-          code: 'session-running',
-          message: `session ${SESSION} is running, so Claude Code will not resume it here.`,
-        };
-      },
     });
 
     // THE NEGATIVE, ASSERTED DIRECTLY: not one keystroke went anywhere.
     expect(tmux.sent()).toEqual([]);
-    expect(asked).toEqual({ sessionId: SESSION, cwd: CWD });
-    expect(error?.code).toBe('session-running');
-    // And what comes back must not read as a delivery.
-    expect(error?.message).not.toMatch(/delivered|sent/i);
+    expect(error?.kind).toBe('refused');
+    expect(error?.code).toBe('no-terminal');
+    // It says what is true and points at the remedy, and it never claims a
+    // delivery.
+    expect(error?.message).toContain(`${SESSION}`);
+    expect(error?.message).toMatch(/terminal/i);
+    expect(error?.message).not.toMatch(/delivered|sent to the agent|resume/i);
   });
 
-  it('does not guess between two panes vam started for one project', async () => {
+  it('refuses rather than guess between two panes vam started for one project', async () => {
     const id = projectIdOf(CWD);
     const tmux = fakeTmux(`${id}\t\tvam-atlas-aaa\n${id}\t\tvam-atlas-bbb\n`);
-    let calledCli = false;
-    await replyToSession({
+    const error = await replyToSession({
       agents,
       rowId: SESSION,
       prompt: 'ship it',
       run: tmux.run,
-      deliver: async () => {
-        calledCli = true;
-        return null;
-      },
     });
 
     expect(tmux.sent()).toEqual([]);
-    expect(calledCli).toBe(true);
+    expect(error?.code).toBe('no-terminal');
   });
 
-  it('will not type into a pane when the project holds more than one live session', async () => {
-    // The pairing tmux records is a PROJECT, not a session, so a second live
+  it('refuses when the project holds more than one live session and no proof which pane', async () => {
+    // The tag tmux records is a PROJECT, not a session, so a second live
     // session in the same directory means the pane might be the other one.
     const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`);
-    let calledCli = false;
-    await replyToSession({
+    const error = await replyToSession({
       agents: [...agents, { key: 'other#8', sessionId: 'other', cwd: CWD }],
       rowId: `${SESSION}#7`,
       prompt: 'ship it',
       run: tmux.run,
-      deliver: async () => {
-        calledCli = true;
-        return null;
-      },
     });
 
     expect(tmux.sent()).toEqual([]);
-    expect(calledCli).toBe(true);
+    expect(error?.code).toBe('no-terminal');
   });
 
-  it('refuses a row it cannot find without touching tmux or the CLI', async () => {
+  it('refuses a row it cannot find without touching tmux', async () => {
     const tmux = fakeTmux('');
     const error = await replyToSession({
       agents,
       rowId: 'gone#1',
       prompt: 'ship it',
       run: tmux.run,
-      deliver: noDeliver,
     });
 
     expect(error?.code).toBe('unknown-session');
@@ -157,7 +178,6 @@ describe('replyToSession', () => {
       rowId: SESSION,
       prompt: 'ship it',
       run: tmux.run,
-      deliver: noDeliver,
     });
 
     expect(error).not.toBeNull();
@@ -166,7 +186,23 @@ describe('replyToSession', () => {
     expect(tmux.sent()).toHaveLength(1);
   });
 
-  it('falls back to the CLI when tmux cannot be asked at all', async () => {
+  it('carries a tmux the reply reached but could not submit, so the words are not lost', async () => {
+    // Make ONLY the submit (a bare Enter) fail, not the literal text.
+    const calls: string[][] = [];
+    const run: TmuxRun = async (argv) => {
+      calls.push([...argv]);
+      if (isBareEnter([...argv])) {
+        return { failure: { message: 'exit 1', code: 1 }, stdout: '', stderr: 'boom' };
+      }
+      if (argv[0] === 'list-sessions') return ok(`${projectIdOf(CWD)}\t\t${PANE}\n`);
+      return ok();
+    };
+    const error = await replyToSession({ agents, rowId: SESSION, prompt: 'ship it', run });
+    expect(error?.message).toMatch(/typed into .* but vam could not press Return/);
+    expect(calls.filter((argv) => argv[0] === 'send-keys')).toHaveLength(2);
+  });
+
+  it('refuses when tmux cannot be asked at all, without claiming a delivery', async () => {
     const tmux = fakeTmux('', {
       'list-sessions': {
         failure: { message: 'spawn tmux ENOENT', code: 'ENOENT' },
@@ -174,20 +210,16 @@ describe('replyToSession', () => {
         stderr: '',
       },
     });
-    let calledCli = false;
-    await replyToSession({
+    const error = await replyToSession({
       agents,
       rowId: SESSION,
       prompt: 'ship it',
       run: tmux.run,
-      deliver: async () => {
-        calledCli = true;
-        return null;
-      },
     });
 
     expect(tmux.sent()).toEqual([]);
-    expect(calledCli).toBe(true);
+    expect(error).not.toBeNull();
+    expect(error?.message).not.toMatch(/delivered/i);
   });
 });
 
@@ -203,7 +235,6 @@ describe('replyToSession with published panes', () => {
       rowId: 'sess-beta#8',
       prompt: 'ship it',
       run: tmux.run,
-      deliver: noDeliver,
       panes: new Map([
         ['sess-alpha#7', 'vam-atlas-aa11bb'],
         ['sess-beta#8', 'vam-atlas-cc22dd'],
@@ -215,5 +246,29 @@ describe('replyToSession with published panes', () => {
       ['send-keys', '-t', '=vam-atlas-cc22dd:', '-l', '--', 'ship it'],
       ['send-keys', '-t', '=vam-atlas-cc22dd:', 'Enter'],
     ]);
+  });
+
+  it('refuses the project-tag fallback when the only tagged pane was published by another row', async () => {
+    // THE VETO THE FALLBACK ENDS ON, exercised on its own. One live row in the
+    // project, one tmux session tagged with the project -- every count the
+    // fallback demands is satisfied -- and yet the pane is spoken for: a row
+    // in ANOTHER project published it as its own. `claimedPanes` must win over
+    // the tag, and with the pane now the only channel, "refuse" is the whole
+    // difference between a typed reply and one landing in somebody else's
+    // agent. A mutation that returns the tagged pane unchecked survived every
+    // other test in this file; this one is the reason it no longer does.
+    const gamma = { key: 'sess-gamma#9', sessionId: 'sess-gamma', cwd: CWD };
+    const delta = { key: 'sess-delta#10', sessionId: 'sess-delta', cwd: OTHER };
+    const tmux = fakeTmux(`${projectIdOf(CWD)}\t\tvam-atlas-ee33ff\n`);
+    const error = await replyToSession({
+      agents: [gamma, delta],
+      rowId: 'sess-gamma#9',
+      prompt: 'ship it',
+      run: tmux.run,
+      panes: new Map([['sess-delta#10', 'vam-atlas-ee33ff']]),
+    });
+
+    expect(tmux.sent()).toEqual([]);
+    expect(error?.code).toBe('no-terminal');
   });
 });

@@ -33,6 +33,7 @@ import {
   readEditorHighlight,
   setActiveEditorSettings,
 } from './editor.js';
+import { clampStoredTreeWidth } from './files-tree-width.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
 import {
@@ -41,6 +42,24 @@ import {
   readPromptSubmitKey,
   setActivePromptSubmitKey,
 } from './submit-key.js';
+import {
+  DEFAULT_TAB_INDICATORS,
+  readTabIndicators,
+  type TabIndicatorId,
+  withTabIndicator,
+} from './tab-indicators.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  readTerminalFontSize,
+  setActiveTerminalFontSize,
+} from './terminal-font.js';
+import {
+  DEFAULT_TERMINAL_SCHEME_PREF,
+  readTerminalSchemePref,
+  setActiveTerminalScheme,
+  type TerminalSchemePref,
+} from './terminal-scheme.js';
+import { DEFAULT_NARROW_VIEWS, readNarrowViews, setActiveNarrowViews } from './view-width.js';
 
 const KEY = 'vam.prefs.v1';
 
@@ -464,6 +483,125 @@ export type Prefs = {
    * would answer differently.
    */
   readonly editorIndent: number;
+  /**
+   * How wide the Files tab's tree was last DRAGGED to, in pixels -- or `null`
+   * for "never dragged", which is a real value rather than a missing one.
+   *
+   * NULL IS THE ONE DESIGN DECISION HERE. The tree shipped as a CLAMPED SHARE
+   * (`w-[38%] min-w-[7.5rem] max-w-[13.5rem]`, `FilesTab.tsx`), which gives a
+   * wide pane a readable column and a narrow one a floor. A stored pixel width
+   * cannot express that, so a default number would have moved the tree on
+   * every narrow pane of every operator who never touched the handle --
+   * exactly what `DEFAULT_PANES` exists to avoid on the other two boundaries.
+   * `null` keeps the share; a drag replaces it with a number; nothing in
+   * between has to be migrated.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView` and
+   * `editorIndent` give at length: `Canvas.tsx` mounts one `DetailPanel` --
+   * hence one `FilesTab` -- per split leaf and `PhoneShell` mounts another,
+   * so per pane it would be an arrangement the operator had to re-make on
+   * every split, with no dialogue in which a pane opened by a keystroke could
+   * be asked. Per session it would key an arrangement to an id the TTL prunes.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   *
+   * Stored in PIXELS and clamped ONLY against `[TREE_WIDTH_MIN,
+   * TREE_WIDTH_MAX]` -- never against a container. See
+   * `files-tree-width.ts`'s header for why a container clamp on this write
+   * path would collapse the operator's width the first time they looked at
+   * another tab.
+   */
+  readonly filesTreeWidth: number | null;
+  /**
+   * How large the tmux screen is drawn, in pixels, out of the few sizes
+   * `prefs/terminal-font.ts` offers.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView`,
+   * `editorIndent` and `filesTreeWidth` give at length: `Canvas.tsx` mounts
+   * one `DetailPanel` -- hence one `TerminalTab` -- per split leaf and
+   * `PhoneShell` mounts another, so per pane it would be an arrangement the
+   * operator had to re-make on every split, with no dialogue in which a pane
+   * opened by a keystroke could be asked. Per session it would key a reading
+   * preference to an id the TTL prunes.
+   *
+   * IT IS NOT ONLY PAINT, which is what makes it unlike `outFontSize` next to
+   * it in this record: the size decides the advance of one character, and the
+   * advance decides how many COLUMNS tmux is told to compose at
+   * (`terminal-size.ts`). That is why `terminal-font.ts` is a store with a
+   * subscription rather than a custom property on the root -- see its header
+   * for the defect the property version would ship.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalFontSize: number;
+  /**
+   * The colours the tmux screen is drawn in: a named theme per APP theme,
+   * the colours moved off each, and how opaque the ground is painted.
+   *
+   * ITS OWN FIELD AND NOT A BUCKET OF `palette`, because it is not an
+   * override layer over the stylesheet: `prefs/terminal-scheme.ts` argues
+   * that the screen owns its colours the way an emulator does, and a scheme
+   * is a whole table of twenty-three rather than a few tokens moved off
+   * `styles.css`. Per app theme for the reason `palette` is -- a scheme is
+   * chosen against the screen it will be worn on.
+   *
+   * GLOBAL, not per pane and not per session, for the reason
+   * `terminalFontSize` above gives, and read the same way: a store with a
+   * subscription, because the resolved colours land on the screen's OWN
+   * element as custom properties (never on `:root`, or every surface that
+   * reads `--vam-ansi-*` would move with them), and an element's inline
+   * style is a React value.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalScheme: TerminalSchemePref;
+  /**
+   * Whether the Response, PRs, Agents and Terminal views are capped at a
+   * readable line length instead of filling the pane.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView`,
+   * `editorIndent`, `filesTreeWidth` and `terminalFontSize` give at length:
+   * `Canvas.tsx` mounts one `DetailPanel` -- hence one of each of these four
+   * views -- per split leaf and `PhoneShell` mounts another, so per pane it
+   * would be an arrangement the operator had to re-make on every split, with
+   * no dialogue in which a pane opened by a keystroke could be asked. Per
+   * session it would key a reading preference to an id the TTL prunes.
+   *
+   * ONE FLAG FOR FOUR VIEWS BECAUSE IT IS ONE PROMISE: no more than eighty
+   * characters on a line. `prefs/view-width.ts` carries the whole argument,
+   * including why the Terminal belongs with the prose views and why the pixel
+   * maximum is nevertheless different there.
+   *
+   * IT IS NOT ONLY PAINT, the same way `terminalFontSize` above it is not:
+   * narrowing the Terminal shrinks the box `terminal-size.ts` divides by the
+   * measured advance, so tmux is told a smaller column count and a running
+   * agent's screen is re-wrapped. That is why the flag is a store with a
+   * subscription rather than a custom property on the root.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly narrowViews: boolean;
+  /**
+   * What a session tab draws beside its title: the indicator ids that are ON,
+   * out of the eight `prefs/tab-indicators.ts` offers. The strip never draws
+   * a mark for `idle`, and that is not a toggle -- the module header carries
+   * the operator's sentence and the argument.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView` and
+   * `narrowViews` above it give: every split leaf draws its own strip from
+   * the same rule, and a display choice keyed to a session id is one the TTL
+   * prunes. Exempt from the icon TTL like `theme` and `panes`: it describes
+   * the person, not a session that stopped existing.
+   *
+   * ONLY PAINT, unlike the two fields above it: nothing here reaches tmux or
+   * a session, so it is a prop from `CanvasInner` to the strip and not a
+   * store with a subscription.
+   */
+  readonly tabIndicators: readonly TabIndicatorId[];
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -489,6 +627,11 @@ export const EMPTY_PREFS: Prefs = {
   promptSubmitKey: DEFAULT_PROMPT_SUBMIT_KEY,
   editorHighlight: DEFAULT_EDITOR_HIGHLIGHT,
   editorIndent: DEFAULT_EDITOR_INDENT,
+  filesTreeWidth: null,
+  terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
+  narrowViews: DEFAULT_NARROW_VIEWS,
+  tabIndicators: DEFAULT_TAB_INDICATORS,
 };
 
 /**
@@ -720,6 +863,36 @@ function parsePrefs(
     // the two spaces the editor indented by before there was a setting.
     editorHighlight: readEditorHighlight((parsed as { editorHighlight?: unknown }).editorHighlight),
     editorIndent: clampEditorIndent((parsed as { editorIndent?: unknown }).editorIndent),
+    // Per field like every line above it, and the only one whose default is
+    // `null` rather than a value: "never dragged" is what the tree's own
+    // clamped share answers to, and a payload predating this field is exactly
+    // that. A number IS clamped, because a hand-edited width must not render
+    // a column nobody could have chosen.
+    filesTreeWidth: readFilesTreeWidth((parsed as { filesTreeWidth?: unknown }).filesTreeWidth),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, for the reason `readTerminalFontSize` argues: a size this
+    // vam does not offer is one no dialog could show as chosen, so it reads
+    // back as the size the pane ships at.
+    terminalFontSize: readTerminalFontSize(
+      (parsed as { terminalFontSize?: unknown }).terminalFontSize,
+    ),
+    // Per field like every line above it -- and per field INSIDE it as well:
+    // `readTerminalSchemePref` lets an unknown theme id cost the id, a bad
+    // override cost that override and a string opacity cost the opacity,
+    // each alone, because a hand-edited scheme is still mostly the
+    // operator's own colours.
+    terminalScheme: readTerminalSchemePref((parsed as { terminalScheme?: unknown }).terminalScheme),
+    // Per field like every line above it, and normalised in the safe
+    // direction `readNarrowViews` argues: a payload this vam cannot read must
+    // not re-shape four views -- and re-wrap a running tmux session -- on the
+    // strength of a choice nobody made.
+    narrowViews: readNarrowViews((parsed as { narrowViews?: unknown }).narrowViews),
+    // Per field like every line above it, and normalised in the two directions
+    // `readTabIndicators` argues: not a list at all reads as the defaults the
+    // operator saw before they had a choice, a list reads as itself with the
+    // words this vam cannot draw dropped one at a time -- and an EMPTY list
+    // stays empty, because every switch off is a choice.
+    tabIndicators: readTabIndicators((parsed as { tabIndicators?: unknown }).tabIndicators),
   };
 }
 
@@ -1063,6 +1236,31 @@ export function setDetailTab(prefs: Prefs, detailTab: string | null): Prefs {
   return { ...prefs, detailTab };
 }
 
+/**
+ * Anything that is not a finite number reads as "never dragged" -- which is
+ * what a payload predating this field already says by having no key, and what
+ * a devtools edit should cost too. A number that IS finite is clamped rather
+ * than dropped: an out-of-range width is a width someone meant, just not one
+ * the column can render.
+ */
+function readFilesTreeWidth(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isFinite(raw) ? clampStoredTreeWidth(raw) : null;
+}
+
+/**
+ * Store the width the tree was dragged to, or `null` to hand it back its
+ * clamped share. Clamped on the way in as well, like `setOutFontSize`: the
+ * handle cannot produce an out-of-range width, but a future caller could.
+ *
+ * NOTE WHAT IS NOT CLAMPED HERE: the container. `renderedTreeWidth` is the
+ * only place a container is consulted and it is a RENDER-time function --
+ * see `files-tree-width.ts`. A width narrowed against a hidden (0px) pane and
+ * written back here would be the operator's chosen width, gone, for good.
+ */
+export function setFilesTreeWidth(prefs: Prefs, width: number | null): Prefs {
+  return { ...prefs, filesTreeWidth: width === null ? null : clampStoredTreeWidth(width) };
+}
+
 /** Written whenever focus lands somewhere; `null` forgets the pointer. */
 export function setLastFocus(prefs: Prefs, lastFocus: FocusChoice | null): Prefs {
   return { ...prefs, lastFocus };
@@ -1127,6 +1325,33 @@ export function setEditorHighlight(prefs: Prefs, on: unknown): Prefs {
  *  produce an out-of-range width, but a future caller could. */
 export function setEditorIndent(prefs: Prefs, width: unknown): Prefs {
   return { ...prefs, editorIndent: clampEditorIndent(width) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it: the dialog can only offer sizes off the list, but a future caller could
+ *  store one that is not on it, and the pane would then be drawn at a size the
+ *  dialog shows nobody having chosen. */
+export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
+  return { ...prefs, terminalFontSize: readTerminalFontSize(size) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it: the switch can only send a boolean, but a hand-edited payload and a
+ *  future caller can send anything, and only a literal `true` may narrow. */
+export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
+  return { ...prefs, narrowViews: readNarrowViews(narrow) };
+}
+
+/** One indicator on or off; the list comes back in canonical order however it
+ *  was built, so two payloads that mean the same set are the same list. */
+export function setTabIndicator(prefs: Prefs, id: TabIndicatorId, on: boolean): Prefs {
+  return { ...prefs, tabIndicators: withTabIndicator(prefs.tabIndicators, id, on) };
+}
+
+/** Back to the five the operator was shipped with. The dialog's "reset" and
+ *  nothing else calls it: a read never resets, it normalises. */
+export function resetTabIndicators(prefs: Prefs): Prefs {
+  return { ...prefs, tabIndicators: DEFAULT_TAB_INDICATORS };
 }
 
 /**
@@ -1824,7 +2049,30 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
 ];
 
 /**
- * A COLOUR THE OPERATOR MAY STILL HAVE, AND MAY NO LONGER SET.
+ * THE DEEPEST SURFACE, WHICH IS NOT A SWATCH AND IS NOT UNSETTABLE EITHER.
+ *
+ * One spelling, because three lists below need this token and three lists of
+ * one string is how two of them stop agreeing. What each of them means by it
+ * is deliberately different, and the difference is the whole point:
+ *
+ *  - `RETIRED_TOKENS`: not in the grid. The operator asked for the swatch to
+ *    go ("the ground setting is unnecessary") and it stays gone.
+ *  - `TEMPLATE_TOKENS`: a whole-palette preset MAY write it. Picking one
+ *    colour by hand and choosing a palette someone measured end to end are
+ *    two different acts, and the operator asked to stop doing the first, not
+ *    the second.
+ *  - `PALETTE_KEYS`: may appear in a stored bucket, because it always could.
+ *
+ * The constant was already here, declared beside `LEGACY_GROUND_TOKEN` for the
+ * rename migration, while the retired-token list 80 lines above it typed the
+ * string out again. Two spellings of one token in one file is the drift this
+ * repo keeps paying for, so the declaration moved up to the first place that
+ * needs it and every list below now derives from it.
+ */
+const GROUND_TOKEN = '--vam-ground';
+
+/**
+ * A COLOUR THE OPERATOR MAY STILL HAVE, AND MAY NO LONGER PICK BY HAND.
  *
  * `--vam-ground` left the swatch grid when the operator asked for it to; it
  * did not leave the stylesheet. So a stored override for it is still read,
@@ -1833,12 +2081,36 @@ export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: 
  * migration may not do (`LEGACY_GROUND_TOKEN` below argues the same case for
  * the rename before this one, and that rename now lands here).
  *
+ * "MAY NO LONGER SET" WAS TOO STRONG, and this comment used to say it. What
+ * left was the SWATCH -- a control for picking one colour on its own, which is
+ * the thing the operator called unnecessary and which is still gone. A
+ * template is not that control: it writes a whole palette that was measured as
+ * a whole, and `--vam-ground` is the token that decides whether a dark theme
+ * is dark. `TEMPLATE_TOKENS` below is that permission, held apart from this
+ * list so neither can quietly become the other.
+ *
  * The cost, stated rather than discovered: with no swatch there is no
- * per-token reset either, so "reset <theme> colours" is the only way back.
- * That button clears the whole bucket, retired entries included, so the
- * colour is undoable -- just not individually.
+ * per-token reset either, so "reset <theme> colours" is the only way back --
+ * or the `default` template, which clears the same bucket from the same row
+ * the palette was chosen in, and is the nearer of the two to hand.
  */
-const RETIRED_TOKENS: readonly string[] = ['--vam-ground'];
+const RETIRED_TOKENS: readonly string[] = [GROUND_TOKEN];
+
+/**
+ * WHAT A WHOLE-PALETTE TEMPLATE MAY WRITE, which is the swatch grid plus the
+ * ground and nothing else.
+ *
+ * NOT `PALETTE_KEYS`, and the difference matters the next time something is
+ * retired: that set is "anything that may sit in a stored bucket", which will
+ * grow every time a swatch is withdrawn. A token leaving the grid must not
+ * thereby become something a preset may paint -- that would make every future
+ * retirement a silent widening of what a template can do. This list is a
+ * decision, so it is written as one.
+ */
+export const TEMPLATE_TOKENS: readonly string[] = [
+  ...PALETTE_TOKENS.map((entry) => entry.token),
+  GROUND_TOKEN,
+];
 
 /** Every token that may appear in a stored bucket: offered plus retired. */
 const PALETTE_KEYS = new Set([...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]);
@@ -1883,7 +2155,6 @@ const SPLITS: readonly (readonly [string, string])[] = [
  * everything downstream sees exactly one name.
  */
 const LEGACY_GROUND_TOKEN = '--vam-canvas';
-const GROUND_TOKEN = '--vam-ground';
 
 /**
  * What may be written into a custom property.
@@ -2106,6 +2377,12 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveFocusView(prefs.focusView);
   setActivePromptSubmitKey(prefs.promptSubmitKey);
   setActiveEditorSettings({ highlight: prefs.editorHighlight, indent: prefs.editorIndent });
+  setActiveTerminalFontSize(prefs.terminalFontSize);
+  // Resolved for the theme ON SCREEN, the same `effectiveTheme` read the
+  // palette line above takes: `system` is a source for the appearance, not
+  // an appearance, and there is no scheme chosen against it.
+  setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
+  setActiveNarrowViews(prefs.narrowViews);
   /**
    * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
    * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has

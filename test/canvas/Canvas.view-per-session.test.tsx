@@ -70,7 +70,8 @@ function press(key: string, modifiers: KeyboardEventInit = {}) {
 /** `Cmd+<n>` — the SESSION tab in the focused pane. */
 const sessionChord = (n: number) => press(String(n), { metaKey: true, code: `Digit${n}` });
 /** `Alt+<n>` — the VIEW in the focused pane. */
-const viewChord = (n: number) => press(String(n), { altKey: true, code: `Digit${n}` });
+const viewChord = (n: number) =>
+  press(String(n), { ctrlKey: true, altKey: true, code: `Digit${n}` });
 
 function mountFocused() {
   const view = render(<Canvas model={MODEL} />);

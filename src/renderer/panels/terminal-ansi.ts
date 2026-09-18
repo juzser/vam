@@ -22,9 +22,12 @@
  * worst.
  *
  * COLOUR IS A TOKEN, NEVER A VALUE. Sixteen tones come out of here by NAME
- * and the theme decides what they are (`styles.css`). That is what lets the
- * light theme remap them instead of reproducing them -- ANSI "white" on a
- * white panel has to become a dark grey or it stops being text.
+ * and the scheme decides what they are: `styles.css` names the tokens, and
+ * the Terminal tab sets them on the screen's own element from the scheme in
+ * force (`prefs/terminal-scheme.ts`). That is what lets a light scheme remap
+ * them instead of reproducing them -- ANSI "white" on a white ground has to
+ * become a dark grey or it stops being text -- and what lets the operator
+ * choose a scheme at all without this file knowing.
  */
 
 /** The escape byte itself, spelled rather than typed. */
@@ -344,10 +347,31 @@ const BG: Readonly<Record<AnsiTone, string>> = {
   'bright-white': 'bg-ansi-bright-white',
 };
 
+/**
+ * THE BOLD COLOUR, and the rule that decides who gets it -- iTerm2's.
+ *
+ * A scheme carries a `bold` ink (`prefs/terminal-scheme.ts`), and the
+ * question is which runs wear it. iTerm2's answer, which every scheme with a
+ * bold colour was drawn against: a bold run with NO colour of its own takes
+ * the bold colour; a bold run the program coloured keeps the program's
+ * colour and is merely heavier. The second half is the one that matters --
+ * `ESC[1;31m` is how an agent marks an error line, and a rule that turned
+ * every bold run peach would take the red away from exactly the line the
+ * operator is scanning for. So the class is emitted only where `fg` is
+ * `null`, and it is the pane's own default-ink case that moves, not the
+ * agent's.
+ *
+ * A token like the sixteen -- `styles.css` maps it to `--vam-term-bold`,
+ * which the screen's element carries -- and a static string, for the reason
+ * the tables above are.
+ */
+const BOLD_DEFAULT = 'text-term-bold';
+
 /** The class list for one span, or `''` when it looks like the pane itself. */
 export function spanClasses(span: AnsiSpan): string {
   const classes: string[] = [];
   if (span.fg !== null) classes.push(FG[span.fg]);
+  else if (span.bold) classes.push(BOLD_DEFAULT);
   if (span.bg !== null) classes.push(BG[span.bg]);
   if (span.bold) classes.push('font-bold');
   // `dim` is opacity and not a colour: a dimmed red is still red, and a

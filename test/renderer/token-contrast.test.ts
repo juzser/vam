@@ -63,6 +63,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FILE_ROW_INKS } from '../../src/renderer/panels/files-icons.js';
+import { ICON_TONE_INK, ICON_TONES } from '../../src/renderer/panels/icon-value.js';
+import { PALETTE_TEMPLATES, templatePalette } from '../../src/renderer/prefs/palette-templates.js';
 import { contrast } from '../support/contrast.js';
 import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
@@ -98,6 +100,35 @@ const MARKER_INK = /(?:\bmarker:|::marker\]:)text-([a-z0-9-]+)/g;
  * which is precisely what it was, and what a mutation caught.
  */
 const TREE_GLYPH_INKS = FILE_ROW_INKS.map((utility) => `--vam-${utility.replace(/^text-/, '')}`);
+
+/**
+ * The eight icon tones, as TOKENS, read from the module the picker paints with.
+ *
+ * Same bridge as `TREE_GLYPH_INKS` above, and for the same reason recorded
+ * there: the tree's inks were a typed second copy until a mutation showed that
+ * repointing a family in the module reddened nothing. `icon-value.tsx` is the
+ * only place the eight names exist; this turns each one's Tailwind utility
+ * into the custom property it resolves to.
+ */
+const ICON_TONE_TOKENS = ICON_TONES.map(
+  (tone) => `--vam-${ICON_TONE_INK[tone].replace(/^text-/, '')}`,
+);
+
+/**
+ * THE FOUR FILLS A CHOSEN ICON IS REALLY DRAWN ON.
+ *
+ * A glyph is not in one place. `SessionList` draws the group's and the
+ * project's on the sidebar column; the tab strip draws the session's on the
+ * pane behind an inactive tab and on `ground`, which the active tab fills
+ * itself; and the picker draws all twenty-four of them, plus the eight
+ * swatches, on the panel its shell is made of.
+ *
+ * `sidebar` and `pane` HOLD THE SAME VALUE TODAY and are both listed anyway,
+ * which is the argument `TEXT_GROUNDS` already makes about `--vam-pane`: the
+ * two were split so an operator could move one without the other, and a guard
+ * that measured only one would go quiet the day they did.
+ */
+const ICON_GROUNDS = ['--vam-sidebar', '--vam-pane', '--vam-ground', '--vam-panel'] as const;
 
 const RENDERER_DIR = resolve(process.cwd(), 'src/renderer');
 
@@ -174,6 +205,20 @@ const TEXT_GROUNDS = [
  * guard reads the colour the bubble's paragraph is really painted with and
  * holds it to 4.5:1, so an edit that reaches for a quieter grey fails there.
  */
+
+/**
+ * The composer's three mode hues, and the two fills the chip behind one has.
+ *
+ * Hoisted out of the test that measures them because the template sweep at the
+ * bottom of this file asks the same question of the same list against fills a
+ * preset supplies, and two copies of one list is the drift this file has
+ * already been caught by twice (`TREE_GLYPH_INKS`, `ICON_TONE_TOKENS`).
+ */
+const MODE_TOKENS = ['--vam-mode-auto', '--vam-mode-manual', '--vam-mode-plan'] as const;
+const MODE_GROUNDS = ['--vam-card', '--vam-line-strong'] as const;
+
+/** The three fills a file-tree row can have under its glyph. */
+const TREE_GLYPH_FILLS = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
 
 /** Tokens that carry body text and therefore owe WCAG 1.4.3's 4.5:1. */
 const TEXT_TOKENS = [
@@ -275,8 +320,8 @@ describe('token contrast, per theme', () => {
        * quiet on the hover.
        */
       it('paints each mode glyph at 3:1 on the chip it sits in, at rest and on hover', () => {
-        const pairs = ['--vam-mode-auto', '--vam-mode-manual', '--vam-mode-plan'].flatMap((token) =>
-          ['--vam-card', '--vam-line-strong'].map((ground) => [token, ground] as const),
+        const pairs = MODE_TOKENS.flatMap((token) =>
+          MODE_GROUNDS.map((ground) => [token, ground] as const),
         );
         // 3 hues x 2 chip states. The literal is the point, as above: dropping
         // a mode or a state from either list has to redden this, not quieten
@@ -365,9 +410,63 @@ describe('token contrast, per theme', () => {
        * five inks times three fills. Drop a fill from this list, or an ink
        * from the module, and this reddens rather than passing more quietly.
        */
+      /**
+       * THE EIGHT ICON TONES, AT THE FLOOR A GLYPH OWES — and the argument for
+       * which floor that is, because the two are a factor of 1.5 apart.
+       *
+       * A tone is painted on a LUCIDE PATH, never on text: `IconMark` gives it
+       * to an `<svg>` and to nothing else, and the emoji kind takes no tone at
+       * all precisely because a colour cannot reach it. So what is being
+       * measured is a graphical object that carries meaning — WCAG 1.4.11's
+       * 3:1 — and not body text under 1.4.3's 4.5:1. The glyph is also never
+       * the only thing saying which row this is: the project's name, the
+       * group's name and the session's title sit next to it in an ink this
+       * file already holds to 4.5. An icon whose colour an operator chose is
+       * decoration ON a label, not a label.
+       *
+       * ASSERTING THE FLOOR IT OWES RATHER THAN THE ONE IT HAPPENS TO CLEAR is
+       * the same decision the mode glyphs record above. Measured, the worst
+       * ground is `sidebar`/`pane` in both themes: dark runs 5.33 (red) to
+       * 8.83 (yellow), light 4.25 (yellow) to 6.03 (purple). Five of the eight
+       * clear 4.5 in light as well and three do not — orange 4.47, green 4.33,
+       * yellow 4.25 — and pinning the test at 4.5 would be pinning a margin
+       * nobody designed for, so that a hue moved for a reason would fail here
+       * for none.
+       *
+       * 8 tones x 4 fills. The literal is the point, as everywhere else in
+       * this file: dropping a tone from the module or a fill from the list has
+       * to redden this rather than quieten it.
+       */
+      it('paints every icon tone at 3:1 on each fill a chosen glyph is drawn on', () => {
+        const pairs = ICON_TONE_TOKENS.flatMap((ink) =>
+          ICON_GROUNDS.map((fill) => [ink, fill] as const),
+        );
+        expect(measure(pairs, 3)).toEqual({ pairs: 32, failing: [] });
+      });
+
+      /**
+       * NEUTRAL IS NOT A NINTH HUE, and this is what holds it to that.
+       *
+       * The first tone in the row is "no colour": the value an unpainted glyph
+       * already has, so that picking it looks like clearing a choice rather
+       * than choosing grey. The placeholders it has to match — `Monitor` on a
+       * project heading, `Folder` on a group's — paint `text-ink-faint`, and
+       * nothing but this assertion stops the two drifting into two slightly
+       * different greys answering the same question.
+       *
+       * A LITERAL, NOT `var(--vam-ink-faint)`, for the reason `--color-pane`
+       * gives in `styles.css`: a token pointed at another token moves two
+       * things whenever one of them is set. The cost of the literal is exactly
+       * the drift this test removes.
+       */
+      it('keeps the neutral tone on the ink an unpainted glyph already wears', () => {
+        expect(hex('--vam-icon-neutral')).toBe(hex('--vam-ink-faint'));
+      });
+
       it('draws every file-tree glyph at 3:1 on all three fills a row can have', () => {
-        const fills = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
-        const pairs = TREE_GLYPH_INKS.flatMap((ink) => fills.map((fill) => [ink, fill] as const));
+        const pairs = TREE_GLYPH_INKS.flatMap((ink) =>
+          TREE_GLYPH_FILLS.map((fill) => [ink, fill] as const),
+        );
         expect(measure(pairs, 3)).toEqual({ pairs: 15, failing: [] });
       });
     });
@@ -443,4 +542,148 @@ describe('token contrast, per theme', () => {
       used.filter((u) => !TEXT_TOKENS.includes(u.ink as (typeof TEXT_TOKENS)[number])),
     ).toEqual([]);
   });
+});
+
+/**
+ * THE SAME FLOORS, AGAINST THE FILLS A COLOUR TEMPLATE PUTS THERE INSTEAD.
+ *
+ * Everything above reads `:root` and `html.light` and stops there, which was a
+ * complete account of vam's palette right up until the appearance settings
+ * grew a row of presets. A template REPLACES five of the fills this file calls
+ * grounds -- `panel`, `sidebar`, `pane`, `raised`, `card` -- and the tokens
+ * drawn ON them are mostly ones it does not set and cannot see: the eight icon
+ * tones, the three mode hues, the file tree's five glyph inks, the quiet ink a
+ * control's border is drawn in. "The ground a glyph is drawn on" is therefore
+ * not one value per theme but eight, and this file was measuring one of them.
+ *
+ * SO THE CORPUS IS THE PALETTE AN OPERATOR CAN ACTUALLY BE LOOKING AT. Each
+ * template's overrides are laid over the stylesheet's own map and the families
+ * re-measured on the result -- which also means a token a template does NOT
+ * set (`line-strong` under the keyboard cursor, `ground` behind a tab) keeps
+ * the stylesheet's value in the pair, because that is what would really be
+ * painted.
+ *
+ * WHY THE 4.5:1 TEXT SWEEP IS NOT ALSO HERE, and it is a split rather than a
+ * gap: `palette-templates.test.ts` owns it, 630 pairs of it, and states the
+ * claim in the form that file needs -- against a TYPED record of the inks each
+ * template was chosen under, so a stylesheet that moves one has to come and
+ * re-derive rather than silently agreeing. The floors in this file are the
+ * non-text ones (WCAG 1.4.11's 3:1), and nothing anywhere was asking them of a
+ * preset's surfaces.
+ *
+ * THE TEMPLATES ARE READ FROM THE MODULE, never listed here, for the reason
+ * `TREE_GLYPH_INKS` above records: a remembered list goes quiet exactly when
+ * somebody adds the thing it was supposed to cover.
+ */
+describe('non-text floors, on every colour template', () => {
+  const TINTED = PALETTE_TEMPLATES.filter((t) => t.kind === 'values');
+
+  it('has templates to measure at all', () => {
+    // A SWEEP OVER AN EMPTY ROW passes every assertion below by having nothing
+    // to compare. Four guards in this repo have gone green on an empty corpus.
+    expect(TINTED.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const theme of THEMES) {
+    const base = tokens(ruleBody(CSS, theme.selector));
+
+    describe(theme.name, () => {
+      it('holds every non-text mark to 3:1 on the fills each template paints under it', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const template of TINTED) {
+          const values = templatePalette(template.id, theme.name);
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${template.id} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          const marks = [
+            // A chosen icon's glyph, on all four fills one is drawn on.
+            ...ICON_TONE_TOKENS.flatMap((ink) => ICON_GROUNDS.map((fill) => [ink, fill] as const)),
+            // The composer's mode glyph, at rest and under a pointer.
+            ...MODE_TOKENS.flatMap((ink) => MODE_GROUNDS.map((fill) => [ink, fill] as const)),
+            // The file tree's glyphs, on all three fills a row can have.
+            ...TREE_GLYPH_INKS.flatMap((ink) =>
+              TREE_GLYPH_FILLS.map((fill) => [ink, fill] as const),
+            ),
+            // The "New session" border, on the sidebar a template repaints.
+            ['--vam-ink-quiet', '--vam-sidebar'] as const,
+            // The bullet a reader finds each list item by, on the pane.
+            ['--vam-ink-quiet', '--vam-pane'] as const,
+            // THE ONE PAIR WHERE THE GROUND IS THE MARK AND NOT THE SURFACE,
+            // and the reason it is here is that a template can now write it.
+            // `Switch` paints the knob of a checked switch `bg-ground` on a
+            // `bg-ink-faint` track -- the fill inverts with the state so that
+            // "the dot is the thing you can see" either way. Every other
+            // measurement in this file reads an ink ON the ground; this one
+            // reads the ground as an ink, so it is the pair that moves in the
+            // OPPOSITE direction when a palette darkens the room. It is also
+            // the one that would catch a preset going the other way: at
+            // #8a8a8a the knob reads 1.592:1 on its track and at #ffffff
+            // 2.169:1, both under 1.4.11's 3, where black reads 9.683:1.
+            ['--vam-ground', '--vam-ink-faint'] as const,
+          ];
+          for (const [ink, ground] of marks) {
+            pairs += 1;
+            const ratio = contrast(hex(ink), hex(ground));
+            if (ratio < 3) {
+              failing.push(`${template.id}: ${ink} on ${ground} = ${ratio.toFixed(3)}`);
+            }
+          }
+        }
+        // 7 templates x 56 marks each: 8 tones x 4 fills, 3 modes x 2,
+        // 5 glyphs x 3, the two borders, and the switch knob. A LITERAL, not
+        // `TINTED.length * 56`: a count derived from the corpus shrinks with
+        // the corpus, so a template that quietly stopped being tinted would
+        // leave this sweep measuring six palettes and reporting a full house.
+        expect({ pairs, failing }).toEqual({ pairs: 392, failing: [] });
+      });
+
+      /**
+       * THE 63 TEXT PAIRS, AGAINST THE GROUNDS A TEMPLATE SUPPLIES.
+       *
+       * The sweep at the top of this file asks WCAG 1.4.3 of nine inks on
+       * seven grounds and answers it for the stylesheet. A template replaces
+       * five of those grounds outright and -- since a palette may write
+       * `--vam-ground` -- can replace a sixth, which is the one this pair list
+       * has always been weakest about: `ground` carries the code fence, the
+       * page behind the panes and the phone list, and it is now the token a
+       * high-contrast preset moves furthest.
+       *
+       * `palette-templates.test.ts` also sweeps text over template surfaces,
+       * and the two are not the same claim. That one measures against a TYPED
+       * record of the inks each template was chosen under, so a stylesheet
+       * that moves an ink reddens there and has to be re-derived; it covers
+       * the five surfaces a template sets. This one measures against whatever
+       * the stylesheet says TODAY, over all seven grounds including the two a
+       * template does not set -- so it answers "is this palette readable as
+       * the app is now", which is a question about the present rather than
+       * about the decision.
+       */
+      it('carries all 63 text pairs at 4.5:1 on the grounds each template supplies', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const template of TINTED) {
+          const values = templatePalette(template.id, theme.name);
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${template.id} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          for (const token of TEXT_TOKENS) {
+            for (const ground of TEXT_GROUNDS) {
+              pairs += 1;
+              const ratio = contrast(hex(token), hex(ground));
+              if (ratio < 4.5) {
+                failing.push(`${template.id}: ${token} on ${ground} = ${ratio.toFixed(3)}`);
+              }
+            }
+          }
+        }
+        // 7 templates x 9 inks x 7 grounds, as a literal for the reason above.
+        expect({ pairs, failing }).toEqual({ pairs: 441, failing: [] });
+      });
+    });
+  }
 });

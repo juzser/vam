@@ -35,9 +35,13 @@
  * the life of the renderer: drawn as the newest turn with `output: null`, with
  * the real turn and its real answer sitting above it. The operator reported
  * exactly that, twice. Divergence is not hypothetical: the prompt reaches a
- * Claude Code session as one `send-keys -l` into a tmux pane with no bracketed
- * paste to frame it (`sources/claude-code/reply.ts`), and a TUI that is
- * booting, re-wrapping or echoing records something that is not byte-identical.
+ * Claude Code session as `send-keys -l` keystrokes typed into a tmux pane with
+ * no bracketed paste to frame it, and a multi-line one is typed line by line
+ * with a `\`+Enter escape between them (`sources/claude-code/reply.ts`), so a
+ * TUI that is booting, re-wrapping or echoing records something that is not
+ * byte-identical -- and there is no echo confirming the turn landed at all, so
+ * the paint's `running` claim (`live`, below) rests on the keystroke alone and
+ * MUST be able to expire, which is what the two rules below and the clock do.
  *
  * So there are two more ways out, and they answer different questions.
  * OVERTAKEN (`seenAll`) is evidence: the session has recorded a turn since the

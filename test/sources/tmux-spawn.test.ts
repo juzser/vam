@@ -223,6 +223,43 @@ describe('listVamSessions', () => {
       sessions: [{ project: 'claude-code:demo-11111111', pid: '', name: 'vam-demo-a1b2c3' }],
     });
   });
+
+  /**
+   * THE SEPARATORS CAN COME BACK AS `_`, AND THAT IS NOT "NO SESSIONS".
+   *
+   * Measured against tmux 3.7b: when the CLIENT's LC_CTYPE is not UTF-8 --
+   * unset, `C`, or a locale the system does not have -- every control
+   * character in a `-F` expansion is printed as `_`, so the two tabs
+   * `listSessionsArgv` separates its fields with arrive as underscores and
+   * the line has no tab at all. A GUI launch (Finder, Dock, Spotlight) has
+   * no LANG or LC_* in its environment, so this is what a packaged vam saw
+   * on every listing: the parser found no tab, skipped every line, and
+   * answered `ok, []` -- "vam started none of these" -- for a machine whose
+   * every vam session was right there. Downstream, `paneForRow` refused the
+   * reply as `no-terminal`, and `vamControlled` went false for every row.
+   *
+   * The listing is UNREADABLE and says so, so the refusal carries the tmux
+   * reason and `load()` records "could not ask" rather than "none". The
+   * environment repair (`env/utf8-ctype.ts`) is what makes the tab survive;
+   * this is what keeps the failure honest when it does not.
+   */
+  it('is UNAVAILABLE -- not an empty list -- when the separators did not survive', async () => {
+    const run = fakeTmux(() => ({
+      stdout: ['claude-code:demo-11111111_4242_vam-demo-a1b2c3', '__notes', ''].join('\n'),
+    }));
+    const result = await listVamSessions(run);
+    expect(result.kind).toBe('unavailable');
+    expect(result.kind === 'unavailable' && result.error).toMatchObject({
+      kind: 'unreachable',
+      code: 'listing-unreadable',
+    });
+    expect(result.kind === 'unavailable' && result.error.message).toMatch(/LC_CTYPE/);
+  });
+
+  it('still reads an empty listing as no sessions', async () => {
+    const run = fakeTmux(() => ({ stdout: '' }));
+    await expect(listVamSessions(run)).resolves.toEqual({ kind: 'ok', sessions: [] });
+  });
 });
 
 describe('createVamSession', () => {

@@ -32,8 +32,8 @@
  * token list cannot prove a CSS rule reached a real element.
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { chroma, contrast, deltaE, lightness } from '../support/contrast.js';
 import { ruleBody, tokens } from '../support/css-tokens.js';
@@ -48,20 +48,78 @@ const hex = (from: Map<string, string>, name: string): string => {
   return value as string;
 };
 
+/**
+ * The same colour one 8-bit step darker, for the question "could this rung
+ * have gone lower?" -- which is the fifth pass's own claim and is otherwise
+ * only assertable by typing the answer.
+ */
+const oneStepDarker = (value: string): string => {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value);
+  expect(m, `${value} is a six-digit hex`).not.toBeNull();
+  const down = (pair: string): string =>
+    Math.max(0, Number.parseInt(pair, 16) - 1)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${down((m as RegExpExecArray)[1] as string)}${down((m as RegExpExecArray)[2] as string)}${down((m as RegExpExecArray)[3] as string)}`;
+};
+
+const RENDERER_DIR = resolve(process.cwd(), 'src/renderer');
+
+/** Every `.ts`/`.tsx` file the renderer ships, for the sweep below. */
+function rendererSources(dir: string = RENDERER_DIR): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) out.push(...rendererSources(full));
+    else if (['.ts', '.tsx'].includes(extname(e.name))) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Source with its COMMENTS TAKEN OUT, and that is load-bearing rather than
+ * tidy. The sweep below asks whether anything PAINTS `header`, and the one
+ * place in the renderer that says `bg-header` is the JSX comment in
+ * `DetailPanel.tsx` recording that the composer stopped painting it -- prose
+ * that is evidence FOR the claim and would be read by a plain regex as
+ * evidence against it. A scan that cannot tell code from prose is the repo's
+ * own standing lesson; here it would fire in the direction that makes the
+ * guard useless, so the prose is removed before the question is asked.
+ *
+ * Block comments only, plus `//` lines that start one. A `//` mid-line is
+ * left alone so a URL inside a string cannot silently truncate a real call
+ * site out of the corpus.
+ */
+const withoutComments = (source: string): string =>
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('//'))
+    .join('\n');
+
 /** The just-noticeable difference in CIE L*, the same floor every pass here uses. */
 const JND = 2.3;
 
 /**
- * The eight distinct dark surfaces, deepest first, with the one pair that is
- * deliberately equal (`sidebar` / `pane`, split at the operator's own ask so
- * the two settings can diverge -- they still start on the same value).
+ * The dark surfaces, deepest first, GROUPED BY RUNG rather than by token --
+ * because two of the groups now hold more than one name.
+ *
+ * `sidebar` / `pane` were the first, split at the operator's own ask so the
+ * two settings could diverge; they still start on the same value.
+ *
+ * `header` / `panel` are the second, and the fifth pass put them there. Eight
+ * rungs became SEVEN, which is the whole reason that pass had anything to
+ * spend: `--vam-header` is painted by nothing in the renderer (the test below
+ * proves it, by sweep, rather than by this sentence), and an unworn fill was
+ * standing on 2.45 L* of a ladder whose every other rung was arguing over
+ * tenths. Sharing `panel`'s value costs nothing on screen and lets `panel`
+ * and everything above it descend a rung. See `styles.css`.
  */
 const SURFACE_LADDER = [
   ['--vam-ground'],
   ['--vam-sunken'],
   ['--vam-well'],
-  ['--vam-header'],
-  ['--vam-panel'],
+  ['--vam-header', '--vam-panel'],
   ['--vam-sidebar', '--vam-pane'],
   ['--vam-raised'],
   ['--vam-card'],
@@ -99,6 +157,41 @@ const SEGMENT_ON = '--vam-segment-on';
  * the deliberate move and still refuses the accidental one.
  */
 const GROUND_PINNED = '#141414';
+
+/**
+ * THE FIFTH PASS'S ASK, AND THE ONLY ASSERTION IN THIS FILE THAT ENCODES IT.
+ *
+ * Operator: make the pane, the panel, the sidebar, the card and the bubble
+ * darker. FIVE NAMES, and every one of them is in the upper half of a ladder
+ * whose rungs sit a bare JND apart -- so the shape assertions above cannot
+ * express this request at all. They are satisfied by a ladder that is well
+ * spaced ANYWHERE, including exactly where it already was, and they would go
+ * on passing through a re-balance that moved four of the five and left the
+ * fifth. That is the failure mode this test exists for: it names the five,
+ * records where the FOURTH pass left each one, and requires each to have come
+ * DOWN by a real step.
+ *
+ * `DARKENED_BY` IS 2 L*, NOT THE 2.3 JND EVERY GAP OWES, and the difference is
+ * deliberate rather than slack. A gap is a claim about two surfaces being told
+ * APART; this is a claim about one surface having MOVED, and the ladder's own
+ * arithmetic caps what is available: with `--vam-ground` pinned and every gap
+ * still owing a JND, the lowest legal value for `panel` is 2.40 L* under where
+ * it was, and the bubble -- held up by the multiple `surface-elevation.
+ * test.ts` measures it off `raised` by -- can only reach 2.19. A floor of 2.3
+ * here would have demanded more than the ladder can pay, and the only way to
+ * pay it is to spend a gap. That is the one thing the operator has complained
+ * about twice, so the floor is set under it on purpose. `styles.css` carries
+ * the arithmetic; `e2e/pane-colour-shots.mjs` re-asks the same question of the
+ * PAINT, which is the half a token list cannot answer.
+ */
+const FOURTH_PASS_NAMED = {
+  '--vam-panel': '#282828',
+  '--vam-sidebar': '#2d2d2d',
+  '--vam-pane': '#2d2d2d',
+  '--vam-card': '#393939',
+  '--vam-in-bubble': '#464646',
+} as const;
+const DARKENED_BY = 2;
 
 /** The two HELD tokens, unmoved across all three passes, and why is in `styles.css`. */
 const HELD = {
@@ -151,6 +244,18 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
     expect(hex(dark, '--vam-ground')).toBe(GROUND_PINNED);
   });
 
+  it('takes all five surfaces the operator named below where the fourth pass left them', () => {
+    // Read as a table rather than a loop of bare expectations, so a failure
+    // names WHICH of the five stood still and by how much the other four
+    // moved -- the shape of this request's one likely wrong answer.
+    const moved = Object.entries(FOURTH_PASS_NAMED).map(([name, before]) => ({
+      name,
+      by: Number((lightness(before) - lightness(hex(dark, name))).toFixed(2)),
+    }));
+    expect(moved.length).toBe(5);
+    expect(moved.filter((m) => m.by < DARKENED_BY)).toEqual([]);
+  });
+
   it('keeps the two held tokens exactly as they were', () => {
     for (const [name, value] of Object.entries(HELD)) {
       expect(hex(dark, name), name).toBe(value);
@@ -192,10 +297,111 @@ describe('the dark ladder: eight surfaces, seven gaps, every one a JND', () => {
     }).toEqual({ measured: SURFACE_LADDER.length - 1, tooNarrow: [] });
   });
 
-  it('spans 16-18 L* from ground to card, the shape eight genuinely distinct rungs needs', () => {
+  /**
+   * THE SPAN, DERIVED FROM THE RUNG COUNT RATHER THAN TYPED.
+   *
+   * It used to read "16 to 18.5 L*, the shape eight genuinely distinct rungs
+   * needs" -- a pair of literals that were correct for eight rungs and said
+   * nothing about why. The fifth pass merged two of them, and a literal band
+   * cannot tell "a rung was removed on purpose" from "a rung collapsed by
+   * accident": it just goes red at a number nobody can re-derive.
+   *
+   * So the band is computed. The FLOOR is one JND per gap, which is the same
+   * claim the gap test above makes, restated end to end. The CEILING is what
+   * this pass is actually about: a ladder whose average gap runs far over the
+   * JND is spending lightness it does not need, and lightness is exactly what
+   * the operator keeps asking to have back. 1.25 leaves real room -- the
+   * fourth pass ran at 1.096 JND per gap and this one at 1.115 -- while still
+   * failing a ladder that has quietly inflated.
+   */
+  it('spans one JND per gap, and not much more than one — measured, not typed', () => {
+    const gaps = SURFACE_LADDER.length - 1;
     const span = lightness(hex(dark, '--vam-card')) - lightness(hex(dark, '--vam-ground'));
-    expect(span).toBeGreaterThanOrEqual(16);
-    expect(span).toBeLessThanOrEqual(18.5);
+    expect(gaps).toBe(6);
+    expect(span).toBeGreaterThanOrEqual(gaps * JND);
+    expect(span).toBeLessThanOrEqual(gaps * JND * 1.25);
+  });
+
+  /**
+   * THE CLAIM THAT MAKES THIS PASS FINISHED RATHER THAN PARTIAL.
+   *
+   * "Darker" has no natural stopping point, and the honest answer to it is
+   * not a number somebody liked but the FLOOR: `panel` and `pane` are as dark
+   * as this ladder can legally paint them with `--vam-ground` pinned, because
+   * one 8-bit step further puts each of them inside a JND of the rung below.
+   * Asserted by actually taking that step and measuring it, so the statement
+   * survives a future edit to `JND`, to the rungs beneath, or to the values
+   * themselves -- and so an edit that walks either one back UP has to come
+   * here and explain itself rather than quietly passing the gap test with
+   * room to spare.
+   *
+   * Only these two. `raised`, `card` and `segment-on` sit above their JND
+   * floors on purpose (see `styles.css`): each is held up by a second
+   * constraint -- a `pane-colour-shots.mjs` ratchet, or a refusal to ship a
+   * gap that clears by a hundredth -- and a floor test would read those
+   * reasons as slack.
+   */
+  it('leaves panel and pane at the darkest value the ladder can legally give them', () => {
+    const below = { '--vam-panel': '--vam-well', '--vam-pane': '--vam-panel' } as const;
+    const measured = Object.entries(below).map(([rung, under]) => {
+      const floor = lightness(hex(dark, under)) + JND;
+      return {
+        rung,
+        clearsItsFloor: lightness(hex(dark, rung)) >= floor,
+        oneStepLowerWouldNot: lightness(oneStepDarker(hex(dark, rung))) < floor,
+      };
+    });
+    expect(measured).toEqual([
+      { rung: '--vam-panel', clearsItsFloor: true, oneStepLowerWouldNot: true },
+      { rung: '--vam-pane', clearsItsFloor: true, oneStepLowerWouldNot: true },
+    ]);
+  });
+
+  /**
+   * WHY `header` MAY SHARE `panel`'S VALUE, ASKED OF THE RENDERER RATHER THAN
+   * ASSUMED. The merge is what paid for this pass, and it is only sound while
+   * nothing paints the fill: two names on one rung are free when one of them
+   * is never drawn, and a bug the moment it is. The day something wears
+   * `header` again it needs its own rung back and the five surfaces above it
+   * have to be re-derived to pay for it -- this is the test that says so.
+   *
+   * THE SWEEP IS OVER SOURCE TEXT AND THAT IS THE RIGHT CORPUS HERE. The
+   * question is "does any file NAME this fill", which the file's own text is
+   * direct evidence of -- the same distinction `token-contrast.test.ts` draws
+   * for its marker scan. It is not standing in for a rendered measurement:
+   * there is nothing to render, which is the point.
+   */
+  it('shares panel’s value with header only for as long as nothing paints header', () => {
+    const files = rendererSources();
+    // A SWEEP THAT READ NO FILES REPORTS NO PAINTERS. Four guards in this
+    // repo have already gone green having examined zero of them.
+    expect(files.length).toBeGreaterThan(20);
+    const painters = files.filter((file) =>
+      /\b(?:bg|text|border|ring|from|via|to|fill|stroke|divide|outline|shadow)-header\b|--(?:color|vam)-header\b/.test(
+        withoutComments(readFileSync(file, 'utf8')),
+      ),
+    );
+    expect(painters.map((f) => f.slice(RENDERER_DIR.length + 1))).toEqual([]);
+    expect(hex(dark, '--vam-header')).toBe(hex(dark, '--vam-panel'));
+  });
+
+  /**
+   * `html.light` IS `:root`, WHICH MAKES A FORGOTTEN PAIR INVISIBLE RATHER
+   * THAN BROKEN. The light block overrides the dark one; a surface whose dark
+   * value moves and whose light value is left pointing at it does not vanish,
+   * it FALLS THROUGH, and every assertion in this file that only reads `dark`
+   * goes on passing while the light theme paints a dark room.
+   *
+   * `leaves the light theme exactly where the artboard put it` above pins the
+   * light values one by one and would catch that today. This is the same
+   * claim made structurally instead of by table: it cannot go stale when a
+   * token is added, and it states the property -- the two themes are
+   * different colours on every surface -- rather than a list of colours.
+   */
+  it('gives every surface a value of its own in each theme, so none falls through', () => {
+    const names = [...SURFACE_LADDER.flat(), SEGMENT_ON, '--vam-in-bubble'];
+    expect(names.length).toBe(11);
+    expect(names.filter((n) => hex(dark, n) === hex(light, n))).toEqual([]);
   });
 
   it('keeps segment-on a JND clear of the widened card, and the lightest rung there is', () => {

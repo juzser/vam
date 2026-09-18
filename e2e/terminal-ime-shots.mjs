@@ -56,6 +56,16 @@
  *      gives for the key-truth guard. And the LINE is measured with it:
  *      `Ctrl+1` must still reach vam, because `Mod-<digit>` is the tab switch
  *      an operator uses to leave this pane.
+ *   9. AND THE SHIFTED CONTROL CHORD REACHES IT TOO. No terminal tells
+ *      `Ctrl+Shift+P` from `Ctrl+P` -- both are 0x10 -- but the pane's rule
+ *      carried a `!shiftKey` clause, so it sent nothing and vam's grammar
+ *      answered two of them instead: measured before PR 366, `Ctrl+Shift+H` in
+ *      a focused terminal moved the keyboard to the session list and
+ *      `Ctrl+Shift+P` opened a directory picker. Chromium is what decides
+ *      which `key` a really-held Shift produces, so this is the only place the
+ *      claim can be measured rather than asserted about an event that was
+ *      handed its own answer. `Ctrl+Shift+1` is checked beside it: widening to
+ *      Shift must not widen past the twenty-six letters.
  *
  * THE BRIDGE IS A STUB, injected with `page.addInitScript`, exactly as
  * `files-tab-keyboard-shots.mjs` does and for the same reason recorded there:
@@ -84,6 +94,10 @@
  *     "vam never hears it" reddens while the send still lands.
  *   - widen the chord branch to accept any one-character key -> case 8's
  *     Ctrl+1 reddens.
+ *   - put `!event.shiftKey` back in the chord branch -> case 9's Ctrl+Shift+P
+ *     and Ctrl+Shift+H redden.
+ *   - widen `controlStrokeFor` to claim any key when Shift is held -> case 9's
+ *     Ctrl+Shift+1 reddens.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/terminal-ime-shots.mjs http://localhost:5520 docs/ui
@@ -616,6 +630,8 @@ const chordDown = (key, code, keyCode, modifiers) =>
     modifiers,
   });
 const CTRL = 2;
+const META = 4;
+const SHIFT = 8;
 
 await sent();
 await heard();
@@ -674,9 +690,96 @@ check(
   JSON.stringify(stillTyping),
 );
 
+// AND THE SHIFTED SPELLING, which is the half that was a hole.
+//
+// NO TERMINAL DISTINGUISHES `Ctrl+Shift+P` FROM `Ctrl+P` — both are 0x10 — so
+// the pane owes the agent a `C-p` for it. It did not send one: its rule was
+// `ctrlKey && !altKey && !shiftKey`, so the chord went back to vam, where
+// (measured before PR 366) `Ctrl+Shift+H` moved the keyboard to the session
+// list and `Ctrl+Shift+P` opened a directory picker while tmux got nothing.
+// PR 366 stopped vam answering them on macOS and left them doing NOTHING AT
+// ALL, which is what this pair now measures the end of.
+//
+// A REAL SHIFT, HELD, IS THE POINT OF MEASURING IT HERE. `modifiers` puts the
+// bit on the event Chromium builds, and the browser decides for itself what
+// `key` a shifted letter is; a hand-built `KeyboardEvent` in a unit
+// environment is told both and so can only confirm what it was given.
+await sent();
+await heard();
+await chordDown('P', 'KeyP', 80, CTRL | SHIFT);
+await page.waitForTimeout(250);
+const shiftedChord = await sent();
+check(
+  'Ctrl+Shift+P reaches the pane as C-p — the same control character Ctrl+P is',
+  shiftedChord.length === 1 &&
+    shiftedChord[0]?.kind === 'control' &&
+    shiftedChord[0]?.letter === 'p',
+  `the pane sent ${JSON.stringify(shiftedChord)}`,
+);
+check(
+  'and vam never hears it, which on Linux and Windows is a directory picker not opening',
+  (await heard()).length === 0,
+  '`Mod-Shift-p` reached the window listener as well as the pane',
+);
+
+await chordDown('H', 'KeyH', 72, CTRL | SHIFT);
+await page.waitForTimeout(250);
+const shiftedBackspace = await sent();
+check(
+  'Ctrl+Shift+H reaches it too, which a terminal reads as backspace',
+  shiftedBackspace.length === 1 &&
+    shiftedBackspace[0]?.kind === 'control' &&
+    shiftedBackspace[0]?.letter === 'h',
+  `the pane sent ${JSON.stringify(shiftedBackspace)}`,
+);
+const afterShifted = await keyboardAt();
+check(
+  'and vam never hears that one either — on Linux and Windows it is `focusList`',
+  (await heard()).length === 0,
+  '`Mod-Shift-h` reached the window listener as well as the pane',
+);
+// SEPARATE, so a red one says which thing broke. This machine is macOS, where
+// `Ctrl-Shift-h` binds to nothing since PR 366 — so a leak to vam moves no
+// keyboard here and the check above is the one with the teeth. This is what
+// the leak WOULD cost where the binding is live, asserted at the only place
+// it can be: `focusList` is the action that empties this pane of the keyboard.
+check(
+  'and the keyboard is still on the box, which is what `focusList` would have taken',
+  afterShifted.isBox,
+  JSON.stringify(afterShifted),
+);
+
+// AND SHIFT DID NOT WIDEN THE RULE PAST THE LETTERS. `Ctrl+Shift+1` arrives as
+// `!` and is no control character in any terminal, so it must still go back to
+// vam — the same line `Ctrl+1` draws below, checked with Shift held because
+// that is the clause that just changed. On macOS it resolves to `Ctrl-Shift-1`,
+// which vam binds to nothing, so nothing here can navigate away.
+await sent();
+await heard();
+await chordDown('!', 'Digit1', 49, CTRL | SHIFT);
+await page.waitForTimeout(250);
+check(
+  'Ctrl+Shift+1 is still NOT the pane’s: widening to Shift did not widen past the letters',
+  (await sent()).length === 0,
+  'a shifted digit chord was typed into the agent',
+);
+check(
+  'and it still reaches the window listener',
+  (await heard()).includes('!'),
+  'Ctrl+Shift+1 never reached the window listener',
+);
+
 // AND THE LINE THE RULE IS DRAWN ON. `Ctrl+1` is no control character in any
-// terminal, so it stays vam's — which is what keeps the tab switch working
-// from inside a pane that has taken every Ctrl+letter.
+// terminal, so it stays vam's — which is what keeps a digit chord out of
+// somebody's agent whatever vam does with it afterwards.
+//
+// WHAT VAM DOES WITH IT CHANGED, and the second check is what changed with it.
+// `Ctrl+1` used to BE the tab switch; the operator cancelled that row, so on
+// macOS it now resolves to nothing at all (`digitChord`, `keyboard/chords.ts`)
+// and the tab switch is `Cmd+1`. Both are asserted: the pane must decline the
+// Ctrl spelling (this rule), and the Cmd spelling must still cross the pane
+// and reach the window listener, which is the property the old caption here
+// claimed and would have gone on claiming while being false.
 await sent();
 await heard();
 await chordDown('1', 'Digit1', 49, CTRL);
@@ -685,6 +788,20 @@ check(
   'Ctrl+1 is NOT the pane’s: no control character comes of it in any terminal',
   (await sent()).length === 0,
   'a digit chord was typed into the agent',
+);
+check(
+  'and it still reaches the window listener rather than being swallowed here',
+  (await heard()).includes('1'),
+  'Ctrl+1 never reached the window listener',
+);
+await sent();
+await heard();
+await chordDown('1', 'Digit1', 49, META);
+await page.waitForTimeout(250);
+check(
+  'Cmd+1 is not the pane’s either — no terminal has ever wanted Cmd',
+  (await sent()).length === 0,
+  'a Cmd chord was typed into the agent',
 );
 check(
   'and it reaches vam, which is the tab switch an operator leaves this pane with',

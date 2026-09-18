@@ -47,8 +47,10 @@
  * and it gets its own line rather than being folded into either.
  */
 
+import { GitBranch } from 'lucide-react';
 import {
   type CompositionEvent,
+  type CSSProperties,
   type FocusEvent,
   Fragment,
   type KeyboardEvent,
@@ -58,10 +60,27 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { isControlLetter } from '../../shared/terminal.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import {
+  activeTerminalFontSize,
+  subscribeTerminalFontSize,
+  TERMINAL_LINE_HEIGHT,
+} from '../prefs/terminal-font.js';
+import {
+  activeTerminalScheme,
+  subscribeTerminalScheme,
+  terminalSchemeStyle,
+} from '../prefs/terminal-scheme.js';
+import {
+  activeNarrowViews,
+  NARROW_TERMINAL_MAX_WIDTH,
+  subscribeNarrowViews,
+} from '../prefs/view-width.js';
+import { OverlayScroll } from './OverlayScroll.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
 import { placeCursor } from './terminal-cursor.js';
@@ -264,8 +283,10 @@ function strokeFor(key: string): PaneKey | null {
  *   NOT ALT. On macOS Option is the COMPOSE key: `Option+e` opens a dead-key
  *   composition that the hidden box exists to receive, and its keydown carries
  *   `isComposing: false` -- so claiming Alt would break accented input in the
- *   exact place the input-method work was built to fix. vam also binds
- *   `Alt-<digit>` outright (`keyboard/chords.ts`). THE COST IS REAL AND IS THE
+ *   exact place the input-method work was built to fix. vam also binds the
+ *   VIEW ROW on `Ctrl-Alt-<digit>` (`keyboard/chords.ts`), which arrives here
+ *   carrying both modifiers and is declined by the Shift/Alt rule below rather
+ *   than by this one. THE COST IS REAL AND IS THE
  *   TRADE: Meta chords do not reach the pane, so readline's `Alt+B`/`Alt+F`
  *   word motion is unavailable here. The portable spelling of Meta is the Esc
  *   PREFIX -- press Escape, then the letter -- and Escape is already the
@@ -273,15 +294,50 @@ function strokeFor(key: string): PaneKey | null {
  *   terminals themselves default Option to compose and make Meta opt-in, so
  *   this is the platform's own answer rather than vam's idiosyncrasy.
  *
- *   NOT SHIFT, AND NOT ALT, ALONGSIDE CTRL. `Ctrl+Shift+P` and `Ctrl+Alt+]`
- *   are real bindings in vam's grammar, and no terminal distinguishes
- *   `Ctrl+Shift+U` from `Ctrl+U` anyway -- both are 0x15. So a chord with a
- *   second modifier held is vam's, which costs the pane nothing.
+ *   SHIFT IS NOT ASKED ABOUT AT ALL, AND THAT IS A CORRECTION. This function
+ *   used to decline a shifted control chord, on the argument that
+ *   `Ctrl+Shift+P` is a real binding in vam's grammar. The argument had the
+ *   fact and the conclusion pointing opposite ways: NO TERMINAL DISTINGUISHES
+ *   `Ctrl+Shift+P` FROM `Ctrl+P` -- both are 0x10, as `Ctrl+Shift+U` and
+ *   `Ctrl+U` are both 0x15 -- so a shifted control chord is a control
+ *   character on the wire and the pane is the layer that owes it to the
+ *   agent. MEASURED, before PR 366: `Ctrl+Shift+H` in a focused terminal moved
+ *   vam's keyboard to the session list and `Ctrl+Shift+P` opened a directory
+ *   picker, while tmux received nothing. PR 366 took Ctrl off vam's six
+ *   application commands on macOS, which stopped the wrong thing happening and
+ *   left the right thing still not happening: the chord did nothing at all.
+ *   The lower-casing below is what makes `'P'` a `ControlLetter`, so claiming
+ *   it costs no second rule. The operator was asked whether they use
+ *   `Ctrl+Shift+<letter>` in a terminal, said they do not, and asked for it
+ *   anyway -- so this is a correctness fix with a measured-low blast radius,
+ *   not a convenience.
+ *
+ *   IT COSTS LINUX AND WINDOWS TWO CHORDS, said rather than discovered later.
+ *   `Mod-` is Ctrl there, so `Ctrl+Shift+H` is `focusList` and `Ctrl+Shift+P`
+ *   is `newProject`, and both are now the pane's while it holds the keyboard
+ *   -- the same bill PR 361 already sent those platforms for `Ctrl+K`,
+ *   `Ctrl+W`, `Ctrl+N` and `Ctrl+T`. The pane does not ask which platform it
+ *   is on and is not given a branch to: one surface answering one keystroke
+ *   two ways would buy no terminal anything. The escape hatch is the one macOS
+ *   already relies on -- the caller declines the COMMAND modifier above, and
+ *   `normalizeKey` spells `Mod-` from Cmd on macOS and from Super on Linux and
+ *   Windows alike, so Super+Shift+H still reaches the session list from inside
+ *   a terminal. That last sentence is pinned by a test and was NOT driven on
+ *   either platform from the machine this was written on.
+ *
+ *   NOT ALT, ALONGSIDE CTRL. `Ctrl+Alt+]` is a real binding in vam's grammar
+ *   and Option is macOS's compose key, so the Alt half of the old rule stands
+ *   exactly as it was.
  *
  *   NOT A DIGIT, AND THAT IS THE LINE THIS FUNCTION IS DRAWN ON. `Ctrl+1`
  *   produces no control character in any terminal, so leaving it to vam costs
- *   the operator nothing INSIDE the pane and keeps `Mod-<digit>` working from
- *   within it. `onKeyDown`'s own older comment warned that widening the chord
+ *   the operator nothing INSIDE the pane and keeps the tab row working from
+ *   within it -- `Mod-<digit>`, which is Cmd on macOS and therefore reaches
+ *   vam by the Cmd branch above rather than by this one. Ctrl+<digit> itself
+ *   answers nothing in vam since the operator cancelled that row, so it is a
+ *   keystroke neither layer acts on; this rule is still what keeps it out of
+ *   somebody's agent. `onKeyDown`'s own older comment warned that widening the
+ *   chord
  *   branch would claim "the tab switch the operator uses to leave" first; the
  *   letters-only rule is what answers that warning rather than overriding it.
  *
@@ -368,9 +424,13 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
 }
 
 /**
- * What the cursor's cell looks like: a solid block, the character in it drawn
- * in the pane's own background colour. Reverse video, which is what a terminal
- * cursor has always been.
+ * What the cursor's cell looks like: a solid block in the scheme's `cursor`
+ * colour, the character in it drawn in `cursorAccent`. It WAS `bg-ink
+ * text-panel` -- reverse video off the app's own pair -- and moved onto the
+ * scheme's pair with the rest of the screen, because the operator's scheme
+ * names a caret colour (`hans` carries a violet one) and a caret in the app's
+ * ink over a ground the app did not choose is the one thing on the screen
+ * that would still look borrowed.
  *
  * A STATIC STRING for the reason `spanClasses` is a table of them: Tailwind
  * extracts class names by scanning source text, so anything template-built
@@ -379,16 +439,16 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
  * the RESOLVED background rather than reading this attribute back.
  *
  * IT REPLACES THE CELL'S OWN COLOURS RATHER THAN JOINING THEM. A cursor span
- * carrying both `text-ansi-red` and `text-panel` would resolve by stylesheet
- * order, not by the order they are written here, so which one won would be an
- * accident. The character under a block cursor is not readable in its own
- * colour anyway -- that is what the block is.
+ * carrying both `text-ansi-red` and `text-term-cursor-accent` would resolve
+ * by stylesheet order, not by the order they are written here, so which one
+ * won would be an accident. The character under a block cursor is not
+ * readable in its own colour anyway -- that is what the block is.
  *
  * NO ANIMATION. See the note at the top of this file: the screen behind it is
  * a one-second snapshot, and a blink is a claim about liveness that nothing
  * here can honour.
  */
-const CURSOR_CLASSES = 'bg-ink text-panel';
+const CURSOR_CLASSES = 'bg-term-cursor text-term-cursor-accent';
 
 const NO_BRIDGE: PaneView = {
   kind: 'unavailable',
@@ -405,6 +465,7 @@ export function TerminalTab({
   read,
   resize,
   send,
+  branch,
 }: {
   readonly projectId: string | null;
   /**
@@ -426,6 +487,20 @@ export function TerminalTab({
    * the compiler is what notices.
    */
   readonly send: SendKey | undefined;
+  /**
+   * The git branch the session's working directory is on, for the rule under
+   * the screen -- `Session.branch`, passed through unexamined.
+   *
+   * `null` AND `undefined` DRAW NOTHING, and they are the same thing here on
+   * purpose. `model.ts` is explicit that `null` means "the source cannot say",
+   * never "not on a branch"; `undefined` is a caller that did not pass one at
+   * all (every existing test fixture, and the phone shell). Neither is a fact
+   * about a branch, and on a one-line rule the sidebar's em-dash placeholder
+   * would read as a branch actually called `—`. The sidebar draws one because
+   * its rows are a table whose columns have to line up whatever a row knows;
+   * this is a sentence, and a sentence says nothing rather than saying a dash.
+   */
+  readonly branch?: string | null;
 }) {
   /**
    * `null` is "has not answered yet", and it is a state rather than an
@@ -568,6 +643,52 @@ export function TerminalTab({
 
   const paneRef = useRef<HTMLElement | null>(null);
   const rulerRef = useRef<HTMLElement | null>(null);
+  /**
+   * THE SIZE THE SCREEN IS DRAWN AT, read from the store rather than taken as
+   * a prop -- `prefs/terminal-font.ts` carries the whole argument, and the
+   * half that belongs here is this: it is not only paint. The advance of one
+   * character at this size is what `measurePane` divides the box by, so a
+   * change to it has to re-run the measurement below. That is why it is a
+   * React value: a custom property on the root would repaint the screen and
+   * leave tmux composing at the old column count, with nothing on screen to
+   * say so.
+   */
+  const fontSize = useSyncExternalStore(
+    subscribeTerminalFontSize,
+    activeTerminalFontSize,
+    activeTerminalFontSize,
+  );
+  /**
+   * WHETHER THE SCREEN IS CAPPED AT A READABLE WIDTH, read the same way and
+   * for the same reason as the size above it — `prefs/view-width.ts` carries
+   * the argument, and the half that belongs here is that eighty of THIS view's
+   * characters is a COLUMN COUNT. Capping the box is the whole mechanism: the
+   * box shrinks, the observer below fires, `measurePane` divides the smaller
+   * box by the same advance, and tmux is told the smaller count -- two thirds
+   * of what fit, and never fewer than eighty, because the cap lets go of a
+   * pane too narrow for two thirds of it to hold eighty.
+   */
+  const narrowViews = useSyncExternalStore(
+    subscribeNarrowViews,
+    activeNarrowViews,
+    activeNarrowViews,
+  );
+  /**
+   * THE COLOURS THE SCREEN IS DRAWN IN, read the same way -- and this one IS
+   * only paint, which is why it is worth saying why it is a React value at
+   * all. The resolved scheme lands on the pane's OWN element as custom
+   * properties (`terminalSchemeStyle`), never on `:root`, because the sixteen
+   * `--vam-ansi-*` names are global tokens and a scheme put on the root would
+   * recolour anything else that reads them. An element's inline style is
+   * rendered, so the pane has to re-render for a change; `prefs/
+   * terminal-scheme.ts` carries the rest of the argument, including why the
+   * store is fed from `Canvas.tsx`'s theme effect as well as from every write.
+   */
+  const scheme = useSyncExternalStore(
+    subscribeTerminalScheme,
+    activeTerminalScheme,
+    activeTerminalScheme,
+  );
   /**
    * Only a pane that is actually being drawn is measured -- and a pane is
    * drawn only for a session vam RECORDED as its own for this project. Every
@@ -826,9 +947,15 @@ export function TerminalTab({
    *
    * `Ctrl+1` produces no control character in any terminal, so leaving the
    * digit row to vam costs the pane nothing and keeps `Mod-<digit>`,
-   * `Mod-Shift-[` and `Mod-Alt-[` working from inside it. Same for a chord
-   * with a SECOND modifier held: `Ctrl+Shift+P` and `Ctrl+Alt+]` stay vam's,
-   * and no terminal tells `Ctrl+Shift+U` from `Ctrl+U` anyway.
+   * `Mod-Shift-[` and `Mod-Alt-[` working from inside it. `Ctrl+Alt+]` stays
+   * vam's for the same reason with Option's compose duty on top of it.
+   *
+   * `Ctrl+Shift+<letter>` USED TO BE ON THAT LIST AND IS NOT ANY MORE, because
+   * the reason it was there was backwards: no terminal tells `Ctrl+Shift+U`
+   * from `Ctrl+U`, which makes it the PANE'S keystroke and not vam's. It is a
+   * letter, so `controlStrokeFor` claims it and the Shift token never reaches
+   * the wire -- exactly as a real terminal would do. `controlStrokeFor` holds
+   * the measurement, and what it costs Linux and Windows.
    *
    * WHAT IT COSTS, QUOTED HONESTLY. `normalizeKey` folds Ctrl and Cmd into one
    * `Mod-` token, so the chords the pane now claims -- `Mod-k` (palette),
@@ -847,7 +974,8 @@ export function TerminalTab({
    *
    * ── ALT IS NOT THE PANE'S ────────────────────────────────────────────────
    *
-   * vam binds `Alt-<digit>` outright, and on macOS Option is the COMPOSE key:
+   * vam binds the view row on `Ctrl-Alt-<digit>`, and on macOS Option is the
+   * COMPOSE key:
    * `Option+e` opens a dead-key composition into the hidden box, and that
    * keydown carries `isComposing: false`, so the guard above cannot protect
    * it. Claiming Alt would break accented input in the exact place the
@@ -856,9 +984,12 @@ export function TerminalTab({
    *
    * ── AND THE THREE THAT WERE ALREADY TRUE ─────────────────────────────────
    *
-   * SHIFT IS NOT A CHORD MODIFIER. It is how a capital and every symbol on the
-   * number row is produced; exempting it would leave a pane that cannot type
-   * `K` or `!`.
+   * SHIFT ON ITS OWN IS NOT A MODIFIER HERE AT ALL. It is how a capital and
+   * every symbol on the number row is produced; claiming it would leave a pane
+   * that cannot type `K` or `!`. Held WITH Ctrl it is not asked about either,
+   * and for the opposite-looking reason that is the same reason: the wire
+   * carries no Shift bit on a control character, so `Ctrl+Shift+P` is `C-p`
+   * and the pane owes it to the agent.
    *
    * A printable key, Return and Backspace are the PANE'S, and they are stopped
    * here. The canvas reads a focused element as text entry only when it is an
@@ -921,16 +1052,30 @@ export function TerminalTab({
        * does below: a key vam cannot deliver is not vam's to eat. Without a
        * bridge -- the browser build -- a chord goes back to the window
        * listener, where `Mod-k` still opens the palette.
+       *
+       * SHIFT IS NOT ASKED ABOUT, AND THE CLAUSE THAT USED TO ASK WAS A HOLE.
+       * `controlStrokeFor` carries why (no terminal tells `Ctrl+Shift+P` from
+       * `Ctrl+P`); what belongs here is what the clause turned out to be
+       * DOING, since removing a condition is only safe once that is known.
+       * With Ctrl held, nothing below this branch is reachable -- the next
+       * line returns on `ctrlKey || altKey` -- so `!event.shiftKey` decided
+       * exactly one thing: who got `Ctrl+Shift+<letter>`. Every other shifted
+       * Ctrl keystroke still leaves by `controlStrokeFor` answering `null`,
+       * which is the same door it left by before, and
+       * `TerminalTab.control-chords.test.tsx` holds a row for each of them --
+       * Tab, a digit, a bracket, an arrow, Ctrl+Alt -- rather than leaving
+       * that as a claim about the shape of a condition.
        */
-      if (event.ctrlKey && !event.altKey && !event.shiftKey) {
+      if (event.ctrlKey && !event.altKey) {
         const chord = controlStrokeFor(event.key);
         if (chord !== null) {
           if (send === undefined || projectId === null) return;
           // PREVENTED, and not only for vam's sake. In a focused text control
           // on macOS, Chromium honours Cocoa's own emacs bindings -- Ctrl+A,
-          // Ctrl+E, Ctrl+K, Ctrl+U all move or delete in the hidden box -- so
-          // an unprevented chord would edit the composition staging area on
-          // its way to the agent.
+          // Ctrl+E, Ctrl+K, Ctrl+U all move or delete in the hidden box, and
+          // the SHIFTED spellings are the same family's selection-extending
+          // half -- so an unprevented chord would edit the composition staging
+          // area on its way to the agent.
           event.preventDefault();
           /**
            * STOPPED, AND IT DOES TWO JOBS -- one obvious, one MEASURED and
@@ -1028,6 +1173,7 @@ export function TerminalTab({
     [queue],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read by this effect, it is read by the LAYOUT this effect measures -- `measurePane` divides the pane box by the advance of a character rendered AT that size, so the value is what makes a measurement stale, and the rule cannot see a dependency that reaches the DOM rather than the closure
   useEffect(() => {
     const pane = paneRef.current;
     const ruler = rulerRef.current;
@@ -1062,7 +1208,12 @@ export function TerminalTab({
       if (timer !== undefined) window.clearTimeout(timer);
       observer.disconnect();
     };
-  }, [showing, resize, projectId, rowId]);
+    // `fontSize` IS A DEPENDENCY, and it is the one that is easy to leave out.
+    // The pane's own box does not move when the type does, so the observer
+    // never fires for it: without this, choosing a bigger screen would repaint
+    // at the new size and go on asking tmux for the column count of the old
+    // one, and the only symptom would be lines wrapping in the wrong place.
+  }, [showing, resize, projectId, rowId, fontSize]);
 
   // Nothing is focused, so there is no project to ask about and the effect
   // above never asks. Saying "reading the session's screen" here -- which is
@@ -1144,7 +1295,32 @@ export function TerminalTab({
        -- is behaviour, not text: a key vam cannot deliver is not cancelled,
        so it goes back to vam's own keyboard (see `onKeyDown`), and a refusal
        still draws its own line, which is not one of the two removed. */
-    <div data-terminal className="relative flex min-h-0 flex-1 flex-col gap-1.5">
+    /* AND THE OPERATOR'S WIDTH CHOICE LANDS HERE, on the tab as a whole rather
+       than on the screen alone, so the status rule stays the width of the
+       screen it belongs to.
+
+       WHY THE FACE AND THE SIZE ARE ON THIS ELEMENT. The cap is written in
+       `ch` -- eighty of them, `prefs/view-width.ts` argues why -- and `ch`
+       resolves against the element's OWN font. Every child below re-declares
+       both (the pane inline, the status rule through `text-meta`, the two
+       sentences through `font-sans`), so this declaration paints nothing at
+       all: it exists so that one cell here is one cell down there. Computing
+       the pixels instead would mean multiplying the size by a monospace RATIO,
+       which is precisely the mistake `terminal-size.ts`'s header records
+       paying for -- "out by a column every seventeen".
+
+       NOTHING TELLS THE MEASUREMENT ABOUT THIS, and that is correct rather
+       than an omission: unlike a font-size change, a cap change MOVES THIS
+       BOX, so the `ResizeObserver` the measuring effect installs fires on its
+       own and tmux is told the new column count by the ordinary path. */
+    <div
+      data-terminal
+      className="relative mx-auto flex w-full min-h-0 flex-1 flex-col gap-1.5 font-mono"
+      style={{
+        fontSize: `${fontSize}px`,
+        maxWidth: narrowViews ? NARROW_TERMINAL_MAX_WIDTH : undefined,
+      }}
+    >
       {/* THE THIRD EMPTY CASE, and the one `not-vam`/`unavailable` do not
           cover: a pane vam DID reach, showing nothing. That is a real screen
           -- the session exists, tmux answered, and the pane below is live and
@@ -1155,7 +1331,11 @@ export function TerminalTab({
           replace. `trim` because tmux pads every row to the pane's width, so
           a screen of only spaces is the same fact as an empty string. */}
       {view.text.trim() === '' && (
-        <p data-terminal-blank className="flex-none text-control text-ink-faint">
+        /* `font-sans` because the element above carries `font-mono` purely so
+           that `ch` means one terminal cell -- see its own note. This is an
+           English sentence about the pane, not a line of the pane, and it is
+           read in the face every other sentence in vam is read in. */
+        <p data-terminal-blank className="flex-none font-sans text-control text-ink-faint">
           {
             "This session's screen is empty right now — vam reached the pane, there is just nothing drawn on it yet."
           }
@@ -1171,7 +1351,9 @@ export function TerminalTab({
         <p
           data-terminal-refused
           data-terminal-refusal={refused}
-          className="flex-none text-control text-ink-faint"
+          /* `font-sans` for the reason `data-terminal-blank` above states: a
+             sentence about the pane is not a line of the pane. */
+          className="flex-none font-sans text-control text-ink-faint"
         >
           {refused === 'unaimed'
             ? // vam declined to guess: no session of its own answers for this
@@ -1230,117 +1412,162 @@ export function TerminalTab({
           landing on the surface every comment in this file describes and not
           on a hidden box. Focus is forwarded from here to the box a microtask
           later -- see `onFocus` below for why the delay is not a detail. */}
-      <section
-        ref={paneRef}
-        data-terminal-pane
-        {...insertScopeMark}
-        {...insertStopMark}
-        tabIndex={-1}
-        onKeyDown={onKeyDown}
-        onPointerDown={(event: PointerEvent<HTMLElement>) => {
-          /**
-           * THE GESTURE IS CAPTURED, WHICH IS THE WHOLE OF WHY IT CANNOT GET
-           * STUCK -- and it is `PaneResizer.tsx`'s idiom, not a new one: "the
-           * drag is held entirely by `setPointerCapture`/
-           * `releasePointerCapture`", for this same reason.
-           *
-           * THE DEFECT IT FIXES, which shipped in the first cut of this pane
-           * and was found in review. The suppression below is a boolean, and
-           * this one was cleared by an `onPointerUp` ON THIS ELEMENT -- so it
-           * was cleared only when the pointer came up OVER the pane. Press
-           * inside and release outside, which is the ORDINARY way a person
-           * drags out to select the last line of a terminal, and the pane was
-           * not on the event's path at all: the flag stayed set for the life
-           * of the component, the forward below returned early every time,
-           * the box never took the keyboard again, and Vietnamese went
-           * straight back to leaking `tieengs` into a running agent. It
-           * self-healed on the SECOND keystroke (see `onKeyDown`), which is
-           * precisely what made it invisible by hand -- only the first
-           * character of the next syllable was typed raw.
-           *
-           * Capture ends on release, on cancel, AND when the element is
-           * removed, and it retargets the release to this element wherever it
-           * physically lands. Measured in Chromium both ways: without it, a
-           * release outside fired `window`'s `pointerup` and never this
-           * element's; with it, this element gets the release in both cases,
-           * and the drag-selection this suppression exists to protect is
-           * character-for-character identical.
-           *
-           * THE ORDER OF THESE TWO LINES IS THE FAIL-SAFE. The flag is set
-           * only once the capture is actually held, so an engine that refuses
-           * the capture degrades to possibly losing a selection -- never to a
-           * pane whose keyboard does not come back.
-           */
-          event.currentTarget.setPointerCapture(event.pointerId);
-          pointerDown.current = true;
-        }}
-        onLostPointerCapture={() => {
-          pointerDown.current = false;
-          // A DRAG THAT SELECTED SOMETHING KEEPS THE KEYBOARD ON THE PANE.
-          // Focusing a text control collapses the document selection, so
-          // taking the keyboard here would delete the selection the operator
-          // just made -- and mouse selection is the only way there is to copy
-          // text out of this tab. A plain click leaves nothing selected and
-          // does hand it over, which is what a click on a terminal means.
-          //
-          // HERE RATHER THAN IN `onPointerUp` so that there is ONE place a
-          // gesture can end: a cancelled pointer hands the keyboard back on
-          // the same line a completed one does, instead of being a second
-          // path nobody wrote.
-          if (globalThis.getSelection()?.isCollapsed === false) return;
-          takeKeyboard();
-        }}
-        onFocus={(event: FocusEvent<HTMLElement>) => {
-          setHasFocus(true);
-          // Only focus that landed on the PANE is forwarded; focus that landed
-          // on the box is already where it belongs.
-          if (event.target !== paneRef.current || pointerDown.current) return;
-          /**
-           * A MICROTASK, AND IT IS LOAD-BEARING. `focusInsertStop` focuses
-           * this element and then asks `document.activeElement === stop` --
-           * that answer IS what `I` reports, and a `false` makes the canvas
-           * refuse out loud with "nothing in this pane takes the keyboard".
-           * Forwarding synchronously makes that check fail every time.
-           * Measured both ways in Chromium: deferred by one microtask, the
-           * check still sees this element and the box has the keyboard before
-           * anything can be typed into it.
-           */
-          queueMicrotask(takeKeyboard);
-        }}
-        onBlur={(event: FocusEvent<HTMLElement>) => {
-          // Focus moving between the pane and its own hidden box is not the
-          // operator leaving: without this the corner hint would blink off
-          // and on at every forward, and `hasFocus` would be false while the
-          // keys were still going to this session.
-          if (paneRef.current?.contains(event.relatedTarget) === true) return;
-          setHasFocus(false);
-        }}
-        aria-label={`terminal of ${view.name}: typing goes to this session, press Tab to leave`}
-        /* THE 10.5px AND THE 1.45 BELOW ARE THE ONE LITERAL SIZE LEFT IN THE
-           RENDERER, and they are a measurement rather than a style choice.
-           `terminal-size.ts` divides this box by the advance of one character
-           rendered HERE -- "Geist Mono at 10.5px measures 6.6015625px per
-           advance", its own header records -- to decide the columns and rows
-           tmux is told to compose at. Moving this onto the type scale would
-           re-flow the operator's live session, and tmux has already wrapped the
-           screen by the time vam sees it, so no CSS here could undo the break.
-           The chrome AROUND the screen is on the scale; the screen is not.
-           `test/renderer/type-scale.test.ts` names this as the exception.
+      {/* THE SCROLLBAR THAT SAYS SO, and it is the same defect the file tree
+          had: `vam-no-scrollbar` hides the native bar, so a screen clipped at
+          the pane's bottom edge was indistinguishable from a screen that had
+          ended -- on the one surface in vam where what is below the fold is
+          somebody's running work. `OverlayScroll` is the house answer and is
+          reused rather than reimplemented: a thumb painted OVER the content,
+          `pointer-events-none`, taking no width from a terminal whose width is
+          counted in columns and unable to interfere with a drag across the
+          screen.
 
-           The sizes are spelled in prose above rather than as classes on
-           purpose: that guard scans this file as TEXT, so a class name written
-           in a comment counts as a call site. Reddening on a comment would be
-           noise, and teaching the scan to strip comments would mean teaching
-           it to strip `//` out of a URL in a string as well. */
-        /* THE RING FOLLOWS THE BOX NOW. `focus-visible` on this element would
-           never match again: the keyboard is one element deeper, and a
-           container has no focus of its own to make visible. `has-[...]` keeps
-           the browser's own heuristic -- a ring after a keyboard entry and
-           none after a click -- rather than trading it for `focus-within`,
-           which would draw one every time somebody clicks the screen. The
-           token is unchanged, and `SettingsOverlay.tsx` still names this file
-           as the renderer's one `focus-visible`. */
-        className="vam-no-scrollbar relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line bg-panel px-3 py-2 font-mono text-[10.5px] text-ink leading-[1.45] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
+          THE SCROLLING ELEMENT IS THE PANE ITSELF, which is why everything
+          below travels as `scroller` rather than staying on a wrapper. The six
+          scroll keys move THIS element's `scrollTop` (`scrollPane`), the
+          measurement divides THIS element's content box, the insert scope and
+          the accessible name describe THIS element, and a wrapper between them
+          would be a second box for one of those to be wrong about. */}
+      <OverlayScroll
+        scrollRef={(el) => {
+          paneRef.current = el;
+        }}
+        scroller={{
+          'data-terminal-pane': '',
+          ...insertScopeMark,
+          ...insertStopMark,
+          tabIndex: -1,
+          onKeyDown,
+          onPointerDown: (event: PointerEvent<HTMLElement>) => {
+            /**
+             * THE GESTURE IS CAPTURED, WHICH IS THE WHOLE OF WHY IT CANNOT GET
+             * STUCK -- and it is `PaneResizer.tsx`'s idiom, not a new one: "the
+             * drag is held entirely by `setPointerCapture`/
+             * `releasePointerCapture`", for this same reason.
+             *
+             * THE DEFECT IT FIXES, which shipped in the first cut of this pane
+             * and was found in review. The suppression below is a boolean, and
+             * this one was cleared by an `onPointerUp` ON THIS ELEMENT -- so it
+             * was cleared only when the pointer came up OVER the pane. Press
+             * inside and release outside, which is the ORDINARY way a person
+             * drags out to select the last line of a terminal, and the pane was
+             * not on the event's path at all: the flag stayed set for the life
+             * of the component, the forward below returned early every time,
+             * the box never took the keyboard again, and Vietnamese went
+             * straight back to leaking `tieengs` into a running agent. It
+             * self-healed on the SECOND keystroke (see `onKeyDown`), which is
+             * precisely what made it invisible by hand -- only the first
+             * character of the next syllable was typed raw.
+             *
+             * Capture ends on release, on cancel, AND when the element is
+             * removed, and it retargets the release to this element wherever it
+             * physically lands. Measured in Chromium both ways: without it, a
+             * release outside fired `window`'s `pointerup` and never this
+             * element's; with it, this element gets the release in both cases,
+             * and the drag-selection this suppression exists to protect is
+             * character-for-character identical.
+             *
+             * THE ORDER OF THESE TWO LINES IS THE FAIL-SAFE. The flag is set
+             * only once the capture is actually held, so an engine that refuses
+             * the capture degrades to possibly losing a selection -- never to a
+             * pane whose keyboard does not come back.
+             */
+            event.currentTarget.setPointerCapture(event.pointerId);
+            pointerDown.current = true;
+          },
+          onLostPointerCapture: () => {
+            pointerDown.current = false;
+            // A DRAG THAT SELECTED SOMETHING KEEPS THE KEYBOARD ON THE PANE.
+            // Focusing a text control collapses the document selection, so
+            // taking the keyboard here would delete the selection the operator
+            // just made -- and mouse selection is the only way there is to copy
+            // text out of this tab. A plain click leaves nothing selected and
+            // does hand it over, which is what a click on a terminal means.
+            //
+            // HERE RATHER THAN IN `onPointerUp` so that there is ONE place a
+            // gesture can end: a cancelled pointer hands the keyboard back on
+            // the same line a completed one does, instead of being a second
+            // path nobody wrote.
+            if (globalThis.getSelection()?.isCollapsed === false) return;
+            takeKeyboard();
+          },
+          onFocus: (event: FocusEvent<HTMLElement>) => {
+            setHasFocus(true);
+            // Only focus that landed on the PANE is forwarded; focus that landed
+            // on the box is already where it belongs.
+            if (event.target !== paneRef.current || pointerDown.current) return;
+            /**
+             * A MICROTASK, AND IT IS LOAD-BEARING. `focusInsertStop` focuses
+             * this element and then asks `document.activeElement === stop` --
+             * that answer IS what `I` reports, and a `false` makes the canvas
+             * refuse out loud with "nothing in this pane takes the keyboard".
+             * Forwarding synchronously makes that check fail every time.
+             * Measured both ways in Chromium: deferred by one microtask, the
+             * check still sees this element and the box has the keyboard before
+             * anything can be typed into it.
+             */
+            queueMicrotask(takeKeyboard);
+          },
+          onBlur: (event: FocusEvent<HTMLElement>) => {
+            // Focus moving between the pane and its own hidden box is not the
+            // operator leaving: without this the corner hint would blink off
+            // and on at every forward, and `hasFocus` would be false while the
+            // keys were still going to this session.
+            if (paneRef.current?.contains(event.relatedTarget) === true) return;
+            setHasFocus(false);
+          },
+          'aria-label': `terminal of ${view.name}: typing goes to this session, press Tab to leave`,
+          /* A REGION, SPELLED AS A ROLE. This was a `<section>` with an
+             `aria-label`, which IS `role="region"` with a name -- the element
+             changed because `OverlayScroll` owns the box now, and the role is
+             written out so the landmark survives the change rather than being
+             lost with the tag. */
+          role: 'region',
+          /* THE SIZE, AND WHY IT IS INLINE RATHER THAN A CLASS. It is a chosen
+             value (`prefs/terminal-font.ts`), so there is no class to write at
+             build time -- the same reason `OverlayScroll`'s own thumb is
+             positioned by `style`. What used to stand here was a literal size
+             and leading, defended at length as "a measurement rather than a
+             style choice" because `terminal-size.ts` divides this box by the
+             advance of one character rendered HERE. That defence was right
+             about the mechanism and wrong about the conclusion: the advance is
+             MEASURED whatever the size is, so the literal was never what made
+             the fit work -- it was only what made the size unchangeable. The
+             measurement still happens here, at whatever size this is.
+
+             THE LINE HEIGHT IS A RATIO, not a pixel count, because it has to
+             hold at four sizes rather than at one. */
+          style: {
+            fontSize: `${fontSize}px`,
+            lineHeight: TERMINAL_LINE_HEIGHT,
+            /* THE SCHEME, ON THIS ELEMENT AND NO WIDER. Twenty-three custom
+               properties and the ground already composited with the opacity
+               (`terminalSchemeStyle` says why the compositing is arithmetic
+               here rather than a `color-mix()` in the stylesheet). Inline
+               for the same reason the size is: a chosen value has no class to
+               write at build time. The cast is React's: `CSSProperties` does
+               not name custom properties, and `style.setProperty` is what it
+               does with a `--` key regardless. */
+            ...(terminalSchemeStyle(scheme) as CSSProperties),
+          },
+        }}
+        /* THE RING FOLLOWS THE BOX. `focus-visible` on this element would
+           never match: the keyboard is one element deeper, and a container has
+           no focus of its own to make visible. `has-[...]` keeps the browser's
+           own heuristic -- a ring after a keyboard entry and none after a
+           click -- rather than trading it for `focus-within`, which would draw
+           one every time somebody clicks the screen. The token is unchanged,
+           and `SettingsOverlay.tsx` still names this file as the renderer's one
+           `focus-visible`. */
+        /* `text-term-fg` AND NO `bg-*`: the default ink is the scheme's
+           foreground through its token, and the ground is the inline
+           composite above -- a `bg-term-bg` utility would paint the colour
+           and lose the opacity. The selection pair is the scheme's too:
+           `selection:` is Tailwind's `::selection` on this element and every
+           element inside it, which is exactly the scope the scheme has. What
+           was here before, `bg-panel text-ink`, made the screen the app's
+           panel; that is now a scheme called `vam`, one press away. */
+        className="relative min-h-0 flex-1 overflow-auto rounded-[9px] border border-line px-3 py-2 font-mono text-term-fg selection:bg-term-selection-bg selection:text-term-selection-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
       >
         {/* WHERE AN INPUT METHOD COMPOSES. See `inputRef` above for the whole
             of why this exists; what matters HERE is its shape.
@@ -1415,9 +1642,10 @@ export function TerminalTab({
         </span>
         {/* THE SCREEN, WITH THE AGENT'S OWN COLOURS. `capture-pane -e` keeps
             the SGR sequences and `terminal-ansi.ts` turns them into spans
-            whose classes are theme tokens -- so an error line is red in both
-            themes without vam choosing a red twice, and a sequence vam does
-            not model is dropped rather than drawn.
+            whose classes are tokens -- so an error line is red in every
+            scheme without vam choosing a red twice, the scheme in force
+            decides which red (the tokens are set on the pane above), and a
+            sequence vam does not model is dropped rather than drawn.
 
             The lines are joined by real newlines inside ONE `pre` rather than
             wrapped in a block each: the pane's width is measured in
@@ -1447,60 +1675,108 @@ export function TerminalTab({
             </Fragment>
           ))}
         </pre>
-      </section>
-      {/* WHOSE TERMINAL THIS IS, and the way out of it, in one badge that
-          costs no row.
+      </OverlayScroll>
+      {/* THE RULE UNDER THE SCREEN: what this terminal is, on one line that
+          does not sit on top of it.
 
-          THE NAME WAS INVISIBLE AND THAT WAS A DEFECT OF MINE. When the two
-          lines above the pane came off, the session's name went into the
-          pane's `aria-label` -- which is real for a screen reader and nothing
-          at all for the person looking at the screen. The operator asked for
-          the CHROME back off the top, not for the identity to go with it, and
-          then reported exactly that: switching to this tab, they cannot see
-          which session they are looking at.
+          WHAT WAS WRONG WITH THE BADGE IT REPLACES. The session's name floated
+          bottom-right OVER the content, dimmed and `pointer-events-none`,
+          defended as costing no row. It cost no row and it covered the one
+          corner a terminal is read at last -- and it was drawn in the faintest
+          ink vam has, over whatever the agent had just printed there. A rule
+          under the screen costs exactly one row and is legible; the row is the
+          price of the name being readable, and it is the row every terminal
+          multiplexer already spends on a status line.
 
-          It is the tmux session's name rather than the row's title because
-          that is the fact this tab alone can tell them: the panel above
-          already names the session, and a project vam started twice has two
-          panes that only this name tells apart -- it is also what they would
-          read in `tmux ls`.
+          THE ORDER IS FACTS FIRST, IDENTITY LAST. What the session is doing --
+          which branch it is on -- is what an operator reads while working; the
+          name is what they read when they have lost track of which pane this
+          is. So the branch sits at the left where reading starts, and the name
+          is pushed to the right end, where it is also out of the way of a
+          branch long enough to need the room.
 
-          OUTSIDE THE SCROLLING BOX, positioned against the wrapper. Inside,
-          it would be laid out against the pane's content and would scroll up
-          out of sight with the first screenful. The bottom-right corner is
-          the emptiest part of a terminal -- the prompt sits bottom-LEFT --
-          and `pointer-events-none` keeps it from eating a click meant for the
-          text under it. The exit is appended only while the pane has focus,
-          because that is the only moment "how do I get out of here" is a
-          question anyone is asking. */}
-      <span
-        data-terminal-badge
-        aria-hidden="true"
-        className="pointer-events-none absolute right-1.5 bottom-1 max-w-[60%] truncate rounded-[5px] border border-line bg-panel px-1.5 py-0.5 font-mono text-meta text-ink-faint"
+          WHAT IS DELIBERATELY NOT ON IT. No model name and no context
+          percentage: vam's model has neither (`domain/model.ts`), and a status
+          line that invents one is worse than one that is shorter than
+          somebody else's. No token budget either -- `CanvasBudget` exists, but
+          it is the FACTORY's spend summed across every epic and it reaches
+          only the browser shell, which has no terminal bridge at all; drawn
+          here it would be a number about something else, under one session's
+          screen, in a shell where it can never actually appear.
+
+          ONE ROW, AND ONLY WHERE THERE IS A SCREEN. Every other `PaneView`
+          draws a sentence and no pane, and a rule under a sentence would be
+          chrome for a terminal that is not there. */}
+      <div
+        data-terminal-status
+        className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
       >
-        {/* WHAT THE INPUT METHOD IS BUILDING, because the box it is building it
-            in cannot be seen. A native terminal draws the in-flight candidate
-            under the cursor; vam's screen is a one-second capture of a pane
-            the syllable has not reached yet, so there is nothing there to
-            draw it on. Without this line the operator types `tieengs` and
-            watches an unchanged screen until the syllable commits, which is
-            the same "the keys do nothing" the bug itself looked like. It
-            rides the badge because that corner is already reserved and costs
-            no row, and it comes FIRST because it is the transient fact --
-            the name is still there when it goes. */}
-        {composing !== '' && (
-          <span data-terminal-composing className="text-ink">
-            {composing}
-            {' · '}
+        {/* THE BRANCH, when the source knows it. Absent means ABSENT: see the
+            `branch` prop for why this draws nothing at all rather than the
+            sidebar's em-dash. The glyph is the sidebar's, at the sidebar's
+            size and weight, so the same fact reads the same way in both
+            places. */}
+        {typeof branch === 'string' && branch !== '' && (
+          <span className="flex min-w-0 items-center gap-1">
+            <GitBranch size={10} strokeWidth={1.6} aria-hidden="true" />
+            <span data-terminal-branch title={branch} className="truncate">
+              {branch}
+            </span>
           </span>
         )}
-        {view.name}
-        {hasFocus && (
-          <span data-terminal-exit-hint className="text-ink-quiet">
-            {' · Tab leaves'}
-          </span>
-        )}
-      </span>
+        {/* The gap. A spacer rather than `justify-between`, so that the name
+            keeps its own right edge whether or not anything is drawn on the
+            left. */}
+        <span className="flex-1" />
+        {/* WHOSE TERMINAL THIS IS.
+
+            THE NAME WAS INVISIBLE ONCE AND THAT WAS A DEFECT OF MINE. When the
+            two lines above the pane came off, the session's name went into the
+            pane's `aria-label` -- real for a screen reader and nothing at all
+            for the person looking at the screen. The operator asked for the
+            CHROME back off the top, not for the identity to go with it, and
+            then reported exactly that: switching to this tab, they could not
+            see which session they were looking at.
+
+            It is the tmux session's name rather than the row's title because
+            that is the fact this tab alone can tell them: the panel above
+            already names the session, and a project vam started twice has two
+            panes that only this name tells apart -- it is also what they would
+            read in `tmux ls`.
+
+            `aria-hidden` still, and the truncation kept. The pane's own
+            accessible name already carries the session, so reading this aloud
+            would say it twice; and a tmux session name is unbounded while this
+            rule is one line. */}
+        <span
+          data-terminal-badge
+          aria-hidden="true"
+          className="max-w-[60%] flex-none truncate text-ink-quiet"
+        >
+          {/* WHAT THE INPUT METHOD IS BUILDING, because the box it is building
+              it in cannot be seen. A native terminal draws the in-flight
+              candidate under the cursor; vam's screen is a one-second capture
+              of a pane the syllable has not reached yet, so there is nothing
+              there to draw it on. Without this line the operator types
+              `tieengs` and watches an unchanged screen until the syllable
+              commits, which is the same "the keys do nothing" the bug itself
+              looked like. It rides the name because it is the transient fact --
+              the name is still there when it goes -- and it comes FIRST for
+              the same reason. */}
+          {composing !== '' && (
+            <span data-terminal-composing className="text-ink">
+              {composing}
+              {' · '}
+            </span>
+          )}
+          {view.name}
+          {hasFocus && (
+            <span data-terminal-exit-hint className="text-ink-quiet">
+              {' · Tab leaves'}
+            </span>
+          )}
+        </span>
+      </div>
     </div>
   );
 }

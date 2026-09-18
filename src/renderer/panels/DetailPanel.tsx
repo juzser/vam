@@ -69,6 +69,7 @@
 import {
   ArrowUp,
   Box,
+  ChevronDown,
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
@@ -94,6 +95,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -138,9 +140,16 @@ import {
   submitsPrompt,
   subscribePromptSubmitKey,
 } from '../prefs/submit-key.js';
+import {
+  activeNarrowViews,
+  narrowProseMaxWidth,
+  PROSE_RULER_CLASS,
+  PROSE_RULER_TEXT,
+  subscribeNarrowViews,
+} from '../prefs/view-width.js';
 import { useAgentWorkReader } from '../sources/agent-work-reader.js';
 import { useHistoryReader } from '../sources/history-reader.js';
-import { describeFailure } from '../sources/port.js';
+import { describeFailure, type SourceError } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { useAgentWork } from '../sources/useAgentWork.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
@@ -148,13 +157,20 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
-import { FilesTab } from './FilesTab.js';
+import { type FileOpenRequest, FilesTab } from './FilesTab.js';
+import {
+  MODEL_CHOICES,
+  modelCommandLine,
+  modelCommandStrokes,
+  modelControlState,
+} from './model-command.js';
 import { Note } from './Note.js';
-import { OUT_MARKDOWN } from './out-markdown.js';
+import { type OutActionResult, OutActionsProvider } from './out-actions.js';
+import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, visibleTabs } from './tabs.js';
+import { narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
 import {
   appendOlder,
   applyWalk,
@@ -670,12 +686,12 @@ export type DetailPanelProps = {
   /**
    * True while a write is in flight.
    *
-   * `claude --resume` is a subprocess with a 120-second timeout
-   * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`), so this is not a flicker: Enter can
-   * start something that runs for two minutes. `Canvas` has had the flag since
-   * the composer was written -- it guards against a double submit -- and it
-   * never reached the pane, so the operator saw nothing happen and every
-   * further Enter was swallowed without a word.
+   * A reply is a run of tmux `send-keys` into the session's pane (`reply.ts`),
+   * each a subprocess of its own, plus the listing that resolves the pane
+   * first: quick, but not instant, and a multi-line prompt is several of them.
+   * `Canvas` has had the flag since the composer was written -- it guards
+   * against a double submit -- and it never reached the pane, so the operator
+   * saw nothing happen and every further Enter was swallowed without a word.
    */
   readonly sending?: boolean;
   /**
@@ -845,9 +861,9 @@ export type DetailPanelProps = {
    * THIS SETS THE GLOBAL DEFAULT, NOT THIS SESSION'S OWN PROVIDER — a fact
    * about the plumbing, not a design choice. `defaultProvider` is read once,
    * at NEW session creation (`sources/http-factory.ts`,
-   * `sources/preload-factory.ts`); every reply to a session already running
-   * goes through `claude --resume` (`main/sources/claude-code/deliver.ts`),
-   * which never consults it. A control drawn beside THIS session's composer
+   * `sources/preload-factory.ts`); every reply to a session already running is
+   * typed into its pane (`main/sources/claude-code/reply.ts`), which never
+   * consults it. A control drawn beside THIS session's composer
    * that claimed to change how ITS next reply is handled would be exactly
    * the lie `setModelRequest`'s own comment refuses elsewhere in this file —
    * there is no channel that would make it true. So the choice made here
@@ -856,6 +872,24 @@ export type DetailPanelProps = {
    * where the operator is already looking.
    */
   readonly onSetDefaultProvider?: (id: ProviderId) => void;
+  /**
+   * `prefs.filesTreeWidth` — the width the operator last dragged the Files
+   * tab's tree to, or `null`/absent for "never dragged", which draws the
+   * clamped share that tree has always drawn. Read here only to hand on to
+   * `FilesTab`; this panel has no opinion about it.
+   */
+  readonly filesTreeWidth?: number | null;
+  /**
+   * Persists a new tree width, or `undefined` to withdraw the drag handle
+   * entirely — ABSENT, NOT DISABLED, the same rule `onSetDefaultProvider`
+   * above follows: a caller with nowhere to put the number must not draw a
+   * grip that looks draggable and springs back the moment it is released.
+   *
+   * GLOBAL, not this pane's and not this session's — see the field's own
+   * comment in `prefs.ts` for why an arrangement the operator would otherwise
+   * re-make on every split is stored once.
+   */
+  readonly onFilesTreeWidth?: (width: number) => void;
 };
 
 /**
@@ -1885,7 +1919,7 @@ function noAnswerNote(
  * and `test/panels/out-font-size.test.tsx` both reach it at this path, and
  * this is the file whose name says what the map is FOR.
  */
-export { OUT_MARKDOWN };
+export { OUT_MARKDOWN, OUT_URL_TRANSFORM };
 
 /**
  * One answer: the machine-ish head it was built with, then its own markdown.
@@ -1934,7 +1968,16 @@ function OutText({ output }: { readonly output: string }) {
               </span>
             )}
             <div data-out-body className="flex min-w-0 flex-col gap-2">
-              <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+              {/* `urlTransform` is vam's own, and it is a NARROWING: see
+                  `OUT_URL_TRANSFORM`. react-markdown's default silently
+                  blanks four schemes and admits four others, which left this
+                  pane with two disagreeing lists and a refusal that could not
+                  name what it refused. */}
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                components={OUT_MARKDOWN}
+                urlTransform={OUT_URL_TRANSFORM}
+              >
                 {body}
               </Markdown>
             </div>
@@ -2492,9 +2535,19 @@ function QuestionCard({
    * `Mod-2` is not `2`, so the copy chord and the tab chords reach the window
    * listener by construction instead of by this file listing them.
    *
-   * The digits stay BARE and are still safe for the reason they always were:
-   * this listener only fires while the keyboard is already inside the options
-   * list, and the canvas grammar binds no bare digit.
+   * The digits stay BARE, and one of the two reasons that was safe has EXPIRED
+   * -- corrected here rather than left to be believed. This paragraph used to
+   * end "and the canvas grammar binds no bare digit". IT BINDS NINE OF THEM
+   * NOW: `1`..`9` are `pickView`'s one-key spelling (`SELECT_DIGITS`,
+   * `keyboard/chords.ts`), added at the operator's request.
+   *
+   * The other reason stands and was always the load-bearing one: this listener
+   * only fires while the keyboard is already inside the options list, it sits
+   * BELOW the window listener in the bubble path, and it cancels what it
+   * handled -- so the card claims a digit first and `Canvas.tsx` returns on
+   * `defaultPrevented`. The new binding adds a second, independent guard
+   * rather than relying on that: a bare digit is Select-only
+   * (`isSelectOnlyChord`), and an open question card is an insert scope.
    */
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
     const action = resolveQuestionKey(normalizeKey(event));
@@ -3816,20 +3869,40 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
   /**
-   * ONE KEYSTROKE, into this session's pane, shared by the mode row's own
-   * Shift-Tab AND every button of the phone keystroke strip -- they are the
-   * SAME channel (`window.api.terminal.send`) into the SAME pane, so one
-   * in-flight guard and one refusal caption serve both rather than each
-   * growing its own copy. `cycleNote` is the shared note; `sentText`/
-   * `busyText` are the one difference between a mode cycle and a keystroke.
+   * KEYSTROKES INTO THIS SESSION'S PANE, shared by the mode row's own
+   * Shift-Tab, every button of the phone keystroke strip, the composer's
+   * Escape AND the model picker's `/model <x>` line -- they are the SAME
+   * channel (`window.api.terminal.send`) into the SAME pane, so one in-flight
+   * guard and one refusal caption serve all of them rather than each growing
+   * its own copy. `cycleNote` is the shared note; `sentText`/`busyText` are
+   * the one difference between a mode cycle and a keystroke.
    *
-   * One press at a time, ACROSS BOTH CONTROLS: held down, a repeat here
+   * One press at a time, ACROSS EVERY CONTROL: held down, a repeat here
    * queued a `back-tab` per repeat into a live agent with nothing on screen
-   * counting them, and a phone tap repeated in a hurry is the same failure.
+   * counting them, a phone tap repeated in a hurry is the same failure, and a
+   * model picked twice while the first pick is still typing would interleave
+   * two lines in one pane.
+   *
+   * A RUN, NOT A KEY, since the model picker: `/model opus` is a line and an
+   * Enter rather than a chord, and `pressPaneKey` below is the one-stroke
+   * case of this. ONE STROKE AT A TIME, AWAITED, and the run STOPS at the
+   * first that does not land. The pane is a byte stream, so pieces sent in
+   * order arrive as one line; but a Return pressed after a refused piece
+   * would submit a mangled line into a running agent, so a refusal anywhere
+   * in the run ends it with the text sitting in the pane unsent -- `reply.ts`
+   * keeps exactly this rule for a prompt, and its refusal says so. Every
+   * stroke is aimed by main by the same rule as the first (`terminal/ipc.ts`
+   * reuses a proven pairing for two seconds, which is what makes a run of
+   * three not three listings).
+   *
    * `window.api` exists only in the Electron shell, and its absence is
    * reported rather than made into a no-op.
    */
-  const pressPaneKey = async (key: PaneKey, sentText: string, busyText: string) => {
+  const typePaneStrokes = async (
+    strokes: readonly PaneKey[],
+    sentText: string,
+    busyText: string,
+  ) => {
     if (entry === null) return;
     if (cycleNote?.kind === 'busy') return;
     const send = globalThis.window?.api?.terminal?.send;
@@ -3843,17 +3916,34 @@ export function DetailPanel(props: DetailPanelProps) {
     // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
     setCycleNote({ kind: 'busy', text: busyText });
     const mine = cycleAbout;
-    const landed = await send(entry.project.id, key, entry.session.id).catch(
-      (): PaneSendResult => 'refused',
-    );
+    let landed: PaneSendResult = 'sent';
+    let typed = 0;
+    for (const stroke of strokes) {
+      landed = await send(entry.project.id, stroke, entry.session.id).catch(
+        (): PaneSendResult => 'refused',
+      );
+      if (landed !== 'sent') break;
+      typed += 1;
+    }
     // Thirty seconds is long enough to move on, and an answer about the
     // session that was here then says nothing about the one that is here now.
     if (noteFor.current !== mine) return;
     const refusal = cycleWording(landed);
+    // A run that typed something and then stopped has left it on screen in
+    // the pane, and the caption must say so: "not sent" alone would send the
+    // operator looking for a pairing problem while the half-line sits there
+    // waiting for a Return that vam did not press.
+    const sitting =
+      refusal !== null && typed > 0 && strokes.length > 1
+        ? `${refusal} — what was typed is sitting in the pane unsent`
+        : refusal;
     setCycleNote(
-      refusal === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: refusal },
+      sitting === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: sitting },
     );
   };
+  /** The one-stroke case: the chord, the strip's keys, the composer's Escape. */
+  const pressPaneKey = (key: PaneKey, sentText: string, busyText: string) =>
+    typePaneStrokes([key], sentText, busyText);
   /**
    * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
    * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
@@ -3873,6 +3963,40 @@ export function DetailPanel(props: DetailPanelProps) {
   /** One keystroke-strip button's press, over the shared bridge above. */
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
     pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
+  /**
+   * Type `/model <choice>` and Enter into this session's pane -- the model
+   * picker's whole act, over the shared run above.
+   *
+   * WHAT VAM MAY CLAIM AFTERWARDS is the delivery and not the model:
+   * "typed /model opus into the terminal of <title>". The CLI answers in the
+   * pane ("Set model to Opus 5 and saved as your default for new sessions",
+   * measured on 2.1.274) and vam never reads that answer back, so the caption
+   * says the session answers THERE rather than naming a model here. Naming
+   * one would be the claim nothing checked -- the same rule `cycleMode` keeps
+   * for the mode it does not read back.
+   *
+   * A choice that is not one word is refused before a key is built
+   * (`modelCommandLine`): a space would hand the CLI two arguments and a
+   * newline would submit `/model` bare, which opens the CLI's own menu --
+   * the one thing vam must never drive.
+   */
+  const sendModel = (choice: string) => {
+    if (entry === null) return Promise.resolve();
+    const line = modelCommandLine(choice);
+    const strokes = modelCommandStrokes(choice);
+    if (line === null || strokes === null) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — a model is one word, and this has a space or a line break in it',
+      });
+      return Promise.resolve();
+    }
+    return typePaneStrokes(
+      strokes,
+      `typed ${line} into the terminal of ${entry.session.title} — the session answers there`,
+      `${line} · typing…`,
+    );
+  };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
@@ -3949,6 +4073,90 @@ export function DetailPanel(props: DetailPanelProps) {
       pickTabRef.current(tabRequest.tab);
     }
   }, [tabRequest]);
+  /**
+   * WHAT A CONTROL INSIDE AN AGENT'S ANSWER CAN ASK THIS PANE FOR.
+   *
+   * Published through a context rather than threaded as props, and
+   * `out-actions.ts` owes the argument for that: `OUT_MARKDOWN` is a module
+   * constant because it is a react-markdown PROP, so a map rebuilt per render
+   * would re-render every answer in the column. The PROVIDER is here, per
+   * pane, because `openFileRef` is about THIS pane's session and THIS pane's
+   * Files tab -- two split panes showing two sessions must not share one.
+   */
+  const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
+  const refSessionId = entry?.session.id ?? null;
+  const outActions = useMemo(
+    () => ({
+      /**
+       * The address is already parsed and already checked HERE (the control
+       * runs `checkLink` to decide how to draw itself); main parses and checks
+       * it again on its own side, which is where the guarantee is.
+       *
+       * ONLY ONE OF THE TWO SHELLS EVER REACHES THE BRIDGE, and it is worth
+       * saying out loud rather than leaving a reader to assume both do.
+       * `App.tsx` routes on `window.api !== undefined`: with it, the desktop
+       * canvas; without it, the browser shell (the demo and a paired phone
+       * alike), and the two are mutually exclusive. So this member answers for
+       * real in the Electron app, and everywhere else it answers the refusal
+       * below -- in words, never a press that does nothing.
+       *
+       * THAT LEAVES A PHONE WITHOUT A WAY TO OPEN A LINK, which is a real
+       * cost and not an oversight. A `window.open` fallback would work there
+       * (a phone browser has tabs; there is no application window to hijack),
+       * but it would put a call this repo denies by policy into a component
+       * that also runs inside Electron, where the denial is load-bearing --
+       * and the gate that keeps them apart would be one `undefined` check in
+       * the renderer, which is the least trusted process here. If the remote
+       * endpoint ever wants this, it should be decided for the phone
+       * deliberately, not inherited from a fallback nobody re-read.
+       */
+      openLink: async (url: string): Promise<OutActionResult> => {
+        const open = globalThis.window?.api?.link?.open;
+        if (open === undefined) {
+          return {
+            ok: false,
+            reason: 'the vam desktop app is what opens links; this build has no bridge to it.',
+          };
+        }
+        return await open(url);
+      },
+      /**
+       * THE REFERENCE CROSSES AS TEXT. Main resolves it against this session's
+       * own working directory and answers an absolute path, or refuses in the
+       * session's own words (`main/files/resolve-ipc.ts`) -- this pane never
+       * joins a root to a path, because string arithmetic cannot answer
+       * containment (`main/dialog/attach-image.ts` measured that).
+       *
+       * The tab is asked for only AFTER a path comes back. Switching first
+       * would land the operator on a Files tab showing nothing, with the
+       * reason drawn on the tab they just left.
+       */
+      openFileRef: async (reference: string): Promise<OutActionResult> => {
+        const resolve = globalThis.window?.api?.files?.resolve;
+        if (resolve === undefined || files !== true || refSessionId === null) {
+          return {
+            ok: false,
+            reason: 'the vam desktop app is what opens files; this build has no Files tab.',
+          };
+        }
+        try {
+          const target = await resolve(refSessionId, reference);
+          // A FRESH OBJECT every time: pressing the same reference twice is
+          // two asks. Same shape as `tabRequest` above, same reason.
+          setFileOpenRequest({ sessionId: refSessionId, path: target.path, line: target.line });
+          pickTabRef.current('Files');
+          return { ok: true };
+        } catch (reason) {
+          const error = reason as SourceError;
+          return {
+            ok: false,
+            reason: error.message ?? 'vam could not open that file.',
+          };
+        }
+      },
+    }),
+    [refSessionId, files],
+  );
   // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
@@ -4262,6 +4470,28 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const [modePickerOpen, setModePickerOpen] = useState(false);
   /**
+   * The model popover's open/closed state, per pane like the two above -- and
+   * the free-text row's own text, which is the ONE thing here that is not a
+   * copy of a fact elsewhere: a full model id the operator is still typing
+   * exists nowhere until Enter sends it, and it is cleared once it has gone.
+   * Neither is "the current model": vam never reads the CLI's answer back and
+   * so holds no opinion about which model a session is on.
+   */
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelIdText, setModelIdText] = useState('');
+  /**
+   * WHICH OF THE THREE FACES THE MODEL CONTROL WEARS for the focused session.
+   * `model-command.ts` carries the table and the argument; this reads it
+   * off the same three facts the rest of the composer reads: the source's
+   * `deliverPrompt` (`delivers`), its `terminal` capability, and whether vam
+   * started this session (`vamControlled` -- the two halves of `canCycleMode`).
+   */
+  const modelControl = modelControlState({
+    delivers,
+    terminal,
+    vamControlled: entry?.session.vamControlled,
+  });
+  /**
    * The mode ON SCREEN, read back out of the draft on every render. A draft
    * carrying some other word on its `mode:` line reads as the default: only
    * these three can be picked here, and an icon has no way to draw a fourth.
@@ -4369,18 +4599,20 @@ export function DetailPanel(props: DetailPanelProps) {
    *
    * Returns whether it CLOSED something, so every caller can answer the same
    * question the same way. The two typeahead lists answer Escape earlier in
-   * the box's own handler, where they already own the arrow keys; these two
-   * popovers are opened by a POINTER, which leaves the keyboard on a button
-   * rather than in the textarea, so they need the answer from there as well.
+   * the box's own handler, where they already own the arrow keys; these three
+   * popovers (provider, mode, model) are opened by a POINTER, which leaves the
+   * keyboard on a button rather than in the textarea, so they need the answer
+   * from there as well.
    *
    * Before this they closed only by picking a row or re-clicking their own
    * toggle. That was survivable while Escape merely left the box; it is not
    * now, because an Escape that reaches past an open popover stops an agent.
    */
   const closeOpenPopover = (): boolean => {
-    if (!modePickerOpen && !providerPickerOpen) return false;
+    if (!modePickerOpen && !providerPickerOpen && !modelPickerOpen) return false;
     setModePickerOpen(false);
     setProviderPickerOpen(false);
+    setModelPickerOpen(false);
     return true;
   };
   /**
@@ -4943,6 +5175,79 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const focusView = useSyncExternalStore(subscribeFocusView, activeFocusView, activeFocusView);
   /**
+   * WHETHER THIS PANE'S VIEWS ARE CAPPED AT A READABLE LINE LENGTH.
+   *
+   * Read through the same seam `focusView` above it uses, and for the same
+   * reason: it is global, `Canvas.tsx` mounts one of these per split leaf and
+   * `PhoneShell` mounts another, and there is no dialogue in which a pane
+   * opened by a keystroke could be asked. `prefs/view-width.ts` carries the
+   * argument for the number and for which views it reaches.
+   */
+  const narrowViews = useSyncExternalStore(
+    subscribeNarrowViews,
+    activeNarrowViews,
+    activeNarrowViews,
+  );
+  /**
+   * HOW WIDE ONE CHARACTER OF THIS PANE'S PROSE REALLY IS, in pixels — or
+   * `null` until something has been laid out.
+   *
+   * THIS IS A MEASUREMENT AND IT USED TO BE A CONSTANT. The constant was
+   * `6.0079`, taken on one macOS machine, and the first Linux CI run measured
+   * 83.95 characters across the column it produced: the shipped font stack
+   * names Geist and does not bundle it, so what paints is the platform's own
+   * face and its advance is not ours to know. `prefs/view-width.ts` carries the
+   * whole argument; what belongs here is the mechanism, which is
+   * `terminal-size.ts`'s: render real glyphs, divide the rectangle the engine
+   * gives back.
+   *
+   * THE OBSERVER IS ON THE RULER, NOT ON THE PANE, and that is the one
+   * non-obvious line of this block. `TerminalTab.tsx` observes its own box
+   * because that is what its column count divides — and its own header records
+   * the cost of that choice: a font change does NOT move the box, so nothing
+   * fires and the effect has to re-run on the size instead. A ruler has the
+   * opposite property. Its width IS the thing that changes when the face
+   * resolves, when the operator steps `out` text, when the page is zoomed and
+   * when a webfont finally swaps in — so observing it turns all four of those
+   * into the one event this needs, and none of them is a prop or a dependency
+   * anything here could have listed.
+   */
+  const proseRulerRef = useRef<HTMLElement | null>(null);
+  const [proseAdvance, setProseAdvance] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const ruler = proseRulerRef.current;
+    if (ruler === null) return;
+    const measure = () => {
+      const width = ruler.getBoundingClientRect().width;
+      const characters = (ruler.textContent ?? '').length;
+      if (!(width > 0) || characters === 0) return;
+      // Only a real move, for `useSyncExternalStore`'s reason one screen up:
+      // an identical number written back every frame is a render per frame.
+      setProseAdvance((previous) =>
+        previous === width / characters ? previous : width / characters,
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(ruler);
+    return () => observer.disconnect();
+  }, []);
+  /**
+   * The cap itself, or `undefined` while the flag is off, while the current
+   * view caps itself, or before the ruler has been measured. One expression,
+   * because the body, the question card and the composer are ONE COLUMN --
+   * see the body's own comment for the operator's decision behind that.
+   */
+  const proseMaxWidth = narrowViews ? narrowProseMaxWidth(proseAdvance) : undefined;
+  /**
+   * The body's own, which is the same cap minus the two views that are not in
+   * it: the Terminal caps itself in `ch` (`narrowsAsProse`), and `FilesTab` is
+   * a CHILD of the body, so a cap left on for it would narrow a tree the
+   * operator drags the width of themselves. The composer and the question card
+   * need no such test — both are already withdrawn on those two views.
+   */
+  const bodyMaxWidth = narrowsAsProse(current) ? proseMaxWidth : undefined;
+  /**
    * THE TURNS THE OPERATOR HAS ASKED BACK, and why this is React state rather
    * than a stored field.
    *
@@ -5089,11 +5394,14 @@ export function DetailPanel(props: DetailPanelProps) {
   /**
    * What the composer's button claims, in the words the SOURCE earns.
    *
-   * PR #70 gave the Claude Code source a real channel into a running session,
-   * so for that source a prompt is handed over and answered — `record` now
-   * understates it, and an operator has to know when a message is going out.
-   * the factory source still genuinely only appends to a log, so this is per-source
-   * and not a rename: one wording for both would be wrong for one of them.
+   * The Claude Code source TYPES the prompt into the pane it owns -- a real
+   * channel into the running session, so `record` understates it and the
+   * operator has to know when a message is going out. But it is a keystroke
+   * with no echo that the turn landed, so the wording stops at "typed into the
+   * terminal" and does not promise a delivery or an answer (`Canvas.tsx`, and
+   * `sources/claude-code/reply.ts`). The factory source still genuinely only
+   * appends to a log, so this is per-source and not a rename: one wording for
+   * both would be wrong for one of them.
    */
   const composerClaim = sending
     ? // The in-flight wording keeps the delivers/records distinction. Losing it
@@ -5104,7 +5412,7 @@ export function DetailPanel(props: DetailPanelProps) {
       ? {
           Glyph: ArrowUp,
           label: 'sending prompt…',
-          title: 'handing the prompt to the running agent session — this can take a while',
+          title: 'typing the prompt into this session’s terminal — this can take a while',
         }
       : {
           Glyph: NotepadText,
@@ -5115,7 +5423,11 @@ export function DetailPanel(props: DetailPanelProps) {
       ? {
           Glyph: ArrowUp,
           label: 'send prompt',
-          title: 'sends the prompt into the running agent session — it is delivered, not filed',
+          // Typed into the pane vam owns, not delivered-and-confirmed: there is
+          // no echo that the turn landed (`sources/claude-code/reply.ts`), so
+          // this claims the keystroke, not the answer.
+          title:
+            'types the prompt into this session’s terminal — it appears when the session records it',
         }
       : {
           Glyph: NotepadText,
@@ -5148,9 +5460,30 @@ export function DetailPanel(props: DetailPanelProps) {
    * leaving it computed for no reader -- which is the rule `composerClaim`'s
    * own `word` field was already deleted under.
    */
-  return (
+  // THE PANE ITSELF, held as a value rather than returned directly, and that
+  // is about the DIFF rather than about the code: wrapping this JSX in the
+  // provider below pushes eleven hundred lines of unrelated markup one level
+  // deeper, the formatter rewrites every one of them, and the change ends up
+  // buried in its own reindentation. A wrapper should cost a wrapper.
+  const pane = (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
+      /* THE SCOPE OF THE READING SIZE, and the only thing this attribute does.
+         `styles.css`'s `[data-reading-pane]` rule re-declares the type scale's
+         BODY and CONTROL steps in terms of `--vam-out-font-size`, so every
+         `text-body` and `text-control` inside this pane follows the size the
+         operator set for the answers. Operator report: "out để fontsize 15 khá
+         to nhưng phần prompt choice option hiện rất bé" -- at `out` 15 the
+         answers read comfortably and the prompt's choice options are tiny.
+         A HOOK RATHER THAN A CLASS because the declaration is a SCOPE, not a
+         style: nothing about this element paints differently, and every call
+         site inside keeps the role it already picked.
+         ITS OWN NAME, AND ON THIS ELEMENT, because `Canvas.tsx` already wraps
+         the desktop pane in `[data-detail-pane]` (the width holder) and
+         `PhoneShell` mounts this panel with no such wrapper: a scope keyed to
+         the Canvas attribute would have covered the desktop by accident and
+         the phone not at all. This element is under both. */
+      data-reading-pane=""
       style={width === undefined ? undefined : { width }}
       className={[
         // THE PANE'S OWN TOKEN, at the operator's ask ("split the pane's
@@ -5304,7 +5637,84 @@ export function DetailPanel(props: DetailPanelProps) {
         you read it. `min-h-0` on every level is still what makes a flex
         child able to shrink and scroll rather than growing its parent.
       */}
-      <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
+      {/* THE BODY EVERY VIEW BUT ONE IS DRAWN INSIDE, and where the operator's
+          width choice lands (`prefs/view-width.ts`).
+
+          A MAXIMUM AND NOTHING ELSE. `narrowsAsProse` decides which views it
+          reaches: the Terminal caps itself in `ch` because eighty of its
+          characters is a COLUMN COUNT, and `FilesTab` — a child of this very
+          element, always mounted and merely `hidden` — is not in the ask and
+          is the one view a second opinion about width would harm. The cap is
+          therefore keyed to the CURRENT view rather than put on unconditionally:
+          leaving it on while Files is up would narrow a tree the operator
+          drags the width of themselves.
+
+          `mx-auto` CENTRES IT, which is a choice and not a default. The cap
+          exists to shorten the eye's return sweep; pinning the column against
+          one edge of a 1600px pane leaves a thousand pixels of void the eye
+          still has to cross to get back. The chrome that frames this body —
+          the view pill in the corner, the composer below — keeps the pane's
+          own width either way, so the column reads as a column and not as a
+          panel that failed to fill.
+
+          `w-full` is what makes `mx-auto` mean anything: a flex child sized by
+          its content has no spare inline space for auto margins to share.
+
+          AND THE COMPOSER AND THE QUESTION CARD COME WITH IT -- the operator's
+          own decision, made on a screenshot of the first cut, where this body
+          was a narrow column of prose sitting on top of full-width chrome:
+          "narrow the composer and the question card too, so the whole block is
+          one column". The first cut argued the other way (they named four
+          VIEWS, and a wide box is better to type into); what that argument
+          missed is that the transcript and the box you answer it in are ONE
+          conversation, and a seam down the middle of it is what the eye
+          actually reads. The same `proseMaxWidth` is spent in all three
+          places, so there is one column and not three that happen to agree. */}
+      <div
+        data-detail-body
+        className={`flex min-h-0 w-full flex-1 select-text flex-col gap-2.5 px-3.5 py-3 ${
+          bodyMaxWidth === undefined ? '' : 'mx-auto'
+        }`}
+        style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
+      >
+        {/* THE RULER, and it is the whole of how the cap knows what a character
+            is. Real glyphs, in this pane's own face, at the smaller of the two
+            prose sizes a response pane draws (`PROSE_RULER_FONT_SIZE`) --
+            measured by the engine rather than assumed by us, which is the
+            correction a frozen macOS advance earned on its first Linux CI run.
+
+            INSIDE THIS ELEMENT so it inherits the face the prose is set in, and
+            `absolute` so its own width is its content's and never this
+            container's -- there is no feedback loop between the cap and the
+            thing the cap is computed from.
+
+            `select-none` IS LOAD-BEARING HERE, unlike on the terminal's ten-M
+            ruler:
+            this body is `select-text`, and three hundred invisible characters
+            inside it would otherwise land in the operator's clipboard every
+            time they selected a turn. */}
+        {/* CLIPPED BY A ZERO-SIZED BOX, and that box is not decoration.
+            `absolute` takes the ruler out of FLOW but not out of its
+            ancestor's SCROLLABLE OVERFLOW: three hundred `whitespace-pre`
+            characters measure ~1750px, and on a 1280px window that put the
+            document's `scrollWidth` at 2015 and drew a horizontal scrollbar
+            across the whole app with an empty band at the right. Measured,
+            after it shipped.
+
+            A wrapper of `h-0 w-0 overflow-hidden` ends the overflow without
+            touching the measurement: clipping is visual, so the ruler's own
+            border box -- the thing `getBoundingClientRect` reports and the
+            cap divides -- is still its full natural width. Shrinking the
+            ruler instead would have been measuring a different string. */}
+        <span aria-hidden="true" className="absolute top-0 left-0 h-0 w-0 overflow-hidden">
+          <span
+            ref={proseRulerRef}
+            data-prose-ruler
+            className={`${PROSE_RULER_CLASS} pointer-events-none block w-max select-none whitespace-pre opacity-0`}
+          >
+            {PROSE_RULER_TEXT}
+          </span>
+        </span>
         {/* A failed session says so here, not only in the dot's colour.
             Measured against the real CLI: a failed row carries `cwd, id,
             kind, name, sessionId, startedAt, state` and NOTHING about why --
@@ -5391,6 +5801,14 @@ export function DetailPanel(props: DetailPanelProps) {
                `undefined` in the browser build, where the tab says so instead
                of taking keys it cannot deliver. */
             send={globalThis.window?.api?.terminal?.send}
+            /* THE BRANCH, for the rule under the screen. Passed from here
+               rather than read inside the tab for the reason the three
+               members above are: this panel is where the session is in scope,
+               and a fact reached for invisibly is a fact a later edit drops
+               with nothing to notice. `null` when there is no session and when
+               the source cannot say -- `TerminalTab` draws nothing for either,
+               and its `branch` prop says why that is not a dash. */
+            branch={entry?.session.branch ?? null}
           />
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />
@@ -5967,6 +6385,17 @@ export function DetailPanel(props: DetailPanelProps) {
             // that its right-hand column IS the corner. See
             // `cornerReserveHeight`'s own comment above.
             reserveCornerHeight={cornerReserveHeight}
+            // The dragged tree width and the way to store a new one. Both
+            // come from the shell that owns `prefs`; `undefined` here draws
+            // the share and no handle, which is what the browser build and
+            // every test that has not wired a store get. See the two props'
+            // own comments above.
+            filesTreeWidth={props.filesTreeWidth ?? null}
+            onFilesTreeWidth={props.onFilesTreeWidth}
+            // "Open this file, at this line" -- from a `path:line` control in
+            // an agent's own answer, already resolved and authorised in main.
+            // See `outActions.openFileRef` above and `FileOpenRequest`.
+            openRequest={fileOpenRequest}
           />
         )}
       </div>
@@ -5993,7 +6422,16 @@ export function DetailPanel(props: DetailPanelProps) {
           // that could disagree with it. The card's options are also the
           // LANDING `I` aims at, by being the first stop in document order.
           {...insertScopeMark}
-          className="flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3"
+          /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
+             see the body's comment. The SEAM is what makes this more than
+             symmetry: `border-t` above draws the rule between the answer and
+             the question, and a rule spanning the whole pane under a 470px
+             column is a line pointing at nothing. Capped here, it is the
+             column's own seam. */
+          className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
+            proseMaxWidth === undefined ? '' : 'mx-auto w-full'
+          }`}
+          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
@@ -6054,7 +6492,12 @@ export function DetailPanel(props: DetailPanelProps) {
             // down the pane. See that constant for the measurement behind it.
             'relative flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
+            // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
+            // -- see the body's comment for the decision and the seam argument
+            // on the question bar above for why the rule has to move with it.
+            proseMaxWidth === undefined ? '' : 'mx-auto w-full',
           ].join(' ')}
+          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
         >
           {/* First child, so it inherits `composerHidden` for free: a
               `QuestionCard` open and unanswered withdraws the whole composer
@@ -6651,35 +7094,218 @@ export function DetailPanel(props: DetailPanelProps) {
                   )}
                 </div>
               )}
-              {/* The model field. Not a menu of names vam made up — vam has no
-              model API and the factory does the choosing — but not an inert
-              chip either: what is typed here becomes the prompt's first
-              line, in the recorded text a person reads. */}
-              <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
-                <input
-                  data-model-request
-                  value={readModelRequest(draft)}
-                  onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
-                  placeholder="model"
-                  aria-label="model requested in this prompt"
-                  /* `outline-none` is GONE, and `focus:text-ink` was never a
-                     substitute for it: recolouring TYPED TEXT says nothing on
-                     an empty field, which is the state this control is in
-                     every time it is first reached. Nothing else drew one
-                     either -- the phone stylesheet's replacement ring applies
-                     to `.vam-tap:has(> [data-tap-skin])` and this field has no
-                     inner skin -- so focusing it put a caret on screen and
-                     nothing more.
+              {/* THE MODEL CONTROL, IN THREE STATES -- `modelControlState`
+              (`model-command.ts`) carries the table and the measurements
+              behind it; this is what each row draws.
 
-                     `FOCUS_RING` is the app's own, in `ink`: measured on the
-                     painted node it is 13.4:1 in dark and 17.7:1 in light
-                     against the card behind it, well past the 3:1 WCAG 1.4.11
-                     asks, and it is a different colour from the composer box's
-                     armed border (`waiting`) so the two signals cannot be read
-                     as each other. */
-                  className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
-                />
-              </Note>
+                delivers   terminal    vamControlled   drawn
+                not true   any         any             the free-text request
+                                                       line, unchanged
+                true       !== false   true            a picker that types
+                                                       `/model <x>` + Enter
+                true       false       any             the picker, DISABLED
+                true       !== false   not true        the picker, DISABLED
+
+              WHY THE FIRST ROW SURVIVES. The field was written for a source
+              that only RECORDS: the prompt is filed, the factory picks the
+              model, and one leading `model: <x>` line is the request in the
+              words a reader of the log will read (`setModelRequest`). That
+              is still true there and it is kept there, note and all.
+
+              WHY THE OTHER ROWS ARE NOT THAT FIELD. On a source that DELIVERS
+              (`deliverPrompt`: Claude Code since PR 383), the draft is typed
+              into the session's tmux pane, so a `model:` line lands in the
+              CLI's prompt as words the agent reads -- it switches nothing.
+              What does switch it, measured on Claude Code 2.1.274, is
+              `/model <alias>` + Enter typed at the REPL, which is exactly one
+              line into the pane vam already types into. So the picker types
+              that, over `typePaneStrokes`, and NEVER touches the draft.
+
+              DISABLED, NOT ABSENT, WHERE VAM CANNOT TYPE -- and this is the
+              one place the control differs from the mode chip beside it,
+              which is ABSENT where no mode can be chosen. The operator asked
+              for disabled, and the two controls are about different things:
+              a mode is a property of vam's own prompt (the draft carries the
+              line), so where vam cannot set one there is nothing to show; a
+              model is a property of the SESSION, which has one whether or not
+              vam can reach it, and a greyed button says exactly that -- there
+              is a model here, and vam has no keyboard into this session to
+              change it. The note carries the remedy.
+
+              THE NOTE ON A DISABLED BUTTON HANGS ON A WRAPPER, and that is
+              not decoration: a disabled `<button>` takes no focus in any
+              browser, so a `Note` on the button itself would open on hover
+              and on nothing else -- the `title` this app deleted, unreadable
+              from the keyboard. The wrapper takes the tab stop (the
+              `StatusCell` precedent, suppression and all). HOVER NEEDS NO
+              HELP, and that is measured rather than assumed: the first draft
+              put `pointer-events-none` on the button on the belief that
+              Chromium delivers no pointer events over a disabled control, and
+              removing it reddened nothing -- on Chromium 153 (Playwright) the
+              hover reaches the wrapper's handlers and the note opens. Electron
+              44 carries a Chromium of the same generation. A rule the guard
+              cannot falsify is a rule nobody chose, so it is not here.
+              `e2e/model-picker-shots.mjs` measures that the note really
+              opens both ways, and what the dimmed label paints. */}
+              {modelControl === 'request' && (
+                <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                  <input
+                    data-model-request
+                    value={readModelRequest(draft)}
+                    onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                    placeholder="model"
+                    aria-label="model requested in this prompt"
+                    /* `outline-none` is GONE, and `focus:text-ink` was never a
+                       substitute for it: recolouring TYPED TEXT says nothing on
+                       an empty field, which is the state this control is in
+                       every time it is first reached. Nothing else drew one
+                       either -- the phone stylesheet's replacement ring applies
+                       to `.vam-tap:has(> [data-tap-skin])` and this field has no
+                       inner skin -- so focusing it put a caret on screen and
+                       nothing more.
+
+                       `FOCUS_RING` is the app's own, in `ink`: measured on the
+                       painted node it is 13.4:1 in dark and 17.7:1 in light
+                       against the card behind it, well past the 3:1 WCAG 1.4.11
+                       asks, and it is a different colour from the composer box's
+                       armed border (`waiting`) so the two signals cannot be read
+                       as each other. */
+                    className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                  />
+                </Note>
+              )}
+              {modelControl === 'picker' && (
+                <div className="relative flex-none">
+                  {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
+                      because it is one the operator did not ask for: measured
+                      on 2.1.274, `/model <alias>` answers "...and saved as your
+                      default for new sessions". vam cannot send the
+                      session-only form (that is the `s` key inside the
+                      interactive menu vam never drives), so the honest thing
+                      is to say what the line does. */}
+                  <Note text="model — typed into the pane vam started as /model <name>, which this session answers there; the CLI also saves the choice as its default for new sessions">
+                    <button
+                      type="button"
+                      data-model-picker
+                      data-model-picker-state="picker"
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-haspopup="listbox"
+                      aria-expanded={modelPickerOpen}
+                      /* LABELLED "model" AND NOT WITH A NAME: vam does not read
+                         the session's model back (the transcript's assistant
+                         rows carry `message.model`, but nothing surfaces it
+                         yet), and a button wearing "Opus" would be a claim
+                         nothing checked -- the same rule the mode chip keeps
+                         for the mode it does not read back. */
+                      aria-label="model — choose one for this session"
+                      onClick={() => setModelPickerOpen((open) => !open)}
+                      className="vam-tap flex h-6 shrink-0 cursor-pointer items-center text-ink-dim hover:text-ink"
+                    >
+                      <span
+                        aria-hidden="true"
+                        data-tap-skin
+                        className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                      >
+                        model
+                        <ChevronDown size={11} strokeWidth={2} />
+                      </span>
+                    </button>
+                  </Note>
+                  {modelPickerOpen && (
+                    <div
+                      data-model-picker-menu
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                    >
+                      {/* THE FIVE, as a listbox of their own rather than the
+                          popover being one: the free-text row below is an
+                          `<input>`, and an input is not an option, so a
+                          `role="listbox"` around both would be a listbox with
+                          a child no screen reader can place. */}
+                      <div
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="model for this session"
+                        className="flex flex-col gap-0.5"
+                      >
+                        {MODEL_CHOICES.map((choice) => (
+                          <button
+                            key={choice.id}
+                            type="button"
+                            data-model-option={choice.id}
+                            role="option"
+                            /* NONE IS MARKED SELECTED, for the label's reason
+                               above: vam holds no fact about which model the
+                               session is on, and `aria-selected` is a claim. */
+                            aria-selected={false}
+                            onClick={() => {
+                              setModelPickerOpen(false);
+                              void sendModel(choice.id);
+                            }}
+                            className="flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* A FULL MODEL ID, for what the five aliases cannot
+                          name: `claude --help` takes "an alias for the latest
+                          model ... or a model's full name". Enter sends it as
+                          the same line; a space in it is refused before a key
+                          is built (`sendModel`). */}
+                      <input
+                        data-model-id
+                        value={modelIdText}
+                        onChange={(event) => setModelIdText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') {
+                            dismissPopoverOnEscape(event);
+                            return;
+                          }
+                          // This box's own Enter, not the composer's: the
+                          // prompt box's handler submits the DRAFT on it.
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setModelPickerOpen(false);
+                          void sendModel(modelIdText);
+                          setModelIdText('');
+                        }}
+                        placeholder="full model id"
+                        aria-label="full model id — Enter to type /model with it"
+                        className={`h-6 w-[148px] rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {modelControl === 'disabled' && (
+                <Note text="vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal">
+                  <span
+                    data-model-picker-shell
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
+                    tabIndex={0}
+                    className={`inline-flex flex-none rounded-[6px] ${FOCUS_RING}`}
+                  >
+                    <button
+                      type="button"
+                      data-model-picker
+                      data-model-picker-state="disabled"
+                      disabled
+                      aria-disabled="true"
+                      aria-label="model — vam cannot choose one for this session"
+                      /* `text-ink-faint` is the disabled ink `SettingsOverlay`'s
+                         stepper buttons take (`disabled:text-ink-faint`), and it
+                         is measured against this card in
+                         `e2e/model-picker-shots.mjs`: the label must still
+                         clear 3:1, because a greyed control an operator cannot
+                         read is a control that is not there. */
+                      className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
+                    >
+                      model
+                      <ChevronDown size={11} strokeWidth={2} />
+                    </button>
+                  </span>
+                </Note>
+              )}
               {/* The mode, beside the model field the operator asked to put it
               next to, as ONE icon showing only the mode that is current —
               the three pills below the input are gone with the row they sat
@@ -6858,8 +7484,8 @@ export function DetailPanel(props: DetailPanelProps) {
                 </Note>
               )}
               {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
-              and this drew one for both of them -- for a source that hands the
-              prompt to a running `claude --resume` and for a source that
+              and this drew one for both of them -- for a source that types the
+              prompt into the running session's pane and for a source that
               appends it to a log and nothing reads it back out. Those are
               different things to have done, and the whole distinction lived in
               an `aria-label` and a native `title`: invisible to anyone looking
@@ -7015,6 +7641,11 @@ export function DetailPanel(props: DetailPanelProps) {
         })()}
     </aside>
   );
+
+  // THE PANE'S OWN ACTS, published to every control drawn inside an answer:
+  // the transcript's markdown AND the Files tab's markdown preview, which
+  // share one component map. See `out-actions.ts`.
+  return <OutActionsProvider value={outActions}>{pane}</OutActionsProvider>;
 }
 
 /**

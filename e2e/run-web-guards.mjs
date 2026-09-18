@@ -58,7 +58,61 @@
  * reaches the DOM as an element or as characters, and where the boxes of three
  * toolbar buttons fall against the view pill -- which is a rectangle question
  * and not a click one, because a control can be half-buried and still take
- * every click aimed at its centre.
+ * every click aimed at its centre,
+ * and -- since the file tree learned to be dragged -- whether a column that
+ * OVERFLOWS really stops at the pane and really scrolls (a `scrollTop` that
+ * moves under a real wheel, which no unit environment can produce), whether
+ * the thumb that says so appears only when there is something to scroll, and
+ * what a pointer-captured drag does to two columns' rectangles at both
+ * extremes and at vam's narrowest legal pane -- including the one act that
+ * proves the container clamp never writes back, which is looking at another
+ * tab and coming back, because a `display: none` tree measures 0px.
+ * and -- since the sidebar became a tree you can read -- where its three
+ * levels REALLY sit once a browser has laid the column out (a `padding-left`
+ * on a container moves its CHILDREN and not itself, so the declaration and the
+ * picture are two different facts), whether a status mark keeps its lane at
+ * every status, whether every spinner in the list is at the SAME ANGLE --
+ * `Element.getAnimations()` on a row mounted deliberately late, which is a
+ * question no unit environment can be asked at all -- whether a bell rung for
+ * a wait ever stops ringing, and what `prefers-reduced-motion` leaves drawn,
+ * which is the cascade's answer about a real node rather than a content scan
+ * of a stylesheet,
+ * and -- since an icon could be a glyph with a colour -- whether a tone CLASS
+ * resolves to anything at all (a token missing from the built stylesheet
+ * leaves the glyph on its inherited ink and every unit assertion still green),
+ * whether the light theme really remaps the eight rather than reproducing
+ * them, what a glyph's rectangle does to the name beside it, and whether the
+ * sentence a refusing control owes has a box on screen rather than only a
+ * value in a function,
+ * and -- since an agent's links became controls -- whether the SHIPPED BUNDLE
+ * really draws a link as a button and leaves no anchor in the pane (a claim
+ * about the built page, which the component's own unit tests cannot make),
+ * whether the address beside it is PAINTED rather than merely present,
+ * whether a refused scheme puts a sentence on screen with a box of its own,
+ * and whether jumping to `path:line` really SCROLLS the editor there --
+ * computed from the textarea's own line height and viewport, both of which
+ * are 0 or `''` in happy-dom, where the claim cannot be asked at all,
+ * and -- since the operator found a hairline where the sidebar meets the
+ * pane -- WHAT THE TOP ROW OF A SEAM ACTUALLY PAINTS, compared pixel by pixel
+ * against the rows below it. That is the one claim nothing in this repo could
+ * previously make: every element at that seam declared exactly the right
+ * thing, and the line came from Tailwind's own preflight handing every `<hr>`
+ * a `currentColor` top border back after the reset, so the class names, the
+ * tokens and the content scans were all green while the line was on screen,
+ * and -- since the terminal took a colour scheme of its own -- what the
+ * screen's ground, ink, bold ink, caret and `::selection` RESOLVE to on a
+ * real paint in both app themes (a utility a unit test can only name), and
+ * whether the scheme follows the OS flipping under `system`, which no write
+ * carries and only `emulateMedia` can drive,
+ * and -- since the composer's model field became a picker that is DISABLED
+ * where vam cannot type -- what the dimmed label of a disabled control
+ * actually paints against the composer (a token guard proves the value is in
+ * the stylesheet, only a browser proves it reaches the node), and whether the
+ * note on a disabled button can be opened at all: a disabled `<button>` takes
+ * no focus anywhere, so "the note is there" and "the note can be read" are
+ * two facts, and only a real hover and a real Tab press answer the second --
+ * and the hover half is where the guard buried an assumption of its own
+ * author's (see the script's header).
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -103,7 +157,17 @@ const GUARDS = [
   'agents-navigator-shots',
   'files-tab-keyboard-shots',
   'files-markdown-shots',
+  'files-tree-resize-shots',
   'terminal-ime-shots',
+  'sidebar-tree-shots',
+  'sidebar-seam-shots',
+  'terminal-chrome-shots',
+  'terminal-scheme-shots',
+  'terminal-settings-shots',
+  'tree-icon-shots',
+  'out-links-shots',
+  'view-width-shots',
+  'model-picker-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

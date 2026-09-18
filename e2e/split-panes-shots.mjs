@@ -101,12 +101,25 @@ async function modeCell() {
   return (await page.locator('[data-mode]').innerText()) ?? '';
 }
 /**
- * A Cmd/Ctrl chord. `Control` rather than `Meta` so this runs the same on a CI
- * runner as on the machine it was written on — `normalizeKey` folds the two,
- * and what matters here is `event.code`, which is `Digit<n>` either way.
+ * A `Mod-` chord, spelled so that it means the same thing wherever this runs.
+ *
+ * `Meta` FOR A DIGIT, `Control` FOR ANYTHING ELSE, and the split is the digit
+ * row's own. This used to press `Control` for everything, on the reasoning
+ * that `normalizeKey` folded Ctrl and Cmd together so the guard would behave
+ * identically on a Mac and on the ubuntu runner. That fold is gone from the
+ * DIGIT ROW (`digitChord`, `keyboard/chords.ts`): the operator cancelled
+ * Ctrl+number, so `Mod-<digit>` is Cmd on macOS and Ctrl elsewhere — and a
+ * guard still pressing Ctrl+2 would have gone on passing in CI while being
+ * dead on the machine vam is used on, which is the one failure mode a guard
+ * must not have.
+ *
+ * Meta is the command modifier on BOTH sides of that rule (a Super+<digit>
+ * that reaches the page lands on the tab row too), so one spelling covers
+ * both — and the same is true of `Mod-t` below, whose Ctrl spelling went to
+ * the terminal in the same pair of decisions (`CTRL_GESTURES`).
  */
 async function modChord(key) {
-  await page.keyboard.press(`Control+${key}`);
+  await page.keyboard.press(`Meta+${key}`);
   await page.waitForTimeout(150);
 }
 

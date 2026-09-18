@@ -58,10 +58,13 @@ const MODEL: CanvasModel = {
 
 const tabs = () => [...document.querySelectorAll('[data-session-tab]')];
 const titleOf = (tab: Element) => tab.querySelector('[data-tab-select]')?.textContent ?? '';
-const dotOf = (id: string) =>
-  tabs()
-    .find((tab) => titleOf(tab) === id)
-    ?.querySelector('[data-tab-status]') ?? null;
+const tabOf = (id: string) => tabs().find((tab) => titleOf(tab) === id) ?? null;
+/** The status marks a tab draws -- `data-tab-mark` per indicator, and the
+ *  four statuses that can earn one are named after themselves. */
+const marksOf = (id: string) =>
+  [...(tabOf(id)?.querySelectorAll('[data-tab-mark]') ?? [])].map((el) =>
+    el.getAttribute('data-tab-mark'),
+  );
 
 afterEach(cleanup);
 
@@ -71,23 +74,30 @@ describe('idle is not waiting', () => {
   });
 
   it('gives every tab its own status, with idle distinct from both waiting and done', () => {
+    // Read off the tab itself: the dot that used to carry the attribute is
+    // gone (`Canvas.tab-indicators.test.tsx`), and an idle tab draws nothing
+    // it could be hung on -- which is exactly why the status has to live on
+    // the tab, or "is this tab idle" would be unanswerable.
     render(<Canvas model={MODEL} />);
     const marks = Object.fromEntries(
-      tabs().map((tab) => [
-        titleOf(tab),
-        tab.querySelector('[data-tab-status]')?.getAttribute('data-tab-status') ?? null,
-      ]),
+      tabs().map((tab) => [titleOf(tab), tab.getAttribute('data-tab-status')]),
     );
     expect(marks).toEqual({ a1: 'waiting', a2: 'idle', a3: 'idle', a4: 'done' });
   });
 
-  it('paints the idle tab dot in the idle token, never the waiting amber and never done', () => {
+  it('draws the idle tab bare, and the waiting one with the bell -- never the same mark', () => {
+    // The stronger form of the old assertion. It used to be "the idle dot is
+    // not the waiting amber"; now the idle tab has NO mark, so an idle session
+    // painted as a demand would be a tab that grew a bell. The waiting tab's
+    // mark is the one the sidebar row rings (`status-mark.tsx`).
     render(<Canvas model={MODEL} />);
-    const idle = dotOf('a2')?.className ?? '';
-    expect(idle).toContain('bg-idle');
-    expect(idle).not.toContain('bg-waiting');
-    expect(idle).not.toContain('bg-done');
-    expect(dotOf('a1')?.className ?? '').toContain('bg-waiting');
+    expect(marksOf('a2')).toEqual([]);
+    expect(marksOf('a3')).toEqual([]);
+    expect(marksOf('a1')).toEqual(['waiting']);
+    expect(tabOf('a1')?.querySelector('[data-tab-mark="waiting"] .lucide-bell')).not.toBeNull();
+    // And `done` is its own thing too: off by default, and when it is on it
+    // is a tick and not the bell -- which is asserted in the indicators file.
+    expect(marksOf('a4')).toEqual([]);
   });
 
   it('paints the sidebar row dot in the idle token too', () => {

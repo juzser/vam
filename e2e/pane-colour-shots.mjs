@@ -960,20 +960,46 @@ console.log(`${outDir}/list-markers-dark.png`);
 //
 // SO THE DURABLE HALF IS KEPT AND THE DATED HALF IS RE-DERIVED. The ground is
 // still PINNED -- to where this pass put it, so accidental drift still fails
-// even though a deliberate move passed. And instead of "lighter than the
-// second pass's fill", each rung must still stand as far ABOVE THE GROUND as
-// the third pass left it: that is the separation the operator complained
-// about twice, and darkening the room is not allowed to quietly spend it.
+// even though a deliberate move passed.
+//
+// AND THE FIFTH PASS TURNS THE SECOND CHECK OVER, deliberately, because it is
+// the check that encoded the opposite request. It read "each rung must still
+// stand as far ABOVE THE GROUND as the third pass left it" -- darkness was
+// bought by moving the floor, and spending a rung's distance off that floor
+// was the way to get it wrong. The operator's next ask named five surfaces
+// and NOT the ground: the pane, the panel, the sidebar, the card and the
+// bubble. Answering that means closing exactly the distance this line used to
+// ratchet open, so a guard holding the old floor would fail on the fix.
+//
+// IT BECOMES THE SAME QUESTION WITH ITS SIGN FLIPPED: each rung must now be
+// at least `DARKENED_BY_AT_LEAST` CLOSER to the pinned ground than the FOURTH
+// pass painted it. That is the operator's request, as paint, and it is a
+// claim the stylesheet cannot make on its own -- `dark-ladder.test.ts` proves
+// the tokens moved, this proves the move reached a real element.
+//
+// WHAT THE OLD LINE PROTECTED IS NOT DROPPED, it is next door and unchanged:
+// the SEPARATION block below holds every pair of surfaces that TOUCH to a
+// distance wider than the one recorded before the pass that widened them. The
+// third pass's gain lives there, measured between the rungs rather than
+// between each rung and the floor -- which is where it was always the real
+// claim. All four of those rows still pass on this palette, which is what
+// makes it safe to stop ratcheting here.
 const GROUND_IS = '#141414';
 const GROUND_TOLERANCE = 1; // pinned to the pixel; this is rounding room, not a floor.
-/** `aboveGround`: the third pass's own ΔL* off its ground (10.27 L*). */
+/** `wasAboveGround`: the FOURTH pass's own painted ΔL* off this same ground. */
 const WIDENED_LADDER = [
-  { what: 'the sidebar', selector: '[data-sidebar-pane]', aboveGround: 12.35 },
-  { what: 'the detail pane', selector: '[data-action-pane]', aboveGround: 12.35 },
-  { what: 'a card on the pane', selector: '[data-question]', aboveGround: 17.7 },
+  { what: 'the sidebar', selector: '[data-sidebar-pane]', wasAboveGround: 12.15 },
+  { what: 'the detail pane', selector: '[data-action-pane]', wasAboveGround: 12.15 },
+  { what: 'a card on the pane', selector: '[data-question]', wasAboveGround: 17.65 },
 ];
-/** How much of that distance 8-bit rounding may eat. Not a budget to spend. */
-const ABOVE_GROUND_SLACK = 0.5;
+/**
+ * How much closer to the ground each of them has to have come. 2.0 L* rather
+ * than the 2.3 JND for the reason `dark-ladder.test.ts` gives at length: with
+ * the ground pinned and every gap still owing a JND, the ladder's arithmetic
+ * caps the available move at 2.40 L* for the panel and 2.19 for the bubble,
+ * so a floor of 2.3 could only be met by spending a gap.
+ */
+const DARKENED_BY_AT_LEAST = 2;
 /** What the LIGHT theme paints on ground plus these three nodes, unmoved. */
 const LIGHT_UNMOVED = [
   'rgb(255, 255, 255)',
@@ -1025,7 +1051,7 @@ const widened = await widenedSeen();
 console.log(`  the page behind the panes: ${GROUND_IS} -> ${ground.fill} (L* ${ground.light}, step ${ground.step})`);
 for (const rung of widened) {
   const above = ground.light === null || rung.light === null ? null : Number((rung.light - ground.light).toFixed(2));
-  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, third pass had ${rung.aboveGround})`);
+  console.log(`  ${rung.what}: ${rung.fill} (L* ${rung.light}, ${above} above ground, fourth pass had ${rung.wasAboveGround})`);
 }
 check(
   'every surface the ladder covers is drawn, and paints an opaque fill',
@@ -1038,14 +1064,14 @@ if (ground.painted && widened.every((r) => r.painted)) {
     Math.abs(ground.step) <= GROUND_TOLERANCE,
     `step ${ground.step} L* off ${GROUND_IS}`,
   );
-  const lostGround = widened
+  const notDarker = widened
     .map((r) => ({ ...r, above: Number((r.light - ground.light).toFixed(2)) }))
-    .filter((r) => r.above < r.aboveGround - ABOVE_GROUND_SLACK);
+    .filter((r) => r.above > r.wasAboveGround - DARKENED_BY_AT_LEAST);
   check(
-    'and darkening the room did not spend the separation the third pass bought',
-    lostGround.length === 0,
-    lostGround
-      .map((r) => `${r.what}: ${r.above} above ground, third pass had ${r.aboveGround}`)
+    'and every surface the operator named came DOWN towards the pinned ground',
+    notDarker.length === 0,
+    notDarker
+      .map((r) => `${r.what}: ${r.above} above ground, fourth pass had ${r.wasAboveGround}`)
       .join(' ; '),
   );
   // AND THE ORDER SURVIVED IT. The ladder is ground < sidebar = pane < card,
@@ -1176,11 +1202,32 @@ if (separations.every((s) => s.bothOpaque)) {
   );
 }
 
+// THE WHOLE ROOM, IN ONE FRAME, IN BOTH THEMES.
+//
+// Every other shot this file takes is a locator screenshot of one element,
+// which is the right shape for measuring and the wrong shape for the only
+// review that actually decides a palette: a person looking at it. The five
+// surfaces the fifth pass moved are `pane`, `panel`, `sidebar`, `card` and
+// `in-bubble`, and four of the five are only judgeable NEXT TO each other --
+// a card is too light when it is too light FOR ITS PANE. So the pair below is
+// deliberately un-clipped, taken at the point in this script where the
+// sidebar, the detail pane, a question card and the In bubble are all on
+// screen at once (the three selectors the ladder block just measured prove
+// the first three are; the bubble was measured further up).
+//
+// Both themes, from the same page state, so the two are comparable frame to
+// frame rather than being two different screens that happen to differ in
+// colour.
+await page.screenshot({ path: `${outDir}/whole-room-dark.png` });
+console.log(`${outDir}/whole-room-dark.png`);
+
 // THE OTHER THEME DID NOT MOVE, and this is the half a dark-only measurement
 // cannot see. The operator asked about dark; light is pinned as paint here and
 // as tokens in `dark-ladder.test.ts`.
 await page.evaluate(() => document.documentElement.classList.add('light'));
 await page.waitForTimeout(200);
+await page.screenshot({ path: `${outDir}/whole-room-light.png` });
+console.log(`${outDir}/whole-room-light.png`);
 const lightNow = await page.evaluate(
   (selectors) =>
     selectors.map((selector) => {
@@ -1339,66 +1386,174 @@ if (templateIds.length >= 3) {
   // The pane is still wearing the `--vam-pane` swatch driven further up, so
   // this reads the value the TEMPLATE lands on rather than the stylesheet's --
   // which makes "the press changed something" a real comparison.
-  const beforeTemplate = await page.evaluate(() => ({
+  let beforeTemplate = await page.evaluate(() => ({
     pane: getComputedStyle(document.querySelector('[data-action-pane]')).backgroundColor,
     sidebar: getComputedStyle(document.querySelector('[data-sidebar-pane]')).backgroundColor,
   }));
-  const picked = templateIds[1];
-  await page.locator(`[data-palette-template="${picked}"]`).click();
-  await page.waitForTimeout(350);
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(300);
 
-  const painted = await page.evaluate(() => {
-    const { opaque, lightness, ratio } = window.vamColour;
-    const read = (sel) => {
-      const el = document.querySelector(sel);
-      return el === null ? null : getComputedStyle(el).backgroundColor;
-    };
-    const pane = read('[data-action-pane]');
-    const card = read('[data-question]');
-    const sidebar = read('[data-sidebar-pane]');
-    const bubble = read('[data-detail-scroll="in"]');
-    const all = [pane, card, sidebar, bubble];
-    const both = all.every((c) => c !== null && opaque(c));
-    return {
-      pane,
-      card,
-      sidebar,
-      bubble,
-      allOpaque: both,
-      cardOverPane: both ? Number((lightness(card) - lightness(pane)).toFixed(2)) : null,
-      bubbleOverPane: both ? Number((lightness(bubble) - lightness(pane)).toFixed(2)) : null,
-      bubbleRatio: both ? Number(ratio(bubble, pane).toFixed(3)) : null,
-    };
-  });
-  console.log(`  after "${picked}": ${JSON.stringify(painted)}`);
+  // EVERY TINTED TEMPLATE, NOT ONE OF THEM. This used to press `templateIds[1]`
+  // and take a screenshot of it, which measured the wiring once and said
+  // nothing about the other presets -- and a palette is exactly the kind of
+  // thing that ships broken one entry at a time. Each one is now pressed, its
+  // ladder re-measured AS PAINT, and its own screenshot taken; the last one
+  // pressed stays in force for the `default` section below, which needs some
+  // template in force to have anything to come back from.
+  const tinted = templateIds.filter((id) => id !== 'default');
+  check(
+    'the row offers a real corpus of tinted templates, not one',
+    tinted.length >= 3,
+    JSON.stringify(tinted),
+  );
 
+  const openSettings = async () => {
+    if ((await page.locator('[data-settings-overlay]').count()) === 0) {
+      await page.locator('button[aria-label="settings"]').click();
+      await page.waitForSelector('[data-settings-overlay]');
+      await page.waitForTimeout(300);
+    }
+  };
+
+  let painted = null;
+  let picked = null;
+  // THE GROUND, READ OFF THE DOCUMENT AND OFF A PAINTED ELEMENT.
+  //
+  // A palette may write `--vam-ground` now, and that write has a longer road
+  // than any other token in the table: it is not in the swatch grid, so it
+  // travels `applyPaletteTemplate` -> `setPaletteColor` -> `writePrefs` ->
+  // `applyPalette`, and every one of those walks a LIST. It was dropped by the
+  // first of them until this change. A unit test can prove the bucket holds
+  // it; only a browser can prove it reached the root and then reached paint,
+  // which is why both are read here -- the custom property on the document,
+  // and the resolved colour of the scrim that is drawn with it.
+  const grounds = [];
+  for (const id of tinted) {
+    await openSettings();
+    await page.locator(`[data-palette-template="${id}"]`).click();
+    await page.waitForTimeout(350);
+    // While the overlay is still up: the scrim is the one element that paints
+    // `bg-ground` at every moment this guard can reach, so it is where the
+    // token's journey to a pixel is checked.
+    const ground = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement)
+        .getPropertyValue('--vam-ground')
+        .trim();
+      const scrim = document.querySelector('button[aria-label="close settings"]');
+      return {
+        root,
+        // NOT PARSED, COMPARED. Tailwind compiles `bg-ground/70` through its
+        // own colour pipeline and Chromium hands this back as
+        // `oklab(0.19125 ... / 0.7)`, so there is no hex here to match the
+        // root against -- two earlier versions of this check tried, and got
+        // `NaN` and then a 40-digit string. What the browser can answer
+        // without a colour-space conversion is whether the fill CHANGED, and
+        // that is the whole claim: a ground written by a template has to
+        // reach the element that paints it.
+        scrimFill: scrim === null ? null : getComputedStyle(scrim).backgroundColor,
+      };
+    });
+    grounds.push({ id, ...ground });
+    console.log(`  "${id}" ground: root ${ground.root}, scrim ${ground.scrimFill}`);
+    check(
+      `the "${id}" scrim is painted with something`,
+      ground.scrimFill !== null && ground.scrimFill !== '',
+      String(ground.scrimFill),
+    );
+    // THE ONE FRAME WHERE THE GROUND IS ACTUALLY ON SCREEN. The shot taken
+    // after this loop closes the overlay shows the ROOM -- sidebar, pane, tab
+    // strip -- and the ground is behind all of it: a palette can take the page
+    // to #000000 and the room screenshot will not move a pixel. The scrim is
+    // `bg-ground/70` across the whole viewport, so this is the frame that
+    // shows what a ground is worth.
+    await page.screenshot({ path: `${outDir}/palette-ground-${id}.png` });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(300);
+
+    painted = await page.evaluate(() => {
+      const { opaque, lightness, ratio } = window.vamColour;
+      const read = (sel) => {
+        const el = document.querySelector(sel);
+        return el === null ? null : getComputedStyle(el).backgroundColor;
+      };
+      const pane = read('[data-action-pane]');
+      const card = read('[data-question]');
+      const sidebar = read('[data-sidebar-pane]');
+      const bubble = read('[data-detail-scroll="in"]');
+      const all = [pane, card, sidebar, bubble];
+      const both = all.every((c) => c !== null && opaque(c));
+      return {
+        pane,
+        card,
+        sidebar,
+        bubble,
+        allOpaque: both,
+        cardOverPane: both ? Number((lightness(card) - lightness(pane)).toFixed(2)) : null,
+        bubbleOverPane: both ? Number((lightness(bubble) - lightness(pane)).toFixed(2)) : null,
+        bubbleRatio: both ? Number(ratio(bubble, pane).toFixed(3)) : null,
+      };
+    });
+    console.log(`  after "${id}": ${JSON.stringify(painted)}`);
+
+    check(
+      `pressing "${id}" repaints the pane and the sidebar`,
+      painted.allOpaque &&
+        painted.pane !== beforeTemplate.pane &&
+        painted.sidebar !== beforeTemplate.sidebar,
+      `${JSON.stringify(beforeTemplate)} -> ${JSON.stringify(painted)}`,
+    );
+    // THE LADDER SURVIVED THE PRESS. A template keeps vam's own lightnesses and
+    // moves only a* and b*, so the card must still clear the pane by the JND the
+    // dark lift bought -- if a preset could flatten this, clicking one would undo
+    // a release of work and nothing would say so.
+    check(
+      `and "${id}" keeps the card a visible step above the pane`,
+      painted.cardOverPane !== null && painted.cardOverPane >= 2.3,
+      `card is ${painted.cardOverPane} L* over the pane`,
+    );
+    check(
+      `and "${id}" still draws an In bubble`,
+      painted.bubbleOverPane !== null &&
+        painted.bubbleOverPane > 0 &&
+        painted.bubbleRatio >= BUBBLE_FLOORS.dark.ratio,
+      `bubble ${painted.bubbleOverPane} L* over the pane at ${painted.bubbleRatio}:1`,
+    );
+    await page.screenshot({ path: `${outDir}/palette-template-${id}.png` });
+    console.log(`${outDir}/palette-template-${id}.png`);
+    beforeTemplate = { pane: painted.pane, sidebar: painted.sidebar };
+    picked = id;
+  }
+
+  // AND A PALETTE REALLY DOES MOVE IT. Every assertion in the loop above is
+  // satisfied by a feature that is completely dead: if no template wrote a
+  // ground at all, each one would simply show the stylesheet's and the root
+  // would agree with the scrim every time. So the sweep has to prove it found
+  // the thing it is here to measure -- more than one ground across the row,
+  // and at least one of them darker than vam's own.
+  const distinct = [...new Set(grounds.map((g) => g.root.toLowerCase()))];
+  console.log(`  grounds across the row: ${distinct.join(', ')}`);
   check(
-    `pressing "${picked}" repaints the pane and the sidebar`,
-    painted.allOpaque &&
-      painted.pane !== beforeTemplate.pane &&
-      painted.sidebar !== beforeTemplate.sidebar,
-    `${JSON.stringify(beforeTemplate)} -> ${JSON.stringify(painted)}`,
+    'at least one template paints a ground of its own, rather than all of them inheriting vam’s',
+    distinct.length >= 2,
+    JSON.stringify(grounds.map((g) => `${g.id}:${g.root}`)),
   );
-  // THE LADDER SURVIVED THE PRESS. A template keeps vam's own lightnesses and
-  // moves only a* and b*, so the card must still clear the pane by the JND the
-  // dark lift bought -- if a preset could flatten this, clicking one would undo
-  // a release of work and nothing would say so.
+  const darkest = grounds
+    .map((g) => ({ id: g.id, value: Number.parseInt(g.root.replace('#', ''), 16) }))
+    .sort((a, b) => a.value - b.value)[0];
+  console.log(`  darkest ground on the row: ${darkest.id}`);
   check(
-    `and "${picked}" keeps the card a visible step above the pane`,
-    painted.cardOverPane !== null && painted.cardOverPane >= 2.3,
-    `card is ${painted.cardOverPane} L* over the pane`,
+    'the darkest ground on the row is darker than the one the stylesheet paints',
+    darkest.value < Number.parseInt('141414', 16),
+    JSON.stringify(darkest),
   );
+  // AND IT REACHED THE PAINT, not just the custom property. `applyPalette`
+  // writes the root's inline style; a token that got that far and no further
+  // would leave every one of these fills identical, which is exactly what the
+  // guard saw when the apply loop was put back on the swatch grid.
+  const fills = [...new Set(grounds.map((g) => String(g.scrimFill)))];
   check(
-    `and "${picked}" still draws an In bubble`,
-    painted.bubbleOverPane !== null &&
-      painted.bubbleOverPane > 0 &&
-      painted.bubbleRatio >= BUBBLE_FLOORS.dark.ratio,
-    `bubble ${painted.bubbleOverPane} L* over the pane at ${painted.bubbleRatio}:1`,
+    'and the scrim that paints the ground really changes with it',
+    fills.length >= 2,
+    JSON.stringify(grounds.map((g) => `${g.id}:${g.scrimFill}`)),
   );
-  await page.screenshot({ path: `${outDir}/palette-template-${picked}.png` });
-  console.log(`${outDir}/palette-template-${picked}.png`);
 
   // ------------------------------------- THE WAY BACK, AND WHAT IT PROMISES
   //
@@ -1411,17 +1566,19 @@ if (templateIds.length >= 3) {
   // it walks into a trap no unit test can see paint through: the overrides
   // live on the root's INLINE style and custom properties inherit, so by the
   // time this row is on screen the cascade IS the operator's palette. The
-  // obvious read hands the chip `slate`'s colours and it previews the very
-  // thing it is offering to leave.
+  // obvious read hands the chip the IN-FORCE template's colours and it
+  // previews the very thing it is offering to leave.
   //
-  // So this is measured with `slate` IN FORCE, in a real browser, against the
-  // surfaces it repaints afterwards. The discs promise; the press pays.
+  // So this is measured with a tinted template IN FORCE -- whichever the loop
+  // above pressed last, which is a stronger fixture than naming one, since it
+  // follows the table rather than a memory of it -- in a real browser, against
+  // the surfaces it repaints afterwards. The discs promise; the press pays.
   await page.locator('button[aria-label="settings"]').click();
   await page.waitForSelector('[data-settings-overlay]');
   await page.waitForTimeout(300);
   // EVERY CHIP DRAWS ITS OWN PALETTE, and this is the assertion that keeps the
-  // fix above from over-applying. `default` has to ask the cascade; the four
-  // tinted chips must NOT, or all five previews collapse onto one colour --
+  // fix above from over-applying. `default` has to ask the cascade; every
+  // tinted chip must NOT, or all of the previews collapse onto one colour --
   // the failure that looks most like working software, since the row still
   // renders, still has discs, and still applies the right palette when pressed.
   const firstDiscs = await page.evaluate(() =>
@@ -1435,7 +1592,7 @@ if (templateIds.length >= 3) {
   );
   console.log(`  every chip's pane disc: ${JSON.stringify(firstDiscs)}`);
   check(
-    'every template chip previews a pane of its own, rather than all five sharing one',
+    'every template chip previews a pane of its own, rather than all of them sharing one',
     firstDiscs.length >= 3 &&
       new Set(firstDiscs.map((d) => d.fill)).size === firstDiscs.length &&
       firstDiscs.every((d) => d.fill !== null),

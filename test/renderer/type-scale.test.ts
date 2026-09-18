@@ -49,6 +49,10 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_SIZES,
+} from '../../src/renderer/prefs/terminal-font.js';
 
 const ROOT = resolve(process.cwd());
 const RENDERER = resolve(ROOT, 'src/renderer');
@@ -78,21 +82,6 @@ const EXCEPTIONS: ReadonlyArray<{
   readonly count: number;
   readonly why: string;
 }> = [
-  {
-    file: 'panels/TerminalTab.tsx',
-    size: '10.5',
-    count: 1,
-    why:
-      'THE TMUX SCREEN IS MEASURED, NOT STYLED. `terminal-size.ts` divides the ' +
-      "pane's box by the advance of one rendered character to decide the " +
-      'columns and rows tmux is told to compose at, and its own header records ' +
-      'the measurement it took: "Geist Mono at 10.5px measures 6.6015625px per ' +
-      'advance here". Rounding this up to the scale would silently re-flow the ' +
-      "operator's live session, and the screen tmux returns is already wrapped " +
-      'by then — no CSS can undo a break that is in the text. The chrome AROUND ' +
-      'the screen (its empty, pending and unreachable lines, and the size chip) ' +
-      'is on the scale; the screen itself is not.',
-  },
   {
     file: 'panels/PairingScreen.tsx',
     size: '24',
@@ -189,10 +178,19 @@ describe('the renderer sizes its type from one named scale', () => {
 
   it('declares no fifth step — a scale nobody can add to by accident', () => {
     const css = readFileSync(STYLES, 'utf8');
-    const declared = [...css.matchAll(/^\s*--text-([a-z-]+):/gm)]
-      .map((m) => m[1] as string)
-      .filter((name) => !name.endsWith('--line-height'));
-    expect(declared.sort()).toEqual(SCALE.map(([role]) => role).sort());
+    // A SET, NOT A LIST, and the difference arrived with the pane's reading
+    // size: `[data-reading-pane]` RE-DECLARES `--text-body` and
+    // `--text-control` in terms of `--vam-out-font-size`, so two of the four
+    // names now appear twice in this file. A scoped override is not a fifth
+    // step — it is the same step, re-answered for one subtree — and the rule
+    // this assertion exists for is about NAMES. The block itself is checked
+    // below rather than merely tolerated here.
+    const declared = new Set(
+      [...css.matchAll(/^\s*--text-([a-z-]+):/gm)]
+        .map((m) => m[1] as string)
+        .filter((name) => !name.endsWith('--line-height')),
+    );
+    expect([...declared].sort()).toEqual(SCALE.map(([role]) => role).sort());
   });
 
   it('uses the roles at a real number of call sites', () => {
@@ -222,10 +220,36 @@ describe('the renderer sizes its type from one named scale', () => {
     const belowTheFloor = literals
       .filter(({ size }) => Number(size) < FLOOR)
       .map(({ file, size }) => `${file}: ${size}px`);
-    // The one thing under the floor is the tmux screen, and it is under it
-    // because a measurement says so rather than because a caption was tuned by
-    // eye. Spelled as the exact list, so a second one cannot join it quietly.
-    expect([...new Set(belowTheFloor)]).toEqual(['panels/TerminalTab.tsx: 10.5px']);
+    // NOTHING AT ALL NOW, and the one thing that used to be here is worth a
+    // sentence because it left rather than being raised. The tmux screen was
+    // set at a literal 10.5px and exempted on the grounds that the size is a
+    // MEASUREMENT (`terminal-size.ts` divides the pane's box by the advance of
+    // one character rendered at it). It is still measured; it is no longer a
+    // literal. The size is an operator setting whose default is above this
+    // floor, so there is no class left to exempt.
+    expect([...new Set(belowTheFloor)]).toEqual([]);
+  });
+
+  /**
+   * THE FLOOR IS ABOUT CLASSES, NOT ABOUT PIXELS -- and the terminal is where
+   * that distinction became load-bearing rather than pedantic.
+   *
+   * The rule above now finds nothing under 11px, and that would be a cheerful
+   * lie on its own: `prefs/terminal-font.ts` offers 10.5px, and an operator
+   * who picks it gets a pane set below the floor. That is not the thing the
+   * floor exists to stop. Fifty call sites sat under it because captions had
+   * been tuned smaller by eye, one at a time, with nobody able to say what
+   * size a caption was; a person deliberately choosing the density of their
+   * own terminal is the opposite act. The exception is written down HERE, in
+   * the guard, so that it stays a decision -- and derived from the shipped
+   * list, so that a fifth offered size cannot appear without this reading it.
+   */
+  it('names the one place a size below the floor is the operator’s to choose', () => {
+    const under = TERMINAL_FONT_SIZES.filter((size) => size < FLOOR);
+    expect(under).toEqual([10.5]);
+    // And the DEFAULT is not one of them: shipping below the floor to everyone
+    // is what the floor does stop.
+    expect(DEFAULT_TERMINAL_FONT_SIZE).toBeGreaterThanOrEqual(FLOOR);
   });
 
   it("spells no size as Tailwind's own text-xs / text-sm either", () => {
@@ -237,5 +261,85 @@ describe('the renderer sizes its type from one named scale', () => {
       return hits.map((m) => `${rel(path)}: text-${m[1]}`);
     });
     expect([...new Set(strays)].sort()).toEqual([]);
+  });
+});
+
+/**
+ * THE PANE'S READING SIZE, DERIVED RATHER THAN RESTATED.
+ *
+ * Operator report, translated: "the font size of the other parts of the pane
+ * (in bubble, heading, choice popover, prompt input...) needs to be in
+ * proportion to the out font size; at `out` 15 the answers are comfortably
+ * large but the prompt's choice options are now very small." Measured on the
+ * shipped build at `out` 15: the answer prose is 15px and the option label is
+ * `text-control` at a flat 12px.
+ *
+ * The answer is a SCOPE that re-declares two of the four steps as multiples of
+ * the reading size, so that every call site keeps the role it already picked.
+ * That puts a second table of type numbers in `styles.css`, which is exactly
+ * what this file exists to prevent — so the numerators and the denominator are
+ * recomputed here from the scale's own declarations. Change 13 to 14 in
+ * `@theme` and this reddens until the ratios follow.
+ */
+describe('the response pane re-declares the scale against the reading size', () => {
+  const css = readFileSync(STYLES, 'utf8');
+  const block = /\[data-reading-pane\]\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+  const bodySize = SCALE.find(([role]) => role === 'body')?.[1] ?? 0;
+
+  it('has a block at all, keyed to the pane and nothing wider', () => {
+    // A selector that matches nothing reads exactly like one that works;
+    // `e2e/view-width-shots.mjs` measures the painted result, and this only
+    // claims the rule was typed.
+    expect(block, 'no [data-reading-pane] rule in styles.css').not.toBe('');
+    expect(bodySize).toBeGreaterThan(0);
+  });
+
+  it('scales exactly the two steps that carry what is being READ', () => {
+    // `meta` is the scale's own floor and it is chrome ANNOTATING the reading —
+    // the timestamp, the key cap, the count, and the terminal's status rule,
+    // which sits under a screen whose size has a setting of its own. It is
+    // pinned at 11px because the operator asked twice for the small fonts to be
+    // bigger. `heading` has no call site in a response pane at all, and a
+    // declaration with no reader is the shape `prefs.no-write-only-field.test.ts`
+    // exists to catch one layer down.
+    const overridden = [...block.matchAll(/--text-([a-z]+):/g)].map((m) => m[1] as string);
+    expect(overridden.sort()).toEqual(['body', 'control']);
+    for (const role of ['meta', 'heading']) {
+      expect(block, `--text-${role} must not be scoped`).not.toContain(`--text-${role}:`);
+    }
+  });
+
+  it('scales each one by its own share of the body step, sizes and leadings alike', () => {
+    // The pair is one decision — the scale's own header says so, and every one
+    // of the 204 literals it replaced set a size and no leading. A 20px body on
+    // a 20px leading is a wall of text.
+    for (const [role, size, leading] of SCALE.filter(([r]) => r === 'body' || r === 'control')) {
+      const declaration = new RegExp(`--text-${role}:\\s*([^;]+);`).exec(block)?.[1]?.trim() ?? '';
+      const paired =
+        new RegExp(`--text-${role}--line-height:\\s*([^;]+);`).exec(block)?.[1]?.trim() ?? '';
+      // The body step IS the reading size, so it carries no ratio at all.
+      expect(declaration, `--text-${role}`).toBe(
+        size === bodySize
+          ? 'var(--vam-pane-size)'
+          : `calc(var(--vam-pane-size) * ${size} / ${bodySize})`,
+      );
+      expect(paired, `--text-${role}--line-height`).toBe(
+        `calc(var(--vam-pane-size) * ${leading} / ${bodySize})`,
+      );
+    }
+  });
+
+  it('scales UP only, so the 11px floor is never walked back through', () => {
+    // `--vam-pane-size` is `max(<the body step>, <the out size>)`. The
+    // operator's report is that a LARGE `out` leaves the rest of the pane too
+    // small; nobody asked for a small `out` to shrink the chrome, and doing it
+    // would put the control step at 9.2px at `out` 10 — under the floor this
+    // file is named for. It is also what keeps the steps in order at every
+    // setting, which a per-step floor would not.
+    const size = /--vam-pane-size:\s*([^;]+);/.exec(css)?.[1]?.trim() ?? '';
+    expect(size, 'no --vam-pane-size declaration').not.toBe('');
+    expect(size).toMatch(/^max\(/);
+    expect(size).toContain('var(--text-body)');
+    expect(size).toContain('var(--vam-out-font-size)');
   });
 });

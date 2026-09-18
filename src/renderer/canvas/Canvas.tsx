@@ -31,7 +31,7 @@
  * that same id again.
  */
 
-import { Box, Factory, FlaskConical, type LucideIcon, Plus } from 'lucide-react';
+import { Box, Factory, FlaskConical, type LucideIcon, Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
   type DragEvent as ReactDragEvent,
@@ -75,10 +75,12 @@ import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
+  type Chord,
   type ChordState,
   chordText,
   EMPTY_CHORD,
   isSelectOnly,
+  isSelectOnlyChord,
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
@@ -93,6 +95,7 @@ import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
+import { describeIcon, IconMark, parseIcon } from '../panels/icon-value.js';
 import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -100,7 +103,8 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
-import { resolveSessionGlyph } from '../panels/session-icon.js';
+import { resolveSessionIcon } from '../panels/session-icon.js';
+import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
@@ -129,6 +133,7 @@ import {
   renameGroup,
   setDefaultProvider,
   setDetailTab,
+  setFilesTreeWidth,
   setFocusView,
   setGroupCollapsed,
   setGroupIcon,
@@ -147,6 +152,8 @@ import {
   watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';
+import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
+import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
@@ -412,6 +419,24 @@ type ProjectIconTarget = {
   readonly projectId: string;
   readonly name: string;
 };
+
+/**
+ * WHETHER THE PANEL STAYS OPEN AFTER A PICK — one rule, used by all three
+ * pickers so the three levels cannot answer it differently.
+ *
+ * AN EMOJI IS ONE PRESS and the panel gets out of the way, exactly as it
+ * always has. A GLYPH IS TWO: the picture, and then the colour. Closing on the
+ * first would put the tone row out of reach of the only thing it can paint,
+ * and an operator would have to reopen the picker to finish a choice they had
+ * already started — which is also the state in which the row can do nothing
+ * and has to say so (`toneRefusal`).
+ *
+ * Clearing (`''`) parses to `null` and therefore closes, which is right: there
+ * is nothing left to colour.
+ */
+function keepPickerOpen(icon: string): boolean {
+  return parseIcon(icon)?.kind === 'glyph';
+}
 
 /**
  * ONE PANE's tabs, exactly as its strip draws them.
@@ -872,36 +897,87 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
 };
 
 /**
- * The dot every tab wears, and why the ink above is not simply extended to
- * the inactive ones.
+ * THE MARK A TAB WEARS, AND WHY A RESTING TAB WEARS NONE.
  *
  * `TAB_STATUS_INK` is applied only when a tab is ACTIVE, so three of its four
  * statuses could never be seen: the tab you are looking at is not the one
  * that needs to tell you something. And since every session of the project is
  * a tab, the strip is the densest status surface in the app — after a split
  * the operator's eyes are here, while the amber "needs you" mark lived only
- * in the sidebar.
+ * in the sidebar. So status gets a mark of its own on the tab, and the ink
+ * stays the active tab's: colouring an inactive tab's TITLE by status would
+ * put "which tab am I on" and "how is each session doing" in one ink,
+ * colliding with the three-channel active-tab treatment (accent underline,
+ * ground/ink, `opacity-85` on the neighbours).
  *
- * TWO CHANNELS, KEPT SEPARABLE: colouring an inactive tab's TITLE by status
- * would put "which tab am I on" and "how is each session doing" in one ink,
- * colliding with the deliberate three-channel active-tab treatment (accent
- * underline, ground/ink, `opacity-85` on the neighbours). So the ink stays
- * the active tab's and status gets a mark of its own on every tab — the
- * sidebar row's dot, a pixel smaller for an 11px row.
+ * THAT MARK USED TO BE A DOT ON EVERY TAB, idle included, and the operator
+ * read the result the way the sidebar's five dots had been read once before:
+ * "if a tab is idle (not running, not waiting for you, ...) there is no need
+ * to show the dot". A strip of mostly-idle tabs was a row of grey dots saying
+ * "nothing" eight times. Now a tab draws AT MOST ONE status mark -- the
+ * sidebar row's own glyph (`panels/status-mark.tsx`: a spinner, a bell, a
+ * triangle, a tick), so the two surfaces say one thing -- and only for a
+ * status whose switch is on (`prefs/tab-indicators.ts`). Idle is not a
+ * switch: a resting tab with no icon and no draft is its title and nothing
+ * else, and no empty lane is reserved for the mark it is not wearing. A quiet
+ * tab is narrower than a busy one; that is the point, not a cost.
+ *
+ * THE LANE IS `--text-control`, 12px, the tab label's own size -- and the
+ * glyph fills it. The sidebar row centres a 12px glyph in a 14px lane under a
+ * 13px title; a tab's title is 12px on a 16px line, and the session icon
+ * beside it already draws at exactly 12 (`IconMark size={12}` below, "the
+ * tab label's own size, so the two kinds of icon occupy the same height"). A
+ * mark at the same 12 sits in the same square as that icon and on the same
+ * centre line as the label, which is what makes the two read as one row of
+ * things rather than a big thing beside a small one. The two pixels of air
+ * the sidebar keeps inside its lane are for a triangle and a circle sitting
+ * centred beside each other in a COLUMN; on a tab the mark has no neighbour
+ * above or below to be centred against, and the lucide glyphs carry their own
+ * pixel of air inside the box (a 24-unit viewBox with 2 units of margin). The
+ * 16px line has two pixels above and below the lane; the row is 36 and does
+ * not move (measured in `e2e/tab-strip-shots.mjs`).
+ *
+ * Mark first, then the icon, then the title, then the marks about the
+ * OPERATOR's state in this tab -- an unsent draft, a prompt not yet recorded,
+ * sub-agents at work -- because reading order on a strip is left to right and
+ * what the session is doing outranks what you were doing here.
  */
-const TAB_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
-  running: 'bg-running',
-  waiting: 'bg-waiting',
-  idle: 'bg-idle',
-  done: 'bg-done',
-  failed: 'bg-failed',
-};
+export const TAB_MARK_LANE_PX = 12;
+/** The glyph is the lane: see above for why the tab keeps no air the sidebar
+ *  needs, and `status-mark.tsx` for why the sidebar does. */
+export const TAB_MARK_GLYPH_PX = TAB_MARK_LANE_PX;
+
+/** A status that may earn a mark. `idle` is not in it, by construction: the
+ *  type is the indicator vocabulary narrowed to the statuses, and idle is a
+ *  status that is not an indicator. */
+type TabStatusMark = Extract<TabIndicatorId, SessionStatus>;
+
+/** Which status mark, if any, this session's tab draws under these switches.
+ *  `null` for idle whatever the switches say, and for a status whose switch
+ *  is off. */
+function tabStatusMark(
+  status: SessionStatus,
+  indicators: readonly TabIndicatorId[],
+): TabStatusMark | null {
+  if (status === 'idle') return null;
+  return isTabIndicatorOn(indicators, status) ? status : null;
+}
+
+/** Is there an unsent draft worth a pencil? The composer's own send rule
+ *  (`sendPromptFor` returns on `trim() === ''`), so the pencil never marks a
+ *  draft the send would refuse. */
+export function hasDraft(text: string | undefined): boolean {
+  return text !== undefined && text.trim() !== '';
+}
 
 function TabStrip({
   orientation,
   tabs,
   activeId,
   paneFocused,
+  indicators,
+  drafts,
+  pending,
   onSelect,
   onClose,
   onTabContextMenu,
@@ -911,6 +987,26 @@ function TabStrip({
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
   readonly activeId: string | null;
+  /**
+   * Which indicators a tab may draw -- `prefs.tabIndicators`, passed as a
+   * prop rather than read from a store because this strip is rendered by the
+   * component that owns the prefs (`prefs/tab-indicators.ts` says why that
+   * makes it unlike `terminalFontSize`).
+   */
+  readonly indicators: readonly TabIndicatorId[];
+  /**
+   * Every session's unsent composer text, by session id -- the whole map
+   * rather than one flag per tab, because a draft belongs to a SESSION and a
+   * session may be a tab of any pane; the strip reads its own tabs' entries
+   * and ignores the rest. `hasDraft` decides what counts.
+   */
+  readonly drafts: Readonly<Record<string, string>>;
+  /**
+   * The prompts painted but not yet recorded (`domain/optimistic.ts`), for
+   * the `pending` indicator. The list is at most a few long and usually
+   * empty, so it is scanned per tab rather than indexed first.
+   */
+  readonly pending: readonly PendingPrompt[];
   /**
    * Does the pane this strip belongs to hold the keyboard? Since PR 268 took
    * the focus ring off the pane, "the active tab of a pane that does NOT have
@@ -1087,12 +1183,28 @@ function TabStrip({
         // to its project's glyph the way the (now-deleted) canvas root node
         // already did, and the two surfaces disagreed the moment one carried
         // a project icon and no session icon of its own.
-        const glyph = resolveSessionGlyph(entry);
+        //
+        // The chain answers with a KIND now (an emoji, or a named glyph in a
+        // tone), not a character, so the tone arrives here without this strip
+        // knowing that colours exist -- see `session-icon.tsx` for why that is
+        // one chain and not two.
+        const icon = isTabIndicatorOn(indicators, 'icon') ? resolveSessionIcon(entry) : null;
+        const mark = tabStatusMark(entry.session.status, indicators);
+        const draft = isTabIndicatorOn(indicators, 'draft') && hasDraft(drafts[entry.session.id]);
+        const queued =
+          isTabIndicatorOn(indicators, 'pending') &&
+          pending.some((one) => one.sessionId === entry.session.id);
+        const agents = isTabIndicatorOn(indicators, 'agents') ? entry.session.runningAgents : 0;
         return (
           <div
             key={entry.session.id}
             data-session-tab
             data-active={active ? 'true' : 'false'}
+            /* ON THE TAB, not on the mark: the 6px dot used to carry this and
+               the dot is gone, and an idle tab has no mark to hang it on. The
+               tests and the browser guard read "which status is this tab" off
+               the tab itself, whether or not anything is drawn for it. */
+            data-tab-status={entry.session.status}
             /*
               THREE CHANNELS ON THE ACTIVE TAB, not one (operator: "the
               focused tab should have a different opacity from the others,
@@ -1118,14 +1230,22 @@ function TabStrip({
                 : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
             }`}
           >
-            {/* Decorative to a screen reader, as the sidebar row's dot is:
+            {/* AT MOST ONE, and none for idle -- see `TAB_MARK_LANE_PX`.
+                Decorative to a screen reader, as the dot it replaces was:
                 labelling one per tab would read every session's status
-                before any of the titles. */}
-            <span
-              data-tab-status={entry.session.status}
-              aria-hidden="true"
-              className={`h-[6px] w-[6px] flex-none rounded-full ${TAB_STATUS_DOT[entry.session.status]}`}
-            />
+                before any of the titles, and the sidebar row already says
+                the word once. `announce={false}` keeps the sr-only word out;
+                the wrapper carries the tab's own hook. */}
+            {mark !== null && (
+              <span data-tab-mark={mark} aria-hidden="true" className="flex flex-none">
+                <StatusMark
+                  status={mark}
+                  announce={false}
+                  lane={TAB_MARK_LANE_PX}
+                  glyph={TAB_MARK_GLYPH_PX}
+                />
+              </span>
+            )}
             <button
               type="button"
               data-tab-select
@@ -1143,15 +1263,67 @@ function TabStrip({
               onContextMenu={tabMenuOf(entry)}
               className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
-              {glyph !== null && (
+              {icon !== null && (
                 <>
-                  <span data-session-icon={entry.session.id} aria-hidden="true">
-                    {glyph}
+                  {/* `inline-flex` so a drawn glyph sits on the label's centre
+                      line rather than on its baseline, which is where an
+                      inline `<svg>` lands by default and is about 3px too low
+                      beside 12px text. An emoji is unaffected: it is the only
+                      thing in the box either way. 12 is `--text-control`, the
+                      tab label's own size, so the two kinds of icon occupy the
+                      same height. */}
+                  <span
+                    data-session-icon={entry.session.id}
+                    data-tab-mark="icon"
+                    aria-hidden="true"
+                    className="inline-flex items-center align-middle"
+                  >
+                    <IconMark value={icon} size={TAB_MARK_GLYPH_PX} fallback={null} />
                   </span>{' '}
                 </>
               )}
               {entry.session.title}
             </button>
+            {/* THE MARKS ABOUT YOU, after the title. Siblings of the select
+                button rather than children, so a long title's `truncate`
+                never clips them: the fact that a draft is waiting here is
+                exactly the thing a tab must not lose to an ellipsis. */}
+            {draft && (
+              /* NAMED, unlike the status mark, and `role="img"` so the name
+                 is announced: an unsent draft is a fact about the OPERATOR
+                 that no other surface reads aloud -- the sidebar row does not
+                 know about it -- so hiding it would leave a screen-reader
+                 user the only person who cannot tell which tab they were
+                 mid-sentence in. */
+              <span
+                data-tab-mark="draft"
+                role="img"
+                aria-label="unsent draft"
+                className="flex flex-none text-ink-dim"
+              >
+                <Pencil size={TAB_MARK_GLYPH_PX} strokeWidth={1.8} />
+              </span>
+            )}
+            {queued && (
+              /* A HOLLOW dot, deliberately unlike the filled one the strip
+                 used to draw for status: it means "something of yours is in
+                 flight", not "this session is in some state". `border-current`
+                 takes the tab's own ink, so it dims with the tab. 7px is the
+                 sidebar's idle dot; a ring smaller than that has no inside. */
+              <span
+                data-tab-mark="pending"
+                aria-hidden="true"
+                className="h-[7px] w-[7px] flex-none rounded-full border border-current"
+              />
+            )}
+            {agents > 0 && (
+              /* The same `●N` the command palette draws, in the same ink:
+                 one badge, three surfaces. Decorative here as the status mark
+                 is, and for the same reason. */
+              <span data-tab-mark="agents" aria-hidden="true" className="flex-none text-running">
+                ●{agents}
+              </span>
+            )}
             <button
               type="button"
               data-tab-close
@@ -1479,17 +1651,22 @@ function CanvasInner({
   // appearance, and a flip that moved only the class would leave a light theme
   // wearing dark's canvas until the next write. `writePrefs` covers an edit;
   // only this covers the OS changing its mind with nothing else happening.
+  // The terminal's scheme is the third half of the same appearance and is
+  // stored per theme for the same reason, so it moves in the same statement:
+  // without this line an open terminal would keep its dark scheme after the
+  // OS flipped to light under `system`, with nothing else on screen wrong.
   const [effective, setEffective] = useState<EffectiveTheme>('dark');
   useEffect(() => {
     const show = (theme: Theme) => {
       const next = applyTheme(theme);
       setEffective(next);
       applyPalette(paletteFor(prefs.palette, next));
+      setActiveTerminalScheme(prefs.terminalScheme, next);
     };
     show(prefs.theme);
     if (prefs.theme !== 'system') return;
     return watchOsTheme(() => show('system'));
-  }, [prefs.theme, prefs.palette]);
+  }, [prefs.theme, prefs.palette, prefs.terminalScheme]);
 
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
@@ -2613,6 +2790,31 @@ function CanvasInner({
   );
 
   /**
+   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the three levels.
+   *
+   * DELIBERATELY NOT CAPTURED INTO THE TARGET beside the source and the id.
+   * What a target freezes is WHICH thing is being edited -- `IconTarget` argues
+   * why, and that is the part that must not move under an open panel. The icon
+   * ITSELF is the part that has to move: a glyph and its colour are two
+   * presses, and a frozen value would leave the swatches still refusing on the
+   * grounds that nothing was chosen, one press after something was.
+   *
+   * READ OFF THE MODEL RATHER THAN THE PREFS BUCKET, so the picker marks what
+   * the operator can SEE. The two agree for a project and a group -- prefs is
+   * the only writer of either -- but a session's icon can also come from a
+   * source's own fixture (`fixtures/demo.ts`), which never reaches prefs at
+   * all.
+   */
+  const projectIcons = useMemo(
+    () => new Map(allEntries.map((entry) => [entry.project.id, entry.project.icon ?? null])),
+    [allEntries],
+  );
+  const groupIcons = useMemo(
+    () => new Map((model.groups ?? []).map((group) => [group.id, group.icon ?? null])),
+    [model.groups],
+  );
+
+  /**
    * Every session focus could land on.
    *
    * A remembered focus stores a session id under its source, never anything
@@ -3599,9 +3801,9 @@ function CanvasInner({
    * prompt; it has no channel into a running agent session, so "recorded" is
    * the truth and "sent" would not be. A `'session'` source can be different:
    * when `capabilities.deliverPrompt` is true the write really does reach a
-   * running `claude --resume`, and saying "recorded" there would be the same
-   * lie in the other direction — the operator would think nothing happened
-   * when an agent is about to answer.
+   * running session -- it is TYPED into the pane vam owns -- and saying
+   * "recorded" there would be the same lie in the other direction, the operator
+   * thinking nothing happened when the keystrokes went out.
    *
    * WHAT THE WORDING IS ACTUALLY DERIVED FROM, said here because it reads
    * like a per-call outcome and is not one. `deliverPrompt` is the source's
@@ -3609,15 +3811,15 @@ function CanvasInner({
    * `SourceWrites.recordPrompt` is `Promise<void>` (`sources/port.ts`), the
    * preload unwraps it as `void` (`preload/api.ts`), and main's
    * `recordPrompt` resolves to `SourceError | null` -- a refusal or nothing
-   * (`main/sources/source.ts`). The Claude Code source routes a reply two
-   * ways, into a tmux pane it owns or into `claude --resume`
-   * (`main/sources/claude-code/reply.ts`), and reports neither: both count as
-   * delivered, and both refuse loudly rather than quietly recording, which is
-   * why resolving without an error is enough to say "sent" here. The gap that
-   * remains is a source declaring `deliverPrompt` while its write only
-   * appends -- vam cannot see that, and it cannot be closed in this file. It
-   * needs an outcome carried back through those four layers. Do not paper
-   * over it here with a wording that guesses.
+   * (`main/sources/source.ts`). The Claude Code source has ONE reply channel,
+   * a tmux pane it owns (`main/sources/claude-code/reply.ts`), and reports only
+   * whether the keystrokes went out: a row with no such pane REFUSES loudly
+   * rather than quietly recording, which is why resolving without an error is
+   * enough to say the text was typed here. What resolving does NOT prove is
+   * that the turn landed -- there is no echo, and the sentence stops short of
+   * claiming one. The gap that remains is a source declaring `deliverPrompt`
+   * while its write only appends -- vam cannot see that, and it cannot be
+   * closed in this file. Do not paper over it here with a wording that guesses.
    *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
@@ -3725,8 +3927,13 @@ function CanvasInner({
         try {
           await sessionSource.write.recordPrompt(entry.session.id, text);
           setStatus(
+            // What vam can honestly claim differs by source. A delivering
+            // source (Claude Code) TYPED the prompt into the pane it owns;
+            // there is no echo that the turn landed, so it claims none, and the
+            // turn appears here when the session's transcript records it. A
+            // recording source only appended to a log.
             sessionSource.capabilities.deliverPrompt
-              ? `sent into the running session of ${entry.session.title} — it will answer there`
+              ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
               : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
           );
           lastSent.current.set(entry.session.id, { text, at: Date.now() });
@@ -4446,6 +4653,11 @@ function CanvasInner({
         return;
       }
 
+      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
+      // `resolveChord` clears the one-key memory, so after it runs there is no
+      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
+      // below turns on exactly that difference (`isSelectOnlyChord`).
+      const typed: Chord = { prefix: chord.current.pending ?? '', key };
       const step = resolveChord(chord.current, key);
       chord.current = step.state;
       const action = step.action;
@@ -4520,7 +4732,42 @@ function CanvasInner({
        * a status line here would answer a keystroke the operator aimed at the
        * box they are typing in.
        */
-      if (cursorMode === 'insert' && isSelectOnly(action)) {
+      /**
+       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
+       * ACT is welcome under a caret but whose SPELLING is not.
+       *
+       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
+       * chord — no layout makes a character out of one — and reaching the
+       * Terminal view from inside the prompt box is deliberate, tested and
+       * captioned. A bare `3` is text: it types a digit into every box on
+       * screen, and it is the question card's own option mark
+       * (`resolveQuestionKey`). One is the grammar's in both modes and the
+       * other in Select alone, which is why this predicate reads the CHORD and
+       * `isSelectOnly` above reads the ACTION. Widening either to cover both
+       * would take a working binding away.
+       *
+       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
+       * this handler reads INPUT|TEXTAREA — which is every text box in the
+       * shell, the composer, the palette filter, the search line, a rename
+       * field, the Files filter, and the terminal's own hidden compose box —
+       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
+       * whose keys go into somebody's running agent. That pane claims its own
+       * printable keys while it has a bridge to send them down and hands them
+       * back when it has none, so without this a bridgeless build would answer
+       * a digit aimed at an agent by switching the view under it.
+       *
+       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
+       * one. The `typing` clause at the top already returns for a focused
+       * INPUT|TEXTAREA — the composer, the palette filter, the session search
+       * line, a rename field, the Files tab's filter and its "new file" box
+       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
+       * lean on the tag name alone). Those boxes keep their digit whether or
+       * not this line exists; what only this line can reach is an insert scope
+       * that is no text box.
+       *
+       * The silence above applies unchanged: the key was never claimed.
+       */
+      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
         return;
       }
 
@@ -5656,6 +5903,15 @@ function CanvasInner({
         // every pane rather than per-session.
         defaultProvider: prefs.defaultProvider,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // The Files tab's tree width, and the way back. GLOBAL for the same
+        // reason `defaultProvider` above it is passed identically to every
+        // pane: one `FilesTab` per split leaf, and an arrangement the
+        // operator would otherwise have to re-make on each one. Written only
+        // by a finished gesture -- a drag's own `onPointerUp` or one arrow
+        // press -- never on a render, which is the rule
+        // `prefs/files-tree-width.ts` exists to hold.
+        filesTreeWidth: prefs.filesTreeWidth,
+        onFilesTreeWidth: (width: number) => savePrefs(setFilesTreeWidth(prefs, width)),
         sending: paneWriting,
         // The refusal is the focused pane's too, and for the same reason:
         // a background pane cannot have answered the key it would be
@@ -5823,6 +6079,9 @@ function CanvasInner({
               tabs={paneTabs}
               activeId={leaf.sessionId}
               paneFocused={isFocused}
+              indicators={prefs.tabIndicators}
+              drafts={draftsBySession}
+              pending={pending}
               onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
@@ -5903,6 +6162,13 @@ function CanvasInner({
       newTabInPane,
       newSessionDecline,
       dropTarget,
+      // The strip's three indicator inputs. `buildDetailProps` above already
+      // re-derives on every draft keystroke, so `draftsBySession` costs this
+      // hook nothing it was not paying; `pending` and the switches change
+      // rarely. Without them the strip would draw a stale pencil.
+      prefs.tabIndicators,
+      draftsBySession,
+      pending,
     ],
   );
 
@@ -6013,6 +6279,7 @@ function CanvasInner({
       {pickingIconFor !== null && (
         <IconPicker
           title={pickingIconFor.title}
+          value={entriesById.get(pickingIconFor.sessionId)?.session.icon ?? null}
           onPick={(icon) => {
             // Both the source and the session come from the target captured
             // when the picker opened, so there is nothing to look up and
@@ -6023,8 +6290,12 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : // `describeIcon`, not the stored string: `lucide:rocket:teal`
+                  // in this sentence is vam reading its own storage format
+                  // aloud. An emoji still reports as itself.
+                  `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
@@ -6115,6 +6386,7 @@ function CanvasInner({
       {pickingGroupIconFor !== null && (
         <IconPicker
           title={pickingGroupIconFor.name}
+          value={groupIcons.get(pickingGroupIconFor.groupId) ?? null}
           onPick={(icon) => {
             savePrefs(
               setGroupIcon(prefs, pickingGroupIconFor.source, pickingGroupIconFor.groupId, icon),
@@ -6122,8 +6394,9 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingGroupIconFor(null);
           }}
           onClose={() => setPickingGroupIconFor(null)}
@@ -6133,6 +6406,7 @@ function CanvasInner({
       {pickingProjectIconFor !== null && (
         <IconPicker
           title={pickingProjectIconFor.name}
+          value={projectIcons.get(pickingProjectIconFor.projectId) ?? null}
           onPick={(icon) => {
             savePrefs(
               setProjectIcon(
@@ -6146,8 +6420,9 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingProjectIconFor(null);
           }}
           onClose={() => setPickingProjectIconFor(null)}

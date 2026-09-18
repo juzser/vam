@@ -171,7 +171,7 @@ describe('the colour template row', () => {
 
   it('still previews a tinted template with its own colours, not with the cascade', () => {
     // The other half of the same branch. A read that went to the stylesheet
-    // for EVERY chip would make all five previews identical, which is the
+    // for EVERY chip would make every preview identical, which is the
     // failure that looks most like working software.
     const restore = cascade({ '--vam-pane': '#272727' });
     try {
