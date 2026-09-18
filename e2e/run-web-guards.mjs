@@ -201,6 +201,12 @@ const GUARDS = [
   'terminal-scrollback-shots',
   'terminal-insert-shots',
   'prompt-popovers-shots',
+  // The PRs tab, which `?demo=1` structurally cannot reach with content: the
+  // demo fixture declares no pull requests. Stubs `window.api` like
+  // `files-tab-keyboard-shots` does, and measures the row at 390px -- eleven
+  // fields were added to it and whether they FIT is a rectangle question no
+  // unit environment can answer.
+  'prs-tab-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

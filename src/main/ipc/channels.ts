@@ -180,6 +180,49 @@ export const CHANNELS = {
    * decision.
    */
   linkOpen: 'vam:link:open',
+  /**
+   * OPEN A PULL REQUEST IN THE OPERATOR'S BROWSER.
+   *
+   * A SECOND CHANNEL RATHER THAN A CALL TO `linkOpen`, and the difference is
+   * the allowlist, not the plumbing. `linkOpen` governs an address a MODEL
+   * WROTE in prose and lets any http or https address through, because vam
+   * cannot enumerate the web an agent might reference. This one governs the
+   * address behind a ROW IN VAM'S OWN LIST, where the operator is promised
+   * they know where it goes without reading it -- so it accepts https on
+   * github.com and nothing else (`src/shared/pr-link.ts`). Routing this
+   * through `linkOpen` would have widened it to the whole web for the sake of
+   * reusing four lines.
+   *
+   * Authorised by the operator on 2026-09-18: `pull-requests.ts` had recorded
+   * that opening a pull request in a browser was deliberately absent, and this
+   * is the decision that changed it.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, for `linkOpen`'s reason: a paired
+   * phone has a browser of its own.
+   */
+  prsOpen: 'vam:prs:open',
+  /**
+   * MERGE A PULL REQUEST, OR DELETE A BRANCH. The only channel in this table
+   * that changes anything on GitHub.
+   *
+   * Takes a SESSION ID, never a directory. Which repository is acted on is
+   * decided by where that session stands, exactly as
+   * `sources/claude-code/pull-requests.ts` refuses `--repo` so that a pane can
+   * only ever describe the repository vam is actually in. A channel that took
+   * a path would hand that invariant straight back.
+   *
+   * Everything else it needs is validated in main: the number, the branch (it
+   * goes into an API PATH -- see `checkBranchName`), and the merge method,
+   * which is an ALLOWLIST and is what keeps `--admin` unreachable from the
+   * renderer. The runner behind it is non-re-entrant, so a second click while
+   * one is in flight is refused rather than run.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`: there is no route to this on
+   * `remote/server.ts`'s table and there must not be. A paired phone
+   * authenticated once, over the network, must not be able to merge the
+   * operator's pull requests.
+   */
+  prsAction: 'vam:prs:action',
   updateCheck: 'vam:update:check',
   /**
    * The same question, asked AGAIN, because a person pressed a button.

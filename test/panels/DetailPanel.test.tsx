@@ -67,6 +67,7 @@ import {
 } from '../../src/renderer/sources/agent-work-reader.js';
 import type { AgentWork } from '../../src/shared/agent-work.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
+import { makePullRequest } from '../support/pull-request.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
 function attachOk(draft: string, file: AttachedFile): string {
@@ -4007,18 +4008,34 @@ describe('the PRs tab', () => {
   };
   const body = () => q<HTMLElement>('[data-prs]')?.textContent ?? '';
 
+  // Built through `makePullRequest` so these three rows keep saying exactly
+  // what they said before -- a number, a title, a state, a check conclusion --
+  // without restating the eleven descriptive fields the type grew for "it
+  // needs more information". The builder's defaults are the NOT-KNOWING ones,
+  // which is a real payload shape and not an invented one; the drawing of
+  // those fields is asserted in `DetailPanel.pr-detail.test.tsx`.
   const POPULATED: Session['pullRequests'] = {
     kind: 'ok',
     prs: [
-      {
+      makePullRequest({
         number: 128,
         title:
           'Rework the detail pane so a narrow column stays readable end to end, however long the branch name grows',
         state: 'open',
         checks: 'failing',
-      },
-      { number: 121, title: 'Spike the roster reader', state: 'draft', checks: 'pending' },
-      { number: 97, title: 'Carry the branch to the sidebar', state: 'merged', checks: 'passing' },
+      }),
+      makePullRequest({
+        number: 121,
+        title: 'Spike the roster reader',
+        state: 'draft',
+        checks: 'pending',
+      }),
+      makePullRequest({
+        number: 97,
+        title: 'Carry the branch to the sidebar',
+        state: 'merged',
+        checks: 'passing',
+      }),
     ],
   };
 
@@ -4340,15 +4357,22 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
   });
 
-  it('keeps the composer on the other tabs, which are still about the answer', () => {
-    // Only Terminal. PRs and Agents are read alongside a reply being written,
-    // and nothing about them makes the prompt box the wrong place to type.
+  it('keeps the composer on Agents, which is still about the answer', () => {
+    // Agents is read alongside a reply being written, and nothing about it
+    // makes the prompt box the wrong place to type.
+    //
+    // PRs USED TO BE ASSERTED HERE TOO, and the operator's review on
+    // 2026-09-18 said it should not have been: "it does not need the prompt
+    // input." A list of pull requests on GitHub is not a conversation with the
+    // agent, so there is nothing a sentence typed under it is addressed to.
+    // Which views draw a composer is now `drawsComposer`'s (`tabs.ts`) and is
+    // pinned, per name, in `DetailPanel.composer-tabs.test.tsx`.
     withBridge();
     draw();
-    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
-    expect(q('[data-prompt-box]')).not.toBeNull();
     fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
+    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
+    expect(q('[data-prompt-box]')).toBeNull();
   });
 });
 

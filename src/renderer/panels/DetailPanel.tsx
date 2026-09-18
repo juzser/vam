@@ -105,8 +105,10 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
+import type { PrAction } from '../../shared/pr-action.js';
 import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
 import type { PaneKey, PaneSendResult, SessionModel } from '../../shared/terminal.js';
+import { relativeTime } from '../adapter/relative-time.js';
 import type {
   AgentQuestion,
   Command,
@@ -154,6 +156,7 @@ import { describeFailure, type SourceError } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { useAgentWork } from '../sources/useAgentWork.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
+import { ConfirmPrAction } from './ConfirmPrAction.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
@@ -173,7 +176,7 @@ import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
-import { narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
+import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
 import {
   appendOlder,
   applyWalk,
@@ -1265,10 +1268,90 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 function PullRequestsTab({
   pullRequests,
   repo,
+  sessionId,
+  bridge,
+  now = () => new Date(),
 }: {
   readonly pullRequests: PullRequestList | undefined;
   readonly repo?: DetailPanelProps['prRepo'];
+  /**
+   * WHOSE pull requests these are, for the action channel. Main turns this
+   * into the directory to act in -- the renderer never names one, which is
+   * what keeps a pane from acting on a repository its session is not in
+   * (`src/main/pr/ipc.ts`).
+   */
+  readonly sessionId: string | null;
+  /**
+   * The desktop bridge, or `undefined` in the browser build and on the phone.
+   * ABSENT, NOT DISABLED: with no bridge the list still reads -- it comes
+   * through the source, which works everywhere -- and simply grows no controls
+   * that could not act.
+   */
+  readonly bridge?: PrsBridge;
+  /** Injected so the relative time in a row is testable against a fixed instant. */
+  readonly now?: () => Date;
 }) {
+  /**
+   * WHAT THE LAST ACTION SAID -- gh's own sentence, or vam's refusal.
+   *
+   * ONE NOTE FOR THE WHOLE TAB rather than one per row, because there is only
+   * ever one action in flight (main's runner refuses a second) and a column of
+   * stale sentences beside rows that have moved on is worse than the one
+   * current answer. It carries the pull request number so the operator can see
+   * which row the sentence is about.
+   */
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  /** The question standing in front of an irreversible act, or nothing. */
+  const [asking, setAsking] = useState<PendingPrAction | null>(null);
+  /**
+   * IS ONE ALREADY RUNNING. Main refuses a second write outright -- that is
+   * the real bar, and it is on the far side of the process boundary. THIS is
+   * the half the operator can see: a merge waits on GitHub, so the button is
+   * slow, so it gets pressed again, and a second press that simply vanished
+   * would be indistinguishable from a button that does not work. So the second
+   * press is REFUSED IN WORDS here rather than sent and silently dropped.
+   */
+  const [running, setRunning] = useState(false);
+
+  const ask = (pending: PendingPrAction) => {
+    if (running) {
+      setNote({ ok: false, text: 'vam is already running a pull request action — wait for it.' });
+      return;
+    }
+    setNote(null);
+    setAsking(pending);
+  };
+
+  const go = (pending: PendingPrAction) => {
+    setAsking(null);
+    const act = bridge?.act;
+    if (act === undefined || sessionId === null) return;
+    setRunning(true);
+    void act(sessionId, pending.action)
+      .then((outcome) => {
+        // gh's OWN words, success or failure. "the merge failed" is not
+        // actionable; "the base branch policy prohibits the merge" is.
+        setNote({ ok: outcome.ok, text: outcome.message });
+      })
+      .catch((error: unknown) => {
+        setNote({
+          ok: false,
+          text: error instanceof Error ? error.message : 'that action failed.',
+        });
+      })
+      .finally(() => setRunning(false));
+  };
+
+  const open = (url: string) => {
+    const openIt = bridge?.open;
+    if (openIt === undefined) return;
+    setNote(null);
+    void openIt(url).then((outcome) => {
+      // A browser that declined must not look like one that opened.
+      if (!outcome.ok) setNote({ ok: false, text: outcome.reason });
+    });
+  };
+
   /**
    * WHICH DIRECTORY THIS PANE IS ASKING FROM, and how to point it elsewhere.
    *
@@ -1376,40 +1459,301 @@ function PullRequestsTab({
       </p>,
     );
   }
+  const at = now();
   return framed(
-    <ul data-prs className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
-      {pullRequests.prs.map((pr) => (
-        <li
-          key={pr.number}
-          data-pr-row
-          data-pr-state={pr.state}
-          data-pr-checks={pr.checks}
-          className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
-        >
-          <span
-            data-pr-checks-mark
-            title={CHECK_MARK[pr.checks].label}
-            className={`h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
+    <>
+      <ul
+        data-prs
+        className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
+      >
+        {pullRequests.prs.map((pr) => (
+          <PullRequestRow
+            key={pr.number}
+            pr={pr}
+            now={at}
+            /* WITHDRAWN, NOT DISABLED, three times over: no bridge (the
+               browser build), nothing to open (an address vam would refuse,
+               which the reader already turned into `null`), and no session to
+               act for. Each absence removes a control rather than drawing one
+               that refuses under a finger. */
+            onOpen={bridge?.open === undefined ? null : open}
+            onAsk={bridge?.act === undefined || sessionId === null ? null : ask}
           />
-          <span className="min-w-0 flex-1">
-            {/* Truncated, not shortened: the pane is a narrow column, and the
-                whole title stays in the DOM for anything that reads it. */}
-            <span data-pr-title className="block truncate text-body text-ink">
-              {pr.title}
-            </span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-meta">
-              <span data-pr-number className="font-mono text-ink-faint">
-                {`#${pr.number}`}
-              </span>
-              <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
-                {pr.state}
-              </span>
-              <span className="truncate text-ink-faint">{CHECK_MARK[pr.checks].label}</span>
-            </span>
+        ))}
+      </ul>
+      {note === null ? null : (
+        <p
+          data-pr-note
+          data-pr-note-ok={note.ok ? 'true' : undefined}
+          /* `aria-live`: this sentence appears without anything moving focus,
+             which is precisely the case a screen reader is otherwise not told
+             about. */
+          aria-live="polite"
+          className={`flex-none select-text text-control ${note.ok ? 'text-ink-dim' : 'text-danger'}`}
+        >
+          {note.text}
+        </p>
+      )}
+      {asking === null ? null : (
+        <ConfirmPrAction
+          verb={asking.verb}
+          number={asking.number}
+          title={asking.title}
+          consequence={asking.consequence}
+          command={asking.command}
+          onConfirm={() => go(asking)}
+          onCancel={() => setAsking(null)}
+        />
+      )}
+    </>,
+  );
+}
+
+/**
+ * The bridge the PRs tab acts through. Named here rather than reached for
+ * inside the tab, for the reason `TerminalTab`'s three members are passed from
+ * the call site: a fact reached for invisibly is a fact a later edit drops
+ * with nothing to notice.
+ */
+type PrsBridge = NonNullable<typeof globalThis.window extends never ? never : Window['api']>['prs'];
+
+/** A question waiting to be answered, and everything needed to draw it. */
+type PendingPrAction = {
+  readonly verb: string;
+  readonly number: number;
+  readonly title: string;
+  readonly consequence: string;
+  readonly command: string;
+  readonly action: PrAction;
+};
+
+/** The one word each review decision gets, and the ink it wears. */
+const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink: string }> = {
+  approved: { label: 'approved', ink: 'text-done' },
+  'changes-requested': { label: 'changes requested', ink: 'text-danger' },
+  'review-required': { label: 'review required', ink: 'text-ink-dim' },
+};
+
+/**
+ * ONE PULL REQUEST, drawn.
+ *
+ * ITS OWN COMPONENT because the row grew from four facts to fifteen when the
+ * operator asked for "more information", and a fifteen-fact row inline inside
+ * a list inside a tab is where a narrow-pane defect goes to hide.
+ *
+ * EVERY ADDED FIELD IS `| null` AND EVERY ONE OF THEM DRAWS NOTHING WHEN IT
+ * IS. That is the model's rule (`model.ts`) carried to the paint: `null` is
+ * "gh did not say", and "+0 −0" or an arrow with nothing on one side of it
+ * would be vam inventing an answer it does not have. `0` is NOT null and does
+ * draw -- a pull request that only deletes says `+0`.
+ *
+ * THE ROW IS A BUTTON, not a `div` with a click handler: it is the control
+ * that opens the pull request, so it has to be reachable by Tab, activate on
+ * Return and Space, and announce itself. The action buttons are SIBLINGS of it
+ * rather than children -- a button inside a button is invalid markup and, in
+ * practice, one click that fires both.
+ *
+ * THE METADATA WRAPS. Measured against the phone (`e2e/playwright.phone`) and
+ * the narrowest legal pane: at 390px the diff, the branches, the author and
+ * the labels cannot share one line, so the row is `flex-wrap` with a small
+ * gap rather than a fixed grid -- a row that clipped would hide the one field
+ * the operator opened this tab to read.
+ */
+function PullRequestRow({
+  pr,
+  now,
+  onOpen,
+  onAsk,
+}: {
+  readonly pr: PullRequest;
+  readonly now: Date;
+  readonly onOpen: ((url: string) => void) | null;
+  readonly onAsk: ((pending: PendingPrAction) => void) | null;
+}) {
+  const url = pr.url;
+  const clickable = onOpen !== null && url !== null;
+  /**
+   * WHAT MAY BE MERGED. `open` only -- a draft is its author's explicit "not
+   * yet", and a merged or closed pull request has nothing left to merge. The
+   * control is WITHDRAWN in every other case rather than drawn and refused.
+   */
+  const mayMerge = onAsk !== null && pr.state === 'open';
+  /**
+   * WHAT MAY HAVE ITS BRANCH DELETED, and the bound here is not tidiness.
+   * Deleting the head branch of an OPEN pull request CLOSES that pull request
+   * on GitHub -- so this button, offered there, would silently be a second and
+   * unannounced "close this". Two acts behind one word is not something this
+   * pane does, so the offer is limited to a pull request that is already
+   * decided and whose branch vam actually knows the name of.
+   */
+  // Bound to a local BEFORE the closures below read it: a narrowing on
+  // `pr.headRefName` does not survive into a callback, and a branch name is
+  // the one argument in this row that must not be able to arrive as `null`.
+  const headRef = pr.headRefName === '' ? null : pr.headRefName;
+  const mayDeleteBranch =
+    onAsk !== null && (pr.state === 'merged' || pr.state === 'closed') && headRef !== null;
+
+  const identity = (
+    <>
+      {/* Truncated, not shortened: the pane is a narrow column, and the whole
+          title stays in the DOM for anything that reads it. */}
+      <span data-pr-title className="block truncate text-left text-body text-ink">
+        {pr.title}
+      </span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta">
+        <span data-pr-number className="font-mono text-ink-faint">
+          {`#${pr.number}`}
+        </span>
+        <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
+          {pr.state}
+        </span>
+        <span className="truncate text-ink-faint">{CHECK_MARK[pr.checks].label}</span>
+        {pr.additions === null ? null : (
+          <span data-pr-additions className="font-mono text-done">
+            {`+${pr.additions}`}
           </span>
-        </li>
-      ))}
-    </ul>,
+        )}
+        {pr.deletions === null ? null : (
+          <span data-pr-deletions className="font-mono text-danger">
+            {`−${pr.deletions}`}
+          </span>
+        )}
+        {pr.changedFiles === null ? null : (
+          <span data-pr-files className="text-ink-faint">
+            {`${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'}`}
+          </span>
+        )}
+        {pr.review === null ? null : (
+          <span data-pr-review className={PR_REVIEW[pr.review].ink}>
+            {PR_REVIEW[pr.review].label}
+          </span>
+        )}
+        {pr.mergeable === 'conflicting' ? (
+          <span data-pr-mergeable className="text-danger">
+            conflicts
+          </span>
+        ) : null}
+        {pr.updatedAt === null ? null : (
+          <span data-pr-updated className="text-ink-faint">
+            {relativeTime(pr.updatedAt, now)}
+          </span>
+        )}
+      </span>
+      {pr.headRefName === null && pr.baseRefName === null && pr.author === null ? null : (
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ink-faint">
+          {pr.headRefName === null || pr.baseRefName === null ? null : (
+            /* HEAD then BASE: the order IS the sentence -- this branch into
+               that one. `min-w-0` + `truncate` so a long branch name cannot
+               push the row wider than the pane. */
+            <span
+              data-pr-branches
+              /* MEASURED at 390px: a real branch name truncates there, and a
+                 truncated name with nowhere to read the rest is information
+                 the pane had and threw away. The full pair lives on `title`,
+                 which is the same bargain the repo heading above makes with
+                 its directory path. */
+              title={`${pr.headRefName} → ${pr.baseRefName}`}
+              className="min-w-0 truncate font-mono"
+            >
+              {`${pr.headRefName} → ${pr.baseRefName}`}
+            </span>
+          )}
+          {pr.author === null ? null : <span data-pr-author>{`@${pr.author}`}</span>}
+        </span>
+      )}
+      {pr.labels.length === 0 ? null : (
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          {pr.labels.map((label) => (
+            <span
+              key={label}
+              data-pr-label
+              className="rounded-full border border-line px-1.5 py-px text-ink-dim text-meta"
+            >
+              {label}
+            </span>
+          ))}
+        </span>
+      )}
+    </>
+  );
+
+  return (
+    <li
+      data-pr-row
+      data-pr-state={pr.state}
+      data-pr-checks={pr.checks}
+      className="flex items-start gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
+    >
+      <span
+        data-pr-checks-mark
+        title={CHECK_MARK[pr.checks].label}
+        /* `mt-[7px]` puts the dot on the title's own first line now that the
+           row is several lines tall -- centred against the whole row it would
+           drift down as fields appear. */
+        className={`mt-[7px] h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
+      />
+      <span className="flex min-w-0 flex-1 flex-col">
+        {clickable ? (
+          <button
+            type="button"
+            data-pr-open
+            title={url}
+            aria-label={`open pull request ${pr.number} on GitHub`}
+            onClick={() => onOpen(url)}
+            className={`flex min-w-0 cursor-pointer flex-col rounded text-left ${FOCUS_RING}`}
+          >
+            {identity}
+          </button>
+        ) : (
+          <span className="flex min-w-0 flex-col">{identity}</span>
+        )}
+        {mayMerge || mayDeleteBranch ? (
+          <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {mayMerge ? (
+              <button
+                type="button"
+                data-pr-merge
+                onClick={() =>
+                  onAsk({
+                    verb: 'Merge',
+                    number: pr.number,
+                    title: pr.title,
+                    consequence:
+                      'This merges the pull request on GitHub, now, with your own credentials. vam cannot undo it, and nothing about your branch protection is overridden — if the repository refuses, GitHub’s own words are what you will see.',
+                    // The exact command, so the strategy is never a private
+                    // decision of this button's. See `ConfirmPrAction`.
+                    command: `gh pr merge ${pr.number} --squash`,
+                    action: { kind: 'merge', number: pr.number, method: 'squash' },
+                  })
+                }
+                className={`vam-hit-24 cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+              >
+                Merge
+              </button>
+            ) : null}
+            {mayDeleteBranch && headRef !== null ? (
+              <button
+                type="button"
+                data-pr-delete-branch
+                onClick={() =>
+                  onAsk({
+                    verb: 'Delete branch',
+                    number: pr.number,
+                    title: pr.title,
+                    consequence: `This deletes the remote branch ${headRef} on GitHub. vam cannot undo it. Your local copy of the branch is untouched.`,
+                    command: `gh api --method DELETE repos/{owner}/{repo}/git/refs/heads/${headRef}`,
+                    action: { kind: 'delete-branch', branch: headRef },
+                  })
+                }
+                className={`vam-hit-24 cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-danger hover:text-danger ${FOCUS_RING}`}
+              >
+                Delete branch
+              </button>
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+    </li>
   );
 }
 
@@ -6034,6 +6378,16 @@ export function DetailPanel(props: DetailPanelProps) {
                 ? undefined
                 : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
             }
+            /* WHOSE pull requests, for the action channel. Main turns this into
+               the directory to act in, so the renderer never names a path --
+               see `src/main/pr/ipc.ts`. */
+            sessionId={entry?.session.id ?? null}
+            /* The desktop bridge, read at the CALL SITE like the Terminal and
+               Files tabs' bridges directly below, so all of what this tab can
+               reach is visible in one place. `undefined` in the browser build
+               and on the phone, where the list still draws and the controls
+               simply do not. */
+            bridge={globalThis.window?.api?.prs}
           />
         ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
         // see its own comment for why. This slot contributes nothing so the
@@ -6689,12 +7043,19 @@ export function DetailPanel(props: DetailPanelProps) {
         is the darker colour they were looking at. Nothing else in the app
         wears `header` now; the token stays defined, unworn, rather than being
         deleted out from under a theme that still names it. */}
-      {/* NOT ON `Files`, for the same reason as the question bar just above:
-        the editor is a full-pane surface with its own keyboard, and a
-        composer prompting the AGENT underneath it would be a second insert
-        scope competing for the same keystrokes a person is typing into a
-        file. */}
-      {current !== 'Terminal' && current !== 'Files' && !composerHidden && (
+      {/* WHICH VIEWS GET ONE IS `drawsComposer`'s (`tabs.ts`), not a chain of
+        `!==` here. It used to be exactly that chain, and the cost was that a
+        new tab inherited an answer instead of being given one: the operator
+        found the box drawn under the PRs list, a view where nothing typed is
+        addressed to anything. The reasons -- Terminal and Files own their own
+        keyboards, PRs is not a conversation -- are written beside the names
+        they are about, and `DetailPanel.composer-tabs.test.tsx` derives its
+        whole expectation from that one predicate.
+
+        `composerHidden` is the orthogonal half and stays here: it is about
+        this SESSION (none selected, a source that cannot record, a question
+        open), not about which view is on. */}
+      {drawsComposer(current) && !composerHidden && (
         <div
           data-composer-bar
           // The other insert scope, and the common one: with no question open
