@@ -60,6 +60,19 @@ import { chromium } from 'playwright-core';
 const origin = process.argv[2] ?? 'http://localhost:5529';
 const outDir = process.argv[3] ?? 'docs/images';
 
+/**
+ * `Mod`, AS THIS MACHINE SPELLS IT. `chords.ts` resolves `Mod-<letter>` to the
+ * COMMAND key, and on macOS that is Meta alone -- `digitChord`/`chordOf` accept
+ * Control for exactly two gestures (`d` and `u`) and for nothing else. So the
+ * literal `Control+k` this script used to press produced `Ctrl-k`, which is
+ * bound to nothing, and the palette never opened: the script worked on CI's
+ * Linux and could not be run on the maintainer's own machine, which is where
+ * README screenshots actually get taken. Measured here 2026-09-18 -- the
+ * palette shot timed out on `getByPlaceholder('go to session…')` until this
+ * line existed.
+ */
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+
 const browser = await chromium.launch();
 
 /** Stop every running CSS animation (breathing dots, the "..." ellipsis) so
@@ -93,7 +106,7 @@ async function freeze(page) {
   const tabCount = await page.locator('[data-session-tab]').count();
   console.log(`hero: ${tabCount} tabs open`);
   if (tabCount < 3) throw new Error(`expected 3 open tabs for the hero, got ${tabCount}`);
-  await page.keyboard.press('Control+[');
+  await page.keyboard.press(`${MOD}+[`);
   await page.waitForTimeout(300);
   await freeze(page);
   await page.screenshot({ path: `${outDir}/hero-dark.png` });
@@ -110,9 +123,9 @@ async function freeze(page) {
   await page.locator('[data-session-row="factory-sse-1"]').click();
   await page.locator('[data-session-row="crosscheck-2"]').click();
   await page.locator('[data-session-row="dogfood-4"]').click();
-  await page.keyboard.press('Control+[');
+  await page.keyboard.press(`${MOD}+[`);
   await page.waitForTimeout(150);
-  await page.keyboard.press('Control+k');
+  await page.keyboard.press(`${MOD}+k`);
   const input = page.getByPlaceholder('go to session…');
   await input.waitFor({ state: 'visible', timeout: 3000 });
   const groups = await page.locator('[cmdk-group-heading]').allTextContents();
