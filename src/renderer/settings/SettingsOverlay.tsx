@@ -51,6 +51,7 @@ import {
   type Prefs,
   paletteFor,
   paletteValue,
+  setConciseOutput,
   setDefaultProvider,
   setEditorHighlight,
   setEditorIndent,
@@ -792,7 +793,7 @@ export function SettingsOverlay({
                   <code className="text-ink">.env</code> and <code className="text-ink">.ini</code>.
                   Every other file is drawn as plain text on purpose: a regex literal defeats a
                   scanner this size, and a wrong colour asserts a structure that is not in the file.
-                  How wide one indent step is lives under Behaviour.
+                  The width of one indent step is under Behaviour.
                 </p>
               </Block>
             </Panel>
@@ -893,6 +894,85 @@ export function SettingsOverlay({
                   tools failed: it keeps its line and its{' '}
                   <code className="text-ink">· N failed</code> count, and so does the newest turn
                   while the session is working or waiting.
+                </p>
+              </Block>
+
+              {/* CONCISE OUTPUT — NEXT TO FOCUS VIEW, which is where the
+                  operator asked for it and is also the right place: the two
+                  rows together are how much the operator has to read. One
+                  decides what vam DRAWS of a turn, the other what the agent
+                  WRITES in one.
+
+                  AND THEY ARE OPPOSITE IN ONE WAY WORTH READING TWICE. Focus
+                  view is vam's own paint and reaches no session; this one
+                  leaves vam entirely -- the rules are typed into a pane
+                  somebody's agent is reading (`main/terminal/concise.ts`).
+                  That is the whole design, from the operator's own question:
+                  "is there a way that, if the skill is enabled, vam uses the
+                  skill before the input is sent, or when the session starts?"
+                  vam has no model and must never show prose the agent did not
+                  write, so the only honest mechanism is to ASK.
+
+                  DRAWN UNCONDITIONALLY, INCLUDING FOR A SOURCE THAT CANNOT
+                  TAKE A PROMPT AT ALL (`recordPrompt: false`). The rule this
+                  surface keeps elsewhere -- "a control that cannot act is not
+                  drawn as one", `RemotePanel`'s header -- is about a control
+                  whose press does nothing HERE AND NOW; this is a standing
+                  preference about every session vam will ever type into, and
+                  the dialog is not opened per session. Withdrawing it because
+                  the row currently focused has no pane would make it appear
+                  and disappear as the operator clicks around the sidebar. The
+                  precedent is one section over: `send key` is drawn on the
+                  same terms, and for the same reason. The per-session refusal
+                  is answered where it happens -- `replyToSession` types
+                  nothing into a session it cannot prove a pane for, and the
+                  priming is not spent, so the rules wait for a prompt that
+                  lands. */}
+              <Block
+                label={t('settings.behaviour.conciseOutput.label')}
+                hint={t('settings.behaviour.conciseOutput.hint')}
+              >
+                <Switch
+                  name="concise-output"
+                  label={t('settings.behaviour.conciseOutput.label')}
+                  checked={prefs.conciseOutput}
+                  onChange={(next) => onChange(setConciseOutput(prefs, next))}
+                  on={t('settings.behaviour.conciseOutput.on')}
+                  off={t('settings.behaviour.conciseOutput.off')}
+                />
+                {/* THE DISCLOSURE, ON SCREEN, and it is longer than any other
+                    note in this dialog because this is the only switch whose
+                    "on" position TYPES SOMETHING INTO A RUNNING AGENT. Four
+                    facts the operator cannot guess and would otherwise meet as
+                    a surprise in their own transcript: that vam's words appear
+                    there, that they ride the FIRST prompt to each session,
+                    that a `/clear` empties them and vam cannot tell, and that
+                    turning the switch off cannot un-say them.
+
+                    THE LIMIT IS NAMED RATHER THAN PAPERED OVER. vam has no
+                    signal for "this agent has forgotten"; inventing one (every
+                    N prompts, or on a gap in the transcript) would be wrong in
+                    both directions. Off-and-on-again is the only re-arm there
+                    is, so it is written where the person who needs it will
+                    look.
+
+                    AND IT DOES NOT OPEN WITH "vam", which is the rule the
+                    editor-colours note above carries and the same guard that
+                    catches it: this panel upper-cases a paragraph's first
+                    letter and the product is spelled `vam`. The first draft of
+                    this paragraph began "vam types the request...",
+                    `e2e/settings-chrome-shots.mjs` measured `Vam` on the
+                    screen, and the fix is the WORDING rather than a
+                    `data-verbatim` opt-out -- that attribute means "somebody
+                    chose these letters", and this is prose. */}
+                <p data-concise-output-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  the request goes in at the start of the <span className="text-ink">first</span>{' '}
+                  prompt vam sends to each session, so it is in your transcript where you can read
+                  exactly what was asked, and it costs those tokens once. After a{' '}
+                  <code className="text-ink">/clear</code> or a compaction the agent has forgotten
+                  it and vam cannot tell — turn this off and on again to ask every session afresh.
+                  Turning it off stops vam asking; it cannot un-say what a session has already been
+                  told.
                 </p>
               </Block>
 

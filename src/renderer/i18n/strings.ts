@@ -175,6 +175,22 @@ const EN = {
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",
   'settings.behaviour.focusView.on': 'on',
   'settings.behaviour.focusView.off': 'off',
+  // CONCISE OUTPUT. The label names what the operator gets, never the skill it
+  // is vam's wording of: `i-have-adhd` is the source and is credited in
+  // `main/terminal/concise.ts`, but a settings row that named a third-party
+  // skill would be asking the operator to know what that is before they could
+  // decide anything.
+  //
+  // THE HINT SAYS WHO IS ASKING AND WHEN, because both are surprising. vam has
+  // no model: the only thing it can do is TYPE A REQUEST into the session, and
+  // it does that once per session rather than on every prompt. An operator who
+  // read this as "vam shortens the answers it draws" would be wrong about the
+  // whole product.
+  'settings.behaviour.conciseOutput.label': 'concise output',
+  'settings.behaviour.conciseOutput.hint':
+    'ask the agent for shorter, clearer answers — vam types the request into the session, it never rewrites what it draws',
+  'settings.behaviour.conciseOutput.on': 'on',
+  'settings.behaviour.conciseOutput.off': 'off',
   'settings.behaviour.editorIndent.label': 'file editor indent',
   // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
   // the text, so the caption says it rather than leaving "indent" to be read

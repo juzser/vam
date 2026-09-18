@@ -46,6 +46,7 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const ROWS = [
   ['view width', '[data-switch="narrow-views"]', 'behaviour', 'appearance'],
   ['focus view', '[data-switch="focus-view"]', 'behaviour', 'appearance'],
+  ['concise output', '[data-switch="concise-output"]', 'behaviour', 'appearance'],
   ['file editor indent', 'input[aria-label="editor indent"]', 'behaviour', 'appearance'],
   ['the colour templates', '[data-palette-template]', 'appearance', 'behaviour'],
   ['the colour swatches', '[data-palette-swatch]', 'appearance', 'behaviour'],
@@ -172,6 +173,84 @@ console.log('=== which panel each setting is in, measured as paint');
   const rail = page.locator('[data-settings-nav]');
   await rail.screenshot({ path: `${outDir}/settings-nav-sections.png` });
   console.log(`${outDir}/settings-nav-sections.png`);
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// THE ONE ROW THAT TYPES INTO SOMEBODY ELSE'S AGENT, AND ITS DISCLOSURE.
+//
+// Operator, translated: "turn this ADHD skill into a setting that can be
+// toggled on and off in vam... put it next to the focus view setting."
+//
+// The switch writes a preference main reads before it types a prompt into a
+// pane (`main/terminal/concise.ts`). Before an operator throws it they are
+// owed four facts they cannot guess -- that vam's own words will appear in
+// their transcript, that they ride the FIRST prompt to each session, that a
+// `/clear` empties them and vam cannot tell, and that turning the switch off
+// cannot un-say them. `test/settings/concise-output.test.tsx` holds the
+// SENTENCES. What is asserted here is that the paragraph is PAINTED next to
+// the control, on the panel the operator is actually looking at -- a note
+// mounted inside a hidden panel, or clipped outside the scrollport, is a
+// disclosure nobody read, and no unit environment can tell the difference.
+console.log('\n=== the concise-output row and what it discloses');
+{
+  const page = await openSettings();
+  await page.locator('[data-settings-nav-item="behaviour"]').click();
+  await page.waitForTimeout(150);
+
+  const row = await page.evaluate(() => {
+    const port = document.querySelector('[data-settings-scroll]');
+    const control = document.querySelector('[data-switch="concise-output"]');
+    const note = document.querySelector('[data-concise-output-note]');
+    const focus = document.querySelector('[data-switch="focus-view"]');
+    if (port === null || control === null || note === null || focus === null) return null;
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) };
+    };
+    return {
+      control: box(control),
+      note: box(note),
+      focus: box(focus),
+      words: (note.textContent ?? '').trim().length,
+      // The scrollport's whole extent, not its visible window: a note below
+      // the fold is reachable by scrolling, a note outside this is not.
+      reach: port.scrollHeight,
+      portTop: Math.round(port.getBoundingClientRect().top),
+    };
+  });
+  if (row === null) {
+    throw new Error('the behaviour panel draws no concise-output switch, or no note beside it');
+  }
+  console.log(`  ${JSON.stringify(row)}`);
+  // PAINTED, not merely mounted.
+  if (row.control.h === 0 || row.note.h === 0) {
+    throw new Error(`the row or its note has no height: ${JSON.stringify(row)}`);
+  }
+  // UNDER FOCUS VIEW, which is where the operator asked for it. Measured as
+  // the y of the two controls rather than as sibling order, because that is
+  // the thing an operator can actually see.
+  if (row.control.top <= row.focus.top) {
+    throw new Error(
+      `concise output is drawn at y=${row.control.top}, above focus view at y=${row.focus.top}`,
+    );
+  }
+  // THE NOTE IS THE DISCLOSURE, so an empty one is the defect. A floor rather
+  // than an exact length: it is prose and will be reworded.
+  if (row.words < 200) {
+    throw new Error(`the disclosure is ${row.words} characters, too short to carry four facts`);
+  }
+  // AND IT IS INSIDE THE BOX THAT SCROLLS. Beyond `scrollHeight` there is no
+  // gesture in this dialog that reaches it.
+  if (row.note.bottom - row.portTop > row.reach + 1) {
+    throw new Error(
+      `the disclosure ends ${row.note.bottom - row.portTop}px down a scrollport ${row.reach}px deep — it cannot be scrolled to`,
+    );
+  }
+  await page.locator('[data-concise-output-note]').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  await page.screenshot({ path: `${outDir}/settings-concise-output.png` });
+  console.log(`${outDir}/settings-concise-output.png`);
   await page.close();
 }
 

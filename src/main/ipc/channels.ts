@@ -81,6 +81,23 @@ export const CHANNELS = {
    */
   setPrRepos: 'vam:source:set-pr-repos',
   /**
+   * DESKTOP-ONLY, the same standing as `setPrRepos` above, and the second
+   * preference main needs a copy of: whether vam asks the agent for a shorter,
+   * clearer answer.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, for a reason that is stronger here
+   * than for the map. The rules are typed into a tmux pane ON THIS MACHINE;
+   * putting the switch on the routes `remote/server.ts` registers would let a
+   * paired phone change what vam types into an agent running on the desktop,
+   * which is a remote capability nobody asked for. The phone still gets the
+   * effect -- a prompt SENT from the phone travels through the same
+   * `DESKTOP_SOURCE.recordPrompt` -- it just cannot change the setting.
+   *
+   * Answers through the `IpcResult` envelope like `setPrRepos`, so a caller
+   * has one shape to read. See `main/terminal/concise.ts`.
+   */
+  setConciseOutput: 'vam:terminal:set-concise-output',
+  /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */
