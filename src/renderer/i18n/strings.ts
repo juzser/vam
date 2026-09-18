@@ -88,7 +88,7 @@ const EN = {
 
   // ── Appearance ───────────────────────────────────────────────────────────
   'settings.appearance.hint':
-    "theme, colours, the size of the text in out and in the terminal, the terminal's own colour scheme, how much of a turn the transcript draws, what a session tab shows, and the file editor",
+    "theme, colours, the size of the text in out and in the terminal, the terminal's own colour scheme, how much of a turn the transcript draws, and the file editor",
   'settings.appearance.theme.label': 'theme',
   'settings.appearance.theme.hint': 'system follows what the operating system asks for',
   'settings.appearance.templates.label': 'templates',
@@ -149,22 +149,6 @@ const EN = {
   // prompt the transcript has NOT recorded yet, `agents` is a count), so
   // every caption says what the mark MEANS rather than what it looks like.
   // The hint carries the one rule that is not a switch: idle draws nothing.
-  'settings.appearance.tabIndicators.label': 'session tabs',
-  'settings.appearance.tabIndicators.hint':
-    'what a tab shows beside its title. A tab that is idle shows only its title — that is not a switch',
-  'settings.appearance.tabIndicators.reset': 'reset tab marks',
-  'settings.appearance.tabIndicators.running': 'running — a spinner while the agent is working',
-  'settings.appearance.tabIndicators.waiting':
-    'waiting — a bell when a question or permission prompt is open for you',
-  'settings.appearance.tabIndicators.failed':
-    'failed — a triangle when the session stopped on an error',
-  'settings.appearance.tabIndicators.done': 'done — a tick when the session has finished',
-  'settings.appearance.tabIndicators.icon': 'icon — the emoji or glyph you gave the session',
-  'settings.appearance.tabIndicators.draft':
-    'draft — a pencil when this tab’s prompt box holds unsent text',
-  'settings.appearance.tabIndicators.pending':
-    'pending — a hollow dot when a prompt was sent but the transcript has not yet recorded it',
-  'settings.appearance.tabIndicators.agents': 'agents — ●N, the number of sub-agents running',
   // THE FILE EDITOR'S OWN TWO. The label says which editor, because vam has
   // more than one text box and only this one has a gutter to keep level.
   'settings.appearance.editorHighlight.label': 'file editor colours',

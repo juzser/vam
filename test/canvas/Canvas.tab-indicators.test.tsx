@@ -24,11 +24,7 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session, SessionStatus } from '../../src/renderer/domain/model.js';
-import {
-  DEFAULT_TAB_INDICATORS,
-  TAB_INDICATOR_IDS,
-  type TabIndicatorId,
-} from '../../src/renderer/prefs/tab-indicators.js';
+import { TAB_INDICATOR_IDS, type TabIndicatorId } from '../../src/renderer/prefs/tab-indicators.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
@@ -66,8 +62,16 @@ const MODEL: CanvasModel = {
   ],
 };
 
-function seed(tabIndicators: readonly TabIndicatorId[]) {
-  localStorage.setItem('vam.prefs.v1', JSON.stringify({ tabIndicators }));
+/**
+ * THE LIST IS A CONSTANT NOW, so there is nothing to seed and no test here
+ * may pretend otherwise. The operator asked for the switches to go
+ * (`prefs/tab-indicators.ts`), so what was "this id is off by default and on
+ * when switched" became "this id is not on the list and draws nothing" --
+ * which is the claim the shipped app actually makes. A stored `tabIndicators`
+ * key is ignored: `parsePrefs` no longer reads one.
+ */
+function seed() {
+  localStorage.removeItem('vam.prefs.v1');
 }
 
 const tabs = () => [...document.querySelectorAll('[data-session-tab]')];
@@ -148,7 +152,7 @@ describe('a resting tab', () => {
   });
 
   it('cannot be made to draw one: idle is not an indicator id', () => {
-    seed([...TAB_INDICATOR_IDS]);
+    seed();
     render(<Canvas model={MODEL} />);
     expect(marksOf('idle-1')).toEqual([]);
   });
@@ -172,26 +176,23 @@ describe('the status marks, one per tab at most', () => {
     expect(glyphsIn(markOf('failed-1', 'failed'))).toEqual(['lucide-triangle-alert']);
   });
 
-  it('leaves a finished session unmarked by default, and ticks it once told to', () => {
+  it('leaves a finished session unmarked -- `done` is not on the list', () => {
     // A tick on every session left open after a working day is the grey dot
-    // again in a different shape, so `done` ships off.
+    // again in a different shape, so `done` is not one of the five.
     render(<Canvas model={MODEL} />);
     expect(marksOf('done-1')).toEqual([]);
-    cleanup();
-
-    seed([...DEFAULT_TAB_INDICATORS, 'done']);
-    render(<Canvas model={MODEL} />);
-    expect(marksOf('done-1')).toEqual(['done']);
-    expect(glyphsIn(markOf('done-1', 'done'))).toEqual(['lucide-check']);
   });
 
-  it('honours each status switch on its own', () => {
-    // Running off, the others on: only the running tab loses its mark.
-    seed(['waiting', 'failed']);
+  it('draws running, waiting and failed, and no other status', () => {
+    // The three that are on the list, and the two statuses that are not:
+    // together they are the whole of `SessionStatus`, so this says what the
+    // strip draws AND what it never draws.
     render(<Canvas model={MODEL} />);
-    expect(marksOf('running-1')).toEqual([]);
+    expect(marksOf('running-1')).toEqual(['running']);
     expect(marksOf('waiting-1')).toEqual(['waiting']);
     expect(marksOf('failed-1')).toEqual(['failed']);
+    expect(marksOf('done-1')).toEqual([]);
+    expect(marksOf('idle-1')).toEqual([]);
   });
 
   it('is decorative to a screen reader, as the dot was', () => {
@@ -225,11 +226,12 @@ describe('the session’s own icon', () => {
     expect(markOf('idle-1', 'icon')?.textContent).toBe('🌙');
   });
 
-  it('goes when its switch is off, leaving the title', () => {
-    seed(DEFAULT_TAB_INDICATORS.filter((id) => id !== 'icon'));
+  it('is on the list, so a tab that has one always draws it', () => {
+    seed();
     render(<Canvas model={WITH_ICON} />);
-    expect(marksOf('idle-1')).toEqual([]);
-    expect(titleOf('idle-1')).toBe('idle-1');
+    expect(marksOf('idle-1')).toEqual(['icon']);
+    // The icon rides INSIDE the title button, so the title reads with it.
+    expect(titleOf('idle-1')).toBe('🌙 idle-1');
   });
 });
 
@@ -322,12 +324,12 @@ describe('the draft pencil', () => {
     expect(marksOf('idle-1')).toEqual([]);
   });
 
-  it('can be switched off', () => {
-    seed(DEFAULT_TAB_INDICATORS.filter((id) => id !== 'draft'));
+  it('is on the list, so a draft always raises it', () => {
+    seed();
     render(<Canvas model={MODEL} />);
     focusTab('idle-1');
-    typeInto('a draft nobody asked to see');
-    expect(marksOf('idle-1')).toEqual([]);
+    typeInto('a draft the operator has not sent');
+    expect(marksOf('idle-1')).toEqual(['draft']);
   });
 });
 
@@ -360,7 +362,7 @@ function recordingSource(): CanvasSource {
 }
 
 describe('the pending dot', () => {
-  it('is off by default: a sent prompt raises nothing on the tab', async () => {
+  it('is not on the list: a sent prompt raises nothing on the tab', async () => {
     render(<Canvas model={MODEL} source={recordingSource()} />);
     focusTab('idle-1');
     typeInto('ship it');
@@ -370,8 +372,8 @@ describe('the pending dot', () => {
     expect(marksOf('idle-1')).toEqual([]);
   });
 
-  it('marks the tab whose prompt is typed into the pane and not yet recorded, once switched on', async () => {
-    seed([...DEFAULT_TAB_INDICATORS, 'pending']);
+  it('stays off the tab even while a prompt is typed and not yet recorded', async () => {
+    seed();
     render(<Canvas model={MODEL} source={recordingSource()} />);
     focusTab('idle-1');
     typeInto('ship it');
@@ -379,9 +381,9 @@ describe('the pending dot', () => {
       promptInput()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
     // The composer is empty again, so no pencil -- what is pending is the
-    // prompt, not a draft of one.
-    expect(marksOf('idle-1')).toEqual(['pending']);
-    expect(markOf('idle-1', 'pending')?.getAttribute('aria-hidden')).toBe('true');
+    // prompt, not a draft of one -- and `pending` is not on the list, so the
+    // tab carries nothing at all. The pane is where a sent prompt shows.
+    expect(marksOf('idle-1')).toEqual([]);
     expect(marksOf('running-1')).toEqual(['running']);
   });
 });
@@ -401,16 +403,19 @@ describe('the agents count', () => {
     ],
   };
 
-  it('is off by default', () => {
+  it('is not on the list', () => {
     render(<Canvas model={BUSY} />);
     expect(marksOf('running-1')).toEqual(['running']);
   });
 
-  it('draws ●N after the title once switched on, and nothing for a count of zero', () => {
-    seed([...DEFAULT_TAB_INDICATORS, 'agents']);
+  it('draws nothing even for a session with agents running', () => {
+    seed();
     render(<Canvas model={BUSY} />);
-    expect(marksOf('running-1')).toEqual(['running', 'agents']);
-    expect(markOf('running-1', 'agents')?.textContent).toBe('●3');
+    // Three agents running under this session, and the tab says only that the
+    // session is running: the count is the sidebar row's job, and `agents` is
+    // not on the list.
+    expect(marksOf('running-1')).toEqual(['running']);
+    expect(markOf('running-1', 'agents')).toBeNull();
     expect(marksOf('idle-1')).toEqual([]);
   });
 });

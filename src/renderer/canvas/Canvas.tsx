@@ -917,7 +917,7 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
  * "nothing" eight times. Now a tab draws AT MOST ONE status mark -- the
  * sidebar row's own glyph (`panels/status-mark.tsx`: a spinner, a bell, a
  * triangle, a tick), so the two surfaces say one thing -- and only for a
- * status whose switch is on (`prefs/tab-indicators.ts`). Idle is not a
+ * status the indicator list names (`prefs/tab-indicators.ts`). Idle is not a
  * switch: a resting tab with no icon and no draft is its title and nothing
  * else, and no empty lane is reserved for the mark it is not wearing. A quiet
  * tab is narrower than a busy one; that is the point, not a cost.
@@ -955,12 +955,9 @@ type TabStatusMark = Extract<TabIndicatorId, SessionStatus>;
 /** Which status mark, if any, this session's tab draws under these switches.
  *  `null` for idle whatever the switches say, and for a status whose switch
  *  is off. */
-function tabStatusMark(
-  status: SessionStatus,
-  indicators: readonly TabIndicatorId[],
-): TabStatusMark | null {
+function tabStatusMark(status: SessionStatus): TabStatusMark | null {
   if (status === 'idle') return null;
-  return isTabIndicatorOn(indicators, status) ? status : null;
+  return isTabIndicatorOn(status) ? status : null;
 }
 
 /** Is there an unsent draft worth a pencil? The composer's own send rule
@@ -975,7 +972,6 @@ function TabStrip({
   tabs,
   activeId,
   paneFocused,
-  indicators,
   drafts,
   pending,
   onSelect,
@@ -987,13 +983,6 @@ function TabStrip({
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
   readonly activeId: string | null;
-  /**
-   * Which indicators a tab may draw -- `prefs.tabIndicators`, passed as a
-   * prop rather than read from a store because this strip is rendered by the
-   * component that owns the prefs (`prefs/tab-indicators.ts` says why that
-   * makes it unlike `terminalFontSize`).
-   */
-  readonly indicators: readonly TabIndicatorId[];
   /**
    * Every session's unsent composer text, by session id -- the whole map
    * rather than one flag per tab, because a draft belongs to a SESSION and a
@@ -1188,13 +1177,12 @@ function TabStrip({
         // tone), not a character, so the tone arrives here without this strip
         // knowing that colours exist -- see `session-icon.tsx` for why that is
         // one chain and not two.
-        const icon = isTabIndicatorOn(indicators, 'icon') ? resolveSessionIcon(entry) : null;
-        const mark = tabStatusMark(entry.session.status, indicators);
-        const draft = isTabIndicatorOn(indicators, 'draft') && hasDraft(drafts[entry.session.id]);
+        const icon = isTabIndicatorOn('icon') ? resolveSessionIcon(entry) : null;
+        const mark = tabStatusMark(entry.session.status);
+        const draft = isTabIndicatorOn('draft') && hasDraft(drafts[entry.session.id]);
         const queued =
-          isTabIndicatorOn(indicators, 'pending') &&
-          pending.some((one) => one.sessionId === entry.session.id);
-        const agents = isTabIndicatorOn(indicators, 'agents') ? entry.session.runningAgents : 0;
+          isTabIndicatorOn('pending') && pending.some((one) => one.sessionId === entry.session.id);
+        const agents = isTabIndicatorOn('agents') ? entry.session.runningAgents : 0;
         return (
           <div
             key={entry.session.id}
@@ -6079,7 +6067,6 @@ function CanvasInner({
               tabs={paneTabs}
               activeId={leaf.sessionId}
               paneFocused={isFocused}
-              indicators={prefs.tabIndicators}
               drafts={draftsBySession}
               pending={pending}
               onSelect={(sessionId, viaPointer) => {
@@ -6162,11 +6149,11 @@ function CanvasInner({
       newTabInPane,
       newSessionDecline,
       dropTarget,
-      // The strip's three indicator inputs. `buildDetailProps` above already
+      // The strip's two indicator inputs. `buildDetailProps` above already
       // re-derives on every draft keystroke, so `draftsBySession` costs this
-      // hook nothing it was not paying; `pending` and the switches change
-      // rarely. Without them the strip would draw a stale pencil.
-      prefs.tabIndicators,
+      // hook nothing it was not paying. Without them the strip would draw a
+      // stale pencil. (The indicator LIST is a constant now, so it is not a
+      // dependency: see `prefs/tab-indicators.ts`.)
       draftsBySession,
       pending,
     ],
