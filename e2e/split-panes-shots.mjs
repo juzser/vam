@@ -293,11 +293,20 @@ if (!modTSaid.includes('no new-session command')) {
 await page.screenshot({ path: `${outDir}/digit-row-selects-a-tab.png` });
 console.log(`${outDir}/digit-row-selects-a-tab.png`);
 
-// --- What A11.1 does to a tab's own `×`: it cannot leave a live session
-// without a tab, so it refuses ALOUD rather than closing one the adoption
-// would put straight back. (This step used to close dogfood-4's tab to get
-// down to two; the refusal is what happens there now, so the same gesture
-// pins the new rule instead.)
+// --- WHAT A TAB'S OWN `×` DOES (A22): it closes the SESSION, through the same
+// `closeSession` the `x` key and the tab's context menu use. It must NOT
+// remove the tab and leave the session running — every session of the active
+// project is a tab (A11.1), so the adoption effect would put it straight back
+// and the control would read as broken. That was the old behaviour's whole
+// problem: it refused on every tab, because a tab is only ever drawn for a
+// session the model still carries, and the operator reported it as a dead
+// button.
+//
+// The demo has no write route at all, so what is checked here is that the
+// press REACHED the close path and was refused by the SOURCE — naming the
+// session — rather than being turned away by the tab strip before it got
+// there. The tab count is the other half: still three, because nothing was
+// removed.
 //
 // HOVER THE TAB FIRST. The `×` on an inactive tab is `pointer-events: none`
 // until its tab is hovered (audit F4: `opacity: 0` removed no pointer events,
@@ -307,9 +316,9 @@ console.log(`${outDir}/digit-row-selects-a-tab.png`);
 // clicking the button cold is the one route a person does not have.
 await page
   .locator('[data-session-tab]')
-  .filter({ has: page.getByLabel('close dogfood-4 tab') })
+  .filter({ has: page.getByLabel('close session dogfood-4') })
   .hover();
-await page.getByLabel('close dogfood-4 tab').click();
+await page.getByLabel('close session dogfood-4').click();
 await page.waitForTimeout(150);
 const refused = (await page.locator('[data-status-bar]').innerText()) ?? '';
 const afterRefusal = await tabTitlesInPane(0);
@@ -317,13 +326,13 @@ console.log('after pressing a tab’s ×:', afterRefusal, '| status:', refused);
 if (afterRefusal.length !== 3) {
   throw new Error(
     `a tab’s × left ${afterRefusal.length} tab(s) (${afterRefusal.join(', ')}) — every session ` +
-      'of the active project is a tab, so the × must change nothing.',
+      'of the active project is a tab, so the × must close the SESSION, never drop the tab.',
   );
 }
-if (!refused.includes('close the session with x')) {
+if (!refused.includes('close-session command') || !refused.includes('dogfood-4')) {
   throw new Error(
-    `pressing a tab’s × said "${refused}" — it must refuse aloud and name the key that does ` +
-      'close a session, never silently do nothing.',
+    `pressing a tab’s × said "${refused}" — it must reach \`closeSession\` and be refused by the ` +
+      'source, naming the session; anything else means the strip turned the press away itself.',
   );
 }
 await page.locator('[data-session-row="crosscheck-2"]').click();

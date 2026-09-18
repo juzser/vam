@@ -1345,7 +1345,13 @@ function TabStrip({
               /* The `x` is a second focusable stop inside the tab, so it needs
                  the same handler or a right-click on it reaches nothing. */
               onContextMenu={tabMenuOf(entry)}
-              aria-label={`close ${entry.session.title} tab`}
+              /* NAMES THE SESSION, because that is what it closes now (A22).
+                 "close <title> tab" was accurate when the `×` removed a tab
+                 from a pane; it would now be a screen reader being told one
+                 thing while a session is stopped. The wording matches the
+                 context menu's own "Close session" item, which is the same
+                 action on the same tab. */
+              aria-label={`close session ${entry.session.title}`}
               onClick={(event) => {
                 event.stopPropagation();
                 onClose(entry.session.id);
@@ -3486,51 +3492,6 @@ function CanvasInner({
     setFocusedPaneId(fallback);
   }, [panes, focusedPaneId, setFocusedPaneId]);
 
-  /**
-   * A15.5 — a tab's own `×` closes THE TAB, in the pane that drew it, and
-   * the pane itself once its last tab goes (VSCode: an emptied editor group
-   * is dropped, not left as a titled void).
-   *
-   * This REVERSES A11.3's "one action, two keys", and deliberately: that
-   * decision was made when every session in the project was always a tab of
-   * the one strip, so there was no tab to close that was not the session
-   * itself. A pane's tab list is now a genuine choice — which sessions THIS
-   * pane has open — so closing one is meaningful on its own, and the session
-   * keeps running and keeps its sidebar row. Closing the session itself is
-   * still one keystroke, `x`, and still the sidebar row's own `×`.
-   *
-   * Refuses aloud rather than emptying the shell when the tab is the last
-   * tab of the last pane — `removeTab` returns `null` for exactly that case.
-   */
-  const closePaneTab = useCallback(
-    (paneId: string, sessionId: string) => {
-      // A11.1: a session of this project cannot be left without a tab, so
-      // there is nothing for the `×` to do to a LIVE one — the adoption
-      // effect would put the tab straight back, and a control whose effect
-      // is undone in the same breath reads as broken. It refuses aloud
-      // instead, in the demo `+`'s idiom, and names the key that does close a
-      // session; the destructive verb stays where it already lives.
-      //
-      // The rest of this callback is not dead: a tab whose session has just
-      // ENDED still draws until the next model arrives, and a `×` pressed in
-      // that window is the one close that has real work to do.
-      if (entriesByIdRef.current.has(sessionId)) {
-        setStatus('every session of this project is a tab — close the session with x');
-        return;
-      }
-      const next = removeTab(panes, paneId, sessionId);
-      if (next === null) {
-        setStatus('that is the last tab — close the session with x');
-        return;
-      }
-      setPanes(next);
-      if (findLeaf(next, focusedPaneIdRef.current) === null) {
-        setFocusedPaneId(stepPane(panes, paneId, 1));
-      }
-    },
-    [panes, setFocusedPaneId],
-  );
-
   /** Cycle the keyboard between splits, wrapping — vim's `Ctrl-w w`/`W`. */
   const stepFocusedSplit = useCallback(
     (delta: 1 | -1) => {
@@ -4071,6 +4032,62 @@ function CanvasInner({
       }
     },
     [source, pendingAction],
+  );
+
+  /**
+   * A22 — a tab's own `×` closes THE SESSION that tab is for.
+   *
+   * The operator reported it as a dead button, and it was one. A15.5 gave the
+   * `×` the job of closing the TAB, in the pane that drew it; A11.1 then
+   * restored "every session of the active project is a tab of exactly one
+   * pane", which left a tab-close nothing to do that the adoption effect
+   * would not undo in the same breath — so it refused aloud instead, on the
+   * reasoning that an honest refusal beat a control undoing itself.
+   *
+   * That reasoning was right about `removeTab` and wrong about the button.
+   * `orderedPaneTabs` draws a tab only for a session that IS in the model, so
+   * the liveness guard was true for every tab that could be clicked and the
+   * refusal was the whole of the behaviour: a control drawn on every tab and
+   * effective on none of them, however politely it explained itself.
+   *
+   * It goes through `closeSession` — the SAME callback the `x` key, the
+   * sidebar row's own `×` and this tab's context menu "Close session" use.
+   * No new destructive capability and no second confirm flow: the pending
+   * guard, the "this source cannot close" refusal and the forcible
+   * kill-anyway prompt all belong to that one path, and routing onto it is
+   * the whole change. (It is declared after `closeSession` for that reason,
+   * and for no other.)
+   *
+   * THE `removeTab` ARM BELOW STAYS, for a session id this pane holds that
+   * the model no longer carries. Nothing draws such a tab today — the strip
+   * filters the ids through `allEntries` — so the `×` cannot reach it; it is
+   * the total-function half of a callback that is handed a session id by a
+   * closure, and deleting it would make that callback lie to the first caller
+   * that is not the strip. Refuses aloud rather than emptying the shell when
+   * the tab is the last tab of the last pane — `removeTab` returns `null` for
+   * exactly that case.
+   */
+  const closePaneTab = useCallback(
+    (paneId: string, sessionId: string) => {
+      const live = entriesByIdRef.current.get(sessionId);
+      if (live !== undefined) {
+        // THE TAB'S OWN title, as the context menu does it: every sentence
+        // `closeSession` writes names the session, and reading the title off
+        // anything but the tab that was pressed could name a neighbour.
+        void closeSession(sessionId, live.session.title);
+        return;
+      }
+      const next = removeTab(panes, paneId, sessionId);
+      if (next === null) {
+        setStatus('that is the last tab — close the session with x');
+        return;
+      }
+      setPanes(next);
+      if (findLeaf(next, focusedPaneIdRef.current) === null) {
+        setFocusedPaneId(stepPane(panes, paneId, 1));
+      }
+    },
+    [panes, setFocusedPaneId, closeSession],
   );
 
   /**
