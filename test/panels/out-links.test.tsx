@@ -101,22 +101,31 @@ describe('a link in an agent answer', () => {
    * A LINK TEXT THAT LIES IS WHY THE ADDRESS IS PRINTED AT ALL.
    * `[https://github.com](https://evil.test)` is one line of markdown.
    */
-  it('shows the real destination even when the link text claims another', () => {
+  it('paints the real host, not the address the link text claims', () => {
     draw('[https://github.com/juzser/vam](https://evil.test/phish)');
-    expect(document.body.textContent).toContain('https://evil.test/phish');
-    // And the pill's own printed host is the REAL one: a text that is an
-    // address is not treated as self-named unless it is THIS address.
-    const pill = screen.getByRole('button', { name: /github\.com/ });
+    // The pill prints a NAME now, and this text is not one -- it is a
+    // destination, and the wrong one. `textLooksLikeAddress` catches exactly
+    // this case and the real host is printed in its place, so the lie is
+    // never painted at all.
+    const pill = screen.getByRole('button', { name: /evil\.test/ });
     expect(pill.querySelector('[data-out-host]')?.textContent).toBe('evil.test');
+    expect(printed(pill)).toBe('evil.test');
+    expect(printed(document.body)).not.toContain('github.com');
+    // And the whole address is still readable before the press.
     expect(pill.getAttribute('data-out-address')).toBe('https://evil.test/phish');
+    expect(pill.getAttribute('data-note')).toContain('https://evil.test/phish');
   });
 
-  it('draws a unicode host in the punycode a browser would resolve', () => {
+  it('resolves a unicode host to the punycode a browser would use', () => {
+    // The pill prints the agent's own name for a named link, so the punycode
+    // is not painted here -- it is on `data-out-address` and in the note,
+    // which is where a homograph has to be visible before a press.
     draw('[site](https://exämple.test/x)');
-    expect(document.body.textContent).toContain('xn--');
     const pill = screen.getByRole('button', { name: /site/ });
-    expect(pill.querySelector('[data-out-host]')?.textContent).toBe('xn--exmple-cua.test');
-    expect(printed(pill)).not.toContain('ä');
+    expect(printed(pill)).toBe('site');
+    expect(pill.getAttribute('data-out-address')).toBe('https://xn--exmple-cua.test/x');
+    expect(pill.getAttribute('data-note')).toContain('xn--exmple-cua.test');
+    expect(pill.getAttribute('data-note')).not.toContain('ä');
   });
 
   it('refuses javascript:, says so, and asks main nothing', async () => {
@@ -169,16 +178,20 @@ describe('a link in an agent answer', () => {
 });
 
 describe('a link in an agent answer is one pill', () => {
-  it('prints the text and the host inside one control, and the whole address nowhere as prose', () => {
+  it('prints the name and nothing else, and the whole address nowhere as prose', () => {
     draw('See the [runbook](https://example.test/runbook) before deploying.');
     const pill = screen.getByRole('button', { name: /runbook/ });
     expect(pill.className).toContain('inline-flex');
-    expect(pill.className).toContain('rounded-full');
-    // The host is INSIDE the button, not beside it, and is the parsed host.
-    const host = pill.querySelector('[data-out-host]');
-    expect(host).not.toBeNull();
-    expect(host?.textContent).toBe('example.test');
-    expect(printed(pill)).toBe('runbookexample.test');
+    expect(pill.className).toContain('bg-out-pill');
+    // NO BORDER AND NO SECOND COLOUR: the name inherits the paragraph's ink,
+    // and the ground is the wash. Both are the operator's ask, and both are
+    // measured on the real paint in `e2e/out-links-shots.mjs`.
+    expect(pill.className).not.toContain('border');
+    expect(pill.className).not.toContain('text-done');
+    // The name, and no caption derived from the address beside it.
+    expect(printed(pill)).toBe('runbook');
+    expect(pill.querySelector('[data-out-host]')).toBeNull();
+    expect(pill.querySelector('[data-out-path]')).toBeNull();
     // The full address is not printed anywhere on the page...
     expect(printed(document.body)).not.toContain('https://');
     expect(printed(document.body)).not.toContain('(');
@@ -195,28 +208,27 @@ describe('a link in an agent answer is one pill', () => {
   });
 
   /**
-   * THE DOUBLE READING THE OPERATOR ASKED TO LOSE. `<https://github.com/…>`
-   * is how an agent writes a source most of the time; "text · host" would
-   * print `github.com` twice, so the self-named pill prints host + path.
+   * `<https://github.com/…>` is how an agent writes a source most of the
+   * time, and it has no name of its own to print -- so its HOST is the name.
+   * Not the path: the operator asked for the name and the icon and no
+   * shortened link, and a path is the shortened link.
    */
-  it('prints host + path when the text IS the address, and not the host twice', () => {
+  it('names a self-named link by its host, with no path', () => {
     draw('See <https://github.com/juzser/vam/pull/383> for the fix.');
     const pill = screen.getByRole('button', { name: /github\.com/ });
-    expect(printed(pill)).toBe('github.com/juzser/vam/pull/383');
+    expect(printed(pill)).toBe('github.com');
     expect(pill.querySelectorAll('[data-out-host]')).toHaveLength(1);
-    expect(pill.querySelector('[data-out-host]')?.textContent).toBe('github.com');
-    expect(pill.querySelector('[data-out-path]')?.textContent).toBe('/juzser/vam/pull/383');
+    expect(pill.querySelector('[data-out-path]')).toBeNull();
     expect(pill.getAttribute('data-out-address')).toBe('https://github.com/juzser/vam/pull/383');
   });
 
-  it('folds a long self-named path in the middle, keeping its tail', () => {
+  it('names a long self-named address by its host alone, folding nothing', () => {
     draw('<https://example.test/a/very/long/path/that/goes/on/and/on?with=query>');
-    const path = document.querySelector('[data-out-path]')?.textContent ?? '';
-    expect([...path]).toHaveLength(FOLD_LIMIT);
-    expect(path).toContain('…');
-    expect(path.endsWith('with=query')).toBe(true);
+    const pill = screen.getByRole('button', { name: /example\.test/ });
+    expect(printed(pill)).toBe('example.test');
+    expect(printed(pill)).not.toContain('…');
     // The whole address is still on the control.
-    expect(document.querySelector('[data-out-link]')?.getAttribute('data-out-address')).toBe(
+    expect(pill.getAttribute('data-out-address')).toBe(
       'https://example.test/a/very/long/path/that/goes/on/and/on?with=query',
     );
   });
@@ -228,17 +240,23 @@ describe('a link in an agent answer is one pill', () => {
     expect(pill.querySelector('[data-out-path]')).toBeNull();
   });
 
-  it('is the same pill for a refused link, dotted and faint, naming the scheme it refused', () => {
+  it('is the same pill for a refused link, in the failure ink, with the Ban glyph', () => {
     draw('[poison](javascript:alert(1))');
     const pill = screen.getByRole('button', { name: /poison/ });
     expect(pill.getAttribute('data-out-link-refused')).toBe('true');
     expect(pill.className).toContain('inline-flex');
-    expect(pill.className).toContain('rounded-full');
-    expect(pill.className).toContain('border-dotted');
-    expect(pill.className).toContain('text-ink-faint');
-    expect(pill.className).not.toContain('text-done');
-    expect(pill.querySelector('[data-out-host]')?.textContent).toBe('javascript:');
-    expect(printed(pill)).toBe('poisonjavascript:');
+    expect(pill.className).toContain('bg-out-pill');
+    expect(pill.className).not.toContain('border');
+    // THE ONE PILL THAT KEEPS AN INK OF ITS OWN: a live link reads as the
+    // sentence it is in, and "this one is not like the others" is exactly
+    // what a refused one has to say. See `OutLink`'s header.
+    // THE ONE PILL THAT KEEPS AN INK OF ITS OWN, and it is the ink of the
+    // `Refusal` this control will produce. `text-ink-faint` was the first
+    // answer and measured 3.97:1 on the light wash -- under 1.4.3's 4.5 --
+    // while `ink-dim` is the prose's own ink, which would make the one pill
+    // that must not read as a sentence read as one.
+    expect(pill.className).toContain('text-failed');
+    expect(printed(pill)).toBe('poison');
     // The raw address is not painted, and is still on the control.
     expect(pill.getAttribute('data-out-address')).toBe('javascript:alert(1)');
     expect(pill.getAttribute('data-note')).toMatch(/javascript/);
@@ -248,10 +266,11 @@ describe('a link in an agent answer is one pill', () => {
     const { openLink } = draw('[the thing](<not a url>)');
     const pill = screen.getByRole('button', { name: /the thing/ });
     expect(pill.getAttribute('data-out-link-refused')).toBe('true');
-    // Percent-encoded, because that is what remark hands `a:` for a
-    // destination with spaces in it -- and the raw href, not a prettier
+    // The text is the name, as on every other pill. The href stays raw and
+    // percent-encoded on the control -- that is what remark hands `a:` for a
+    // destination with spaces in it, and the raw href, not a prettier
     // decoding of it, is what main would be asked to open.
-    expect(pill.querySelector('[data-out-host]')?.textContent).toBe('not%20a%20url');
+    expect(printed(pill)).toBe('the thing');
     expect(pill.getAttribute('data-out-address')).toBe('not%20a%20url');
     await userEvent.click(pill);
     expect((await screen.findByRole('status')).textContent).toMatch(/not an address vam can read/);
@@ -280,12 +299,15 @@ describe('a link in an agent answer is one pill', () => {
     );
     const pills = document.querySelectorAll('li [data-out-link]');
     expect(pills).toHaveLength(3);
-    expect([...pills].map((pill) => pill.querySelector('[data-out-host]')?.textContent)).toEqual([
-      'example.test',
-      'github.com',
+    // Two named, one self-named: the named ones print their names and the
+    // self-named one prints its host, and none of them prints a path.
+    expect([...pills].map((pill) => printed(pill))).toEqual([
+      'runbook',
+      'the PR',
       'docs.example.test',
     ]);
     expect(printed(document.body)).not.toContain('https://');
+    expect(printed(document.body)).not.toContain('/retries');
   });
 });
 

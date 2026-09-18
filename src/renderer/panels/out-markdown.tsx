@@ -46,7 +46,7 @@ import {
   SYNTAX_CLASS,
   tokenizeCode,
 } from './highlight.js';
-import { foldMiddle, linkParts, linkWhere, textIsAddress } from './link-face.js';
+import { linkParts, textIsAddress, textLooksLikeAddress } from './link-face.js';
 import { Note } from './Note.js';
 import { useOutActions } from './out-actions.js';
 
@@ -257,28 +257,46 @@ const NO_ADDRESS = 'vam was given no address to open.';
 
 /**
  * A LINK AN AGENT WROTE, as a button and never as an anchor -- drawn as ONE
- * PILL: `[ text · host ↗ ]`.
+ * PILL: `[ name ↗ ]`.
  *
- * Operator: "the sources in an answer should be displayed compactly, as a
- * tag or pill with a hyperlink." The control this replaces printed the text
- * and then the whole parsed address after it, in mono, in brackets -- 262px
- * for `runbook (https://example.test/runbook)` at the shipped 13px, and when
- * the text WAS the address the eye read it twice. The pill is the text, the
- * HOST in a quieter ink, and an external-link glyph, inside one bordered
- * `rounded-full` control; `e2e/out-links-shots.mjs` measures the same link
- * at 165.53px -- 37% narrower, and one thing to read instead of two.
+ * Operator: "the sources in an answer should be displayed compactly, as a tag
+ * or pill with a hyperlink." The control this replaces printed the text and
+ * then the whole parsed address after it, in mono, in brackets -- 262px for
+ * `runbook (https://example.test/runbook)` at the shipped 13px, and when the
+ * text WAS the address the eye read it twice.
  *
- * WHERE THE PRINTED ADDRESS WENT, because the property it carried must
- * survive: "no anchor" is also satisfied by drawing nothing, and what the
- * operator needs is to SEE where a control goes before pressing it. The HOST
- * is painted inside the pill, and the host is the part of an address that
- * decides where a click lands. The FULL parsed address is on the button as
- * `data-out-address` (what the web guard reads), in the `Note` that opens on
- * hover and on keyboard focus (the house rule `Note.tsx` states: a `title`
- * opens on hover and on nothing else), and in a screen-reader-only span, so
- * the destination is readable before pressing by every kind of reader. Both
- * `test/panels/out-font-size.test.tsx` and the web guard find the pill's
- * parts by attribute rather than by position in the tree.
+ * QUIETER AGAIN, at the operator's second reading: "the source pill should be
+ * much smaller, no border, a dark background with opacity so the sources look
+ * tidier; only the name and the icon, no shortened link; and the link colour
+ * should be the normal one, not a different colour." So the pill is a NAME and
+ * a glyph on a wash, and each of those three is a deliberate subtraction:
+ *
+ *   - NO BORDER, NO SECOND COLOUR. The words take the paragraph's own ink --
+ *     no class at all, so they inherit whatever the prose around them is
+ *     wearing -- and the ground is `--color-out-pill`, black at a low alpha
+ *     (`styles.css` carries the measurement). A link in a paragraph is not a
+ *     button on a toolbar; it should read as the sentence it is part of.
+ *   - NO ADDRESS IN THE PILL. Not the path and not a folded version of it.
+ *     `foldMiddle` and `linkWhere` are no longer called from here; they stay
+ *     exported and tested in `link-face.ts`, which is the module that owns
+ *     "how an address is made readable" whether or not this control asks.
+ *   - SMALLER: no border to pay for, `px-1`, and a glyph at `0.8em`.
+ *
+ * WHAT MAKES IT READ AS A LINK, then, since neither colour nor a border does:
+ * the GLYPH at its end, which is a shape rather than a hue and so is the
+ * non-colour indicator WCAG 1.4.1 asks for, plus the wash the name sits on.
+ * The web guard asserts the glyph on every pill for exactly that reason -- it
+ * is now the whole of the affordance, and a pill that lost it would look like
+ * a phrase with a grey background.
+ *
+ * WHERE THE ADDRESS WENT, because the property it carried must survive: "no
+ * anchor" is also satisfied by drawing nothing, and what the operator needs is
+ * to SEE where a control goes before pressing it. The full parsed address is
+ * on the button as `data-out-address` (what the web guard reads), in the
+ * `Note` that opens on hover and on keyboard focus (the house rule `Note.tsx`
+ * states: a `title` opens on hover and on nothing else), and in a
+ * screen-reader-only span. What changed is that it is no longer PAINTED in
+ * the flow of the sentence; every way of asking for it still answers.
  *
  * WHAT IS DRAWN IS THE PARSED ADDRESS, not the typed one -- `checkLink`
  * answers `new URL(...).href`, so a unicode host arrives here already in
@@ -287,14 +305,17 @@ const NO_ADDRESS = 'vam was given no address to open.';
  * folded: something unreadable is still better than nothing.
  *
  * A SELF-NAMED LINK -- `<https://github.com/juzser/vam/pull/383>`, the shape
- * a "Sources:" list is usually written in -- prints host + path rather than
- * "address · host", which would be the double reading the operator asked to
- * lose. `link-face.ts` decides which case a link is and how the path folds.
+ * a "Sources:" list is usually written in -- has no name of its own to print,
+ * so its HOST is the name: `github.com`, not the path, which is the one thing
+ * on this control that is still derived from the address. It is the part that
+ * decides where a click lands and the part a reader would call the source by.
+ * `link-face.ts` decides which case a link is in.
  *
- * A REFUSED ONE IS THE SAME PILL, dotted and faint, with a `Ban` glyph in
- * place of the arrow -- a control that can only refuse says so before it is
- * pressed -- and its quiet half names the scheme it refused, since a
- * `javascript:` address has no host to name.
+ * A REFUSED ONE IS THE SAME PILL in the faint ink, with a `Ban` glyph in place
+ * of the arrow -- a control that can only refuse says so before it is pressed.
+ * It keeps a colour difference where the live pill gave one up, because
+ * "this one is not like the others" is exactly what it has to say, and it
+ * names the scheme it refused, a `javascript:` address having no host.
  *
  * PRESSING A REFUSED ONE IS NOT A NO-OP. The scheme check runs here first so
  * a refusal costs no round trip, and it is a CONVENIENCE: main runs the same
@@ -320,9 +341,13 @@ function OutLink({ href, children }: { readonly href?: string; readonly children
   // a self-named `javascript:` has nothing to split and is drawn as its text.
   const face = self && address !== undefined ? linkParts(address) : null;
   const split = face !== null && face.host !== '' ? face : null;
-  // The quiet half of a NAMED link. A self-named one already reads as its
-  // destination, so it gets none rather than its own host again.
-  const where = split !== null || self || href === undefined ? null : linkWhere(href);
+  // A TEXT THAT CLAIMS AN ADDRESS IT IS NOT. See `textLooksLikeAddress`: the
+  // pill prints a name now, and this text is not one -- it is a destination,
+  // and the wrong one. The real host is printed in its place. `split` already
+  // covers the honest version of this (text IS the address), so this is only
+  // reached when the two disagree.
+  const lying = !self && text !== null && href !== undefined && textLooksLikeAddress(text);
+  const realHost = lying && address !== undefined ? (linkParts(address)?.host ?? null) : null;
   const hint =
     checked?.ok === true ? `opens ${address} in the browser` : (checked?.reason ?? NO_ADDRESS);
   const Glyph = ok ? ExternalLink : Ban;
@@ -337,21 +362,28 @@ function OutLink({ href, children }: { readonly href?: string; readonly children
           data-out-link-refused={checked?.ok === false ? 'true' : undefined}
           data-out-address={address}
           className={[
-            // `items-baseline`, not `items-center`: the text and the host are
-            // two sizes and have to share the paragraph's baseline, or the
-            // pill's words sit a pixel above the sentence they are in.
-            // `max-w-full` with `truncate` on the parts, because an
-            // inline-flex box cannot break across lines and a long label
-            // would otherwise decide how wide the pane is.
-            'inline-flex max-w-full cursor-pointer items-baseline gap-1 rounded-full border px-1.5 align-baseline leading-[1.3]',
-            // `border-ink-quiet`: the one border token that clears WCAG
-            // 1.4.11's 3:1 on the pane in BOTH themes (6.80:1 dark, 4.64:1
-            // light); every `line-*` rung stops short in light (2.80:1 at
-            // loudest). `styles.css` names `ink-quiet` for exactly this, "a
-            // control border".
-            ok
-              ? 'border-ink-quiet text-done hover:bg-raised'
-              : 'border-ink-quiet border-dotted text-ink-faint',
+            // `items-baseline`, not `items-center`: the name and the glyph
+            // have to share the paragraph's baseline, or the pill's word sits
+            // a pixel above the sentence it is in. `max-w-full` with
+            // `truncate` on the name, because an inline-flex box cannot break
+            // across lines and a long label would otherwise decide how wide
+            // the pane is. `gap-0.5` and `px-1`: with the border gone there is
+            // nothing to hold the words off an edge, so the padding is the
+            // whole of the pill's size and it is as small as a chip can be
+            // and still read as one.
+            'inline-flex max-w-full cursor-pointer items-baseline gap-0.5 rounded-[5px] bg-out-pill px-1 align-baseline leading-[1.3]',
+            // NO INK CLASS ON THE LIVE ONE, and that is the point: the name
+            // inherits the paragraph's colour, so a link reads as part of the
+            // sentence. `hover:brightness` rather than a second ground, so
+            // the wash stays one token. The REFUSED one keeps its own ink --
+            // see the header for why it is the exception.
+            // THE REFUSED ONE IN THE INK OF ITS OWN REFUSAL. `text-ink-faint`
+            // was 3.97:1 on the light wash -- measured, under 1.4.3's 4.5 --
+            // and `ink-dim` is the prose's own ink, which would make the one
+            // pill that must not read as a sentence read as one. `failed` is
+            // the ink the `Refusal` this control produces is printed in, so
+            // the two halves of one outcome say the same thing.
+            ok ? 'hover:bg-out-pill-hover' : 'text-failed',
           ].join(' ')}
           onClick={() => {
             if (checked === null || !checked.ok) {
@@ -364,33 +396,24 @@ function OutLink({ href, children }: { readonly href?: string; readonly children
             });
           }}
         >
-          {split === null ? (
-            <>
-              <span className="truncate">{children}</span>
-              {where !== null && (
-                <span data-out-host className="truncate font-mono text-[0.875em] text-ink-faint">
-                  {where}
-                </span>
-              )}
-            </>
-          ) : (
-            // ONE span holding both halves, so the host and its path abut as
-            // they do in the address bar -- the flex `gap` is for the parts of
-            // a NAMED pill, and a gap inside a URL reads as a space in it.
-            <span className="truncate font-mono text-[0.917em]">
-              <span data-out-host>{split.host}</span>
-              {split.rest !== '' && (
-                <span data-out-path className="text-ink-faint">
-                  {foldMiddle(split.rest)}
-                </span>
-              )}
-            </span>
-          )}
+          {/* ONE NAME, and nothing derived from the address beside it. A
+              link the agent named prints that name; a self-named one has no
+              name but its host, which is the only case `split` is consulted
+              for now -- never its path. */}
+          <span className="truncate" data-out-name>
+            {split !== null || realHost !== null ? (
+              <span data-out-host>{split?.host ?? realHost}</span>
+            ) : (
+              children
+            )}
+          </span>
           <Glyph
             aria-hidden
             // Sized in `em` for the same reason as the words; `self-center`
             // because an SVG has no baseline and would otherwise stand on it.
-            className="h-[0.875em] w-[0.875em] flex-none self-center text-ink-faint"
+            // Smaller than the old 0.875 to match the smaller pill, and it
+            // keeps the faint ink: it is the affordance, not a word.
+            className="h-[0.8em] w-[0.8em] flex-none self-center text-ink-faint"
             strokeWidth={1.8}
           />
           <span className="sr-only">, {hint}</span>
@@ -646,6 +669,12 @@ export const OUT_MARKDOWN: Components = {
   ),
   a: ({ href, children }) => <OutLink href={href}>{children}</OutLink>,
   img: ({ alt }) => (
-    <span className="font-mono text-[0.875em] text-ink-faint">{alt === '' ? 'image' : alt}</span>
+    // MARKED, so the type-scale test can find the smallest rung in out by
+    // attribute rather than by a class it would have to restate. It used to
+    // find that rung on the link pill's host caption; the pill has no caption
+    // any more (`OutLink`), and this is the element that carries the size now.
+    <span data-out-alt className="font-mono text-[0.875em] text-ink-faint">
+      {alt === '' ? 'image' : alt}
+    </span>
   ),
 };

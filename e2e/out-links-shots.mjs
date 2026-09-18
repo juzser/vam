@@ -85,6 +85,12 @@ await page.addInitScript(() => {
     '',
     'I also checked ../../etc/passwd:1, which is not ours.',
     '',
+    // A TEXT THAT CLAIMS AN ADDRESS IT DOES NOT HAVE. The printed caption
+    // used to be what stopped this being believed; with the caption gone the
+    // NAME is replaced by the real host, and this is where that is measured
+    // on a real paint rather than in jsdom.
+    'A colleague sent [https://github.com/juzser/vam](https://evil.test/phish).',
+    '',
     // THE SHAPE THE OPERATOR ASKED ABOUT: a "Sources:" list. One named, one
     // self-named (the text IS the address, which is how agents write these
     // most of the time), one with a path long enough to fold.
@@ -273,7 +279,7 @@ const drawn = await page.evaluate(() => {
     tags: [...(out?.querySelectorAll('[data-out-link]') ?? [])].map((el) => el.tagName),
   };
 });
-check('the answer really rendered its controls', drawn.links === 6 && drawn.refs === 2, JSON.stringify(drawn));
+check('the answer really rendered its controls', drawn.links === 7 && drawn.refs === 2, JSON.stringify(drawn));
 check('and not one of them is an anchor', drawn.anchors === 0, JSON.stringify(drawn));
 check('every link is a real button', drawn.tags.every((t) => t === 'BUTTON'), JSON.stringify(drawn));
 check('the javascript: one is marked as refused before it is ever pressed', drawn.refused === 1, JSON.stringify(drawn));
@@ -339,8 +345,26 @@ const readPills = () =>
       display: cs.display,
       radius: cs.borderTopLeftRadius,
       borderStyle: cs.borderTopStyle,
+      borderWidth: cs.borderTopWidth,
       border: cs.borderTopColor,
       ink: cs.color,
+      // THE WASH, COMPOSITED. `backgroundColor` on the pill is an rgba with
+      // an alpha, and a contrast ratio wants the colour that is actually
+      // there -- so the alpha is resolved over the ground behind it here,
+      // where both are in hand, rather than in the check.
+      pillGround: (() => {
+        const over = groundOf(el);
+        const m = /rgba?\(([^)]+)\)/.exec(cs.backgroundColor);
+        const under = /rgba?\(([^)]+)\)/.exec(over);
+        if (m === null || under === null) return over;
+        const [r, g, b, a = '1'] = m[1].split(',').map((n) => Number.parseFloat(n));
+        const [br, bg, bb] = under[1].split(',').map((n) => Number.parseFloat(n));
+        const mix = (top, bottom) => Math.round(top * Number(a) + bottom * (1 - Number(a)));
+        return `rgb(${mix(r, br)}, ${mix(g, bg)}, ${mix(b, bb)})`;
+      })(),
+      // The paragraph's own ink, so "the link wears the prose's colour" is a
+      // comparison rather than a literal.
+      proseInk: el.parentElement === null ? null : getComputedStyle(el.parentElement).color,
       ground: groundOf(el),
       box: box(el),
       line,
@@ -369,12 +393,17 @@ console.log(
 );
 check(
   'every link is ONE inline-flex pill, rounded, with a real box',
-  pills.length === 6 &&
+  pills.length === 7 &&
     pills.every(
       (p) =>
         p.display === 'inline-flex' &&
-        Number.parseFloat(p.radius) >= p.box.height / 2 &&
-        p.box.width > 20 &&
+        // A CHIP'S CORNER, NOT A CAPSULE'S. The pill lost its border and its
+        // caption at the operator's second reading and is a small ground
+        // under a word now, so a full `height/2` radius would make a lozenge
+        // out of a phrase. Between 3px and half the box is the shape.
+        Number.parseFloat(p.radius) >= 3 &&
+        Number.parseFloat(p.radius) < p.box.height / 2 &&
+        p.box.width > 12 &&
         p.box.height > 0,
     ),
   JSON.stringify(pills.map((p) => [p.display, p.radius, p.box.width, p.box.height])),
@@ -385,23 +414,34 @@ check(
   JSON.stringify(pills.map((p) => [p.box.height, p.line])),
 );
 check(
-  `the runbook pill is narrower than the ${OLD_RUNBOOK_WIDTH}px its text + address used to take, by a fifth or more`,
-  runbook !== undefined && runbook.box.width <= 0.8 * OLD_RUNBOOK_WIDTH,
+  `the runbook pill is a THIRD of the ${OLD_RUNBOOK_WIDTH}px its text + address used to take`,
+  // It was "a fifth or more" when the pill still carried a host caption; the
+  // caption is gone, so the bar moves with it rather than staying where the
+  // old rendering could have crept back under it.
+  runbook !== undefined && runbook.box.width <= 0.35 * OLD_RUNBOOK_WIDTH,
   JSON.stringify(runbook?.box),
 );
 check(
-  'the host is painted INSIDE every pill, with a box of its own',
-  pills.every(
-    (p) => p.host !== null && p.host.box.width > 10 && p.host.box.height > 0 && within(p.host.box, p.box),
-  ),
-  JSON.stringify(pills.map((p) => p.host)),
+  'NO pill paints a path, a scheme or a folded address -- a name and a glyph is the whole of it',
+  pills.every((p) => !p.printed.includes('/') && !p.printed.includes('…') && !/https?:/.test(p.printed)),
+  JSON.stringify(pills.map((p) => p.printed)),
 );
 check(
-  'and it is the parsed host: punycode for the unicode one, the scheme for the refused one',
-  pills.some((p) => p.host?.text === 'xn--exmple-cua.test') &&
-    !pills.some((p) => p.printed.includes('ä')) &&
-    pills.some((p) => p.refused && p.host?.text === 'javascript:'),
-  JSON.stringify(pills.map((p) => p.host?.text)),
+  'a link that has no name of its own is named by its HOST, and a named one by its name',
+  // `docs.example.test` is written `<https://docs.example.test/retries>` in
+  // the fixture and `runbook` is `[runbook](...)`: the two cases, one rule.
+  pills.some((p) => p.printed === 'docs.example.test' && p.host?.text === 'docs.example.test') &&
+    pills.some((p) => p.printed === 'runbook' && p.host === null),
+  JSON.stringify(pills.map((p) => [p.printed, p.host?.text ?? null])),
+);
+check(
+  'a link whose TEXT claims an address it does not have paints the REAL host instead',
+  // The caption used to be what stopped a lying text from being believed.
+  // With the caption gone the name itself is replaced -- the lie is never
+  // painted at all. See `textLooksLikeAddress`.
+  pills.some((p) => p.address === 'https://evil.test/phish' && p.printed === 'evil.test') &&
+    !pills.some((p) => p.printed.includes('github.com/juzser')),
+  JSON.stringify(pills.map((p) => [p.printed, p.address])),
 );
 // Read off the WHOLE answer, not the pills: the rendering this replaced
 // printed the address in a sibling span OUTSIDE the button, and a scan of the
@@ -442,14 +482,23 @@ check(
 );
 check(
   'a glyph is painted at the end of every pill, inside it',
-  pills.every((p) => p.glyph !== null && p.glyph.width > 6 && within(p.glyph, p.box) && p.glyph.left > p.host.box.left),
+  // THE GLYPH IS THE WHOLE AFFORDANCE NOW: with no border and no second ink,
+  // it is the only thing that says "this opens something" -- a shape rather
+  // than a hue, which is what WCAG 1.4.1 asks for. It sits after the name.
+  pills.every((p) => p.glyph !== null && p.glyph.width > 6 && within(p.glyph, p.box) && p.glyph.left > p.box.left),
   JSON.stringify(pills.map((p) => p.glyph)),
 );
 check(
-  'the refused pill is drawn as what it is: dotted, in the faint ink',
-  pills.filter((p) => p.refused).every((p) => p.borderStyle === 'dotted' && p.ink === p.host?.ink) &&
-    pills.filter((p) => !p.refused).every((p) => p.borderStyle === 'solid'),
-  JSON.stringify(pills.map((p) => [p.refused, p.borderStyle, p.ink])),
+  'NO pill paints a border at all, and the live ones take the prose ink',
+  pills.every((p) => p.borderWidth === '0px') &&
+    pills.filter((p) => !p.refused).every((p) => p.ink === p.proseInk),
+  JSON.stringify(pills.map((p) => [p.printed, p.borderWidth, p.ink, p.proseInk])),
+);
+check(
+  'a pill IS a wash: its ground differs from the prose it sits in, and the refused one is faint',
+  pills.every((p) => p.pillGround !== p.ground) &&
+    pills.filter((p) => p.refused).every((p) => p.ink !== p.proseInk),
+  JSON.stringify(pills.map((p) => [p.printed, p.pillGround, p.ground, p.refused])),
 );
 
 // THE THREE INKS ON THE GROUND THEY ARE PAINTED ON, IN BOTH THEMES. The
@@ -465,20 +514,21 @@ for (const theme of ['dark', 'light']) {
   const themed = theme === 'dark' ? pills : await readPills();
   const inks = themed.map((p) => ({
     printed: p.printed,
-    border: Number(ratio(p.border, p.ground).toFixed(2)),
-    text: Number(ratio(p.ink, p.ground).toFixed(2)),
-    host: p.host === null ? null : Number(ratio(p.host.ink, p.ground).toFixed(2)),
-    ground: p.ground,
+    text: Number(ratio(p.ink, p.pillGround).toFixed(2)),
+    ground: p.pillGround,
   }));
   console.log(`${theme} inks: ${JSON.stringify(inks)}`);
+  // NO BORDER CHECK ANY MORE, and its absence is a decision rather than an
+  // omission: there is no border to measure, and the wash under the words is
+  // deliberately under 3:1 (`--vam-out-pill`, ~1.3:1 dark). A ground that
+  // carried meaning would have to clear 1.4.11; this one carries none -- the
+  // GLYPH is the affordance, checked above -- so what is left to prove is
+  // that the words are readable ON the wash, which is 1.4.3's 4.5:1 and is
+  // measured against the pill's own ground rather than the paragraph's,
+  // because the wash is what they are actually painted on.
   check(
-    `${theme}: every pill border clears 3:1 on the prose ground`,
-    inks.length === 6 && inks.every((i) => i.border >= 3),
-    JSON.stringify(inks),
-  );
-  check(
-    `${theme}: every pill text and every host clear 4.5:1 on the prose ground`,
-    inks.length === 6 && inks.every((i) => i.text >= 4.5 && i.host !== null && i.host >= 4.5),
+    `${theme}: every pill's words clear 4.5:1 on the wash they sit on`,
+    inks.length === 7 && inks.every((i) => i.text >= 4.5),
     JSON.stringify(inks),
   );
   if (theme === 'light') {
@@ -505,16 +555,15 @@ check(
   JSON.stringify(sources.map((p) => [p.box.top, p.box.bottom])),
 );
 check(
-  'the self-named one prints host + path, not the host twice, and the long path folded in the middle',
-  sources.some((p) => p.printed === 'code.example.test/juzser/vam/pull/383') &&
-    sources.some(
-      (p) =>
-        p.host?.text === 'docs.example.test' &&
-        p.printed.includes('…') &&
-        p.printed.endsWith('tab=readme') &&
-        !p.printed.includes('docs.example.testdocs.example.test'),
-    ),
-  JSON.stringify(sources.map((p) => p.printed)),
+  'the two self-named links are named by their hosts, with no path and nothing folded',
+  // They were `host + path`, the path folded at 24 characters, until the
+  // operator asked for the name and the icon alone. The hosts stay; the
+  // paths, the fold and the `…` go, and the addresses they came from are
+  // still on the controls.
+  ['code.example.test', 'docs.example.test'].every((host) =>
+    pills.some((p) => p.printed === host && (p.address ?? '').includes(host)),
+  ) && !pills.some((p) => p.printed.includes('…')),
+  JSON.stringify(pills.map((p) => p.printed)),
 );
 
 // THE DESTINATION OPENS ON FOCUS, not only on hover: the pill carries a
@@ -536,6 +585,19 @@ await page
   .catch(() => {});
 
 await page.screenshot({ path: `${outDir}/out-links-controls.png` });
+// AND THE ANSWER ALONE, clipped to the prose so the picture in `docs/ui` is
+// the pills rather than the window around them. Playwright's `clip`, because
+// `sips` ignores a crop offset on this machine.
+{
+  const body = await page.locator('[data-out-body]').first().boundingBox();
+  if (body !== null) {
+    await page.screenshot({
+      path: `${outDir}/out-link-pills.png`,
+      clip: { x: body.x, y: body.y, width: body.width, height: Math.min(body.height, 320) },
+    });
+    console.log(`${outDir}/out-link-pills.png`);
+  }
+}
 console.log(`${outDir}/out-links-controls.png`);
 
 // THE DOCS SHOT: the answer's body -- an inline pill, a refused one, and the
