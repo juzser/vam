@@ -28,10 +28,10 @@
  * `running`, `waiting`, `failed` and `done` are the four status glyphs
  * `panels/status-mark.tsx` draws on the sidebar row, and a tab draws the same
  * glyph so the two surfaces say one thing. A session has one status, so at
- * most one of the four is ever drawn; the toggles decide which STATUSES earn
- * a mark, not how many marks a tab gets. `done` ships off: a finished session
- * is the commonest thing left open after a working day, and a tick on every
- * one of them is the grey dot again in a different shape.
+ * most one of the four is ever drawn; `TAB_INDICATORS` below decides which
+ * STATUSES earn a mark, not how many marks a tab gets. `done` ships off: a
+ * finished session is the commonest thing left open after a working day, and
+ * a tick on every one of them is the grey dot again in a different shape.
  *
  * ── THE THREE THAT RIDE AFTER THE TITLE ───────────────────────────────────
  * `draft` (a pencil: unsent text in this session's composer) ships on,
@@ -43,28 +43,24 @@
  * pane and on the sidebar row, and both are transient enough that a tab
  * flashing them reads as noise to anyone who did not ask for it.
  *
- * ── STORED AS A LIST OF IDS ───────────────────────────────────────────────
- * A JSON array of the ids that are ON, rather than a record of eight
- * booleans: a payload from a vam that had seven indicators reads back with
- * seven, one that had nine reads back with eight, and neither shape needs a
- * migration. The cost is that the list has to be normalised -- deduplicated,
- * unknown words dropped, and put in `TAB_INDICATOR_IDS` order -- which
- * `readTabIndicators` does on every read AND every write, so two payloads
- * that mean the same set are the same list.
- *
- * NOT A STORE WITH A SUBSCRIPTION, unlike `terminal-font.ts` beside it. That
- * shape exists for a value read by components mounted far from the prefs
- * (one `DetailPanel` per split leaf, and another in `PhoneShell`). The tab
- * strip is rendered by `CanvasInner`, the component that owns `prefs`, so
- * the list is a prop and there is nothing for a subscription to shortcut.
+ * ── NOT A PREF, SO NOT A MODULE WITH A READER ─────────────────────────────
+ * Nothing here is stored, normalised or subscribed to, and this module owns
+ * no state: `TAB_INDICATORS` is a constant and `isTabIndicatorOn` reads it
+ * directly. There is no payload to migrate, and no store to shortcut --
+ * unlike `terminal-font.ts` beside it, which is a store with a subscription
+ * because its value is read by components mounted far from the prefs (one
+ * `DetailPanel` per split leaf, and another in `PhoneShell`). `Canvas.tsx`
+ * imports `isTabIndicatorOn` and calls it; nothing here travels through
+ * `prefs.ts`, which is why that file imports this one not at all.
  */
 
 /**
- * Every indicator a tab can draw, in the order the dialog lists them and the
- * order a stored list is normalised to. THE ONLY LIST: the type below, the
- * defaults, the settings rows and the tests all derive from it.
+ * Every indicator a tab can draw. THE ONLY LIST: the type below, the constant
+ * below that, and the tests all derive from it. The dialog and the settings
+ * rows this comment used to name went with the pref, so the list they once
+ * ordered is now ordered only by the strip.
  *
- * The order is also the strip's reading order: the four status marks first
+ * That order is the strip's reading order: the four status marks first
  * (a tab draws at most one), then the session's own icon, then the three that
  * follow the title.
  */

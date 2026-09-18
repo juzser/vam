@@ -10,11 +10,12 @@
  * and in its place is AT MOST ONE status mark, the same glyph the sidebar row
  * draws (`panels/status-mark.tsx`), then the session's icon, then the title,
  * then the three indicators that are about the operator's own state rather
- * than the agent's. Each is a switch in Settings (`prefs/tab-indicators.ts`),
- * and idle is not one of them.
+ * than the agent's. Which of them ship is a constant, not a switch in
+ * Settings (`prefs/tab-indicators.ts` -- see `seed` below), and idle is not
+ * one of them.
  *
  * WHAT THIS FILE CAN SAY: which elements the strip puts in the DOM for which
- * state and which preference, and what a screen reader is handed. What it
+ * state and which indicator, and what a screen reader is handed. What it
  * cannot: that the marks paint, that the row does not grow, that an idle tab
  * is narrower than a marked one. Those are pixels, and
  * `e2e/tab-strip-shots.mjs` measures them in Chromium.
