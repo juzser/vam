@@ -1481,10 +1481,19 @@ check(
 // --- 12.4 THE CONTROL IS REACHABLE, IN THE BUNDLE THAT IS SERVED. Everything
 // above arrives through `localStorage`, which would stay green if the settings
 // row had never been built. This is the operator's own path: open settings,
-// click the mode, watch the column.
+// go to the section, click the mode, watch the column.
 await openSession(foldedPage, 'factory-sse-1');
 await foldedPage.locator('button[aria-label="settings"]').first().click();
 await foldedPage.waitForSelector('[data-settings-nav]');
+// AND THE NAV STEP IS PART OF THAT PATH NOW. The overlay opens on Appearance
+// and focus view lives under Behaviour since the look/behaviour split
+// (`settings/sections.ts`). Every panel stays MOUNTED, so the selectors below
+// went on matching while the row was unreachable -- `innerText()` on a
+// `hidden` subtree answers the empty string, and `.click()` waits for a
+// visibility that never comes. Navigating is what keeps the four checks below
+// about a control a person could actually have pressed.
+await foldedPage.locator('[data-settings-nav-item="behaviour"]').click();
+await foldedPage.waitForTimeout(150);
 const promised = await foldedPage
   .locator('[data-focus-view-note]')
   .innerText()

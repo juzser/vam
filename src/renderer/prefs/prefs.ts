@@ -26,6 +26,7 @@ import type { CanvasModel, SourceId } from '../domain/model.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
+import { DEFAULT_CONCISE_OUTPUT, readConciseOutput } from './concise-output.js';
 import {
   clampEditorIndent,
   DEFAULT_EDITOR_HIGHLIGHT,
@@ -580,6 +581,30 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly narrowViews: boolean;
+  /**
+   * Whether vam asks the agent for a shorter, clearer answer.
+   *
+   * THE ONE FIELD IN THIS RECORD NOTHING IN THE RENDERER READS, and that is
+   * the fact worth carrying here. Every other preference changes something on
+   * screen or in `localStorage`; this one changes what vam TYPES INTO SOMEBODY
+   * ELSE'S PANE. It reaches the only code that consults it -- main, at the
+   * seam where a prompt becomes keystrokes -- over `window.api.prefs`, pushed
+   * by `activatePrefs` on every read and write, the same crossing `prRepos`
+   * makes and for the same reason.
+   *
+   * `prefs/concise-output.ts` carries why the default is off;
+   * `main/terminal/concise.ts` carries what is sent, when it travels, and the
+   * limit vam cannot see (a `/clear` empties the agent's context and nothing
+   * tells vam).
+   *
+   * GLOBAL, for the reason `focusView` is, plus one of its own: it is a
+   * standing instruction about how the operator wants to be answered, which
+   * does not change between the sessions they have open.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly conciseOutput: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -609,6 +634,7 @@ export const EMPTY_PREFS: Prefs = {
   terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
   terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
   narrowViews: DEFAULT_NARROW_VIEWS,
+  conciseOutput: DEFAULT_CONCISE_OUTPUT,
 };
 
 /**
@@ -864,6 +890,11 @@ function parsePrefs(
     // not re-shape four views -- and re-wrap a running tmux session -- on the
     // strength of a choice nobody made.
     narrowViews: readNarrowViews((parsed as { narrowViews?: unknown }).narrowViews),
+    // Per field like every line above it, and normalised in the strictest
+    // direction any reader here takes: only a literal `true` is on, because
+    // this is the one preference whose "on" position TYPES SOMETHING INTO A
+    // RUNNING AGENT. A payload vam cannot read must not do that.
+    conciseOutput: readConciseOutput((parsed as { conciseOutput?: unknown }).conciseOutput),
   };
 }
 
@@ -1311,6 +1342,14 @@ export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
  *  future caller can send anything, and only a literal `true` may narrow. */
 export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
   return { ...prefs, narrowViews: readNarrowViews(narrow) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it -- and this is the one where the direction is not a nicety: anything but
+ *  a literal `true` is off, because "on" means vam types a paragraph of its
+ *  own into a pane somebody's agent is reading. */
+export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, conciseOutput: readConciseOutput(on) };
 }
 
 /**
@@ -2343,9 +2382,10 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
   setActiveNarrowViews(prefs.narrowViews);
   /**
-   * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
-   * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has
-   * no access to this store.
+   * AND TWO PREFERENCES CROSS INTO MAIN, because the thing each one changes
+   * happens there: `gh` is spawned by `main/sources/claude-code/source.ts`,
+   * and the concise-output rules are typed into a pane by
+   * `main/terminal/concise.ts`. Neither has access to this store.
    *
    * HERE RATHER THAN AT THE PICKER, for the reason every line above it is
    * here: `activatePrefs` runs on every read AND every write, so a reload arms
@@ -2362,6 +2402,21 @@ export function activatePrefs(prefs: Prefs): Prefs {
    * has no `prefs` at all and this must simply not happen.
    */
   globalThis.window?.api?.prefs?.setPrRepos?.(prefs.prRepos)?.catch?.(() => {});
+  /**
+   * THE SECOND CROSSING, AND THE ONLY READER THIS PREFERENCE HAS. Nothing in
+   * the renderer consults `conciseOutput`; main does, at the seam where a
+   * prompt becomes keystrokes. So this line is not a projection that can go
+   * one poll stale like the map above it -- it IS the setting. Wired to the
+   * control alone it would leave main holding `false` until somebody opened
+   * settings, and every session started before that would be answered at full
+   * length by a vam whose switch was on.
+   *
+   * BOTH STATES ARE PUSHED. `false` is as load-bearing as `true` here: it is
+   * how turning the switch off reaches main at all, and -- because main clears
+   * its priming ledger on `false` -- it is what makes off-and-on-again the
+   * operator's one way to re-arm a session whose agent has forgotten.
+   */
+  globalThis.window?.api?.prefs?.setConciseOutput?.(prefs.conciseOutput)?.catch?.(() => {});
   return prefs;
 }
 

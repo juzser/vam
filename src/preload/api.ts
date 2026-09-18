@@ -135,19 +135,26 @@ export const unwrapAgentWork = (pending: Promise<unknown>): Promise<AgentWork> =
   unwrapIntoArm(pending) as Promise<AgentWork>;
 
 /**
- * The per-project pull-request directories, pushed into main.
+ * THE PREFERENCES MAIN NEEDS A COPY OF. Two, now.
  *
  * ITS OWN FACTORY, AND NOT PART OF `DesktopSourceApi`, which is the whole
  * point. `DesktopSourceApi` is `PreloadSourceApi` minus one member -- the
- * shape a paired phone also implements over HTTP -- and adding this there
- * would put "a directory this machine spawns a process in" on the remote
- * routes. It is a preference main happens to need, not a thing the source can
- * do, so it sits beside `clipboard` and `dialog` as its own desktop-only
- * member. See `main/sources/claude-code/pr-repos.ts` for the argument.
+ * shape a paired phone also implements over HTTP -- and adding either of these
+ * there would put a desktop-only act on the remote routes: "a directory this
+ * machine spawns a process in" for the first, and "what vam types into an
+ * agent running on this machine" for the second. They are preferences main
+ * happens to need, not things the source can do, so they sit beside
+ * `clipboard` and `dialog` as their own desktop-only member. See
+ * `main/sources/claude-code/pr-repos.ts` and `main/terminal/concise.ts`.
+ *
+ * NEITHER DECIDES ANYTHING HERE. Both forward a value main validates on its
+ * own side, because the renderer is the least trusted process in the app and a
+ * check in the preload is a check the renderer could have skipped.
  */
 export function createPrefsBridge(ipc: InvokerLike) {
   return {
     setPrRepos: (map: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setPrRepos, map)),
+    setConciseOutput: (on: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setConciseOutput, on)),
   };
 }
 
