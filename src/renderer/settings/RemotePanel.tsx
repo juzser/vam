@@ -33,10 +33,9 @@ const POLL_MS = 1_000;
  * trying whether `tailscale serve` itself would still succeed.
  */
 const NO_ADDRESS: Record<string, string> = {
-  'no-cli': 'vam could not ask this machine for its address: there is no tailscale command here.',
-  'not-running':
-    'Tailscale is not running on this machine, so there is no address for the phone to reach yet.',
-  'no-name': 'Tailscale is running but reported no MagicDNS name, and vam will not guess one.',
+  'no-cli': 'No tailscale command on this machine, so vam cannot ask for an address.',
+  'not-running': 'Tailscale is not running here, so there is no address for the phone yet.',
+  'no-name': 'Tailscale reported no MagicDNS name, and vam will not guess one.',
 };
 
 /**
@@ -89,14 +88,14 @@ const ACT_FAILED: Record<ActName, string> = {
 /** The registry's own trouble, which no surface said before. */
 const REGISTRY_TROUBLE: Record<'unreadable' | 'write-failed', string> = {
   unreadable:
-    'vam could not read its device registry, so it is admitting no phone at all. It has NOT overwritten the file -- pairing a device would, so vam refuses until the file is readable again.',
+    'vam could not read its device registry, so it is admitting no phone. The file is NOT overwritten -- pairing a device would overwrite it, so vam refuses until it reads again.',
   'write-failed':
-    'The last pairing change could not be written to disk, so it did not take effect: a device you allowed is not paired, and one you removed may still be.',
+    'The last pairing change was not written to disk, so it did not take effect: an allowed device is not paired, and a removed one may still be.',
 };
 
 /** The same tail on every one: the endpoint answered, so it is not the cause. */
 const ACT_TAIL =
-  ' The remote endpoint is running -- this failed inside vam, most often a device registry it could not write. The list below is the last state vam read.';
+  ' The remote endpoint is running, so this failed inside vam -- most often a registry it could not write. The list below is the last state vam read.';
 
 export function desktopRemoteApi(): RemoteApi | undefined {
   return (globalThis.window?.api as unknown as BridgeWithRemote | undefined)?.remote;

@@ -330,9 +330,8 @@ export function PairingPanel(props: PairingPanelProps) {
       <div>
         <h4 className={HEADING}>Remote access</h4>
         <p className={`mt-1 ${HINT}`}>
-          Everyone on your tailnet reaches this address — every laptop, phone, server and shared-in
-          guest. Being on the tailnet does not authorise a device to drive your agents; pairing it
-          here is what does.
+          Everyone on your tailnet can reach this address, shared-in guests included. Only a device
+          paired here can drive your agents.
         </p>
       </div>
 
@@ -350,11 +349,11 @@ export function PairingPanel(props: PairingPanelProps) {
         <h4 className={HEADING}>Connecting a phone</h4>
         <ol data-testid="pairing-steps" className="mt-2 flex list-none flex-col gap-1.5">
           <Step id="tailscale" done={!serve.cliMissing}>
-            Install Tailscale on this machine and on the phone, and sign both into the same tailnet.
+            Install Tailscale on this machine and on the phone, both signed into the same tailnet.
           </Step>
           <Step id="serve" done={serve.enabled}>
             Turn on phone access below. It runs <code>tailscale serve</code>, which puts this
-            machine's loopback server behind an <code>https://…ts.net</code> address.
+            machine behind an <code>https://…ts.net</code> address.
           </Step>
           {/* WHAT THE PHONE SHOWS, named here, because the operator is holding
               that phone while they read this and "it worked" has to be
@@ -364,23 +363,19 @@ export function PairingPanel(props: PairingPanelProps) {
               screen on the desktop" -- which the operator dutifully did, and
               found this walkthrough telling them to scan the code. */}
           <Step id="open">
-            On the phone, scan the QR code beside that address with the camera — or open the address
-            by hand. A pairing form loads, asking for a code; it can reach nothing else until it has
-            one.
+            On the phone, scan the QR beside that address — or open the address by hand. A pairing
+            form loads, and it can reach nothing else until it has a code.
           </Step>
           <Step id="code">
-            Press “Regenerate” here for a code, and type those eight characters into that form. The
-            code lives two minutes, is single-use, and is deliberately not in the QR: the address is
-            not a secret, and pairing is what authorises a device.
+            Ask for a code here and type its eight characters into that form. The code lasts two
+            minutes, works once, and is not in the QR.
           </Step>
           <Step id="allow" done={props.devices.length > 0}>
-            Allow the device when it appears here. You can revoke it later, one at a time or all at
-            once.
+            Allow the device when it appears here. You can revoke it later.
           </Step>
         </ol>
         <p data-testid="pairing-steps-note" className={`mt-2 ${HINT}`}>
-          A tick is what vam can see from here. The two steps on the phone have none, because this
-          machine has no way to know a camera was pointed at anything.
+          A tick is what vam can see from here. The two steps on the phone have none.
         </p>
       </div>
 
@@ -436,8 +431,7 @@ export function PairingPanel(props: PairingPanelProps) {
               </div>
             )}
             <p data-testid="serve-on" className={`mt-1 ${HINT}`}>
-              Phone access is on. Your whole tailnet — every laptop, phone, tablet, server, CI
-              runner and shared-in guest on it — can reach this port until you turn it off.
+              Phone access is on. Your whole tailnet can reach this port until you turn it off.
             </p>
             <button
               type="button"
@@ -452,11 +446,8 @@ export function PairingPanel(props: PairingPanelProps) {
         ) : (
           <>
             <p data-testid="serve-off" className={`mt-1 ${HINT}`}>
-              Enabling this runs <code>tailscale serve</code> on this machine: a standing
-              configuration change that puts this port in front of your whole tailnet — every
-              laptop, phone, tablet, server, CI runner and shared-in guest — until you turn it off
-              again. It outlives vam, and it is https only: the certificate is what lets the phone
-              keep a credential at all.
+              This runs <code>tailscale serve</code>: a standing change that puts this port in front
+              of your whole tailnet, over https, until you turn it off. It outlives vam.
             </p>
             <button
               type="button"
@@ -478,8 +469,7 @@ export function PairingPanel(props: PairingPanelProps) {
             className="mt-2 rounded-md border border-line-loud bg-well p-3"
           >
             <p className={HINT}>
-              Serve is turned off for your whole tailnet. A tailnet admin needs to turn it on here,
-              then Enable phone access can be pressed again:
+              Serve is off for your whole tailnet. An admin turns it on here, then try again:
             </p>
             <ExternalLink
               href={serve.tailnetServeDisabledUrl}
@@ -506,8 +496,8 @@ export function PairingPanel(props: PairingPanelProps) {
       <div className={SECTION}>
         <p data-testid="pairing-writes" className={HINT}>
           {props.allowWrites
-            ? 'This server accepts writes: a paired device can close sessions and type into a running agent.'
-            : 'This server is read-only: the write routes are not registered at all.'}
+            ? 'A paired device can close sessions and type into a running agent.'
+            : 'Read-only: the write routes are not registered.'}
         </p>
         {/* A SWITCH, BECAUSE THIS ONE IS A SETTING. It stores a boolean and
             does nothing else -- it runs nothing, reaches nothing outside vam,
@@ -588,8 +578,8 @@ export function PairingPanel(props: PairingPanelProps) {
           <p data-testid="pairing-grant" className={`mt-2 ${HINT}`}>
             Allow it?{' '}
             {props.allowWrites
-              ? 'It will be able to read your sessions and to type into a running agent.'
-              : 'It will be able to read your sessions; this server is read-only, so it cannot type into an agent.'}
+              ? 'It will read your sessions and type into a running agent.'
+              : 'It will read your sessions. This server is read-only, so it cannot type into one.'}
           </p>
           <p data-testid="pairing-source" className={HINT}>
             Connecting from {view.awaiting.source}.
@@ -608,8 +598,8 @@ export function PairingPanel(props: PairingPanelProps) {
       {view.burned || throttled ? (
         <p data-testid="pairing-warning" role="alert" className={ALERT_BOX}>
           {throttled
-            ? 'Too many failed attempts: an unpaired device is trying to connect. Pairing is off for 15 minutes.'
-            : 'Code burned after five wrong answers — press Regenerate for a new one.'}
+            ? 'Too many wrong codes. Pairing is off for 15 minutes.'
+            : 'Code burned after five wrong answers. Regenerate for a new one.'}
         </p>
       ) : null}
 
