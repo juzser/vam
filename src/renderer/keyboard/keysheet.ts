@@ -14,6 +14,7 @@
  * read what a key does.
  */
 
+import { EDITOR_KEYS, TREE_KEYS } from '../panels/files-tree.js';
 import { TABS } from '../panels/tabs.js';
 import {
   activeBindings,
@@ -434,8 +435,18 @@ type SheetRow = {
    */
   readonly dead: string | null;
 };
+/**
+ * Which section of the sheet a group is.
+ *
+ * `files` is the one that is NOT an `ActionGroup`, and it is deliberately
+ * absent from `GROUP_ORDER`: that tuple orders the groups derived from
+ * `BINDING_TABLES`, and the Files tab's keyboard is not in that table. See
+ * `buildFilesSheet` for the whole of why.
+ */
+export type SheetGroupId = ActionGroup | 'files';
+
 type SheetGroup = {
-  readonly group: ActionGroup;
+  readonly group: SheetGroupId;
   readonly title: string;
   readonly rows: readonly SheetRow[];
 };
@@ -632,4 +643,86 @@ export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetG
       // and a titled empty group is a heading that advertises nothing.
       .filter((group) => group.rows.length > 0)
   );
+}
+
+/* ---------------------------------------------------------------------------
+ * THE FILES TAB'S OWN KEYBOARD, ON THE SAME SHEET.
+ *
+ * The defect: that tab's filter has shipped since the tab did, `/` has always
+ * reached it, and `?` — the one place an operator goes to ask what a key is —
+ * had no Files section at all. A real feature, invisible, which is how an
+ * operator came to ask for a file-search shortcut that already half existed.
+ *
+ * WHY THIS IS A SECOND BUILDER RATHER THAN A SIXTH GROUP IN `buildKeySheet`.
+ * That one walks `BINDING_TABLES`, and the rest of this repo reads its output
+ * as exactly that: `bindings.test.ts` resolves every row it emits through
+ * `resolveChord` to prove the sheet names no key nothing is bound to, and
+ * `binding-clashes.test.ts` derives each row's `dead` mark from what the
+ * keystroke actually reaches. The Files tab's keys are deliberately NOT in
+ * that table — `files-tree.ts` argues the case: they are hardcoded, which is
+ * "exactly what makes writing one into a tooltip honest rather than a lie
+ * waiting for the operator to rebind something" — so folding them in would
+ * have asked those assertions a question with no answer, `Mod-p` first, being
+ * precisely the chord the grammar leaves unbound.
+ *
+ * SO THE PROPERTY IS KEPT AND THE MECHANISM IS NOT. `buildKeySheet`'s contract
+ * is that a row exists only because a binding does, and this holds the same
+ * bargain against the other source of truth: `TREE_KEYS` and `EDITOR_KEYS` are
+ * what `resolveTreeKey` and `FilesTab.tsx`'s handlers dispatch on, so a key
+ * taken out of a list stops working, and one put in without a caption THROWS
+ * here rather than rendering a blank line nobody notices. A key added later
+ * cannot silently go undocumented, which is the whole reason it is derived.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * What one Files-tab key does, in the fewest words that are still true.
+ *
+ * Keyed by the string `normalizeKey` produces, because that is what the two
+ * lists hold and what the handlers compare against — one spelling, or the
+ * sheet and the code could disagree about which keystroke a row is.
+ */
+const FILES_KEY_LABELS: Readonly<Record<string, string>> = {
+  j: 'down one row of the tree',
+  k: 'up one row of the tree',
+  h: 'shut this directory, or step out to the one holding it',
+  l: 'open this directory, or step into it — on a file, open it in the editor',
+  Enter: 'open the file and put the caret in the editor',
+  '/': 'filter the tree — from the tree',
+  'Mod-p': 'find a file — from anywhere in the tab, the editor included',
+  'Mod-Shift-e': 'move the keyboard between the editor and the tree',
+  Tab: 'indent in the editor — Shift+Tab outdents',
+  'Mod-s': 'save the open file',
+  'Mod-Shift-f': 'tidy this file’s whitespace — refuses by name where it cannot',
+  'Mod-Shift-m': 'markdown: the rendered document, or its raw text',
+  'Mod-z': 'undo the last format, while the file is still what it produced',
+  Escape: 'hand the keyboard back to Select',
+  'Mod-[': 'hand the keyboard back to Select',
+};
+
+/** What the section is called. Lower case, like every other group title. */
+const FILES_GROUP_TITLE = 'in the files tab';
+
+/**
+ * The Files section: one row per key that tab answers, in the order the lists
+ * declare them — the tree's keyboard, then the editor's, deduplicated because
+ * `Escape` and `Mod-[` are on both and mean one thing.
+ *
+ * The parameter exists so the throw is reachable from a test, exactly as
+ * `buildKeySheet`'s `overrides` is; nothing in the app passes it.
+ */
+export function buildFilesSheet(
+  keys: readonly string[] = [...TREE_KEYS, ...EDITOR_KEYS],
+): readonly SheetGroup[] {
+  const rows = [...new Set(keys)].map((key): SheetRow => {
+    const label = FILES_KEY_LABELS[key];
+    if (label === undefined || label === '') {
+      throw new Error(`no caption for the Files-tab key "${key}" — add one to FILES_KEY_LABELS`);
+    }
+    // `mode` and `dead` are `null` rather than guessed at: these keys belong
+    // to one tab rather than to a cursor mode, and nothing in the grammar can
+    // shadow them — the tab answers them before the window listener is
+    // reached, and claims exactly what it answers.
+    return { keys: key, label, mode: null, dead: null };
+  });
+  return rows.length === 0 ? [] : [{ group: 'files', title: FILES_GROUP_TITLE, rows }];
 }

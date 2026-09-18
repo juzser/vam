@@ -483,6 +483,80 @@ check(
   await page.evaluate(() => document.activeElement?.matches('[data-files-editor]') ?? false),
 );
 
+/**
+ * `Mod-p` — FILE SEARCH, FROM THE ONE PLACE `/` CAN NEVER BE PRESSED.
+ *
+ * Measured here rather than only in happy-dom for this file's own stated
+ * reason: what is being claimed is that the keyboard MOVES, out of a
+ * `<textarea>` and into an `<input>`, and `document.activeElement` in a unit
+ * environment is not the browser's answer to who owns the keyboard. The
+ * selection is the same kind of claim — `focus()` does not select, and only a
+ * real text control has a real selection to read back.
+ *
+ * `Meta+p`, NOT `Control+p`, AND THE DIFFERENCE IS NOT COSMETIC. `normalizeKey`
+ * folds Control into `Mod-` only for the letters in `CTRL_GESTURES` (`d` and
+ * `u`), so on a Mac `Control+p` arrives spelled `Ctrl-p` and reaches nothing at
+ * all — a guard written that way would have gone green against a key the tab
+ * does not answer. `Meta+p` spells `Mod-p` on both platforms: on darwin
+ * through `metaKey`, and off it because `mod` is `ctrlKey || metaKey`.
+ */
+await page.keyboard.press('Meta+p');
+await page
+  .waitForFunction(() => document.activeElement?.matches('[data-files-filter]') ?? false, null, {
+    timeout: 3_000,
+  })
+  .catch(() => {});
+check(
+  'Mod-p moves the keyboard from the editor to the filter box',
+  await page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false),
+  await page.evaluate(() => document.activeElement?.outerHTML?.slice(0, 120) ?? 'nothing focused'),
+);
+
+// It searches: what is typed there narrows the tree to what matches.
+await page.keyboard.type('env');
+const treeAfterSearch = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-files-row]')].map(
+    (row) => row.getAttribute('data-files-row-path') ?? '',
+  ),
+);
+check(
+  'and the box it lands in is the one that filters the tree',
+  treeAfterSearch.length > 0 && treeAfterSearch.every((path) => path.includes('env')),
+  JSON.stringify(treeAfterSearch),
+);
+
+// A SECOND PRESS RESTARTS THE SEARCH. Read as a real selection, which is the
+// half no unit environment can answer for.
+await page.keyboard.press('Meta+p');
+const selection = await page.evaluate(() => {
+  const box = document.querySelector('[data-files-filter]');
+  return box === null ? null : { start: box.selectionStart, end: box.selectionEnd, v: box.value };
+});
+check(
+  'a second Mod-p selects what is already there, so the next keystroke starts over',
+  selection !== null && selection.start === 0 && selection.end === selection.v.length,
+  JSON.stringify(selection),
+);
+await page.keyboard.type('src');
+check(
+  'and typing really does replace the stale search rather than appending to it',
+  (await page.evaluate(
+    () => document.querySelector('[data-files-filter]')?.value ?? '',
+  )) === 'src',
+);
+
+// Back to where the rest of this file expects the keyboard: clear the filter,
+// and put the caret in the editor again.
+await page.keyboard.press('Meta+p');
+await page.keyboard.press('Backspace');
+await editor.click();
+await page.waitForFunction(
+  () => document.activeElement?.matches('[data-files-editor]') ?? false,
+  null,
+  { timeout: 3_000 },
+);
+await editor.press('End');
+
 // Leave the way the composer's own Mod-[ does, and confirm Select comes back.
 await page.keyboard.press('Control+[');
 await page.waitForFunction(
