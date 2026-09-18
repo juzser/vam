@@ -45,7 +45,7 @@ import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.j
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
-import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
+import type { PaneKey, PaneSendResult, PaneView, SessionModel } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
@@ -391,6 +391,21 @@ export type TerminalApi = {
    * same screen.
    */
   prompt(projectId: string, rowId?: string): Promise<PromptView>;
+  /**
+   * WHICH MODEL the session in that pane is running, read off the CLI's own
+   * status line.
+   *
+   * A read like `prompt`, and beside it for the same reason those two are one
+   * act: this is the fact the model BUTTON is drawn from, and the picker
+   * underneath types `/model <alias>` down `send`. Before this member existed
+   * vam typed a request and never looked, so the button could only ever be
+   * labelled with the word "model".
+   *
+   * `{ kind: 'unknown' }` is a normal answer and not a failure: a session with
+   * a question open is not painting its status line at all
+   * (`shared/terminal.ts`).
+   */
+  model(projectId: string, rowId?: string): Promise<SessionModel>;
 };
 
 /**
@@ -421,6 +436,10 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalPrompt, projectId)
         : ipc.invoke(CHANNELS.terminalPrompt, projectId, rowId)) as Promise<PromptView>,
+    model: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalModel, projectId)
+        : ipc.invoke(CHANNELS.terminalModel, projectId, rowId)) as Promise<SessionModel>,
   };
 }
 
