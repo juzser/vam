@@ -539,6 +539,33 @@ function paneColumn(paneId: string): HTMLElement | null {
 }
 
 /**
+ * DOES THIS PANE HAVE A BOX FOR `i` TO OPEN? — read off the pane, like
+ * everything else on this path.
+ *
+ * `i` means "type into the thing I am pointing at", and until now it answered
+ * that with `beginComposing()` whatever the pane was showing. That is only
+ * true of a pane that HAS a composer. `DetailPanel.tsx` draws the composer bar
+ * on neither `Terminal` nor `Files` (the editor and the screen are full-pane
+ * surfaces with their own keyboards, and a second insert scope underneath them
+ * would compete for the same keystrokes), and withdraws it while an unanswered
+ * question is on screen. In all three states `beginComposing` set a flag that
+ * nothing reads, focused nothing, and said nothing — a key indistinguishable
+ * from a frozen application, which is the family `keyboard/focus-scope.ts` was
+ * written to end.
+ *
+ * ASKED OF THE MARKUP AND NOT OF `viewBySession`, deliberately. The view is
+ * what the pane was ASKED to show; a Terminal view can be drawing a refusal
+ * sentence with nothing to type into, and a source with no route to record a
+ * prompt draws no composer on a Response view. The question `i` needs answered
+ * is what is ON SCREEN in this pane, which is the one thing a DOM read cannot
+ * be wrong about. It is `paneElement`'s own argument, and `paneColumn` above
+ * is the same shape.
+ */
+function paneComposer(paneId: string): HTMLElement | null {
+  return paneElement(paneId)?.querySelector<HTMLElement>('[data-composer-bar]') ?? null;
+}
+
+/**
  * WHY THIS PANE CANNOT BE SPLIT ON THIS AXIS, or `null` when it can.
  *
  * ONE function for every route that makes a pane — `zv`, `zs` and the drop on
@@ -5387,7 +5414,38 @@ function CanvasInner({
           // from inside the box, moved a session instead of switching a tab.
           // Composing happens INSIDE Insert; there was never a third mode,
           // and `beginComposing` is the one place that says so.
-          beginComposing();
+          if (paneComposer(focusedPaneId) !== null) {
+            beginComposing();
+            return;
+          }
+          /**
+           * — AND THE PANE WITH NO BOX TO OPEN, which is where the sentence
+           * above stopped being true.
+           *
+           * `beginComposing` sets a flag only a composer reads, so in a pane
+           * that draws none (`paneComposer`: the Terminal view, the Files
+           * view, an unanswered question) `i` set it, focused nothing, and
+           * said nothing. It cost the operator most on the TERMINAL, where
+           * this key is now the only way in: nothing focuses that pane on
+           * arrival any more, at their request ("can I still have to press
+           * `i` to focus the terminal input?"), and a key that silently does
+           * nothing would have left the screen reachable by mouse alone.
+           *
+           * THE SAME LANDING `I` MAKES, through the same one authority for
+           * where the keyboard goes in a pane — `focusInsertStop`, which
+           * takes the pane's first stop in document order: the question's
+           * options when one is open, the terminal's screen or the file
+           * editor on those views. That priority is not a second list to keep
+           * in step with this one, it is the layout (`focus-scope.ts`), and
+           * it is what `i` was already documented there as following.
+           *
+           * AND IT REFUSES ALOUD WHEN IT CANNOT LAND, for `focusAction`'s
+           * reason: the operator ASKED for the keyboard and is owed an answer
+           * about a pane that has nowhere to put it.
+           */
+          if (!focusInsertStop(paneElement(focusedPaneId))) {
+            setStatus('nothing in this pane takes typing — no prompt box, no question, no screen');
+          }
           return;
         }
         case 'open': {

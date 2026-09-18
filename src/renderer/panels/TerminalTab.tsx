@@ -951,30 +951,35 @@ export function TerminalTab({
   const run = useRef(0);
 
   /**
-   * FOCUS ON ARRIVAL, ONCE. This component is mounted by the tab switch and by
-   * nothing else, so the first pane it draws IS the operator arriving at the
-   * terminal, and the tab they opened to type in should be ready to type in.
+   * NOTHING FOCUSES THIS PANE ON ARRIVAL, AND THAT IS THE OPERATOR'S RULE.
    *
-   * THE LATCH IS THE WHOLE POINT and it was missing. `showing` is not a mount
-   * signal: the `shownFor` block above sets `view` to `null` DURING RENDER
-   * whenever the project changes, so `showing` goes true, false, true again
-   * on every session switch -- and a bare `if (showing) focus()` therefore
-   * took focus back every time. Escape let go and the next read grabbed on,
-   * so `j` to move to the next session typed a `j` into that session's agent
-   * instead, forever. A transient `unavailable` read did the same thing.
-   * Latching means the way out stays out: once this component has given the
-   * pane focus, only the operator decides where focus goes next.
+   * There was a latched effect here -- `FOCUS ON ARRIVAL, ONCE` -- that called
+   * `takeKeyboard()` the first time a screen was drawn. Their report,
+   * translated: "when I go into terminal mode, can it not automatically enter
+   * insert mode straight away -- can I still have to press `i` to focus the
+   * terminal input?" Opening a tab to LOOK at it put the next keystroke into a
+   * running agent, and this is the one surface in vam where that is somebody
+   * else's machine rather than a text box.
+   *
+   * WHAT THE LATCH WAS FOR IS NOW UNREACHABLE RATHER THAN GUARDED, which is
+   * the better half of the deletion. `showing` was never a mount signal: the
+   * `shownFor` block above sets `view` to `null` DURING RENDER whenever the
+   * project changes, so it goes true, false, true again on every session
+   * switch -- and a bare `if (showing) focus()` took the keyboard back each
+   * time, so the `j` that moves to the next session was typed into that
+   * session's agent instead. A transient `unavailable` read did the same. The
+   * latch made that survivable; taking the grab away removes the state it was
+   * surviving. Both cases are still driven --
+   * `test/canvas/Canvas.terminal-insert.test.tsx` and this file's own suite --
+   * because the rule is "vam never takes this keyboard", not "vam takes it at
+   * most once".
+   *
+   * SO THERE ARE THREE WAYS IN, ALL OF THEM THE OPERATOR'S: `i` and `I`, which
+   * land here through `focusInsertStop` (`Canvas.tsx`, `case 'prompt'` and
+   * `case 'focusAction'` -- this pane is a `data-insert-stop`, see the render
+   * below), and a click, which the pane's own `onFocus` forwards to the box.
+   * `takeKeyboard` is what all three end at; nothing calls it unprompted.
    */
-  const grabbed = useRef(false);
-  useEffect(() => {
-    if (!showing || grabbed.current) return;
-    grabbed.current = true;
-    // The BOX, not the pane. The keyboard has to arrive somewhere an input
-    // method can compose into, and the pane is not that -- arriving on the
-    // section and being forwarded a tick later would leave the very first
-    // syllable of a session composed against nothing.
-    takeKeyboard();
-  }, [showing, takeKeyboard]);
 
   /**
    * SEND THESE, IN THIS ORDER, ON THE ONE CHAIN.

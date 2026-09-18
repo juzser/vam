@@ -44,6 +44,12 @@ const pane = () => q<HTMLElement>('[data-terminal-pane]');
  * one element deeper: `document.activeElement !== pane()` is true whether the
  * pane has the keyboard or not, so every "it did not grab focus back" case
  * below would pass with the latch deleted.
+ *
+ * AND THE LATCH IS DELETED NOW, so the same sentence has a second edge. With
+ * nothing taking the keyboard on arrival, a case that never CALLS `enter()`
+ * asks whether a pane that has never held the keyboard took it back -- which
+ * is true of a pane that is simply broken. Every such case below enters
+ * first, on purpose, and that line is what makes the assertion able to fail.
  */
 const holdsKeyboard = () => pane()?.contains(document.activeElement) === true;
 
@@ -84,13 +90,46 @@ async function open(view: PaneView = ok(), sent: PaneSendResult = 'sent') {
 const keys = (send: { mock: { calls: unknown[][] } }): PaneKey[] =>
   send.mock.calls.map((call) => call[1] as PaneKey);
 
-describe('the Terminal tab takes focus when it is opened', () => {
-  it('focuses the pane as soon as there is a pane to focus', async () => {
+/**
+ * THE OPERATOR'S WAY IN, and the only one there is now.
+ *
+ * `i` and `I` both end at `focusInsertStop` (`keyboard/focus-scope.ts`), which
+ * focuses the pane's first insert stop -- this pane itself -- and the pane
+ * forwards the keyboard to its hidden box one microtask later. Every case
+ * below that needs the pane to HAVE the keyboard says so by calling this,
+ * because nothing gives it to them any more.
+ */
+async function enter() {
+  (pane() as HTMLElement).focus();
+  await settle();
+}
+
+describe('the Terminal tab takes no focus when it is opened', () => {
+  it('draws the screen and leaves the keyboard where the operator had it', async () => {
+    /**
+     * REVERSED ON THE OPERATOR'S WORDS, translated: "when I go into terminal
+     * mode, can it not automatically enter insert mode straight away -- can I
+     * still have to press `i` to focus the terminal input?"
+     *
+     * What stood here asserted the opposite, on the argument that "the tab the
+     * operator opened to type in is ready to type in". The argument holds for
+     * a text box and not for this: what is typed here goes into somebody's
+     * running agent, so a tab opened to LOOK at one was a tab where the next
+     * keystroke was already someone else's.
+     */
     await open();
-    // IN THE PANE, on the hidden box that an input method can compose into --
-    // `TerminalTab.ime.test.tsx` owns why that box exists. What this asserts
-    // is unchanged: the tab the operator opened to type in is ready to type
-    // in, and the keyboard is inside this pane and not on the body.
+    expect(pane()).not.toBeNull();
+    expect(pane()?.contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('and hands it over when the operator asks — the landing `i` and `I` make', async () => {
+    // The other half, in the same file: a pane nothing can enter would be a
+    // worse defect than the one above, and `Canvas.tsx` reaches it through
+    // exactly this call. `TerminalTab.ime.test.tsx` drives `focusInsertStop`
+    // itself; here the act is the `.focus()` that function makes.
+    await open();
+    await enter();
     expect(pane()?.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(document.body);
   });
@@ -505,6 +544,7 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
     // mode, dismisses the prompt. Keeping it as an exit made the pane the one
     // place in their tools where Escape did not mean escape.
     const send = await open();
+    await enter();
     expect(holdsKeyboard()).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' })).toBe(false);
     await settle();
@@ -529,6 +569,7 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
     // rule under the screen and is appended only while the pane has focus,
     // which is the only moment the question is asked.
     await open();
+    await enter();
     expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Tab');
     expect(q('[data-terminal-exit-hint]')?.closest('[data-terminal-status]')).not.toBeNull();
 
@@ -558,6 +599,11 @@ describe('the way out stays out', () => {
       />,
     );
     await settle();
+    // THE OPERATOR PUTS IT THERE FIRST, which is what keeps this case honest
+    // now that nothing takes the keyboard on arrival: without the entry the
+    // pane never had the keyboard, "it did not grab focus back" would be true
+    // of a pane that had never held it, and the case could not fail.
+    await enter();
     expect(holdsKeyboard()).toBe(true);
 
     // Leaving is Tab now, and happy-dom does not move focus for a synthetic
