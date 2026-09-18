@@ -30,8 +30,8 @@ import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { baseProps, entriesOf, makeSession } from '../panels/session-list-props.js';
 
 beforeAll(() => {
-  // The canvas mounts ReactFlow, which measures with APIs happy-dom does not
-  // implement, and reads prefs from a store it does not provide either.
+  // The canvas renders session panes that measure with APIs happy-dom does
+  // not implement, and reads prefs from a store it does not provide either.
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}

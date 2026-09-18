@@ -17,7 +17,7 @@ import type { StoredGroup } from '../prefs/prefs.js';
 import type { CanvasModel, Group, Project } from './model.js';
 
 /** `Prefs.groups`: source id → the groups the operator made in that source. */
-export type StoredGroupsBySource = Readonly<Record<string, readonly StoredGroup[]>>;
+type StoredGroupsBySource = Readonly<Record<string, readonly StoredGroup[]>>;
 
 /** Which source a group is stored under, or `null` for an id nothing holds. */
 export function groupSource(stored: StoredGroupsBySource, groupId: string): string | null {

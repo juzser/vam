@@ -51,10 +51,10 @@ describe('the membership picker', () => {
 
   /**
    * A project belongs to at most one group -- membership is array position,
-   * and a project in two groups walks its sessions twice, minting duplicate
-   * `info:<sessionId>` node ids that break ReactFlow and `j`/`k`
-   * (`to-canvas.ts:312`). So adding one MOVES it, and the row says where
-   * from before the click rather than after it.
+   * and a project in two groups walks its sessions twice, so the session id
+   * the sidebar keys its rows on would stop being unique. So adding one
+   * MOVES it, and the row says where from before the click rather than
+   * after it.
    */
   it('says which other group a project would be moved out of', () => {
     const { container } = renderPicker();

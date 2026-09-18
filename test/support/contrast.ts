@@ -1,7 +1,8 @@
 /**
  * WCAG 2.x relative-luminance contrast, for tests that measure `styles.css`
- * rather than quoting it. Shared by the token guard and by the node-glow test,
- * which asserts one specific ratio in the middle of a larger story.
+ * rather than quoting it. Shared by the token guard (`test/renderer/token-contrast.test.ts`)
+ * and the other four importers: `palette-templates`, `tip-surface`, `surface-elevation`
+ * and `dark-ladder`.
  *
  * `deltaE` is here for the one question the ratio cannot answer, and it was
  * added because that question arrived as an operator complaint. The WCAG ratio

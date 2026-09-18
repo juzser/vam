@@ -76,7 +76,7 @@ describe('resolveChord — single keys', () => {
 });
 
 describe('resolveChord — two-key chords', () => {
-  it('gg goes to the first node', () => {
+  it('gg lands on the first session in the sidebar', () => {
     expect(type(['g', 'g']).actions).toEqual([{ kind: 'first' }]);
   });
 

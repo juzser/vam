@@ -5,7 +5,7 @@
  *
  *  - **live** (the default) — a real factory server. Rows are real sessions,
  *    the prompt box writes to a real log.
- *  - **demo** (`?demo=1`) — the fixture from §3. Every write is refused HERE,
+ *  - **demo** (`?demo=1`) — the fixture. Every write is refused HERE,
  *    before it reaches the client, and the banner says so. A demo you can type
  *    into is a demo that teaches you the wrong reflex.
  *
@@ -33,9 +33,6 @@ import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
-import { DEMO_MODEL, demoModelWithTurns } from './fixtures/demo.js';
-import { demoAgentWork } from './fixtures/demo-agent-work.js';
-import { createDemoHistory } from './fixtures/demo-history.js';
 import { PairingScreen } from './panels/PairingScreen.js';
 import { AgentWorkReaderProvider } from './sources/agent-work-reader.js';
 import { HistoryReaderProvider } from './sources/history-reader.js';
@@ -464,13 +461,57 @@ function SourceCanvas({
  * exact component in a test (`test/app/App.agent-work.test.tsx`), the way
  * `App.history.test.tsx` already does for `DesktopCanvas`'s pager.
  */
+type DemoModule = typeof import('./fixtures/demo.js');
+type DemoAgentWorkModule = typeof import('./fixtures/demo-agent-work.js');
+type DemoHistoryModule = typeof import('./fixtures/demo-history.js');
+
+/**
+ * The three fixture modules, loaded once the demo is actually reached rather
+ * than pulled into the production entry chunk for every operator who never
+ * passes `?demo=1`. `DemoCanvas` renders nothing while they load — there is
+ * no user-visible state to show for "the demo is arriving" that is worth a
+ * new string.
+ */
 export function DemoCanvas() {
+  const [fixtures, setFixtures] = useState<{
+    demo: DemoModule;
+    agentWork: DemoAgentWorkModule;
+    history: DemoHistoryModule;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      import('./fixtures/demo.js'),
+      import('./fixtures/demo-agent-work.js'),
+      import('./fixtures/demo-history.js'),
+    ]).then(([demo, agentWork, history]) => {
+      if (!cancelled) setFixtures({ demo, agentWork, history });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (fixtures === null) return null;
+  return <DemoCanvasLoaded {...fixtures} />;
+}
+
+function DemoCanvasLoaded({
+  demo,
+  agentWork,
+  history: historyModule,
+}: {
+  demo: DemoModule;
+  agentWork: DemoAgentWorkModule;
+  history: DemoHistoryModule;
+}) {
   // Once per mount: padding 3,276 turns is real work, and doing it on every
   // render would measure the fixture instead of the pane.
   const model = useMemo(() => {
     const asked = demoTurns();
-    return asked > 0 ? demoModelWithTurns(asked) : DEMO_MODEL;
-  }, []);
+    return asked > 0 ? demo.demoModelWithTurns(asked) : demo.DEMO_MODEL;
+  }, [demo]);
   /**
    * THE DEMO'S OWN PAGER, and the demo is the only session this repo may drive
    * a guard against or put in a screenshot -- vam is public and every real
@@ -482,14 +523,17 @@ export function DemoCanvas() {
    * ONCE PER MOUNT, like the model above: the scripted refusal is a step in a
    * closure, so a pager rebuilt on every render would refuse forever.
    */
-  const history = useMemo(() => (demoHasHistory() ? createDemoHistory() : null), []);
+  const history = useMemo(
+    () => (demoHasHistory() ? historyModule.createDemoHistory() : null),
+    [historyModule],
+  );
   return (
     // THE AGENT READER, BESIDE THE PAGER AND FOR THE SAME REASON: without it
     // `useAgentWorkReader()` reads the context's own default, `null`, and
     // picking `coder`/`tester`/`reviewer` in the Agents tab drew the sentence
     // reserved for a source with no agent surface at all -- untrue of the
     // demo, which can answer anything (`fixtures/demo-agent-work.ts`).
-    <AgentWorkReaderProvider value={demoAgentWork}>
+    <AgentWorkReaderProvider value={agentWork.demoAgentWork}>
       <HistoryReaderProvider value={history}>
         <Canvas
           model={model}

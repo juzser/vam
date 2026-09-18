@@ -7,7 +7,7 @@
  * This asserts the KEYSTROKE actually opens the surface — dispatched at
  * `window`, the way an operator's press arrives — not merely that a binding
  * string exists in a table, the substitution this repo has shipped a defect
- * from before (see `Canvas.zoom-keys.test.tsx`, the same pattern).
+ * from before.
  *
  * It also asserts unpair (`onRemove`) and `Revoke all` are reachable from
  * the exact surface `.` opens, by stubbing the desktop bridge with a paired

@@ -799,7 +799,7 @@ describe('the panel remembers which turn you are reading, independent of the can
 
   it('defers back to the canvas on a plain session refocus too, with no step cursor at all', () => {
     // The OTHER real navigation: a different session gets focused (`j`/`k`,
-    // or a sidebar click), landing on its info node -- no step cursor,
+    // or a sidebar click), landing on the session itself -- no step cursor,
     // `focusNodeId` still changes because the SESSION changed. Session
     // identity alone already covered this before turn ids were stabilised;
     // this pins that it still does now that `focusNodeId` is the mechanism

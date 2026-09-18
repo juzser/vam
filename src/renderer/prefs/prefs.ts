@@ -1,8 +1,8 @@
 /**
  * The two things that are yours rather than the factory's.
  *
- * §3 already decided this and the code had not caught up: "draggable and
- * remembers position. Position is saved per user, **and does not go into
+ * The design already decided this and the code had not caught up: "draggable
+ * and remembers position. Position is saved per user, **and does not go into
  * the event log**." Where you dragged a card and which emoji you put on a
  * session are facts about how you like to look at the work — they are not
  * facts about the work, so they must not become events. The factory is right
@@ -394,12 +394,12 @@ export type Prefs = {
    * Where the operator was looking when they last quit: a SESSION, keyed by
    * its source, or `null` for "nothing was focused".
    *
-   * A session rather than a node id, which is the whole decision here. Node
-   * ids are derived from the layout and change whenever the model, the filters
-   * or the fold state change, so a stored node id would go stale between one
-   * launch and the next without anything having ended. A session id under its
-   * source is the identity `icons` and `renames` already store, and it is what
-   * a re-laid-out canvas can still be matched against (`focus.ts`).
+   * A session rather than a node id, which is the whole decision here. A
+   * remembered focus stores a session id under its source; candidates are
+   * rebuilt whenever the model, the filters or the fold state change, so a
+   * stored one goes stale rather than pointing at a session that has since
+   * ended. A session id under its source is the identity `icons` and
+   * `renames` already store, and it is the one `focus.ts` matches against.
    *
    * EXEMPT FROM THE ICON TTL, and for a different reason than `theme` is. This
    * IS a fact about a session, so the "not about the person" argument does not
@@ -1112,8 +1112,7 @@ export function setGroupIcon(
  * At most one group per project, and it is enforced here rather than left to
  * the caller because the cost of getting it wrong is not cosmetic: membership
  * is array position, so a project in two groups has its sessions walked twice
- * and mints two nodes carrying the same `info:<sessionId>` id -- which breaks
- * the canvas and the keys `j`/`k` step through.
+ * and the session id the sidebar keys its rows on stops being unique.
  */
 export function addProjectToGroup(
   prefs: Prefs,
@@ -1620,8 +1619,8 @@ export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): 
 /**
  * Put the stored names onto the model, once, before anything reads it -- the
  * same trick `applyIcons` plays one field over, and for the same reason: the
- * sidebar, the canvas node and the detail panel all render `session.title`,
- * and none of them should have to know that a title can be local.
+ * sidebar and the detail panel both render `session.title`,
+ * and neither should have to know that a title can be local.
  *
  * `projectNames` defaults to `{}` for the same reason `applyIcons`'
  * `projectIcons` argument does: every existing two-argument call site
@@ -1667,8 +1666,8 @@ export function applyRenames(
 /**
  * Put the stored icons onto the model, once, before anything reads it.
  *
- * The sidebar and the canvas node both render `session.icon`, and neither
- * should know that an icon is a local preference rather than something the
+ * Only the tab strip renders `session.icon` today, and it should not
+ * know that an icon is a local preference rather than something the
  * factory said. Applying it here means one place knows. Looked up per
  * project's `source`, not by session id alone — two sources can name a
  * session the same thing (AC-1). `projectIcons` follows the same rule one

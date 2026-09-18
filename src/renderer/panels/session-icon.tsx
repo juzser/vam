@@ -28,7 +28,7 @@
  * Both ends of the chain can vanish on their own: an empty pick clears a
  * choice rather than storing "" (`setIcon`), and the stored buckets are
  * pruned by a TTL. Either way the value read here is simply absent, so the
- * next link answers and the node never goes blank. A stored value this build
+ * next link answers and the tab never goes blank. A stored value this build
  * cannot DRAW -- a glyph name a newer vam wrote -- behaves the same way by
  * design: `parseIcon` returns `null` for it, so it is skipped rather than
  * printed.

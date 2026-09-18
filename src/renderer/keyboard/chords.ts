@@ -711,7 +711,7 @@ export type KeyAction =
   | { readonly kind: 'scrollHalf'; readonly delta: 1 | -1 }
   | { readonly kind: 'cancel' };
 
-export type ChordStep = {
+type ChordStep = {
   readonly state: ChordState;
   readonly action: KeyAction | null;
   /**
@@ -1373,7 +1373,7 @@ export type KeyBindings = Readonly<Record<string, readonly string[]>>;
 
 export const NO_BINDINGS: KeyBindings = {};
 
-export type Binding = {
+type Binding = {
   readonly id: string;
   readonly action: KeyAction;
   readonly chords: readonly Chord[];
@@ -1486,7 +1486,7 @@ function inPrecedenceOrder(overrides: KeyBindings): readonly Binding[] {
 
 /** One chord two or more actions claim: who answers it, and who is left
  *  advertising a key that does nothing. */
-export type BindingClash = {
+type BindingClash = {
   /** As it is written down and shown: `r`, `gt`. */
   readonly chord: string;
   /** The action the keystroke really invokes — `buildTables`' own winner. */

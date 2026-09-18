@@ -35,7 +35,7 @@ const external = ['electron'];
  * nothing here used to override that. The result was a renderer chunk
  * shipped as 2.28 MB of full-name, fully-commented source: every session
  * parsing and evaluating code nobody was ever meant to read, before the
- * canvas could draw its first node. Same code, same chunks, set explicitly
+ * renderer painted anything at all. Same code, same chunks, set explicitly
  * rather than left to a default this CLI does not share with the rest of
  * the Vite ecosystem.
  */

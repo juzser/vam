@@ -842,7 +842,7 @@ export type DropZone = Edge | 'centre';
  * gesture, and the one an operator reaches for by dropping "into" a pane —
  * gets the largest single target in the box.
  */
-export const DROP_EDGE_BAND = 0.2;
+const DROP_EDGE_BAND = 0.2;
 
 export function dropZone(x: number, y: number, width: number, height: number): DropZone {
   if (
