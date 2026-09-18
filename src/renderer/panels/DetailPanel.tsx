@@ -5517,7 +5517,7 @@ export function DetailPanel(props: DetailPanelProps) {
           // no echo that the turn landed (`sources/claude-code/reply.ts`), so
           // this claims the keystroke, not the answer.
           title:
-            'types the prompt into this session’s terminal — it appears when the session records it',
+            'types the prompt into this session’s terminal — it shows once the session records it',
         }
       : {
           Glyph: NotepadText,
@@ -7012,7 +7012,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 onChange={(event) => void takeFile(event.currentTarget)}
                 className="hidden"
               />
-              <Note text="reads the file here and puts its text into the prompt text that gets recorded — vam uploads nothing">
+              <Note text="puts the file’s text into the prompt text — vam uploads nothing">
                 <button
                   type="button"
                   data-attach
@@ -7065,7 +7065,7 @@ export function DetailPanel(props: DetailPanelProps) {
               bytes itself off that path; vam still uploads nothing. See
               `state/artifacts/vam-image-attach/findings.md`. */}
               {pickImageAttachment !== undefined && entry !== null && (
-                <Note text="opens a file picker, checks the file is really an image inside this session's own directory, and puts its path on its own line in the prompt text — vam uploads nothing">
+                <Note text="puts an image’s path into the prompt — it must sit inside this session’s own directory; vam uploads nothing">
                   <button
                     type="button"
                     data-attach-image
@@ -7129,7 +7129,7 @@ export function DetailPanel(props: DetailPanelProps) {
                    only one of them would dismiss on a press inside the very
                    thing being pressed. */
                 <div data-popover-root="provider" className="relative flex-none">
-                  <Note text="which agent a NEW session starts with — vam's own Settings, reachable here; it does not change this session, which is already running">
+                  <Note text="the agent NEW sessions start with — not this one, which is already running">
                     <button
                       type="button"
                       data-provider-picker-toggle
@@ -7246,7 +7246,7 @@ export function DetailPanel(props: DetailPanelProps) {
               `e2e/model-picker-shots.mjs` measures that the note really
               opens both ways, and what the dimmed label paints. */}
               {modelControl === 'request' && (
-                <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                <Note text="vam cannot switch models here — the factory chooses; this writes your request into the prompt">
                   <input
                     data-model-request
                     value={readModelRequest(draft)}
@@ -7281,7 +7281,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       session-only form (that is the `s` key inside the
                       interactive menu vam never drives), so the honest thing
                       is to say what the line does. */}
-                  <Note text="model — typed into the pane vam started as /model <name>, which this session answers there; the CLI also saves the choice as its default for new sessions">
+                  <Note text="types /model <name> into this session’s pane — the CLI also makes it the default for new sessions">
                     <button
                       type="button"
                       data-model-picker
@@ -7415,7 +7415,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {modelControl === 'disabled' && (
-                <Note text="vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal">
+                <Note text="vam owns no terminal here — open the session in a vam terminal to send /model">
                   <span
                     data-model-picker-shell
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
@@ -7479,7 +7479,7 @@ export function DetailPanel(props: DetailPanelProps) {
               {canCycleMode && (
                 <div data-popover-root="mode" className="relative flex-none">
                   <Note
-                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. It belongs to the session: this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started.`}
+                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ⇧Tab cycles the session’s own.`}
                   >
                     <button
                       type="button"
@@ -7592,8 +7592,8 @@ export function DetailPanel(props: DetailPanelProps) {
                 <Note
                   text={
                     listening
-                      ? 'listening — press again to stop; what is heard is appended to the prompt'
-                      : "dictates into the prompt using this device's own speech recognition — vam records no audio and uploads none"
+                      ? 'listening — press again to stop; speech goes into the prompt'
+                      : 'dictates into the prompt — on-device speech recognition; vam records and uploads nothing'
                   }
                 >
                   <button

@@ -199,11 +199,8 @@ const GUARDS = [
   'view-width-shots',
   'model-picker-shots',
   'terminal-scrollback-shots',
-<<<<<<< HEAD
   'terminal-insert-shots',
-=======
   'prompt-popovers-shots',
->>>>>>> 8c7d1e5c (fix(composer): the prompt row's popovers dismiss, and only one is ever open)
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

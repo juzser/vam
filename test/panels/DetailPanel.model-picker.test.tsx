@@ -370,7 +370,7 @@ describe('a session vam can type into gets a real picker', () => {
 
 describe('a session vam cannot type into gets the same button, disabled', () => {
   const DISABLED_NOTE =
-    'vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal';
+    'vam owns no terminal here — open the session in a vam terminal to send /model';
 
   it('is disabled where vam did not start the session', () => {
     draw({

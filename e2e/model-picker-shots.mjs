@@ -52,7 +52,7 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const OWNED = 'notes-1';
 const NOT_OWNED = 'vam-build-1';
 const DISABLED_NOTE =
-  'vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal';
+  'vam owns no terminal here — open the session in a vam terminal to send /model';
 
 const failures = [];
 function check(label, ok, detail) {

@@ -270,12 +270,21 @@ describe('the mode icon says WHICH mode, in the tooltip and in colour', () => {
 
   it('keeps the two mechanisms in the tooltip, which is what it was there for', () => {
     // The sentence it replaces explained why there are two ways to move a mode
-    // at all: this control writes a line into the draft, and Shift+Tab presses
-    // the session's own chord. Leading with the mode name must not cost that.
+    // at all: this control writes a line into the draft, and the Shift+Tab
+    // chord presses the session's own. Leading with the mode name must not
+    // cost that, and neither may SHORTENING it -- the tooltip was cut from 212
+    // characters to 112 at the operator's ask, and this pair of facts is what
+    // the cut was not allowed to spend. An operator who knows only one of them
+    // is left believing the other is broken.
+    //
+    // RE-AIMED AT THE NEW WORDS rather than deleted: either spelling of the
+    // chord, because the glyph is typography while the MECHANISM is the claim.
+    // What must not vanish is that there IS a chord, and that picking here
+    // goes into the prompt.
     draw({ draft: 'ship it' });
     const note = toggle()?.getAttribute('data-note') ?? '';
-    expect(note).toContain('Shift+Tab');
-    expect(note).toContain('recorded');
+    expect(note).toMatch(/⇧Tab|Shift\+Tab/);
+    expect(note).toContain('prompt');
   });
 
   it('carries its mode as a fact a guard can read, on the glyph itself', () => {
