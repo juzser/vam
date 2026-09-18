@@ -1174,6 +1174,28 @@ export function FilesTab({
     wantEditorFocus.current = true;
   }, []);
 
+  /**
+   * FIND A FILE — the one act, and the one code path every surface in this tab
+   * reaches it by: `/` on the tree, and `Mod-p` from the tree, the editor, the
+   * preview and either text box. Four handlers, one function, because a second
+   * `filterRef.current?.focus()` written out somewhere else is how two of them
+   * come to disagree about what the key does.
+   *
+   * IT SELECTS, AND `focus()` DOES NOT DO THAT. Measured rather than assumed
+   * (`test/panels/DetailPanel.files-tab.test.tsx`): focusing an input leaves
+   * the caret exactly where it was, so a second press on a box that already
+   * holds `env` would have appended to a stale search instead of starting a
+   * new one. Selecting makes the next keystroke replace it and `Enter` on its
+   * own still take the operator to the first match of what is there.
+   */
+  const focusFilter = useCallback(() => {
+    setNote(null);
+    const box = filterRef.current;
+    if (box === null) return;
+    box.focus();
+    box.select();
+  }, []);
+
   const onEditorKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (activePath === null) return;
@@ -1200,6 +1222,16 @@ export function FilesTab({
         // things to remember for no gain.
         event.preventDefault();
         setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
+        return;
+      }
+      if (key === 'Mod-p') {
+        // TO THE FILTER, from inside a text box where `/` is a character the
+        // operator is typing. Claimed rather than left to fall through: the
+        // app grammar leaves `Mod-p` unbound, so unprevented it would reach a
+        // browser tab's own print dialog (`browser-contested-chords.test.ts`
+        // lists `Mod-p` as cancelable) and nothing would have searched.
+        event.preventDefault();
+        focusFilter();
         return;
       }
       if (key === 'Mod-Shift-f') {
@@ -1262,6 +1294,7 @@ export function FilesTab({
       setContent,
       saveFile,
       focusCursorRow,
+      focusFilter,
       formatActive,
       undoFormat,
       settings.indent,
@@ -1306,8 +1339,7 @@ export function FilesTab({
           openFromTree(step.path, step.focusEditor);
           return;
         case 'filter':
-          setNote(null);
-          filterRef.current?.focus();
+          focusFilter();
           return;
         case 'editor':
           setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
@@ -1320,10 +1352,19 @@ export function FilesTab({
           return;
       }
     },
-    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor],
+    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor, focusFilter],
   );
 
-  /** Escape/Mod-[ out of either text box, and Mod-Shift-e across to the editor. */
+  /**
+   * Escape/Mod-[ out of either text box, Mod-Shift-e across to the editor, and
+   * Mod-p back to the filter.
+   *
+   * `Mod-p` IS ANSWERED IN HERE TOO, and that is what makes "a second press
+   * restarts the search" true: the first press lands the caret in this box, so
+   * the second one arrives with the caret already here. Unanswered it would
+   * have fallen through to a browser tab's print dialog from the very box the
+   * key exists to reach.
+   */
   const onBoxKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
       const key = normalizeKey(event);
@@ -1332,12 +1373,17 @@ export function FilesTab({
         event.currentTarget.blur();
         return;
       }
+      if (key === 'Mod-p') {
+        event.preventDefault();
+        focusFilter();
+        return;
+      }
       if (key === 'Mod-Shift-e') {
         event.preventDefault();
         setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
       }
     },
-    [focusEditor],
+    [focusEditor, focusFilter],
   );
 
   /**
@@ -1361,6 +1407,14 @@ export function FilesTab({
         event.currentTarget.blur();
         return;
       }
+      if (key === 'Mod-p') {
+        // The rendered view is read-only and still not a place `/` can be
+        // pressed — it is a document, not a list of rows — so it gets the same
+        // way to the filter every other surface in this tab has.
+        event.preventDefault();
+        focusFilter();
+        return;
+      }
       if (key === 'Mod-Shift-m') {
         event.preventDefault();
         togglePreview();
@@ -1371,7 +1425,7 @@ export function FilesTab({
         setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
       }
     },
-    [focusCursorRow, togglePreview],
+    [focusCursorRow, focusFilter, togglePreview],
   );
 
   if (sessionId === null) {
@@ -2101,7 +2155,18 @@ function Tree({
             }
             onBoxKeyDown(event);
           }}
-          placeholder="filter…"
+          /* THE KEY IS IN THE BOX, because the box was already there and
+             nobody could find it: the filter has shipped since this tab did
+             and its placeholder said only `filter…`. Spelled the way
+             `normalizeKey` spells it and parenthesised the way this file's own
+             Format and Save tooltips name theirs (`(Mod-Shift-f)`, `(Mod-s)`),
+             rather than a chip beside the input — at `TREE_WIDTH`'s 7.5rem
+             floor a chip would take a third of the column off a box that has
+             ~62px to begin with, and a placeholder clips where a flex item
+             squeezes. `Mod-p` rather than `/` because it is the spelling that
+             works from every surface in the tab; `/` has the key sheet and the
+             README. */
+          placeholder="filter… (Mod-p)"
           aria-label="filter files"
           className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
         />

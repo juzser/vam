@@ -980,6 +980,85 @@ describe('walking the tree from the keyboard', () => {
     expect(document.activeElement).toBe(q('[data-files-filter]'));
   });
 
+  /**
+   * SEARCHING FOR A FILE FROM ANYWHERE IN THE TAB — the operator's ask, and
+   * the half `/` could never answer: `/` is a character you type into a file,
+   * so with the caret in the editor there was no way to reach the filter at
+   * all. `Mod-p` is `Cmd+P`, which is "go to file" in VS Code and Sublime, and
+   * `chords.ts` left it deliberately unbound when new-project moved to
+   * `Mod-Shift-p`.
+   *
+   * MUTATION TARGET: take `Mod-p` out of `TREE_KEYS` and the first of these
+   * reddens; take it out of `EDITOR_KEYS` and the second does.
+   */
+  it('Mod-p puts the caret in the filter box from the tree, and claims the key', async () => {
+    await openTree();
+    expect(await press('p', { metaKey: true })).toBe(true);
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+  });
+
+  it('Mod-p reaches the filter box from the editor, where / never could', async () => {
+    await openTree();
+    await press('j');
+    await press('Enter');
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(editor);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      editor.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+    // Claimed, or the browser prints the page: over Tailscale Serve `Cmd+P`
+    // is the print dialog, and it is cancelable rather than reserved.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  /**
+   * A SECOND PRESS RESTARTS THE SEARCH rather than appending to a stale one.
+   * `focus()` alone does NOT select — measured, not assumed — so this is the
+   * guard on the `select()` beside it.
+   *
+   * MUTATION TARGET: drop `select()` from `focusFilter` and this reddens.
+   */
+  it('selects what is already in the box, so a second Mod-p restarts the search', async () => {
+    await openTree();
+    const box = q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'env' } });
+      await Promise.resolve();
+    });
+    box.focus();
+    box.setSelectionRange(3, 3);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      box.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(box);
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, 3]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  /** The filter box says which key gets to it, where an operator looking at
+   *  the tree can read it — the feature existed and could not be found. */
+  it('names its key in the filter box itself', async () => {
+    await openTree();
+    expect(q<HTMLInputElement>('[data-files-filter]')?.placeholder).toContain('Mod-p');
+  });
+
   it('Enter in the filter box hands the keyboard to the first matching row', async () => {
     await openTree();
     const box = q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement;

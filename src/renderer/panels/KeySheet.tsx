@@ -1,9 +1,17 @@
 /**
  * `?` — every keyboard binding there is (docs/design/canvas-layout.md §4).
  *
- * Its rows come from `buildKeySheet()`, which walks the chord tables, so this
- * component holds no key strings of its own and cannot advertise a control
- * that does not exist. Everything here is layout.
+ * Its rows come from two generators — `buildKeySheet()`, which walks the chord
+ * tables, and `buildFilesSheet()`, which walks the Files tab's own two key
+ * lists — so this component holds no key strings of its own and cannot
+ * advertise a control that does not exist. Everything here is layout.
+ *
+ * TWO GENERATORS RATHER THAN ONE, and `keysheet.ts`'s own header on
+ * `buildFilesSheet` carries the argument: that tab's keyboard is hardcoded and
+ * out of `BINDING_TABLES` on purpose, so it cannot be derived the same way —
+ * but it is still a keyboard, and leaving it off the sheet is how its filter
+ * stayed invisible for a release while an operator asked for a file search
+ * that already half existed.
  *
  * The overlay idiom is `CommandPalette`'s, deliberately not a second one: a
  * scrim that is a real button (a div with a click handler is invisible to
@@ -16,7 +24,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { buildKeySheet } from '../keyboard/keysheet.js';
+import { buildFilesSheet, buildKeySheet } from '../keyboard/keysheet.js';
 
 export type KeySheetProps = {
   readonly onClose: () => void;
@@ -35,7 +43,9 @@ export function KeySheet({ onClose }: KeySheetProps) {
     };
   }, []);
 
-  const groups = buildKeySheet();
+  // The grammar first, then the one surface with a keyboard of its own: the
+  // sheet reads outward from what works everywhere to what works in one tab.
+  const groups = [...buildKeySheet(), ...buildFilesSheet()];
 
   return (
     <div
@@ -55,7 +65,7 @@ export function KeySheet({ onClose }: KeySheetProps) {
         <div className="mb-3 flex items-baseline gap-2">
           <h2 className="font-semibold text-ink text-heading">keyboard</h2>
           <span className="text-ink-faint text-meta">
-            every binding there is — generated from the chord tables
+            every binding there is — generated from the key tables
           </span>
           <button
             ref={closeButton}
