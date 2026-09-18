@@ -41,7 +41,17 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
       />
       <Command
         label="Command palette"
-        className="relative w-[min(560px,90vw)] overflow-hidden rounded-md border border-line bg-surface"
+        /* `bg-panel`, NOT `bg-surface`. There is no `--color-surface` token
+           in `styles.css` and there never was: Tailwind emitted no rule for
+           it, so this panel had NO background at all and the canvas behind it
+           read straight through the command list -- the operator's report,
+           "the command palette needs a background, it is transparent now so
+           the text overlaps". `bg-panel` is what the settings dialog wears,
+           which is the same kind of thing: a floating surface over the app.
+           `e2e/command-palette-shots.mjs` measures the painted pixel now, so
+           a class that names nothing cannot pass again. */
+        data-command-palette
+        className="relative w-[min(560px,90vw)] overflow-hidden rounded-md border border-line bg-panel"
         onKeyDown={(event) => {
           // The window listener ignores keys typed in an input, so Escape has
           // to be caught here or the overlay would have no keyboard way out —
@@ -94,7 +104,7 @@ function PaletteRow({
       // type — the project name included, not just the session's own title.
       value={`${project.name} ${session.title} ${session.epic ?? ''} ${session.id}`}
       onSelect={() => onPick(session.id)}
-      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[selected=true]:bg-surface-raised"
+      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[selected=true]:bg-raised"
     >
       <span className="text-ink-faint">{project.name}/</span>
       <span>{session.title}</span>
