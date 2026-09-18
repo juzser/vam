@@ -495,27 +495,37 @@ describe('the terminal text size is an appearance setting', () => {
 });
 
 /**
- * THE FILE EDITOR'S OWN TWO SETTINGS, in the section the operator asked for
- * them in ("thêm setting riêng cho tab đó trong phần appearance").
+ * THE FILE EDITOR'S OWN TWO SETTINGS, which the operator first asked for as a
+ * pair in Appearance (translated: "if needed, add settings of its own for that
+ * tab under appearance") and then split along with everything else in that
+ * panel (translated: "can you separate the appearance and colour settings from
+ * the feature settings?").
+ *
+ * SO THE PAIR IS IN TWO PANELS NOW, and that is the assertion rather than an
+ * exception to one. `settings/sections.ts` carries the rule that decides a
+ * row: the colour switch is a colour and stayed, the indent is a count of
+ * spaces written into the operator's own file and moved.
+ * `test/settings/behaviour-section.test.tsx` holds the same claim from the
+ * other side, in both directions.
  *
  * The pair is proven three ways across this repo and each way is needed: the
  * STORE round-trips them (`test/prefs/prefs.editor.test.ts`), the EDITOR
  * honours them without a remount (`test/panels/DetailPanel.files-tab.test.tsx`),
- * and this file proves the two controls exist, sit in Appearance, and write
- * the pref the other two read. A setting nobody can reach is the storage-shaped
- * version of a control that changes nothing.
+ * and this file proves the two controls exist, sit where they are meant to, and
+ * write the pref the other two read. A setting nobody can reach is the
+ * storage-shaped version of a control that changes nothing.
  */
-describe('the file editor has its own settings in Appearance', () => {
+describe('the file editor has its own settings, one per panel', () => {
   const highlight = () => document.querySelector<HTMLElement>('[data-switch="editor-highlight"]');
   const indent = () => screen.getByLabelText('editor indent') as HTMLInputElement;
 
-  it('puts both of them under Appearance, beside the theme and the colours', () => {
+  it('keeps the colour switch in Appearance and puts the indent under Behaviour', () => {
     open();
     expect(highlight()).not.toBeNull();
     expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe(
       'Appearance',
     );
-    expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
+    expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Behaviour');
   });
 
   it('shows the colour setting in force and writes the one you pick', () => {

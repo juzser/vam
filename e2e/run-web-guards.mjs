@@ -119,7 +119,13 @@
  * a number no unit environment reports at all), whether a real wheel reaches
  * the history, and whether a poll a second later leaves the operator where
  * they scrolled to or throws them at the live end -- which is a race between
- * a layout effect and an interval, and has no meaning outside a browser.
+ * a layout effect and an interval, and has no meaning outside a browser,
+ * and -- since the settings overlay was split into look and behaviour --
+ * whether a control is PAINTED in the panel it was moved to and nowhere else,
+ * which no unit environment can be asked at all: every panel in that dialog is
+ * mounted and `hidden`, so a `querySelector` finds a row in the tree whether
+ * or not the operator could ever see it, and only a real box with a real
+ * width tells the two apart.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -155,6 +161,7 @@ const GUARDS = [
   'pane-colour-shots',
   'composer-bar-shots',
   'settings-chrome-shots',
+  'settings-panels-shots',
   'favicon-shots',
   'key-truth-shots',
   'mode-truth-shots',

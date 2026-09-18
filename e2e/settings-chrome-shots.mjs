@@ -45,12 +45,20 @@ function ratio(a, b) {
 }
 
 /**
- * The four sections, spelled once. Read from the page rather than from
- * `sections.ts` — this file runs against the BUILT bundle, and a guard that
- * imported the source would be asserting against something it did not load.
+ * The sections whose NAME this file asserts, spelled once. Read from the page
+ * rather than from `sections.ts` — this file runs against the BUILT bundle,
+ * and a guard that imported the source would be asserting against something it
+ * did not load.
+ *
+ * `behaviour` joined the list when the overlay was split into look and
+ * behaviour, and `update` is still deliberately absent: what it is here for is
+ * the narrow strip's ACCESSIBLE NAMES, and the width table below wraps around
+ * whatever the real count is (read off the DOM, not off this array). Adding a
+ * row here is adding a name to check, never a section to the nav.
  */
 const SECTIONS = [
   ['appearance', 'Appearance'],
+  ['behaviour', 'Behaviour'],
   ['sessions', 'Sessions'],
   ['remote', 'Remote'],
   ['keyboard', 'Keyboard'],
@@ -154,15 +162,27 @@ for (const width of STRIP_WIDTHS) {
   // Rows, measured rather than assumed, AND THE NUMBERS ARE A FUNCTION OF HOW
   // MANY SECTIONS THERE ARE. With four tabs this read 2 below `sm` and 1
   // above; the fifth (Update) makes it 3 and 2, because the strip wraps at two
-  // per row narrow and three per row wide. Re-measured here rather than
-  // computed, so that a sixth section reddens this and somebody decides -- a
+  // per row narrow and four per row wide. Re-measured here rather than
+  // computed, so that a new section reddens this and somebody decides -- a
   // guard that derived the layout from the layout would assert nothing.
+  //
+  // THE SIXTH SECTION ARRIVED AND THIS DID NOT REDDEN, which the paragraph
+  // above promised it would. Saying so is the point of this note rather than
+  // quietly leaving the numbers as they are. Behaviour was split out of
+  // Appearance and the strip's two tracks absorbed it exactly: six over two
+  // narrow tracks is three rows, the same three five needed with its last row
+  // half empty, and six over four wide tracks is two rows, the same two five
+  // needed. The literals are therefore UNCHANGED and still correct -- and the
+  // honest reading of that is that this pair of numbers is blind to any
+  // section that lands in a gap the previous count already paid for. The
+  // budget below is not: it is measured in pixels against the viewport, and it
+  // is the assertion that actually protects the operator.
   const rows = new Set(geometry.map((item) => item.top)).size;
   const expected = width < 640 ? 3 : 2;
-  console.log(`${width}px: ${names.join(' ')} rows=${rows}`);
+  console.log(`${width}px: ${names.join(' ')} rows=${rows} over ${geometry.length} sections`);
   if (rows !== expected) {
     throw new Error(
-      `${width}px: the strip laid out on ${rows} row(s), expected ${expected} for ${SECTIONS.length} sections`,
+      `${width}px: the strip laid out on ${rows} row(s), expected ${expected} for ${geometry.length} sections`,
     );
   }
 
@@ -234,7 +254,7 @@ for (const width of STRIP_WIDTHS) {
       throw new Error(`1100px: the rail's ${id} tab is not named ${JSON.stringify(label)}`);
     }
   }
-  console.log('1100px: the rail names all four sections');
+  console.log(`1100px: the rail names all ${SECTIONS.length} sections checked here`);
   await page.close();
 }
 
@@ -1060,9 +1080,19 @@ console.log('\n=== the settings button census');
 // parts that carry the state -- the track's boundary against the panel, and
 // the knob against its track -- have to clear 3:1, or the state is legible
 // only to someone who already knows where to look.
-console.log('\n=== the appearance switch');
+//
+// IT IS IN BEHAVIOUR NOW, WHICH IS WHY THIS BLOCK NAVIGATES. The overlay opens
+// on Appearance, and focus view moved out of it with the look/behaviour split.
+// Every panel stays MOUNTED, so the selector below kept matching -- and a
+// Playwright `.click()` on an element inside a `hidden` subtree waits for
+// visibility and times out, which is how this guard reported the move. The
+// navigation is the fix and the timeout was the evidence; nothing else in this
+// block changed.
+console.log('\n=== the behaviour section’s switch');
 {
   const page = await openSettings(1100, 800);
+  await page.locator('[data-settings-nav-item="behaviour"]').click();
+  await page.waitForTimeout(150);
   await page.evaluate(() => {
     const chan = (v) => {
       const c = v / 255;
@@ -1117,7 +1147,7 @@ console.log('\n=== the appearance switch');
     });
 
   const off = await readSwitch();
-  if (off === null) throw new Error('the appearance section draws no switch at all');
+  if (off === null) throw new Error('the behaviour section draws no switch at all');
   await page.locator('[data-switch="focus-view"]').click();
   await page.waitForTimeout(250);
   const on = await readSwitch();

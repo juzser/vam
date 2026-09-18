@@ -743,111 +743,29 @@ export function SettingsOverlay({
                   a list of rows with a page in the middle. */}
               <TerminalColours prefs={prefs} theme={theme} onChange={onChange} />
 
-              {/* THE VIEWS' WIDTH, next to the two text sizes because it is
-                  the same question asked about the box instead of the glyph:
-                  how long is a line. Operator request, translated: "a setting
-                  for whether the width of the Response view, Terminal, PRs and
-                  Agents is full-pane or narrowed."
+              {/* THE FILE EDITOR'S COLOURS, and they are the LAST thing left
+                  in this panel from the four rows that used to end it. The
+                  operator asked for the split ("can you separate the
+                  appearance and colour settings from the feature settings?"),
+                  and `settings/sections.ts` carries the rule that decides a
+                  row. This one stays because the operator is choosing whether
+                  a file is COLOURED -- its own name says so -- and the
+                  tokeniser that stops running is machinery, not the choice.
+                  The same rule keeps `terminal text` here and sends `view
+                  width` away.
 
-                  ONE SWITCH FOR FOUR VIEWS BECAUSE IT IS ONE PROMISE -- no
-                  more than eighty characters on a line (WCAG 2.2 SC 1.4.8) --
-                  and `prefs/view-width.ts` carries the argument for why the
-                  Terminal belongs in it and why its pixel maximum is
-                  nevertheless a different number. A second switch would be
-                  asking the operator to answer the same question twice.
+                  ITS OTHER HALF IS IN BEHAVIOUR, and the note under it says
+                  so. A count of spaces is bytes in the operator's own file,
+                  which is not a thing this panel is about; splitting the pair
+                  is the price of a panel where every row is paint.
 
-                  AND IT IS NOT ONLY PAINT, which is why the hint ends the way
-                  it does. Narrowing the Terminal makes fewer columns fit and
-                  vam tells tmux the new width (`terminal-size.ts`) -- the same
-                  disclosure `terminal text` above it owes, for the same
-                  reason: an operator who is not told reads a re-wrapped screen
-                  as vam having broken their session. */}
-              <Block
-                label={t('settings.appearance.narrowViews.label')}
-                hint={t('settings.appearance.narrowViews.hint')}
-              >
-                <Switch
-                  name="narrow-views"
-                  label={t('settings.appearance.narrowViews.label')}
-                  checked={prefs.narrowViews}
-                  onChange={(next) => onChange(setNarrowViews(prefs, next))}
-                  on={t('settings.appearance.narrowViews.on')}
-                  off={t('settings.appearance.narrowViews.off')}
-                />
-              </Block>
-
-              {/* CONCISE MODE, and it is here for the same reason `out text`
-                  is: this is not behaviour, it is how densely the transcript
-                  is drawn -- the family the theme, the colours and the text
-                  size above it are in. Nothing it changes reaches a session.
-
-                  GLOBAL, so it belongs in a dialog rather than on a pane. See
-                  `Prefs.focusView` for why it is not per pane (an
-                  arrangement the operator would re-make on every split) and
-                  not per session (a display choice keyed to an id the store
-                  prunes).
-
-                  NO SHORTCUT. The grammar would allow one, but the digit row
-                  is contested and every free key is worth more to an action
-                  than to a preference you set once and leave. If the operator
-                  turns out to flip this often, it earns a key then. */}
-              {/* THE LABEL AND THE HINT ARE THE WHOLE DOCUMENTATION. This row
-                  is the only place an operator learns what focus view does,
-                  and the two facts they need are what it FOLDS and that the
-                  folded thing COMES BACK. The retired "turn progress / shown /
-                  collapsed" wording carried neither: it named a quantity
-                  ("how much of each turn's working") and two words that could
-                  be read as "deleted" and "kept". */}
-              <Block
-                label={t('settings.appearance.focusView.label')}
-                hint={t('settings.appearance.focusView.hint')}
-              >
-                <Switch
-                  name="focus-view"
-                  label={t('settings.appearance.focusView.label')}
-                  checked={prefs.focusView}
-                  onChange={(next) => onChange(setFocusView(prefs, next))}
-                  on={t('settings.appearance.focusView.on')}
-                  off={t('settings.appearance.focusView.off')}
-                />
-                {/* THE PROMISE, ON SCREEN. This row asks the operator to give
-                    up detail, and what it must never cost them is the alarm
-                    (`Decision.errorCount`) or the way back. A guarantee kept
-                    only in the source is one the person making the choice
-                    cannot read -- so what `drawsProgressLine` holds back, and
-                    what `drawsUnfoldControl` restores, are both named here, in
-                    the words the column draws them in. */}
-                <p data-focus-view-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                  A folded turn keeps <code className="text-ink">···</code> where its working was —
-                  press it and that turn comes back, on its own. Nothing is folded from a turn whose
-                  tools failed: it keeps its line and its{' '}
-                  <code className="text-ink">· N failed</code> count, and so does the newest turn
-                  while the session is working or waiting.
-                </p>
-              </Block>
-
-              {/* THE FILE EDITOR'S OWN TWO, and they are here for the reason
-                  `out text` and `focus view` are: this is paint, not
-                  behaviour -- what the Files tab's editor LOOKS like, in the
-                  family the theme, the colours and the text size above it are
-                  in. The operator asked for exactly that ("nếu cần có thể
-                  thêm setting riêng cho tab đó trong phần appearance").
-
-                  TWO, AND NOT A THIRD. A word-wrap toggle is the one a reader
-                  of this list will miss, and it is deliberately absent: the
-                  editor's gutter numbers LINES, not visual rows, so a wrapped
-                  line makes every number under it wrong. That is an invariant
-                  rather than a preference, and a setting whose "on" position
-                  breaks the column beside it is not a setting. An editor font
-                  size is absent for a different reason: the editor draws at
+                  NO WORD-WRAP TOGGLE, which is the row a reader of this list
+                  will miss: the editor's gutter numbers LINES, not visual
+                  rows, so a wrapped line makes every number under it wrong.
+                  That is an invariant rather than a preference. An editor font
+                  size is absent for a different reason -- the editor draws at
                   one step of vam's own type scale, and a second independent
-                  size would be a knob rather than a choice.
-
-                  THE INDENT REACHES TWO PLACES, which is why it is worth a
-                  row at all: it is what `Tab` inserts in that editor AND what
-                  `Mod-Shift-f` indents a JSON file by. It is a count of
-                  SPACES, never a tab byte -- `prefs/editor.ts` carries the
-                  argument, and it is the gutter's own correctness. */}
+                  size would be a knob rather than a choice. */}
               <Block
                 label={t('settings.appearance.editorHighlight.label')}
                 hint={t('settings.appearance.editorHighlight.hint')}
@@ -874,12 +792,123 @@ export function SettingsOverlay({
                   <code className="text-ink">.env</code> and <code className="text-ink">.ini</code>.
                   Every other file is drawn as plain text on purpose: a regex literal defeats a
                   scanner this size, and a wrong colour asserts a structure that is not in the file.
+                  How wide one indent step is lives under Behaviour.
+                </p>
+              </Block>
+            </Panel>
+
+            {/* WHAT VAM DOES, as against what vam looks like.
+                Operator, translated: "can you separate the appearance and
+                colour settings from the feature settings?" Four rows in
+                Appearance each carried a comment arguing that a switch which
+                folds half a turn away was "really" paint, and four such
+                arguments in a row is the shape of a section that is two
+                sections. `settings/sections.ts` carries the rule that decides
+                which side a row falls on, the reason this panel sits second in
+                the nav, and the one cost the split has.
+
+                THE ORDER INSIDE IT IS THE SAME COARSE-TO-FINE the panel above
+                uses: the two rows about what a RESPONSE PANE shows, then the
+                one about a file. */}
+            <Panel
+              id="behaviour"
+              active={section === 'behaviour'}
+              hint={t('settings.behaviour.hint')}
+              phone={phone}
+            >
+              {/* THE VIEWS' WIDTH, first because it is the widest claim in the
+                  panel: it is about every response pane at once. Operator
+                  request, translated: "a setting for whether the width of the
+                  Response view, Terminal, PRs and Agents is full-pane or
+                  narrowed."
+
+                  ONE SWITCH FOR FOUR VIEWS BECAUSE IT IS ONE PROMISE -- no
+                  more than eighty characters on a line (WCAG 2.2 SC 1.4.8) --
+                  and `prefs/view-width.ts` carries the argument for why the
+                  Terminal belongs in it and why its pixel maximum is
+                  nevertheless a different number. A second switch would be
+                  asking the operator to answer the same question twice.
+
+                  IT IS HERE AND NOT UNDER APPEARANCE, which is a change of
+                  mind worth stating rather than quietly making: a width reads
+                  like paint and is not, because the width IS the whole choice
+                  and the pane's contents re-flow into it. `terminal text`
+                  stayed behind under the same rule for the opposite reason --
+                  there the choice is a glyph size and the column count merely
+                  follows. */}
+              <Block
+                label={t('settings.behaviour.narrowViews.label')}
+                hint={t('settings.behaviour.narrowViews.hint')}
+              >
+                <Switch
+                  name="narrow-views"
+                  label={t('settings.behaviour.narrowViews.label')}
+                  checked={prefs.narrowViews}
+                  onChange={(next) => onChange(setNarrowViews(prefs, next))}
+                  on={t('settings.behaviour.narrowViews.on')}
+                  off={t('settings.behaviour.narrowViews.off')}
+                />
+              </Block>
+
+              {/* FOCUS VIEW. GLOBAL, so it belongs in a dialog rather than on
+                  a pane. See `Prefs.focusView` for why it is not per pane (an
+                  arrangement the operator would re-make on every split) and
+                  not per session (a display choice keyed to an id the store
+                  prunes).
+
+                  NO SHORTCUT. The grammar would allow one, but the digit row
+                  is contested and every free key is worth more to an action
+                  than to a preference you set once and leave. If the operator
+                  turns out to flip this often, it earns a key then.
+
+                  THE LABEL AND THE HINT ARE THE WHOLE DOCUMENTATION. This row
+                  is the only place an operator learns what focus view does,
+                  and the two facts they need are what it FOLDS and that the
+                  folded thing COMES BACK. The retired "turn progress / shown /
+                  collapsed" wording carried neither: it named a quantity
+                  ("how much of each turn's working") and two words that could
+                  be read as "deleted" and "kept". */}
+              <Block
+                label={t('settings.behaviour.focusView.label')}
+                hint={t('settings.behaviour.focusView.hint')}
+              >
+                <Switch
+                  name="focus-view"
+                  label={t('settings.behaviour.focusView.label')}
+                  checked={prefs.focusView}
+                  onChange={(next) => onChange(setFocusView(prefs, next))}
+                  on={t('settings.behaviour.focusView.on')}
+                  off={t('settings.behaviour.focusView.off')}
+                />
+                {/* THE PROMISE, ON SCREEN. This row asks the operator to give
+                    up detail, and what it must never cost them is the alarm
+                    (`Decision.errorCount`) or the way back. A guarantee kept
+                    only in the source is one the person making the choice
+                    cannot read -- so what `drawsProgressLine` holds back, and
+                    what `drawsUnfoldControl` restores, are both named here, in
+                    the words the column draws them in. */}
+                <p data-focus-view-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  A folded turn keeps <code className="text-ink">···</code> where its working was —
+                  press it and that turn comes back, on its own. Nothing is folded from a turn whose
+                  tools failed: it keeps its line and its{' '}
+                  <code className="text-ink">· N failed</code> count, and so does the newest turn
+                  while the session is working or waiting.
                 </p>
               </Block>
 
+              {/* THE INDENT, LAST, and it is the one row here whose subject is
+                  a FILE rather than a pane. It reaches two places, which is
+                  why it is worth a row at all: it is what `Tab` inserts in the
+                  Files editor AND what `Mod-Shift-f` indents a JSON file by.
+                  It is a count of SPACES, never a tab byte -- `prefs/editor.ts`
+                  carries the argument, and it is the gutter's own correctness.
+
+                  ITS SIBLING IS IN APPEARANCE. Whether that editor COLOURS a
+                  file is a colour, so it stayed; how many spaces it writes
+                  into the file is not. */}
               <Block
-                label={t('settings.appearance.editorIndent.label')}
-                hint={t('settings.appearance.editorIndent.hint')}
+                label={t('settings.behaviour.editorIndent.label')}
+                hint={t('settings.behaviour.editorIndent.hint')}
               >
                 <Stepper
                   name="editor indent"

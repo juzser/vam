@@ -22,6 +22,18 @@ import { SECTIONS } from '../../src/renderer/settings/sections.js';
  *  assertions below are about the ENDS, not about which section is there. */
 const last = SECTIONS[SECTIONS.length - 1]?.id ?? 'appearance';
 
+/**
+ * ONE STEP FROM THE TOP, read off the list for the same reason `last` is.
+ * It was the literal `'sessions'` in four tests below until Behaviour was
+ * split out of Appearance and landed between them. Every one of those
+ * assertions is about STEPPING -- that an arrow, a wrap or `Ctrl-Tab` moves
+ * the selection by one and takes the panel and the focus with it -- never
+ * about which section happens to be one step away, so a literal there is a
+ * test that reddens whenever the nav gains a destination while saying nothing
+ * about the key that moved.
+ */
+const second = SECTIONS[1]?.id ?? 'appearance';
+
 afterEach(cleanup);
 
 function open(prefs: Prefs = EMPTY_PREFS) {
@@ -88,9 +100,9 @@ describe('the nav is steerable without a mouse', () => {
   it('moves selection with the arrows, wrapping, and shows the panel it lands on', () => {
     open();
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowDown' });
-    expect(shown()).toEqual(['sessions']);
-    expect(nav('sessions').getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(nav('sessions'), { key: 'ArrowUp' });
+    expect(shown()).toEqual([second]);
+    expect(nav(second).getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(nav(second), { key: 'ArrowUp' });
     expect(shown()).toEqual(['appearance']);
     // Wrapping: up from the first lands on the last -- whichever that is.
     // Named from `SECTIONS` rather than spelled, because this assertion is
@@ -103,8 +115,8 @@ describe('the nav is steerable without a mouse', () => {
   it('keeps focus on the nav item it moved to, never inside the panel', () => {
     open();
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(nav('sessions'));
-    expect(panel('sessions').contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).toBe(nav(second));
+    expect(panel(second).contains(document.activeElement)).toBe(false);
   });
 
   it('jumps to the ends with Home and End', () => {
@@ -118,9 +130,9 @@ describe('the nav is steerable without a mouse', () => {
   it('is one tab stop: the selected item rovers, the others are skipped', () => {
     open();
     expect(nav('appearance').tabIndex).toBe(0);
-    expect(nav('sessions').tabIndex).toBe(-1);
+    expect(nav(second).tabIndex).toBe(-1);
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowDown' });
-    expect(nav('sessions').tabIndex).toBe(0);
+    expect(nav(second).tabIndex).toBe(0);
     expect(nav('appearance').tabIndex).toBe(-1);
   });
 
@@ -131,9 +143,9 @@ describe('the nav is steerable without a mouse', () => {
     const field = screen.getByLabelText('out text size');
     act(() => (field as HTMLElement).focus());
     fireEvent.keyDown(field, { key: 'Tab', ctrlKey: true });
-    expect(shown()).toEqual(['sessions']);
-    expect(document.activeElement).toBe(nav('sessions'));
-    fireEvent.keyDown(nav('sessions'), { key: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(shown()).toEqual([second]);
+    expect(document.activeElement).toBe(nav(second));
+    fireEvent.keyDown(nav(second), { key: 'Tab', ctrlKey: true, shiftKey: true });
     expect(shown()).toEqual(['appearance']);
   });
 });
@@ -163,7 +175,7 @@ describe('below md the same nav is a segmented strip', () => {
       // Still one nav state, not two components with two: the strip steers the
       // same sections with the same keys.
       fireEvent.keyDown(nav('appearance'), { key: 'ArrowRight' });
-      expect(shown()).toEqual(['sessions']);
+      expect(shown()).toEqual([second]);
     } finally {
       if (wide === undefined) {
         Reflect.deleteProperty(window, 'matchMedia');
