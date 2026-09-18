@@ -367,11 +367,37 @@ function OutLink({ href, children }: { readonly href?: string; readonly children
             // a pixel above the sentence it is in. `max-w-full` with
             // `truncate` on the name, because an inline-flex box cannot break
             // across lines and a long label would otherwise decide how wide
-            // the pane is. `gap-0.5` and `px-1`: with the border gone there is
-            // nothing to hold the words off an edge, so the padding is the
-            // whole of the pill's size and it is as small as a chip can be
-            // and still read as one.
-            'inline-flex max-w-full cursor-pointer items-baseline gap-0.5 rounded-[5px] bg-out-pill px-1 align-baseline leading-[1.3]',
+            // the pane is.
+            //
+            // `0.85em`, AND IT IS NOT A ROLE FROM THE SCALE. The operator:
+            // "the source needs to be smaller than the out font size." That
+            // is a claim about a RELATIONSHIP, and the out size is the
+            // operator's own stepper (`--vam-out-font-size`, 10..20), so no
+            // fixed size can hold it -- one that is smaller at 15px is larger
+            // at 10.
+            //
+            // `text-control` WAS THE OBVIOUS ANSWER AND IT IS WRONG HERE,
+            // measured rather than reasoned: inside `[data-reading-pane]` the
+            // scale is re-declared off `--vam-pane-size`, which is
+            // `max(--text-body, --vam-out-font-size)` -- it FLOORS AT 13 while
+            // the prose does not. Driven to the bottom of the stepper, the
+            // pill rendered 12px against a 10px paragraph: bigger than the
+            // text it sits in, which is the opposite of what was asked.
+            // `text-meta` is worse still, a flat 11px that would swell against
+            // a 10px prose and shrink to nothing against a 20px one.
+            //
+            // `em` resolves against the PARAGRAPH'S OWN computed size, so the
+            // step holds at every setting and at any future one. The 11px
+            // floor the scale keeps (`type-scale.test.ts`, asked for twice)
+            // does not bind here: it is about sizes the operator cannot
+            // change, and this prose already goes to 10px when they ask it to.
+            // The guard drives the stepper to both ends and re-asks.
+            //
+            // `px-1.5 py-0.5`, at the operator's ask for more padding. The
+            // vertical half-step is free in a paragraph: padding on an inline
+            // box paints outside the line box without moving it, so the pill
+            // gets its air and the sentence keeps its rhythm.
+            'inline-flex max-w-full cursor-pointer items-baseline gap-0.5 rounded-[5px] bg-out-pill px-1.5 py-0.5 align-baseline text-[0.85em] leading-[1.3]',
             // NO INK CLASS ON THE LIVE ONE, and that is the point: the name
             // inherits the paragraph's colour, so a link reads as part of the
             // sentence. `hover:brightness` rather than a second ground, so
