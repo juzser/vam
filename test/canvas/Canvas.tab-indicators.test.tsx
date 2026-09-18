@@ -81,7 +81,7 @@ const tabs = () => [...document.querySelectorAll('[data-session-tab]')];
 const tabOf = (id: string) =>
   tabs().find(
     (tab) =>
-      tab.querySelector('[data-tab-close]')?.getAttribute('aria-label') === `close ${id} tab`,
+      tab.querySelector('[data-tab-close]')?.getAttribute('aria-label') === `close session ${id}`,
   ) ?? null;
 /** The title as read, which is the button's text with any icon in front. */
 const titleOf = (id: string) => tabOf(id)?.querySelector('[data-tab-select]')?.textContent?.trim();

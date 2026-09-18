@@ -194,20 +194,28 @@ describe('a restored layout absorbs what was created while the project was away'
 });
 
 /**
- * The consequence the invariant has for a tab's own `×`. Closing a tab used
- * to leave a live session with no tab anywhere, reachable only from the
- * sidebar — which is precisely the state A11.1 forbids, so the adoption
- * would put the tab straight back and the `×` would read as broken. It
- * refuses aloud instead, in the demo `+`'s idiom: a control that cannot do
- * the thing says why rather than doing nothing. Ending the session is still
- * one keystroke away, and stays where the destructive verb already lives.
+ * The consequence the invariant has for a tab's own `×` — restated by A22,
+ * and still the same guarantee.
+ *
+ * What the `×` must never do is REMOVE the tab and leave the session
+ * running: that is exactly the state A11.1 forbids, and the adoption effect
+ * would undo it in the same breath. The first answer to that was a refusal,
+ * which kept the invariant by making the control inert — on every tab, since
+ * a tab is only ever drawn for a session the model still carries. The answer
+ * now is that the `×` closes the SESSION (`Canvas.tab-close-session.test.tsx`),
+ * so the invariant holds because the session goes, not because nothing
+ * happens. Read from this side it is the same claim: no press of a tab's
+ * `×` ever leaves a live session without a tab.
+ *
+ * This canvas has no write route at all — `READ_ONLY_SOURCE`, the default —
+ * so here nothing goes, and it says so rather than pretending.
  */
-describe('a tab’s × cannot leave a live session without one', () => {
-  it('refuses, naming the key that actually closes the session', () => {
+describe('a tab’s × never leaves a live session without one', () => {
+  it('takes no tab away, and names the session it could not close', () => {
     render(<Canvas model={model(['a1', 'a2'])} />);
     const close = paneFor('pane-1')?.querySelector<HTMLButtonElement>('[data-tab-close]');
     act(() => close?.click());
     expect(tabsIn(paneFor('pane-1'))).toEqual(['a1', 'a2']);
-    expect(said()).toContain('close the session with x');
+    expect(said()).toContain('no close-session command');
   });
 });
