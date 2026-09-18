@@ -20,21 +20,26 @@
  * records keeps the request-in-words it always had.
  *
  * AND THE SECOND HALF OF THAT ANSWER LINE IS WHY THIS MODULE NO LONGER BUILDS
- * KEYS. "saved as your default for new sessions" is a change to
+ * KEYS, OR LINES. "saved as your default for new sessions" is a change to
  * `~/.claude/settings.json` nobody asked for, so main drives the CLI's own
- * `/model` menu and presses `s` instead (`main/terminal/model-switch.ts`).
- * What is left here is the decision table, the five rows the popover draws,
- * and the one-word rule.
+ * `/model` menu and presses `s` instead (`main/terminal/model-switch.ts`). The
+ * last piece to go was `modelCommandLine`, which survived while main still
+ * typed the argument form for a full model id; the operator chose refusal over
+ * that fallback, the free-text row went with it, and what is left here is the
+ * decision table and the five rows the popover draws. The one-word rule is
+ * `isModelChoice` alone now, and the last describe below holds both facts.
  *
  * `modelControlState` is the decision table, and it is asserted row by row so
  * that a change to one arm reddens here before it reaches the pane.
  */
 
 import { describe, expect, it } from 'vitest';
+// The whole module too, because one of the assertions below is about what it
+// does NOT export -- which a named import cannot ask.
+import * as modelCommand from '../../src/renderer/panels/model-command.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
-  modelCommandLine,
   modelControlState,
   runningModelRows,
 } from '../../src/renderer/panels/model-command.js';
@@ -209,59 +214,54 @@ describe('what the button says', () => {
 });
 
 /**
- * THE LINE THIS MODULE STILL OWNS IS THE ONE THE CAPTION PRINTS, and it used
- * to be the one vam typed. A `modelCommandStrokes` stood beside it, cutting
- * `/model <choice>` into `PaneKey`s for `terminal.send` -- and the CLI answers
- * that form with "and saved as your default for new sessions", so every pick
- * rewrote `~/.claude/settings.json`. It is gone; main drives the CLI's own
- * menu, and types this line itself only for the one choice that has no menu
- * row. What reaches the wire is asserted where it happens, in
- * `test/main/terminal/model-switch.test.ts`.
+ * AND THIS MODULE BUILDS NO `/model <choice>` LINE AT ALL ANY MORE.
+ *
+ * TWO BUILDERS WENT, ONE AT A TIME. `modelCommandStrokes` cut the line into
+ * `PaneKey`s for `terminal.send`, and the CLI answers that form with "and
+ * saved as your default for new sessions" -- so every pick rewrote
+ * `~/.claude/settings.json`. It went when main took the route over and drove
+ * the CLI's own menu. `modelCommandLine` outlived it by one change: main still
+ * typed the argument form for a full model id, and the renderer printed that
+ * line in the caption while refusing a choice that was not one word.
+ *
+ * NEITHER REASON SURVIVED THIS ONE. The operator chose refusal over the
+ * fallback, so main types the argument form for nothing; the free-text row
+ * went with it, so every choice the picker can send is one of `MODEL_CHOICES`'
+ * own ids and no input is left that the one-word rule could refuse. The rule
+ * did not move -- it is `isModelChoice`, in main's own `shared/terminal.ts`,
+ * on whatever crosses the bridge -- so what is asserted here is the rule's
+ * corpus against that one copy, and the ABSENCE of a renderer-side speller for
+ * the line that costs somebody their default.
  */
-describe('what one choice becomes in the caption, and what is refused outright', () => {
-  it('is the CLI’s argument form, `/model <alias>`', () => {
-    expect(modelCommandLine('opus')).toBe('/model opus');
-    expect(modelCommandLine('default')).toBe('/model default');
-    expect(modelCommandLine('  sonnet  ')).toBe('/model sonnet');
-  });
-
-  it('takes a full model id too, so the free-text row can name what the aliases cannot', () => {
-    expect(modelCommandLine('claude-opus-5')).toBe('/model claude-opus-5');
-  });
-
-  it('refuses an empty choice, and any choice with whitespace or a control character in it', () => {
-    // A raw newline in a literal payload reaches the pane as 0x0a and the REPL
-    // submits on it (`tmux/argv.ts`), so a choice carrying one would submit
-    // `/model` bare -- opening a menu with the rest typed into it. A space
-    // would hand the CLI two arguments. Both are refused before the bridge is
-    // touched, with `null` and never a shorter line.
-    expect(modelCommandLine('')).toBeNull();
-    expect(modelCommandLine('   ')).toBeNull();
-    expect(modelCommandLine('opus\nhello')).toBeNull();
-    expect(modelCommandLine('opus haiku')).toBeNull();
-    expect(modelCommandLine('op\tus')).toBeNull();
-    expect(modelCommandLine(`op${String.fromCharCode(27)}us`)).toBeNull();
-  });
-
-  it('agrees with the rule MAIN enforces, so neither side can drift alone', () => {
-    // TWO COPIES, ONE RULE. The renderer's exists to WORD the refusal before
-    // the bridge is touched; main's is the enforcement, because the renderer
-    // is the least trusted process in the app. A choice one of them takes and
-    // the other refuses would be a control that reports a pairing problem for
-    // a line it built itself.
-    const cases = [
-      'opus',
-      'default',
-      'claude-opus-5-20260501',
-      '',
-      '   ',
-      'opus haiku',
-      'opus\nhello',
-      'op\tus',
-      `op${String.fromCharCode(27)}us`,
-    ];
-    for (const choice of cases) {
-      expect(isModelChoice(choice.trim()), choice).toBe(modelCommandLine(choice) !== null);
+describe('the one-word rule, and the builder that is not here to break it', () => {
+  it('holds for an alias, a full model id, and nothing carrying whitespace', () => {
+    // The corpus the two copies used to be compared on, kept whole and asked
+    // of the copy that remained. A raw newline in a literal payload reaches
+    // the pane as 0x0a and the REPL submits on it (`tmux/argv.ts`), so a
+    // choice carrying one would submit `/model` bare -- opening a menu with
+    // the rest typed into it. A space would hand the CLI two arguments.
+    for (const choice of ['opus', 'default', 'claude-opus-5-20260501']) {
+      expect(isModelChoice(choice), choice).toBe(true);
     }
+    for (const choice of ['', '   ', 'opus haiku', 'opus\nhello', 'op\tus', 'opus']) {
+      expect(isModelChoice(choice), JSON.stringify(choice)).toBe(false);
+    }
+  });
+
+  it('exports no way to spell `/model <choice>` in the least trusted process', () => {
+    // NOT A STYLE POINT. A renderer-side builder for the argument form is the
+    // one thing standing between a future hand and the defect this whole
+    // change removes: the line is right there, already written, and typing it
+    // over `terminal.send` is one call away. `modelCommandLine` was that, and
+    // it is asserted gone rather than merely deleted.
+    expect(Object.keys(modelCommand)).not.toContain('modelCommandLine');
+    expect(Object.keys(modelCommand)).not.toContain('modelCommandStrokes');
+    for (const [name, value] of Object.entries(modelCommand)) {
+      if (typeof value !== 'function') continue;
+      expect(String(value), name).not.toContain('/model ');
+    }
+    // And the sweep really had a corpus to sweep -- five exports, of which
+    // three are functions -- rather than passing on an empty object.
+    expect(Object.keys(modelCommand).length).toBeGreaterThanOrEqual(4);
   });
 });

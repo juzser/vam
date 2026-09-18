@@ -460,10 +460,12 @@ export type TerminalApi = {
    * session; there is deliberately no way to express a model switch as a
    * keystroke on this bridge.
    *
-   * `choice` is one word: one of the CLI's five aliases, which main walks the
-   * menu for, or a full model id, which has no menu row -- that one falls back
-   * to the argument form and comes back as `scope: 'default'`, which the
-   * caption must disclose.
+   * `choice` IS ONE OF THE CLI'S FIVE ALIASES, which main walks the menu for.
+   * Anything else -- a full model id, say -- has no menu row, and the only
+   * form the CLI takes it in is the argument form that ALSO rewrites the
+   * default. vam used to send that one and disclose the cost; the operator
+   * chose refusal, so it comes back `not-in-menu` with nothing typed, and this
+   * bridge offers no second member that would.
    */
   switchModel(projectId: string, choice: string, rowId?: string): Promise<ModelSwitchResult>;
 };
