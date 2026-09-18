@@ -5,8 +5,8 @@
  *
  * Two properties are load-bearing and neither is visible to a reader of the
  * markup alone. First, EVERY panel stays mounted — `Canvas.settings` queries
- * the theme buttons and the layout options immediately after `,` without
- * navigating anywhere, and those assertions are asserting something true.
+ * the theme buttons immediately after `,` without navigating anywhere, and
+ * those assertions are asserting something true.
  * Second, focus follows the SELECTION and stays in the nav: with automatic
  * activation, a cursor that dived into each panel would leave the operator a
  * whole nav's worth of arrow presses from the list they were steering.
@@ -17,6 +17,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { SECTIONS } from '../../src/renderer/settings/sections.js';
+
+/** The end of the nav, read off the list rather than spelled: the two
+ *  assertions below are about the ENDS, not about which section is there. */
+const last = SECTIONS[SECTIONS.length - 1]?.id ?? 'appearance';
 
 afterEach(cleanup);
 
@@ -37,6 +41,19 @@ const shown = () =>
     .map((el) => el.getAttribute('data-settings-panel'));
 
 describe('the nav is a tablist over the declared sections', () => {
+  /**
+   * The operator asked for the Layout section to go. It was the only control
+   * that could hide a pane, so this asserts the whole feature is gone --
+   * the section, its panel, and the per-pane tiles inside it -- rather than
+   * only that the nav item stopped being drawn.
+   */
+  it('offers no layout section: hiding a pane is not a thing vam does', () => {
+    open();
+    expect(SECTIONS.map((s) => s.id)).not.toContain('layout');
+    expect(document.querySelector('[data-settings-panel="layout"]')).toBeNull();
+    expect(document.querySelectorAll('[data-pane-toggle]').length).toBe(0);
+  });
+
   it('names every section once, in a stable order', () => {
     open();
     const labels = [...document.querySelectorAll('[data-settings-nav-item]')].map(
@@ -71,36 +88,39 @@ describe('the nav is steerable without a mouse', () => {
   it('moves selection with the arrows, wrapping, and shows the panel it lands on', () => {
     open();
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowDown' });
-    expect(shown()).toEqual(['layout']);
-    expect(nav('layout').getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(nav('layout'), { key: 'ArrowUp' });
+    expect(shown()).toEqual(['sessions']);
+    expect(nav('sessions').getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(nav('sessions'), { key: 'ArrowUp' });
     expect(shown()).toEqual(['appearance']);
-    // Wrapping: up from the first lands on the last.
+    // Wrapping: up from the first lands on the last -- whichever that is.
+    // Named from `SECTIONS` rather than spelled, because this assertion is
+    // about the WRAP and a literal here goes stale every time a section is
+    // added (it did, when Update arrived).
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowUp' });
-    expect(shown()).toEqual(['keyboard']);
+    expect(shown()).toEqual([last]);
   });
 
   it('keeps focus on the nav item it moved to, never inside the panel', () => {
     open();
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(nav('layout'));
-    expect(panel('layout').contains(document.activeElement)).toBe(false);
+    expect(document.activeElement).toBe(nav('sessions'));
+    expect(panel('sessions').contains(document.activeElement)).toBe(false);
   });
 
   it('jumps to the ends with Home and End', () => {
     open();
     fireEvent.keyDown(nav('appearance'), { key: 'End' });
-    expect(shown()).toEqual(['keyboard']);
-    fireEvent.keyDown(nav('keyboard'), { key: 'Home' });
+    expect(shown()).toEqual([last]);
+    fireEvent.keyDown(nav(last), { key: 'Home' });
     expect(shown()).toEqual(['appearance']);
   });
 
   it('is one tab stop: the selected item rovers, the others are skipped', () => {
     open();
     expect(nav('appearance').tabIndex).toBe(0);
-    expect(nav('layout').tabIndex).toBe(-1);
+    expect(nav('sessions').tabIndex).toBe(-1);
     fireEvent.keyDown(nav('appearance'), { key: 'ArrowDown' });
-    expect(nav('layout').tabIndex).toBe(0);
+    expect(nav('sessions').tabIndex).toBe(0);
     expect(nav('appearance').tabIndex).toBe(-1);
   });
 
@@ -111,9 +131,9 @@ describe('the nav is steerable without a mouse', () => {
     const field = screen.getByLabelText('out text size');
     act(() => (field as HTMLElement).focus());
     fireEvent.keyDown(field, { key: 'Tab', ctrlKey: true });
-    expect(shown()).toEqual(['layout']);
-    expect(document.activeElement).toBe(nav('layout'));
-    fireEvent.keyDown(nav('layout'), { key: 'Tab', ctrlKey: true, shiftKey: true });
+    expect(shown()).toEqual(['sessions']);
+    expect(document.activeElement).toBe(nav('sessions'));
+    fireEvent.keyDown(nav('sessions'), { key: 'Tab', ctrlKey: true, shiftKey: true });
     expect(shown()).toEqual(['appearance']);
   });
 });
@@ -143,7 +163,7 @@ describe('below md the same nav is a segmented strip', () => {
       // Still one nav state, not two components with two: the strip steers the
       // same sections with the same keys.
       fireEvent.keyDown(nav('appearance'), { key: 'ArrowRight' });
-      expect(shown()).toEqual(['layout']);
+      expect(shown()).toEqual(['sessions']);
     } finally {
       if (wide === undefined) {
         Reflect.deleteProperty(window, 'matchMedia');
@@ -158,13 +178,15 @@ describe('the overlay draws a focus indicator', () => {
   it('gives every nav item, tile and the close button a visible ring', () => {
     open();
     const nav = [...document.querySelectorAll('[data-settings-nav-item]')];
-    const tiles = [...document.querySelectorAll('[data-layout-option]')];
-    const ringed = [...nav, ...tiles, screen.getByRole('button', { name: 'Esc' })];
+    // A12.1 retired the LayoutPicker's `[data-layout-option]` tiles with the
+    // three canvas presets, and the `[data-pane-toggle]` tiles that replaced
+    // them went with the whole Layout section. The nav items and the close
+    // button are the corpus this panel has left.
+    const ringed = [...nav, screen.getByRole('button', { name: 'close' })];
     // Derived, not counted: this guard exists to prove it examined a real
     // corpus, and a hard-coded floor turns into a false red the moment a
     // section is added or retired — which is exactly what it just did.
     expect(nav.length).toBe(SECTIONS.length);
-    expect(tiles.length).toBeGreaterThan(3);
     for (const el of ringed) {
       expect(el.className, `${el.textContent} has no focus ring`).toContain(
         'focus-visible:outline-ink',

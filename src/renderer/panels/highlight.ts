@@ -31,6 +31,26 @@ export type Token = {
   readonly kind: TokenKind;
 };
 
+/**
+ * WHICH TOKEN KIND WEARS WHICH COLOUR, for every surface that draws one.
+ *
+ * Here rather than beside either caller, because there are two of them now --
+ * `out`'s fenced code blocks (`DetailPanel.tsx`) and the file editor's overlay
+ * (`FilesTab.tsx`) -- and a second copy of this table is how a `string` comes
+ * to be one colour in a transcript and a different one in an editor.
+ *
+ * Every entry is a TOKEN utility, never a literal colour (13.1), and none of
+ * them is one of the four status colours -- see the note beside those in
+ * `styles.css` for why an added line must not be `running` green.
+ */
+export const SYNTAX_CLASS: Readonly<Record<TokenKind, string>> = {
+  plain: '',
+  comment: 'text-syn-comment',
+  string: 'text-syn-string',
+  number: 'text-syn-number',
+  keyword: 'text-syn-keyword',
+};
+
 /** The languages with a tokenizer. `diff` is line-based and has its own path. */
 export type HighlightLang = 'shell' | 'ts' | 'json' | 'diff';
 

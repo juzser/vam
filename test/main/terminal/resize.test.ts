@@ -35,15 +35,24 @@ function runner(answers: Record<string, TmuxRunResult>) {
   const argvs: (readonly string[])[] = [];
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
-    return answers[argv[0] ?? ''] ?? failed(`no stub for ${argv[0] ?? ''}`);
+    // THE PANE READ IS ONE TMUX INVOCATION OF TWO COMMANDS since it began
+    // asking where the cursor is (`tmux/argv.ts`), so its first word is
+    // `display-message` and not `capture-pane`. Every stub here names the
+    // read by WHAT IT READS rather than by the verb that happens to lead.
+    const verb = argv.includes('capture-pane') ? 'capture-pane' : (argv[0] ?? '');
+    return answers[verb] ?? failed(`no stub for ${verb}`);
   };
-  return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
+  return {
+    run,
+    argvs,
+    verbs: () => argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
+  };
 }
 
 describe('resizing the session vam started for a project', () => {
   it('resizes the recorded session, exactly targeted, in columns and rows', async () => {
     const { run, argvs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'resize-window': ok(''),
     });
     expect(await resizeSessionPane(run, ATLAS, SIZE)).toBe(true);
@@ -66,7 +75,7 @@ describe('resizing the session vam started for a project', () => {
     // alone answers `ambiguous` for both. The row resolves it -- the same rule
     // the read draws by, so the session resized is the one on screen.
     const { run, argvs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-d4e5f6\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n${ATLAS}\t\tvam-atlas-d4e5f6\n`),
       'resize-window': ok(''),
     });
     const panes = new Map([['sess-beta#8', 'vam-atlas-d4e5f6']]);
@@ -80,7 +89,7 @@ describe('resizing the session vam started for a project', () => {
     // this is the difference between fitting a pane and reflowing someone
     // else's terminal.
     const { run, verbs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'resize-window': ok(''),
     });
     const panes = new Map([['sess-beta#8', 'notes']]);
@@ -92,7 +101,7 @@ describe('resizing the session vam started for a project', () => {
     // The operator's own sessions are on the same server. vam can see them and
     // must never touch them: no `@vam-project`, no resize.
     const { run, verbs } = runner({
-      'list-sessions': ok(`\tirc\n\tnotes\n${BEACON}\tvam-beacon-b2c3d4\n`),
+      'list-sessions': ok(`\t\tirc\n\t\tnotes\n${BEACON}\t\tvam-beacon-b2c3d4\n`),
       'resize-window': ok(''),
     });
     expect(await resizeSessionPane(run, ATLAS, SIZE)).toBe(false);
@@ -104,7 +113,7 @@ describe('resizing the session vam started for a project', () => {
     // fit -- and resizing one of two would be a coin toss landing in a real
     // terminal.
     const { run, verbs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-d4e5f6\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n${ATLAS}\t\tvam-atlas-d4e5f6\n`),
       'resize-window': ok(''),
     });
     expect(await resizeSessionPane(run, ATLAS, SIZE)).toBe(false);
@@ -120,7 +129,7 @@ describe('resizing the session vam started for a project', () => {
 
   it('reports a refused resize rather than claiming the pane now fits', async () => {
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'resize-window': failed("can't find window"),
     });
     expect(await resizeSessionPane(run, ATLAS, SIZE)).toBe(false);
@@ -141,7 +150,7 @@ describe('the terminal resize channel', () => {
 
   it('resizes for a well-formed ask', async () => {
     const { run, verbs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'resize-window': ok(''),
     });
     expect(await harness(run)(ATLAS, 120, 40)).toBe(true);
@@ -162,7 +171,7 @@ describe('the terminal resize channel', () => {
     // The renderer is the least trusted process in the app. A size it sends is
     // an allocation request to a program on the operator's machine, so it is
     // checked here and not only where it was measured.
-    const { run, argvs } = runner({ 'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`) });
+    const { run, argvs } = runner({ 'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`) });
     expect(await harness(run)(...args)).toBe(false);
     expect(argvs).toEqual([]);
   });
@@ -182,7 +191,7 @@ describe('the terminal resize channel', () => {
 describe('a session another row claimed is not resized on this row’s behalf', () => {
   it('lists, finds only a claimed session, and stops there', async () => {
     const { run, verbs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'resize-window': ok(''),
     });
     const panes = new Map([['sess-alpha', 'vam-atlas-a1b2c3']]);
@@ -192,7 +201,7 @@ describe('a session another row claimed is not resized on this row’s behalf', 
 
   it('still resizes a session nobody claimed for a row that published nothing', async () => {
     const { run, argvs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'resize-window': ok(''),
     });
     expect(await resizeSessionPane(run, ATLAS, SIZE, 'sess-gamma#9', new Map())).toBe(true);

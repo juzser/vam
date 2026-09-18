@@ -15,7 +15,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   createClipboardApi,
   createDialogApi,
+  createFilesApi,
+  createIssueApi,
+  createLinkApi,
   createMainErrorsApi,
+  createPrefsBridge,
   createPreloadApi,
   createRemoteApi,
   createStreamSubscribe,
@@ -32,8 +36,20 @@ contextBridge.exposeInMainWorld('api', {
   // this bridge checks on its own.
   update: createUpdateApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
+  // Opens a PREFILLED issue form in the operator's own browser, and posts
+  // nothing. Takes text, never a location -- see `CHANNELS.issueOpen`.
+  issue: createIssueApi(ipcRenderer),
+  // The address an AGENT wrote, handed to the operating system's browser --
+  // and the only member that names a destination. The allowlist that pays for
+  // that lives in main (`src/main/link/ipc.ts`), never here: this forwarder
+  // decides nothing, so nothing about what opens depends on it.
+  link: createLinkApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
+  // The file-editor tab's read and write, authorised against every live
+  // session's own working directory in main before a byte moves either way.
+  // See `src/main/files/authorize.ts` and `src/main/files/ipc.ts`.
+  files: createFilesApi(ipcRenderer),
   // The pairing screen's own channels. Exposed unconditionally like every
   // other member -- whether main registered them is runtime state, and the
   // bridge's shape may not depend on runtime state.
@@ -41,4 +57,8 @@ contextBridge.exposeInMainWorld('api', {
   // Main's own failure buffer (`src/main/errors/log.ts`), read side. See
   // `src/renderer/errors/main-errors-bridge.ts` for the one caller.
   mainErrors: createMainErrorsApi(ipcRenderer),
+  // Preferences main needs a copy of. Exactly one today: where to ask GitHub
+  // from, per project. Desktop-only by construction -- it is not a member of
+  // the source API a phone implements over HTTP.
+  prefs: createPrefsBridge(ipcRenderer),
 });

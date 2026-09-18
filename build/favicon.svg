@@ -1,0 +1,53 @@
+<!--
+  The SMALL mark: the same graph as build/icon.svg, drawn for 32 and 16 pixels.
+
+  NOT A REDUCTION OF icon.svg, and that is the point. Measured on the 32px
+  favicon that shipped, the brightest pixel of either quiet node reached
+  2.31:1 against the background, and 1.79:1 at 16px. The artwork's own
+  #6e6d6d node stroke is 4.4:1, but at 1024 it is 14 units wide, which is
+  0.44 of a pixel at 32 and 0.22 at 16, so the ring averages into the
+  background before it is ever seen. The dotted edge (24 units, 0.75px at 32)
+  and the two gaussian blurs go the same way, leaving the amber node as the
+  only thing above 2:1 in the whole square. The mark read as one orange spot.
+
+  So this file is the same composition with every element sized to survive:
+  the quiet nodes are FILLED discs rather than hairline rings, the dotted edge
+  is solid, the beams are wide enough to land on a whole pixel, and there is
+  no blur at all. Nothing here is a new colour. #fe9d00, #6e6d6d and #7c7b7b
+  are all lifted from icon.svg, which stays exactly as it is: it is the
+  1024px app icon, where every one of those details is legible and worth
+  having.
+
+  src/renderer/public/favicon.png is this file rasterised at 32x32, and
+  favicon-16.png at 16x16. Draw at the target size; never scale a larger
+  raster down, which is the whole defect above. Any SVG renderer will do, and
+  no script is committed to do it, deliberately: the one that used to live
+  here re-rendered build/icon.png too, which is authored art that a re-render
+  would silently replace.
+-->
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="61%" cy="66%" r="78%">
+      <stop offset="0%" stop-color="#191512"/>
+      <stop offset="42%" stop-color="#0c0b0a"/>
+      <stop offset="100%" stop-color="#040404"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="32" height="32" fill="url(#bg)"/>
+
+  <!-- Beams, behind the nodes: they start outside the active node's ring and
+       stop at each quiet node's edge, so no stroke crosses a disc. -->
+  <g stroke="#fe9d00" stroke-width="2" stroke-linecap="round">
+    <line x1="14" y1="17.1" x2="7.9" y2="11.6"/>
+    <line x1="22.2" y1="15.1" x2="24.3" y2="9.5"/>
+  </g>
+
+  <!-- Quiet nodes: filled, not ringed. A 14/1024 ring stroke is 0.44px here. -->
+  <circle cx="5.5" cy="9.5" r="3.2" fill="#6e6d6d"/>
+  <circle cx="25.5" cy="6.5" r="3.2" fill="#6e6d6d"/>
+
+  <!-- The lit node, with its ring. -->
+  <circle cx="19.5" cy="22" r="4.2" fill="#fe9d00"/>
+  <circle cx="19.5" cy="22" r="6.6" fill="none" stroke="#fe9d00" stroke-width="1.6"/>
+</svg>

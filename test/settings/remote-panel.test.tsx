@@ -54,6 +54,10 @@ function fakeApi(over: Partial<RemoteState> = {}, opened: Partial<RemoteState> =
     revokeAll: vi.fn(async () => idle),
     enableServe: vi.fn(async () => idle),
     disableServe: vi.fn(async () => idle),
+    // The bridge carries it, so the fake does too: a fake with only the
+    // members its subject happens to call stops catching the day it reaches
+    // for another.
+    openLink: vi.fn(async () => true),
     setWrites: vi.fn(async () => idle),
   };
 }
@@ -86,7 +90,7 @@ describe('RemotePanel', () => {
   });
 
   it.each([
-    ['no-cli', /could not ask/i],
+    ['no-cli', /no tailscale command/i],
     ['not-running', /Tailscale is not running/i],
     ['no-name', /will not guess/i],
   ] as const)('names %s as the reason there is no address', async (reason, said) => {
@@ -106,10 +110,37 @@ describe('RemotePanel', () => {
     expect(screen.queryByText('Show a pairing code')).toBeNull();
   });
 
-  it('says so in the browser build, where there is no bridge to ask', async () => {
-    render(<RemotePanel api={undefined} active />);
-
-    expect((await screen.findByTestId('remote-off')).textContent).toMatch(/desktop app/i);
+  /**
+   * THE BROWSER BUILD IS THE PHONE, and what it gets is the LIST.
+   *
+   * This used to assert one sentence -- "Remote access is part of the desktop
+   * app" -- which was true about the acts and the whole of what a phone could
+   * see. Remote is now the only settings section a phone draws at all
+   * (`sections.ts`, `PHONE_SECTIONS`), so that sentence had become the entire
+   * destination of the entire overlay. `PairedDeviceList` reads the list over
+   * HTTP; the part of the old sentence worth keeping -- where the controls
+   * are -- survives inside it, which is what the second assertion holds.
+   *
+   * `fetch` is stubbed to a refusal rather than left to happen: this
+   * environment resolves a relative URL against `localhost:3000`, so an
+   * un-stubbed render is a unit test making a network connection.
+   */
+  it('reads the paired devices in the browser build, where there is no bridge', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new TypeError('Failed to fetch'));
+    try {
+      render(<RemotePanel api={undefined} active />);
+      const failed = await screen.findByTestId('devices-failed');
+      expect(failed.textContent).toMatch(/Failed to fetch/i);
+      expect(screen.queryByTestId('remote-off')).toBeNull();
+      expect(fetchSpy).toHaveBeenCalledWith(
+        '/api/devices',
+        expect.objectContaining({ headers: expect.anything() }),
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('copies the https address through electron clipboard, not the page own', async () => {
@@ -140,7 +171,7 @@ describe('RemotePanel', () => {
     const api = fakeApi({ writesPreference: false });
     render(<RemotePanel api={api} active />);
 
-    await userEvent.click(await screen.findByRole('button', { name: /turn writes on/i }));
+    await userEvent.click(await screen.findByRole('switch', { name: /writes/i }));
 
     expect(api.setWrites).toHaveBeenCalledWith(true);
   });

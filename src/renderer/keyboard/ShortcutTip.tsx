@@ -8,9 +8,9 @@
  * `effectiveBindings` — after `resolveChord` and the settings page — and holds
  * no key of its own.
  *
- * Mode is not flattened either: `describeAction` returns `byMode` for the two
- * families whose meaning depends on the cursor mode, so a caller that knows its
- * mode gets that meaning and one that does not gets BOTH, named. Picking one
+ * Mode is not flattened either: `describeAction` returns `byMode` for a family
+ * whose meaning depends on the cursor mode, so a caller that knows its mode
+ * gets that meaning and one that does not gets BOTH, named. Picking one
  * silently is the same lie in a smaller font.
  *
  * `Note` is its sibling: same Radix machinery, same reason (a `title` never
@@ -39,12 +39,19 @@
 
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { createContext, type ReactNode, useContext } from 'react';
-import { actionId, activeBindings, bindingChords, type KeyAction } from './chords.js';
+import {
+  actionId,
+  activeBindings,
+  bindingChords,
+  isSelectOnlyChord,
+  type KeyAction,
+  parseChord,
+} from './chords.js';
 import { CURSOR_MODES, type CursorMode, describeAction, MODE_TITLES } from './keysheet.js';
 
 /** One row of a tooltip: the chords, and the mode that reading is true in
  *  (`null` for a key that means the same in both). */
-export type TipLine = {
+type TipLine = {
   readonly caption: string | null;
   readonly keys: string;
 };
@@ -54,6 +61,23 @@ export type TipLine = {
  * unbound one: not an empty bracket, not a placeholder, not the shipped
  * default the operator just cleared. A caller with no lines renders its label
  * alone, the honest surface for a button no key reaches.
+ *
+ * AND THE CHORDS ARE JOINED ONLY WHERE THEY MEAN THE SAME THING — which they
+ * stopped doing the day `pickView` grew a one-key spelling.
+ *
+ * Its two slots are not alike: `Ctrl-Alt-1` reaches the Response view from
+ * anywhere, and a bare `1` is text wherever there is a caret and stands down
+ * (`isSelectOnlyChord`, `chords.ts`). Joined, this tip read "Ctrl-Alt-1 or 1"
+ * with nothing to say that half of it does nothing in the mode the operator
+ * may be in — the same lie the key sheet had to be taught to split, one
+ * surface over, and the reason this file's own header calls picking one
+ * silently "the same lie in a smaller font".
+ *
+ * So a Select-only spelling gets a LINE of its own, captioned with the mode it
+ * is true in, and a caller that has declared itself in Insert is not shown it
+ * at all. An action with no Select-only chord — which is every other action in
+ * the grammar — takes the unchanged path above it and still prints one joined
+ * line.
  */
 export function shortcutLines(
   action: KeyAction | undefined,
@@ -63,16 +87,39 @@ export function shortcutLines(
   if (action === undefined) {
     return [];
   }
-  const keys = bindingChords(overrides, actionId(action)).join(' or ');
-  if (keys === '') {
+  const chords = bindingChords(overrides, actionId(action));
+  if (chords.length === 0) {
     return [];
   }
-  const { byMode } = describeAction(action);
-  if (byMode === null) {
-    return [{ caption: null, keys }];
-  }
+  const { label, byMode } = describeAction(action);
+  const selectOnly = chords.filter((chord) => isSelectOnlyChord(parseChord(chord)));
   const modes = mode === undefined ? CURSOR_MODES : [mode];
-  return modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
+  if (selectOnly.length === 0) {
+    const keys = chords.join(' or ');
+    return byMode === null
+      ? [{ caption: null, keys }]
+      : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
+  }
+  const anywhere = chords.filter((chord) => !selectOnly.includes(chord));
+  const lines: TipLine[] = [];
+  if (anywhere.length > 0) {
+    const keys = anywhere.join(' or ');
+    lines.push(
+      ...(byMode === null
+        ? [{ caption: null, keys }]
+        : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }))),
+    );
+  }
+  // Shown unless the caller has said it is in Insert, where the key is not
+  // this action's at all. `mode === undefined` means "I do not know", and the
+  // honest answer to that is both lines.
+  if (mode !== 'insert') {
+    lines.push({
+      caption: `${MODE_TITLES.select} · ${byMode === null ? label : byMode.select}`,
+      keys: selectOnly.join(' or '),
+    });
+  }
+  return lines;
 }
 
 /**
@@ -133,6 +180,36 @@ export function TipProvider({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/**
+ * The chord, drawn as a chip and SAID as a shortcut.
+ *
+ * The chip's separation from the label is entirely visual -- a gap and a
+ * border -- and the whole tip is the target of `aria-describedby`, so a
+ * screen reader flattens it into the label. Measured, the Settings tip
+ * announced as "Settings," : a name with a comma welded to it, where the
+ * comma is the entire shortcut. "Search sessions/" and "Filter sessionsF"
+ * were the same sentence.
+ *
+ * A border is not readable, so the word is spoken instead: the visible chip
+ * goes `aria-hidden` and an `sr-only` twin carries "shortcut: <chord>". The
+ * chord itself is `chordText`'s output verbatim in both, so the two surfaces
+ * cannot drift and neither one prettifies what the key sheet spells.
+ */
+function Chip({ keys }: { readonly keys: string }) {
+  return (
+    <>
+      <span
+        data-tip-keys
+        aria-hidden="true"
+        className="shrink-0 rounded-[4px] border border-on-tip-line px-1 py-px font-mono text-meta text-on-tip-dim"
+      >
+        {keys}
+      </span>
+      <span className="sr-only">{` shortcut: ${keys}`}</span>
+    </>
+  );
+}
+
 export function ShortcutTip({
   label,
   action,
@@ -164,36 +241,29 @@ export function ShortcutTip({
           side="top"
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] border border-line-strong bg-raised px-2 py-1.5 text-[11px] leading-[1.45]"
+          className="z-50 flex max-w-[280px] flex-col gap-1 rounded-[7px] bg-tip px-2 py-1.5 text-control shadow-tip"
         >
-          {/* ink on raised (14.9:1 dark, 15.5:1 light) and ink-dim (6.7:1 in
-              both), never ink-faint: faint measures 3.27 / 3.01, under AA. */}
+          {/* THE TIP IS ITS OWN SURFACE and carries its own inks. `on-tip`
+              (13.92:1 dark, 15.55:1 light) and `on-tip-dim` (6.89 / 6.78) --
+              the readings `ink` and `ink-dim` had on the `raised` fill this
+              used to have, re-solved against it. A page ink in here would be
+              tuned for the surface BEHIND the tip, which the tip is now the
+              inverse of, so `text-ink-dim` would land a pale grey on a pale
+              fill. There is no third ink: nothing in a tip is decoration. */}
           {merge ? (
             <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
-              <span className="min-w-0 flex-1 text-ink">{label}</span>
-              {lines[0] === undefined ? null : (
-                <span
-                  data-tip-keys
-                  className="shrink-0 rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
-                >
-                  {lines[0].keys}
-                </span>
-              )}
+              <span className="min-w-0 flex-1 text-on-tip">{label}</span>
+              {lines[0] === undefined ? null : <Chip keys={lines[0].keys} />}
             </span>
           ) : (
             <>
-              <span className="text-ink">{label}</span>
+              <span className="text-on-tip">{label}</span>
               {lines.map((line) => (
                 <span key={line.caption ?? line.keys} className="flex items-baseline gap-1.5">
                   {line.caption === null ? null : (
-                    <span className="min-w-0 flex-1 text-ink-dim">{line.caption}</span>
+                    <span className="min-w-0 flex-1 text-on-tip-dim">{line.caption}</span>
                   )}
-                  <span
-                    data-tip-keys
-                    className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-[10px] text-ink-dim"
-                  >
-                    {line.keys}
-                  </span>
+                  <Chip keys={line.keys} />
                 </span>
               ))}
             </>

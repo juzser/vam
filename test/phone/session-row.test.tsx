@@ -5,8 +5,8 @@
  *
  * WHAT THE DESKTOP ROW SPENDS ITS SECOND LINE ON, measured at 390px before any
  * of this: a branch icon and an em dash. `session.branch` is `null` for every
- * factory session -- the worktree line is on `docs/ade-redesign.md`'s
- * placeholder table, waiting on data the factory does not report -- so a whole
+ * factory session -- the worktree line was on a design mockup's placeholder
+ * table, waiting on data the factory does not report -- so a whole
  * line of a 63.5px row, on the narrowest screen vam has, said nothing. The
  * same line carried the age in `ink-faint`, which measures 3.27:1 dark and
  * 3.01:1 light and fails AA in both (issue 188); and status was the 7px dot
@@ -105,6 +105,30 @@ describe('the phone row’s second line', () => {
     }
   });
 
+  /**
+   * THE STATUS IS SAID ONCE HERE, and the desktop is why it is said at all.
+   *
+   * A desktop row carries the status in the mark and nowhere else -- no word,
+   * no token -- so the mark says it in `sr-only` text, which is a channel the
+   * 7px dot it replaced never had. This line already prints the same word a
+   * few pixels below, in ink anyone can read, so the invisible copy would be
+   * read twice by the one reader it was added for.
+   */
+  it('lets the mark say the status on a desktop and stay silent here, where the line says it', () => {
+    draw(true);
+    for (const mark of document.querySelectorAll('[data-session-row] [data-status-mark]')) {
+      expect(mark.textContent, mark.getAttribute('data-status-mark') ?? '').toBe('');
+    }
+    cleanup();
+
+    draw(false);
+    const said = [...document.querySelectorAll('[data-session-row] [data-status-mark]')].map(
+      (mark) => mark.textContent,
+    );
+    expect(said).toEqual(['waiting', 'running', 'done']);
+    expect(document.querySelectorAll('[data-row-meta]').length, 'no meta line here').toBe(0);
+  });
+
   it('spends a status token on the waiting row only, because that is what it is', () => {
     draw(true);
     const needsYou = document.querySelector('[data-row-needs-you]');
@@ -190,7 +214,11 @@ describe('the desktop row, which shares this component', () => {
     draw(false);
     expect(document.querySelectorAll('[data-row-meta]').length, 'a phone-only line').toBe(0);
     expect(document.querySelectorAll('[data-session-branch]').length).toBe(3);
-    expect(document.body.textContent).toContain('—');
+    // The em-dash stood in for a branch no source could name, and this
+    // asserted it as proof the desktop meta line was drawn at all. It is gone
+    // -- a branch glyph beside a dash is two marks spent on an absence -- so
+    // the proof is the sentence that was always that cell's real content.
+    expect(document.body.textContent).toContain('cannot say which branch');
     expect(row('a1').className).toContain('border-line-loud');
     expect(row('a1').querySelector('[data-row-cursor]')).not.toBeNull();
   });

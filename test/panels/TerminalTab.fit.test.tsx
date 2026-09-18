@@ -23,10 +23,24 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RESIZE_DEBOUNCE_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
 import { applyPalette } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  setActiveTerminalFontSize,
+  TERMINAL_FONT_SIZES,
+} from '../../src/renderer/prefs/terminal-font.js';
+import { activeTerminalScheme } from '../../src/renderer/prefs/terminal-scheme.js';
+import { setActiveNarrowViews } from '../../src/renderer/prefs/view-width.js';
 import type { PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
-const ok = (text = 'the pane'): PaneView => ({ kind: 'ok', name: 'vam-atlas-a1b2c3', text });
+/** A screen with no cursor answer -- what a stub that never asked tmux knows. */
+const NO_CURSOR = { kind: 'unreadable' } as const;
+const ok = (text = 'the pane'): PaneView => ({
+  kind: 'ok',
+  name: 'vam-atlas-a1b2c3',
+  text,
+  cursor: NO_CURSOR,
+});
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 
@@ -239,10 +253,258 @@ describe('the Terminal tab tells tmux how big the pane is', () => {
   });
 });
 
-describe('the pane takes its colours from the theme', () => {
+/**
+ * THE ONE FAILURE A SETTING FOR THE SCREEN'S SIZE CAN INTRODUCE, and it is
+ * silent.
+ *
+ * tmux composes the screen at the size it was TOLD, and vam works that size
+ * out by dividing the pane's box by the advance of one rendered character. The
+ * advance is a function of the font size. So the moment the size becomes a
+ * setting, "the size moved" and "the column count moved" have to be the same
+ * event -- and the thing that makes them not be is the obvious
+ * implementation: put the size on the document as a custom property, let CSS
+ * repaint, and never tell React. The pane's own box does not change when its
+ * type does, so its `ResizeObserver` never fires, and tmux goes on composing
+ * at the old width. Nothing looks broken. Long lines wrap in the wrong place,
+ * and the report is "tmux is broken".
+ *
+ * THE RULER IS NOT WRITTEN BY HAND IN THIS BLOCK, which is what makes it a
+ * test of the chain rather than of the arithmetic. `getBoundingClientRect` is
+ * defined to DERIVE the advance from the size the ruler is actually drawn at,
+ * read back through `getComputedStyle` -- happy-dom resolves inherited
+ * font-size, so this is the engine's answer to "what size is that character",
+ * not the test's. Move the size onto an inner element, take the ruler out of
+ * the pane, or drop `fontSize` from the effect's dependencies, and the column
+ * count stops moving while everything else still passes.
+ */
+describe('the column count follows the size the screen is drawn at', () => {
+  /** A monospace advance, as a fraction of the em -- Geist Mono measures about
+   *  0.63 here. The exact ratio does not matter; that it is a RATIO does. */
+  const ADVANCE = 0.6;
+
+  /** The layout a real engine would give: a fixed box, and a cell derived from
+   *  whatever size the ruler is really inheriting. */
+  function layoutDerived(box: { width: number; height: number }) {
+    const pane = q<HTMLElement>('[data-terminal-pane]');
+    const ruler = q<HTMLElement>('[data-terminal-ruler]');
+    if (pane === null || ruler === null) throw new Error('the pane was not drawn');
+    Object.defineProperty(pane, 'clientWidth', { value: box.width, configurable: true });
+    Object.defineProperty(pane, 'clientHeight', { value: box.height, configurable: true });
+    const characters = (ruler.textContent ?? '').length;
+    ruler.getBoundingClientRect = () => {
+      const em = Number.parseFloat(globalThis.getComputedStyle(ruler).fontSize);
+      return { width: em * ADVANCE * characters, height: em * 1.55 } as DOMRect;
+    };
+  }
+
+  const columnsFor = (px: number, width: number) => Math.floor(width / (px * ADVANCE));
+
+  /**
+   * THE DEBOUNCE ONLY -- deliberately NOT `fire()`.
+   *
+   * `fire()` invokes every observer callback by hand, which is a resize this
+   * scenario does not have: the pane's box is identical before and after the
+   * size changes, so a real `ResizeObserver` says nothing at all. Using it here
+   * would hand the measurement the very trigger whose absence is the defect,
+   * and the block would pass with `fontSize` deleted from the effect's
+   * dependencies -- measured, exactly that. What may fire is the effect
+   * RE-RUNNING, which re-observes, and `observe` delivers an initial size.
+   */
+  const tick = async () => {
+    await act(async () => {
+      vi.advanceTimersByTime(RESIZE_DEBOUNCE_MS * 2);
+      await Promise.resolve();
+    });
+  };
+
+  it('asks tmux for a different number of columns at every size it offers', async () => {
+    const resize = vi.fn(async () => true);
+    setActiveTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
+    await settle();
+    // The box never changes. Only the type does, which is the whole point:
+    // nothing here would make a `ResizeObserver` fire on its own.
+    layoutDerived({ width: 800, height: 480 });
+
+    const asked: number[] = [];
+    for (const size of TERMINAL_FONT_SIZES) {
+      await act(async () => {
+        setActiveTerminalFontSize(size);
+      });
+      await tick();
+      const last = resize.mock.calls.at(-1) as unknown[] | undefined;
+      asked.push(last?.[1] as number);
+      // The arithmetic, said exactly: the columns are the box over the advance
+      // AT THIS SIZE, and not at the size that shipped.
+      expect(asked.at(-1), `${size}px`).toBe(columnsFor(size, 800));
+    }
+
+    // AND THEY ARE ALL DIFFERENT. This is the assertion that fails when the
+    // size is applied by CSS alone: every entry would be the same number, and
+    // every other test in this file would still be green.
+    expect(new Set(asked).size).toBe(TERMINAL_FONT_SIZES.length);
+    // Bigger type, fewer columns -- in that direction, not merely "different".
+    expect([...asked].sort((a, b) => b - a)).toEqual(asked);
+  });
+
+  it('tells tmux nothing when the size is set to the one already in force', async () => {
+    // The other half. A resize is a process spawned against somebody's live
+    // session, so "the setting was written" must not be the trigger -- "the
+    // cell count changed" is.
+    const resize = vi.fn(async () => true);
+    setActiveTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={resize}
+        send={undefined}
+      />,
+    );
+    await settle();
+    layoutDerived({ width: 800, height: 480 });
+    await fire();
+    expect(resize).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      setActiveTerminalFontSize(DEFAULT_TERMINAL_FONT_SIZE);
+    });
+    await tick();
+    expect(resize).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the terminal is the ONE view narrow mode does not narrow', () => {
+  /**
+   * THE OPERATOR'S SECOND SENTENCE: "even in narrow mode, the terminal still
+   * needs full width."
+   *
+   * WHAT THIS REPLACES. A whole block stood here resolving
+   * `NARROW_TERMINAL_MAX_WIDTH` -- a `max()` of two thirds of the pane against
+   * a floor of eighty and a half `ch` -- to pixels at four sizes and four
+   * plausible monospace advances, to prove the narrowed terminal came out at
+   * exactly eighty columns. Every line of it was about a cap this view no
+   * longer has, so it is gone with the constant rather than re-aimed: the
+   * prose views keep theirs, and `prefs.view-width.test.ts` still holds the
+   * arithmetic they are built from.
+   *
+   * WHY THE TERMINAL IS DIFFERENT, in one line: narrowing it is not a margin,
+   * it is a COLUMN COUNT sent to tmux, which re-wraps the screen of a session
+   * that is still running. Eighty columns of somebody's agent is a different
+   * screen, not a tidier one.
+   */
+  it('takes its whole box while every other view is narrowed', async () => {
+    setActiveNarrowViews(true);
+    for (const size of TERMINAL_FONT_SIZES) {
+      setActiveTerminalFontSize(size);
+      render(
+        <TerminalTab
+          projectId={ATLAS}
+          read={vi.fn(async () => ok())}
+          resize={vi.fn(async () => true)}
+          send={undefined}
+        />,
+      );
+      await settle();
+      const tab = q<HTMLElement>('[data-terminal]');
+      expect(tab, `${size}px`).not.toBeNull();
+      // NO MAXIMUM AT ALL, at any size. `maxWidth` was the whole mechanism --
+      // the box shrinks, the observer fires, `measurePane` divides the smaller
+      // box and tmux is told the smaller count -- so its absence is the whole
+      // of the fix, and this is the assertion that reddens if the cap returns.
+      expect(tab?.style.maxWidth, `${size}px`).toBe('');
+      // The size still lands here, and so does the face: the tab's default is
+      // the terminal's own, and the two English sentences below opt out of it
+      // by name (`data-terminal-blank`, `data-terminal-refused`).
+      expect(tab?.className, `${size}px`).toContain('font-mono');
+      expect(tab?.style.fontSize, `${size}px`).toBe(`${size}px`);
+      cleanup();
+    }
+  });
+
+  it('is not capped with the setting off either, which is where it started', async () => {
+    setActiveNarrowViews(false);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok())}
+        resize={vi.fn(async () => true)}
+        send={undefined}
+      />,
+    );
+    await settle();
+    expect(q<HTMLElement>('[data-terminal]')?.style.maxWidth).toBe('');
+  });
+
+  it('asks tmux for the columns of the WHOLE box, narrowed or not', async () => {
+    // THE HALF THAT IS NOT A STYLE. The cap was never only paint: it moved the
+    // box `measurePane` divides, so a capped terminal told tmux a smaller
+    // column count and tmux re-wrapped a running agent's screen at it.
+    // happy-dom lays nothing out, so the box here is written by the test --
+    // what is pinned is that the setting does not change the count vam sends
+    // for the SAME box. The rectangle itself is measured in a real engine by
+    // `e2e/view-width-shots.mjs`.
+    const asked: (readonly unknown[] | undefined)[] = [];
+    for (const narrowed of [false, true]) {
+      setActiveNarrowViews(narrowed);
+      const resize = vi.fn(async () => true);
+      render(
+        <TerminalTab
+          projectId={ATLAS}
+          read={vi.fn(async () => ok())}
+          resize={resize}
+          send={undefined}
+        />,
+      );
+      await settle();
+      layout({ box: { width: 1000, height: 400 }, cell: 8 });
+      await fire();
+      asked.push(resize.mock.calls.at(-1)?.slice(1, 3));
+      cleanup();
+    }
+    expect(asked[0]).toEqual([125, 25]);
+    expect(asked[1]).toEqual(asked[0]);
+  });
+
+  it('keeps the tab’s own sentences in the reading face the rest of it is not', async () => {
+    // The cost of carrying `font-mono`: every child that does not declare a
+    // family inherits it. The pane and its status rule are monospace anyway;
+    // these two are English sentences, and they say so.
+    setActiveNarrowViews(true);
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        read={vi.fn(async () => ok('   '))}
+        resize={vi.fn(async () => true)}
+        send={undefined}
+      />,
+    );
+    await settle();
+    expect(q<HTMLElement>('[data-terminal-blank]')?.className).toContain('font-sans');
+  });
+});
+
+describe('the pane takes its colours from the terminal scheme, not from the theme', () => {
+  /**
+   * THIS BLOCK USED TO HOLD THE OPPOSITE. It pinned `bg-panel text-ink` on
+   * the pane, forbade any hex in its markup, and drove `applyPalette` to
+   * prove an app-palette override recoloured the screen. All three were the
+   * design, and all three were replaced on purpose when the screen got a
+   * scheme of its own (`prefs/terminal-scheme.ts`): the colours are now DATA
+   * on the pane's inline style -- which is where the hexes come from -- and
+   * the app palette no longer reaches it. `TerminalTab.scheme.test.tsx` holds
+   * the new ownership in full; what stays here is the seam it moved across.
+   */
   const css = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
 
-  it('draws in tokens, never in a colour of its own', async () => {
+  it('draws its ink through a token of the scheme, and its ground from the scheme itself', async () => {
     render(
       <TerminalTab
         projectId={ATLAS}
@@ -254,31 +516,32 @@ describe('the pane takes its colours from the theme', () => {
     await settle();
     const pane = q<HTMLElement>('[data-terminal-pane]');
     const classes = pane?.getAttribute('class') ?? '';
-    expect(classes).toContain('bg-panel');
-    expect(classes).toContain('text-ink');
-    // `capture-pane` is called WITHOUT `-e`, so the text carries no colour of
-    // its own: every pixel in this pane is the theme's, and a literal would be
-    // a colour the theme could not reach.
-    expect(pane?.outerHTML).not.toMatch(/#[0-9a-f]{6}/i);
+    expect(classes).toContain('text-term-fg');
+    expect(classes).not.toContain('bg-panel');
+    expect(classes).not.toContain('text-ink');
+    // Every hex in the pane's markup is one of the scheme's own, on the pane
+    // element itself -- the spans below it still carry tokens and no value.
+    const pre = q<HTMLElement>('[data-terminal-pane] pre');
+    expect(pre?.outerHTML).not.toMatch(/#[0-9a-f]{6}/i);
+    expect(pane?.style.getPropertyValue('--vam-term-bg')).toBe(activeTerminalScheme().background);
   });
 
-  it('is wired to tokens the operator can actually override', () => {
-    // The chain that has to hold: the utility reads `--color-*`, which is
-    // defined as the `--vam-*` custom property, which is what the colour
-    // picker writes onto the root.
-    expect(css).toContain('--color-panel: var(--vam-panel);');
-    expect(css).toContain('--color-ink: var(--vam-ink);');
+  it('is wired to tokens the scheme can actually reach', () => {
+    // The chain that has to hold: the utility reads `--color-term-*`, which
+    // is defined as the `--vam-term-*` custom property, which is what the
+    // pane sets on itself from the scheme in force.
+    expect(css).toContain('--color-term-fg: var(--vam-term-fg);');
+    expect(css).toContain('--color-term-cursor: var(--vam-term-cursor);');
   });
 
-  it('changes colour when the operator overrides the token, not only on reload', async () => {
-    // VERIFIED RATHER THAN ASSUMED. The overrides are set as custom properties
-    // on the root at runtime, so a pane built from token classes should
-    // inherit them for free -- this drives the real `applyPalette` and reads
-    // the pane's computed colour back.
+  it('is left alone by an app-palette override, which used to move it', async () => {
+    // VERIFIED RATHER THAN ASSUMED, in the direction that changed. The
+    // overrides still go onto the root as custom properties; a pane that
+    // reads its own properties off itself does not see them.
     document.head.innerHTML = `<style>
       :root { --vam-panel: #141414; --vam-ink: #ededed; }
-      .bg-panel { background-color: var(--vam-panel); }
-      .text-ink { color: var(--vam-ink); }
+      [data-terminal-pane] { --vam-term-fg: var(--vam-ink); }
+      .text-term-fg { color: var(--vam-term-fg); }
     </style>`;
     render(
       <TerminalTab
@@ -290,13 +553,12 @@ describe('the pane takes its colours from the theme', () => {
     );
     await settle();
     const pane = q<HTMLElement>('[data-terminal-pane]') as HTMLElement;
-    expect(getComputedStyle(pane).backgroundColor).toBe('#141414');
-
+    const ground = pane.style.backgroundColor;
+    expect(ground).toMatch(/^rgba?\(30, 31, 41(, 1)?\)$/);
     applyPalette({ '--vam-panel': '#3b0764', '--vam-ink': '#f5d0fe' });
-    expect(getComputedStyle(pane).backgroundColor).toBe('#3b0764');
-    expect(getComputedStyle(pane).color).toBe('#f5d0fe');
-
+    await settle();
+    expect(pane.style.backgroundColor).toBe(ground);
+    expect(pane.style.getPropertyValue('--vam-term-fg')).toBe('#9a9b97');
     applyPalette({});
-    expect(getComputedStyle(pane).backgroundColor).toBe('#141414');
   });
 });

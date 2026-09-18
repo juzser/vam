@@ -327,9 +327,9 @@ export function toCanvasModel(
      * while staying ONE canvas row, and that is not a change to this line.
      * `Session` has no project field; membership is expressed by which
      * `Project.sessions` array holds it, so listing a session twice duplicates
-     * it through `allSessions`, `orderedSessions` and `layoutCanvas` — which
-     * mints two nodes with the same `info:<id>`, and duplicate node ids break
-     * both ReactFlow and the id `j`/`k` navigate by. The honest fix is a
+     * it through `allSessions` and `orderedSessions`, and the session id both
+     * are built from stops being unique — the sidebar keys its rows on that
+     * id and so does the id `j`/`k` navigate by. The honest fix is a
      * membership list on the session plus a sidebar that groups by it and a
      * layout that stays keyed on the session; that spans the domain model,
      * the selectors, the layout and the sidebar, and belongs in its own task.

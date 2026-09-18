@@ -8,6 +8,8 @@
  * that returned the whole model would be claiming to speak for the others.
  */
 
+import type { AgentWork } from '../../shared/agent-work.js';
+import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { Project, SourceId } from '../domain/model.js';
 
 /**
@@ -136,6 +138,37 @@ export type SessionSource = {
   readonly declines: SourceDeclines;
   readonly viewerScope: ViewerScope;
   load(): Promise<readonly Project[]>;
+  /**
+   * The turns BEFORE a point in one session -- scrolling back, which `load()`
+   * deliberately cannot do: it reads a fixed tail of each session so a poll
+   * stays cheap, and the median transcript is three times that tail.
+   *
+   * OPTIONAL, BUT NOT CAPABILITY-GATED, and the distinction matters because
+   * every other optional member here is the other thing. `subscribe`, `write`
+   * and `governance` are absent when a flag says the source cannot do them;
+   * this one is present on every source the factories assemble, and a source
+   * that cannot page says so in the ANSWER -- `TranscriptPage`'s `unavailable`
+   * arm, which is the same shape `PaneView` and `AgentsResult` use. It is
+   * optional only so that a source built by hand (a demo fixture, a test) is
+   * not obliged to invent a transcript it does not have.
+   *
+   * It never rejects, for the reason the arm exists: "vam could not read" and
+   * "there is nothing older" are exactly the two answers that must not be
+   * confused, and a forgotten `catch` confuses them.
+   */
+  readonly history?: (sessionId: string, cursor: HistoryCursor | null) => Promise<TranscriptPage>;
+
+  /**
+   * What ONE of a session's subagents was asked and what it has done -- the
+   * Agents pane's detail side.
+   *
+   * OPTIONAL AND ANSWER-GATED, exactly like `history` above: a source that
+   * cannot see inside an agent says so in `AgentWork`'s own `unavailable`
+   * arm rather than through a capability flag, and it never rejects -- "vam
+   * could not read" and "this agent has done nothing yet" are the two answers
+   * that must not be confused.
+   */
+  readonly agentWork?: (sessionId: string, agentId: string) => Promise<AgentWork>;
   readonly subscribe?: (onChange: () => void) => () => void;
   readonly write?: SourceWrites;
   readonly governance?: SourceGovernance;

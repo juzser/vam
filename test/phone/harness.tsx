@@ -7,10 +7,10 @@
  * renders the columns -- their environment answers that query with `false`.
  */
 
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
 import { PHONE_QUERY } from '../../src/renderer/phone/viewport.js';
 import type { SessionSource, SourceDeclines } from '../../src/renderer/sources/port.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 export function step(id: string, label: string, output: string): Decision {
   return { id, label, input: `run ${label}`, output, commands: [] };

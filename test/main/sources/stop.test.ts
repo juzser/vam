@@ -344,7 +344,7 @@ describe('closing a session vam itself started', () => {
   });
   const runner = (
     rest: TmuxRunResult = ok,
-    listed = listing(`${projectIdOf('/w/alpha')}\t${OWNED}`),
+    listed = listing(`${projectIdOf('/w/alpha')}\t\t${OWNED}`),
   ) => {
     const calls: string[][] = [];
     const run: TmuxRun = async (argv) => {
@@ -364,10 +364,15 @@ describe('closing a session vam itself started', () => {
 
   it('SPAWNS NOTHING for an interactive session vam did not start, and cannot resolve a pane for it', async () => {
     // No tmux session carries this row's project, so no pairing exists.
-    const { calls, run } = runner(ok, listing(`${projectIdOf('/w/elsewhere')}\t${OWNED}`));
+    const { calls, run } = runner(ok, listing(`${projectIdOf('/w/elsewhere')}\t\t${OWNED}`));
     const stop = vi.fn(async () => null);
     const error = await stopSession([interactive], 'sess-2#77', stop, run);
-    expect(error?.code).toBe('pane-unresolved');
+    // `not-vam-started`, which is what this test's own name has always said:
+    // nothing on the server carries this row's project, so there is no pane to
+    // be ambiguous ABOUT. It answered `pane-unresolved` until the refusal was
+    // split, and that sentence blamed a crowded project and a publishing delay
+    // that were not the reason here.
+    expect(error?.code).toBe('not-vam-started');
     expect(error?.message).toContain('Close the terminal yourself');
     expect(stop).not.toHaveBeenCalled();
     expect(calls.every((argv) => argv[0] === 'list-sessions')).toBe(true);
@@ -403,6 +408,113 @@ describe('closing a session vam itself started', () => {
     expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
   });
 
+  /**
+   * THE DEFECT THIS TASK EXISTS FOR, closed. Same shape as the test above --
+   * two live rows in one project, neither published -- except now the tmux
+   * session is ALSO tagged with the pid `new-session -P -F` printed for it
+   * at creation (`VAM_PID_OPTION`, `tmux/spawn.ts`). The row that pid names
+   * closes without the count ever being consulted; the row it does NOT name
+   * still gets the honest refusal above, unchanged.
+   */
+  it('closes the row its OWN pid was tagged with, even with a second live row in the project', async () => {
+    const withPid: StoppableAgent = { ...owned, pid: 4242 };
+    const twinNoMatch: StoppableAgent = {
+      ...owned,
+      key: 'sess-8#13',
+      sessionId: 'sess-8',
+      pid: 9999,
+    };
+    const taggedByPid = () => runner(ok, listing(`${projectIdOf('/w/alpha')}\t4242\t${OWNED}`));
+
+    const { calls, run } = taggedByPid();
+    const closed = await stopSession(
+      [withPid, twinNoMatch],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(closed).toBeNull();
+    expect(calls).toContainEqual(['kill-session', '-t', `=${OWNED}`]);
+
+    // The OTHER row, whose pid nothing on the server was tagged with, is not
+    // rescued by its neighbour's proof -- it still refuses honestly.
+    const { run: run2 } = taggedByPid();
+    const stillUnresolved = await stopSession(
+      [withPid, twinNoMatch],
+      'sess-8#13',
+      vi.fn(async () => null),
+      run2,
+    );
+    expect(stillUnresolved?.code).toBe('pane-unresolved');
+  });
+
+  /**
+   * THE REFUSAL MUST NAME THE CAUSE THAT IS ACTUALLY TRUE.
+   *
+   * Reported from use: closing a session answered "more than one live session
+   * may share this project, or it has not published its pane yet". Measured on
+   * the reporting machine, NEITHER was the case: there was no tmux server
+   * running at all, 0 of 5 live sessions published a `tmux` field, and 6 of
+   * the 8 live rows were alone in their own directory. The real reason was the
+   * one the sentence did not offer -- vam did not start these sessions, so
+   * there is no pane of its own to find.
+   *
+   * A wrong cause is worse than an unknown one: it sent the operator looking
+   * for a duplicate project and a publishing delay that were not there, and
+   * left "force it closed" as the only offered way forward for a terminal vam
+   * never owned. `classifyTmuxFailure` states the same rule one file over.
+   */
+  describe('what the refusal says when no pane can be found', () => {
+    const sole: StoppableAgent = { ...owned, key: 'sess-7#31', sessionId: 'sess-7' };
+
+    it('says vam did not start it when no tmux session carries its project', async () => {
+      // The whole server holds nothing tagged for this row's project -- which
+      // on the reporting machine was the case for every row, since no tmux
+      // server was running at all.
+      const { calls, run } = runner(ok, listing(''));
+      const error = await stopSession(
+        [sole],
+        'sess-7#31',
+        vi.fn(async () => null),
+        run,
+      );
+      expect(error?.code).toBe('not-vam-started');
+      expect(error?.message).toContain('did not start');
+      expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+    });
+
+    it('does not blame a crowded project when the row is alone in its own', async () => {
+      const { run } = runner(ok, listing(''));
+      const error = await stopSession(
+        [sole],
+        'sess-7#31',
+        vi.fn(async () => null),
+        run,
+      );
+      expect(error?.message).not.toContain('more than one live session');
+      expect(error?.message).not.toContain('published its pane');
+    });
+
+    /**
+     * AND THE AMBIGUOUS CASE KEEPS ITS OWN SENTENCE, because there it is TRUE:
+     * a pane for this project does exist and vam cannot prove which row is in
+     * it. Splitting the two is the whole point; collapsing them again would
+     * restore the defect in the other direction.
+     */
+    it('still says the pairing is ambiguous when a pane really is contested', async () => {
+      const twin: StoppableAgent = { ...owned, key: 'sess-8#13', sessionId: 'sess-8' };
+      const { run } = runner();
+      const error = await stopSession(
+        [owned, twin],
+        'sess-9#12',
+        vi.fn(async () => null),
+        run,
+      );
+      expect(error?.code).toBe('pane-unresolved');
+      expect(error?.message).toContain('more than one live session');
+    });
+  });
+
   it('still stops a BACKGROUND session through the CLI', async () => {
     const { run } = runner();
     const stop = vi.fn(async () => null);
@@ -431,7 +543,7 @@ describe('stopSession with published panes', () => {
   const project = projectIdOf('/w/alpha');
   const listed: TmuxRunResult = {
     failure: null,
-    stdout: `${project}\tvam-alpha-aa11bb\n${project}\tvam-alpha-cc22dd\n`,
+    stdout: `${project}\t\tvam-alpha-aa11bb\n${project}\t\tvam-alpha-cc22dd\n`,
     stderr: '',
   };
 
@@ -550,7 +662,7 @@ describe('a row whose published pane belongs to another project', () => {
     failure: null,
     // Tagged for '/w/other', never '/w/mine' -- a real vam session, just not
     // this row's project.
-    stdout: `${projectIdOf('/w/other')}\tvam-other-ee55ff\n`,
+    stdout: `${projectIdOf('/w/other')}\t\tvam-other-ee55ff\n`,
     stderr: '',
   };
   const run: TmuxRun = async (argv) =>

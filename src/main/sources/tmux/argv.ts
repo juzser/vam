@@ -29,6 +29,8 @@
  * element reaches the exec'd program as one word whatever it contains.
  */
 
+import type { ControlLetter } from '../../../shared/terminal.js';
+
 /**
  * The prefix that makes a session vam's own, AT A GLANCE.
  *
@@ -77,6 +79,57 @@ export const VAM_SESSION_PREFIX = 'vam-';
  * Close and Enter both refuse on a session vam itself started.
  */
 export const VAM_PROJECT_OPTION = '@vam-project';
+
+/**
+ * THE SECOND PAIRING, AND WHAT IT ANSWERS THAT THE FIRST CANNOT.
+ *
+ * `VAM_PROJECT_OPTION` names which PROJECT a tmux session belongs to; it
+ * cannot name which ROW, because two sessions vam started for one project
+ * read back identically -- `paneForRow` (`reply.ts`) then has nothing but a
+ * COUNT to go on: exactly one live row in the project, exactly one tagged
+ * session. Two live sessions in one cwd, neither of which has published a
+ * `tmux` field in `~/.claude/sessions/<pid>.json` yet, fail both counts and
+ * `paneForRow` answers `null` for both -- correctly, since nothing in the
+ * project scheme says which row is in which pane.
+ *
+ * This option answers the sharper question directly, WITHOUT a count. At
+ * creation, `createVamSession` (`tmux/spawn.ts`) asks tmux -- in the SAME
+ * `new-session` call, via `-P -F '#{pane_pid}'` -- for the pid of the process
+ * it just exec'd into the pane, and records it here. `LiveAgent.pid`
+ * (`agents.ts`) is the SAME OS pid `claude agents --json` reports for that
+ * exact row, so a tagged session whose recorded pid equals a row's pid is
+ * that row's pane, full stop, however many other rows or tagged sessions
+ * share the project -- a pid names at most one LIVE process at any moment,
+ * which is exactly the sharpness `agents.ts:20-33` demands of anything that
+ * stands in for a row's `key`.
+ *
+ * WHY THE TMUX SESSION'S LIFETIME MAKES THIS SAFE FOREVER, not merely at the
+ * moment it is written. `newSessionArgv` spreads the command across tmux's own
+ * argv rather than running it through a shell (see the module note), so the
+ * pane holds exactly one process for its whole life: when that process exits,
+ * tmux tears the pane down and, with no other window or pane left, the
+ * session with it (`remain-on-exit` is off, tmux's default). MEASURED, on
+ * tmux 3.7b over a private `-L` socket: a session created to run a
+ * short-lived command answered `no server running` the instant that command
+ * exited. So a LIVE tmux session's `@vam-pid` can never outlive the one
+ * process it was recorded for, and a pid the OS later recycles onto an
+ * unrelated process cannot forge a match here -- the tmux session that would
+ * have to carry the stale tag is already gone.
+ *
+ * A session vam did not start can never carry this option at all: every name
+ * this file's callers see has already passed `isVamSession`'s prefix filter
+ * (`listVamSessions`, `spawn.ts`), so the operator's own sessions -- including
+ * one they happen to have running `claude` in, in their own tmux, under a name
+ * that is not `vam-*` -- are never in `sessions` for this to match against.
+ *
+ * A BONUS PROOF, NOT THE PRIMARY ONE. A session the project tag already
+ * records is still findable, repliable and closeable by the older, per-project
+ * fallback with or without this: `createVamSession` degrades silently, not
+ * with a refusal, when the pid cannot be read or recorded (`spawn.ts`) --
+ * exactly how an older Claude Code that never publishes a `tmux` field is
+ * already treated, not an exception to it.
+ */
+export const VAM_PID_OPTION = '@vam-pid';
 
 /** Characters tmux itself dislikes in a session name (`.` and `:` are targets). */
 const UNSAFE_NAME = /[^A-Za-z0-9_-]+/g;
@@ -138,6 +191,13 @@ const paneTarget = (name: string): string => `=${name}:`;
  * because whether tmux consumes one before a `shell-command` is not something
  * vam can verify without creating a real session on the operator's server, and
  * a guess there would break every session vam starts.
+ *
+ * `-P -F PANE_PID_FORMAT` COSTS NOTHING EXTRA, and answers a question
+ * `createVamSession` would otherwise have no cheap way to ask: the pid of the
+ * process tmux just exec'd into the pane, printed on the SAME call that
+ * creates it. See `VAM_PID_OPTION` for why that pid is what closes the
+ * "two live sessions, one project" defect, and `PANE_PID_FORMAT` for the
+ * measurement behind it.
  */
 export function newSessionArgv(input: {
   name: string;
@@ -151,8 +211,44 @@ export function newSessionArgv(input: {
   if (program.startsWith('-')) {
     return failCommand(`tmux would read \`${program}\` as an option, not as the program to run`);
   }
-  return ['new-session', '-d', '-s', input.name, '-c', input.cwd, ...input.command];
+  return [
+    'new-session',
+    '-d',
+    '-P',
+    '-F',
+    PANE_PID_FORMAT,
+    '-s',
+    input.name,
+    '-c',
+    input.cwd,
+    ...input.command,
+  ];
 }
+
+/**
+ * What `-P -F` prints about the pane `new-session` just created: the pid of
+ * the process tmux exec'd into it.
+ *
+ * WHY AT CREATION, AND NOT LOOKED UP LATER. `create-session.ts`'s own header
+ * says vam does not know the Claude session id at this point -- `claude`
+ * mints it after it starts, well after this call returns. This format needs
+ * none of that: tmux knows the pid of the child it just forked before that
+ * child has done anything at all, so there is no window to wait out and
+ * nothing to guess in the meantime.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket: `new-session -d -P -F
+ * '#{pane_pid}' -s name -c dir sleep 100` printed exactly the pid `ps`
+ * reported for the `sleep` process the trailing argv spread into the pane --
+ * the SAME identity `agents.ts` names `pid` on a `LiveAgent`, since both name
+ * the OS process the command line handed to `exec`, and this file's own
+ * `newSessionArgv` note already establishes that the command reaches tmux
+ * unwrapped, spread across argv rather than run through a shell, so there is
+ * no intervening shell pid to be confused with. The same socket confirmed the
+ * OTHER half of the safety argument: once that process exited, the whole
+ * session -- and with it, any `@vam-pid` recorded on it -- was gone; `list-
+ * sessions` answered "no server running" (see `VAM_PID_OPTION`).
+ */
+const PANE_PID_FORMAT = '#{pane_pid}';
 
 const failCommand = (why: string): never => {
   throw new Error(`vam will not build a tmux new-session argv: ${why}`);
@@ -164,7 +260,93 @@ export function hasSessionArgv(name: string): readonly string[] {
 }
 
 /**
- * The RENDERED screen as plain text -- what the pane looks like right now.
+ * The word that marks tmux's answer about the cursor, so that the answer is
+ * RECOGNISED rather than assumed.
+ *
+ * `readPane` strips this line off the front of stdout, and a strip made on
+ * POSITION alone would eat the first line of somebody's screen the moment the
+ * cursor query did not run -- an old tmux with no `cursor_flag`, a runner
+ * stubbed by a test that predates this, a sequence that ran only half. With
+ * the marker, "there is no cursor line" is a state this file can spell and the
+ * screen survives whole (`spawn.ts`, `readCursorLine`).
+ *
+ * `@vam-` for the reason `VAM_PROJECT_OPTION` uses it: it is vam's namespace
+ * on this server, and it is legible to a person running the command by hand.
+ */
+export const VAM_CURSOR_MARK = '@vam-cursor';
+
+/**
+ * WHAT VAM ASKS ABOUT THE CURSOR, and the four fields are the whole of it.
+ *
+ * `cursor_flag` first because it can veto the other two: it is 0 when a
+ * program in the pane turned the cursor off (DECTCEM), and a caret drawn over
+ * a pager or a spinner is vam inventing one the application deliberately
+ * removed. `cursor_x` and `cursor_y` are CELLS from the left and lines from
+ * the top of the pane.
+ *
+ * `cursor_character` is deliberately NOT asked for. The captured screen
+ * already carries that cell, so it would be a second copy of one character of
+ * a stranger's session for no gain -- and the fewer bytes of somebody's
+ * terminal that cross this boundary for decoration, the better.
+ *
+ * `history_size` IS THE FOURTH, AND IT IS NOT ABOUT THE CURSOR -- it is what
+ * makes `cursor_y` usable once the capture below carries scrollback. That row
+ * counts from the top of the SCREEN, and a capture that begins `n` lines above
+ * the screen makes it `n` rows out; `spawn.ts` adds the offset back. It rides
+ * this line rather than taking a command of its own because a second
+ * `display-message` would be a second answer to reconcile with the first, and
+ * this one is already read, already marked, and already free.
+ *
+ * MEASURED on tmux 3.7b: all four keys exist and expand, and a key tmux does
+ * not know expands to the EMPTY STRING rather than failing -- which is what
+ * makes an older tmux read as `unreadable` instead of as a crash.
+ */
+const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}`;
+
+/**
+ * HOW FAR BACK THE TERMINAL TAB CAN SCROLL: five hundred lines above the
+ * screen, and the number is a budget rather than a preference.
+ *
+ * WHY THERE IS A NUMBER AT ALL. `capture-pane` with no `-S` returns the
+ * visible screen and NOTHING else (measured, 3.7b: an 80x10 pane with 40
+ * lines of output answers with 10 lines; `-S -200` answers with 85, which is
+ * all the history there was -- tmux clamps, it does not pad). Since
+ * `resizeWindowArgv` sizes the window to exactly the rows the pane can show,
+ * "the screen" and "the box" were the same height and the tab had nothing to
+ * scroll. That was the operator's report, and `-S` is the whole of the fix.
+ *
+ * WHY NOT ALL OF IT. tmux's own default `history-limit` is 2000 (measured on
+ * the same socket), and the cost of asking is paid on EVERY read -- the tab
+ * polls once a second, and ten times a second while the operator is typing
+ * (`panels/TerminalTab.tsx`, `ECHO_MS`). Both halves were measured on a
+ * 137x41 pane of densely coloured output, through the real bundle in
+ * Chromium:
+ *
+ *            bytes per read     renderer cost per changed read
+ *   screen         6,349                 0.9 ms
+ *   -S -200       37,549                 2.7 ms
+ *   -S -500       84,349                 5.7 ms
+ *   -S -1000     162,349                11.3 ms
+ *   -S -2000     297,985                21.9 ms
+ *
+ * At 2000 a single update outruns a 60Hz frame, so typing into a pane would
+ * stutter on its own scrollback; at 500 the whole update fits inside one
+ * frame with room to spare, and twelve screenfuls is a long way back through
+ * an agent's work. The idle cost of even that is zero rather than 5.7ms a
+ * second, because the tab drops a capture identical to the one it is already
+ * showing before React sees it (`TerminalTab.tsx`, `sameScreen`).
+ *
+ * THE OTHER CEILING, named so it is not discovered: `createTmuxRunner` gives
+ * execFile a 4MB buffer. Five hundred lines of vam's widest legal pane (500
+ * columns) are well under it for any screen a program actually draws, and a
+ * read that did exceed it would arrive as a classified failure rather than as
+ * a truncated screen.
+ */
+export const PANE_HISTORY_LINES = 500;
+
+/**
+ * The RENDERED screen as plain text -- what the pane looks like right now --
+ * AND where the cursor is on it, in ONE tmux invocation.
  *
  * `-p` prints to stdout. `-e` asks tmux to keep the SGR sequences, which it
  * did not used to: the operator's report was "tmux chua co color", and a
@@ -176,11 +358,63 @@ export function hasSessionArgv(name: string): readonly string[] {
  * arrives together with `panels/terminal-ansi.ts`, which turns them into
  * styled spans and drops everything it does not model, including a sequence
  * the capture boundary cut in half. What is still NOT built is the live
- * streaming path (`pipe-pane -o`): that needs a real emulator, and half of
- * one is worse than none.
+ * streaming path (`pipe-pane -o`): that needs a real emulator, and half of one
+ * is worse than none. Asking where the cursor is does not change that: the tab
+ * draws a SNAPSHOT with the cursor marked on it, not a terminal.
+ *
+ * TWO COMMANDS, ONE PROCESS, and that is why the cursor costs the Terminal tab
+ * nothing. A bare `;` element is tmux's command separator in an argv array
+ * exactly as it is in a shell string -- MEASURED through `execFile` with an
+ * array and no shell, on tmux 3.7b: both answers arrive in order on one
+ * stdout. The tab already spawns one short-lived tmux per second; a second
+ * spawn for a caret would have doubled that for the life of every open tab.
+ *
+ * THE ORDER IS LOAD-BEARING. The cursor query is FIRST because its answer is
+ * exactly one line while the screen's length is not known in advance, so the
+ * front is the only place a reader can find the short answer. `-t` on BOTH:
+ * measured, a `display-message` with no target answers about whatever pane
+ * tmux calls current, which is somebody else's session as easily as this one.
+ *
+ * The separator cannot be confused with an argument. Every name reaching here
+ * came off `list-sessions` filtered by `isVamSession` and was minted by
+ * `vamSessionName`, which admits only `[A-Za-z0-9_-]`, so no argument in this
+ * argv can end in a `;` for tmux to read as a second separator.
+ *
+ * WHAT A HALF-FAILURE DOES, measured rather than assumed: with a bad target on
+ * the `display-message` and a good one on the `capture-pane`, tmux exits ZERO
+ * with an empty cursor line and the whole screen behind it -- so a cursor vam
+ * cannot read never costs the operator the screen. The other way round, tmux
+ * exits 1 and the existing classifier reports it exactly as it did before this
+ * line existed.
+ *
+ * `history` IS OPT-IN, AND THE DEFAULT IS THE OLD SHAPE ON PURPOSE. Only the
+ * Terminal tab wants the scrollback (`terminal/pane.ts`). `terminal/answer.ts`
+ * reads this same pane to find the picker a session is waiting on, and it
+ * identifies one by there being EXACTLY ONE `❯` on the screen -- hand it five
+ * hundred lines of history and every picker the session has ever drawn is in
+ * the text, so `readPicker` finds several cursors, refuses, and vam stops
+ * being able to answer a question at all. A default of "the screen" is what
+ * keeps that from being a thing a later caller can walk into.
  */
-export function capturePaneArgv(name: string): readonly string[] {
-  return ['capture-pane', '-p', '-e', '-t', paneTarget(name)];
+export function capturePaneArgv(name: string, history = 0): readonly string[] {
+  return [
+    'display-message',
+    '-p',
+    '-t',
+    paneTarget(name),
+    '-F',
+    CURSOR_FORMAT,
+    ';',
+    'capture-pane',
+    '-p',
+    '-e',
+    // `-S -n` is n lines ABOVE the top of the screen; the end stays the
+    // screen's bottom, so this is history AND screen in one answer, with no
+    // seam between two captures for a line to be lost in or counted twice.
+    ...(history > 0 ? ['-S', `-${Math.floor(history)}`] : []),
+    '-t',
+    paneTarget(name),
+  ];
 }
 
 /**
@@ -224,10 +458,15 @@ export function resizeWindowArgv(name: string, columns: number, rows: number): r
  * six characters. The same probe confirmed `--` is honoured here, so text
  * beginning with `-` reaches the pane instead of being read as an option.
  *
- * NEWLINES INSIDE THE TEXT ARE TYPED AS TYPED. A pane running a TUI will
- * generally act on each one, so a multi-line reply can arrive as several
- * submissions. Nothing here silently rewrites the operator's text to hide
- * that.
+ * ONE LINE ONLY, AND THAT IS WHY THIS IS NOT THE PROMPT BUILDER. A raw newline
+ * in `text` reaches the pane as a single 0x0a byte (measured: `send-keys -l --
+ * $'a<LF>b'` delivered `0x61 0x0a 0x62`), and Claude Code's REPL -- reading a
+ * raw-mode pty -- treats that byte as a submit, so a multi-line prompt sent
+ * through here alone would submit its first line and drop the rest. A whole
+ * prompt goes through `promptKeystrokes`, which breaks each newline the way the
+ * REPL actually accepts one. This stays the single-line primitive it always
+ * was, and the callers that press one key at a time (answering a picker) still
+ * want exactly it.
  */
 export function sendTextArgv(name: string, text: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), '-l', '--', text];
@@ -236,9 +475,63 @@ export function sendTextArgv(name: string, text: string): readonly string[] {
 /**
  * Press Return -- a SEPARATE call, because it is the one key that must be
  * interpreted rather than typed, and `-l` above forbids exactly that.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket into a RAW-MODE pty (the
+ * mode Claude Code's input runs in): this delivered 0x0d (CR), which the REPL
+ * reads as submit. That is the byte a bare newline is NOT (a bare newline is
+ * 0x0a), and the whole reason `promptKeystrokes` exists to keep the two apart.
  */
 export function sendEnterArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'Enter'];
+}
+
+/**
+ * Type a WHOLE prompt into the pane, with its internal newlines intact -- the
+ * ordered keystrokes to enter the text, but NOT the submit that follows it.
+ *
+ * THE NEWLINE IS THE ONLY HARD PART, and it is a fact about Claude Code's REPL
+ * rather than about tmux. Measured on tmux 3.7b over a private `-L` socket into
+ * a raw-mode pty: `send-keys Enter` delivers 0x0d (CR), a raw newline in a
+ * literal payload delivers 0x0a (LF), and a lone backslash delivers 0x5c. The
+ * REPL reads a raw pty, so both CR and a bare LF submit; there is no byte that,
+ * sent on its own, inserts a newline without submitting. What the REPL DOES
+ * accept -- and advertises in its own footer (`\` + Return, the universal
+ * newline that needs no `/terminal-setup`, unlike Shift+Enter or Option+Enter)
+ * -- is a trailing backslash followed by Return: it consumes the `\` and
+ * inserts a newline instead of submitting. So each internal line break becomes
+ * a literal backslash appended to the line, then an interpreted Enter.
+ *
+ * THIS IS INFERENCE FROM THE FOOTER AND THE BYTES, NOT A MEASUREMENT OF THE
+ * REPL, and it is flagged for the reason the control-chord table is: measuring
+ * what the REPL does with a keystroke means typing into a running Claude Code,
+ * which no test here may do (`deliver`'s retirement note, and reply.ts). The
+ * footer string and the byte deliveries are the evidence; that the REPL builds
+ * a two-line buffer from `line\` + Enter + `next` is what follows from them.
+ *
+ * THE ONE INPUT THIS CANNOT ROUND-TRIP is a line whose own text ends in a
+ * backslash: vam's escape is itself a trailing backslash, so the operator's
+ * `\` and vam's `\` arrive as a pair, which the REPL may read as one escaped
+ * backslash and a submit rather than a newline. Bracketed paste would frame
+ * the whole prompt and avoid this, but it was rejected upstream for a reason
+ * that still holds (`renderer/domain/optimistic.ts`): a pasted burst is echoed
+ * back by a booting TUI differently than typed keys, which broke the optimistic
+ * paint's exact-match reconciliation. A rare mangled line beats that.
+ *
+ * The submit is deliberately NOT here. The caller presses Return once, after
+ * the whole prompt has landed, so that a keystroke that fails midway leaves the
+ * text sitting in the pane UNSENT rather than half-submitted (`reply.ts`).
+ */
+export function promptKeystrokes(name: string, prompt: string): readonly (readonly string[])[] {
+  const lines = prompt.split('\n');
+  const steps: (readonly string[])[] = [];
+  lines.forEach((line, index) => {
+    const last = index === lines.length - 1;
+    // Every line but the last carries the escape backslash the REPL turns,
+    // together with the Enter that follows, into an inserted newline.
+    steps.push(sendTextArgv(name, last ? line : `${line}\\`));
+    if (!last) steps.push(sendEnterArgv(name));
+  });
+  return steps;
 }
 
 /**
@@ -340,18 +633,136 @@ export function sendEscapeArgv(name: string): readonly string[] {
 }
 
 /**
- * Every session on the server: the project vam recorded on it, a TAB, and the
- * session name. The filtering to vam's own happens after the read, in
- * `spawn.ts`: tmux's `-f` filter language is another string to get wrong, and
- * the rows are already in hand.
+ * THE TWENTY-SIX CONTROL CHORDS, one constant each, keyed by the letter.
  *
- * A tab separates them because a session name cannot contain one -- tmux
- * rejects it -- and a project id is a digest (`project-id.ts`), so neither
- * field can swallow the other. An unset option arrives as an empty first
- * field, which is precisely the answer "vam did not start this one".
+ * THIS TABLE IS THE ANSWER TO `sendBackspaceArgv`'S QUESTION RATHER THAN AN
+ * EXCEPTION TO IT. That note forbids a general `sendKeyArgv(name, keyName)` on
+ * the grounds that a builder taking a key NAME would take the operator's TEXT
+ * just as happily, and the day something passed a reply through it, a message
+ * reading `C-c` would interrupt the agent instead of being typed to it.
+ * Nothing here takes a name. `sendControlArgv` takes a `ControlLetter`, which
+ * is a twenty-six-member union at compile time and a frozen set at runtime
+ * (`shared/terminal.ts`), and the name it sends is one of the constants below.
+ * The property that note protects -- literal text and interpreted key names
+ * never meeting on one code path -- is untouched: there is still no path by
+ * which the operator's text becomes a key name.
+ *
+ * WRITTEN OUT RATHER THAN BUILT AS a `C-` template, and that IS the point: a
+ * template is precisely a place where a value becomes a key name. Twenty-six
+ * literals cannot be made to produce a twenty-seventh string.
+ *
+ * THE SPELLING IS TMUX'S OWN, READ OFF TMUX. `tmux list-keys` on 3.7b -- a
+ * read-only query, run against the server this machine already had -- prints
+ * twenty-one of these names verbatim in its default key tables (`C-a C-b C-c
+ * C-d C-e C-f C-g C-h C-j C-k C-l C-n C-o C-p C-r C-s C-u C-v C-w C-y C-z`),
+ * in the same key-name grammar `send-keys` parses. The five that do not appear
+ * (`C-i`, `C-m`, `C-q`, `C-t`, `C-x`) are absent only because tmux binds
+ * nothing to them by default, not because they are spelled differently.
+ *
+ * WHAT IS NOT MEASURED, said plainly because everything else in this file is.
+ * `BSpace` and `BTab` each carry a measurement of what the PANE RECEIVED, made
+ * against `cat -v` in a real session. No such measurement stands behind these:
+ * taking one means creating a tmux session, and the change that added them was
+ * made on a machine whose tmux server holds somebody's live agents. The
+ * spelling and the parser are evidence; that `send-keys C-u` puts 0x15 into
+ * the pane rather than something else is inference from them.
+ */
+const CONTROL_KEY_NAMES: Readonly<Record<ControlLetter, string>> = {
+  a: 'C-a',
+  b: 'C-b',
+  c: 'C-c',
+  d: 'C-d',
+  e: 'C-e',
+  f: 'C-f',
+  g: 'C-g',
+  h: 'C-h',
+  i: 'C-i',
+  j: 'C-j',
+  k: 'C-k',
+  l: 'C-l',
+  m: 'C-m',
+  n: 'C-n',
+  o: 'C-o',
+  p: 'C-p',
+  q: 'C-q',
+  r: 'C-r',
+  s: 'C-s',
+  t: 'C-t',
+  u: 'C-u',
+  v: 'C-v',
+  w: 'C-w',
+  x: 'C-x',
+  y: 'C-y',
+  z: 'C-z',
+};
+
+/**
+ * Press one Ctrl chord -- the SIXTH interpreted key, and the first that is a
+ * family rather than a single key.
+ *
+ * INTERPRETED, WHICH IS THE WHOLE OF IT, and it is the opposite case to
+ * `sendTextArgv` above. `-l` is what makes tmux type an argument instead of
+ * pressing it, so `send-keys -l -- 'C-u'` would put the three characters `C`,
+ * `-` and `u` on the operator's line. A chord has to go through tmux's own key
+ * translation, exactly as `Enter` and `BSpace` do -- which is why `control` is
+ * a `PaneKey` kind and not a character inside a `text` one.
+ *
+ * `--` IS HERE WHERE THE OTHER FIVE INTERPRETED BUILDERS HAVE NONE, and the
+ * difference is deliberate rather than drift. Those five pass a compile-time
+ * constant with no data path into it at all; this one passes a constant
+ * SELECTED BY a value that came off the bridge. The terminator makes "no
+ * argument can be read as an option" a property of the argv's SHAPE instead of
+ * a property of what happens to be in the table above -- and it costs nothing,
+ * because the same probe that established `-l` also confirmed tmux honours
+ * `--` on `send-keys` (see `sendTextArgv`).
+ *
+ * THE LOOKUP REFUSES RATHER THAN SPLICING. A letter with no constant is
+ * unreachable twice over -- `isPaneKey` turns it away at the bridge and the
+ * parameter's type turns it away at compile time -- but the alternative to a
+ * refusal is an argv with a hole in it, which reaches `execFile` as the string
+ * `undefined` and tmux as a key name it does not know. Throwing is what
+ * `newSessionArgv` already does for an argv that must never be built.
+ */
+export function sendControlArgv(name: string, letter: ControlLetter): readonly string[] {
+  const keyName = CONTROL_KEY_NAMES[letter];
+  if (keyName === undefined) {
+    // Its own sentence rather than `failCommand`'s, which names `new-session`
+    // and would send the next reader to the wrong builder entirely.
+    throw new Error(
+      `vam will not build a tmux send-keys argv: \`${String(letter)}\` is not one of the twenty-six control chords`,
+    );
+  }
+  return ['send-keys', '-t', paneTarget(name), '--', keyName];
+}
+
+/**
+ * Every session on the server: the project vam recorded on it, a TAB, the pid
+ * vam recorded on it, a second TAB, and the session name. The filtering to
+ * vam's own happens after the read, in `spawn.ts`: tmux's `-f` filter language
+ * is another string to get wrong, and the rows are already in hand.
+ *
+ * Tabs separate them because a session name cannot contain one -- tmux rejects
+ * it (measured, 3.7b: `invalid session name`; a space or a `:` it accepts) --
+ * a project id is a digest (`project-id.ts`), and a pid is digits only
+ * (`PANE_PID_FORMAT`), so no field can swallow another. An unset option
+ * arrives as an empty field, which is precisely the answer "vam did not
+ * record this" -- "did not start this one" for the project field, "an older
+ * vam, or the tag call itself failed" for the pid field (`createVamSession`
+ * degrades silently rather than refusing when that happens; see
+ * `VAM_PID_OPTION`).
+ *
+ * THE TABS ONLY SURVIVE A UTF-8 CLIENT. Measured on the same tmux: when the
+ * client's LC_CTYPE is not a UTF-8 locale -- and a GUI launch sets none --
+ * every control character in a `-F` expansion is printed as `_`, so this
+ * listing comes back with no tab on any line. `env/utf8-ctype.ts` gives the
+ * process a UTF-8 LC_CTYPE at startup so that never happens from vam; and
+ * `listVamSessions` refuses a line without its two tabs rather than skipping
+ * it, so if it ever does the answer is "could not ask", not "no sessions".
+ * This is the ONE format here that leans on a control character, and the
+ * argv test counts it.
  */
 export function listSessionsArgv(): readonly string[] {
-  return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{session_name}`];
+  return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`];
 }
 
 /**
@@ -366,7 +777,24 @@ export function listSessionsArgv(): readonly string[] {
  * an fnmatch to fall through to.
  */
 export function tagSessionArgv(name: string, projectId: string): readonly string[] {
-  return ['set-option', '-t', name, VAM_PROJECT_OPTION, projectId];
+  return setOptionArgv(name, VAM_PROJECT_OPTION, projectId);
+}
+
+/**
+ * Record which pid `new-session -P -F` printed for this session's pane, on
+ * the session itself -- `tagSessionArgv`'s twin, and the same bare-target
+ * argument applies: nothing vam runs between the two `set-option` calls this
+ * file's callers make at creation could rename or replace the exact name they
+ * both target, so there is still nothing for a prefix or an fnmatch to fall
+ * through to by the time this one runs.
+ */
+export function tagPidArgv(name: string, pid: string): readonly string[] {
+  return setOptionArgv(name, VAM_PID_OPTION, pid);
+}
+
+/** The one shape both tag calls share -- a bare-target `set-option`, see `tagSessionArgv`. */
+function setOptionArgv(name: string, key: string, value: string): readonly string[] {
+  return ['set-option', '-t', name, key, value];
 }
 
 /**

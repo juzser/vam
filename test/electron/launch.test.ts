@@ -44,12 +44,64 @@ interface SmokeResult {
   streamSubscribeErrors: string[];
   mainEventSource: string;
   notificationPermission: string;
+  speechRecognitionType: string;
+  micPermissionState: string;
+  dictateControls: number;
+  sendControls: number;
   offOriginRedirectPrevented: boolean;
   sameOriginRedirectPrevented: boolean;
   secondWindowCountAfterOpen: number;
   secondWindowNavigated: boolean;
   cspHeader: string | null;
+  menu: MenuRow[];
+  clipboardAfterContentsCopy: string;
+  bridgeClipboardWriteAnswer: unknown;
+  clipboardAfterBridgeWrite: string;
+  zoomFactorAtRest: number;
+  zoomLevelAtRest: number;
+  zoomLevelAfterCtrlWheel: number;
+  zoomFactorAfterCtrlWheel: number;
+  zoomLevelAfterMetaWheel: number;
+  zoomLevelAfterZoomChanged: number;
+  zoomLevelAfterReload: number;
+  zoomFactorAfterReload: number;
 }
+
+interface MenuRow {
+  path: string;
+  role: string | null;
+  type: string;
+  accelerator: string | null;
+  enabled: boolean;
+  visible: boolean;
+}
+
+/**
+ * Gone from the menu, in the spelling `MenuItem.accelerator` reports. Zoom is
+ * the operator's request; Cmd+W is what `src/renderer/keyboard/chords.ts`
+ * binds to close-the-focused-session, and a menu key equivalent would swallow
+ * it before the page ever saw it.
+ */
+const FORBIDDEN_ACCELERATORS = [
+  'CommandOrControl+0',
+  'CommandOrControl+Plus',
+  'CommandOrControl+=',
+  'CommandOrControl+-',
+  'CommandOrControl+Shift+Plus',
+  'CommandOrControl+W',
+];
+
+/**
+ * LOWERCASE ON PURPOSE: a live `MenuItem.role` reads back `resetzoom`, not the
+ * `resetZoom` the template and the docs use. Written in camelCase, these rows
+ * passed against the UNMODIFIED default menu, matching nothing -- guards that
+ * could not fail. Measured, then fixed.
+ */
+const FORBIDDEN_ROLES = ['resetzoom', 'zoomin', 'zoomout', 'close'];
+
+const roleOf = (row: MenuRow): string => (row.role ?? '').toLowerCase();
+const withRole = (rows: MenuRow[], role: string): MenuRow[] =>
+  rows.filter((row) => roleOf(row) === role);
 
 interface Launch {
   code: number | null;
@@ -376,6 +428,27 @@ describe('the Electron shell launches', () => {
     expect(smoke().notificationPermission).toBe('denied');
   });
 
+  it('denies its own microphone, and therefore draws no button to use it', () => {
+    // THE DEFECT THIS PINS, in the order it has to be read.
+    //
+    // 1. THE RECOGNISER IS HERE. This is Chromium, so feature detection --
+    //    "is there a SpeechRecognition constructor" -- says yes, which is why
+    //    a microphone button shipped in the packaged app at all.
+    expect(smoke().speechRecognitionType).toBe('function');
+    // 2. AND IT MAY NOT LISTEN. `registerPermissionPolicy` in
+    //    `src/main/index.ts` denies every request and every check, so vam
+    //    refuses its own microphone before Chromium's absent speech-service
+    //    key is ever reached. Not `toBe('denied')`: what matters is that it
+    //    is not GRANTED, and a policy that answers a check with `false` may
+    //    reasonably surface as either 'denied' or 'prompt'.
+    expect(smoke().micPermissionState).not.toBe('granted');
+    // 3. SO THE CONTROL IS NOT DRAWN -- and the send button beside it is, or
+    //    this count is zero for the uninteresting reason that no composer is
+    //    on screen. The corpus first, exactly as everywhere else in this repo.
+    expect(smoke().sendControls).toBeGreaterThan(0);
+    expect(smoke().dictateControls).toBe(0);
+  });
+
   // Followup security gap 3: a same-origin URL that then 302s off-origin never
   // fires `will-navigate` -- only `will-redirect` sees it. Both directions are
   // asserted so the handler is shown to discriminate, not to always prevent.
@@ -402,5 +475,107 @@ describe('the Electron shell launches', () => {
   // response, not merely configured somewhere main never wires up.
   it('serves the document with a Content-Security-Policy header', () => {
     expect(smoke().cspHeader).toContain("script-src 'self'");
+  });
+
+  // The application menu vam builds for itself, read off the BUILT menu.
+  // A menu that failed to install reads as an empty walk, and every "no
+  // forbidden accelerator" below would then be vacuously true.
+  it('installs an application menu with a real tree behind it', () => {
+    expect(smoke().menu.length).toBeGreaterThan(10);
+    expect(smoke().menu.map((row) => row.path.split(' > ')[0])).toContain('Edit');
+  });
+
+  it.each(FORBIDDEN_ACCELERATORS)('never claims %s anywhere in the menu', (accelerator) => {
+    const claimed = smoke().menu.filter((row) => row.accelerator === accelerator);
+    expect(claimed.map((row) => `${row.path} [${row.role}]`)).toEqual([]);
+  });
+
+  it.each(FORBIDDEN_ROLES)(
+    'carries no %s role, so no key equivalent can be derived for it',
+    (role) => {
+      // Accelerator alone is not enough: a role-derived key equivalent comes
+      // from the platform and can read back null while still being matched.
+      expect(withRole(smoke().menu, role).map((row) => row.path)).toEqual([]);
+    },
+  );
+
+  // COPY AND PASTE MUST SURVIVE. On macOS the clipboard works THROUGH the
+  // menu: a hand-built menu that drops the Edit roles kills Cmd+C/V/X/A in
+  // the whole app while every other test here still passes.
+  it.each(['undo', 'redo', 'cut', 'copy', 'paste', 'selectall'])(
+    'keeps the %s role, without which the clipboard dies app-wide',
+    (role) => {
+      expect(withRole(smoke().menu, role)).toHaveLength(1);
+    },
+  );
+
+  // ...and the clipboard PERFORMED, not merely wired: this selects text in the
+  // real renderer, runs the action the `copy` role invokes, and reads the real
+  // system clipboard back. Seeded with a sentinel first, so "the value was
+  // already there" cannot pass it.
+  it('really copies the renderer selection to the system clipboard', () => {
+    expect(smoke().clipboardAfterContentsCopy).toBe('vam-clipboard-proof');
+  });
+
+  // The other clipboard route, and the only coverage main's handler has that
+  // is not holding an injected fake. `src/main/clipboard/ipc.ts` AWAITS
+  // electron's `writeText` -- a promise since Electron 44 -- so the handler is
+  // `async`, and `ipcMain.handle` has to settle it before the answer crosses
+  // the process boundary. A unit test cannot see that boundary; this drives
+  // the renderer's own `window.api.clipboard.writeText` and then reads the
+  // real system clipboard back from main.
+  it('really writes to the system clipboard through the bridge channel', () => {
+    // The channel's whole contract: `true` means the text landed. A handler
+    // that answered a bare Promise, or resolved before the write, fails here.
+    expect(smoke().bridgeClipboardWriteAnswer).toBe(true);
+    expect(smoke().clipboardAfterBridgeWrite).toBe('vam-bridge-clipboard-proof');
+  });
+
+  it.each(['quit', 'minimize'])('keeps the %s role a desktop app needs', (role) => {
+    expect(withRole(smoke().menu, role)).toHaveLength(1);
+  });
+
+  // REFRESH, off the built menu rather than off the template.
+  //
+  // Operator: "Cmd+R to refresh vam." Owning the menu had removed Electron's
+  // default `reload` with everything else, so the packaged app answered that
+  // key with nothing. It is a menu item and not a chord for the reason the
+  // rest of this file treats as a hazard: a native key equivalent is matched
+  // BEFORE the page sees it -- which is exactly what a wedged renderer needs,
+  // since it cannot answer a keydown at all.
+  it('offers a reload, with the accelerator written down rather than inherited', () => {
+    const reload = withRole(smoke().menu, 'reload');
+    expect(reload.map((row) => row.path)).toHaveLength(1);
+    expect(reload[0]?.accelerator).toBe('CommandOrControl+R');
+  });
+
+  // Zoom, route by route.
+  it('rests at zoom factor 1 and zoom level 0', () => {
+    expect(smoke().zoomFactorAtRest).toBe(1);
+    expect(smoke().zoomLevelAtRest).toBe(0);
+  });
+
+  // MEASURED, AND NOT A GUARD. Synthetic Ctrl+wheel and Cmd+wheel move the
+  // zoom level by nothing -- and moved it by nothing against the UNLOCKED
+  // build too, so `sendInputEvent` does not reach Chromium's wheel-zoom path
+  // and this cannot fail either way. Kept as a recorded measurement, not
+  // dressed up as protection; the wheel route's real cover is `zoom-changed`
+  // below, which IS falsifiable.
+  it('records what a synthetic modifier + wheel does to the zoom level', () => {
+    expect(smoke().zoomLevelAfterCtrlWheel).toBe(0);
+    expect(smoke().zoomLevelAfterMetaWheel).toBe(0);
+    expect(smoke().zoomFactorAfterCtrlWheel).toBe(1);
+  });
+
+  it('restores the zoom level when Chromium reports a zoom change', () => {
+    expect(smoke().zoomLevelAfterZoomChanged).toBe(0);
+  });
+
+  // The route that was NOT predicted: Chromium re-applies a stored per-origin
+  // zoom on navigation, so a level outlives a reload here and a relaunch in
+  // the wild.
+  it('does not restore a persisted zoom level after a reload', () => {
+    expect(smoke().zoomLevelAfterReload).toBe(0);
+    expect(smoke().zoomFactorAfterReload).toBe(1);
   });
 });

@@ -26,6 +26,31 @@ export const CHANNELS = {
    * different way.
    */
   createSessionIn: 'vam:source:create-session-in',
+  /**
+   * SCROLLING BACK through one session: the turns before a point, read on
+   * demand. Distinct from `load`, which reads a fixed tail of every live
+   * session on a ten-second poll and must stay that cheap -- the median
+   * transcript here is three times that tail, and the largest is 157 MB.
+   *
+   * It answers through the `IpcResult` envelope like every channel above, and
+   * `TranscriptPage` carries an `unavailable` arm of its own besides. That is
+   * not two ways to say one thing: the envelope's arm is for a request main
+   * could not even validate, and the preload folds it into the page type's own
+   * arm so a caller has exactly one shape to draw (`preload/api.ts`).
+   */
+  sessionHistory: 'vam:session:history',
+  /**
+   * ONE SUBAGENT's work: what it was asked, what it has said, what it has
+   * called. Distinct from `load` for the reason `sessionHistory` is, only more
+   * so -- a session here has up to 460 subagent transcripts beside it, and the
+   * poll reads a 128 KiB tail per SESSION. Nobody pays this until a person
+   * opens the Agents tab and picks a row.
+   *
+   * Like `sessionHistory` it answers through the `IpcResult` envelope AND has
+   * an `unavailable` arm of its own; the preload folds the first into the
+   * second so a caller has one shape to draw.
+   */
+  sessionAgentWork: 'vam:session:agent-work',
   applyWaivers: 'vam:source:apply-waivers',
   transitionLesson: 'vam:source:transition-lesson',
   /**
@@ -44,6 +69,18 @@ export const CHANNELS = {
   /** Preload-internal only, the other half of `streamSubscribe`'s ref count. */
   streamUnsubscribe: 'vam:stream:unsubscribe',
   /**
+   * DESKTOP-ONLY, and never a member of `PreloadSourceApi` -- the same
+   * standing as `streamSubscribe` above and for a sharper reason.
+   *
+   * It carries the operator's per-project pull-request directory overrides
+   * from the renderer's prefs into main, where the `gh` read happens. Putting
+   * it on `PreloadSourceApi` instead would put it on the routes
+   * `remote/server.ts` registers for a paired phone, which would make "a
+   * directory this machine spawns a process in" something a remote device
+   * names. See `sources/claude-code/pr-repos.ts` for the whole argument.
+   */
+  setPrRepos: 'vam:source:set-pr-repos',
+  /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */
@@ -55,12 +92,92 @@ export const CHANNELS = {
    */
   clipboardWrite: 'vam:clipboard:write',
   /**
+   * "Open a prefilled vam issue in my own browser."
+   *
+   * TEXT, NEVER A LOCATION -- `remoteOpenLink`'s rule, kept, through a
+   * different door. The renderer sends a TITLE and a BODY; main builds the
+   * address from `src/shared/issue.ts` and opens that. A URL sent as a title
+   * arrives as a query parameter of vam's own issues page and goes nowhere.
+   *
+   * It POSTS NOTHING. What opens is the form, prefilled, in the operating
+   * system's browser -- pressing submit there stays the operator's decision
+   * and their last read of the body before it is public (`report.ts`). Before
+   * this channel the only route to github.com was pasting a four-kilobyte URL
+   * by hand, out of a panel whose text could not be selected.
+   *
+   * Answers a bare boolean: did a browser open. Same shape as `updateOpen`.
+   */
+  issueOpen: 'vam:issue:open',
+  /**
    * The update check. Answers bare too -- an `UpdateStatus`, which carries
    * its own four branches (`src/shared/update.ts`). It is the only channel
    * that reaches a host outside this machine, and it does so unauthenticated,
    * with no query and no body; see `src/main/update/check.ts`.
    */
+  /**
+   * "Open one of the two links the Remote panel draws."
+   *
+   * THE RENDERER NAMES A KEY, NEVER A URL, and that is the whole design:
+   * `window.open` is denied for every page in this app, so a link in the panel
+   * did nothing at all -- and the fix must not become an open-anything
+   * capability behind a different door. Main maps the key to a destination it
+   * owns: a constant for the download page, and for the tailnet admin page the
+   * URL main itself read out of `tailscale serve`'s own output.
+   *
+   * Answers a bare boolean: did a browser open. Same shape as `updateOpen`.
+   */
+  remoteOpenLink: 'vam:remote:open-link',
+  /**
+   * "Open the link this agent wrote" -- THE ONE CHANNEL ON THIS BRIDGE THAT
+   * TAKES A DESTINATION FROM THE RENDERER, and it owes the sharpest argument
+   * here because `remoteOpenLink` directly above and `issueOpen` further up
+   * both exist by NOT taking one.
+   *
+   * Their rule is right and is unchanged: a channel that takes a URL is a
+   * navigate-anywhere capability handed to the least trusted process, so
+   * wherever main CAN own the destination it must. It cannot here. The
+   * addresses in a transcript are whatever a model typed into its answer;
+   * there is no key to map onto a constant, and what vam shipped instead was a
+   * link that did nothing at all -- the operator selecting an address out of a
+   * panel and pasting it into a browser by hand, which is the same defect
+   * `issueOpen` was filed about.
+   *
+   * SO THE ALLOWLIST IS WHAT PAYS FOR IT, AND IT LIVES IN MAIN.
+   * `src/shared/link.ts` is the single decision -- `http:` and `https:`, an
+   * address parsed by `new URL` and never matched as a string, no credentials
+   * hiding the host -- and `src/main/link/ipc.ts` runs it on THIS side of the
+   * boundary, on every call, whatever the renderer believed. `javascript:`,
+   * `data:`, `file:` and every custom app scheme are refused here; the
+   * renderer running the same check first is a convenience whose deletion
+   * would change nothing about what can be opened.
+   *
+   * Answers a bare `LinkOutcome` rather than an `IpcResult`, like
+   * `updateCheck` and `terminalRead`: the type carries its own refusal branch,
+   * and that branch is a SENTENCE to draw beside the control the operator
+   * pressed -- a link that cannot be opened has to say why, or it is the
+   * do-nothing control this channel was added to end.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, so `remote/server.ts` has no route to
+   * it: a paired phone has a browser of its own, and "open this URL" asked of
+   * THIS machine by a remote device is a different act that would need its own
+   * decision.
+   */
+  linkOpen: 'vam:link:open',
   updateCheck: 'vam:update:check',
+  /**
+   * The same question, asked AGAIN, because a person pressed a button.
+   *
+   * `updateCheck` answers from the one check made at launch and never makes
+   * another -- which is right for a notice that reads it on mount and wrong
+   * for the Settings row the operator asked for, where a cached reply from
+   * whenever the app was started is a button that lies about having checked.
+   * This one really goes out, and its answer REPLACES the stored one, so that
+   * `updateOpen` can act on what the operator is looking at.
+   *
+   * The rate limit is a hand: GitHub allows 60 unauthenticated requests an
+   * hour per IP, and `rate-limited` is already a quiet outcome of its own.
+   */
+  updateRecheck: 'vam:update:recheck',
   /**
    * "Take me to the release." Answers a bare boolean -- did the operator's
    * browser open -- and takes NO argument: the URL opened is the one main's
@@ -138,6 +255,108 @@ export const CHANNELS = {
    * `./dialog/attach-image.ts`.
    */
   pickImageAttachment: 'vam:dialog:pick-image-attachment',
+  /**
+   * The file-editor tab's read: one operator-named path, authorised against
+   * every LIVE session's own working directory before a byte is opened. See
+   * `src/main/files/authorize.ts` for why a prefix check alone cannot do
+   * that authorisation and `src/main/files/ipc.ts` for the size ceiling,
+   * binary sniff and the full refusal vocabulary. Answers through the
+   * `IpcResult` envelope: "outside every session's directory" and "too
+   * large" are both refusals in `SourceError`'s own words, not exceptions.
+   *
+   * DESKTOP-ONLY BY CONSTRUCTION, NOT BY CONVENTION: `src/main/remote/
+   * server.ts`'s route table carries no matching path, and its `UNSERVED`
+   * ledger names `files` beside `terminal` so the absence is documented
+   * rather than merely true. Arbitrary file read/write over a network is at
+   * least as serious as typing into a running agent.
+   */
+  filesRead: 'vam:files:read',
+  /**
+   * The file-editor tab's write, with its conflict model IN the same
+   * request rather than a follow-up: the caller's signature (size, mtime
+   * and a content hash -- `src/main/files/content.ts`) must match what is
+   * on disk right now, or the write is refused as `changed-on-disk` rather
+   * than overwriting an agent's own concurrent edit. See `./files/ipc.ts`.
+   * The SAME desktop-only standing as `filesRead`, for the same reason.
+   */
+  filesWrite: 'vam:files:write',
+  /**
+   * The file-editor tab's directory listing: given a live session's own id,
+   * every regular file under that session's own working directory --
+   * `node_modules` and `.git` walked over rather than into (orca's own
+   * quick-open exemption, generalised: every OTHER dotfile and dotdirectory
+   * stays visible, because `.env` is the file the operator named this
+   * feature for), symlinks neither listed nor followed. See
+   * `src/main/files/list.ts` for the walk and `./files/list-ipc.ts` for the
+   * channel.
+   *
+   * ADDED AFTER `filesRead`/`filesWrite` SHIPPED, and keyed by SESSION ID
+   * rather than by a directory string, for the reason `pickImageAttachment`
+   * already is: `renderer/domain/model.ts` carries no `cwd` field, so a
+   * channel this shape is the only way the renderer can ever discover a path
+   * to hand `filesRead` in the first place. Listing grants no standing of its
+   * own -- every path it returns is still independently re-authorised
+   * (`authorize.ts`) the moment it is handed to `filesRead`/`filesWrite`.
+   *
+   * THE SAME DESKTOP-ONLY STANDING AS `filesRead`/`filesWrite` -- covered by
+   * the SAME `UNSERVED.files` entry in `remote/server.ts` rather than a
+   * second one, since the argument ("arbitrary file access over a network is
+   * at least as serious as typing into a running agent") does not change
+   * because the payload is names instead of bytes.
+   */
+  filesList: 'vam:files:list',
+  /**
+   * `src/foo/bar.ts:42`, as an AGENT wrote it, turned into an absolute path
+   * the Files tab may open -- or into a refusal in words.
+   *
+   * KEYED BY SESSION ID for `filesList`'s reason, and with a sharper one of
+   * its own: the reference belongs to the session whose answer it was written
+   * in, and `src/index.ts` names a different file in each project vam is
+   * watching. So this channel authorises against THAT session's own working
+   * directory alone, not against every live root the way `filesRead` does --
+   * `filesRead` is right to accept any of them, because the operator typed
+   * that path, and this is right not to, because nobody typed this one.
+   *
+   * IT GRANTS NO STANDING. The path it answers with is re-authorised from
+   * scratch the moment it is handed to `filesRead`, exactly as a path out of
+   * `filesList` is. What it adds is containment for a string nobody typed --
+   * resolved and compared as canonical paths through the real filesystem, so
+   * a `..`, a sibling directory whose name merely begins with the root's, and
+   * a symlink pointing out of the project are all refused (`resolve-ipc.ts`).
+   *
+   * THE SAME DESKTOP-ONLY STANDING as `filesRead`/`filesWrite`/`filesList`,
+   * covered by the SAME `UNSERVED.files` entry in `remote/server.ts`: turning
+   * a name into an authorised path is the listing question asked one reference
+   * at a time, and it gets no route for the same reason listing gets none.
+   */
+  filesResolve: 'vam:files:resolve',
+  /**
+   * HOW MUCH UNSAVED TEXT THE FILE EDITOR IS HOLDING -- a count and a list of
+   * labels, pushed by the renderer whenever that changes and read by
+   * `app.on('before-quit')` (`src/main/quit/guard.ts`).
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, the same standing as `setPrRepos` and
+   * `streamSubscribe`, and here the reason is the plainest of the three: this
+   * is about QUITTING THIS APPLICATION, and a paired phone has neither a file
+   * editor nor an application to quit. It is covered by the SAME
+   * `UNSERVED.files` entry in `remote/server.ts` as the three channels above
+   * rather than a second one, because "the remote endpoint carries no file
+   * route" is exactly what this is.
+   *
+   * IT IS A PUSH, NOT A PULL, and that is why it exists at all rather than
+   * main simply asking when the operator quits. `beforeunload` cannot cover
+   * Cmd-Q -- it is a page hook and `before-quit` is a main-process veto -- and
+   * a `before-quit` that WAITS on the renderer for an answer is one a wedged
+   * renderer can hang. An app that cannot be quit is a worse bug than the one
+   * this closes. Main keeps the last report and reads a local variable, so
+   * there is no wait and nothing to time out; `src/main/quit/unsaved.ts` names
+   * the staleness that costs and why both directions of it are safe.
+   *
+   * Answers the `IpcResult` envelope like its neighbours, always `{ok: true}`:
+   * the reader is total, so a payload main cannot parse already means "nothing
+   * is unsaved" -- which blocks no quit, rather than blocking every one.
+   */
+  filesUnsaved: 'vam:files:unsaved',
   /**
    * The pairing screen's channels. Every one of them answers a bare
    * `RemoteState` (`src/main/remote/ipc.ts`) rather than an `IpcResult`: the

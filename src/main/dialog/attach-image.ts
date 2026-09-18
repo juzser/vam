@@ -155,7 +155,7 @@ export function registerAttachImageIpc(
           ok: false,
           error: refused(
             'unknown-session',
-            `vam has no live session ${sessionId}; it may have exited since the canvas was drawn`,
+            `vam has no live session ${sessionId}; it may have exited since the session list was drawn`,
           ),
         };
       }

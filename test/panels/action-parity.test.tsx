@@ -26,9 +26,9 @@
 
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildActions } from '../../src/renderer/canvas/actions.js';
 import type { Command, Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { buildActions } from '../../src/renderer/panels/actions.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 
 const COMMANDS: readonly Command[] = [

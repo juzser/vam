@@ -1,46 +1,44 @@
 /**
- * The three-column shell, and the one place a keypress becomes a move.
+ * The two-pane shell, and the one place a keypress becomes a move.
  *
- *     [ sessions ] [ ————— canvas ————— ] [ detail + answer ]
+ *     [ sessions ] [ —— tabs —— / detail + answer ]
  *
- * The division of labour is the point: the chord grammar lives in
- * `keyboard/chords.ts`, the geometry in `keyboard/spatial-nav.ts`, the
- * coordinate maths in `canvas/nav-nodes.ts`, the positions in `canvas/layout.ts`
- * — all pure, all tested without a DOM. What is left here is what genuinely
- * needs React: owning the listener, holding focus, and asking ReactFlow where
- * things currently are.
+ * 0.2 migration, A12.1: the middle canvas column is gone. There are exactly
+ * two panes now — the sidebar, and the detail pane, which fills everything
+ * to the sidebar's right. A tab IS that session's detail pane: `TabStrip`
+ * (below) draws a VSCode-shaped strip along the TOP of the detail pane, not
+ * a strip above a separate middle column, and selecting a tab shows that
+ * session's `DetailPanel` filling the rest of the same pane.
  *
- * "Currently" is load-bearing. Every move reads `getNodes()` at the moment the
- * key is pressed rather than a list captured at render, which is what lets §4
- * promise that dragging cannot break `hjkl`.
+ * A13.1: the strip shows one PROJECT's sessions, not every session vam
+ * knows about (`SessionEntry.project` — the sidebar's grouping level, not
+ * `Group`). "The active project" is the focused session's project; with
+ * nothing focused (a genuinely empty filtered view) there is no project to
+ * scope by and the strip is empty. See `activeProjectId` below.
  *
- * **One focus, three views.** The sidebar, the canvas and the detail panel all
- * read the same `focusedNodeId`; none of them owns a cursor of its own. That is
- * why `j` does not have to mean something different depending on which pane you
- * are "in" — there is no such thing as being in a pane. `j`/`k` walk sessions
- * because rows are stacked; `h`/`l` walk a session's chain because its nodes are
- * in a line. Nothing had to be added for the sidebar: it mirrors the same id.
+ * The chord grammar still lives in `keyboard/chords.ts`; what used to live
+ * beside it in `keyboard/spatial-nav.ts` and `canvas/nav-nodes.ts` (the
+ * coordinate maths `h`/`l` used to walk a session's own chain of steps) was
+ * deleted with the graph in step 2 — `h`/`l` walk the active project's tabs
+ * instead. See the `move` case of `onKeyDown` below.
+ *
+ * **One focus, two views.** The sidebar and the detail pane both read the
+ * same `focusedSessionId`; neither owns a cursor of its own. That is why `j`
+ * does not have to mean something different depending on which pane you are
+ * "in" — there is no such thing as being in a pane. `j`/`k` walk the
+ * sidebar's own order, one session at a time. Nothing had to be added for
+ * the sidebar: it mirrors the same id, and the tab strip's `activeId` is
+ * that same id again.
  */
 
+import { Box, Factory, FlaskConical, type LucideIcon, Pencil, Plus } from 'lucide-react';
 import {
-  Background,
-  type Edge,
-  MiniMap,
-  type Node,
-  ReactFlow,
-  ReactFlowProvider,
-  useNodesState,
-  useReactFlow,
-  useStore,
-} from '@xyflow/react';
-import { Box, Factory, FlaskConical, type LucideIcon, Maximize } from 'lucide-react';
-import {
-  Children,
   type ComponentProps,
-  isValidElement,
+  type DragEvent as ReactDragEvent,
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -61,41 +59,58 @@ import type {
   SessionStatus,
   SourceId,
 } from '../domain/model.js';
+import {
+  countTurns,
+  countTurnsWithInput,
+  PAINT_SWEEP_INTERVAL_MS,
+  type PendingPrompt,
+  reconcile,
+  withPending,
+} from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
+import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
-import { DEMO_PROMPT } from '../fixtures/demo.js';
-import { type ChordState, EMPTY_CHORD, normalizeKey, resolveChord } from '../keyboard/chords.js';
+import {
+  type Chord,
+  type ChordState,
+  chordText,
+  EMPTY_CHORD,
+  isSelectOnly,
+  isSelectOnlyChord,
+  normalizeKey,
+  resolveChord,
+} from '../keyboard/chords.js';
+import { cursorModeAt, focusInsertStop, releaseInsert } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
-import { nextNode } from '../keyboard/spatial-nav.js';
+import { buildActions, clampIndex } from '../panels/actions.js';
+import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
+import { ContextMenu } from '../panels/ContextMenu.js';
+import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
+import { describeIcon, IconMark, parseIcon } from '../panels/icon-value.js';
+import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
 import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
-import { NEW_PROJECT_PENDING, SessionList } from '../panels/SessionList.js';
-import { visibleTabs } from '../panels/tabs.js';
+import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
+import { SplitResizer } from '../panels/SplitResizer.js';
+import { resolveSessionIcon } from '../panels/session-icon.js';
+import { StatusMark } from '../panels/status-mark.js';
+import { halfPageTarget } from '../panels/stick-to-bottom.js';
+import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
-import {
-  ALL_VISIBLE,
-  CANVAS_STRIP,
-  type ColumnId,
-  canvasIsMain,
-  columnOrder,
-  DEFAULT_PANES,
-  layoutForViewport,
-  layoutWidths,
-  PANE_RESIZE_STEP,
-} from '../prefs/panes.js';
+import { DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
   applyIcons,
@@ -104,27 +119,31 @@ import {
   applyTheme,
   browserStorage,
   createGroup,
-  DEFAULT_FOCUS_SHARE,
   deleteGroup,
   type EffectiveTheme,
-  FOCUS_SHARE_OFF,
+  type FocusChoice,
   isGroupCollapsed,
+  isProjectCollapsed,
   isProjectHidden,
   type Prefs,
   paletteFor,
+  prRepoFor,
   readPrefs,
   removeProjectFromGroup,
   renameGroup,
+  setDefaultProvider,
   setDetailTab,
+  setFilesTreeWidth,
+  setFocusView,
   setGroupCollapsed,
   setGroupIcon,
   setIcon,
   setLastFocus,
-  setLayout,
-  setPaneVisibility,
   setPaneWidth,
+  setProjectCollapsed,
   setProjectHidden,
   setProjectIcon,
+  setProjectPrRepo,
   setProjectRename,
   setRename,
   setSessionFilters,
@@ -133,75 +152,49 @@ import {
   watchOsTheme,
   writePrefs,
 } from '../prefs/prefs.js';
+import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
+import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
-import { buildActions, clampIndex } from './actions.js';
-import { CommandPalette } from './CommandPalette.js';
-import { copyText } from './clipboard.js';
-import { columnsForWidth, GRID } from './grid.js';
-import { KeySheet } from './KeySheet.js';
-import { infoNodeId, layoutCanvas, orderedSessions, sessionBounds } from './layout.js';
-import { type FlowNodeLike, toNavNodes } from './nav-nodes.js';
-import { countTurnsWithInput, type PendingPrompt, reconcile, withPending } from './optimistic.js';
-import { PROVIDER_MARKS } from './provider-marks.js';
-import { SessionFanNode } from './SessionFanNode.js';
-import { SessionInfoNode } from './SessionInfoNode.js';
-import { StepNode } from './StepNode.js';
-import { StepSlotNode } from './StepSlotNode.js';
-import { type CanvasSource, READ_ONLY_SOURCE } from './source.js';
-
-/**
- * A `StepSlotSpec` is emitted for all three of a session's slot positions
- * (layout.ts), including the one a real step already occupies — the fan's
- * scenery ids must be stable regardless of decision count (AC-9's `scenery`
- * set is read straight off `layout.slots`, unfiltered). Only the EMPTY
- * positions get the dashed "no step yet" card; an occupied position renders
- * nothing here, so it does not draw a second "no step yet" behind the real
- * step card it sits under.
- */
-function OccupiedSlot() {
-  return null;
-}
-
-const NODE_TYPES = {
-  info: SessionInfoNode,
-  step: StepNode,
-  fan: SessionFanNode,
-  slot: StepSlotNode,
-  'slot-filled': OccupiedSlot,
-};
-
-/** ReactFlow requires an edges array; there is no custom edge type any more —
- *  the fan is a scenery node (epic.md §5.2). A module-level constant keeps
- *  this a stable reference across renders. */
-const NO_EDGES: Edge[] = [];
+import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
+import {
+  adoptOrphans,
+  canSplit,
+  closePane,
+  type DropZone,
+  detachTab,
+  dropZone,
+  type Edge,
+  findLeaf,
+  joinPane,
+  type Leaf,
+  leaves,
+  MIN_PANE_PX,
+  orientationFor,
+  paneHolding,
+  pruneClosedTabs,
+  removeTab,
+  resizeSplit,
+  restoreLayout,
+  type SplitOrientation,
+  type SplitTree,
+  setPaneSession,
+  singlePane,
+  splitPane,
+  splitSizes,
+  stepPane,
+} from './split.js';
 
 /** `model.groups ?? []` on every render is a fresh reference each keystroke,
- *  defeating `SessionList`'s memo -- stable like `NO_EDGES` above. */
+ *  defeating `SessionList`'s memo -- a module-level constant keeps this a
+ *  stable reference across renders. */
 const EMPTY_GROUPS: readonly Group[] = [];
 
 /** Home-row first: the labels you can hit without looking. */
 const JUMP_KEYS = 'asdfghjkl;qwertyuiop';
 
-/**
- * Where the canvas opens: 80%, centred on the origin until focus moves it.
- *
- * `fitView` used to decide this, which meant the opening zoom depended on how
- * many sessions the workspace happened to have.
- */
-const DEFAULT_VIEWPORT = { x: 0, y: 0, zoom: 0.8 } as const;
-
-/**
- * How much of the canvas the focused session's row should occupy.
- *
- * The operator asked for this twice with different numbers (70%, then 60%), and
- * said it would become a setting. It now is one: this constant is the DEFAULT,
- * the stored `focusViewportShare` overrides it, and `focusPadding` derives what
- * ReactFlow actually wants from whichever is in force. Keeping the target named
- * rather than folding it into a padding value is what let the settings pane
- * write to it without anyone re-deriving the formula.
- */
 /**
  * Token counts at a glance: `578k`, `4.2M`.
  *
@@ -232,6 +225,25 @@ export function compactTokens(n: number): string {
  * layout does" the token formatter above is written for.
  */
 const STATUS_MAX_CHARS = 72;
+
+/**
+ * How long the SAME prompt to the SAME session is treated as a repeat.
+ *
+ * Measured against what it has to beat: the in-flight guard
+ * (`writingBySession`) already covers a second Return that lands while the
+ * first send is still going, and that send is two tmux spawns -- about ten
+ * milliseconds. So the hole this closes is a second Return that arrives after
+ * the first finished and before the operator could possibly have decided to
+ * ask the same thing again.
+ *
+ * 1.5 seconds is chosen against a person, not a machine: a deliberate
+ * re-send -- "it did not answer, try again" -- takes a beat of reading first,
+ * and nobody re-reads a pane and re-presses Return inside a second and a half.
+ * Long enough to catch a stutter, a stuck key, a trackpad double-fire; short
+ * enough that a genuine repeat is never refused for more than one attempt,
+ * and the refusal says what happened either way.
+ */
+const REPEAT_WINDOW_MS = 1_500;
 
 /**
  * A status message shortened for the bar, never for the log.
@@ -300,29 +312,70 @@ export function StatusCell({ text }: { readonly text: string }) {
   );
 }
 
-/** Now the DEFAULT of a stored preference rather than the value itself: the
- *  settings overlay writes `prefs.focusViewportShare`, and this is what a
- *  browser with nothing stored falls back to. Still 0.6, still one literal. */
-export const FOCUS_VIEWPORT_SHARE = DEFAULT_FOCUS_SHARE;
+/**
+ * WHAT THE FOOTER IS SHOWING: the resting mode, or the transient state that
+ * outranks it. One string, and the only new name in this file.
+ *
+ * NOT A SECOND SOURCE OF TRUTH, and the distinction matters here more than
+ * anywhere: PR 295 made the cursor mode DERIVED from DOM focus
+ * (`keyboard/focus-scope.ts`), after an audit found four leaks between a
+ * stored flag and where the keyboard actually was. This is a projection of
+ * that mirror and of `jumping`/`filtering` onto one value, computed at the
+ * point of render. Nothing stores it and nothing writes it.
+ */
+type ModeState = CursorMode | 'jump' | 'filter';
 
 /**
- * ReactFlow's fitting `padding` for a target share of the viewport.
+ * THE MODE INDICATOR — a modal app saying which mode it is in.
  *
- * A numeric padding is resolved by the library as `(v - v / (1 + p)) / 2`
- * pixels on each side of the axis of length `v`, which leaves the content
- * spanning `1 / (1 + p)` of it. Inverting THAT gives p = 1/share - 1; at 0.6
- * the padding is 0.667.
+ * It was `<span data-mode className="font-semibold text-ink">`: a 10px word in
+ * a 32px footer, in the same size and row as six other 10px cells, and it was
+ * the WHOLE of the signal — the pane's focus border and its animated top line
+ * were both removed at the operator's request, so nothing else on screen moves
+ * when the mode changes. A daily user of this app concluded the modes had been
+ * removed. They had not; they were invisible.
  *
- * It used to be `(1/share - 1) / 2`, from a reading of `padding` as a fraction
- * of the fitted BOUNDS added to each side -- content at `1 / (1 + 2p)`. That
- * is not what the installed ReactFlow does, and the difference is not
- * academic: at the shipped 60% target it framed the session at 75%. Nothing
- * caught it because the value it fed was only ever asserted against the same
- * wrong model. `grid.test.ts` now measures the result through
- * `getViewportForBounds`, the library's own arithmetic.
+ * TWO CHANNELS, because the word alone had already failed:
+ *
+ *   AT REST it is a chip with a ground of its own, and the armed states draw
+ *   it INVERTED — the ink ramp's two ends, which is the one pair guaranteed to
+ *   read on every surface in both themes and needs no new token. So Select and
+ *   Insert differ before either word has been read. `TerminalTab`'s cursor
+ *   already spells the same idiom (`bg-ink text-panel`).
+ *
+ *   AT THE MOMENT IT CHANGES something moves. The caller keys this component
+ *   on the state it draws, so a change REMOUNTS it and the CSS animation
+ *   restarts — a `textContent` swap in place would replay nothing. The
+ *   animation is a `box-shadow` ring that fades out once, which is
+ *   `vam-focus-glow`'s form and off the paint-heavy path for the same reason;
+ *   `prefers-reduced-motion` stops it, and the inversion carries the state
+ *   without it.
+ *
+ * QUIET ON PURPOSE. One fade, no loop, no colour that means a session state:
+ * this is a persistent indicator, and an indicator that keeps moving is an
+ * alert. No live region either — `StatusCell` a few cells along is this
+ * footer's one polite region, and a second one would read the mode over every
+ * refusal the first is announcing.
+ *
+ * The WORD is unchanged, deliberately: JUMP and FILTER are transient, a key is
+ * being awaited, and they outrank the resting mode. Since `f` now paints its
+ * labels on the rows they address, the mode the operator returns to is no
+ * longer a thing they have to remember while JUMP is up.
  */
-export function focusPadding(share: number): number {
-  return 1 / share - 1;
+function ModeCell({ state }: { readonly state: ModeState }) {
+  const armed = state !== 'select';
+  const word = state === 'jump' ? 'JUMP' : state === 'filter' ? 'FILTER' : MODE_TITLES[state];
+  return (
+    <span
+      data-mode
+      className={[
+        'vam-mode-change inline-flex h-[18px] flex-none items-center rounded-[4px] border px-1.5 font-semibold text-control leading-none tracking-[0.04em]',
+        armed ? 'border-ink bg-ink text-ground' : 'border-line-loud bg-well text-ink',
+      ].join(' ')}
+    >
+      {word}
+    </span>
+  );
 }
 
 function jumpLabels(ids: readonly string[]): Map<string, string> {
@@ -366,6 +419,162 @@ type ProjectIconTarget = {
   readonly projectId: string;
   readonly name: string;
 };
+
+/**
+ * WHETHER THE PANEL STAYS OPEN AFTER A PICK — one rule, used by all three
+ * pickers so the three levels cannot answer it differently.
+ *
+ * AN EMOJI IS ONE PRESS and the panel gets out of the way, exactly as it
+ * always has. A GLYPH IS TWO: the picture, and then the colour. Closing on the
+ * first would put the tone row out of reach of the only thing it can paint,
+ * and an operator would have to reopen the picker to finish a choice they had
+ * already started — which is also the state in which the row can do nothing
+ * and has to say so (`toneRefusal`).
+ *
+ * Clearing (`''`) parses to `null` and therefore closes, which is right: there
+ * is nothing left to colour.
+ */
+function keepPickerOpen(icon: string): boolean {
+  return parseIcon(icon)?.kind === 'glyph';
+}
+
+/**
+ * ONE PANE's tabs, exactly as its strip draws them.
+ *
+ * The leaf's own list resolved against the model through `orderedPaneTabs`,
+ * never `entries`' whole project. The leaf's list is the order the tabs were
+ * OPENED in, which is what the operator saw as jumbled: a pick in the sidebar
+ * landed at the far end of a strip listing the same sessions a different way.
+ * The order rule stays in `selectors.ts` alone, and this is re-read every
+ * render because it depends on session status. An id whose session has gone
+ * draws nothing until the prune effect catches up, and A13.1's project scoping
+ * is applied here as well: a strip only ever lists the ACTIVE project's
+ * sessions, so a pane left over from another project cannot draw one.
+ *
+ * A FUNCTION, and not inlined into `renderLeaf` where it used to live, because
+ * `Mod-<digit>` counts this list and `Mod-t` reads its head. "The tab at
+ * position N" has to mean the tab the operator can SEE at position N, and the
+ * only way to promise that is for the strip and the keyboard to derive it from
+ * one expression rather than two that agree today.
+ */
+function drawnPaneTabs(
+  all: readonly SessionEntry[],
+  sessionIds: readonly string[],
+  activeProjectId: string | null,
+): readonly SessionEntry[] {
+  return orderedPaneTabs(all, sessionIds).filter(
+    (entry) => activeProjectId === null || entry.project.id === activeProjectId,
+  );
+}
+
+/**
+ * ONE PANE's element, by the id the tree already names it with.
+ *
+ * A DOM read rather than a ref map, and deliberately: `data-split-pane` is
+ * written by `renderLeaf` a few hundred lines below, so this is this file
+ * asking about its own markup — the same relationship `DetailPanel` already
+ * has with `document.activeElement`. A `Map<string, HTMLElement>` kept by ref
+ * callbacks would be a second index of the pane tree, which is precisely the
+ * shape of duplication the mode rewrite is removing.
+ *
+ * `null` for a pane that is not drawn — a stale id from a closure, or a leaf
+ * closed between the keystroke and the read. Every caller has to answer that
+ * anyway, because a pane with nothing to type into gives the same `false`.
+ */
+function paneElement(paneId: string): Element | null {
+  return document.querySelector(`[data-split-pane="${CSS.escape(paneId)}"]`);
+}
+
+/**
+ * IS SOMETHING ALREADY ANSWERING THE KEYS? Read off the DOM, like the mode.
+ *
+ * Asked by the one act in this file that moves the keyboard on VAM's
+ * initiative rather than the operator's — the new session's arrival — so that
+ * it can decline. Every other focus move here is the direct answer to a key
+ * the operator just pressed, and none of them has any business asking.
+ *
+ * TWO CLAUSES BECAUSE THERE ARE TWO POPULATIONS, and neither contains the
+ * other. `cursorModeAt` covers the regions marked `data-insert-scope` — the
+ * composer, the question card, the terminal — which is Insert, and the reason
+ * they are marked. The tag test covers the boxes that are NOT marked and never
+ * should be: the command palette's filter, the search line, a rename field.
+ * They are overlays and inline edits rather than places the pane cursor lives,
+ * so they carry no scope; they still hold a caret in the middle of a word, and
+ * that is the whole question being asked. It is the same shape as the keydown
+ * handler's own `typing` guard, which reads the same two tag names for the
+ * same reason one layer down.
+ *
+ * A FOCUSED BUTTON IS NOT ANSWERING ANYTHING, deliberately. Measured in
+ * Chromium: a pointer press on a `<button>` leaves `document.activeElement` on
+ * that button. happy-dom's `.click()` moves no focus, so a rule phrased as
+ * "activeElement is not the body" would have declined on every mouse-driven
+ * creation there is — in production only, while every test written against it
+ * stayed green. `Canvas.new-session-focus.test.tsx` focuses the `+`
+ * explicitly for that reason.
+ */
+function answeringKeys(): boolean {
+  const active = document.activeElement;
+  if (cursorModeAt(active) === 'insert') {
+    return true;
+  }
+  return active instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(active.tagName);
+}
+
+/**
+ * ONE PANE's transcript column — the region `Mod-d` / `Mod-u` scroll.
+ *
+ * SCOPED TO THE PANE, the same way `focusInsertStop` is and for the same
+ * reason: every pane draws a column of its own, and a document-wide
+ * `querySelector` would scroll whichever one happens to be first in the tree
+ * — the pane the operator is not looking at, half the time.
+ *
+ * `null` is a real answer and covers three different absences at once: a pane
+ * showing one of the other views, a session whose transcript has no turns yet
+ * (the column is replaced by a sentence), and a pane holding no session at
+ * all. The caller refuses once, in words true of all three — the column is
+ * what the key acts on, and there isn't one.
+ */
+function paneColumn(paneId: string): HTMLElement | null {
+  return paneElement(paneId)?.querySelector<HTMLElement>('[data-detail-column]') ?? null;
+}
+
+/**
+ * WHY THIS PANE CANNOT BE SPLIT ON THIS AXIS, or `null` when it can.
+ *
+ * ONE function for every route that makes a pane — `zv`, `zs` and the drop on
+ * a pane's edge — because the floor is an invariant of the LAYOUT and not a
+ * property of one gesture. That distinction is the whole finding: PR 289
+ * measured `MIN_PANE_PX` and applied it in `dividerShare`, which governs
+ * dragging a divider and nothing else, so a 254px pane could not be DRAGGED
+ * below 320 but could be SPLIT into two 127px halves — into the exact broken
+ * zone (the view-icon pill over the first prompt bubble's text, a question
+ * card's option printed over its own explanation) the number was measured
+ * from. Fixing the chord alone would have left the drag still doing it.
+ *
+ * MEASURED FROM THE DOM, like `paneElement` above and for the same reason:
+ * the split tree holds shares, not pixels, and this question is about pixels.
+ * A pane that is not drawn, or one whose rect has not been laid out yet,
+ * measures nothing — and an unmeasured pane is NOT a pane that is too small,
+ * so `canSplit` lets it through. That policy is `dividerShare`'s, kept
+ * deliberately identical; see `canSplit`'s own comment.
+ *
+ * THE SENTENCE FITS THE CELL. `StatusCell` truncates at 72 characters and
+ * hangs the tail on a tooltip, so a longer refusal loses the clause that says
+ * why — PR 289 hit exactly that on the divider's own message, and there is an
+ * assertion on it here too. This one is 57 characters at four digits.
+ */
+function splitRefusal(paneId: string, orientation: SplitOrientation): string | null {
+  const rect = paneElement(paneId)?.getBoundingClientRect() ?? null;
+  if (rect === null) {
+    return null;
+  }
+  const extent = orientation === 'row' ? rect.width : rect.height;
+  if (canSplit(extent, MIN_PANE_PX)) {
+    return null;
+  }
+  const axis = orientation === 'row' ? 'wide' : 'tall';
+  return `can't split — a pane needs ${MIN_PANE_PX}px, this one is ${Math.round(extent)}px ${axis}`;
+}
 
 /**
  * Whether a new session can be started at all, and through what.
@@ -486,75 +695,658 @@ function useUsageSnapshot(getUsage: (() => Promise<UsageSnapshot>) | undefined):
 }
 
 /**
- * The three columns, mounted or not.
+ * The detail pane's own column: the tab strip along its top edge, and
+ * `DetailPanel` filling the rest — A12.1's "a tab IS that session's detail
+ * pane", not a strip above a separate column.
  *
- * Wrappers around the call sites rather than a guard inside SessionList and
- * DetailPanel: both panels open with hooks, so an early `return null` inside
- * them would be a conditional hook. A wrapper never creates the component at
- * all, which is what "unmounted" has to mean — a display:none pane is still a
- * pane, still measured, and still findable by every query that should now miss.
+ * `width` is applied HERE, on the wrapper, not on `DetailPanel` (which is
+ * handed `width={undefined}` and fills via its own `w-full`, the same
+ * contract `PhoneShell` already relies on) — one width, in one place, so the
+ * toolbar above `DetailPanel` cannot render a different width than the pane
+ * below it.
  *
- * A hidden `CanvasColumn`'s children are still BUILT (JSX is evaluated at the
- * call site) — they are plain element objects, never rendered, so nothing in
- * them mounts, subscribes or measures.
+ * The `show` prop this and the sidebar's own `SidebarSlot` wrapper used to
+ * take is gone with the settings section that was its only writer: both
+ * panes are always drawn now, so the wrappers were guarding a state nothing
+ * could reach. `SidebarSlot` existed only for that guard and is deleted;
+ * `SessionList` is rendered directly.
  */
-function SidebarSlot({ show, ...props }: ComponentProps<typeof SessionList> & { show: boolean }) {
-  return show ? <SessionList {...props} /> : null;
-}
-
-function DetailSlot({ show, ...props }: ComponentProps<typeof DetailPanel> & { show: boolean }) {
-  return show ? <DetailPanel {...props} /> : null;
-}
-
-/**
- * The canvas column, in one of its two jobs.
- *
- * As the main column it flexes: it is what the window is about, and it takes
- * whatever the two fixed panes leave. As a strip it is a fixed `CANVAS_STRIP`
- * wide and flexes not at all, because in that layout the RESPONSE is what takes
- * the leftover room. Which of the two it is comes from the layout's order —
- * `canvasIsMain` — never from a width someone dragged.
- */
-function CanvasColumn({
-  show,
-  strip,
+function DetailColumn({
+  width,
   children,
 }: {
-  show: boolean;
-  strip: boolean;
-  children: ReactNode;
+  readonly width: number;
+  readonly children: ReactNode;
 }) {
-  return show ? (
+  return (
+    <div data-detail-pane className="relative flex min-w-0 flex-col" style={{ width }}>
+      {children}
+    </div>
+  );
+}
+
+/** A15.2: the strip is chrome, not content — `h-9` (36px) is the shortest
+ *  height that still keeps an 11px tab label and its icon clear of the row's
+ *  own top/bottom edge (see `TabStrip`'s own `py-1`). A15.5 moved this row
+ *  out of `DetailColumn` and INTO each pane: one strip per pane is the whole
+ *  point, and a row above the split layout could only ever draw one. */
+/** The drag handlers are the STRIP's own, not inherited from the pane
+ *  underneath: a tab dropped on a strip becomes a tab of that strip, whatever
+ *  the pane's edge geometry would have said about the same point (the strip is
+ *  36px at the TOP of the pane, so every point in it is inside the `top` band
+ *  and would have split the pane downward). Optional, so the phone shell and
+ *  every test that renders a bare strip are unaffected. */
+function TabStripRow({
+  children,
+  onDragOver,
+  onDrop,
+}: {
+  readonly children: ReactNode;
+  readonly onDragOver?: (event: ReactDragEvent<HTMLDivElement>) => void;
+  readonly onDrop?: (event: ReactDragEvent<HTMLDivElement>) => void;
+}) {
+  return (
+    // The same exemption the pane itself takes, for the same reason: this is a
+    // DROP TARGET for a pointer drag, not a control. The interactive things
+    // are the tab buttons inside it, each reachable by Tab and each with its
+    // own name. There is no role for "a place a drag can land" — ARIA's
+    // `aria-dropeffect` was deprecated without a replacement — and no keyboard
+    // user is stranded by it: `zv`/`zs` split, `zw` moves between panes and
+    // the digit row picks a tab, each saying what it did in the status bar.
+    // biome-ignore lint/a11y/noStaticElementInteractions: see above.
     <div
-      data-canvas-pane
-      className={`relative flex min-w-0 flex-col bg-canvas ${strip ? 'flex-none border-line border-l' : 'flex-1'}`}
-      style={strip ? { width: CANVAS_STRIP } : undefined}
+      data-tab-strip-row
+      className="flex h-9 flex-none items-stretch gap-[9px] border-line border-b px-1.5"
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
       {children}
     </div>
-  ) : null;
+  );
 }
 
 /**
- * The three columns, drawn in the layout's order.
+ * The session tab strip — VSCode-shaped: one tab per session in the active
+ * project (A13.1), click to switch, `×` to close.
  *
- * The children are written in `Canvas.tsx` in reading order and matched to the
- * order by their KEY, so the sequence lives in one place — the layout
- * descriptor — instead of in this file's JSX, which is exactly the thing
- * `panes.ts` said could not be expressed while the order was hard-coded here.
+ * `×` closes the SESSION, exactly what the sidebar row's own `×` and the `x`
+ * chord do (A11.3: "a tab that cannot be closed independently of its
+ * session makes it meaningless. One action, two keys.") — decision 6's
+ * lighter "close the tab, leave the session running" is void under the
+ * every-session-is-a-tab model, because there is no tab to close that is
+ * not the session itself.
+ *
+ * `orientation` IS A PROP FROM THE START, even though only `'horizontal'` is
+ * wired up in this task, per epic.md Amendment A1.5: the strip must
+ * eventually support a vertical arrangement and drag-to-reorder, and a strip
+ * hard-coded horizontal with the axis bolted on later is a rewrite landing on
+ * top of the largest diff in this migration. `tabs` is handed in the ORDER
+ * the sidebar draws its own project (`orderedSessions`) — never re-sorted
+ * here by title or status.
+ *
+ * A15.1: `data-tab-select` is now `draggable`, and dropping it onto a pane
+ * splits that pane rather than reordering the strip — the operator asked
+ * for split, not reorder, when this was revisited. `onTabDragStart`/
+ * `onTabDragEnd` are optional so every caller that predates splitting (and
+ * every existing test) is unaffected.
  */
-function Columns({ order, children }: { order: readonly ColumnId[]; children: ReactNode }) {
-  const byId = new Map(
-    Children.toArray(children).map((child) => [
-      isValidElement(child) ? String(child.key).replace(/^\.\$/, '') : '',
-      child,
-    ]),
+/**
+ * The `+` at the end of one pane's strip — the operator's request, and
+ * VSCode's own "new editor in THIS group": the session it starts is born in
+ * the pane whose button was pressed, not in whichever pane holds the
+ * keyboard (`renderLeaf` passes the leaf id through).
+ *
+ * A SIBLING of the strip rather than a child of it, so it stays pinned at
+ * the row's right edge while a pane full of tabs scrolls under it, and so a
+ * pane holding nothing yet — where `TabStrip` draws its "no sessions open"
+ * placeholder instead of any tabs — still has one.
+ *
+ * `decline` is `newSessionDecline`: the reason there is no route, computed
+ * from the same `newSessionRoute` the click reads, so the caption cannot
+ * disagree with what pressing it does. It is worn as the TOOLTIP and said
+ * out loud in the status bar on click; the button is never drawn inert.
+ * (`ViewIcons`' rule for icon-only controls applies here too: a real
+ * `<button>`, reachable by Tab, with an `aria-label`. A `title` alone is not
+ * a name.)
+ */
+/**
+ * THE PANE WHILE A SESSION IS BEING STARTED.
+ *
+ * Operator: "open the new tab immediately with loading in the pane." Until
+ * now the pane moved only when the ROW arrived, which is after the write and
+ * after the agent registered itself -- so the one control that had just been
+ * pressed was the one surface that did not react to it.
+ *
+ * ONE SENTENCE AND A DOT, and nothing that pretends to be a session: no
+ * title, no status, no age, no turn, no composer. vam knows none of those yet,
+ * and this pane has spent several rounds having invented content removed from
+ * it. The dot is the same one a running session wears, meaning the same thing
+ * -- something is happening -- and `aria-live` is what says it to a reader who
+ * cannot see it start.
+ *
+ * IT DOES NOT SAY HOW LONG. vam has nothing to wait on and no measured
+ * distribution to promise against: `tmux new-session -d` returns immediately
+ * and the agent registers on its own schedule. A progress bar would be an
+ * invented number, and "a few seconds" would be a guess the operator could
+ * catch vam getting wrong.
+ */
+function StartingSession({ projectName }: { readonly projectName: string }) {
+  return (
+    <div
+      data-pane-starting
+      aria-live="polite"
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
+    >
+      <span className="h-2 w-2 flex-none rounded-full bg-running vam-breathe" />
+      <p className="text-control text-ink-faint">starting a session in {projectName}…</p>
+      <p className="text-meta text-ink-quiet">
+        it appears here as soon as the agent inside it registers
+      </p>
+    </div>
   );
-  // An order naming no column is not an empty row of columns, it is no row at
-  // all -- which is what the phone shell asks for, and what leaves nothing of
-  // the desktop layout in the tree beside it.
-  if (order.length === 0) return null;
-  return <div className="flex min-h-0 flex-1">{order.map((id) => byId.get(id))}</div>;
+}
+
+function NewTabButton({
+  decline,
+  onClick,
+}: {
+  readonly decline: string | null;
+  readonly onClick: () => void;
+}) {
+  return (
+    // `ShortcutTip`, not `title`: the decline is the one thing this button has
+    // to say that its `aria-label` does not, and a `title` opens on hover and
+    // on nothing else -- so a keyboard user pressed it, got silence, and had
+    // no route to the reason. The sidebar's New session already carries the
+    // same string this way.
+    // The chord is offered only when there IS a route: `Mod-t` takes the same
+    // declined path, so printing it beside the refusal would read as "press
+    // this instead" for a key that refuses identically.
+    //
+    // `newTab`, NOT `newSession`, and that correction is half of why `newTab`
+    // exists as an action of its own. This tip used to print `o` beside "New
+    // session in this pane" while `o` starts one in the FOCUSED session's
+    // project and lands it wherever the adoption rule puts it -- so the button
+    // named a key that does something adjacent, and in the pane a split had
+    // just emptied it named a key that refuses where the button works.
+    <ShortcutTip
+      label={decline ?? 'New session in this pane'}
+      action={decline === null ? { kind: 'newTab' } : undefined}
+    >
+      <button
+        type="button"
+        data-tab-new
+        aria-label="new session in this pane"
+        onClick={onClick}
+        className="vam-tap flex flex-none cursor-pointer items-center self-center rounded-[4px] px-1.5 py-1 text-ink-faint hover:text-ink"
+      >
+        <Plus size={13} strokeWidth={1.7} />
+      </button>
+    </ShortcutTip>
+  );
+}
+
+/** The literal class strings, not a template literal, so Tailwind's static
+ *  scanner can see them rather than a computed `` `text-${status}` ``. */
+const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
+  running: 'text-running',
+  waiting: 'text-waiting',
+  idle: 'text-idle',
+  done: 'text-done',
+  failed: 'text-failed',
+};
+
+/**
+ * THE MARK A TAB WEARS, AND WHY A RESTING TAB WEARS NONE.
+ *
+ * `TAB_STATUS_INK` is applied only when a tab is ACTIVE, so three of its four
+ * statuses could never be seen: the tab you are looking at is not the one
+ * that needs to tell you something. And since every session of the project is
+ * a tab, the strip is the densest status surface in the app — after a split
+ * the operator's eyes are here, while the amber "needs you" mark lived only
+ * in the sidebar. So status gets a mark of its own on the tab, and the ink
+ * stays the active tab's: colouring an inactive tab's TITLE by status would
+ * put "which tab am I on" and "how is each session doing" in one ink,
+ * colliding with the three-channel active-tab treatment (accent underline,
+ * ground/ink, `opacity-85` on the neighbours).
+ *
+ * THAT MARK USED TO BE A DOT ON EVERY TAB, idle included, and the operator
+ * read the result the way the sidebar's five dots had been read once before:
+ * "if a tab is idle (not running, not waiting for you, ...) there is no need
+ * to show the dot". A strip of mostly-idle tabs was a row of grey dots saying
+ * "nothing" eight times. Now a tab draws AT MOST ONE status mark -- the
+ * sidebar row's own glyph (`panels/status-mark.tsx`: a spinner, a bell, a
+ * triangle, a tick), so the two surfaces say one thing -- and only for a
+ * status the indicator list names (`prefs/tab-indicators.ts`). Idle is not a
+ * switch: a resting tab with no icon and no draft is its title and nothing
+ * else, and no empty lane is reserved for the mark it is not wearing. A quiet
+ * tab is narrower than a busy one; that is the point, not a cost.
+ *
+ * THE LANE IS `--text-control`, 12px, the tab label's own size -- and the
+ * glyph fills it. The sidebar row centres a 12px glyph in a 14px lane under a
+ * 13px title; a tab's title is 12px on a 16px line, and the session icon
+ * beside it already draws at exactly 12 (`IconMark size={12}` below, "the
+ * tab label's own size, so the two kinds of icon occupy the same height"). A
+ * mark at the same 12 sits in the same square as that icon and on the same
+ * centre line as the label, which is what makes the two read as one row of
+ * things rather than a big thing beside a small one. The two pixels of air
+ * the sidebar keeps inside its lane are for a triangle and a circle sitting
+ * centred beside each other in a COLUMN; on a tab the mark has no neighbour
+ * above or below to be centred against, and the lucide glyphs carry their own
+ * pixel of air inside the box (a 24-unit viewBox with 2 units of margin). The
+ * 16px line has two pixels above and below the lane; the row is 36 and does
+ * not move (measured in `e2e/tab-strip-shots.mjs`).
+ *
+ * Mark first, then the icon, then the title, then the marks about the
+ * OPERATOR's state in this tab -- an unsent draft, a prompt not yet recorded,
+ * sub-agents at work -- because reading order on a strip is left to right and
+ * what the session is doing outranks what you were doing here.
+ */
+export const TAB_MARK_LANE_PX = 12;
+/** The glyph is the lane: see above for why the tab keeps no air the sidebar
+ *  needs, and `status-mark.tsx` for why the sidebar does. */
+export const TAB_MARK_GLYPH_PX = TAB_MARK_LANE_PX;
+
+/** A status that may earn a mark. `idle` is not in it, by construction: the
+ *  type is the indicator vocabulary narrowed to the statuses, and idle is a
+ *  status that is not an indicator. */
+type TabStatusMark = Extract<TabIndicatorId, SessionStatus>;
+
+/** Which status mark, if any, this session's tab draws under these switches.
+ *  `null` for idle whatever the switches say, and for a status whose switch
+ *  is off. */
+function tabStatusMark(status: SessionStatus): TabStatusMark | null {
+  if (status === 'idle') return null;
+  return isTabIndicatorOn(status) ? status : null;
+}
+
+/** Is there an unsent draft worth a pencil? The composer's own send rule
+ *  (`sendPromptFor` returns on `trim() === ''`), so the pencil never marks a
+ *  draft the send would refuse. */
+export function hasDraft(text: string | undefined): boolean {
+  return text !== undefined && text.trim() !== '';
+}
+
+function TabStrip({
+  orientation,
+  tabs,
+  activeId,
+  paneFocused,
+  drafts,
+  pending,
+  onSelect,
+  onClose,
+  onTabContextMenu,
+  onTabDragStart,
+  onTabDragEnd,
+}: {
+  readonly orientation: 'horizontal' | 'vertical';
+  readonly tabs: readonly SessionEntry[];
+  readonly activeId: string | null;
+  /**
+   * Every session's unsent composer text, by session id -- the whole map
+   * rather than one flag per tab, because a draft belongs to a SESSION and a
+   * session may be a tab of any pane; the strip reads its own tabs' entries
+   * and ignores the rest. `hasDraft` decides what counts.
+   */
+  readonly drafts: Readonly<Record<string, string>>;
+  /**
+   * The prompts painted but not yet recorded (`domain/optimistic.ts`), for
+   * the `pending` indicator. The list is at most a few long and usually
+   * empty, so it is scanned per tab rather than indexed first.
+   */
+  readonly pending: readonly PendingPrompt[];
+  /**
+   * Does the pane this strip belongs to hold the keyboard? Since PR 268 took
+   * the focus ring off the pane, "the active tab of a pane that does NOT have
+   * the keyboard" is a state with nothing to say it — two panes each have an
+   * active tab and only one of them is where the next keystroke lands. The
+   * strip is where that difference can usefully show, so the accent under the
+   * active tab is drawn at full strength only here.
+   */
+  readonly paneFocused: boolean;
+  /**
+   * `viaPointer` is the ACTIVATION SOURCE, carried rather than inferred later
+   * (the operator's "focusing a tab should focus the prompt" is true of a
+   * click and false of a chord — see `Canvas.tab-pointer-focus.test.tsx`).
+   * Its value is `UIEvent.detail`, the click count: the HTML activation
+   * behaviour dispatches a click with `detail` 0 when a focused button is
+   * activated from the keyboard, and a pointer press always reports at least
+   * 1. This is the only place in the shell that can still see the difference,
+   * so it is read here and passed on as a fact.
+   */
+  readonly onSelect: (sessionId: string, viaPointer: boolean) => void;
+  readonly onClose: (sessionId: string) => void;
+  /**
+   * A RIGHT-CLICK ON A TAB, carried up with the pointer where it happened.
+   *
+   * Optional for the same reason `onTabDragStart` is: every existing caller
+   * and every existing test that has no reason to care keeps working, and
+   * `Canvas.tsx`'s own render is the one caller that supplies it. A strip with
+   * no handler simply lets the event through, which on a browser build is the
+   * browser's own menu and is the right answer there.
+   */
+  readonly onTabContextMenu?: (
+    entry: SessionEntry,
+    at: { readonly x: number; readonly y: number },
+  ) => void;
+  /**
+   * A15.1 — dragging a tab is how a split is made. Optional so every
+   * existing caller (and every existing test) that has no reason to care
+   * about splitting keeps working unchanged; `Canvas.tsx`'s own render is
+   * the one caller that supplies both.
+   */
+  readonly onTabDragStart?: (
+    sessionId: string,
+  ) => (event: ReactDragEvent<HTMLButtonElement>) => void;
+  readonly onTabDragEnd?: () => void;
+}) {
+  /** One right-click handler per tab, shared by its two buttons so they cannot
+   *  drift, and `undefined` when the caller offered no menu -- which leaves the
+   *  event to whatever shell is hosting the strip. */
+  const tabMenuOf = (entry: SessionEntry) =>
+    onTabContextMenu === undefined
+      ? undefined
+      : (event: { preventDefault: () => void; clientX: number; clientY: number }) => {
+          event.preventDefault();
+          onTabContextMenu(entry, { x: event.clientX, y: event.clientY });
+        };
+
+  /** STATE, not `useRef`: until the strip has tabs it renders a placeholder
+   *  div with no scroller at all, so a ref read by an effect that runs once
+   *  on mount is null for good and the wheel listener below is never
+   *  attached. State re-runs both effects when the real scroller appears. */
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  /** Is a pointer down on the strip? A press in progress PINS it: scrolling
+   *  out from under a stationary pointer moves the target of the click that
+   *  pointer is in the middle of making. A ref, not state — nothing renders
+   *  from it, and the layout effect must read it in the same commit. */
+  const pressed = useRef(false);
+
+  useEffect(() => {
+    // On the window: a pointer released outside the strip (the common case)
+    // still ends the press, and a `pressed` stuck true freezes it for good.
+    const release = () => {
+      pressed.current = false;
+    };
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
+    };
+  }, []);
+
+  /**
+   * THE ACTIVE TAB IS ON SCREEN. Every session of the active project is a tab
+   * of one pane, appended and never sorted, so a project with a dozen
+   * sessions overflows a split pane on first paint — and every route that
+   * moves the active tab (`Mod-<digit>`, `h`/`l`, a sidebar click through
+   * `paneHolding`, `restoreLayout`) could land on a tab scrolled out of view
+   * while the strip stayed put. The comment on the scroller below reasons
+   * carefully about where the `+` goes when the tabs overflow and never about
+   * where the ACTIVE TAB goes; this is that gap.
+   *
+   * A LAYOUT effect, so the strip is in place at the paint that made the tab
+   * active rather than jumping a frame later. `nearest` ON BOTH AXES is one
+   * call for both orientations: it moves the minimum on whichever axis has
+   * slack (`inline` horizontal, `block` for the `flex-col` strip) and leaves
+   * a tab already in view where it is.
+   */
+  useLayoutEffect(() => {
+    if (activeId === null || pressed.current) return;
+    scroller
+      ?.querySelector('[data-session-tab][data-active="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeId, scroller]);
+
+  /**
+   * A VERTICAL WHEEL SCROLLS THE HORIZONTAL STRIP. A scroller with slack on
+   * one axis only is unreachable with an ordinary mouse or a trackpad flick,
+   * both of which send `deltaY`, and the strip draws no scrollbar to drag.
+   *
+   * A native listener rather than `onWheel`: React registers `wheel` at the
+   * root as PASSIVE, where `preventDefault` is ignored, and without it the
+   * page takes the scroll as well. Only when the strip has somewhere to go —
+   * otherwise a wheel over a strip that fits swallows the page's own scroll.
+   */
+  useEffect(() => {
+    if (scroller === null || orientation !== 'horizontal') return;
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      if (scroller.scrollWidth <= scroller.clientWidth) return;
+      scroller.scrollLeft += event.deltaY;
+      event.preventDefault();
+    };
+    scroller.addEventListener('wheel', onWheel, { passive: false });
+    return () => scroller.removeEventListener('wheel', onWheel);
+  }, [orientation, scroller]);
+
+  if (tabs.length === 0) {
+    return (
+      <div
+        data-tab-strip
+        data-orientation={orientation}
+        className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-control text-ink-faint"
+      >
+        no sessions open — pick one from the sidebar
+      </div>
+    );
+  }
+  return (
+    <div
+      data-tab-strip
+      data-orientation={orientation}
+      ref={setScroller}
+      onPointerDown={() => {
+        pressed.current = true;
+      }}
+      /*
+        NOT `flex-1` on the horizontal strip any more (operator: "put the new
+        tab button next to the last tab, instead of on the right"). `shrink`
+        with no grow makes the strip exactly as wide as its tabs until they
+        run out of room, so the `+` that follows it in `TabStripRow` lands
+        immediately after the last tab.
+
+        WHAT HAPPENS WHEN THE TABS OVERFLOW is the question that placement
+        raises, and the answer chosen is PINNED, not scrolled: the `+` stays
+        a sibling of this scroller rather than moving inside it, so once the
+        strip fills the row the strip scrolls under a `+` that does not move.
+        Following the last tab into the overflow would put "add one more"
+        behind a horizontal scroll exactly when a pane has the most tabs,
+        which is when it is most likely to be wanted.
+      */
+      className={
+        orientation === 'horizontal'
+          ? 'flex min-w-0 shrink items-stretch overflow-x-auto'
+          : 'flex min-h-0 flex-1 flex-col overflow-y-auto'
+      }
+    >
+      {tabs.map((entry) => {
+        const active = entry.session.id === activeId;
+        // The chain (`panels/session-icon.ts`): the session's own choice, else
+        // its project's, else nothing drawn -- deliberately not the module's
+        // own placeholder glyph, which would put a Monitor icon on every tab
+        // nobody has picked one for. Adopting the chain is the point: this
+        // used to read `entry.session.icon` alone, so a tab never fell back
+        // to its project's glyph the way the (now-deleted) canvas root node
+        // already did, and the two surfaces disagreed the moment one carried
+        // a project icon and no session icon of its own.
+        //
+        // The chain answers with a KIND now (an emoji, or a named glyph in a
+        // tone), not a character, so the tone arrives here without this strip
+        // knowing that colours exist -- see `session-icon.tsx` for why that is
+        // one chain and not two.
+        const icon = isTabIndicatorOn('icon') ? resolveSessionIcon(entry) : null;
+        const mark = tabStatusMark(entry.session.status);
+        const draft = isTabIndicatorOn('draft') && hasDraft(drafts[entry.session.id]);
+        const queued =
+          isTabIndicatorOn('pending') && pending.some((one) => one.sessionId === entry.session.id);
+        const agents = isTabIndicatorOn('agents') ? entry.session.runningAgents : 0;
+        return (
+          <div
+            key={entry.session.id}
+            data-session-tab
+            data-active={active ? 'true' : 'false'}
+            /* ON THE TAB, not on the mark: the 6px dot used to carry this and
+               the dot is gone, and an idle tab has no mark to hang it on. The
+               tests and the browser guard read "which status is this tab" off
+               the tab itself, whether or not anything is drawn for it. */
+            data-tab-status={entry.session.status}
+            /*
+              THREE CHANNELS ON THE ACTIVE TAB, not one (operator: "the
+              focused tab should have a different opacity from the others,
+              and a border-bottom"):
+                - the ACCENT UNDER IT. `border-b-2` is on every tab and
+                  transparent on the others, so lighting it moves nothing;
+                - the GROUND AND INK it already had;
+                - OPACITY, which recedes the neighbours.
+              Opacity is deliberately not carrying this alone — dimming is
+              not an accessible signal by itself, and `opacity-85` is as far
+              as the inactive title can go while its 11px text stays above
+              4.5:1 (measured in `e2e/tab-strip-shots.mjs`, not estimated).
+
+              AND THE PANE'S OWN FOCUS rides the accent's colour: an
+              unfocused pane's active tab keeps its ground and its underline
+              but wears the quiet line rather than the cursor accent, so
+              "which tab this pane is on" and "which pane the keyboard is in"
+              are two readable facts instead of one ambiguous one.
+            */
+            className={`group flex flex-none items-center gap-1.5 border-line border-r border-b-2 px-2.5 text-control ${
+              active
+                ? `bg-ground text-ink ${paneFocused ? 'border-b-cursor-ring' : 'border-b-line-loud'}`
+                : 'border-b-transparent text-ink-dim opacity-85 hover:text-ink hover:opacity-100'
+            }`}
+          >
+            {/* AT MOST ONE, and none for idle -- see `TAB_MARK_LANE_PX`.
+                Decorative to a screen reader, as the dot it replaces was:
+                labelling one per tab would read every session's status
+                before any of the titles, and the sidebar row already says
+                the word once. `announce={false}` keeps the sr-only word out;
+                the wrapper carries the tab's own hook. */}
+            {mark !== null && (
+              <span data-tab-mark={mark} aria-hidden="true" className="flex flex-none">
+                <StatusMark
+                  status={mark}
+                  announce={false}
+                  lane={TAB_MARK_LANE_PX}
+                  glyph={TAB_MARK_GLYPH_PX}
+                />
+              </span>
+            )}
+            <button
+              type="button"
+              data-tab-select
+              draggable={onTabDragStart !== undefined}
+              onDragStart={onTabDragStart?.(entry.session.id)}
+              onDragEnd={onTabDragEnd}
+              onClick={(event) => onSelect(entry.session.id, event.detail > 0)}
+              /* ON THE BUTTONS, not on the tab's wrapper. This one is the
+                 element the keyboard focuses, and the Menu key and Shift+F10
+                 fire `contextmenu` on the focused element -- so one handler
+                 serves the pointer and the keyboard, where a handler on the
+                 static wrapper would have served only the pointer.
+                 `preventDefault` only when there IS a menu: with no handler
+                 the event belongs to whatever shell hosts the strip. */
+              onContextMenu={tabMenuOf(entry)}
+              className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
+            >
+              {icon !== null && (
+                <>
+                  {/* `inline-flex` so a drawn glyph sits on the label's centre
+                      line rather than on its baseline, which is where an
+                      inline `<svg>` lands by default and is about 3px too low
+                      beside 12px text. An emoji is unaffected: it is the only
+                      thing in the box either way. 12 is `--text-control`, the
+                      tab label's own size, so the two kinds of icon occupy the
+                      same height. */}
+                  <span
+                    data-session-icon={entry.session.id}
+                    data-tab-mark="icon"
+                    aria-hidden="true"
+                    className="inline-flex items-center align-middle"
+                  >
+                    <IconMark value={icon} size={TAB_MARK_GLYPH_PX} fallback={null} />
+                  </span>{' '}
+                </>
+              )}
+              {entry.session.title}
+            </button>
+            {/* THE MARKS ABOUT YOU, after the title. Siblings of the select
+                button rather than children, so a long title's `truncate`
+                never clips them: the fact that a draft is waiting here is
+                exactly the thing a tab must not lose to an ellipsis. */}
+            {draft && (
+              /* NAMED, unlike the status mark, and `role="img"` so the name
+                 is announced: an unsent draft is a fact about the OPERATOR
+                 that no other surface reads aloud -- the sidebar row does not
+                 know about it -- so hiding it would leave a screen-reader
+                 user the only person who cannot tell which tab they were
+                 mid-sentence in. */
+              <span
+                data-tab-mark="draft"
+                role="img"
+                aria-label="unsent draft"
+                className="flex flex-none text-ink-dim"
+              >
+                <Pencil size={TAB_MARK_GLYPH_PX} strokeWidth={1.8} />
+              </span>
+            )}
+            {queued && (
+              /* A HOLLOW dot, deliberately unlike the filled one the strip
+                 used to draw for status: it means "something of yours is in
+                 flight", not "this session is in some state". `border-current`
+                 takes the tab's own ink, so it dims with the tab. 7px is the
+                 sidebar's idle dot; a ring smaller than that has no inside. */
+              <span
+                data-tab-mark="pending"
+                aria-hidden="true"
+                className="h-[7px] w-[7px] flex-none rounded-full border border-current"
+              />
+            )}
+            {agents > 0 && (
+              /* The same `●N` the command palette draws, in the same ink:
+                 one badge, three surfaces. Decorative here as the status mark
+                 is, and for the same reason. */
+              <span data-tab-mark="agents" aria-hidden="true" className="flex-none text-running">
+                ●{agents}
+              </span>
+            )}
+            <button
+              type="button"
+              data-tab-close
+              /* The `x` is a second focusable stop inside the tab, so it needs
+                 the same handler or a right-click on it reaches nothing. */
+              onContextMenu={tabMenuOf(entry)}
+              aria-label={`close ${entry.session.title} tab`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose(entry.session.id);
+              }}
+              /*
+                `opacity: 0` REMOVES NO POINTER EVENTS AND HIDES NO FOCUS
+                RING. This project diagnosed that on the sidebar row --
+                `test/phone/touch-targets.test.tsx`, "removes the hover-
+                revealed close control rather than leaving it invisible" --
+                and the new strip reintroduced it on what is now the primary
+                navigation surface (audit F4): Tab reached this button and it
+                was then a focused control with `opacity: 0`, `outline: none`
+                and no box shadow, visible nowhere on screen (WCAG 2.4.7),
+                while any pointer that cannot hover -- touch, pen -- met a
+                15x17 invisible close target sitting on an inactive tab.
+                Both halves come from the same wrong idea, so both are fixed
+                at once: invisible means UNHITTABLE, and focus REVEALS.
+              */
+              className="shrink-0 cursor-pointer rounded-[4px] px-1 text-ink-faint opacity-0 hover:text-ink focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-cursor-ring group-hover:opacity-100 data-[active=true]:opacity-100 pointer-events-none focus-visible:pointer-events-auto group-hover:pointer-events-auto data-[active=true]:pointer-events-auto"
+              data-active={active ? 'true' : 'false'}
+            >
+              ×
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -567,7 +1359,7 @@ function Columns({ order, children }: { order: readonly ColumnId[]; children: Re
  */
 function SourceReadout({ source }: { source: CanvasSource }) {
   return (
-    <span data-source className="min-w-0 truncate font-mono text-[10px]">
+    <span data-source className="min-w-0 truncate font-mono text-meta">
       {source.kind === 'demo' ? (
         <span className="text-waiting">● {source.note}</span>
       ) : source.kind === 'connecting' ? (
@@ -598,6 +1390,159 @@ function SourceReadout({ source }: { source: CanvasSource }) {
         <span className="text-done">● factory</span>
       )}
     </span>
+  );
+}
+
+/**
+ * WHAT THE DROP WILL DO, drawn before it happens — the only sign, while
+ * dragging, of which of the two outcomes releasing here would produce.
+ *
+ * A JOIN AND A SPLIT MUST NOT LOOK THE SAME. Since a drop learnt to join
+ * (`dropZone`), the same pane under the same pointer has two possible
+ * answers, and the operator finding out which by doing it is the one thing
+ * this shell refuses everywhere else. Three channels say them apart, because
+ * one is a single point of failure at a glance:
+ *
+ *  - EXTENT: a split highlights the HALF the new pane would take, so the
+ *    rectangle is the pane that is about to exist; a join highlights the
+ *    WHOLE pane, because the whole pane is what receives the tab.
+ *  - RIM: solid for a split, which draws a boundary that is about to be real;
+ *    dashed for a join, which draws no new boundary at all.
+ *  - A WORD, which is the one an operator does not have to have learnt.
+ *
+ * `pointer-events-none` so it never itself becomes a drop target (the drag
+ * events are bound to the pane underneath, not to this overlay), and reuses
+ * `--color-cursor-ring` (`styles.css`): the token has carried no consumer
+ * since its own graph-node origin died in the 0.2 migration, its VALUE is
+ * independent of who reads it, and `token-contrast.test.ts` already pins it
+ * for contrast against `--color-ground` — exactly the background this draws
+ * over. The caption is `bg-ground`/`text-ink`, the app's own base pair, so
+ * the word never has to be legible against a translucent wash.
+ *
+ * `aria-hidden` stays: this duplicates, for the eye, the state of a pointer
+ * gesture a screen reader is not in the middle of, and it changes on every
+ * mouse move. The KEYBOARD route to a split is `zv`/`zs`, which speaks for
+ * itself in the status bar.
+ */
+const DROP_ZONE_SHAPE: Readonly<Record<DropZone, string>> = {
+  left: 'inset-y-0 left-0 w-1/2 border-solid',
+  right: 'inset-y-0 right-0 w-1/2 border-solid',
+  top: 'inset-x-0 top-0 h-1/2 border-solid',
+  bottom: 'inset-x-0 bottom-0 h-1/2 border-solid',
+  centre: 'inset-0 border-dashed',
+};
+
+/** The word each outcome wears. "Move into this pane" and not "Join": the
+ *  gesture MOVES a tab, and the pane it left may well close behind it. */
+const DROP_ZONE_WORD: Readonly<Record<DropZone, string>> = {
+  left: 'Split left',
+  right: 'Split right',
+  top: 'Split above',
+  bottom: 'Split below',
+  centre: 'Move into this pane',
+};
+
+function DropZoneOverlay({ zone }: { readonly zone: DropZone }) {
+  return (
+    <div
+      data-drop-zone={zone}
+      aria-hidden="true"
+      className={`pointer-events-none absolute z-10 flex items-center justify-center border-2 border-cursor-ring bg-cursor-ring/15 ${DROP_ZONE_SHAPE[zone]}`}
+    >
+      <span className="rounded-[4px] border border-cursor-ring bg-ground px-2 py-0.5 font-medium text-control text-ink">
+        {DROP_ZONE_WORD[zone]}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Walks a `SplitTree` (`split.ts`) into nested flex containers — `row` a
+ * vertical divider (panes side by side), `column` a horizontal one (panes
+ * stacked) — and calls `renderLeaf` for every leaf it reaches. Purely a
+ * geometry translation: the tree already says everything about WHAT is
+ * shown and in what order, so this component owns no state of its own.
+ *
+ * `gap-px` over a `bg-line` container draws the seam between panes as a
+ * single-pixel line without a border on every child fighting its neighbour
+ * for whose edge draws it — the same trick a two-column CSS grid uses for a
+ * shared divider.
+ *
+ * HOW A FRACTION BECOMES A WIDTH. Each slot is `flex-grow: <fraction>` over
+ * `flex-basis: 0`, which is `flex-1` with the grow factor taken from the tree
+ * instead of hardcoded to 1 — panes were equal-share by construction before
+ * sizes existed, and equal shares are exactly what the same expression still
+ * produces when every fraction is `1 / n`. A zero basis is what makes the
+ * grow factor a RATIO of the whole rather than a share of the room left over
+ * after content, which would make two panes holding different transcripts
+ * start at different widths and the stored fraction a lie.
+ *
+ * A DIVIDER IS A CHILD OF THE SLOT BEFORE IT, absolutely positioned over the
+ * seam, so `SplitResizer` can find its own pair through `parentElement` and
+ * `nextElementSibling` rather than being told pixel sizes this component
+ * would have to measure on every render.
+ *
+ * Resizing a pane changes the width its `TerminalTab` reports to tmux, and
+ * that is DELIBERATE: `capture-pane` returns the screen tmux has already
+ * composed, so a pane that changed size without telling tmux would draw text
+ * wrapped for the width it used to have. `TerminalTab`'s `ResizeObserver`
+ * picks the change up from the DOM — which is why the slot's real box has to
+ * move, and why nothing here may fake a resize with a transform, which an
+ * observer does not see at all. Its 120ms debounce and its unchanged-cell
+ * check were written for exactly this gesture (see `RESIZE_DEBOUNCE_MS`), so
+ * a drag costs at most one `tmux resize-window` after the pointer stops.
+ */
+function SplitLayout({
+  tree,
+  renderLeaf,
+  onResize,
+  onRefuse,
+}: {
+  readonly tree: SplitTree;
+  readonly renderLeaf: (leaf: Leaf) => ReactNode;
+  readonly onResize: (splitId: string, at: number, share: number) => void;
+  readonly onRefuse: (message: string) => void;
+}) {
+  if (tree.kind === 'leaf') {
+    return <>{renderLeaf(tree)}</>;
+  }
+  const sizes = splitSizes(tree);
+  const last = tree.children.length - 1;
+  return (
+    <div
+      data-split
+      data-split-orientation={tree.orientation}
+      className={`flex min-h-0 min-w-0 flex-1 gap-px bg-line ${
+        tree.orientation === 'row' ? 'flex-row' : 'flex-col'
+      }`}
+    >
+      {tree.children.map((child, at) => (
+        <div
+          key={child.id}
+          data-split-slot={child.id}
+          className="relative flex min-h-0 min-w-0"
+          style={{ flexGrow: sizes[at] ?? 1 / tree.children.length, flexShrink: 1, flexBasis: 0 }}
+        >
+          <SplitLayout
+            tree={child}
+            renderLeaf={renderLeaf}
+            onResize={onResize}
+            onRefuse={onRefuse}
+          />
+          {at < last && (
+            <SplitResizer
+              splitId={tree.id}
+              at={at}
+              orientation={tree.orientation}
+              ariaLabel={`resize pane ${at + 1} and pane ${at + 2}`}
+              share={(sizes[at] ?? 0.5) / ((sizes[at] ?? 0.5) + (sizes[at + 1] ?? 0.5))}
+              onResize={onResize}
+              onRefuse={onRefuse}
+            />
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -651,58 +1596,14 @@ function CanvasInner({
 
   const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
   const storedDetail = liveWidths.detail ?? prefs.panes.detail;
-  // Visibility is read here and passed down, never asked of a child: which
-  // columns exist is a fact about the layout, and `layoutWidths` is the one
-  // place that knows an unmounted pane owes its sibling nothing.
-  // And read through `layoutForViewport`, so that "which columns exist" also
-  // answers the window too narrow to hold them: with the canvas demoted none of
-  // the three columns flexes, and the strip is what gives. Render-time only —
-  // `prefs.paneVisibility` is untouched, so widening the window restores it.
-  const visible = layoutForViewport(prefs.paneVisibility, viewportWidth);
-  const order = columnOrder(visible);
   /**
    * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
    * so every environment without one -- jsdom, happy-dom, the tests -- keeps
    * the columns it was written against.
    */
   const phone = usePhoneViewport();
-  // The canvas is a strip exactly when it is drawn but is not the main column.
-  const canvasStrip = visible.canvas && !canvasIsMain(visible);
-
-  /**
-   * The canvas pane's OWN width, watched directly rather than derived from
-   * `viewportWidth` and the two side panes' widths.
-   *
-   * A pane-resizer drag (or a layout preset moving the strip) changes what
-   * the canvas pane measures without ever firing a window `resize` event --
-   * `viewportWidth` above would not move. `TerminalTab.tsx`'s own pane-size
-   * effect already hits exactly this gap for the SAME reason (a resizer drag
-   * resizing its pane) and works around it the same way: a `ResizeObserver`
-   * on the pane element itself, not a window listener. `clientWidth` is that
-   * file's own measurement, reused here rather than a second unit.
-   *
-   * `null` until the first observation -- "not yet measured", not "very
-   * narrow" -- which is what keeps a still-mounting canvas at the default
-   * `GRID.columns` instead of collapsing to one column for a render or two
-   * before anything has actually been laid out.
-   */
-  const canvasPaneRef = useRef<HTMLDivElement | null>(null);
-  const [canvasPaneWidth, setCanvasPaneWidth] = useState<number | null>(null);
-  useEffect(() => {
-    const el = canvasPaneRef.current;
-    if (!visible.canvas || el === null) {
-      return;
-    }
-    const measure = () => setCanvasPaneWidth(el.clientWidth);
-    // `observe` delivers the element's initial size, so this is also the
-    // first measurement.
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible.canvas]);
 
   const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
-    visible,
     { sidebar: storedSidebar, detail: storedDetail },
     viewportWidth,
   );
@@ -720,8 +1621,8 @@ function CanvasInner({
   );
 
   /**
-   * The factory's model with your icons on it. Done here, once, so neither the
-   * sidebar nor the canvas node has to know that an icon comes from somewhere
+   * The factory's model with your icons on it. Done here, once, so the tab
+   * strip does not have to know that an icon comes from somewhere
    * different than the rest of a session.
    */
   // The class on <html> is what styles.css switches on, and prefs is the only
@@ -738,21 +1639,26 @@ function CanvasInner({
   // appearance, and a flip that moved only the class would leave a light theme
   // wearing dark's canvas until the next write. `writePrefs` covers an edit;
   // only this covers the OS changing its mind with nothing else happening.
+  // The terminal's scheme is the third half of the same appearance and is
+  // stored per theme for the same reason, so it moves in the same statement:
+  // without this line an open terminal would keep its dark scheme after the
+  // OS flipped to light under `system`, with nothing else on screen wrong.
   const [effective, setEffective] = useState<EffectiveTheme>('dark');
   useEffect(() => {
     const show = (theme: Theme) => {
       const next = applyTheme(theme);
       setEffective(next);
       applyPalette(paletteFor(prefs.palette, next));
+      setActiveTerminalScheme(prefs.terminalScheme, next);
     };
     show(prefs.theme);
     if (prefs.theme !== 'system') return;
     return watchOsTheme(() => show('system'));
-  }, [prefs.theme, prefs.palette]);
+  }, [prefs.theme, prefs.palette, prefs.terminalScheme]);
 
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
-    // the sidebar, the node and the detail panel all render `session.title`,
+    // the sidebar, the tab strip and the detail panel all render `session.title`,
     // and none of them should know a title can be vam's own rather than the
     // source's.
     () =>
@@ -768,22 +1674,79 @@ function CanvasInner({
    * The replies sent but not yet reported back by the source (`optimistic.ts`).
    *
    * Held here, one level above `model`, so every pane draws a pending reply
-   * exactly as it draws a real turn -- the sidebar, the step nodes and the
-   * detail panel all read `model` and none of them learns that a turn can be
-   * vam's own, which is the same rule the rename above follows.
+   * exactly as it draws a real turn -- the sidebar and the detail panel both
+   * read `model`, which is the same rule the rename above follows.
+   *
+   * WITH ONE EXCEPTION, and it is written into the model rather than passed
+   * beside it: a paint carries `unconfirmed` (model.ts), because a reader that
+   * draws a turn's ABSENCES is making claims about what the source reported and
+   * on a paint the source has reported nothing. No pane learns that from here.
    */
   const [pending, setPending] = useState<readonly PendingPrompt[]>([]);
   const pendingSeq = useRef(0);
-  // Reconciled against `sourceModel`, which is the model WITHOUT the paint:
-  // counting a painted turn as a real one would retire the paint on the render
-  // that drew it.
+  /**
+   * THE LAST PROMPT EACH SESSION WAS SENT, and when -- the record that stops
+   * one prompt from arriving twice.
+   *
+   * `writingBySession` above already refuses a second send while one is IN
+   * FLIGHT, and that is not enough: the send is a couple of tmux spawns and
+   * resolves in about ten milliseconds, so two Returns a tenth of a second
+   * apart both pass it and the agent receives the same words twice. The
+   * operator reported exactly that.
+   *
+   * A REPEAT IS REFUSED, NOT DELAYED. A true debounce would hold every send
+   * back by the window, which makes Return feel slow for the common case
+   * where nothing is duplicated at all -- and would still have to decide what
+   * to do with the second prompt. This decides that directly: the SAME text,
+   * to the SAME session, inside `REPEAT_WINDOW_MS`, is the one case where
+   * vam can be confident the operator did not mean it twice.
+   *
+   * KEYED BY TEXT, so it can only ever stop a repeat. A different prompt sent
+   * a moment later is a person typing fast, not a double-fire, and it goes
+   * through untouched -- which is the failure a blanket debounce would have.
+   *
+   * WRITTEN ONLY WHERE THE SEND LANDED, never at the attempt. A prompt that
+   * was refused -- an unwritable source, a tmux spawn that threw -- never
+   * reached the agent, so the very next thing the operator does is press
+   * Return on the same words again, and that is a first delivery, not a
+   * second. Recording at the attempt would turn every failure into a 1.5s
+   * lockout of its own retry.
+   */
+  const lastSent = useRef(new Map<string, { readonly text: string; readonly at: number }>());
+  /**
+   * Reconciled against `sourceModel`, which is the model WITHOUT the paint:
+   * counting a painted turn as a real one would retire the paint on the render
+   * that drew it.
+   *
+   * ON A TIMER AS WELL AS ON EVERY MODEL, because a paint has two ways to die
+   * and only one of them is news from the source. The other is the expiry
+   * (`PAINT_LIFETIME_MS`), which exists precisely for the case where the source
+   * never reports the words back -- and hanging that on "the next model
+   * arrives" would make the safety valve depend on the thing it is insuring
+   * against. `load()` keeps the last good model when it fails (`useSourceModel`),
+   * so a source that has started erroring produces no new model at all.
+   *
+   * THE CLOCK IS READ HERE, not inside `reconcile`, which stays a pure function
+   * of its arguments. The interval is torn down the moment nothing is pending,
+   * so an idle canvas runs no timer; while one is up it ticks once a second,
+   * and each tick that changes nothing hands the same array identity back and
+   * costs no render.
+   */
+  const paintCount = pending.length;
   useEffect(() => {
-    setPending((current) => {
-      const next = reconcile(sourceModel, current);
-      // Identity, not length, is what stops this effect from looping.
-      return next.length === current.length ? current : next;
-    });
-  }, [sourceModel]);
+    const sweep = () =>
+      setPending((current) => {
+        const next = reconcile(sourceModel, current, Date.now());
+        // Identity, not length, is what stops this effect from looping.
+        return next.length === current.length ? current : next;
+      });
+    sweep();
+    if (paintCount === 0) {
+      return;
+    }
+    const id = window.setInterval(sweep, PAINT_SWEEP_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [sourceModel, paintCount]);
   /**
    * The drawn model: the source's, plus the optimistic paint, plus the
    * operator's grouping resolved on top.
@@ -802,16 +1765,251 @@ function CanvasInner({
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
   /**
-   * `null` until there is a layout to point at.
+   * A15.1 — the detail pane's own layout: one or more panes, arranged by
+   * `split.ts`'s tree, each showing one session. Before any split exists
+   * this is a single leaf, and the whole rest of the file goes on reading
+   * `focusedSessionId` exactly as it did pre-split — see the pair below.
    *
-   * This used to seed itself from `layout.nodes[0]`, which was only possible
-   * while the layout came straight from the model. It is now built from the
-   * FILTERED model, and that cannot be computed above the filter state
-   * declared below. Nothing is lost: the "land focus on something real" effect
-   * already had to cover the live case, where the first model arrives after
-   * mount and the first layout is empty whatever this says.
+   * `paneSeq` mints every pane id after the first, the same
+   * increment-a-ref-and-stringify shape `pendingSeq` already uses for
+   * optimistic prompts: ids only ever need to be unique for the life of one
+   * mounted shell, never stable across a reload. Starts at `1`, not `0` —
+   * the initial leaf is already hardcoded `pane-1`, so a counter starting at
+   * `0` mints `pane-1` again for the very FIRST split, two leaves sharing
+   * one id and React warning about a duplicate key on the one render that
+   * matters most for this feature. Caught by `Canvas.split.test.tsx`, not
+   * by eye.
    */
-  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const paneSeq = useRef(1);
+  const [panes, setPanes] = useState<SplitTree>(() => singlePane(null, 'pane-1'));
+  /**
+   * Which pane a `+` just started a session FOR, and which sessions already
+   * existed when it did.
+   *
+   * `write.createSession` resolves `void` (`preload-api.ts`) — `tmux
+   * new-session -d` returns before the agent inside has registered anywhere
+   * vam can read, so the id of what was started is not knowable at the call
+   * and cannot be opened on the spot. The pane is remembered instead, and the
+   * session that turns up in a later model is opened into it (the effect
+   * beside the prune below). A ref, not state: nothing renders from it, and
+   * an intervening render must not reset it.
+   *
+   * Armed only after the write RESOLVES, so a refused or failed creation
+   * leaves nothing behind to capture an unrelated session that appears later.
+   */
+  const pendingNewTab = useRef<{ paneId: string; known: ReadonlySet<string> } | null>(null);
+  /**
+   * THE PANE THAT IS ABOUT TO BE HANDED THE KEYBOARD — one commit early.
+   *
+   * Operator: "when a new session finishes being created, focus should go
+   * straight into that session's Response view, in insert mode." Insert is
+   * not a flag (`keyboard/focus-scope.ts`), so that request is a FOCUS MOVE —
+   * and the move cannot be made where the decision to make it is made.
+   *
+   * WHY THIS IS TWO STEPS AND NOT ONE. At the commit the arrival effect runs
+   * in, the pane it is about is still drawing `StartingSession` IN PLACE OF
+   * its `DetailPanel` (`renderLeaf`) — the wait the operator asked to see.
+   * There is no composer in that pane to land on, so a `focusInsertStop`
+   * called there answers `false` every time, for every pane, including one
+   * that already held a session. The composer exists one commit later, once
+   * `starting` has cleared and `setPaneSession` has put the new tab in front.
+   * STATE rather than a ref for exactly that reason: writing it is what
+   * schedules the commit whose effect then finds the composer rendered.
+   * `TerminalTab`'s own `queueMicrotask` forward is the same measurement in
+   * the smaller.
+   *
+   * ONE ATTEMPT, then it clears — see the effect that consumes it.
+   */
+  const [arrivalFocus, setArrivalFocus] = useState<string | null>(null);
+  /**
+   * A SESSION VAM IS STARTING, which does not exist yet.
+   *
+   * Operator: "when creating a new session there needs to be a loading
+   * indicator in the sidebar too, and open the new tab immediately with
+   * loading in the pane." The status bar was the only surface that said
+   * anything, and it is the one the next act overwrites -- which on this path
+   * is usually the operator pressing the control again, because nothing else
+   * moved.
+   *
+   * THE WAIT HAS TWO PARTS AND VAM ONLY EVER HINTED AT THE SECOND.
+   * `tmux new-session -d` returns as soon as the session EXISTS, and the agent
+   * inside registers where vam can see it later, on its own schedule. So this
+   * outlives the write: it is cleared by a row ARRIVING, not by a promise
+   * resolving.
+   *
+   * STATE, NOT A REF, because it is drawn. And deliberately NOT a `Session` in
+   * the model: a placeholder inside `allEntries` would become a tab of a pane,
+   * a row the keyboard can reach, and a thing `Close` and `Stop` would offer
+   * to act on -- for a session that does not exist. It is drawn beside the
+   * model and nothing may act on it.
+   *
+   * `projectId` IS NULLABLE, for `newProject`'s sake. `createSession` always
+   * names an EXISTING project -- there is a section for it already -- but
+   * `newProject` starts one in a directory that has no project until this
+   * very session exists in it, so there is no id to give and no section for
+   * the sidebar to match against. `null` says so honestly rather than
+   * reusing `NEW_PROJECT_PENDING` (that sentinel names `pendingAction`, a
+   * different lock for a different reason) or inventing an id nothing else
+   * will ever answer to.
+   */
+  const [starting, setStarting] = useState<{
+    /** `null` for a project that does not exist yet -- see above. */
+    readonly projectId: string | null;
+    readonly projectName: string;
+    /** Which pane should show the wait. Never null: `o` uses the focused one. */
+    readonly paneId: string;
+    /** What existed when the operator pressed, so "which row is new" is measured
+     *  against that moment rather than against whatever is there on arrival. */
+    readonly known: ReadonlySet<string>;
+  } | null>(null);
+  /**
+   * Two derived values, mirrored into refs during render, so
+   * `setFocusedSessionId` below can read them and still be the
+   * stably-identified callback its ~40 existing callers rely on (see its own
+   * comment). Assigned further down, immediately after each is computed —
+   * an effect would be one commit behind, and a click is what reads them.
+   */
+  const entriesByIdRef = useRef<ReadonlyMap<string, SessionEntry>>(new Map());
+  const activeProjectIdRef = useRef<string | null>(null);
+  /** Which project each session that EXISTS belongs to — built from
+   *  `allEntries`, never the filtered `entries`, so a restore cannot drop a
+   *  pane's tab merely because a filter is hiding it right now. */
+  const projectOfSessionRef = useRef<ReadonlyMap<string, string>>(new Map());
+  /** The tree as last rendered, for `setFocusedSessionId` to store when the
+   *  project changes — the same render-phase mirror the two above are, for
+   *  the same reason: it must stay a stably-identified callback. */
+  const panesRef = useRef<SplitTree>(panes);
+  /**
+   * A15.7 — ONE REMEMBERED LAYOUT PER PROJECT, and which pane in it had the
+   * keyboard. Written when the operator leaves a project, read when they come
+   * back (`restoreLayout` reconciles it against what is still open). A ref
+   * rather than state: nothing renders from it, it must survive the render
+   * that swaps the panes, and it is deliberately not persisted to `prefs` —
+   * pane ids are minted per mounted shell (see `paneSeq`), so a layout is
+   * only meaningful for as long as this shell lives.
+   */
+  const paneLayouts = useRef(new Map<string, { tree: SplitTree; paneId: string }>());
+  const [focusedPaneId, setFocusedPaneIdState] = useState('pane-1');
+  /**
+   * Mirrors `focusedPaneId`, updated in the SAME tick as the state (never
+   * through an effect one commit behind), so `setFocusedSessionId` below can
+   * read it and stay a stably-identified callback — exactly the contract its
+   * ~40 existing callers already rely on from the plain `useState` setter
+   * this replaces. Without the mirror, every one of those callers' own
+   * dependency arrays would need auditing for a setter that now silently
+   * changes identity underneath them.
+   */
+  const focusedPaneIdRef = useRef(focusedPaneId);
+  const setFocusedPaneId = useCallback((id: string) => {
+    focusedPaneIdRef.current = id;
+    setFocusedPaneIdState(id);
+  }, []);
+
+  /**
+   * The one session the keyboard is pointed at — `null` until there is
+   * something real to point at.
+   *
+   * Before the 0.2 migration this held a ReactFlow NODE id (an info card or a
+   * step), and the session it belonged to was derived a level down. With the
+   * graph gone there is no second granularity left inside a session to
+   * distinguish, so this is now the session id directly — the state IS the
+   * derived value the rest of the file used to compute from it. Nothing is
+   * lost by seeding it `null`: the "land focus on something real" effect
+   * already had to cover the live case, where the first model arrives after
+   * mount and the first `entries` list is empty whatever this says.
+   *
+   * A15.1 changes WHERE this lives, not what it means: it is now the
+   * FOCUSED PANE's own session, derived from `panes`/`focusedPaneId` rather
+   * than owned directly. Every one of this file's ~40 existing call sites —
+   * the chords, the sidebar wiring, `sendPromptFor(focusedEntry)` — keeps
+   * reading and writing the same two names and is unaffected by there now
+   * being more than one pane, the same "the zero-argument names stay bound
+   * to whichever is active" idiom the per-session composer state below
+   * already established for `setComposing`/`actionIndex`.
+   */
+  const focusedSessionId = useMemo(
+    () => findLeaf(panes, focusedPaneId)?.sessionId ?? null,
+    [panes, focusedPaneId],
+  );
+  /**
+   * A15.5 — WHAT A PROJECT SWITCH DOES TO THE PANES, reported by the
+   * operator as "after splitting a tab, when I switch project, the old tab
+   * still shows and is still split". Panes held session ids and nothing
+   * reconciled them, so a split kept drawing the PREVIOUS project's
+   * sessions after the strip (project-scoped since A13.1) had stopped
+   * listing them: the shell showing something it could no longer justify
+   * showing, and saying nothing about it.
+   *
+   * Picking a session in another project COLLAPSES the layout to a single
+   * pane holding it. The alternative — remembering one layout per project
+   * and restoring it — is the richer answer and is deliberately not what
+   * this does: it needs a second store keyed by project, kept in step with
+   * sessions that end while their project is off screen, which is a larger
+   * change than this one is scoped for. Collapsing is the smaller rule that
+   * makes the invariant true and visible in one place: every pane on screen
+   * holds sessions of the project on screen. It is also loud by
+   * construction — the split visibly folds — rather than a reconciliation
+   * the operator has to notice the absence of.
+   */
+  const setFocusedSessionId = useCallback(
+    (sessionId: string | null) => {
+      const nextProjectId =
+        sessionId === null ? null : (entriesByIdRef.current.get(sessionId)?.project.id ?? null);
+      const currentProjectId = activeProjectIdRef.current;
+      if (
+        sessionId !== null &&
+        nextProjectId !== null &&
+        currentProjectId !== null &&
+        nextProjectId !== currentProjectId
+      ) {
+        // The outgoing project keeps its layout, exactly as it stands.
+        paneLayouts.current.set(currentProjectId, {
+          tree: panesRef.current,
+          paneId: focusedPaneIdRef.current,
+        });
+        paneSeq.current += 1;
+        const freshId = `pane-${paneSeq.current}`;
+        const stored = paneLayouts.current.get(nextProjectId);
+        if (stored === undefined) {
+          // A project never opened in this shell starts as one pane holding
+          // what was picked — VSCode's own answer for a workspace it has
+          // never seen.
+          setPanes(singlePane(sessionId, freshId));
+          setFocusedPaneId(freshId);
+          return;
+        }
+        const restored = restoreLayout(
+          stored.tree,
+          // A15.5's invariant, enforced on the way back IN: a tab survives
+          // only if its session still exists AND still belongs to the
+          // project being opened, so a restored layout can never redraw
+          // another project's session.
+          (id) => projectOfSessionRef.current.get(id) === nextProjectId,
+          sessionId,
+          stored.paneId,
+          freshId,
+        );
+        setPanes(restored.tree);
+        setFocusedPaneId(restored.paneId);
+        return;
+      }
+      // A session lives in exactly ONE pane. Picking one another pane already
+      // holds moves the KEYBOARD there and brings it to the front, rather
+      // than opening a second copy of it here -- the operator's
+      // one-session-two-panes report arriving through the sidebar instead of
+      // through the split chord, and the same answer.
+      const holder = sessionId === null ? null : paneHolding(panesRef.current, sessionId);
+      // Read into a local before `setFocusedPaneId` moves the ref, for the
+      // reason `splitFocused` spells out at length: an updater is not
+      // guaranteed to run before the ref does.
+      const target = holder ?? focusedPaneIdRef.current;
+      if (holder !== null && holder !== focusedPaneIdRef.current) {
+        setFocusedPaneId(holder);
+      }
+      setPanes((tree) => setPaneSession(tree, target, sessionId));
+    },
+    [setFocusedPaneId],
+  );
   const [jumping, setJumping] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -841,35 +2039,209 @@ function CanvasInner({
    */
   const terminalTab = source.kind === 'session' && source.source.capabilities.terminal;
   /**
+   * Whether THIS BUILD can show a file editor at all -- read the same way
+   * `dialog.chooseDirectory`'s own presence already is (`window.api?.dialog?.
+   * chooseDirectory`, further down this file), because there is no per-source
+   * capability to ask: `CHANNELS.filesRead`'s own header states that `files`
+   * is deliberately NOT a member of `SourceCapabilities` at all, so a source
+   * has nothing to decline here.
+   *
+   * DELIBERATELY NOT GATED ON `source.kind === 'session'`, unlike
+   * `terminalTab` above -- and that omission is a decision, not an oversight.
+   * `terminalTab` reads `source.source.capabilities.terminal`, a field that
+   * only TYPE-EXISTS on a `'session'` source, so the gate there is load-bearing
+   * for the compiler as much as for the UI. `files` has no such dependency:
+   * every path this tab ever touches is re-authorised in MAIN, fresh, against
+   * the REAL live agent roster (`main/files/authorize.ts`) -- a demo or `live`
+   * canvas's own session id simply will not match anything real there, and
+   * main answers `unknown-session`/`not-authorized` exactly as it would for
+   * any other id it does not recognise. So gating on `source.kind` here would
+   * only be withholding the tab from a canvas that already cannot leak
+   * anything through it, which is also what makes this flag STUB-ABLE in a
+   * browser guard (`e2e/files-tab-keyboard-shots.mjs`) by injecting
+   * `window.api.files` alone, without needing a live Electron backend behind
+   * `?demo=1` at all.
+   */
+  const filesTab = globalThis.window?.api?.files !== undefined;
+  /**
    * How many things have BROKEN this session. Refusals are excluded on
    * purpose: a badge that counted vam's intended "no"s would be a number that
    * grows during correct use, and a number like that is one nobody reads.
    */
   const events = useSyncExternalStore(subscribeEvents, loggedEvents, loggedEvents);
   const failureCount = events.filter((event) => event.kind === 'failure').length;
-  const [composing, setComposing] = useState(false);
-  const [draft, setDraft] = useState('');
+  /**
+   * Composer state, KEYED BY SESSION — the load-bearing change a tab shell
+   * makes here, and the reason A15.1's split panes cost this file almost
+   * nothing extra for the composer specifically. A draft typed in one tab
+   * must survive switching to another and back rather than bleeding into it
+   * or vanishing, and (A15.1) two SPLIT PANES showing two different
+   * sessions must never share one either — both are the same requirement,
+   * "keyed by session, not by whichever pane happens to be looking", and
+   * this was already keyed that way before a second pane existed. One
+   * `Record` per piece of state, read and written through the
+   * `*For(sessionId, …)` helpers below. `buildDetailProps` (further down)
+   * reads these directly per pane; `setComposing`/`actionIndex` are the two
+   * zero-argument aliases still used by keyboard-only callers that only
+   * ever mean "whichever session the keyboard is in right now" (the chord
+   * switch, `beginComposing`) — see that declaration's own comment.
+   */
+  const [draftsBySession, setDraftsBySession] = useState<Readonly<Record<string, string>>>({});
+  const [composingBySession, setComposingBySession] = useState<Readonly<Record<string, boolean>>>(
+    {},
+  );
+  /**
+   * WHICH VIEW EACH SESSION IS ON — the same record shape as the drafts above,
+   * and here for the same reason, arrived at three years late.
+   *
+   * Operator instruction: "when session 1 switches to the PRs view, the rest
+   * of the sessions do not switch". `DetailPanel` used to hold ONE view in
+   * local state and a pane reuses ONE instance for every session it shows, so
+   * the view was a fact about the pane; `renderLeaf`'s own comment asserted
+   * the isolation ("a leaf that stays mounted while its OWN `sessionId`
+   * changes must still be a fresh component instance") while `key={leaf.id}`
+   * remounted nothing, which is how a documented invariant names the bug.
+   *
+   * A session with no entry here opens on `viewSeed`, never on
+   * `prefs.detailTab` read live — that distinction is the second half of the
+   * same bleed. `prefs.detailTab` is what the NEXT RUN opens on, so re-reading
+   * it as each session first appears would put the choice made for session 1
+   * onto every session shown after it, just more slowly. The seed is taken
+   * ONCE, when the shell mounts, and the preference is written past it.
+   */
+  const [viewBySession, setViewBySession] = useState<Readonly<Record<string, DetailTab>>>({});
+  const [viewSeed] = useState<string | null>(() => prefs.detailTab);
+  /**
+   * THE LAST SEND THAT FAILED, per session -- the sentence, kept until the
+   * operator does something about it.
+   *
+   * Operator instruction: a send that errors has to say so in the OUT area,
+   * not only in the status bar. The status bar is a running commentary that
+   * the next act overwrites, and a refused send already rolls its optimistic
+   * turn back and returns the words to the composer -- so from the pane, an
+   * act that failed and an act never attempted looked exactly the same. This
+   * is the surface that stays put.
+   *
+   * KEYED BY SESSION for the reason every record here is: the pane showing
+   * session 2 must not carry session 1's verdict. CLEARED WHEN THE NEXT
+   * ATTEMPT BEGINS rather than on a timer or a dismissal -- a verdict about a
+   * send that has been superseded is worse than no verdict, and the operator
+   * pressing Enter again is the unambiguous signal that they have moved on.
+   *
+   * NOT A SECOND ERROR LOG. `noteFailure` still records the event and still
+   * returns the status-bar sentence; this stores that same sentence. Three
+   * surfaces, three jobs, one source of words.
+   */
+  const [sendFailureBySession, setSendFailureBySession] = useState<
+    Readonly<Record<string, string>>
+  >({});
+  const setSendFailureFor = useCallback((sessionId: string, note: string | null) => {
+    setSendFailureBySession((current) => {
+      if ((current[sessionId] ?? null) === note) return current;
+      const next = { ...current };
+      if (note === null) delete next[sessionId];
+      else next[sessionId] = note;
+      return next;
+    });
+  }, []);
+  /**
+   * THE ONE WRITER, and it writes two places because there are two questions.
+   * The record is what THIS SESSION is showing now; the preference is what the
+   * NEXT RUN opens on. Both routes to a view -- the icon the operator clicks
+   * and the `Alt+<digit>` they press -- come through here, so neither can
+   * drift into answering only one of them, which is what happened the first
+   * time the chord was wired past it.
+   */
+  const setViewFor = useCallback(
+    (sessionId: string, view: DetailTab) => {
+      setViewBySession((current) =>
+        current[sessionId] === view ? current : { ...current, [sessionId]: view },
+      );
+      if (view !== prefs.detailTab) savePrefs(setDetailTab(prefs, view));
+    },
+    [prefs, savePrefs],
+  );
+  const setDraftFor = useCallback((sessionId: string, value: string) => {
+    setDraftsBySession((current) => ({ ...current, [sessionId]: value }));
+  }, []);
+  const setComposingFor = useCallback((sessionId: string, value: boolean) => {
+    setComposingBySession((current) => ({ ...current, [sessionId]: value }));
+  }, []);
   /**
    * WHICH CURSOR MODE THE KEYBOARD IS IN — Select or Insert.
    *
-   * `I` enters Insert, `H` and `Esc` return to Select. One explicit owner
-   * rather than a guess based on what was last clicked: a keyboard-first tool
-   * cannot afford to be wrong about where the next keystroke goes.
+   * A MIRROR OF DOM FOCUS, NOT A SECOND COPY OF IT. The rule and its argument
+   * live in `keyboard/focus-scope.ts`: the mode is Insert exactly when focus
+   * is inside a `data-insert-scope` region, and Select otherwise.
    *
-   * THIS IS ONE FACT, NOT TWO, and that is the whole reason it is named. The
-   * same state decides which pane the keyboard belongs to AND what a key
-   * means, so `hjkl` and `Mod+<digit>` read it rather than carrying a second
-   * notion of where focus is — two parallel notions of one fact is how the
-   * digit table went stale three times in a day.
+   * It used to be an explicit `useState` each handler set beside whatever it
+   * did to focus, and the two drifted in four documented ways — `Mod-0` set
+   * Select and left a read-only textarea holding the keyboard; `I` set Insert
+   * with nothing focused to insert into. Not a flag any more:
    *
-   *   Select — `hjkl` chooses a session, `Mod+<digit>` a session by position.
-   *   Insert — `hjkl` chooses an agent option when one is being asked,
-   *            `Mod+<digit>` switches tab.
+   *   Select — `hjkl` chooses a session, `h`/`l` its project's tabs.
+   *   Insert — `j`/`k` an open question's options, `h`/`l` its steps.
+   *
+   * WHY THE STATE STILL EXISTS: the status bar has to render from something,
+   * and a footer cannot read `document.activeElement` during render. So this
+   * is written FROM the DOM by the effect below and read only by renderers.
+   * The keydown handler does not read it at all — it calls `cursorModeAt`
+   * against the live `document.activeElement`, because a React state read
+   * inside a window listener is a snapshot of the last render while a
+   * keystroke is always about the present tense.
    *
    * The names are the operator's own, and `keysheet.ts` prints the same two.
    */
   const [mode, setMode] = useState<CursorMode>('select');
-  const [actionIndex, setActionIndex] = useState(0);
+  /**
+   * The mirror, kept by the DOM's own focus events.
+   *
+   * `focusin`/`focusout` rather than `focus`/`blur`: only the first pair
+   * bubbles, and this listens once at the document instead of on every
+   * element that could ever hold the keyboard.
+   *
+   * `focusout` reads `relatedTarget` — the element focus is moving TO — and
+   * not `document.activeElement`, which during a focusout is momentarily the
+   * body whether or not focus is about to land somewhere else. Reading the
+   * wrong one would flash Select on every step between two question options.
+   */
+  useEffect(() => {
+    if (phone) return;
+    const onFocusIn = (event: FocusEvent) => setMode(cursorModeAt(event.target));
+    const onFocusOut = (event: FocusEvent) => setMode(cursorModeAt(event.relatedTarget));
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+    setMode(cursorModeAt(document.activeElement));
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+    };
+  }, [phone]);
+  /** Same per-session shape as the composer state above, and the same reason:
+   *  which action `j`/`k` has landed on in the Insert pane is a fact about
+   *  the tab you are reading, not a single global cursor. */
+  const [actionIndexBySession, setActionIndexBySession] = useState<
+    Readonly<Record<string, number>>
+  >({});
+  const setActionIndexFor = useCallback(
+    (sessionId: string, updater: number | ((current: number) => number)) => {
+      setActionIndexBySession((current) => ({
+        ...current,
+        [sessionId]: typeof updater === 'function' ? updater(current[sessionId] ?? 0) : updater,
+      }));
+    },
+    [],
+  );
+  /**
+   * THE RIGHT-CLICKED TAB. Holds the ENTRY rather than an id: a tab already
+   * has its whole `SessionEntry` in hand, so there is nothing to look up and
+   * no way to resolve to a neighbour when the strip changes under an open
+   * menu. The sidebar's equivalent holds an id because a row hands it one.
+   */
+  const [tabMenu, setTabMenu] = useState<{
+    readonly entry: SessionEntry;
+    readonly at: { readonly x: number; readonly y: number };
+  } | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
    * WHICH source's session is being renamed, captured when the editor opens
@@ -913,12 +2285,37 @@ function CanvasInner({
   /**
    * The one route into the session icon chooser.
    *
-   * Both askers come through here — the `s` chord and the root node's own
+   * Both askers come through here — the `s` chord and each tab's own
    * glyph — because two openers writing through two copies of this is how
    * they drift, and only one of them would keep the refusal below. Stable by
    * construction (functional setState, no model read), so it can sit in a
-   * node's data without going stale as the model refreshes.
+   * tab's data without going stale as the model refreshes.
    */
+  /**
+   * BEGIN A RENAME ON ONE SESSION, whichever route asked.
+   *
+   * Factored out of `case 'rename'` when the right-click menu arrived: the
+   * chord acts on the FOCUSED row and the menu acts on the row the pointer
+   * named, and those are different rows often enough that two copies of this
+   * body would drift. The source guard is the same one the icon picker keeps
+   * below, for the same reason -- a project with no source has nowhere to
+   * store the new title.
+   */
+  const beginSessionRename = useCallback((entry: SessionEntry) => {
+    const projectSource = entry.project.source;
+    if (projectSource === undefined) {
+      setStatus('this project has no source — rename unavailable');
+      return;
+    }
+    setRenameDraft(entry.session.title);
+    setRenameTarget({
+      source: projectSource,
+      sessionId: entry.session.id,
+      title: entry.session.title,
+    });
+    setRenamingId(entry.session.id);
+  }, []);
+
   const openSessionIconPicker = useCallback((entry: SessionEntry) => {
     // A project with no source cannot store an icon under one: guessing a
     // fallback here would reintroduce the exact cross-source collision this
@@ -940,18 +2337,48 @@ function CanvasInner({
   }, []);
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
-  /**
-   * The two chords whose EFFECT belongs to a panel: `Mod-<digit>` picks
-   * a detail tab, `p` reveals a project. A fresh object per press, never the
-   * state itself — the tab and the reveal stay where they are drawn and only
-   * the ask travels, which keeps both keys in the chord table (so the sheet
-   * lists them and an open overlay silences them) without pulling a panel's
-   * presentation into the canvas's model.
+  /*
+   * `Alt-<digit>` USED TO TRAVEL AS A REQUEST OBJECT, on the reasoning that a
+   * chord whose effect belongs to a panel should leave the state where it is
+   * drawn. That held while the view was the panel's own state; it stopped
+   * holding the moment a view became a per-session fact this file keeps
+   * (`viewBySession`), because the request had no end -- it never reset to
+   * null, so it was re-delivered to whichever pane took focus next and to
+   * whichever session that pane was showing. The chord writes the record now;
+   * `DetailPanel` keeps the `tabRequest` prop for `PhoneShell`, whose icon row
+   * is a genuinely separate surface asking a pane to move.
    */
-  const [tabRequest, setTabRequest] = useState<{ readonly tab: DetailTab } | null>(null);
+  /**
+   * What the last `Alt+<digit>` REFUSED, or null at rest — the "refuses
+   * aloud" half of A2.5/A5.4.
+   *
+   * It lives here rather than in the panel because the key does: promoting
+   * `Alt+<digit>` into the binding tables moved the listener into this file
+   * and deleted the panel's own. The refusal still draws where it always
+   * drew — a `role="status"` line beside the view icons, in the focused pane
+   * — so it travels down as a prop, gated on `isFocused`: the pane that
+   * could not have answered the key must not be the one apologising for it.
+   *
+   * Not `setStatus`: that is the canvas-wide cell in the status bar, where
+   * `Mod-<digit>`'s refusal goes because `Mod-<digit>` may be about the
+   * sidebar. This one is always about a view in one pane, and it says so
+   * next to that pane's icons.
+   */
+  const [viewNote, setViewNote] = useState<string | null>(null);
+  // A refusal raised for the session just left must not hang over the one
+  // the operator moved to — the panel's own listener cleared it on exactly
+  // this fact before the key moved here.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear on focus change, the body reads nothing
+  useEffect(() => {
+    setViewNote(null);
+  }, [focusedSessionId]);
   const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
-  /** True while a write is in flight — Enter must not fire twice. */
-  const [writing, setWriting] = useState(false);
+  /** True while a write is in flight for THAT session — Enter must not fire
+   *  twice, and a send in one tab must not gate Enter in another. */
+  const [writingBySession, setWritingBySession] = useState<Readonly<Record<string, boolean>>>({});
+  const setWritingFor = useCallback((sessionId: string, value: boolean) => {
+    setWritingBySession((current) => ({ ...current, [sessionId]: value }));
+  }, []);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -972,9 +2399,31 @@ function CanvasInner({
   /** Removals that cannot be stored, because the project has no source to key
    *  them under. See `hiddenProjects`. */
   const [hiddenSourceless, setHiddenSourceless] = useState<readonly string[]>([]);
+  /**
+   * Folds that cannot be stored, because the project has no source to key them
+   * under. `hiddenSourceless` one gesture over, and it exists for that reason
+   * and one more: `SessionList.collapsedProjects` is OPTIONAL with a fallback
+   * to component state, and passing it turns that fallback off for EVERY
+   * project — so a canvas that passed only the keyed folds would leave a
+   * sourceless project with a fold control that did nothing. Kept for the
+   * session rather than persisted: there is no bucket to write it under, and a
+   * fold forgotten on reload is a far smaller thing than one that cannot be
+   * made at all.
+   */
+  const [collapsedSourceless, setCollapsedSourceless] = useState<readonly string[]>([]);
   const searchOrigin = useRef<string | null>(null);
   const chord = useRef<ChordState>(EMPTY_CHORD);
-  const { getNodes, zoomIn, zoomOut, fitView, fitBounds, setCenter } = useReactFlow();
+  /**
+   * Holds the query string `onSidebarFilterChange` just set, or `null`. The
+   * incremental-search effect (below `focusSession`) only moves focus when
+   * the CURRENT query still matches this value, so a `matches` recompute for
+   * an unrelated reason — a model refresh, a session landing, a status
+   * change, all of which leave `query` untouched — never consumes a stale
+   * flag and jumps focus on its own. Cleared right after the effect acts on
+   * it. This is what keeps the focus jump keystroke-triggered without the
+   * handler itself running a second `searchMatches` scan.
+   */
+  const filterKeystrokeQuery = useRef<string | null>(null);
 
   const matches = useMemo(() => searchMatches(allEntries, query), [allEntries, query]);
 
@@ -1023,6 +2472,38 @@ function CanvasInner({
     }
     return ids;
   }, [allEntries, prefs, hiddenSourceless]);
+
+  /**
+   * The projects folded shut, as the ids the sidebar draws from.
+   *
+   * `hiddenProjects` above, one gesture over, and derived the same way for the
+   * same reason: `prefs.collapsedProjects` is keyed by SOURCE, so an id counts
+   * as folded only under ITS OWN source's bucket. A project with no source has
+   * no bucket to read, so its fold is kept for the run in `collapsedSourceless`
+   * instead.
+   *
+   * NOT FLATTENED, unlike `collapsedGroups` below, and that is the one place
+   * the two folds are allowed to differ: a group id is minted locally and
+   * collides with nothing, while a project id is a cwd digest unique only
+   * within its source. `Object.values(...).flat()` here would let one source's
+   * fold close another source's project of the same id -- the collision the
+   * two-level shape exists to prevent, and a test holds it.
+   */
+  const collapsedProjects = useMemo(() => {
+    const ids: string[] = [];
+    for (const entry of allEntries) {
+      const { id, source: projectSource } = entry.project;
+      if (ids.includes(id)) continue;
+      if (
+        projectSource === undefined
+          ? collapsedSourceless.includes(id)
+          : isProjectCollapsed(prefs, projectSource, id)
+      ) {
+        ids.push(id);
+      }
+    }
+    return ids;
+  }, [allEntries, prefs, collapsedSourceless]);
 
   /**
    * The groups folded shut, flattened across sources for the sidebar.
@@ -1175,6 +2656,46 @@ function CanvasInner({
     }));
   }, [prefs.groups, pickingGroupFor]);
 
+  /**
+   * Fold one project, and remember it -- `toggleGroupCollapse` below, one
+   * level down, and deliberately the same gesture with the same outcome.
+   *
+   * It was NOT the same outcome until this was written. `prefs.collapsedProjects`
+   * shipped with a reader, a writer, a source-key migration and a TTL
+   * exemption, and nothing in this file passed any of it, so `SessionList` took
+   * its documented fallback and kept the project fold in component state: fold
+   * a GROUP and reload, still folded; fold a PROJECT and reload, open again,
+   * with nothing on screen to say which is which.
+   *
+   * The sourceless branch is `setProjectRemoved`'s, for its reason. Passing
+   * `collapsedProjects` at all turns `SessionList`'s local fallback off for
+   * EVERY project, so a canvas that wired only the keyed folds would leave a
+   * project with no source holding a chevron that does nothing -- trading a
+   * fold that is forgotten on reload for one that cannot be made at all.
+   */
+  const toggleProjectCollapse = useCallback(
+    (project: Project) => {
+      const projectSource = project.source;
+      if (projectSource === undefined) {
+        setCollapsedSourceless((current) =>
+          current.includes(project.id)
+            ? current.filter((id) => id !== project.id)
+            : [...current, project.id],
+        );
+        return;
+      }
+      savePrefs(
+        setProjectCollapsed(
+          prefs,
+          projectSource,
+          project.id,
+          !isProjectCollapsed(prefs, projectSource, project.id),
+        ),
+      );
+    },
+    [prefs, savePrefs],
+  );
+
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
       const source = groupSource(prefs.groups, group.id);
@@ -1228,233 +2749,467 @@ function CanvasInner({
       all: allEntries.length,
       running: of('running'),
       waiting: of('waiting'),
+      idle: of('idle'),
       done: of('done'),
       failed: of('failed'),
     };
   }, [allEntries]);
 
   /**
-   * The model the canvas draws: `model`, minus whatever the filter excluded.
-   *
-   * Re-filters `model.projects` rather than rebuilding a model out of
-   * `entries`, so every project keeps its identity — id, name and source — and
-   * only its membership changes. A project the filter empties drops out
-   * entirely instead of drawing a heading over nothing. Unfiltered, the very
-   * same object comes back, so the layout memo below does not recompute for a
-   * filter nobody set.
+   * What `hjkl`, `f` and `gg` may land on: every session in view, no filter
+   * of its own. The set is narrowed once, at `entries` above, and the sidebar
+   * and the tab strip are both drawn from the result — so a second narrowing
+   * here is what would put the cursor and the picture back out of step.
    */
-  const visibleModel = useMemo<CanvasModel>(() => {
-    const kept = new Set(entries.map((e) => e.session.id));
-    if (kept.size === allEntries.length) {
-      return model;
-    }
-    const narrow = (projects: readonly Project[]) =>
-      projects
-        .map((project) => ({
-          ...project,
-          sessions: project.sessions.filter((s) => kept.has(s.id)),
-        }))
-        .filter((project) => project.sessions.length > 0);
-    // The grouped half is narrowed the same way and by the same set. Dropping
-    // it here instead would make a filter delete every grouped card from the
-    // canvas -- the "drawn but unreachable" defect this memo's own comment
-    // describes, in reverse.
-    const groups = model.groups?.map((group) => ({ ...group, projects: narrow(group.projects) }));
-    return { projects: narrow(model.projects), ...(groups === undefined ? {} : { groups }) };
-  }, [model, entries, allEntries]);
+  const sessionIds = useMemo(() => entries.map((e) => e.session.id), [entries]);
 
   /**
-   * How many grid columns the canvas pane can show right now.
-   *
-   * `columnsForWidth` is handed `DEFAULT_VIEWPORT.zoom` — the fixed zoom the
-   * canvas OPENS at — never the live one. The arrangement must depend only on
-   * the pane's width, not on the zoom level: `DEFAULT_VIEWPORT`'s own comment
-   * above records that `fitView` was deliberately removed because it made the
-   * opening zoom depend on how much was on screen, and feeding the live zoom
-   * in here would reintroduce that same coupling in the other direction —
-   * scrolling to zoom would re-run this threshold and could rearrange every
-   * node mid-gesture, oscillating across a single wheel notch. Zoom scales
-   * what is drawn; it must never rearrange it. Resizing the PANE is the only
-   * thing that should change `columns` after mount, and it already does, via
-   * `canvasPaneWidth` above.
-   *
-   * `canvasPaneWidth` is `null` until the pane has been measured once, and a
-   * still-mounting canvas stays at the default `GRID.columns` rather than
-   * flashing to one column and back — see the ref/effect above.
+   * A15.1 — every split pane besides the focused one is looked up from the
+   * UNFILTERED set, deliberately unlike `focusedEntry` below (which stays on
+   * the filtered `entries`, its existing and unchanged contract). A pane the
+   * operator deliberately populated should not vanish because the search box
+   * or a status pill now hides its session — only the sidebar cursor's own
+   * navigation (`hjkl`, `Mod-<digit>`) is scoped to what is currently in
+   * view.
    */
-  const columns =
-    canvasPaneWidth === null
-      ? GRID.columns
-      : columnsForWidth(canvasPaneWidth, DEFAULT_VIEWPORT.zoom);
-
-  const layout = useMemo(() => layoutCanvas(visibleModel, columns), [visibleModel, columns]);
-
-  /**
-   * What `hjkl`, `f` and `gg` may land on: every node on the canvas, no filter
-   * of its own. The set is narrowed once, at `entries` above, and the canvas is
-   * drawn from the result — so a second narrowing here is what would put the
-   * cursor and the picture back out of step.
-   */
-  const nodeIds = useMemo(() => layout.nodes.map((n) => n.id), [layout]);
-
-  /**
-   * A click lands the cursor where the click landed, exactly as `j`/`k`
-   * would have -- the mouse is a shortcut through the same door `nodeIds`
-   * already gates, never a second one.
-   *
-   * MEMOISED, AND THAT IS THE POINT. `<ReactFlow>`'s node renderer
-   * (`GraphView`) is wrapped in `React.memo`, so a keystroke that leaves
-   * `nodes`/`edges` untouched should cost that subtree nothing -- but a
-   * fresh closure here on every render is itself a prop that changed, which
-   * defeats the memo and re-renders every drawn node on every keystroke.
-   * Measured: at 200 nodes that turned a draft keystroke into ~110ms; see
-   * `Canvas.keystroke-scaling.test.tsx`.
-   */
-  const onNodeClick: ComponentProps<typeof ReactFlow>['onNodeClick'] = useCallback(
-    (_event, node) => {
-      if (nodeIds.includes(node.id)) {
-        setFocusedId(node.id);
-      }
-    },
-    [nodeIds],
+  const entriesById = useMemo(
+    () => new Map(allEntries.map((entry) => [entry.session.id, entry])),
+    [allEntries],
   );
 
   /**
-   * Every node focus could land on, paired with the SESSION it draws.
+   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the three levels.
    *
-   * The pairing is the point. A remembered focus stores a session id under its
-   * source, never a node id: node ids are derived from the layout, so they are
-   * rebuilt whenever the model, the filters or the fold state change and a
-   * stored one would go stale between launches without anything having ended.
-   * This is where the two vocabularies meet (`prefs/focus.ts`).
+   * DELIBERATELY NOT CAPTURED INTO THE TARGET beside the source and the id.
+   * What a target freezes is WHICH thing is being edited -- `IconTarget` argues
+   * why, and that is the part that must not move under an open panel. The icon
+   * ITSELF is the part that has to move: a glyph and its colour are two
+   * presses, and a frozen value would leave the swatches still refusing on the
+   * grounds that nothing was chosen, one press after something was.
+   *
+   * READ OFF THE MODEL RATHER THAN THE PREFS BUCKET, so the picker marks what
+   * the operator can SEE. The two agree for a project and a group -- prefs is
+   * the only writer of either -- but a session's icon can also come from a
+   * source's own fixture (`fixtures/demo.ts`), which never reaches prefs at
+   * all.
+   */
+  const projectIcons = useMemo(
+    () => new Map(allEntries.map((entry) => [entry.project.id, entry.project.icon ?? null])),
+    [allEntries],
+  );
+  const groupIcons = useMemo(
+    () => new Map((model.groups ?? []).map((group) => [group.id, group.icon ?? null])),
+    [model.groups],
+  );
+
+  /**
+   * Every session focus could land on.
+   *
+   * A remembered focus stores a session id under its source, never anything
+   * derived from a graph: candidates are rebuilt whenever the model, the
+   * filters or the fold state change, so a stored one goes stale rather than
+   * pointing at a session that has since ended. This is where the two
+   * vocabularies meet (`prefs/focus.ts`) — `nodeId` and `session` are the
+   * same string now that there is no more per-decision node to distinguish a
+   * session from, kept as two fields because `FocusCandidate`'s shape is
+   * shared, project-wide, protected code this task does not touch.
    */
   const focusCandidates: readonly FocusCandidate[] = useMemo(
     () =>
-      layout.nodes.map((n) => ({
-        nodeId: n.id,
-        source: sourceKeyOf(n.entry),
-        session: n.entry.session.id,
+      entries.map((e) => ({
+        nodeId: e.session.id,
+        source: sourceKeyOf(e),
+        session: e.session.id,
       })),
-    [layout],
+    [entries],
   );
 
-  /** Which session the focused node belongs to — the id all three panes share. */
-  const focusedSpec = useMemo(
-    () => layout.nodes.find((n) => n.id === focusedId) ?? null,
-    [layout, focusedId],
+  /** The focused session's own entry, from the FILTERED set — `null` once a
+   *  filter or a refresh has made the pointer unreachable, the same rule
+   *  `sessionIds` above enforces for `hjkl`. */
+  const focusedEntry: SessionEntry | null = useMemo(
+    () => entries.find((e) => e.session.id === focusedSessionId) ?? null,
+    [entries, focusedSessionId],
   );
-  const focusedEntry: SessionEntry | null = focusedSpec?.entry ?? null;
-  /** Which session the focus sits in — the id the strip filter and the
-   *  sidebar cursor both read. */
-  const focusedSessionId = focusedSpec?.entry.session.id ?? null;
 
   /**
-   * The viewport follows focus, and frames a session when you arrive in one.
-   *
-   * `j`/`k` can walk to a session that is off screen, and before any of this
-   * the canvas simply did not move — the sidebar and the detail panel updated
-   * while the cards stayed put, so the one pane that shows a session's SHAPE
-   * was the one pane that did not follow you.
-   *
-   * WHEN IT FRAMES IS THE WHOLE DESIGN, and it is a correction of a mistake
-   * this file has already made once. A previous version fitted on every focus
-   * move; the operator asked for it to be removed, and the comment that came
-   * with it admitted it deliberately overrode a zoom they had set by hand. The
-   * fault was not the fit, it was the frequency. Inside one session the
-   * framing is already right — every node of it is on screen — so a re-fit
-   * there can do nothing except undo whatever the operator just did with the
-   * zoom controls. Between sessions there is a new thing to look at and the
-   * old framing was chosen for something else.
-   *
-   * So: arriving in a DIFFERENT session frames that session, whole — root card
-   * and step nodes, `sessionBounds` — at the operator's own share of the
-   * canvas width. Moving about inside one pans and nothing else, with the zoom
-   * argument omitted so `setCenter` keeps the scale exactly where it was.
-   *
-   * The share can be turned OFF (`FOCUS_SHARE_OFF`), and then this is a pan
-   * and only a pan, which is precisely the behaviour that shipped between the
-   * two asks. Somebody who wants that back should not have to ask for code to
-   * be deleted a second time.
-   *
-   * The FIRST landing is not a move between sessions and does not frame: focus
-   * settles on a session shortly after mount without anyone moving it, and the
-   * opening viewport belongs to `DEFAULT_VIEWPORT`, not to this effect.
+   * Composer state, bound to whichever session is the ACTIVE TAB — kept as
+   * zero-argument names for exactly the callers that only ever act on
+   * "whichever session the keyboard is currently in": the chord switch's
+   * `focusList`/`cancel`/`prompt` cases and `beginComposing`. A15.1 moved
+   * every OTHER reader (`sendPromptFor`, `buildDetailProps`) onto the
+   * `*BySession` records directly, parameterised by whichever pane's
+   * session they are actually building for — `setComposing`/`setActionIndex`
+   * are the two of this family that still have a caller of their own; `draft`,
+   * `setDraft`, `composing`, `writing` and `setWriting` do not any more and
+   * are deleted rather than kept as an alias nothing reads.
    */
-  // Lifted out of the effect so the dependency array names exactly what the
-  // effect reads. Depending on `focusedSpec` itself would re-centre on every
-  // layout rebuild — the object is rebuilt each render — and fight a manual pan.
-  const focusCenterX =
-    focusedSpec === null ? null : focusedSpec.position.x + focusedSpec.size.width / 2;
-  const focusCenterY =
-    focusedSpec === null ? null : focusedSpec.position.y + focusedSpec.size.height / 2;
-
-  // Same rule, and the same reason, for the session's frame: four numbers the
-  // geometry makes deterministic rather than one object identity that changes
-  // whenever the model is polled.
-  const frame = useMemo(
-    () => (focusedSessionId === null ? null : sessionBounds(layout, focusedSessionId)),
-    [layout, focusedSessionId],
+  const setComposing = useCallback(
+    (value: boolean) => {
+      if (focusedSessionId !== null) {
+        setComposingFor(focusedSessionId, value);
+      }
+    },
+    [focusedSessionId, setComposingFor],
   );
-  const frameX = frame?.x ?? null;
-  const frameY = frame?.y ?? null;
-  const frameWidth = frame?.width ?? null;
-  const frameHeight = frame?.height ?? null;
+  const actionIndex = focusedSessionId === null ? 0 : (actionIndexBySession[focusedSessionId] ?? 0);
+  const setActionIndex = useCallback(
+    (updater: number | ((current: number) => number)) => {
+      if (focusedSessionId !== null) {
+        setActionIndexFor(focusedSessionId, updater);
+      }
+    },
+    [focusedSessionId, setActionIndexFor],
+  );
 
-  /** The session last framed, so "a different session" is a comparison and not
-   *  a guess. `undefined` until focus first lands, which is what keeps the
-   *  opening render out of it. */
-  const framedSession = useRef<string | null | undefined>(undefined);
-  const focusShare = prefs.focusViewportShare;
+  /**
+   * A13.1: the tab strip shows one PROJECT's sessions, not every session vam
+   * knows about — "every session is always a tab" (A11.1) is scoped to the
+   * ACTIVE project. There is nothing to open, close (as a tab, independent
+   * of the session) or persist: the strip is a pure projection of `entries`
+   * and whichever project is active, recomputed on every render exactly the
+   * way `entries` itself already is.
+   *
+   * "The active project" is DEFINED here as the focused session's project,
+   * looked up UNFILTERED, and — when there is no focused session — as the
+   * project of whatever the panes are actually holding.
+   *
+   * Both halves are corrections to "the focused session's project", the
+   * derivation the epic calls obvious, and both are the same mistake: this
+   * value is what A15.5's invariant is ABOUT (every pane on screen holds
+   * sessions of the project on screen), so deriving it from one session that
+   * may not be there let the invariant switch itself off. A `null` here does
+   * not mean "no project on screen", it meant "do not collapse", and
+   * `setFocusedSessionId` reads it to decide whether a pick is a project
+   * SWITCH. Two ways to reach that: a search or status pill hiding the
+   * focused session (the filtered lookup answered `null` for a session that
+   * is plainly still open), and the keyboard sitting in a pane that holds
+   * nothing — which since PR 268 is where `zv` then `zw` leaves it, on purpose.
+   * Either way, picking a session in another project skipped the collapse and
+   * skipped remembering the layout: a pane went on drawing the previous
+   * project's session under a strip, scoped to the new project, reading "no
+   * sessions open".
+   *
+   * The panes' own sessions are the right fallback because they are the
+   * screen: the strip beside them is scoped to this value, so answering with
+   * the project they hold is answering with what the operator can see. The second case the epic
+   * flags — a project selected in the sidebar with NO session focused — has
+   * no live UI action to select a project independently of a session
+   * (verified: `SessionList.tsx`'s `data-project-heading` binds a click only
+   * to its icon, its collapse chevron and its own "add session" button, none
+   * of which "select" the project), so that case cannot currently arise from
+   * the UI. What CAN happen is genuinely no session focused at all — cold
+   * start before "land focus on something real" resolves, or every session
+   * filtered out — and there `activeProjectId` is `null` and the strip is
+   * empty, reusing the same "no sessions open" copy `TabStrip` already draws
+   * for an empty tab list. If a future surface lets the operator select a
+   * project without a session, THIS is the one place that needs to learn it.
+   */
+  const activeProjectId = useMemo(() => {
+    const focused = focusedSessionId === null ? null : entriesById.get(focusedSessionId);
+    if (focused !== undefined && focused !== null) {
+      return focused.project.id;
+    }
+    for (const leaf of leaves(panes)) {
+      for (const held of leaf.sessionIds) {
+        const entry = entriesById.get(held);
+        if (entry !== undefined) {
+          return entry.project.id;
+        }
+      }
+    }
+    return null;
+  }, [focusedSessionId, entriesById, panes]);
+  const projectTabs = useMemo(
+    () => (activeProjectId === null ? [] : entries.filter((e) => e.project.id === activeProjectId)),
+    [entries, activeProjectId],
+  );
+  const projectTabIds = useMemo(() => projectTabs.map((e) => e.session.id), [projectTabs]);
+  /**
+   * THE STRIP THE OPERATOR IS LOOKING AT — the focused pane's own tabs, drawn
+   * by the same expression that draws them (`drawnPaneTabs`).
+   *
+   * Where `Mod-t` reads its project from, and what `Mod-t`'s own refusal
+   * counts. Every pane draws a strip of its own (A15.5) and exactly one of
+   * them has the keyboard, so "the tab strip in front of you" is a fact the
+   * pane focus already carries.
+   *
+   * `Mod-<digit>` USED TO COUNT THIS and does not any more — see
+   * `drawnTabsAcrossPanes` below, and `chords.ts` for the argument.
+   */
+  const focusedPaneTabs = useMemo(
+    () =>
+      drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
+    [allEntries, panes, focusedPaneId, activeProjectId],
+  );
+  /**
+   * EVERY TAB ON SCREEN, IN THE ORDER THE STRIPS PAINT THEM — what
+   * `Mod-<digit>` counts and what `Mod-Shift-[`/`]` steps.
+   *
+   * `leaves()` walks the split tree in child order, which is the order
+   * `renderSplit` lays the panes out: left to right for a `row`, top to bottom
+   * for a `column`. Each leaf then contributes `drawnPaneTabs` — the SAME
+   * expression its own strip renders from — so "the tab at position N" can
+   * only ever mean the tab an operator can point at.
+   *
+   * DELIBERATELY NOT `projectTabs`, which is every session of the active
+   * project whether or not a pane is drawing it. The list a number addresses
+   * has to be the list that is painted; those two are the same today only
+   * because every session of the active project is a tab, and a rule that
+   * relies on that coincidence is a rule that breaks the day it stops.
+   */
+  const drawnTabsAcrossPanes = useMemo(
+    () =>
+      leaves(panes).flatMap((leaf) => drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId)),
+    [allEntries, panes, activeProjectId],
+  );
+  /**
+   * EVERY session of the active project, filters and all — the list A11.1's
+   * invariant is stated over. Read from `allEntries` rather than the filtered
+   * `entries` for the reason the prune effect gives: a filter narrows what
+   * the SIDEBAR lists, and must not decide which sessions a pane holds, or
+   * turning one on would silently drop tabs and turning it off would silently
+   * add them.
+   */
+  const activeProjectSessionIds = useMemo(
+    () =>
+      activeProjectId === null
+        ? []
+        : allEntries
+            .filter((entry) => entry.project.id === activeProjectId)
+            .map((entry) => entry.session.id),
+    [allEntries, activeProjectId],
+  );
 
+  // The render-phase half of the two mirrors declared beside `panes` above.
+  entriesByIdRef.current = entriesById;
+  activeProjectIdRef.current = activeProjectId;
+  panesRef.current = panes;
+  projectOfSessionRef.current = new Map(
+    allEntries.map((entry) => [entry.session.id, entry.project.id]),
+  );
+
+  /**
+   * A15.5 — a session that is no longer there leaves no tab behind. Sessions
+   * end, are closed from the sidebar, or vanish with their project; a pane
+   * holding the id would otherwise keep drawing a tab for something gone.
+   * `pruneClosedTabs` returns the SAME tree when nothing is stale, so this
+   * cannot churn the render, and it never closes the last pane. Skipped
+   * entirely while the model is empty — that is the pre-load state, not
+   * every session closing at once.
+   *
+   * AND THE KEYBOARD GOES WITH THE PANE THAT CLOSED. A pane emptied this way
+   * is closed, so this is the one site that can leave `focusedPaneId` naming
+   * a leaf that no longer exists — `splitFocused`, `onPaneDrop` and
+   * `closePaneTab` each already refuse or repair such an id, and the state
+   * they guard against was created here. Stale, the shell wedges rather than
+   * breaking loudly: no pane wears the focus, `findLeaf` answers `null` so
+   * `focusedSessionId` is `null` and every chord replies "pick a session
+   * first", and a sidebar click aims `setPaneSession` at nothing and does
+   * nothing at all. "Land focus on something real" below only rescues that
+   * by accident — when the candidate it re-picks happens to be held by a
+   * surviving pane — so the repair belongs here, beside the close, and is
+   * `closePaneTab`'s rule read twice: the next pane round, else the first
+   * one left.
+   *
+   * Read through `panesRef` rather than a `setPanes` updater because the
+   * repair has to know WHICH tree came back; a `setFocusedPaneId` inside an
+   * updater would be a side effect in a function React may call twice.
+   */
   useEffect(() => {
-    if (focusCenterX === null || focusCenterY === null) {
+    if (allEntries.length === 0) {
       return;
     }
-    // Re-frame when the SHARE changes too: the operator is looking at the
-    // canvas while they turn the stepper, and a setting whose effect waits for
-    // the next keypress reads as a setting that did nothing.
-    const key = focusedSessionId === null ? null : `${focusedSessionId}:${focusShare}`;
-    const arrived = framedSession.current !== undefined && framedSession.current !== key;
-    framedSession.current = key;
-    if (
-      arrived &&
-      focusShare !== FOCUS_SHARE_OFF &&
-      frameX !== null &&
-      frameY !== null &&
-      frameWidth !== null &&
-      frameHeight !== null
-    ) {
-      void fitBounds(
-        { x: frameX, y: frameY, width: frameWidth, height: frameHeight },
-        { padding: focusPadding(focusShare), duration: 220 },
-      );
+    const open = new Set(allEntries.map((entry) => entry.session.id));
+    const before = panesRef.current;
+    const pruned = pruneClosedTabs(before, (id) => open.has(id));
+    if (pruned === before) {
       return;
     }
-    setCenter(focusCenterX, focusCenterY, { duration: 220 });
-  }, [
-    focusCenterX,
-    focusCenterY,
-    focusedSessionId,
-    focusShare,
-    frameX,
-    frameY,
-    frameWidth,
-    frameHeight,
-    fitBounds,
-    setCenter,
-  ]);
+    setPanes(pruned);
+    const focused = focusedPaneIdRef.current;
+    if (findLeaf(pruned, focused) !== null) {
+      return;
+    }
+    const next = stepPane(before, focused, 1);
+    const survivor = leaves(pruned).find((leaf) => leaf.id === next) ?? leaves(pruned)[0];
+    if (survivor !== undefined) {
+      setFocusedPaneId(survivor.id);
+    }
+  }, [allEntries, setFocusedPaneId]);
 
   /**
-   * What the detail panel expands: the focused step if a step is focused, else
-   * the session's newest step. Focusing the session head should still show you
-   * something — an empty panel next to a selected session reads as broken.
+   * The other half of the per-pane `+`: the session it started, once it
+   * shows up, opens in the pane that asked for it.
+   *
+   * The FIRST id that was not there when the button was pressed — vam has
+   * nothing better to match on (the write reported no id), and anything else
+   * appearing in the same poll is indistinguishable from it. Fires once and
+   * disarms, so a session started elsewhere a minute later never lands in a
+   * pane nobody pointed at. A pane closed in the meantime disarms too rather
+   * than moving focus onto a leaf that is gone.
+   *
+   * AND IT HANDS OVER THE KEYBOARD, which it did not. Operator: "when a new
+   * session finishes being created, focus should go straight into that
+   * session's Response view, in insert mode." Two things follow from that one
+   * sentence, and they are decided differently:
+   *
+   *   THE VIEW is a fact about the SESSION (`viewBySession`), and it is set
+   *   unconditionally. A session that did not exist a moment ago cannot have
+   *   a view the operator chose for it, so there is nothing here to override:
+   *   without this it would open on `viewSeed`, which is the view a PREVIOUS
+   *   RUN was left on, and an operator who quit on Agents would have got the
+   *   Agents view of a session with nothing in it. The stored preference is
+   *   deliberately NOT written — it is what the next run opens on, and vam
+   *   picking Response for a brand-new row is not the operator picking it.
+   *
+   *   THE KEYBOARD is a fact about the OPERATOR, and it is withheld the
+   *   moment there is any sign they have moved on. `tmux new-session -d` plus
+   *   the agent's own registration is seconds of wall clock, and in that time
+   *   they can step to another pane, start typing, or open an overlay;
+   *   pulling the caret out from under any of those is worse than the press
+   *   of `I` this saves. The pane still gets the session either way — where a
+   *   tab is kept is not a claim on who is typing.
+   *
+   * `keyboardIsFree` IS READ BEFORE `setFocusedPaneId` BELOW, and that order
+   * is load-bearing: that setter writes `focusedPaneIdRef.current`
+   * synchronously, so the same comparison made after it would be against the
+   * value this effect had just installed and would be true always.
+   *
+   * SCOPED TO THIS ROUTE, WHICH IS THE ONLY ONE THAT BRINGS A SESSION TO THE
+   * FRONT — the per-pane `+` and `Mod-t`, the two callers that pass a pane.
+   * The others were checked rather than assumed, by driving each:
+   *
+   *   `o` / the sidebar's `+` pass no pane, so nothing arms here and the row
+   *   is picked up instead by the A11.1 adoption effect — which appends to
+   *   `sessionIds` and does NOT touch `sessionId`, so the session becomes a
+   *   BACKGROUND tab of the focused pane. Nothing is in front to focus, and
+   *   bringing it forward is a separate decision about those keys.
+   *
+   *   `newProject` does not reach `createSession` at all (it calls
+   *   `createSessionIn`), and its session is born in a project that is not
+   *   the active one — `activeProjectId` follows the focused SESSION — so no
+   *   pane holds it and the sidebar is the only surface it appears on
+   *   (measured: the pane still shows the session it had). Giving it this
+   *   behaviour means first deciding that starting a session in a new
+   *   directory switches the project you are looking at, which is an operator
+   *   question and not a focus one.
    */
-  const focusedDecision: Decision | null = useMemo(() => {
-    if (focusedSpec?.kind === 'step') {
-      return focusedSpec.decision;
+  useEffect(() => {
+    const pendingTab = pendingNewTab.current;
+    if (pendingTab === null) {
+      return;
     }
-    return focusedEntry?.session.decisions[0] ?? null;
-  }, [focusedSpec, focusedEntry]);
+    const arrived = allEntries.find((entry) => !pendingTab.known.has(entry.session.id));
+    if (arrived === undefined) {
+      return;
+    }
+    pendingNewTab.current = null;
+    if (findLeaf(panes, pendingTab.paneId) === null) {
+      return;
+    }
+    const keyboardIsFree =
+      focusedPaneIdRef.current === pendingTab.paneId && !overlayOpen && !answeringKeys();
+    setPanes((tree) => setPaneSession(tree, pendingTab.paneId, arrived.session.id));
+    setFocusedPaneId(pendingTab.paneId);
+    setViewBySession((current) => ({ ...current, [arrived.session.id]: 'Response' }));
+    if (keyboardIsFree) {
+      setArrivalFocus(pendingTab.paneId);
+    }
+  }, [allEntries, panes, overlayOpen, setFocusedPaneId]);
+
+  /**
+   * AND THE MOVE ITSELF, one commit later — see `arrivalFocus`.
+   *
+   * By here the pane has drawn the arrived session on its Response view, so
+   * `focusInsertStop` finds the prompt row that did not exist when the
+   * decision above was taken. The same landing `I` uses, so there is one
+   * answer in this file to "where does the keyboard go in a pane".
+   *
+   * IT SAYS NOTHING WHEN IT DOES NOT LAND, and that is the difference from
+   * `I`. `I` refuses aloud because the operator ASKED for the keyboard and is
+   * owed an answer; this move is vam's own initiative, so a complaint would
+   * push the one sentence they did ask for — "started a new session in …" —
+   * off the single line that carries it, to report a non-event. Nothing is
+   * lost by the silence: the session still arrived, still opened in the pane
+   * that asked, and Select with the new tab in front is exactly the state
+   * that shipped before this. (A source that draws no composer cannot reach
+   * here today anyway — `canWriteTo` gates `createSession` on the same
+   * `recordPrompt` capability `composerHidden` reads — but the silence is the
+   * rule rather than a bet on that staying true.)
+   */
+  useEffect(() => {
+    if (arrivalFocus === null) {
+      return;
+    }
+    setArrivalFocus(null);
+    focusInsertStop(paneElement(arrivalFocus));
+  }, [arrivalFocus]);
+
+  /**
+   * A11.1 — EVERY SESSION OF THE ACTIVE PROJECT IS A TAB OF EXACTLY ONE
+   * PANE, never zero.
+   *
+   * The operator opened a project holding two sessions and saw one tab:
+   * "right from the start, shouldn't it show both tabs of a project at
+   * once?" Asked earlier in this epic how many of a project's sessions
+   * should be tabs, they had answered "all of them, always". PR 263 built the
+   * per-pane strips and narrowed it to "every session the pane OPENED" —
+   * right for the editor-group model it was building, and it dropped the
+   * rule. This effect is the rule, put back: a session no pane holds is
+   * adopted, one some pane holds is left where it is.
+   *
+   * The reconciliation half of what the prune effect above does, and it runs
+   * over the same four routes at once rather than at each of them: the first
+   * model of a cold start, a session started outside vam, a pane closed with
+   * `zc` giving up its tabs, and a layout restored (A15.7) for a project
+   * whose sessions changed while it was off screen.
+   *
+   * THREE THINGS IT MUST NOT DO, each one a rule this shell already holds:
+   *
+   * 1. It must not populate from an EMPTY model. `activeProjectId` is `null`
+   *    before the first model arrives, and that is the pre-load state rather
+   *    than a project with no sessions — the prune effect's own guard, in the
+   *    opposite direction.
+   * 2. It must not refill a pane a split DELIBERATELY emptied (PR 268/271).
+   *    It cannot: `zv`/`zs` MOVE the tab, so nothing is orphaned by a split
+   *    and there is nothing to put back. That is the whole reason adoption is
+   *    scoped to sessions NO pane holds rather than to the project's list.
+   * 3. It must not beat the per-pane `+`. That path is more specific — the
+   *    session it started belongs in the pane that asked — so the update is
+   *    written as an UPDATER and re-checks membership against the tree it is
+   *    handed. React runs the `+` effect's updater first (it is declared
+   *    above), so by the time this one runs the arrival already has its pane
+   *    and is no longer an orphan. A session vam did not ask for lands in the
+   *    FOCUSED pane instead, which is VSCode's rule for a file opened with no
+   *    group named.
+   *
+   * The `orphans` read off the rendered tree is an early-out, not the
+   * decision: it keeps the common render from touching state at all, while
+   * the updater is what actually decides against the freshest tree.
+   */
+  useEffect(() => {
+    const orphans = activeProjectSessionIds.filter((id) => paneHolding(panes, id) === null);
+    if (orphans.length === 0) {
+      return;
+    }
+    setPanes((tree) => adoptOrphans(tree, orphans, focusedPaneIdRef.current));
+  }, [activeProjectSessionIds, panes]);
+
+  /**
+   * What the detail panel expands: the focused session's newest decision.
+   *
+   * Before the 0.2 migration this could also be a specific STEP the cursor
+   * had walked onto via `h`/`l` and the graph's own per-decision cards; with
+   * the graph gone there is no finer cursor than the session itself, so the
+   * newest decision is now the only answer there is. Focusing the session
+   * head should still show you something — an empty panel next to a selected
+   * session reads as broken.
+   */
+  const focusedDecision: Decision | null = useMemo(
+    () => focusedEntry?.session.decisions[0] ?? null,
+    [focusedEntry],
+  );
 
   /**
    * The command row whose copy control `i` has just asked for. Cleared by the
@@ -1472,132 +3227,64 @@ function CanvasInner({
   const actions = useMemo(() => buildActions(), []);
 
   const labels = useMemo(
-    () => (jumping ? jumpLabels(nodeIds) : new Map<string, string>()),
-    [jumping, nodeIds],
+    () => (jumping ? jumpLabels(sessionIds) : new Map<string, string>()),
+    [jumping, sessionIds],
   );
-
-  const initialNodes = useMemo<Node[]>(
-    () => [
-      // Scenery first, painted behind the navigable nodes (epic.md §5.2).
-      // Never a `j`/`k` destination: draggable/selectable/focusable are each
-      // explicit — omitted, they'd default true (@xyflow/react board level).
-      ...layout.fans.map((spec) => ({
-        id: spec.id,
-        type: 'fan',
-        position: spec.position,
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        draggable: false,
-        selectable: false,
-        focusable: false,
-        data: {
-          sessionId: spec.sessionId,
-          baseOpacity: spec.opacity,
-          sessionStatus: spec.sessionStatus,
-          branchStatuses: spec.branchStatuses,
-          totalSteps: spec.totalSteps,
-        },
-      })),
-      ...layout.slots.map((spec) => ({
-        id: spec.id,
-        type: spec.placeholder ? 'slot' : 'slot-filled',
-        position: spec.position,
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        draggable: false,
-        selectable: false,
-        focusable: false,
-        data: { sessionId: spec.sessionId, baseOpacity: spec.opacity },
-      })),
-      ...layout.nodes.map((spec) => ({
-        id: spec.id,
-        type: spec.kind,
-        position: spec.position,
-        // `width`/`height` as well as `style`: we know these sizes, and stating
-        // them means the very first keypress navigates correctly instead of
-        // falling back to a zero rectangle before ReactFlow has measured.
-        width: spec.size.width,
-        height: spec.size.height,
-        style: { width: spec.size.width, height: spec.size.height, opacity: spec.opacity },
-        data: {
-          ...(spec.kind === 'info'
-            ? { entry: spec.entry, onPickIcon: openSessionIconPicker }
-            : { entry: spec.entry, decision: spec.decision, recall: spec.recall }),
-          focused: false,
-          jumpLabel: null,
-          sessionId: spec.entry.session.id,
-          baseOpacity: spec.opacity,
-        },
-      })),
-    ],
-    [layout, openSessionIconPicker],
-  );
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-
-  /**
-   * What the canvas column actually draws.
-   *
-   * The full canvas draws every session, which is what makes it a canvas. The
-   * strip draws the focused session and nothing else — that is the "less
-   * detail" half of demoting it, and it is a RENDERING decision, not a width
-   * one: a 300px column showing every fan would be a canvas you cannot read,
-   * whereas one row of cards at 300px is exactly the amount of graph a person
-   * glances at while reading the response beside it. Filtered here rather than
-   * in `initialNodes` so `nodeIds` — the set the cursor may land on — stays the
-   * whole model in every layout: the strip narrows what is DRAWN, never what
-   * `j`/`k` can reach, and the sidebar still lists them all.
-   */
-  const drawnNodes = useMemo(
-    () => (canvasStrip ? nodes.filter((node) => node.data.sessionId === focusedSessionId) : nodes),
-    [canvasStrip, nodes, focusedSessionId],
-  );
-
-  /**
-   * Keep the drawn nodes in step with the model.
-   *
-   * `useNodesState` takes its argument as INITIAL state and never looks at it
-   * again. Against a fixture that is invisible — the model never changes — but
-   * against a live factory the first render happens before the first fetch
-   * answers, so the canvas latched onto an empty layout and stayed empty
-   * forever while the sidebar filled in beside it. Positions are a pure
-   * function of the model, so every render simply re-applies the layout.
-   */
-  useEffect(() => {
-    setNodes(initialNodes);
-  }, [initialNodes, setNodes]);
 
   /**
    * Land focus on something real once there is something real.
    *
    * The first model arrives after mount, so the initial focus is null; and a
-   * filter can strip the node under the cursor. Both end with a canvas nobody
-   * is pointing at, which makes the first keypress do nothing.
+   * filter can strip the session under the cursor. Both end with nothing
+   * pointed at, which makes the first keypress do nothing.
+   *
+   * EXCEPT A PANE THAT IS EMPTY ON PURPOSE. Since `zv`/`zs` MOVE the active
+   * tab, a pane can be left holding nothing while the shell as a whole is
+   * showing plenty — and that pane is exactly where the operator asked the
+   * keyboard to be. Filling it here would undo the split they just made, and
+   * with `paneHolding` routing a pick to whichever pane already holds the
+   * session, it would do worse: the keyboard would bounce straight back out
+   * of the empty pane into the one that took the tab. So "nothing pointed at"
+   * only counts when NO pane holds anything, which is the pre-load and
+   * everything-filtered-away state this was written for.
    */
   useEffect(() => {
     if (focusCandidates.length === 0) {
       return;
     }
-    if (focusedId === null || !nodeIds.includes(focusedId)) {
-      setFocusedId(resolveFocusNodeId(prefs.lastFocus, focusCandidates));
+    const deliberatelyEmpty =
+      findLeaf(panes, focusedPaneId)?.sessionIds.length === 0 &&
+      leaves(panes).some((leaf) => leaf.sessionIds.length > 0);
+    if (deliberatelyEmpty) {
+      return;
     }
-  }, [nodeIds, focusCandidates, focusedId, prefs.lastFocus]);
+    if (focusedSessionId === null || !sessionIds.includes(focusedSessionId)) {
+      setFocusedSessionId(resolveFocusNodeId(prefs.lastFocus, focusCandidates));
+    }
+  }, [
+    sessionIds,
+    focusCandidates,
+    focusedSessionId,
+    panes,
+    focusedPaneId,
+    prefs.lastFocus,
+    setFocusedSessionId,
+  ]);
 
   /**
    * The other half: record where focus is, so the next launch can ask.
    *
-   * ONE EFFECT RATHER THAN A WRITE AT EVERY `setFocusedId`. Focus is moved from
-   * eight places -- the chords, a click on a card, a click on a sidebar row,
-   * search landing and search escaping -- and a write bolted onto each is
-   * seven chances to add a ninth that forgets. Watching the resulting entry
-   * catches all of them, including the ones this file has not grown yet.
+   * ONE EFFECT RATHER THAN A WRITE AT EVERY `setFocusedSessionId`. Focus is
+   * moved from eight places -- the chords, a click on a card, a click on a
+   * sidebar row, search landing and search escaping -- and a write bolted
+   * onto each is seven chances to add a ninth that forgets. Watching the
+   * resulting entry catches all of them, including the ones this file has
+   * not grown yet.
    *
    * The equality guard is what stops it looping: `savePrefs` replaces `prefs`,
    * which re-runs this effect, which finds the stored pointer already says what
    * it was about to write and returns. A focus that lands on nothing keeps the
-   * last pointer rather than clearing it -- an empty canvas is a filter or a
+   * last pointer rather than clearing it -- an empty screen is a filter or a
    * still-loading model, not the operator telling us to forget where they were.
    */
   useEffect(() => {
@@ -1614,37 +3301,485 @@ function CanvasInner({
     savePrefs(setLastFocus(prefs, next));
   }, [focusedEntry, prefs, savePrefs]);
 
-  // Focus, jump labels and the focused-cell opacity override are all
-  // presentation, written onto the existing nodes rather than rebuilding
-  // them: `layoutCanvas` is a pure function of the model and cannot see
-  // focus, so it can only ever emit the status opacity read from
-  // `data.baseOpacity` (stamped once in `initialNodes`).
-  useEffect(() => {
-    const focusedSessionId = focusedEntry?.session.id ?? null;
-    setNodes((current) =>
-      current.map((node) => {
-        const data = node.data as { sessionId?: string; baseOpacity?: number };
-        const opacity =
-          data.sessionId !== undefined && data.sessionId === focusedSessionId
-            ? 1
-            : (data.baseOpacity ?? 1);
-        return {
-          ...node,
-          style: { ...node.style, opacity },
-          data: {
-            ...node.data,
-            focused: node.id === focusedId,
-            jumpLabel: labels.get(node.id) ?? null,
-          },
-        };
-      }),
-    );
-  }, [focusedId, focusedEntry, labels, setNodes]);
+  /** Move focus to a session by id — what the sidebar and the palette do.
+   *  Opening a tab piggybacks on this (see the effect above): every one of
+   *  this function's callers already means "look at this session now". */
+  const focusSession = useCallback(
+    (sessionId: string) => {
+      setFocusedSessionId(sessionId);
+    },
+    [setFocusedSessionId],
+  );
 
-  /** Move focus to a session by id — what the sidebar and the palette do. */
-  const focusSession = useCallback((sessionId: string) => {
-    setFocusedId(infoNodeId(sessionId));
+  // Incremental-search focus: move the cursor to the first match, but only
+  // for the keystroke that changed the filter query (`filterKeystrokeQuery`
+  // set by `onSidebarFilterChange`), never for a `matches` change caused by
+  // something else — a model refresh, a session landing, a status change,
+  // none of which touch `query`.
+  useLayoutEffect(() => {
+    if (filterKeystrokeQuery.current !== query) return;
+    filterKeystrokeQuery.current = null;
+    const first = matches[0];
+    if (first !== undefined) {
+      focusSession(first);
+    }
+  }, [matches, query, focusSession]);
+
+  /**
+   * A15.1 — split the FOCUSED pane, MOVING its active tab into the new half.
+   *
+   * It used to mirror, the way vim's `:split`/`:vsplit` and VSCode's "Split
+   * Editor" do, and the operator's report on using it was "when I split a
+   * tab, I still see that tab showing in both panes". A tab belongs to a
+   * pane in this shell, so two panes showing one session is the same thing
+   * twice over the half of the screen the split was asked for — and the drag
+   * gesture had already been moving rather than copying, so the two ways of
+   * asking disagreed. One rule now, in `detachTab`.
+   *
+   * The pane the tab came from keeps its other tabs and brings the neighbour
+   * to the right forward; left with nothing it STAYS, drawing the strip's
+   * "no sessions open" line, because the operator asked for two panes.
+   * Focus moves to the new pane, as it always did — the reason to split is
+   * almost always to look at something new in the new spot.
+   *
+   * `orientation` is the CSS axis (`row` = side by side, `column` =
+   * stacked); the EDGE handed to `splitPane` is the arbitrary-but-documented
+   * choice of "the new pane lands after (right of / below) the one that was
+   * focused" for the keyboard route — dragging (see `onPaneDrop` below)
+   * lets the operator choose left/right/top/bottom directly instead.
+   */
+  const splitFocused = useCallback(
+    (orientation: SplitOrientation) => {
+      if (focusedSessionId === null) {
+        setStatus('pick a session first');
+        return;
+      }
+      const edge: Edge = orientation === 'row' ? 'right' : 'bottom';
+      // Read the ref into a plain local BEFORE `setFocusedPaneId` below moves
+      // it. `setFocusedPaneId` writes `focusedPaneIdRef.current` synchronously
+      // (see its definition above), while a `setPanes` updater is only
+      // guaranteed to run later, in the render phase — so a lazy
+      // `focusedPaneIdRef.current` read INSIDE the updater can see the id this
+      // very call is about to focus rather than the one being split.
+      // `splitPane` then finds no leaf by that id yet and returns the tree
+      // untouched: the split silently does nothing.
+      //
+      // React's eager-state path hides this whenever the fiber has no pending
+      // update — it runs the updater on the spot, before the ref moves — which
+      // is why no jsdom test in this repo reproduces it; every attempt passes
+      // with this fix reverted. Measured in a real Chromium tab instead: with
+      // this read inlined back into the updater, `e2e/split-panes-shots.mjs`
+      // reports `after zv: 1 pane(s)` and then dies looking for the second
+      // pane. That script is this fix's ONLY regression guard — keep its
+      // pane-count assertions.
+      const targetPaneId = focusedPaneIdRef.current;
+      // `splitPane` is total: an id it cannot find returns the tree
+      // UNCHANGED, which on screen is indistinguishable from a split that
+      // had nothing to do. Said out loud instead — a pane operation that
+      // fails silently is the one shape this shell refuses everywhere else.
+      if (findLeaf(panes, targetPaneId) === null) {
+        setStatus('that pane is gone — nothing to split');
+        return;
+      }
+      // AND THE FLOOR, before anything is built. A pane too small to halve
+      // would make two panes the shell already refuses to let you DRAG to that
+      // size — see `splitRefusal`.
+      const tooSmall = splitRefusal(targetPaneId, orientation);
+      if (tooSmall !== null) {
+        setStatus(tooSmall);
+        return;
+      }
+      paneSeq.current += 1;
+      const newId = `pane-${paneSeq.current}`;
+      setPanes((tree) =>
+        // Split first, while the source pane is still there to be found, then
+        // take the tab out of it: `detachTab` keeps that pane even when it
+        // empties, which is the one thing `removeTab` (what the drag route
+        // uses) would not do.
+        detachTab(
+          splitPane(tree, targetPaneId, edge, focusedSessionId, newId),
+          targetPaneId,
+          focusedSessionId,
+        ),
+      );
+      setFocusedPaneId(newId);
+    },
+    [focusedSessionId, panes, setFocusedPaneId],
+  );
+
+  /**
+   * A divider moved — from a drag or from an arrow key, through the one
+   * `SplitResizer` that owns both.
+   *
+   * An updater rather than a read of `panes`, so ONE stably-identified
+   * callback serves every divider in the tree: this fires on every animation
+   * frame of a drag, and a callback whose identity changed with the tree
+   * would remount the handle mid-gesture and drop the pointer capture that is
+   * holding it.
+   *
+   * No debounce and no commit phase. The position lives in the split tree,
+   * which is React state and per-project memory (`paneLayouts`), never
+   * `localStorage`, so there is no write here to spare. The one thing
+   * downstream that IS expensive — telling tmux — already debounces itself
+   * (`TerminalTab`'s `RESIZE_DEBOUNCE_MS`, written for this very gesture).
+   * `resizeSplit` is total, so a handle whose split was closed by the same
+   * frame is a no-op rather than a crash.
+   *
+   * Its REFUSAL goes to `setStatus` directly — the divider composes the
+   * sentence, because only it has measured the pixels the sentence is about,
+   * and the shell only has to say it in the one place every other refusal in
+   * this file already lands ("only one pane open — nothing to close", the
+   * cross-project drop, `newTabInPane`'s decline). One surface for "vam will
+   * not do that and here is why", never a second channel a divider invented.
+   */
+  const onSplitResize = useCallback((splitId: string, at: number, share: number) => {
+    setPanes((tree) => resizeSplit(tree, splitId, at, share));
   }, []);
+
+  /**
+   * Close the focused split. The SESSION keeps running — only the pane
+   * goes, same distinction `x` already draws for the whole session against
+   * `Mod-w`'s (pre-split) tab-only close. Refuses aloud with only one pane:
+   * closing the last one would leave nothing to show, which `closePane`
+   * itself makes unrepresentable by returning `null` for that case.
+   */
+  const closeFocusedSplit = useCallback(() => {
+    if (leaves(panes).length <= 1) {
+      setStatus('only one pane open — nothing to close');
+      return;
+    }
+    const fallback = stepPane(panes, focusedPaneId, 1);
+    const next = closePane(panes, focusedPaneId);
+    if (next === null) {
+      // Unreachable given the length check above; `closePane` stays total
+      // rather than this call site trusting that guard alone.
+      return;
+    }
+    setPanes(next);
+    setFocusedPaneId(fallback);
+  }, [panes, focusedPaneId, setFocusedPaneId]);
+
+  /**
+   * A15.5 — a tab's own `×` closes THE TAB, in the pane that drew it, and
+   * the pane itself once its last tab goes (VSCode: an emptied editor group
+   * is dropped, not left as a titled void).
+   *
+   * This REVERSES A11.3's "one action, two keys", and deliberately: that
+   * decision was made when every session in the project was always a tab of
+   * the one strip, so there was no tab to close that was not the session
+   * itself. A pane's tab list is now a genuine choice — which sessions THIS
+   * pane has open — so closing one is meaningful on its own, and the session
+   * keeps running and keeps its sidebar row. Closing the session itself is
+   * still one keystroke, `x`, and still the sidebar row's own `×`.
+   *
+   * Refuses aloud rather than emptying the shell when the tab is the last
+   * tab of the last pane — `removeTab` returns `null` for exactly that case.
+   */
+  const closePaneTab = useCallback(
+    (paneId: string, sessionId: string) => {
+      // A11.1: a session of this project cannot be left without a tab, so
+      // there is nothing for the `×` to do to a LIVE one — the adoption
+      // effect would put the tab straight back, and a control whose effect
+      // is undone in the same breath reads as broken. It refuses aloud
+      // instead, in the demo `+`'s idiom, and names the key that does close a
+      // session; the destructive verb stays where it already lives.
+      //
+      // The rest of this callback is not dead: a tab whose session has just
+      // ENDED still draws until the next model arrives, and a `×` pressed in
+      // that window is the one close that has real work to do.
+      if (entriesByIdRef.current.has(sessionId)) {
+        setStatus('every session of this project is a tab — close the session with x');
+        return;
+      }
+      const next = removeTab(panes, paneId, sessionId);
+      if (next === null) {
+        setStatus('that is the last tab — close the session with x');
+        return;
+      }
+      setPanes(next);
+      if (findLeaf(next, focusedPaneIdRef.current) === null) {
+        setFocusedPaneId(stepPane(panes, paneId, 1));
+      }
+    },
+    [panes, setFocusedPaneId],
+  );
+
+  /** Cycle the keyboard between splits, wrapping — vim's `Ctrl-w w`/`W`. */
+  const stepFocusedSplit = useCallback(
+    (delta: 1 | -1) => {
+      if (leaves(panes).length <= 1) {
+        setStatus('only one pane open');
+        return;
+      }
+      setFocusedPaneId(stepPane(panes, focusedPaneId, delta));
+    },
+    [panes, focusedPaneId, setFocusedPaneId],
+  );
+
+  /**
+   * A15.1 — dragging a tab is how a split is made.
+   *
+   * The payload travels in REACT STATE, not the browser's own
+   * `DataTransfer`: happy-dom does not carry a `DataTransfer` through a
+   * constructed `DragEvent` (verified by running it — the property comes
+   * back `undefined` on the receiving end), so a design that read the
+   * dragged session back OUT of the transfer object would be untestable by
+   * construction. `event.dataTransfer` is still written to, defensively,
+   * for a real browser's own drag affordance (the ghost image, the cursor),
+   * but nothing here reads it back.
+   */
+  /** A15.5 — the dragged tab now carries the pane it came FROM as well:
+   *  dropping it on another pane MOVES it (VSCode's own drag-a-tab-to-a-
+   *  group), so the source pane has to be named to take it back out of. */
+  const [dragging, setDragging] = useState<{
+    readonly sessionId: string;
+    readonly paneId: string;
+  } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    readonly paneId: string;
+    readonly zone: DropZone;
+  } | null>(null);
+
+  const onTabDragStart = useCallback(
+    (paneId: string, sessionId: string) => (event: ReactDragEvent<HTMLButtonElement>) => {
+      setDragging({ sessionId, paneId });
+      try {
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('text/plain', sessionId);
+      } catch {
+        // Best-effort only — see the doc comment above. The drop handler
+        // never reads this back.
+      }
+    },
+    [],
+  );
+
+  const onTabDragEnd = useCallback(() => {
+    setDragging(null);
+    setDropTarget(null);
+  }, []);
+
+  /**
+   * The indicator's one writer.
+   *
+   * `null` for the CENTRE of the pane the drag started in: that drop is
+   * refused (there is nothing to move — the tab is already there), and
+   * painting the join overlay over it would promise an outcome the release
+   * will not produce. It is not a rare corner either — the first frame of
+   * every drag is over the tab's own strip. The EDGES of that same pane keep
+   * their overlay, because splitting a pane with its own tab is exactly what
+   * `zv` does.
+   */
+  const showDropZone = useCallback(
+    (paneId: string, zone: DropZone) => {
+      if (zone === 'centre' && dragging?.paneId === paneId) {
+        setDropTarget((current) => (current === null ? current : null));
+        return;
+      }
+      setDropTarget((current) =>
+        current !== null && current.paneId === paneId && current.zone === zone
+          ? current
+          : { paneId, zone },
+      );
+    },
+    [dragging],
+  );
+
+  const onPaneDragOver = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      if (dragging === null) {
+        return;
+      }
+      // Allowing the drop (`preventDefault`) is the browser's own contract
+      // for `dragover` — without it, `drop` never fires at all.
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      showDropZone(
+        paneId,
+        dropZone(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height),
+      );
+    },
+    [dragging, showDropZone],
+  );
+
+  /**
+   * A DROP ON THE TAB STRIP JOINS, wherever in the strip it lands — the
+   * gesture most people reach for, and the one the pane's own geometry cannot
+   * express: the strip is 36px at the TOP of the pane, so every point in it
+   * sits in the `top` band and would have split the pane downward.
+   *
+   * `stopPropagation` is what makes that true rather than nearly true. These
+   * events bubble to the pane's own handlers, which would recompute the zone
+   * from the pane box and overwrite the join with a `top` split on the very
+   * next frame. Stopping here is also what keeps the two handlers from
+   * disagreeing about a single pointer position.
+   */
+  const onStripDragOver = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      if (dragging === null) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      showDropZone(paneId, 'centre');
+    },
+    [dragging, showDropZone],
+  );
+
+  /**
+   * A drag crossing between two children of the SAME pane is not a departure.
+   * `dragleave` fires per element and bubbles, so moving from the transcript
+   * to the composer to the strip all arrive here — and clearing the indicator
+   * on each of them makes it blink through a gesture that never left. The
+   * pointer has gone only when the element it moved ONTO is outside this
+   * pane; `relatedTarget` is that element, and `null` (leaving the window, or
+   * a synthetic event in a test) counts as outside.
+   */
+  const onPaneDragLeave = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && event.currentTarget.contains(next)) {
+        return;
+      }
+      setDropTarget((current) => (current !== null && current.paneId === paneId ? null : current));
+    },
+    [],
+  );
+
+  /**
+   * A RELEASED DRAG, once the gesture has said WHERE it landed — the one
+   * place both drop targets (the pane, and its tab strip) end up, so the two
+   * cannot drift into two policies.
+   *
+   * `zone` decides which of the two things happens: an `Edge` SPLITS the
+   * target pane, `'centre'` JOINS the tab into it. The join is the half that
+   * was missing, and the operator's report is what it cost — every drop
+   * called `splitPane`, so the layout could grow and never shrink, and there
+   * was no way at all to drag a tab back into a pane.
+   *
+   * EVERY REFUSAL IS ALOUD, on both paths — never a drop that just does
+   * nothing, which this codebase's standing rule treats as indistinguishable
+   * from success. `splitPane` and `joinPane` are both total, so a stale id
+   * hands back an untouched tree that looks exactly like a drop that worked.
+   * The four:
+   *
+   *  1. the TARGET pane is gone (a drop that raced a close) — the same
+   *     silent-no-op trap `splitFocused` guards;
+   *  2. the two sessions are in different projects — see below;
+   *  3. the SOURCE pane is gone. This one was missing on the split path and
+   *     is not cosmetic there: a strip is scoped to the active project, so
+   *     `adoptOrphans` puts a tab whose pane closed mid-drag back into the
+   *     focused pane, and splitting from that stale source would leave the
+   *     session drawn in TWO panes at once — the exact invariant (PR 268: a
+   *     session lives in exactly one pane) that `removeTab` was there to
+   *     keep, quietly skipped because it was handed an id nothing holds;
+   *  4. a join onto the pane the tab is already in, where there is nothing
+   *     to move. (An EDGE of that same pane is not refused: splitting a pane
+   *     with its own tab is what `zv` does.)
+   *
+   * THE CROSS-PROJECT REFUSAL COVERS THE JOIN TOO, and that is a decision
+   * rather than an inheritance. A pane's strip draws the ACTIVE project's
+   * sessions and nothing else (`drawnPaneTabs`), so a tab joined in from
+   * another project would join the membership and then draw nothing — a drop
+   * that looks like it worked and shows no tab, which is the worst of the
+   * outcomes this rule exists to prevent. The layout is also remembered per
+   * project, so the tab would come back as another project's session inside
+   * this one's remembered panes. It refuses, in the verb of the gesture the
+   * operator actually made, and names both projects. An empty target pane (no
+   * session shown yet, or one filtered/closed out from under it) has no
+   * project of its own to conflict with, so it always accepts.
+   */
+  const dropTabInPane = useCallback(
+    (paneId: string, zone: DropZone) => {
+      const drag = dragging;
+      setDragging(null);
+      setDropTarget(null);
+      if (drag === null) {
+        return;
+      }
+      const joining = zone === 'centre';
+      const draggedId = drag.sessionId;
+      const targetLeaf = findLeaf(panes, paneId);
+      if (targetLeaf === null) {
+        setStatus(`that pane is gone — nothing to ${joining ? 'move it into' : 'split'}`);
+        return;
+      }
+      const draggedEntry = entriesById.get(draggedId) ?? null;
+      const targetEntry =
+        targetLeaf.sessionId === null ? null : (entriesById.get(targetLeaf.sessionId) ?? null);
+      if (
+        draggedEntry !== null &&
+        targetEntry !== null &&
+        draggedEntry.project.id !== targetEntry.project.id
+      ) {
+        setStatus(
+          `can't ${joining ? 'move a tab' : 'split'} across projects — "${draggedEntry.project.name}" and "${targetEntry.project.name}" are different projects`,
+        );
+        return;
+      }
+      if (findLeaf(panes, drag.paneId) === null) {
+        setStatus('the pane that tab came from has gone — pick the tab up again');
+        return;
+      }
+      if (joining) {
+        if (paneId === drag.paneId) {
+          setStatus('that tab is already in this pane');
+          return;
+        }
+        // `joinPane` opens the tab in the target and takes it out of the
+        // source, closing that pane when it was its last tab — which is what
+        // makes this the one gesture that can un-split a layout.
+        setPanes((tree) => joinPane(tree, paneId, drag.paneId, draggedId));
+        setFocusedPaneId(paneId);
+        return;
+      }
+      // THE SAME FLOOR THE CHORD OBEYS, on the gesture that reaches it by
+      // mouse. Last of the refusals because it is the only one that has to
+      // measure: the three above are about ids, and an id that named nothing
+      // would make this a question about a pane that is not there.
+      const tooSmall = splitRefusal(paneId, orientationFor(zone));
+      if (tooSmall !== null) {
+        setStatus(tooSmall);
+        return;
+      }
+      paneSeq.current += 1;
+      const newId = `pane-${paneSeq.current}`;
+      setPanes((tree) => {
+        // A15.5 — a drag MOVES the tab: it lands in the new pane and leaves
+        // the one it came from, which is VSCode's own gesture and the only
+        // reading under which "the tab sits on the split side" is true of
+        // the tab that was dragged. `removeTab` closes a source pane it
+        // empties, and is total over a source that has already gone.
+        const split = splitPane(tree, paneId, zone, draggedId, newId);
+        return removeTab(split, drag.paneId, draggedId) ?? split;
+      });
+      setFocusedPaneId(newId);
+    },
+    [dragging, panes, entriesById, setFocusedPaneId],
+  );
+
+  const onPaneDrop = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      dropTabInPane(
+        paneId,
+        dropZone(event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height),
+      );
+    },
+    [dropTabInPane],
+  );
+
+  /** The strip's own drop — always a join, never measured. See
+   *  `onStripDragOver` for why it stops the event here. */
+  const onStripDrop = useCallback(
+    (paneId: string) => (event: ReactDragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dropTabInPane(paneId, 'centre');
+    },
+    [dropTabInPane],
+  );
 
   /**
    * Write what you typed into the focused session's log — or, for a `'session'`
@@ -1654,9 +3789,9 @@ function CanvasInner({
    * prompt; it has no channel into a running agent session, so "recorded" is
    * the truth and "sent" would not be. A `'session'` source can be different:
    * when `capabilities.deliverPrompt` is true the write really does reach a
-   * running `claude --resume`, and saying "recorded" there would be the same
-   * lie in the other direction — the operator would think nothing happened
-   * when an agent is about to answer.
+   * running session -- it is TYPED into the pane vam owns -- and saying
+   * "recorded" there would be the same lie in the other direction, the operator
+   * thinking nothing happened when the keystrokes went out.
    *
    * WHAT THE WORDING IS ACTUALLY DERIVED FROM, said here because it reads
    * like a per-call outcome and is not one. `deliverPrompt` is the source's
@@ -1664,15 +3799,15 @@ function CanvasInner({
    * `SourceWrites.recordPrompt` is `Promise<void>` (`sources/port.ts`), the
    * preload unwraps it as `void` (`preload/api.ts`), and main's
    * `recordPrompt` resolves to `SourceError | null` -- a refusal or nothing
-   * (`main/sources/source.ts`). The Claude Code source routes a reply two
-   * ways, into a tmux pane it owns or into `claude --resume`
-   * (`main/sources/claude-code/reply.ts`), and reports neither: both count as
-   * delivered, and both refuse loudly rather than quietly recording, which is
-   * why resolving without an error is enough to say "sent" here. The gap that
-   * remains is a source declaring `deliverPrompt` while its write only
-   * appends -- vam cannot see that, and it cannot be closed in this file. It
-   * needs an outcome carried back through those four layers. Do not paper
-   * over it here with a wording that guesses.
+   * (`main/sources/source.ts`). The Claude Code source has ONE reply channel,
+   * a tmux pane it owns (`main/sources/claude-code/reply.ts`), and reports only
+   * whether the keystrokes went out: a row with no such pane REFUSES loudly
+   * rather than quietly recording, which is why resolving without an error is
+   * enough to say the text was typed here. What resolving does NOT prove is
+   * that the turn landed -- there is no echo, and the sentence stops short of
+   * claiming one. The gap that remains is a source declaring `deliverPrompt`
+   * while its write only appends -- vam cannot see that, and it cannot be
+   * closed in this file. Do not paper over it here with a wording that guesses.
    *
    * A refusal is reported in the factory's own words. `events.unknown-causal-session`
    * and `write.bad-request` each name a different mistake, and collapsing them
@@ -1680,91 +3815,155 @@ function CanvasInner({
    * `'session'` source whose `write` is absent (`recordPrompt: false`) is
    * refused before anything is called at all — `canWriteTo` is the only way in.
    */
-  const sendPrompt = useCallback(async () => {
-    const entry = focusedEntry;
-    if (entry === null || draft.trim() === '') {
-      return;
-    }
-    if (source.kind === 'demo') {
-      setStatus(source.note);
-      return;
-    }
-    // TOTALITY, not a reachable path: with no source there is no model, so
-    // there is no focused entry and the guard above has already returned. It
-    // refuses rather than falling through to the browser branch, which would
-    // read `client` off a source that has none.
-    if (source.kind === 'connecting') {
-      setStatus('still connecting to the source — there is nothing to send to yet');
-      return;
-    }
-    if (writing) {
-      return;
-    }
-    const text = draft;
-    /**
-     * Draw the turn now and empty the composer, so the pane reacts to the key
-     * rather than to the round trip (`optimistic.ts`). `live` is the source's
-     * own `deliverPrompt` and decides ONLY whether the session is painted as
-     * running: a recorded prompt is still shown, because the operator typed it
-     * and it exists, but nothing claims an agent is answering it.
-     */
-    const beginPaint = (live: boolean): PendingPrompt => {
-      pendingSeq.current += 1;
-      const one: PendingPrompt = {
-        id: `vam-pending-${pendingSeq.current}`,
-        sessionId: entry.session.id,
-        input: text,
-        seen: countTurnsWithInput(sourceModel, entry.session.id, text),
-        live,
-      };
-      setPending((current) => [...current, one]);
-      setDraft('');
-      setComposing(false);
-      setWriting(true);
-      return one;
-    };
-    // A refusal must leave no trace of a turn that never happened -- and give
-    // the words back, so nothing has to be retyped.
-    const rollBack = (one: PendingPrompt) => {
-      setPending((current) => current.filter((other) => other.id !== one.id));
-      setDraft(text);
-      setComposing(true);
-    };
-    if (source.kind === 'session') {
-      const sessionSource = source.source;
-      if (!canWriteTo(sessionSource)) {
-        setStatus(`${sessionSource.label} cannot be written to`);
+  /**
+   * A15.1 — parameterised over the entry rather than reading `focusedEntry`
+   * from the closure, so every split pane's OWN composer can send without
+   * first stealing the keyboard from whichever pane actually has it.
+   * `buildDetailProps` (further down) wires each pane's own `onSubmit` to
+   * `() => sendPromptFor(entry)` for that pane's own entry — the focused
+   * pane's is `sendPromptFor(focusedEntry)`, the same call the single-pane
+   * shell always made, just no longer needing a zero-argument wrapper of
+   * its own now that its one caller passes the entry directly.
+   */
+  const sendPromptFor = useCallback(
+    async (entry: SessionEntry | null) => {
+      const entryDraft = entry === null ? '' : (draftsBySession[entry.session.id] ?? '');
+      if (entry === null || entryDraft.trim() === '') {
         return;
       }
-      const painted = beginPaint(sessionSource.capabilities.deliverPrompt);
+      if (source.kind === 'demo') {
+        setStatus(source.note);
+        return;
+      }
+      // TOTALITY, not a reachable path: with no source there is no model, so
+      // there is no focused entry and the guard above has already returned. It
+      // refuses rather than falling through to the browser branch, which would
+      // read `client` off a source that has none.
+      if (source.kind === 'connecting') {
+        setStatus('still connecting to the source — there is nothing to send to yet');
+        return;
+      }
+      if (writingBySession[entry.session.id] ?? false) {
+        return;
+      }
+      const text = entryDraft;
+      // SAID ALOUD, never swallowed. A prompt that vanishes with no word is
+      // indistinguishable from a prompt that was sent, which is the confusion
+      // this whole guard exists to end -- the operator has to be able to tell
+      // "vam ignored my second Return" from "the agent got it twice".
+      const previous = lastSent.current.get(entry.session.id);
+      const repeated =
+        previous !== undefined &&
+        previous.text === text &&
+        Date.now() - previous.at < REPEAT_WINDOW_MS;
+      if (repeated) {
+        setStatus('the same prompt was just sent — ignored, so the agent does not get it twice');
+        setDraftFor(entry.session.id, '');
+        setComposingFor(entry.session.id, false);
+        return;
+      }
+      /**
+       * Draw the turn now and empty the composer, so the pane reacts to the key
+       * rather than to the round trip (`optimistic.ts`). `live` is the source's
+       * own `deliverPrompt` and decides ONLY whether the session is painted as
+       * running: a recorded prompt is still shown, because the operator typed it
+       * and it exists, but nothing claims an agent is answering it.
+       */
+      const beginPaint = (live: boolean): PendingPrompt => {
+        pendingSeq.current += 1;
+        const one: PendingPrompt = {
+          id: `vam-pending-${pendingSeq.current}`,
+          sessionId: entry.session.id,
+          input: text,
+          seen: countTurnsWithInput(sourceModel, entry.session.id, text),
+          // The same model and the same instant as `seen` above -- the two
+          // baselines have to be taken together or the overtaken rule is
+          // measuring against a different moment than the match is.
+          seenAll: countTurns(sourceModel, entry.session.id),
+          live,
+          // Stamped where the paint goes UP, not where the write comes back:
+          // what the expiry bounds is how long this row has been on screen
+          // asserting a turn (`optimistic.ts`).
+          sentAt: Date.now(),
+        };
+        setPending((current) => [...current, one]);
+        setDraftFor(entry.session.id, '');
+        setComposingFor(entry.session.id, false);
+        setWritingFor(entry.session.id, true);
+        // A new attempt supersedes the last verdict. Cleared HERE, where the
+        // attempt begins, rather than in each success branch: a send that
+        // fails a second time writes its own sentence back a moment later,
+        // and one that is still in flight should not be showing the previous
+        // one as if it were about this one.
+        setSendFailureFor(entry.session.id, null);
+        return one;
+      };
+      // A refusal must leave no trace of a turn that never happened -- and give
+      // the words back, so nothing has to be retyped.
+      const rollBack = (one: PendingPrompt) => {
+        setPending((current) => current.filter((other) => other.id !== one.id));
+        setDraftFor(entry.session.id, text);
+        setComposingFor(entry.session.id, true);
+      };
+      if (source.kind === 'session') {
+        const sessionSource = source.source;
+        if (!canWriteTo(sessionSource)) {
+          setStatus(`${sessionSource.label} cannot be written to`);
+          return;
+        }
+        const painted = beginPaint(sessionSource.capabilities.deliverPrompt);
+        try {
+          await sessionSource.write.recordPrompt(entry.session.id, text);
+          setStatus(
+            // What vam can honestly claim differs by source. A delivering
+            // source (Claude Code) TYPED the prompt into the pane it owns;
+            // there is no echo that the turn landed, so it claims none, and the
+            // turn appears here when the session's transcript records it. A
+            // recording source only appended to a log.
+            sessionSource.capabilities.deliverPrompt
+              ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
+              : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
+          );
+          lastSent.current.set(entry.session.id, { text, at: Date.now() });
+          source.onWrote();
+        } catch (cause) {
+          rollBack(painted);
+          const note = noteFailure('send prompt', cause);
+          setStatus(note);
+          setSendFailureFor(entry.session.id, note);
+        } finally {
+          setWritingFor(entry.session.id, false);
+        }
+        return;
+      }
+      const painted = beginPaint(false);
       try {
-        await sessionSource.write.recordPrompt(entry.session.id, text);
+        await source.client.recordPrompt(entry.session.id, text);
         setStatus(
-          sessionSource.capabilities.deliverPrompt
-            ? `sent into the running session of ${entry.session.title} — it will answer there`
-            : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
+          `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
         );
+        lastSent.current.set(entry.session.id, { text, at: Date.now() });
         source.onWrote();
       } catch (cause) {
         rollBack(painted);
-        setStatus(noteFailure('send prompt', cause));
+        const note = noteFailure('send prompt', cause);
+        setStatus(note);
+        setSendFailureFor(entry.session.id, note);
       } finally {
-        setWriting(false);
+        setWritingFor(entry.session.id, false);
       }
-      return;
-    }
-    const painted = beginPaint(false);
-    try {
-      await source.client.recordPrompt(entry.session.id, text);
-      setStatus(`recorded in the log of ${entry.session.title} — recorded, not sent to the agent`);
-      source.onWrote();
-    } catch (cause) {
-      rollBack(painted);
-      setStatus(noteFailure('send prompt', cause));
-    } finally {
-      setWriting(false);
-    }
-  }, [focusedEntry, draft, source, writing, sourceModel]);
+    },
+    [
+      draftsBySession,
+      source,
+      writingBySession,
+      sourceModel,
+      setDraftFor,
+      setComposingFor,
+      setWritingFor,
+      setSendFailureFor,
+    ],
+  );
 
   /**
    * Stop the focused session — really, when the source can.
@@ -1854,14 +4053,18 @@ function CanvasInner({
    * entered from two places that could disagree, and they did: `i` set both
    * the mode and the flag, while the textarea's own `onFocus` set the flag
    * alone -- so clicking into the box left the bar reading Select to an
-   * operator typing a prompt, and `Mod+<digit>`, which reads the mode and is
-   * let through the typing guard on purpose, moved a session instead of
-   * switching a tab. One function, three callers, nothing left to diverge.
+   * operator typing a prompt.
+   *
+   * IT NO LONGER SETS A MODE AT ALL, and that is the last of that family of
+   * bug rather than one more patch to it: `composing` puts the caret in the
+   * box (`DetailPanel`'s own effect focuses it), the caret is inside an
+   * insert scope, and the mode is what being there is called. There is
+   * nothing left for the two callers to disagree about because there is only
+   * one fact.
    */
   const beginComposing = useCallback(() => {
-    setMode('insert');
     setComposing(true);
-  }, []);
+  }, [setComposing]);
 
   /**
    * Store the removal -- or, when there is nowhere to store it, keep it for
@@ -1989,7 +4192,7 @@ function CanvasInner({
    * keeps "it started" and "you can see it" two different sentences too.
    */
   const createSession = useCallback(
-    async (projectId: string, projectName: string) => {
+    async (projectId: string, projectName: string, paneId?: string) => {
       if (pendingAction !== null) {
         setStatus(
           `something else is still running — no new session in ${projectName}; try again in a moment`,
@@ -1998,16 +4201,38 @@ function CanvasInner({
       }
       const route = newSessionRoute(source);
       if (!route.ok) {
+        // RECORDED, like the identical refusal the "new project" control
+        // raises one function down -- and it was not. The same sentence left a
+        // trace from one button and vanished from the one beside it, while the
+        // status bar it went to is overwritten by the next act, which on this
+        // path is usually the operator pressing the control again. Never as a
+        // failure: this is vam working, and a report is not what it needs.
+        recordRefusal('new session', route.decline);
         setStatus(route.decline);
         return;
       }
       setPendingAction(projectId);
+      // Captured BEFORE the write, so "which session is new" is measured
+      // against what existed when the operator pressed the button.
+      const known = new Set(entriesByIdRef.current.keys());
+      // THE WAIT BECOMES VISIBLE HERE, before the write is even issued --
+      // "immediately" in the operator's request is this line. `paneId` is the
+      // pane the `+` was pressed in; `o` has none and means the focused one.
+      setStarting({
+        projectId,
+        projectName,
+        paneId: paneId ?? focusedPaneIdRef.current,
+        known,
+      });
       // The first half of one sentence: this and the success below are a
       // sequence -- "starting…" then "started … it may take a moment to
       // appear" -- rather than two unrelated remarks about the same click.
       setStatus(`starting a new session in ${projectName}…`);
       try {
         await route.write.createSession?.(projectId, projectName);
+        if (paneId !== undefined) {
+          pendingNewTab.current = { paneId, known };
+        }
         // The write resolves when the SESSION exists, not when the agent
         // inside it has registered where vam can see it -- `tmux new-session
         // -d` returns immediately. So the reload below very often comes back
@@ -2019,6 +4244,10 @@ function CanvasInner({
         setStatus(`started a new session in ${projectName} — it may take a moment to appear`);
         if (source.kind === 'session') source.onWrote();
       } catch (cause) {
+        // NOTHING IS LEFT SPINNING. An indicator that outlived its own failure
+        // is the one state worse than no indicator: it says vam is still
+        // trying when vam has stopped.
+        setStarting(null);
         setStatus(noteFailure('new session', cause));
       } finally {
         setPendingAction(null);
@@ -2026,6 +4255,22 @@ function CanvasInner({
     },
     [source, pendingAction],
   );
+
+  /**
+   * AND IT ENDS WHEN THE ROW ARRIVES -- never when the write resolves.
+   *
+   * Its own effect rather than a branch of `pendingNewTab`'s: that one is
+   * armed only for the pane `+` and only after the write, so the keyboard path
+   * would have had an indicator nothing could clear. Any entry the operator
+   * had not already seen ends the wait; vam cannot know which id the CLI
+   * chose, and the set was captured before the write for exactly that reason.
+   */
+  useEffect(() => {
+    if (starting === null) return;
+    if (allEntries.some((entry) => !starting.known.has(entry.session.id))) {
+      setStarting(null);
+    }
+  }, [allEntries, starting]);
 
   /**
    * New PROJECT: choose a directory, then start a session in it.
@@ -2085,6 +4330,16 @@ function CanvasInner({
         return;
       }
       const name = directoryName(cwd);
+      // THE WAIT BECOMES VISIBLE HERE, exactly where `createSession` arms its
+      // own -- the moment the directory is chosen (its "before the write"),
+      // not after `createSessionIn` resolves. `projectId: null` because this
+      // project has no id yet: there is no section for the sidebar to match
+      // against, so it draws a provisional one instead (`SessionList.tsx`).
+      // `known` is captured BEFORE the write for the same reason `createSession`
+      // captures it there: "which row is new" has to be measured against what
+      // existed when the operator picked the directory.
+      const known = new Set(entriesByIdRef.current.keys());
+      setStarting({ projectId: null, projectName: name, paneId: focusedPaneIdRef.current, known });
       // The first half of one sentence, exactly as `createSession` says it:
       // "starting…" here, "started … it may take a moment to appear" below.
       setStatus(`starting a new session in ${name}…`);
@@ -2093,6 +4348,10 @@ function CanvasInner({
         setStatus(`started a new session in ${name} — it may take a moment to appear`);
         if (source.kind === 'session') source.onWrote();
       } catch (cause) {
+        // NOTHING IS LEFT SPINNING -- the same discipline `createSession`'s
+        // own catch keeps, for the same reason: a wait that outlived this
+        // failure would say vam is still trying when vam has stopped.
+        setStarting(null);
         setStatus(noteFailure('new project', cause));
       }
     } finally {
@@ -2110,6 +4369,56 @@ function CanvasInner({
     const route = newSessionRoute(source);
     return route.ok ? null : route.decline;
   }, [source]);
+
+  /**
+   * A NEW SESSION AS A TAB OF ONE NAMED PANE — the per-pane `+`, and `Mod-t`.
+   *
+   * One function for both, so the button and the key cannot drift into two
+   * behaviours or two refusals. It was the button's inline `onClick` until
+   * `Mod-t` needed the same act; nothing about it changed in the move.
+   *
+   * This pane takes the keyboard first, exactly as clicking one of its tabs
+   * does — pressing `+` in an unfocused pane must not leave the caret in the
+   * pane the session did not land in. (From `Mod-t` the pane is already the
+   * focused one, so that call is a no-op there.)
+   *
+   * WHICH PROJECT: this pane's own front tab, else the first tab it holds —
+   * the same "a new session is born in the focused one's project" rule `o`
+   * follows, read per pane rather than globally.
+   *
+   * An EMPTY pane falls back to the project on screen. It used to name no
+   * directory and refuse, which was fine while the only empty pane was the
+   * pre-load one; since `zv`/`zs` MOVE the active tab, a split leaves an empty
+   * pane every time and its `+` would refuse in the state the operator had
+   * just asked for. `activeProjectId` is not a guess — every strip in the
+   * shell is scoped to it, so it is the project the operator is looking at.
+   * With no active project there is still nothing to name, and the refusal
+   * below stands. THIS FALLBACK IS ALSO THE WHOLE DIFFERENCE FROM `newSession`
+   * (`o`/`Mod-n`), which reads the focused SESSION and refuses when there is
+   * none — see `newTab` in `chords.ts`.
+   *
+   * `entry` and `tabs` are passed rather than read here because the caller
+   * knows which pane it is drawing: `renderLeaf` hands the focused leaf the
+   * filtered `focusedEntry` every other assertion in this file is written
+   * against, and an unfocused leaf its own lookup.
+   */
+  const newTabInPane = useCallback(
+    (paneId: string, entry: SessionEntry | null, tabs: readonly SessionEntry[]) => {
+      setFocusedPaneId(paneId);
+      const target =
+        entry ??
+        tabs[0] ??
+        (activeProjectId === null
+          ? null
+          : (allEntries.find((e) => e.project.id === activeProjectId) ?? null));
+      if (target === undefined || target === null) {
+        setStatus('pick a session first — a new one is started in its project');
+        return;
+      }
+      void createSession(target.project.id, target.project.name, paneId);
+    },
+    [allEntries, activeProjectId, createSession, setFocusedPaneId],
+  );
 
   /**
    * Keep the name the operator just typed. Local by design: `claude agents`
@@ -2145,29 +4454,68 @@ function CanvasInner({
     );
   }, [focusedDecision]);
 
-  const stepSession = useCallback(
+  /**
+   * `gt` / `gT` — THE MOVE THAT THINKS IN PROJECTS.
+   *
+   * It used to be `stepSession`: `entries.findIndex(focused) ± 1`, one row of
+   * the flat session list, under a key sheet that has said `next project` /
+   * `previous project` since the sheet was written. With two sessions in one
+   * project `gt` did not leave the project at all, and where it did leave one
+   * it arrived by counting sessions rather than by looking for a project —
+   * while being an exact second spelling of `j`/`k`, which walk that same
+   * list one row at a time and say so. Two keys doing one thing under a
+   * caption for another is the shape this codebase keeps finding and
+   * deleting; the caption was the honest half, so the behaviour moved to it.
+   *
+   * WHERE IT LANDS: the target project's FIRST entry — its most urgent
+   * session, the top row the sidebar draws under that heading — whichever
+   * direction the cursor arrived from. Walking backwards meets the previous
+   * project's LAST session first, and landing there would make `gT` mean
+   * "the bottom of the project above" while `gt` means "the top of the one
+   * below": one key, two rules, told apart only by which way you pressed. A
+   * project's entry point is its top row, so `gt` then `gT` returns to the
+   * project you left rather than to the exact session — this pair navigates
+   * projects, and `j`/`k` are the keys that go back to a session.
+   *
+   * `entries` is project-major (`orderedSessions`), so a project's sessions
+   * are contiguous and "the next different project id" is genuinely the
+   * adjacent one; the landing lookup scans from the head rather than trusting
+   * that, so a repeated project id could at worst land on the earlier of the
+   * two rather than somewhere unrelated.
+   */
+  const stepProject = useCallback(
     (delta: 1 | -1) => {
-      const index = entries.findIndex((e) => e.session.id === focusedEntry?.session.id);
-      // -1 means the cursor is on nothing this list holds: an empty list, or a
-      // focus the filter or a refresh has just made unreachable. Left to the
-      // arithmetic below it became `-1 + 1 = 0`, which for an empty list read
-      // as "off the end" and announced a LAST session that does not exist,
-      // and for a non-empty one silently jumped to the first row with no word
-      // said. `hjkl` already answers this state honestly one branch away.
-      if (index === -1) {
+      // The cursor on nothing this list holds — an empty list, or a focus the
+      // filter or a refresh has just made unreachable. Left to arithmetic this
+      // read as "off the end" on an empty list and announced a LAST project
+      // that does not exist, and on a non-empty one jumped silently to the
+      // first row. `hjkl` answers this state honestly one branch away and so
+      // does this: the honesty predates the project fix and survives it.
+      const here = focusedEntry;
+      const index = here === null ? -1 : entries.findIndex((e) => e.session.id === here.session.id);
+      if (here === null || index === -1) {
         setStatus('no session matches');
         return;
       }
+      let target: string | null = null;
+      for (let at = index + delta; at >= 0 && at < entries.length; at += delta) {
+        const candidate = entries[at];
+        if (candidate !== undefined && candidate.project.id !== here.project.id) {
+          target = candidate.project.id;
+          break;
+        }
+      }
       // Clamped, not wrapped. Stopping dead is information: it tells you where
-      // you are. Wrapping to the far end tells you nothing.
-      const nextIndex = index + delta;
-      if (nextIndex < 0 || nextIndex >= entries.length) {
-        setStatus(delta > 0 ? 'last session already' : 'first session already');
+      // you are. Wrapping to the far end tells you nothing. And it is refused
+      // ALOUD, because a single-project workspace is exactly where this key
+      // can never act and the operator has no other way to be told.
+      if (target === null) {
+        setStatus(delta > 0 ? 'last project already' : 'first project already');
         return;
       }
-      const target = entries[nextIndex];
-      if (target !== undefined) {
-        focusSession(target.session.id);
+      const landing = entries.find((e) => e.project.id === target);
+      if (landing !== undefined) {
+        focusSession(landing.session.id);
       }
     },
     [entries, focusedEntry, focusSession],
@@ -2195,6 +4543,28 @@ function CanvasInner({
       }
 
       /**
+       * AND THE SAME CONCESSION TO A FOCUSED BUTTON, for Enter and Space.
+       *
+       * A button has an activation behaviour of its own, and this listener
+       * cancelled it: `Enter` resolves as the `open` chord, `preventDefault`
+       * follows, and the browser's click never fires. So `ViewIcons`' comment
+       * promised "Enter and Space activate it" while only Space worked (audit
+       * F5), and a tab's `×` closed on Space and did nothing on Enter (audit
+       * F4). Both are the same swallow, and this is the same shape of rule the
+       * `typing` guard above already is: a control that has the focus has
+       * first claim on the keys that operate it.
+       *
+       * Scoped to those two keys and to a real button, so nothing else is
+       * given away — `Enter` anywhere but on a control is still `open`, and
+       * `j` on a focused button is still `move`.
+       */
+      const onButton =
+        target instanceof HTMLElement && target.closest('button, [role="button"]') !== null;
+      if (onButton && (event.key === 'Enter' || event.key === ' ')) {
+        return;
+      }
+
+      /**
        * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
        *
        * The options list of an open question is a real widget with its own
@@ -2207,8 +4577,9 @@ function CanvasInner({
        *
        * It is deliberately not `stopPropagation` on the other side. The list
        * handles some keys and not others, and the ones it does not handle
-       * (`Escape`, `H`) are exactly the ways OUT of it: swallowing everything
-       * would strand the keyboard in a list it could not leave.
+       * (`Escape`, `Mod-Shift-h`, `Mod-0`) are exactly the ways OUT of it:
+       * swallowing everything would strand the keyboard in a list it could
+       * not leave.
        */
       if (event.defaultPrevented) {
         return;
@@ -2254,12 +4625,27 @@ function CanvasInner({
         event.preventDefault();
         const hit = [...labels.entries()].find(([, label]) => label === key);
         setJumping(false);
-        if (hit !== undefined) {
-          setFocusedId(hit[0]);
+        if (hit === undefined) {
+          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
+          // it is is what lets a label reuse a bound letter, and it left a
+          // mistyped label indistinguishable from a dead application: the
+          // labels vanished, the cursor stayed, and nothing said why. The
+          // dismissal itself is right and stays — the labels are off the
+          // screen by the time the key is read, so waiting for a second guess
+          // would be waiting with nothing left to read the guess off.
+          setStatus(`nothing is labelled "${key}" — jump cancelled`);
+          return;
         }
+        setStatus(null);
+        setFocusedSessionId(hit[0]);
         return;
       }
 
+      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
+      // `resolveChord` clears the one-key memory, so after it runs there is no
+      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
+      // below turns on exactly that difference (`isSelectOnlyChord`).
+      const typed: Chord = { prefix: chord.current.pending ?? '', key };
       const step = resolveChord(chord.current, key);
       chord.current = step.state;
       const action = step.action;
@@ -2268,25 +4654,163 @@ function CanvasInner({
         if (step.state.pending !== null) {
           event.preventDefault();
         }
+        /**
+         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
+         *
+         * `resolveChord` abandons `gx` rather than letting `x` mean what a
+         * bare `x` means, which is the right call and is not what changed:
+         * `gx` closing the focused session would be the expensive mistake.
+         * What changed is that not ACTING was being spelled as not SAYING
+         * ANYTHING, so two keystrokes produced an unchanged screen and no way
+         * to tell an unbound pair from a frozen app.
+         *
+         * The plain `action === null` around it stays silent on purpose. Every
+         * unbound letter, function key and media key on the board arrives
+         * here, and a bar that answered all of them would be a bar nobody is
+         * still reading when a real refusal lands. `abandoned` is the narrow
+         * case: a prefix was typed, so the operator was deliberately spelling
+         * something out.
+         */
+        if (step.abandoned !== null) {
+          setStatus(
+            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
+          );
+        }
         return;
       }
+      /**
+       * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
+       * arrives, and never of React state.
+       *
+       * `keyboard/focus-scope.ts` carries the rule and the four findings that
+       * produced it. What is worth saying HERE is why it is read at the top of
+       * the handler rather than closed over: this listener is registered by an
+       * effect, so a `mode` variable in scope is whatever the last render put
+       * there — and the whole class of bug being removed is a mode that had
+       * stopped being true. `document.activeElement` cannot be stale.
+       *
+       * READ BEFORE `preventDefault`, not after, and that ordering is the
+       * whole of the stand-down below: a chord this grammar declines has to be
+       * declined BEFORE the default is cancelled, or the key is dead in the
+       * text box either way — swallowed silently instead of acted on, which is
+       * the worse of the two.
+       */
+      const cursorMode = cursorModeAt(document.activeElement);
+
+      /**
+       * A CHORD THE SURFACE UNDER THE CARET ALREADY OWNS IS NOT THIS
+       * GRAMMAR'S — the typing guard's own argument, one step further on.
+       *
+       * That guard lets `Mod-` chords past a focused INPUT|TEXTAREA because "a
+       * Cmd/Ctrl chord is never text entry — no layout produces a character
+       * from one", which is true OF CHARACTERS and says nothing about editing
+       * commands. `Ctrl-D` is delete-forward in every macOS text view,
+       * `Ctrl-U` deletes to the start of the line, and `Ctrl-D` is EOF in a
+       * shell. Taking those globally would break editing in the composer to
+       * add a scroll gesture (`isSelectOnly`, `keyboard/chords.ts`).
+       *
+       * ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, which is also what
+       * reaches the TERMINAL PANE: it is a `section` carrying
+       * `data-insert-scope`, invisible to any INPUT|TEXTAREA test, and the one
+       * surface where `Ctrl-D` means most. It already hands every Ctrl chord
+       * back to this listener untouched, so this is the only thing standing
+       * between a terminal and a scroll gesture it never asked for.
+       *
+       * NO REFUSAL IS SPOKEN. The key was not declined, it was never claimed —
+       * a status line here would answer a keystroke the operator aimed at the
+       * box they are typing in.
+       */
+      /**
+       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
+       * ACT is welcome under a caret but whose SPELLING is not.
+       *
+       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
+       * chord — no layout makes a character out of one — and reaching the
+       * Terminal view from inside the prompt box is deliberate, tested and
+       * captioned. A bare `3` is text: it types a digit into every box on
+       * screen, and it is the question card's own option mark
+       * (`resolveQuestionKey`). One is the grammar's in both modes and the
+       * other in Select alone, which is why this predicate reads the CHORD and
+       * `isSelectOnly` above reads the ACTION. Widening either to cover both
+       * would take a working binding away.
+       *
+       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
+       * this handler reads INPUT|TEXTAREA — which is every text box in the
+       * shell, the composer, the palette filter, the search line, a rename
+       * field, the Files filter, and the terminal's own hidden compose box —
+       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
+       * whose keys go into somebody's running agent. That pane claims its own
+       * printable keys while it has a bridge to send them down and hands them
+       * back when it has none, so without this a bridgeless build would answer
+       * a digit aimed at an agent by switching the view under it.
+       *
+       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
+       * one. The `typing` clause at the top already returns for a focused
+       * INPUT|TEXTAREA — the composer, the palette filter, the session search
+       * line, a rename field, the Files tab's filter and its "new file" box
+       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
+       * lean on the tag name alone). Those boxes keep their digit whether or
+       * not this line exists; what only this line can reach is an insert scope
+       * that is no text box.
+       *
+       * The silence above applies unchanged: the key was never claimed.
+       */
+      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
+        return;
+      }
+
       event.preventDefault();
       setStatus(null);
 
       switch (action.kind) {
         case 'move': {
-          if (mode === 'insert' && (action.direction === 'down' || action.direction === 'up')) {
-            // In the action pane the vertical axis belongs to the actions —
-            // every command the step proposed, and the prompt last.
+          if (
+            cursorMode === 'insert' &&
+            (action.direction === 'down' || action.direction === 'up')
+          ) {
+            /**
+             * In the action pane the vertical axis belongs to the actions —
+             * every command the step proposed, and the prompt last.
+             *
+             * IT REFUSES WHEN IT CANNOT MOVE, because for a year it could
+             * never move: the commands left the pane for the `!` typeahead
+             * and `buildActions` has returned ONE entry ever since, so the
+             * clamp was arithmetic that always came back with the index it
+             * was given, and `j` in Insert was a key that did nothing and
+             * said nothing. Nothing here can be withdrawn instead — the same
+             * `j` walks an open question's options — so it says so.
+             *
+             * The word "prompt" is keyed off the action's own kind rather
+             * than written into the sentence: one stop that is the prompt is
+             * a fact worth naming, and a second stop, or a different one,
+             * gets the plain boundary sentence `j`/`k` already give the
+             * session list.
+             */
             const delta = action.direction === 'down' ? 1 : -1;
-            setActionIndex((current) => clampIndex(current + delta, actions.length));
+            const next = clampIndex(actionIndex + delta, actions.length);
+            if (next === actionIndex) {
+              const only = actions.length === 1 ? actions[0] : undefined;
+              setStatus(
+                only?.kind === 'prompt'
+                  ? `nothing lies ${action.direction} — the prompt is this pane's only stop`
+                  : `nothing lies ${action.direction}`,
+              );
+              return;
+            }
+            setActionIndex(next);
             return;
           }
-          if (mode === 'insert' && action.direction === 'left') {
-            setMode('select');
+          if (cursorMode === 'insert' && action.direction === 'left') {
+            // `h` is the way BACK out of Insert, and it has to move the
+            // keyboard to be that — the flag it used to set left focus where
+            // it was, so the key that meant "leave" also left the pane still
+            // eating keys. Reached only when the question card did not answer
+            // `h` itself (`event.defaultPrevented`, above), which is what
+            // keeps a walk between two real steps of a question inside it.
+            releaseInsert(document.activeElement);
             return;
           }
-          if (mode === 'insert') {
+          if (cursorMode === 'insert') {
             // `right` — the fourth direction, and the one that had no branch.
             // Insert owns all of `hjkl` or none of it: while a question is
             // open the listbox handles `l` itself and this never runs, but
@@ -2296,34 +4820,40 @@ function CanvasInner({
             // "the keys work, they just do the wrong thing" failure the mode
             // naming exists to end, so the grammar closes it here rather than
             // leaving it to a DOM focus that can be dropped.
+            //
+            // NOT SILENTLY, though, which is what it was: an unconditional
+            // `return`. The reasoning above is an argument for not ACTING,
+            // never one for saying nothing — the operator pressing `l` in
+            // Insert is asking for the one thing `l` does there, the next
+            // step of a question, and the honest answer is that there is no
+            // step to walk. Reached only when the card did not answer the key
+            // itself (`event.defaultPrevented`, above), so a walk between two
+            // real steps is as quiet as it ever was.
+            setStatus(`nothing lies ${action.direction} — only an open question has steps to walk`);
             return;
           }
-          // The cursor can be left on a node the filter has just made
+          // The cursor can be left on a session the filter has just made
           // unreachable. Land on the first survivor rather than navigating from
-          // a node that is no longer in the set — `nextNode` throws on an origin
-          // it cannot find, and rightly so.
-          if (focusedId === null || !nodeIds.includes(focusedId)) {
-            const first = nodeIds[0] ?? null;
+          // a session that is no longer in the set.
+          if (focusedSessionId === null || !sessionIds.includes(focusedSessionId)) {
+            const first = sessionIds[0] ?? null;
             if (first === null) {
               setStatus('no session matches');
               return;
             }
-            setFocusedId(first);
+            setFocusedSessionId(first);
             return;
           }
           /**
-           * Vertical is the LIST; horizontal is the canvas.
+           * Vertical is the LIST; horizontal is the TAB STRIP.
            *
            * `j`/`k` walk the sidebar's own order, one session at a time, and
-           * land on that session's card. They used to walk canvas geometry,
-           * which is a different order: with two projects side by side, `j`
+           * land on that session's row. They used to walk canvas geometry,
+           * which was a different order: with two projects side by side, `j`
            * from the first session went to the one physically below it — in
            * the other column — rather than to the next row in the list you are
            * reading. The sidebar is how sessions are enumerated, so it is what
            * "next session" has to mean.
-           *
-           * `h`/`l` keep the spatial walk, which is what they are for: moving
-           * along a session's own row, card to step to step.
            */
           if (action.direction === 'down' || action.direction === 'up') {
             const at = entries.findIndex((e) => e.session.id === focusedSessionId);
@@ -2341,97 +4871,257 @@ function CanvasInner({
             focusSession(next.session.id);
             return;
           }
-          // Live geometry, read now — not a list captured at render time —
-          // over the WHOLE laid-out set, not only what the canvas draws.
-          // `getNodes` returns what ReactFlow was given, which in the strip is
-          // the focused session alone; navigating that would make `l` answer
-          // "nothing lies right" at the edge of a cell while the sidebar still
-          // lists the session sitting beside it. The strip narrows what is
-          // drawn, never what the model holds, so the undrawn nodes fall back
-          // to their laid-out rectangles — the same ones `layoutCanvas`
-          // computed for them — and every other consumer's rule holds here too.
-          const drawn = new Map(
-            (getNodes() as unknown as FlowNodeLike[]).map((node) => [node.id, node]),
-          );
-          const live = toNavNodes(
-            (initialNodes as unknown as FlowNodeLike[]).map((node) => drawn.get(node.id) ?? node),
-            nodeIds,
-          );
-          const landed = nextNode(live, focusedId, action.direction);
-          if (landed === null) {
-            setStatus(`nothing lies ${action.direction}`);
-          } else {
-            setFocusedId(landed);
-          }
-          return;
-        }
-        case 'first':
-          setFocusedId(nodeIds[0] ?? null);
-          return;
-        case 'last': {
-          const lastEntry = entries[entries.length - 1];
-          if (lastEntry !== undefined) {
-            focusSession(lastEntry.session.id);
-          }
-          return;
-        }
-        case 'position': {
           /**
-           * One digit, two meanings, and `pane` is what decides — the same
-           * state the status-bar mode cell reads, deliberately not a second
-           * notion of where focus is.
+           * `h`/`l` used to keep a spatial walk along a session's own row of
+           * graph cards; the graph is gone, and this branch was re-homed to
+           * the (then-global) open tab set in the same commit as the
+           * deletion. A13.1 scopes it again: previous/next tab OF THE
+           * ACTIVE PROJECT (`projectTabIds`), Select mode only (the `mode
+           * === 'insert'` branches above already returned).
            *
-           * In the response pane the digit is a TAB. Past the four that exist
-           * it says so and stops: falling through to the sidebar would move a
-           * cursor in a pane the operator is not looking at, which is the
-           * failure this whole change is about, and silence would leave them
-           * pressing it again. Refusing out loud is what the sidebar half
-           * below already does for an out-of-range row.
+           * WRAPPING FOLLOWS THE THING TRAVERSED, NOT THE KEY. `j`/`k`, just
+           * above, walk an open-ended list where "the last one" is a real
+           * place worth stopping at and announcing, so they do not wrap.
+           * `h`/`l` walk a closed ring — the active project's tabs — the same
+           * shape every tab strip's own arrow keys already have, so they do
+           * — including the degenerate one-tab ring, which wraps to the tab
+           * already focused rather than refusing. An EMPTY ring (nothing
+           * focused, so no active project) is the one case with no ring to
+           * wrap around, so that is what gets a status message.
            */
-          if (mode === 'insert') {
-            if (!visible.detail) {
-              setStatus('the detail pane is hidden — z0 brings it back');
-              return;
-            }
-            // THE DRAWN LIST, not the constant. A source with no terminal
-            // has that tab withdrawn and everything after it moves up a
-            // position, so indexing the constant opened a tab that was not
-            // there -- accepted, then silently reverted to Response -- and
-            // refused with a count the operator could see was wrong.
-            const drawn = visibleTabs(terminalTab);
-            const tab = drawn[action.digit - 1];
-            if (tab === undefined) {
-              setStatus(`only ${drawn.length} tab${drawn.length === 1 ? '' : 's'}`);
-              return;
-            }
-            setTabRequest({ tab });
+          if (projectTabIds.length === 0) {
+            setStatus('no tabs open');
             return;
           }
-          // `entries` is what the sidebar prints — filter, status pills and
-          // all — so the digits count the rows the operator can see. Counting
-          // the whole model would land the cursor somewhere nobody is looking.
-          //
-          // 9 is the LAST row whatever the count, the convention every browser
-          // tab bar taught, and far more use than a ninth position once the
-          // list outgrows nine.
+          const at = focusedSessionId === null ? -1 : projectTabIds.indexOf(focusedSessionId);
+          if (at === -1) {
+            const first = projectTabIds[0] as string;
+            focusSession(first);
+            return;
+          }
+          const delta = action.direction === 'right' ? 1 : -1;
+          const nextTab = projectTabIds[(at + delta + projectTabIds.length) % projectTabIds.length];
+          if (nextTab !== undefined) {
+            focusSession(nextTab);
+          }
+          return;
+        }
+        /**
+         * THE TWO ENDS OF THE LIST — and, with no list, the same sentence
+         * every neighbour in this switch already says.
+         *
+         * Both used to read the row and move focus only if one came back,
+         * which on an empty list is a keypress that does nothing and says
+         * nothing. `hjkl` and `gt`/`gT` have answered this state honestly for
+         * as long as they have had the branch; these two were the pair that
+         * never learnt it, and an empty list is precisely where `gg` and `G`
+         * can never act.
+         */
+        case 'first': {
+          const first = entries[0];
+          if (first === undefined) {
+            setStatus('no session matches');
+            return;
+          }
+          focusSession(first.session.id);
+          return;
+        }
+        case 'last': {
+          const lastEntry = entries[entries.length - 1];
+          if (lastEntry === undefined) {
+            setStatus('no session matches');
+            return;
+          }
+          focusSession(lastEntry.session.id);
+          return;
+        }
+        case 'selectTab': {
+          /**
+           * ONE DIGIT, ONE MEANING, IN EITHER CURSOR MODE: the session tab at
+           * that position ON SCREEN.
+           *
+           * `drawnTabsAcrossPanes` is every strip's own list, concatenated in
+           * pane order and derived by the very expression that draws each of
+           * them (`drawnPaneTabs`), so "the tab at position N" can only ever
+           * mean the tab an operator can point at. The two mistakes this
+           * family has already made were both a handler counting a list of its
+           * own: the constant while the bar drew a filtered one, then the
+           * drawn one positionally on a route that was supposed to be by name.
+           *
+           * ACROSS PANES, not within the focused one — the fifth arrangement
+           * of this row, argued in `chords.ts` with the cost it carries. A
+           * split is one screen; under the per-pane rule the same digit named
+           * different tabs depending on which half last held the keyboard, and
+           * the tabs in the other half had no number at all. Landing on a tab
+           * another pane holds moves the keyboard there, which `focusSession`
+           * already does for a sidebar pick of the same session.
+           *
+           * Refused out loud both ways, and never clamped: a jump that
+           * silently lands one short is worse than one that does not happen,
+           * because you only find out by reading where you ended up. No tabs
+           * at all and an out-of-range digit are two different facts and get
+           * two sentences.
+           */
+          if (drawnTabsAcrossPanes.length === 0) {
+            setStatus('no tabs open');
+            return;
+          }
+          // 9 is the LAST tab whatever the count, the convention every browser
+          // tab bar taught — and it is what keeps a tenth tab reachable now
+          // that the digits count one list rather than one strip each.
           const target =
-            action.digit === 9 ? entries[entries.length - 1] : entries[action.digit - 1];
+            action.digit === 9
+              ? drawnTabsAcrossPanes[drawnTabsAcrossPanes.length - 1]
+              : drawnTabsAcrossPanes[action.digit - 1];
           if (target === undefined) {
-            // Refused out loud, and not clamped to the last row: a jump that
-            // silently lands one short is worse than one that does not happen,
-            // because you only find out by reading where you ended up.
-            setStatus(
-              entries.length === 0
-                ? 'no session matches'
-                : `only ${entries.length} session${entries.length === 1 ? '' : 's'} in view`,
-            );
+            const count = drawnTabsAcrossPanes.length;
+            // The count is of every pane, because that is the list the digit
+            // addresses. A sentence about "this pane" would be about a
+            // different list from the one that just refused.
+            setStatus(`only ${count} tab${count === 1 ? '' : 's'} open`);
             return;
           }
           focusSession(target.session.id);
           return;
         }
+        case 'stepTab': {
+          /**
+           * `Mod-Shift-[` / `Mod-Shift-]` — one step along the SAME list the
+           * digits address, wrapping at both ends.
+           *
+           * A ring rather than a run with two stops: this walks a tab strip,
+           * and every tab strip's own arrows wrap. `j`/`k` do not, and the
+           * distinction is the thing traversed rather than the key — an
+           * open-ended session list has a last row worth stopping at and
+           * announcing; a strip does not.
+           *
+           * With the cursor on nothing the list holds — an empty pane has the
+           * keyboard — it lands on the first tab rather than refusing, exactly
+           * as `h`/`l` do from the same state.
+           */
+          if (drawnTabsAcrossPanes.length === 0) {
+            setStatus('no tabs open');
+            return;
+          }
+          const at =
+            focusedSessionId === null
+              ? -1
+              : drawnTabsAcrossPanes.findIndex((e) => e.session.id === focusedSessionId);
+          const count = drawnTabsAcrossPanes.length;
+          const landing =
+            at === -1
+              ? drawnTabsAcrossPanes[0]
+              : drawnTabsAcrossPanes[(at + action.delta + count) % count];
+          if (landing !== undefined) {
+            focusSession(landing.session.id);
+          }
+          return;
+        }
+        case 'pickView': {
+          /**
+           * One digit, one VIEW, in either cursor mode — the difference from
+           * `selectTab` directly above, which counts the SESSION TABS of the
+           * same pane. Two families, one digit row each, told apart by the
+           * modifier alone: Cmd picks a tab, Alt picks a view.
+           *
+           * THROUGH `tabForDigit`, the one place a digit becomes a name
+           * (A5.4/A15.6). Never an index into the drawn list: `visibleTabs`
+           * withdraws Terminal without renumbering what follows it, so
+           * counting positions there makes Agents answer to Terminal's digit
+           * the moment the source has no terminal, and its own again the
+           * moment it does.
+           *
+           * Two refusals, because they are two facts — the wording the
+           * panel's own listener carried before this one replaced it: a
+           * digit inside `TABS` names a real view THIS SOURCE has withdrawn,
+           * and a digit past `TABS` names nothing at all.
+           */
+          const drawn = visibleTabs(terminalTab, filesTab);
+          const view = tabForDigit(drawn, action.digit);
+          if (view === undefined) {
+            const named = TABS[action.digit - 1];
+            setViewNote(
+              named === undefined
+                ? `no view ${action.digit} — only ${drawn.length} shown (${drawn.join(', ')})`
+                : // FILES IS NOT A SOURCE CAPABILITY, so "this source has
+                  // none" would name the wrong reason: no source declares a
+                  // file bridge and none ever will (`tabs.ts`'s own header),
+                  // and the operator could go looking for a setting on a
+                  // source that has no say in it. The bridge is the desktop
+                  // app's, so that is what the refusal says.
+                  named === 'Files'
+                  ? 'Files — only the desktop app can edit files'
+                  : `${named} — this source has none`,
+            );
+            return;
+          }
+          setViewNote(null);
+          // WRITTEN, NOT REQUESTED. This used to `setTabRequest({ tab: view })`
+          // and let the panel hold the answer, which was right while the view
+          // was the panel's own state. It is this session's fact now, and the
+          // chord means "the session the keyboard is in", so the one writer
+          // writes it. A request object would be a second writer whose value
+          // outlives the press -- it never resets to null, so moving focus
+          // between panes re-delivered the last press to a pane that never
+          // heard it.
+          if (focusedSessionId !== null) setViewFor(focusedSessionId, view);
+          return;
+        }
+        case 'scrollHalf': {
+          /**
+           * HALF A SCREEN OF TRANSCRIPT, vim's `Ctrl-D` / `Ctrl-U`.
+           *
+           * THE FOCUSED PANE'S COLUMN, and nothing else on screen —
+           * `paneColumn` says why it is scoped rather than found by a
+           * document-wide query.
+           *
+           * INSTANT, NOT SMOOTH, and that is a decision rather than the
+           * absence of one. `scrollTo({ behavior: 'smooth' })` animates over
+           * ~300ms, and a second press landing mid-animation is measured from
+           * wherever the animation has got to — so holding the key travels an
+           * unpredictable distance and stopping is a guess. Vim's own is
+           * instant for the same reason: a repeated motion key has to be
+           * composable with itself.
+           *
+           * AND IT ASKS THE PAGER FOR NOTHING. Writing `scrollTop` fires the
+           * column's own `scroll` event, and the column already reads earlier
+           * turns in when that event arrives near the top
+           * (`askIfNearTop`/`readOlder` in `DetailPanel.tsx`) — the operator's
+           * own "load more when scrolling up", which is a rule about the
+           * SCROLL and not about the mouse. So `Mod-u` gets the paging for
+           * free and, more to the point, gets the paging's own refusals for
+           * free: a source that cannot page, a proven start and a read that
+           * just failed all fall through there rather than being re-decided
+           * here. A `readOlder()` call of its own would be a second trigger to
+           * keep in step with that one, and would fire a fetch on every press
+           * at the top — including the one press that is only a retry loop
+           * nobody asked for.
+           */
+          const box = paneColumn(focusedPaneId);
+          if (box === null) {
+            setStatus('nothing to scroll — this pane is not showing a transcript');
+            return;
+          }
+          const target = halfPageTarget(box, action.delta);
+          // NOT SILENTLY. The scroller is already resting against that end, so
+          // there is nothing to do and no control to withdraw — a key cannot be
+          // taken off the screen — which leaves saying so. The top's sentence
+          // deliberately claims nothing about the SESSION: there may well be
+          // more of it, and the column's own head is the one surface allowed to
+          // say whether there is.
+          if (target === null) {
+            setStatus(
+              action.delta === 1
+                ? 'already at the bottom — that is the newest turn'
+                : 'already at the top — the column’s head says if there is more',
+            );
+            return;
+          }
+          box.scrollTop = target;
+          return;
+        }
         case 'project':
-          stepSession(action.delta);
+          stepProject(action.delta);
           return;
         case 'jump':
           setJumping(true);
@@ -2440,7 +5130,7 @@ function CanvasInner({
           void copyAllCommands();
           return;
         case 'search':
-          searchOrigin.current = focusedId;
+          searchOrigin.current = focusedSessionId;
           setQuery('');
           setFiltering(true);
           return;
@@ -2470,42 +5160,67 @@ function CanvasInner({
         case 'filterMenu':
           setFilterMenuOpen((open) => !open);
           return;
-        case 'focusAction':
+        case 'focusAction': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
             return;
           }
-          // The second half of the action-parity invariant: the cursor may
-          // only enter a pane that is DRAWN. Without this, `I` sets 'action' on an
-          // unmounted detail pane and every `j`/`k`/Enter after it walks and
-          // fires actions nothing is showing.
-          if (!visible.detail) {
-            setStatus('the detail pane is hidden — z0 brings it back');
+          /**
+           * `I` IS A FOCUS MOVE, and Insert is what having moved it is called.
+           *
+           * It used to be `setMode('insert')` and nothing else, with the pane
+           * left to notice the flag and focus something — which it only did
+           * when a question was open (audit F5). With no question, the mode
+           * read Insert while `document.activeElement` was still the body, so
+           * `hjkl` fell through to the canvas grammar under the pane being
+           * read: precisely the "the keys work, they just do the wrong thing"
+           * failure the mode naming exists to end.
+           *
+           * `focusInsertStop` lands on THIS pane's first stop in document
+           * order — the question's options when a question is open, the
+           * prompt row otherwise — and reports whether it landed. A `false`
+           * is a real state (a pane with no session, or a source with no
+           * route to record a prompt, draws no composer at all) and gets a
+           * sentence rather than a mode nothing can act in.
+           */
+          const landed = focusInsertStop(paneElement(focusedPaneId));
+          if (!landed) {
+            setStatus('nothing in this pane takes the keyboard — no question and no prompt box');
             return;
           }
-          setMode('insert');
           setActionIndex(0);
           return;
+        }
         case 'focusList':
-          setMode('select');
+          // `Mod-Shift-h` / `Mod-0` ARE THE FOCUS MOVE BACK — audit F4.
+          // Setting the flag was all this used to do, so the bar read Select
+          // while a now read-only textarea still held the keyboard and the
+          // window listener's own typing guard ate every bare `j` that
+          // followed. `releaseInsert` blurs whatever is in an insert scope,
+          // which is the exit `Escape` in the composer already took and this
+          // one did not.
+          releaseInsert(document.activeElement);
           setComposing(false);
+          // AND SAID ALOUD WHEN THERE WAS NOWHERE TO COME BACK FROM. Every
+          // other navigation key in this switch refuses out loud at the edge
+          // of what it walks — `hjkl`, `gg`/`G`, `gt`/`gT` all do, and
+          // `chords.ts` states that as the house rule. This one did not:
+          // `releaseInsert` returning `false` and `setComposing(false)` being
+          // a no-op both look like success from here, so pressing it with the
+          // keyboard already on the session list did nothing and said
+          // nothing. `cursorMode` is read at the top of this handler, before
+          // this case ran anything, so it names the mode the keypress
+          // actually found.
+          if (cursorMode === 'select') {
+            setStatus('the keyboard is already on the session list');
+          }
           return;
         case 'rename':
           if (focusedEntry === null) {
             setStatus('pick a session first');
             return;
           }
-          if (focusedEntry.project.source === undefined) {
-            setStatus('this project has no source — rename unavailable');
-            return;
-          }
-          setRenameDraft(focusedEntry.session.title);
-          setRenameTarget({
-            source: focusedEntry.project.source,
-            sessionId: focusedEntry.session.id,
-            title: focusedEntry.session.title,
-          });
-          setRenamingId(focusedEntry.session.id);
+          beginSessionRename(focusedEntry);
           return;
         case 'icon':
           if (focusedEntry === null) {
@@ -2531,6 +5246,22 @@ function CanvasInner({
             return;
           }
           void createSession(focusedEntry.project.id, focusedEntry.project.name);
+          return;
+        case 'newTab':
+          // `Mod-t` — the FOCUSED PANE's own `+`, down to the same function
+          // its button calls, so the key and the button cannot come to mean
+          // two things or refuse in two ways. The difference from `newSession`
+          // directly above is which project it resolves and when it refuses;
+          // `newTabInPane` states it, and `chords.ts` argues it.
+          newTabInPane(focusedPaneId, focusedEntry, focusedPaneTabs);
+          return;
+        case 'newProject':
+          // `Mod-p` — the Projects header's `+`, down to the same function
+          // that button calls, so the key and the control cannot come to mean
+          // two things or refuse in two ways. Nothing is decided here:
+          // `newProject` owns the three refusals, the picker and the pending
+          // state, and this case exists only to reach it.
+          void newProject();
           return;
         case 'settings':
           setSettingsSection('appearance');
@@ -2565,76 +5296,79 @@ function CanvasInner({
           });
           return;
         case 'resizePane': {
-          // Which pane owns the keyboard right now decides which one moves —
-          // the same `pane` state `I`/`H` already set, nothing new (epic.md §4.5).
-          const target: 'sidebar' | 'detail' = mode === 'insert' ? 'detail' : 'sidebar';
-          // A width you cannot see change is a keypress that did nothing and
-          // said nothing. The `I` guard above keeps the cursor off a hidden
-          // detail pane, but the sidebar can be hidden under a cursor that is
-          // legitimately on the list, so this one is not redundant.
-          if (!visible[target]) {
-            setStatus(`the ${target} pane is hidden — z0 brings it back`);
-            return;
-          }
-          const step = action.delta * PANE_RESIZE_STEP;
-          savePrefs(setPaneWidth(prefs, target, prefs.panes[target] + step));
+          // A12.1: the detail pane no longer has a width of its own to
+          // drag — it fills everything to the sidebar's right (`panes.ts`)
+          // — so the sidebar is the only real knob left, regardless of
+          // which pane the keyboard is in. Writing to `prefs.panes.detail`
+          // here, the way this case did before the canvas column left,
+          // would be the exact "silence must not look like success" defect
+          // this codebase keeps finding: a keypress that changes a stored
+          // number nothing ever reads again.
+          //
+          // In Insert the seam is approached from the OTHER side: "widen
+          // the pane I am in" (the detail pane) means "shrink the sidebar",
+          // so the sign flips. In Select it is the sidebar's own edge, sign
+          // unchanged — the same `cursorMode` above decides which. There is
+          // no `pane` state to read it off: the mode is derived from where
+          // `document.activeElement` sits (`cursorModeAt`,
+          // `keyboard/focus-scope.ts`), the same fact `I` moves it into and
+          // `Mod-Shift-h` / `Mod-0` hand it back out of (epic.md §4.5).
+          const sign = cursorMode === 'insert' ? -1 : 1;
+          const step = action.delta * sign * PANE_RESIZE_STEP;
+          savePrefs(setPaneWidth(prefs, 'sidebar', prefs.panes.sidebar + step));
           return;
         }
         case 'resetPanes':
-          // `z0` restores VISIBILITY as well as the two widths. It is the only
-          // "put it back" key, and the person most likely to press it is the
-          // one who just hid the wrong pane and cannot see the chord table any
-          // more — so the narrow reading ("widths only") would answer that
-          // person with a layout that still has a column missing, and set both
-          // widths they cannot see while it did. Restoring the shipped layout
-          // is one idea, not two.
-          setMode('select');
+          // `z0` is a WIDTH reset now, and only that. It used to restore
+          // visibility as well, because the person most likely to press it
+          // was the one who had just hidden the wrong pane and could no
+          // longer see the chord table. Nothing can hide a pane any more
+          // (the settings section that could is gone), so there is no
+          // visibility left to lose and none to put back: the two widths
+          // are the whole of what `z0` undoes.
+          //
+          // It hands the keyboard back with them, as it always has — now by
+          // really releasing it rather than by writing Select over a focus
+          // still sitting in a pane.
+          releaseInsert(document.activeElement);
           savePrefs(
-            setPaneVisibility(
-              setPaneWidth(
-                setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
-                'detail',
-                DEFAULT_PANES.detail,
-              ),
-              ALL_VISIBLE,
+            setPaneWidth(
+              setPaneWidth(prefs, 'sidebar', DEFAULT_PANES.sidebar),
+              'detail',
+              DEFAULT_PANES.detail,
             ),
           );
           return;
-        case 'zoom':
-          // The same two functions the zoom buttons already call — no second
-          // path, just a key reaching the one that exists.
-          if (action.delta === 1) {
-            zoomIn();
-          } else {
-            zoomOut();
-          }
-          return;
-        case 'fitView':
-          fitView();
-          return;
-        case 'layout': {
-          const next = setLayout(prefs, action.name);
-          const shown = next.paneVisibility;
-          // Hiding the pane the keyboard is in strands the cursor in a pane
-          // nothing draws — the same defect the `I` guard refuses, arriving
-          // from the other side, so the layout has to move the focus itself.
-          //
-          // Both directions are live. Losing the detail pane sends the
-          // keyboard back to 'list', the fallback the composer and Escape
-          // already use. Losing BOTH the sidebar and the canvas is the same
-          // problem mirrored: 'list' is drawn by those two — the row's focus
-          // ring and the card's — so with neither on screen a list cursor is
-          // pointing at nothing, and the only pane left is the one to be in.
-          if (!shown.detail && mode === 'insert') {
-            setMode('select');
-            setComposing(false);
-          } else if (!shown.sidebar && !shown.canvas && mode === 'select') {
-            setMode('insert');
-            setActionIndex(0);
-          }
-          savePrefs(next);
+        case 'toggleFocusView': {
+          // THE SAME WRITE THE SETTINGS SWITCH MAKES, through `savePrefs` --
+          // not a second path that sets the module store directly. A keystroke
+          // that changed the screen without storing the choice would come back
+          // undone on the next reload, and one that stored it without going
+          // through `activatePrefs` would not reach the mounted columns at
+          // all; `setFocusView` plus `savePrefs` is the one seam both surfaces
+          // already share.
+          const next = !prefs.focusView;
+          savePrefs(setFocusView(prefs, next));
+          // SAID OUT LOUD, because this is the one surface where the change is
+          // invisible until you look at a turn: the settings row draws its own
+          // state, the keystroke draws nothing. `zf` on a column of failing
+          // turns would otherwise look like a key that did nothing.
+          setStatus(
+            next
+              ? 'focus view on — each turn’s working is folded, ··· brings one back'
+              : 'focus view off — every turn draws its working again',
+          );
           return;
         }
+        case 'splitPane':
+          splitFocused(action.orientation);
+          return;
+        case 'closeSplit':
+          closeFocusedSplit();
+          return;
+        case 'stepSplit':
+          stepFocusedSplit(action.delta);
+          return;
         case 'prompt': {
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -2657,7 +5391,7 @@ function CanvasInner({
           return;
         }
         case 'open': {
-          if (mode !== 'insert') {
+          if (cursorMode !== 'insert') {
             setStatus('the full detail is already in the right panel');
             return;
           }
@@ -2682,7 +5416,12 @@ function CanvasInner({
           setRenamingId(null);
           setPickingIconFor(null);
           setConfirmForceClose(null);
-          setMode('select');
+          // The last layer Escape peels is the keyboard itself, and peeling it
+          // is a blur. Note that an Escape typed INSIDE the composer never
+          // reaches here — that box binds its own, blurs itself and stops the
+          // key — so this is the shell-level Escape, from an option list or
+          // from nowhere in particular.
+          releaseInsert(document.activeElement);
           setStatus(null);
           return;
         default: {
@@ -2701,77 +5440,67 @@ function CanvasInner({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     phone,
-    focusedId,
     focusedEntry,
     focusedSessionId,
-    nodeIds,
-    initialNodes,
+    focusedPaneId,
+    focusedPaneTabs,
+    drawnTabsAcrossPanes,
+    newTabInPane,
+    projectTabIds,
+    sessionIds,
     entries,
-    getNodes,
-    zoomIn,
-    zoomOut,
-    fitView,
     jumping,
     labels,
     matches,
     query,
     copyAllCommands,
     beginComposing,
+    beginSessionRename,
     closeSession,
     createSession,
-    stepSession,
+    newProject,
+    stepProject,
     focusSession,
-    mode,
+    // `mode` is deliberately NOT here any more, and its absence is the change:
+    // this listener asks `cursorModeAt(document.activeElement)` when a key
+    // arrives instead of closing over a rendered value. A dependency would
+    // re-register the listener on every focus change for a fact it no longer
+    // reads.
     actionIndex,
+    setActionIndex,
+    setComposing,
     actions,
     prefs,
     savePrefs,
     terminalTab,
-    visible,
+    filesTab,
     overlayOpen,
     openSessionIconPicker,
+    splitFocused,
+    closeFocusedSplit,
+    stepFocusedSplit,
+    setFocusedSessionId,
+    setViewFor,
   ]);
-
-  /**
-   * Subscribed, not read.
-   *
-   * This was `Math.round(getZoom() * 100)` computed during render. `getZoom()`
-   * is an imperative call into ReactFlow's store: it returns the right number
-   * at the moment it runs, and it does not make the component re-render when
-   * the viewport changes. So the readout only refreshed when something ELSE
-   * caused a render, and scrolling to zoom left it showing a stale figure.
-   * `useStore` subscribes to `transform[2]` — the viewport's scale — so the
-   * number tracks the canvas.
-   *
-   * DISPLAY ONLY. `columns` above reads `DEFAULT_VIEWPORT.zoom`, a fixed
-   * reference, not this live subscription — the two must not be conflated:
-   * this one may change every wheel notch, the layout's must not.
-   */
-  const zoom = useStore((state) => state.transform[2]);
-  const zoomPct = Math.round(zoom * 100);
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
   // inline arrow on any one of its 40+ props defeats the whole shallow
   // compare, so every handler `sidebarProps` used to build inline is a
   // `useCallback` instead -- bodies unchanged, only the wrapping is new.
   const onSidebarOpenFilter = useCallback(() => {
-    searchOrigin.current = focusedId;
+    searchOrigin.current = focusedSessionId;
     setFiltering(true);
-  }, [focusedId]);
+  }, [focusedSessionId]);
 
-  const onSidebarFilterChange = useCallback(
-    (next: string) => {
-      setQuery(next);
-      // incsearch: the answer arrives while you type, not after you
-      // commit. Without it the list narrows under a focus ring that is
-      // still pointing at a row the filter just removed.
-      const first = searchMatches(allEntries, next)[0];
-      if (first !== undefined) {
-        focusSession(first);
-      }
-    },
-    [allEntries, focusSession],
-  );
+  const onSidebarFilterChange = useCallback((next: string) => {
+    // incsearch: the answer arrives while you type, not after you
+    // commit. Without it the list narrows under a focus ring that is
+    // still pointing at a row the filter just removed. The move itself
+    // happens in the layout effect above `focusSession`, reading the
+    // memoised `matches` for `next` rather than scanning again here.
+    filterKeystrokeQuery.current = next;
+    setQuery(next);
+  }, []);
 
   const onSidebarOriginFilters = useCallback(
     (next: SessionFilters) => savePrefs(setSessionFilters(prefs, next)),
@@ -2783,18 +5512,50 @@ function CanvasInner({
   const onSidebarFilterCancel = useCallback(() => {
     setFiltering(false);
     setQuery('');
-    setFocusedId(searchOrigin.current);
-  }, []);
+    setFocusedSessionId(searchOrigin.current);
+  }, [setFocusedSessionId]);
 
   const onSidebarRenameCancel = useCallback(() => {
     setRenamingId(null);
     setRenameTarget(null);
   }, []);
 
+  /**
+   * THE RIGHT-CLICK MENU'S TWO ROUTES, BY ID.
+   *
+   * The chords act on `focusedEntry`; a right-click names its own row and must
+   * NOT have to move the cursor there first -- renaming the row you pointed at
+   * while the cursor sits elsewhere is the whole point of a context menu. The
+   * lookup is over `entries`, the set the sidebar actually draws, so an id
+   * that is no longer on screen resolves to nothing and the menu item does
+   * nothing rather than acting on a neighbour.
+   */
+  const onSidebarRenameSession = useCallback(
+    (sessionId: string) => {
+      const found = entries.find((candidate) => candidate.session.id === sessionId);
+      if (found === undefined) return;
+      beginSessionRename(found);
+    },
+    [entries, beginSessionRename],
+  );
+
+  const onSidebarPickSessionIcon = useCallback(
+    (sessionId: string) => {
+      const found = entries.find((candidate) => candidate.session.id === sessionId);
+      if (found === undefined) return;
+      openSessionIconPicker(found);
+    },
+    [entries, openSessionIconPicker],
+  );
+
   const onSidebarPick = useCallback(
     (sessionId: string) => {
       focusSession(sessionId);
-      setMode('select');
+      // Picking a row in the sidebar is an act of Select, so the keyboard
+      // comes back with it — by really coming back. A pointer pick made while
+      // the composer held focus used to write Select over a caret still
+      // blinking in the box.
+      releaseInsert(document.activeElement);
     },
     [focusSession],
   );
@@ -2906,22 +5667,19 @@ function CanvasInner({
 
   // Memoised for the same reason as the callbacks above: a JSX element
   // literal is a fresh object every render, and `resizeHandle` is one of
-  // `SessionListProps`' members. `visible` is the same reference
-  // `prefs.paneVisibility` returns on a keystroke (`layoutForViewport`'s
-  // no-op branch), so this stays stable across one too.
+  // `SessionListProps`' members.
   const sidebarResizeHandle = useMemo(
     () => (
       <PaneResizer
         pane="sidebar"
         ariaLabel="resize sessions panel"
-        layout={visible}
         stored={{ sidebar: storedSidebar, detail: storedDetail }}
         viewportWidth={viewportWidth}
         onChange={onPaneChange}
         onCommit={onPaneCommit}
       />
     ),
-    [visible, storedSidebar, storedDetail, viewportWidth, onPaneChange, onPaneCommit],
+    [storedSidebar, storedDetail, viewportWidth, onPaneChange, onPaneCommit],
   );
 
   /**
@@ -2948,18 +5706,34 @@ function CanvasInner({
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
     // sidebar's -- the canvas is a view, not a place the keyboard goes, so
-    // no other column takes this. A hidden column is not rendered at all,
-    // so it needs no second test against `visible` here either -- the slot
-    // already is that test.
-    keyboardHere: mode === 'select',
+    // no other column takes this.
     entries: entries,
     loading: sidebarLoading,
+    /* WHICH PROJECT VAM IS STARTING A SESSION IN, or null. The project id and
+       name -- the id alone used to be enough, because every existing project
+       already carries its own name in the section the sidebar matches it
+       against. `newProject` has no such section (`projectId` is `null` for
+       it, see `starting`'s own comment above), so the name has to ride along
+       for the sidebar to have anything to print. Deliberately not
+       `pendingAction`, which is the shared serialisation lock and also holds
+       a project id while one is being REMOVED. Two different things wearing
+       one value is how a "starting" indicator comes to appear over a project
+       being deleted. */
+    starting:
+      starting === null
+        ? null
+        : { projectId: starting.projectId, projectName: starting.projectName },
     // The UNFILTERED set, for the two things about removing a project
     // that must not read a narrowed list -- see `allEntries` on
     // `SessionListProps`. `entries` above has already been through
     // search, the status pills and the origin rules.
     allEntries: allEntries,
     focusedSessionId: focusedEntry?.session.id ?? null,
+    // The map `f` built and the key listener reads, handed to the only column
+    // that can draw it. It had no route here at all: `labels` was built,
+    // matched against inside the listener and given to nobody, so jump mode's
+    // whole visible trace was the status bar's word.
+    jumpLabels: labels,
     workspace: 'factory',
     theme: effective,
     onToggleTheme: onSidebarToggleTheme,
@@ -2986,9 +5760,18 @@ function CanvasInner({
     onRenameCancel: onSidebarRenameCancel,
     onPick: onSidebarPick,
     onClose: onSidebarClose,
+    onRenameSession: onSidebarRenameSession,
+    onPickSessionIcon: onSidebarPickSessionIcon,
     onAdd: onSidebarAdd,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
+    // The project fold, stored -- the pair whose absence was the defect. Both
+    // or neither: `SessionList` falls back to its own state per prop, so
+    // passing the list without the handler would draw a fold nothing could
+    // change, and the handler without the list would change a fold nothing
+    // drew.
+    collapsedProjects: collapsedProjects,
+    onToggleCollapse: toggleProjectCollapse,
     // The group layer. `model.groups` rather than the filtered model's,
     // because the only thing this prop is for is a group holding no live
     // project -- see the prop -- and a filter cannot narrow one further.
@@ -3017,98 +5800,364 @@ function CanvasInner({
     resizeHandle: sidebarResizeHandle,
   };
 
-  const detailProps: ComponentProps<typeof DetailPanel> = {
-    entry: focusedEntry,
-    decision: focusedDecision,
-    // The panel's own cursor-vs-refresh signal (`DetailPanel.tsx`'s own doc
-    // on the prop explains why `decision` alone stopped being enough once
-    // turn ids became content-derived): `focusedId` is exactly "which node
-    // the cursor sits on", changed only by `setFocusedId`, which this file
-    // calls only from an explicit navigation -- a click, a chord, a jump --
-    // never from a model refresh landing on the same node.
-    focusNodeId: focusedId,
-    delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
-    // Present only for a source whose `write` surface actually carries it --
-    // `promptAttachments`, read the same way `delivers` reads its own flag.
-    // Absent in the browser build (no `'session'` source there at all: no
-    // `window.api`, so nothing to open a native dialog with) and absent for
-    // any source that has not written a delivery for it.
-    pickImageAttachment:
-      source.kind === 'session' ? source.source.write?.pickImageAttachment : undefined,
-    // The bridge the question card answers through. Passed beside
-    // `delivers` because the two are read together: a source that
-    // declares delivery and a shell that has no main process behind it
-    // are both reasons to draw no Submit at all. `undefined` in the
-    // browser build.
-    answer: globalThis.window?.api?.terminal?.answer,
-    // The other half of the same act: the question a permission prompt is
-    // asking exists only on the pane, so the card that answers it has to read
-    // it first. `undefined` in the browser build, exactly as `answer` is --
-    // and the fixture in demo mode, because a shape with no transcript record
-    // is otherwise invisible to every screenshot and every e2e spec there is.
-    // No `answer` accompanies it there: the demo refuses every write, so the
-    // card draws no Submit rather than one that would apologise.
-    prompt:
-      source.kind === 'demo' ? async () => DEMO_PROMPT : globalThis.window?.api?.terminal?.prompt,
-    // The flag the source declares, finally read. `false` withdraws the
-    // tab rather than mounting one that can only apologise.
-    terminal: terminalTab,
-    // The flag has guarded double-submit here since the composer was
-    // written; the pane never saw it, so a two-minute `claude --resume`
-    // looked like Enter doing nothing.
-    sending: writing,
-    tabRequest: tabRequest,
-    // Opaque both ways: the store never learns the tab names, and the
-    // guard keeps the pane's mount-time report from being a write.
-    initialTab: prefs.detailTab,
-    onTabChange: (next) => {
-      if (next !== prefs.detailTab) {
-        savePrefs(setDetailTab(prefs, next));
-      }
+  /**
+   * A15.1 — one `DetailPanel` prop set per PANE, not one shared set.
+   *
+   * `DetailPanel.tsx` is fenced (owned by a concurrent agent), so the
+   * isolation every split pane needs — `outIsLive`, the auto-follow
+   * `stuckRef`, the sticky IN, the view icons — cannot be built inside it.
+   * It comes instead from `Canvas.tsx` mounting one SEPARATE `DetailPanel`
+   * element per leaf (see `renderLeaf` below): each gets its own React
+   * component instance, so internal state one pane holds can never be read
+   * or written by another. This function is what makes every OTHER prop —
+   * the composer, the action cursor, whether this pane currently holds the
+   * app's Insert-mode keyboard — agree with that isolation instead of all
+   * pointing at whichever session happens to be globally focused.
+   *
+   * `isFocused` gates exactly three things: `viewNote` (the last
+   * `Alt+<digit>` refusal, which only the pane that could have answered the
+   * key may apologise for), `active` (whether this pane currently holds
+   * Insert), and whether leaving the composer also drops the app back to
+   * Select — a background pane's own Escape has no sidebar-focus fact to
+   * give back.
+   * Everything else — the draft, whether it is composing, its action
+   * cursor, whether it is mid-send — reads and writes the SAME per-session
+   * `*BySession` records the single-pane shell already used, keyed by this
+   * pane's own session rather than the globally-focused one, so two panes
+   * showing two different sessions get two independent composers for free.
+   * `onCompose`/`onDraftChange` on a pane that is not yet focused ALSO move
+   * the keyboard there first — the same "clicking into it is how you focus
+   * it" contract a real click already has everywhere else in this shell.
+   */
+  const buildDetailProps = useCallback(
+    (
+      entry: SessionEntry | null,
+      sessionId: string | null,
+      paneId: string,
+      isFocused: boolean,
+    ): ComponentProps<typeof DetailPanel> => {
+      const paneDraft = sessionId === null ? '' : (draftsBySession[sessionId] ?? '');
+      const paneComposing = sessionId === null ? false : (composingBySession[sessionId] ?? false);
+      const paneWriting = sessionId === null ? false : (writingBySession[sessionId] ?? false);
+      const paneActionIndex = sessionId === null ? 0 : (actionIndexBySession[sessionId] ?? 0);
+      /**
+       * WHERE THIS PROJECT'S PULL REQUESTS ARE READ FROM, and the two acts
+       * that change it -- built HERE because this is where `prefs` and
+       * `savePrefs` live, and a pane that wrote prefs behind this component's
+       * back would leave its React state stale.
+       *
+       * ABSENT WITHOUT A PROJECT OR A DIRECTORY PICKER, which is the browser
+       * build and the phone: `dialog` is a desktop bridge, and a control that
+       * cannot open a picker is a control that cannot act.
+       */
+      const projectSource = entry?.project.source;
+      const projectId = entry?.project.id;
+      const choose = globalThis.window?.api?.dialog?.chooseDirectory;
+      const prRepo =
+        projectSource === undefined || projectId === undefined || choose === undefined
+          ? undefined
+          : {
+              directory: prRepoFor(prefs, projectSource, projectId),
+              choose: async () => {
+                const picked = await choose();
+                if (picked === null) return;
+                savePrefs(setProjectPrRepo(prefs, projectSource, projectId, picked));
+              },
+              clear: () => {
+                savePrefs(setProjectPrRepo(prefs, projectSource, projectId, ''));
+              },
+            };
+      return {
+        entry,
+        prRepo,
+        decision: entry?.session.decisions[0] ?? null,
+        // See `detailProps`'s own long-standing comment on this prop, still
+        // true per pane: it is "which session THIS pane's cursor sits on".
+        focusNodeId: sessionId,
+        delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
+        pickImageAttachment:
+          source.kind === 'session' ? source.source.write?.pickImageAttachment : undefined,
+        answer: globalThis.window?.api?.terminal?.answer,
+        prompt:
+          source.kind === 'demo'
+            ? async () => (await import('../fixtures/demo.js')).DEMO_PROMPT
+            : globalThis.window?.api?.terminal?.prompt,
+        terminal: terminalTab,
+        files: filesTab,
+        // A15.4 — the GLOBAL "what a new session starts with"
+        // preference, identical for every pane (it names nothing about
+        // THIS session, only the next one created), the same reasoning
+        // `delivers`/`terminal` above already read off `source` once for
+        // every pane rather than per-session.
+        defaultProvider: prefs.defaultProvider,
+        onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // The Files tab's tree width, and the way back. GLOBAL for the same
+        // reason `defaultProvider` above it is passed identically to every
+        // pane: one `FilesTab` per split leaf, and an arrangement the
+        // operator would otherwise have to re-make on each one. Written only
+        // by a finished gesture -- a drag's own `onPointerUp` or one arrow
+        // press -- never on a render, which is the rule
+        // `prefs/files-tree-width.ts` exists to hold.
+        filesTreeWidth: prefs.filesTreeWidth,
+        onFilesTreeWidth: (width: number) => savePrefs(setFilesTreeWidth(prefs, width)),
+        sending: paneWriting,
+        // The refusal is the focused pane's too, and for the same reason:
+        // a background pane cannot have answered the key it would be
+        // explaining. Keyed to that pane's own session, so a refusal raised
+        // for the session just left does not hang over the next one.
+        viewNote: isFocused ? viewNote : null,
+        // The view icons are drawn in the focused pane and nowhere else
+        // (operator instruction) — the SAME fact `viewNote` above is gated
+        // on, which is the point: a pane that cannot consume an `Alt+<digit>`
+        // should not be showing the row that names one.
+        paneFocused: isFocused,
+        // THIS SESSION'S VIEW, not this pane's and not the app's. `undefined`
+        // for a pane showing no session at all -- there is no per-session fact
+        // to name, so the panel falls back to owning its own, seeded the same
+        // way. See `viewBySession`.
+        // The last send that failed in THIS session, drawn in the pane -- see
+        // `sendFailureBySession`. `null` for a pane showing no session: there
+        // is nothing that could have failed in it.
+        sendFailure: sessionId === null ? null : (sendFailureBySession[sessionId] ?? null),
+        tab: sessionId === null ? undefined : (viewBySession[sessionId] ?? viewSeed),
+        initialTab: viewSeed,
+        onTabChange: (next) => {
+          // Re-narrowed rather than cast. `onTabChange` is typed `string`
+          // (the store must not know the vocabulary), and a name off the bar
+          // is not a view -- the same rule the panel applies to the seed.
+          // `setViewFor` is the one writer; it keeps the preference too.
+          const picked = TABS.find((name) => name === next);
+          if (sessionId !== null && picked !== undefined) setViewFor(sessionId, picked);
+        },
+        draft: paneDraft,
+        onDraftChange: (value: string) => {
+          if (sessionId === null) return;
+          if (!isFocused) setFocusedPaneId(paneId);
+          setDraftFor(sessionId, value);
+        },
+        onSubmit: () => sendPromptFor(entry),
+        active: isFocused && mode === 'insert',
+        actionIndex: paneActionIndex,
+        composing: paneComposing,
+        // `onCompose` is the textarea's own `onFocus`, so by the time it runs
+        // the keyboard is ALREADY in an insert scope and the mode has already
+        // followed it. Nothing here writes a mode: it moves the pane focus to
+        // the pane that was clicked into, and records that this session's box
+        // is editable. That is the whole of it now.
+        onCompose: () => {
+          if (sessionId === null) return;
+          if (!isFocused) setFocusedPaneId(paneId);
+          setComposingFor(sessionId, true);
+        },
+        // And the exit is the same shape: the box blurs ITSELF before calling
+        // this (see the textarea's Escape branch, which has always done so and
+        // was the one exit that worked), so the mode is Select before this
+        // runs. The `isFocused` fork went with the flag — a background pane's
+        // composer closing never had a mode to write, and now there is none
+        // to write anywhere.
+        onStopComposing: () => {
+          if (sessionId === null) return;
+          setComposingFor(sessionId, false);
+          setDraftFor(sessionId, '');
+        },
+        width: undefined,
+        resizeHandle: null,
+      };
     },
-    draft: draft,
-    onDraftChange: setDraft,
-    onSubmit: sendPrompt,
-    active: mode === 'insert',
-    actionIndex: actionIndex,
-    composing: composing,
-    // The mouse route into the box, and the same function the `i` route
-    // uses -- a focus that entered the composer without entering Insert
-    // is the divergence this call closes.
-    onCompose: beginComposing,
-    onStopComposing: () => {
-      setComposing(false);
-      setDraft('');
-      // Escape out of the composer returns the keyboard to the SIDEBAR,
-      // which is the pane the operator asked to get back to. Without
-      // this, a prompt opened with `I` leaves `mode === 'insert'`, so
-      // the blur hands the keys back to a window where `j`/`k` walk the
-      // detail pane's actions instead of the session list — the keys
-      // work, they just do the wrong thing, which is worse than being
-      // swallowed. The `i` path already sat on 'list' and was unaffected,
-      // which is why this only ever bit one of the two entry points.
-      setMode('select');
+    [
+      draftsBySession,
+      composingBySession,
+      writingBySession,
+      actionIndexBySession,
+      sendFailureBySession,
+      viewBySession,
+      viewSeed,
+      source,
+      terminalTab,
+      filesTab,
+      viewNote,
+      prefs,
+      savePrefs,
+      setFocusedPaneId,
+      setDraftFor,
+      setComposingFor,
+      sendPromptFor,
+      setViewFor,
+      mode,
+    ],
+  );
+
+  /**
+   * The FOCUSED pane's own props — the same object the pre-split shell
+   * always built, and still what `PhoneShell` is handed (a phone has no
+   * room for a split, and the chord grammar that would create one is
+   * already off there — see the `onKeyDown` effect's own guard).
+   */
+  const detailProps = useMemo(
+    () => buildDetailProps(focusedEntry, focusedSessionId, focusedPaneId, true),
+    [buildDetailProps, focusedEntry, focusedSessionId, focusedPaneId],
+  );
+
+  /**
+   * One `DetailPanel`, mounted for one leaf of `panes` — the render-side
+   * half of the isolation `buildDetailProps` sets up.
+   *
+   * `key={leaf.id}` KEEPS THE INSTANCE, it does not refresh it, and this
+   * comment used to claim the opposite: that a leaf whose own `sessionId`
+   * changes "must still be a fresh component instance, or `DetailPanel`'s
+   * internal state for the session it used to show would bleed into the one
+   * it shows now". `leaf.id` does not change when `leaf.sessionId` does, so
+   * nothing ever remounted and the bleed was the shipped behaviour — the
+   * operator found it as "session 2 switched to PRs because session 1 did".
+   *
+   * The isolation is real now and comes from the other direction: every fact
+   * that belongs to a session is keyed by session in `buildDetailProps`
+   * (draft, composing, action cursor, mid-send, and now the VIEW), so the
+   * panel holds no per-session state left to bleed. Remounting per session
+   * would have been the cheaper-looking fix and the wrong one — it throws
+   * away scroll position and every open disclosure on each tab click, and it
+   * would not have fixed the view anyway, because the view was seeded from a
+   * single global preference. Anything per-session added here later belongs
+   * in a `*BySession` record, not in `DetailPanel`'s `useState`.
+   */
+  const renderLeaf = useCallback(
+    (leaf: Leaf) => {
+      const isFocused = leaf.id === focusedPaneId;
+      // The focused leaf reuses `focusedEntry` (the FILTERED lookup,
+      // `buildDetailProps`'s and `detailProps`'s own contract) rather than
+      // a second lookup that could disagree with it about the one pane
+      // every existing test already asserts against.
+      const entry = isFocused
+        ? focusedEntry
+        : leaf.sessionId === null
+          ? null
+          : (entriesById.get(leaf.sessionId) ?? null);
+      const paneTabs = drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId);
+      return (
+        // Not a control and not a keyboard stop of its own -- the real
+        // interactive content is the `DetailPanel` instance inside it,
+        // reached by Tab like any other pane. `onMouseDownCapture` is
+        // "clicking anywhere in here focuses this pane", a background fact
+        // the same way a browser tab's own click-to-activate is; the drag
+        // handlers are the drop target for A15.1's split gesture. Keyboard
+        // split-switching (`zw`/`zW`) does not go through this element at all.
+        // biome-ignore lint/a11y/noStaticElementInteractions: see above.
+        <div
+          key={leaf.id}
+          data-split-pane={leaf.id}
+          // The attribute stays and is the ONLY thing focus paints on this
+          // element: the ring it used to wear (`ring-1 ring-inset
+          // ring-cursor-ring`, drawn once a second pane existed) is gone at
+          // the operator's request. What says where the keyboard is instead
+          // is the view-icon overlay that draws in the focused pane alone,
+          // and `data-split-focused` is what the tests and the browser guard
+          // read — neither is a class, so neither goes with the ring.
+          data-split-focused={isFocused ? 'true' : 'false'}
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-ground"
+          onMouseDownCapture={() => {
+            if (!isFocused) setFocusedPaneId(leaf.id);
+          }}
+          onDragOver={onPaneDragOver(leaf.id)}
+          onDragLeave={onPaneDragLeave(leaf.id)}
+          onDrop={onPaneDrop(leaf.id)}
+        >
+          <TabStripRow onDragOver={onStripDragOver(leaf.id)} onDrop={onStripDrop(leaf.id)}>
+            <TabStrip
+              orientation="horizontal"
+              tabs={paneTabs}
+              activeId={leaf.sessionId}
+              paneFocused={isFocused}
+              drafts={draftsBySession}
+              pending={pending}
+              onSelect={(sessionId, viaPointer) => {
+                // The pane whose strip was clicked is the pane the keyboard
+                // moves to FIRST: `setFocusedPaneId` writes its ref
+                // synchronously, so the `setFocusedSessionId` below lands in
+                // this pane rather than in whichever one held focus before.
+                setFocusedPaneId(leaf.id);
+                setFocusedSessionId(sessionId);
+                // A POINTER said "I am here to type", so the caret goes where
+                // typing goes — the operator's own request, and the reason `i`
+                // stops being the price of a click. A keyboard activation of
+                // the same button does NOT: the operator is mid-grammar and
+                // the next key is likelier to be `zv` than a letter of prose.
+                // `setComposingFor` is named with the session rather than
+                // going through `beginComposing`, which reads the focused id
+                // this call is in the middle of changing.
+                //
+                // AND IT SETS NO MODE: composing puts the caret in the box,
+                // and Insert is what the caret being there is called.
+                if (viaPointer) {
+                  setComposingFor(sessionId, true);
+                }
+              }}
+              onClose={(sessionId) => closePaneTab(leaf.id, sessionId)}
+              /* The tab CARRIES its entry, so the menu needs no lookup and
+                 cannot resolve to a neighbour -- unlike the sidebar's, which
+                 is handed an id by a row it does not own. */
+              onTabContextMenu={(tabEntry, at) => setTabMenu({ entry: tabEntry, at })}
+              onTabDragStart={(sessionId) => onTabDragStart(leaf.id, sessionId)}
+              onTabDragEnd={onTabDragEnd}
+            />
+            <NewTabButton
+              decline={newSessionDecline}
+              onClick={() => newTabInPane(leaf.id, entry, paneTabs)}
+            />
+          </TabStripRow>
+          {/* THE PANE OPENS ON THE WAIT, NOT ON THE ARRIVAL. "Open the new
+              tab immediately" is this branch: until now the pane kept showing
+              whatever was there before, and moved only once the row appeared
+              -- which is after the write AND after the agent registered
+              itself, so the one control that had just been pressed was the one
+              surface that did not react to it.
+
+              It stands IN PLACE OF the panel rather than over it, because
+              there is nothing to look at underneath: the session it is about
+              does not exist. Nothing is destroyed by that -- the pane's own
+              tab list is untouched, and the panel returns the moment the row
+              lands (or the moment the creation fails). */}
+          {starting !== null && starting.paneId === leaf.id ? (
+            <StartingSession projectName={starting.projectName} />
+          ) : (
+            <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
+          )}
+          {dropTarget !== null && dropTarget.paneId === leaf.id && (
+            <DropZoneOverlay zone={dropTarget.zone} />
+          )}
+        </div>
+      );
     },
-    width: detailWidth,
-    /* Only where it would move something. The detail pane is a fixed
-       column with the leftover room beside it exactly while the canvas
-       is the main column; everywhere else its width is derived from the
-       sidebar and the canvas's reserve, so its own edge has nothing to
-       drag and the seam that does move is the sidebar's. A handle that
-       moves nothing is worse than no handle: it advertises a gesture the
-       layout cannot honour. */
-    resizeHandle: canvasIsMain(visible) ? (
-      <PaneResizer
-        pane="detail"
-        ariaLabel="resize detail panel"
-        layout={visible}
-        stored={{ sidebar: storedSidebar, detail: storedDetail }}
-        viewportWidth={viewportWidth}
-        onChange={onPaneChange}
-        onCommit={onPaneCommit}
-      />
-    ) : null,
-  };
+    [
+      starting,
+      focusedPaneId,
+      focusedEntry,
+      allEntries,
+      entriesById,
+      activeProjectId,
+      buildDetailProps,
+      closePaneTab,
+      setFocusedPaneId,
+      setFocusedSessionId,
+      setComposingFor,
+      onTabDragStart,
+      onTabDragEnd,
+      onPaneDragOver,
+      onPaneDragLeave,
+      onPaneDrop,
+      onStripDragOver,
+      onStripDrop,
+      newTabInPane,
+      newSessionDecline,
+      dropTarget,
+      // The strip's two indicator inputs. `buildDetailProps` above already
+      // re-derives on every draft keystroke, so `draftsBySession` costs this
+      // hook nothing it was not paying. Without them the strip would draw a
+      // stale pencil. (The indicator LIST is a constant now, so it is not a
+      // dependency: see `prefs/tab-indicators.ts`.)
+      draftsBySession,
+      pending,
+    ],
+  );
 
   // Read once per render, from the bindings in force. `null` means the
   // operator unbound `help`, and the status bar then prints no key at all.
@@ -3121,172 +6170,28 @@ function CanvasInner({
     // derived breakpoint, never from a second media query with the number
     // written out again.
     <div className={`relative flex h-full flex-col ${phone ? 'vam-phone' : ''}`}>
-      {/* Named none of them on a phone: `Columns` renders by order, so a
-          column the order does not name is never created -- which is what
-          "unmounted" has to mean for a pane that is measured, focused and
-          queried. The phone shell below takes their place. */}
-      <Columns order={phone ? [] : order}>
-        <SidebarSlot key="sidebar" show={visible.sidebar} {...sidebarProps} />
-
-        <CanvasColumn key="canvas" show={visible.canvas} strip={canvasStrip}>
-          {/* The toolbar is chrome inside a column, not a column: hidden rather
-              than unmounted in the strip, where 300px has no room for a source
-              readout and four filters. The unmount rule this file argues for
-              elsewhere is about PANES — things that are measured, focused and
-              queried — and keeping the source line mounted keeps its polling
-              exactly as it was in every other layout. */}
-          <div
-            className={`flex h-12 flex-none items-center gap-[9px] border-line border-b px-3.5 ${canvasStrip ? 'hidden' : ''}`}
-          >
-            <span className="shrink-0 font-medium text-[13px] text-ink">Canvas</span>
-            <span className="mx-1 h-3.5 w-px shrink-0 bg-line-strong" />
-
-            <SourceReadout source={source} />
-
-            <span className="flex-1" />
-
-            {/* Positions are a pure function of the model, always — there is
-                no drag to opt a node out of it. It used to read "auto-layout
-                on", bordered and boxed exactly like the zoom/fit buttons to
-                its right, and an operator reasonably read it as one: they
-                pressed it expecting a rearrange, and nothing happened,
-                because there was never a handler to press. Two fixes, not
-                one: no border/box/hover — nothing here should look clickable
-                next to controls that are — and no word implying an "off"
-                that cannot exist, since dragging and pinning were removed
-                (2944843). `Note` carries the actual answer to what someone
-                clicking this was asking: why nodes cannot be dragged. */}
-            <Note text="nodes arrange themselves by status; they cannot be dragged">
-              <span
-                data-auto-layout
-                className="flex h-[26px] shrink-0 cursor-default items-center whitespace-nowrap font-mono text-[10px] text-ink-quiet"
-              >
-                layout: automatic
-              </span>
-            </Note>
-
-            <div className="flex h-[26px] shrink-0 items-center overflow-hidden rounded-[7px] border border-line text-ink-dim">
-              {/* `action` is read from the live grammar (`activeBindings`),
-                  never hardcoded here — a rebind changes the tip without
-                  touching this call site. */}
-              <ShortcutTip label="Zoom out" action={{ kind: 'zoom', delta: -1 }}>
-                <button
-                  type="button"
-                  aria-label="zoom out"
-                  onClick={() => zoomOut()}
-                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-                >
-                  −
-                </button>
-              </ShortcutTip>
-              <span className="flex h-full items-center border-line border-r border-l px-1.5 font-mono text-[10px] text-ink">
-                {zoomPct}%
-              </span>
-              <ShortcutTip label="Zoom in" action={{ kind: 'zoom', delta: 1 }}>
-                <button
-                  type="button"
-                  aria-label="zoom in"
-                  onClick={() => zoomIn()}
-                  className="flex h-full w-[26px] cursor-pointer items-center justify-center hover:text-ink"
-                >
-                  +
-                </button>
-              </ShortcutTip>
-            </div>
-
-            <ShortcutTip label="Fit the whole canvas in view" action={{ kind: 'fitView' }}>
-              <button
-                type="button"
-                aria-label="fit view"
-                onClick={() => fitView()}
-                className="flex h-[26px] shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[7px] border border-line px-2.5 font-mono text-[10px] text-ink-dim hover:text-ink"
-              >
-                <Maximize size={13} strokeWidth={1.6} aria-hidden="true" />
-              </button>
-            </ShortcutTip>
-          </div>
-
-          {/* `data-canvas-viewport` is the element `columnsForWidth` measures —
-              a test hook, same as `data-canvas-pane` one level up (the
-              CanvasColumn root, which also carries the now-hidden toolbar). */}
-          <div ref={canvasPaneRef} data-canvas-viewport className="relative min-h-0 flex-1">
-            <ReactFlow
-              nodes={drawnNodes}
-              edges={NO_EDGES}
-              onNodesChange={onNodesChange}
-              nodesDraggable={false}
-              // A click lands the cursor on the node you clicked, exactly as
-              // `j`/`k` would have. `nodeIds` is the navigable set, so a click
-              // can only reach somewhere the keyboard could also reach — the
-              // mouse takes a shortcut through the same door, it does not open
-              // a second one. Scenery (fans, empty slots) is not in that set
-              // and is therefore inert, which is right: there is nothing to
-              // focus on a connector.
-              onNodeClick={onNodeClick}
-              nodeTypes={NODE_TYPES}
-              // 80%, not `fitView`. Fitting picks whatever scale makes every
-              // node visible, so the canvas opened at a different zoom for
-              // every workspace size and the cards were unreadable in a busy
-              // one. A fixed default means the first frame always looks the
-              // same, and the "move to the focused session" effect below is
-              // what keeps you from having to hunt for where you are.
-              defaultViewport={DEFAULT_VIEWPORT}
-              minZoom={0.2}
-              maxZoom={2}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background color="var(--color-dots)" gap={24} size={1} />
-              {/* Measured off the mockup's minimap: 176x56, one chip per
-                  session cell in that session's status colour. The mockup's
-                  viewport outline is the one measurement not reproduced — see
-                  the note on `maskColor` below. `nodeStrokeWidth` is in flow
-                  units, not pixels, where 1px is ~26 at this scale, so the
-                  mockup's bordered chip is drawn as a filled one instead — at
-                  8px wide the fill is what carries the colour anyway. */}
-              <MiniMap
-                pannable
-                zoomable
-                ariaLabel="canvas minimap"
-                // The spotlight is a DIMMED OUTSIDE and NOTHING ELSE — no
-                // `maskStrokeColor`, no `maskStrokeWidth`. An outline draws a
-                // rectangle around the visible area, and when that area is
-                // wider than the content — the normal case at any ordinary
-                // zoom — its top and bottom edges fall outside the map. Only
-                // the two vertical edges survive, and they read as two bright
-                // rules cut off down the sides, not as a rectangle.
-                //
-                // This has now been removed TWICE: once with the outline in the
-                // ink colour, and again after it was re-added in a quieter line
-                // tone on the argument that a softer tone would read as the
-                // edge of the lit area. It does not. The tone was never the
-                // problem — the geometry is, and no colour fixes a rectangle
-                // whose horizontal edges are off-canvas. Please do not
-                // re-litigate it a third time; masking outside says the same
-                // thing with no lines at all and degrades correctly, dimming
-                // nothing when everything is visible. The absence is guarded
-                // by `test/canvas/Canvas.minimap.test.tsx`, so re-adding
-                // either prop fails a test rather than shipping.
-                maskColor="color-mix(in srgb, var(--color-canvas) 66%, transparent)"
-                // `nodeStrokeWidth` is in FLOW units and is drawn around the
-                // chip, so it is also the only lever that makes a chip bigger
-                // than the node it stands for. A session card is 220 wide, so
-                // 40 is a visible fattening without merging neighbours.
-                nodeStrokeWidth={70}
-                nodeStrokeColor={minimapChipColor}
-                nodeBorderRadius={3}
-                // Narrower than the mockup's 176. A minimap earns its corner by
-                // being glanceable, not by being legible on its own, and the
-                // width it gives up is width the canvas gets back.
-                style={{ width: 132, height: 56 }}
-                className={`!bottom-3 !right-3 !m-0 !rounded-[8px] !border !border-line !bg-sunken ${canvasStrip ? 'hidden' : ''}`}
-                nodeColor={minimapChipColor}
-              />
-            </ReactFlow>
-          </div>
-        </CanvasColumn>
-
-        <DetailSlot key="detail" show={visible.detail} {...detailProps} />
-      </Columns>
+      {/* Named none of them on a phone: the phone shell below takes their
+          place entirely, so nothing here mounts a pane it also draws. */}
+      {!phone && (
+        <div className="flex min-h-0 flex-1">
+          <SessionList {...sidebarProps} />
+          {/* A12.1: the tab strip is the top of the detail pane's OWN
+              column, not a strip above a separate middle column — there is
+              no middle column any more. The source readout that used to
+              sit beside the strip is gone from here (A12.1 item 3): it
+              moved to the status bar, the one place already on screen
+              whether or not a session is focused, so "is vam connected" is
+              never something the tab row alone had to say. */}
+          <DetailColumn width={detailWidth}>
+            <SplitLayout
+              tree={panes}
+              renderLeaf={renderLeaf}
+              onResize={onSplitResize}
+              onRefuse={setStatus}
+            />
+          </DetailColumn>
+        </div>
+      )}
 
       {phone && (
         <PhoneShell
@@ -3308,11 +6213,12 @@ function CanvasInner({
         />
       )}
 
-      {/* Moved out of the canvas column when the canvas became hideable: the
-          palette is a window overlay, not part of the graph, and left inside
-          that column `Mod-k` opened a palette nothing could draw in either of
-          the two layouts that hide the canvas. It sits with the other overlays
-          now, over whichever columns are on screen. */}
+      {/* Moved out of the canvas column when that column became hideable: the
+          palette is a window overlay, and the column it left behind used to
+          hold the graph — left inside it, `Mod-k` opened a palette nothing
+          could draw in either of the two layouts that hide the canvas. It
+          sits with the other overlays now, over whichever columns are on
+          screen. */}
       {/* Same reason as the palette above: `?` in a layout that hides the
           canvas would otherwise open a sheet nothing could draw. */}
       {keySheetOpen && <KeySheet onClose={() => setKeySheetOpen(false)} />}
@@ -3360,6 +6266,7 @@ function CanvasInner({
       {pickingIconFor !== null && (
         <IconPicker
           title={pickingIconFor.title}
+          value={entriesById.get(pickingIconFor.sessionId)?.session.icon ?? null}
           onPick={(icon) => {
             // Both the source and the session come from the target captured
             // when the picker opened, so there is nothing to look up and
@@ -3370,8 +6277,12 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : // `describeIcon`, not the stored string: `lucide:rocket:teal`
+                  // in this sentence is vam reading its own storage format
+                  // aloud. An emoji still reports as itself.
+                  `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingIconFor(null);
           }}
           onClose={() => setPickingIconFor(null)}
@@ -3388,8 +6299,8 @@ function CanvasInner({
               member
                 ? // MOVES it, at most one group per project: a project in two
                   // groups walks its sessions twice and mints duplicate
-                  // `info:<sessionId>` node ids, which break ReactFlow and the
-                  // id `j`/`k` navigates by (`to-canvas.ts:312`).
+                  // session entries, which breaks the sidebar's own React
+                  // keys and the id `j`/`k` navigates by (`to-canvas.ts:312`).
                   addProjectToGroup(
                     prefs,
                     pickingMembersFor.source,
@@ -3462,6 +6373,7 @@ function CanvasInner({
       {pickingGroupIconFor !== null && (
         <IconPicker
           title={pickingGroupIconFor.name}
+          value={groupIcons.get(pickingGroupIconFor.groupId) ?? null}
           onPick={(icon) => {
             savePrefs(
               setGroupIcon(prefs, pickingGroupIconFor.source, pickingGroupIconFor.groupId, icon),
@@ -3469,8 +6381,9 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingGroupIconFor(null);
           }}
           onClose={() => setPickingGroupIconFor(null)}
@@ -3480,6 +6393,7 @@ function CanvasInner({
       {pickingProjectIconFor !== null && (
         <IconPicker
           title={pickingProjectIconFor.name}
+          value={projectIcons.get(pickingProjectIconFor.projectId) ?? null}
           onPick={(icon) => {
             savePrefs(
               setProjectIcon(
@@ -3493,8 +6407,9 @@ function CanvasInner({
             setStatus(
               icon === ''
                 ? 'icon cleared — kept on this machine, never in the event log'
-                : `${icon} — kept on this machine, never in the event log`,
+                : `${describeIcon(icon)} — kept on this machine, never in the event log`,
             );
+            if (keepPickerOpen(icon)) return;
             setPickingProjectIconFor(null);
           }}
           onClose={() => setPickingProjectIconFor(null)}
@@ -3512,22 +6427,36 @@ function CanvasInner({
       {!phone && (
         <footer
           data-status-bar
-          className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-[10px] text-ink-faint"
+          className="flex h-8 flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-meta text-ink-faint"
         >
           {/* The mode indicator is not in the mockup, and it stays: ADE is a
               mouse-and-keyboard app, vam is a modal one, and a modal app that
               does not say which mode it is in is the single worst thing a modal
-              app can be. */}
-          <span data-mode className="font-semibold text-ink">
-            {/* JUMP and FILTER are transient — a key is being awaited — so they
-                outrank the resting mode and keep their own names. Underneath
-                them there are exactly two, and they are the operator's words:
-                Select and Insert. `PROMPT` is gone as a third name because it
-                never was one: composing happens INSIDE Insert, and printing it
-                as a peer of the other two implied a mode the grammar has no
-                state for. */}
-            {jumping ? 'JUMP' : filtering ? 'FILTER' : MODE_TITLES[mode]}
-          </span>
+              app can be.
+
+              JUMP and FILTER are transient — a key is being awaited — so they
+              outrank the resting mode and keep their own names. Underneath
+              them there are exactly two, and they are the operator's words:
+              Select and Insert. `PROMPT` is gone as a third name because it
+              never was one: composing happens INSIDE Insert, and printing it
+              as a peer of the other two implied a mode the grammar has no
+              state for.
+
+              KEYED ON THE STATE IT DRAWS, and that is the whole of how a
+              change becomes visible: a changed key remounts the cell, and a
+              CSS animation only restarts on a mount. See `ModeCell`. */}
+          <ModeCell
+            key={jumping ? 'jump' : filtering ? 'filter' : mode}
+            state={jumping ? 'jump' : filtering ? 'filter' : mode}
+          />
+          {/* A12.1 item 3: relocated here from the tab row, which now draws
+              only tabs. This is the one thing a dashboard must never do
+              differently depending on whether it is connected (the
+              component's own doc comment), so it needs a permanent home —
+              and the status bar, unlike the tab row, is on screen whether or
+              not a session is even focused. */}
+          <SourceReadout source={source} />
+          <span className="h-3 w-px bg-line" />
           {/* The `project/session` cell that used to sit here is gone at the
               operator's request: the slash between a project and a session made
               the pair read as a git ref, and the sidebar row, the canvas card
@@ -3549,7 +6478,17 @@ function CanvasInner({
             </span>
           ) : (
             <Note text={usage.reason}>
-              <span data-usage>{usage.text}</span>
+              {/* A tab stop for the same reason `StatusCell` takes one. This
+                  sentence is the explanation for a MISSING NUMBER -- on the
+                  web/Tailscale build it was keyboard-unreachable, and with no
+                  hover on touch it was unreachable at all. */}
+              <span
+                data-usage
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+                tabIndex={0}
+              >
+                {usage.text}
+              </span>
             </Note>
           )}
           {usage.windows !== null && (
@@ -3615,6 +6554,27 @@ function CanvasInner({
             Keyboard shortcut
           </span>
         </footer>
+      )}
+
+      {/* THE TAB'S RIGHT-CLICK MENU, at the shell level. `position: fixed`
+          (see `ContextMenu.tsx`), so it is not clipped by the strip's own
+          horizontal scroller -- which is exactly what would happen if it were
+          drawn inside the tab it belongs to. */}
+      {tabMenu !== null && (
+        <ContextMenu
+          label={`actions for ${tabMenu.entry.session.title}`}
+          at={tabMenu.at}
+          onClose={() => setTabMenu(null)}
+          items={rowMenuItems(tabMenu.entry.session.id, {
+            // THE SAME BUILDER THE SIDEBAR ROW USES. A tab and a row are one
+            // session seen twice; two item lists would be two answers to
+            // "what can I do to this session", and they would drift.
+            closing: pendingAction === tabMenu.entry.session.id,
+            onRenameSession: onSidebarRenameSession,
+            onPickSessionIcon: onSidebarPickSessionIcon,
+            onClose: (sessionId) => void closeSession(sessionId, tabMenu.entry.session.title),
+          })}
+        />
       )}
     </div>
   );
@@ -3721,6 +6681,15 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
         data-source-mark={register}
         role="img"
         aria-label={`source: ${source}`}
+        // The tab stop is what makes the `Note` above worth having:
+        // `StatusCell` reached this conclusion first, in its own doc comment
+        // -- a tooltip that opens on focus is worth nothing on an element
+        // that cannot be focused, and hung on a bare span it degrades to the
+        // `title` `Note` exists to replace. The suppression sits on the line
+        // directly above the attribute because biome reports it there and
+        // suppresses by line.
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`.
+        tabIndex={0}
         className="flex items-center text-ink-dim"
       >
         {mark === undefined ? (
@@ -3733,23 +6702,6 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   );
 }
 
-/**
- * A minimap chip's colour: the session's status, or nothing at all.
- *
- * Only the info card earns a chip. Its steps, its fan and its slots all belong
- * to the same row, and drawing four more rectangles per session turns a map you
- * read at a glance into a texture — the mockup draws one chip per cell, and so
- * does this. `transparent` rather than an omission because xyflow renders a
- * rect for every node either way.
- */
-function minimapChipColor(node: Node): string {
-  if (node.type !== 'info') {
-    return 'transparent';
-  }
-  const { entry } = node.data as { entry?: SessionEntry };
-  return entry === undefined ? 'transparent' : `var(--color-${entry.session.status})`;
-}
-
 export function Canvas({
   model,
   source = READ_ONLY_SOURCE,
@@ -3758,12 +6710,11 @@ export function Canvas({
   readonly source?: CanvasSource;
 }) {
   return (
-    <ReactFlowProvider>
-      {/* One tooltip group for the whole chrome: once one is open, the button
-          beside it opens with no second delay. */}
-      <TipProvider>
-        <CanvasInner model={model} source={source} />
-      </TipProvider>
-    </ReactFlowProvider>
+    // One tooltip group for the whole chrome: once one is open, the button
+    // beside it opens with no second delay. No more `ReactFlowProvider` —
+    // `CanvasInner` no longer calls `useReactFlow()` for anything.
+    <TipProvider>
+      <CanvasInner model={model} source={source} />
+    </TipProvider>
   );
 }

@@ -42,10 +42,18 @@ function runner(answers: Record<string, TmuxRunResult>) {
   const argvs: (readonly string[])[] = [];
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
-    const verb = argv[0] ?? '';
+    // THE PANE READ IS ONE TMUX INVOCATION OF TWO COMMANDS since it began
+    // asking where the cursor is (`tmux/argv.ts`), so its first word is
+    // `display-message` and not `capture-pane`. Every stub here names the
+    // read by WHAT IT READS rather than by the verb that happens to lead.
+    const verb = argv.includes('capture-pane') ? 'capture-pane' : (argv[0] ?? '');
     return answers[verb] ?? failed(`no stub for ${verb}`);
   };
-  return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
+  return {
+    run,
+    argvs,
+    verbs: () => argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
+  };
 }
 
 describe('matching a project to the tmux session vam started for it', () => {
@@ -133,32 +141,61 @@ describe('matching a project to the tmux session vam started for it', () => {
 describe('reading the pane', () => {
   it('captures the matched session and returns its screen', async () => {
     const { run, argvs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n\tnotes\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n\t\tnotes\n`),
       'capture-pane': ok('$ claude\n'),
     });
     expect(await readSessionPane(run, ATLAS)).toEqual({
       kind: 'ok',
       name: 'vam-atlas-a1b2c3',
       text: '$ claude\n',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
     // The listing has to ASK for the recorded id, or there is nothing to match
     // on and the code falls back to guessing from a name.
-    expect(argvs[0]).toEqual(['list-sessions', '-F', '#{@vam-project}\t#{session_name}']);
+    expect(argvs[0]).toEqual([
+      'list-sessions',
+      '-F',
+      '#{@vam-project}\t#{@vam-pid}\t#{session_name}',
+    ]);
     // Exact targeting: `-t vam-atlas-a1` would reach `vam-atlas-a1b2c3` by
     // tmux's own prefix resolution, and on send-keys that is someone else's
     // session.
-    expect(argvs[1]).toEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-a1b2c3:']);
+    // The cursor query and the capture, one invocation, BOTH aimed at the
+    // same pane -- a `display-message` with no `-t` answers about whatever
+    // pane tmux calls current, which is somebody else's session as easily
+    // as this one.
+    expect(argvs[1]).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-atlas-a1b2c3:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      ';',
+      'capture-pane',
+      '-p',
+      '-e',
+      // The scrollback the tab scrolls through (`tmux/argv.ts`,
+      // `PANE_HISTORY_LINES`); the screen alone is what it drew before, in a
+      // box exactly that many rows tall.
+      '-S',
+      '-500',
+      '-t',
+      '=vam-atlas-a1b2c3:',
+    ]);
   });
 
   it('reports no session of vam-s, and captures nothing, when nothing matches', async () => {
-    const { run, verbs } = runner({ 'list-sessions': ok('\tnotes\n') });
+    const { run, verbs } = runner({ 'list-sessions': ok('\t\tnotes\n') });
     expect(await readSessionPane(run, ATLAS)).toEqual({ kind: 'not-vam' });
     expect(verbs()).toEqual(['list-sessions']);
   });
 
   it('captures nothing when two sessions answer to one project', async () => {
     const { run, verbs } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-d4e5f6\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n${ATLAS}\t\tvam-atlas-d4e5f6\n`),
     });
     expect(await readSessionPane(run, ATLAS)).toEqual({
       kind: 'ambiguous',
@@ -187,7 +224,7 @@ describe('reading the pane', () => {
 
   it('says the session ended when it disappears between the list and the capture', async () => {
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'capture-pane': failed("can't find session: vam-atlas-a1b2c3"),
     });
     expect(await readSessionPane(run, ATLAS)).toEqual({ kind: 'gone' });
@@ -195,7 +232,7 @@ describe('reading the pane', () => {
 
   it('says vam could not ask when the capture fails for any other reason', async () => {
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'capture-pane': failed('server exited unexpectedly'),
     });
     expect((await readSessionPane(run, ATLAS)).kind).toBe('unavailable');
@@ -219,13 +256,16 @@ describe('the terminal channel', () => {
 
   it('answers a bare PaneView, with no IpcResult envelope around it', async () => {
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'capture-pane': ok('screen'),
     });
     expect(await harness(run)(ATLAS)).toEqual({
       kind: 'ok',
       name: 'vam-atlas-a1b2c3',
       text: 'screen',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
   });
 
@@ -249,7 +289,7 @@ describe('the terminal channel', () => {
 
   it("passes the row through, so the tab gets this session's pane", async () => {
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n${ATLAS}\tvam-atlas-cc22dd\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-aa11bb\n${ATLAS}\t\tvam-atlas-cc22dd\n`),
       'capture-pane': ok('beta screen'),
     });
     const panes = new Map([['sess-beta#8', 'vam-atlas-cc22dd']]);
@@ -257,6 +297,9 @@ describe('the terminal channel', () => {
       kind: 'ok',
       name: 'vam-atlas-cc22dd',
       text: 'beta screen',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
   });
 });
@@ -271,7 +314,7 @@ describe('the terminal channel', () => {
  * itself, and `readSessionPane` is given the map (`session-pane.ts`).
  */
 describe('reading the pane a session published', () => {
-  const listing = ok(`${ATLAS}\tvam-atlas-aa11bb\n${ATLAS}\tvam-atlas-cc22dd\n`);
+  const listing = ok(`${ATLAS}\t\tvam-atlas-aa11bb\n${ATLAS}\t\tvam-atlas-cc22dd\n`);
 
   it('captures the pane this row published, where the project alone is ambiguous', async () => {
     const { run, argvs } = runner({ 'list-sessions': listing, 'capture-pane': ok('beta screen') });
@@ -283,8 +326,29 @@ describe('reading the pane a session published', () => {
       kind: 'ok',
       name: 'vam-atlas-cc22dd',
       text: 'beta screen',
+      // These stubs answer the capture and say nothing about the cursor,
+      // which is exactly what `unreadable` means (`shared/terminal.ts`).
+      cursor: { kind: 'unreadable' },
     });
-    expect(argvs).toContainEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-cc22dd:']);
+    expect(argvs.at(-1)).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-atlas-cc22dd:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      ';',
+      'capture-pane',
+      '-p',
+      '-e',
+      // THE SCROLLBACK, and this is the only caller that asks for it: the tab
+      // drew exactly the rows its box could show, so there was nothing in it
+      // to scroll at all (`tmux/argv.ts`, `PANE_HISTORY_LINES`).
+      '-S',
+      '-500',
+      '-t',
+      '=vam-atlas-cc22dd:',
+    ]);
   });
 
   it('still says ambiguous for a row that published nothing', async () => {
@@ -308,7 +372,7 @@ describe('reading the pane a session published', () => {
     // looking for a session that is running. `mispaired` carries the name the
     // row published, which is the one fact that explains the refusal.
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-aa11bb\n`),
       'capture-pane': ok('alpha screen'),
     });
     const view = await readSessionPane(
@@ -325,7 +389,7 @@ describe('reading the pane a session published', () => {
     // would answer with a DIFFERENT live session this row was never in, so
     // the refusal stands -- and it says which pane it was asked to trust.
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-aa11bb\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-aa11bb\n`),
       'capture-pane': ok('alpha screen'),
     });
     const view = await readSessionPane(

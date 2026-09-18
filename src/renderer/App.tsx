@@ -5,7 +5,7 @@
  *
  *  - **live** (the default) — a real factory server. Rows are real sessions,
  *    the prompt box writes to a real log.
- *  - **demo** (`?demo=1`) — the fixture from §3. Every write is refused HERE,
+ *  - **demo** (`?demo=1`) — the fixture. Every write is refused HERE,
  *    before it reaches the client, and the banner says so. A demo you can type
  *    into is a demo that teaches you the wrong reflex.
  *
@@ -19,6 +19,9 @@ import type {
   ClipboardApi,
   DesktopSourceApi,
   DialogApi,
+  FilesApi,
+  IssueApi,
+  LinkApi,
   MainErrorsApi,
   TerminalApi,
   UpdateApi,
@@ -30,10 +33,13 @@ import { useCanvas } from './adapter/useCanvas.js';
 import { Canvas } from './canvas/Canvas.js';
 import { ErrorBoundary } from './errors/ErrorBoundary.js';
 import { bridgeMainErrors } from './errors/main-errors-bridge.js';
-import { DEMO_MODEL } from './fixtures/demo.js';
+import { PairingScreen } from './panels/PairingScreen.js';
+import { AgentWorkReaderProvider } from './sources/agent-work-reader.js';
+import { HistoryReaderProvider } from './sources/history-reader.js';
 import { createSourceFromHttp } from './sources/http-factory.js';
 import { describeFailure, type SessionSource } from './sources/port.js';
 import { createSourceFromPreload } from './sources/preload-factory.js';
+import { writeRemoteToken } from './sources/remote-token.js';
 import { useSourceModel } from './sources/useSourceModel.js';
 import { UpdateNotice } from './update/UpdateNotice.js';
 
@@ -49,9 +55,32 @@ declare global {
     readonly api?: DesktopSourceApi & {
       readonly usage: UsageApi;
       readonly clipboard: ClipboardApi;
+      /**
+       * Opens a PREFILLED issue form in the operator's own browser and posts
+       * nothing. Desktop-only: the browser build has no bridge, and the error
+       * log falls back to showing the URL there -- which it can now do usefully,
+       * because its text is selectable.
+       */
+      readonly issue: IssueApi;
+      /**
+       * Opens an address an AGENT wrote, in the operator's own browser -- the
+       * ONE member that names a destination, and the allowlist that pays for
+       * it lives in main (`CHANNELS.linkOpen`). Desktop-only: in the browser
+       * build a link in a transcript stays what it has always been, an address
+       * printed beside its text, and the control says so when pressed.
+       */
+      readonly link: LinkApi;
       readonly terminal: TerminalApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;
+      /**
+       * The file-editor tab's read, write and list, authorised against every
+       * live session's own working directory in main before a byte or a name
+       * crosses this bridge. See `src/main/files/authorize.ts`. Desktop-only,
+       * by construction rather than convention -- there is no matching route
+       * on `remote/server.ts`'s table, ever (`CHANNELS.filesRead`'s header).
+       */
+      readonly files: FilesApi;
       /**
        * The launch check's answer, and the click that opens the release page
        * in the operator's browser. Desktop-only: the browser build has no
@@ -64,6 +93,15 @@ declare global {
        * through `bridgeMainErrors`.
        */
       readonly mainErrors: MainErrorsApi;
+      /**
+       * PREFERENCES MAIN NEEDS A COPY OF -- one today: where to ask GitHub
+       * from, per project. Desktop-only, and OPTIONAL in this type rather than
+       * merely absent at runtime, because `activatePrefs` runs in the browser
+       * build too and must be able to see that it is not there.
+       */
+      readonly prefs?: {
+        setPrRepos(map: unknown): Promise<void>;
+      };
     };
   }
 }
@@ -84,6 +122,52 @@ function smithUrl(): string {
 
 function isDemo(): boolean {
   return new URLSearchParams(globalThis.location?.search ?? '').get('demo') === '1';
+}
+
+/**
+ * How many turns the demo's first session should carry — `?turns=N`, and only
+ * inside the demo.
+ *
+ * A MEASUREMENT KNOB, not a feature. The detail pane draws every turn the
+ * model gives it, and the real cap is `MAX_DECISIONS = 3276`
+ * (`main/sources/claude-code/transcript.ts`); the hand-written fixture has
+ * seven. Without a way to build the worst case in a real browser, the only
+ * thing anyone could say about the pane at volume is a guess, and this repo
+ * has a rule against those. `e2e/transcript-column-shots.mjs` uses it to time
+ * the column at 3,276 turns.
+ *
+ * Read only where the demo model is built, so it is unreachable outside
+ * `?demo=1`; anything unparseable or below the fixture's own length simply
+ * leaves the fixture alone.
+ */
+function demoTurns(): number {
+  const asked = new URLSearchParams(globalThis.location?.search ?? '').get('turns');
+  const count = Number(asked);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+/**
+ * Whether the demo has a backward pager — `?demo=1&history=off` takes it away.
+ *
+ * THE SAME KIND OF KNOB AS `?turns=N` ABOVE, and it earns its keep the same
+ * way: it makes a real state of the app REACHABLE that otherwise is not.
+ * `SessionSource.history` is optional (`sources/port.ts`), and every source vam
+ * itself assembles has it — so the branch where it is ABSENT, which the column
+ * draws as a stated refusal rather than as "there is nothing older", is a
+ * branch no shipped source can put on screen. Without this it would ship
+ * undrawn and untested in a browser, which is how a message ends up wrong for
+ * a year.
+ *
+ * It is also what keeps the column's geometry guards honest. With a pager, the
+ * column GROWS whenever a check scrolls near its top, so a sticky-position
+ * sweep computed against one set of offsets would be walking a different
+ * column by the time it got there. Off, the fixture is the fixed seven turns
+ * those checks were written against.
+ *
+ * Read only inside the demo, like `demoTurns`.
+ */
+function demoHasHistory(): boolean {
+  return new URLSearchParams(globalThis.location?.search ?? '').get('history') !== 'off';
 }
 
 export function App() {
@@ -129,7 +213,31 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
   const [remote, setRemote] = useState<SessionSource | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
+  /**
+   * THE STATE EVERY NEW DEVICE STARTS IN, and it is not a failure.
+   *
+   * A vam endpoint that refuses an unpaired caller answers `unauthenticated`,
+   * and this component used to hand that to `describeFailure` and draw it as a
+   * banner over an empty canvas -- which is how the operator ended up holding
+   * a phone showing "check the pairing screen on the desktop" and no way to
+   * act on it. "This device has not been allowed yet" and "this source broke"
+   * are different facts and now look different.
+   *
+   * The bump is what re-asks after pairing: the api reads the token per
+   * request (`http-factory.ts`), so nothing has to be rebuilt -- the same
+   * effect simply runs again, now with a credential.
+   */
+  const [attempt, setAttempt] = useState(0);
+  const [needsPairing, setNeedsPairing] = useState(false);
 
+  /**
+   * `attempt` is a SIGNAL, not a value this effect reads: bumping it is how
+   * pairing asks the origin again. The api reads the token per request
+   * (`http-factory.ts`), so there is nothing to rebuild and nothing new to
+   * close over -- the same effect simply runs a second time, now with a
+   * credential. Removing it would leave the pairing screen up forever.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the re-ask signal, not a value read here — see above
   useEffect(() => {
     let cancelled = false;
     createSourceFromHttp()
@@ -141,6 +249,10 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
           typeof reason === 'object' && reason !== null && 'code' in reason
             ? String(reason.code)
             : '';
+        if (code === 'unauthenticated') {
+          if (!cancelled) setNeedsPairing(true);
+          return;
+        }
         // Not a vam endpoint at all -- no route, or no envelope behind it.
         if (!(code === 'no-such-route' || code.startsWith('http-'))) {
           if (!cancelled) setFailure(describeFailure(reason));
@@ -152,12 +264,26 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   // Nothing until the origin has answered: a canvas drawn from the wrong
   // source and swapped a tick later is two claims about the operator's work.
   if (!asked) {
     return null;
+  }
+  if (needsPairing) {
+    return (
+      <PairingScreen
+        onPaired={(token) => {
+          // STORED FIRST, then re-asked: the retry below is only worth making
+          // because the next request will carry this.
+          writeRemoteToken(token);
+          setNeedsPairing(false);
+          setAsked(false);
+          setAttempt((n) => n + 1);
+        }}
+      />
+    );
   }
   if (remote === null && failure === null) {
     return <LiveCanvas client={client} />;
@@ -169,9 +295,9 @@ export function BrowserCanvas({ client }: { readonly client: SmithClient }) {
  * The desktop canvas: rows AND a write route, both assembled from the main
  * process's own descriptor.
  *
- * The Claude Code source declares `recordPrompt: true` and, when it can reach
- * a running `claude --resume`, `deliverPrompt: true` too -- so the
- * `SessionSource` `createSourceFromPreload` returns genuinely carries a
+ * The Claude Code source declares `recordPrompt: true` and, because it can type
+ * a reply into the pane of a session it owns, `deliverPrompt: true` too -- so
+ * the `SessionSource` `createSourceFromPreload` returns genuinely carries a
  * `write` member. `Canvas` is given it as a `'session'` source rather than
  * left on the `READ_ONLY_SOURCE` default, so this shell is exactly as
  * writable as the descriptor it was built from -- whether a given write
@@ -271,43 +397,156 @@ function SourceCanvas({
         </p>
       )}
       <div className="min-h-0 flex-1">
-        {/* The canvas is where the throw actually comes from, and the banner
-            above it is usually the sentence that explains why -- so the
-            boundary goes HERE, under the banner, rather than at the root
-            where it would take the explanation down with the canvas. It also
-            covers the phone shell, which `Canvas` renders. */}
-        <ErrorBoundary surface="the canvas">
-          <Canvas
-            model={model}
-            source={
-              source === null
-                ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
-                  // — this canvas is read-only", which is a claim about a source
-                  // that has not answered yet and, here, is usually wrong. With
-                  // `shown` set there is no source and there will not be one, so
-                  // the cell says that instead of connecting forever.
-                  { kind: 'connecting', error: shown }
-                : { kind: 'session', source, error: shown, loading, onWrote: reload }
-            }
-          />
+        {/* The session view is where the throw actually comes from, and the
+            banner above it is usually the sentence that explains why -- so the
+            boundary goes HERE, under the banner, rather than at the root where
+            it would take the explanation down with the view. It also covers
+            the phone shell, which `Canvas` renders.
+
+            THE NAME IS THE OPERATOR'S, NOT THE MODULE'S. It reads back as
+            "the session view stopped rendering", and 0.2 removed the canvas
+            this used to be called after -- a card naming a surface that no
+            longer exists sends a person looking for a view that is gone, at
+            the moment something already failed. */}
+        <ErrorBoundary surface="the session view">
+          {/* THE SOURCE'S BACKWARD PAGER, published to every pane below.
+              `source.history ?? null`, and both halves of that are deliberate:
+              the member is optional on the port (`sources/port.ts` says why),
+              and a source that has not answered yet -- or failed to assemble --
+              publishes NOTHING rather than a stub that resolves empty. A stub
+              would tell the column "there is nothing older" about a source that
+              has said no such thing, which is the confusion `TranscriptPage`'s
+              whole shape exists to prevent.
+
+              HERE RATHER THAN THROUGH `Canvas`: it is the source's own member,
+              one per app, and it takes the session id it acts on as an
+              argument, so the panes that draw a column all want the same
+              function. `sources/history-reader.ts` carries the argument in
+              full. */}
+          {/* AND THE AGENT READER BESIDE IT, on the identical argument
+              (`sources/agent-work-reader.ts`): one per app, takes the session
+              id it acts on, wanted by every pane that draws an Agents tab.
+              `null` when the source cannot look, never a stub. */}
+          <AgentWorkReaderProvider value={source?.agentWork ?? null}>
+            <HistoryReaderProvider value={source?.history ?? null}>
+              <Canvas
+                model={model}
+                source={
+                  source === null
+                    ? // Not the default `READ_ONLY_SOURCE`: it says "no write route
+                      // — this canvas is read-only", which is a claim about a source
+                      // that has not answered yet and, here, is usually wrong. With
+                      // `shown` set there is no source and there will not be one, so
+                      // the cell says that instead of connecting forever.
+                      { kind: 'connecting', error: shown }
+                    : { kind: 'session', source, error: shown, loading, onWrote: reload }
+                }
+              />
+            </HistoryReaderProvider>
+          </AgentWorkReaderProvider>
         </ErrorBoundary>
       </div>
     </div>
   );
 }
 
-function DemoCanvas() {
+/**
+ * The demo shell: no write route, a scripted backward pager, and a scripted
+ * agent-work reader -- everything `?demo=1` can answer, and nothing it
+ * cannot. Exported for the same reason `DesktopCanvas` and `BrowserCanvas`
+ * are: a provider is wiring that can be silently dropped -- nothing stops
+ * compiling when one is deleted, the consumer below simply reads its context
+ * default and draws the sentence reserved for a source with no such surface
+ * -- and the only way to pin that the wiring survives is to mount this
+ * exact component in a test (`test/app/App.agent-work.test.tsx`), the way
+ * `App.history.test.tsx` already does for `DesktopCanvas`'s pager.
+ */
+type DemoModule = typeof import('./fixtures/demo.js');
+type DemoAgentWorkModule = typeof import('./fixtures/demo-agent-work.js');
+type DemoHistoryModule = typeof import('./fixtures/demo-history.js');
+
+/**
+ * The three fixture modules, loaded once the demo is actually reached rather
+ * than pulled into the production entry chunk for every operator who never
+ * passes `?demo=1`. `DemoCanvas` renders nothing while they load — there is
+ * no user-visible state to show for "the demo is arriving" that is worth a
+ * new string.
+ */
+export function DemoCanvas() {
+  const [fixtures, setFixtures] = useState<{
+    demo: DemoModule;
+    agentWork: DemoAgentWorkModule;
+    history: DemoHistoryModule;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      import('./fixtures/demo.js'),
+      import('./fixtures/demo-agent-work.js'),
+      import('./fixtures/demo-history.js'),
+    ]).then(([demo, agentWork, history]) => {
+      if (!cancelled) setFixtures({ demo, agentWork, history });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (fixtures === null) return null;
+  return <DemoCanvasLoaded {...fixtures} />;
+}
+
+function DemoCanvasLoaded({
+  demo,
+  agentWork,
+  history: historyModule,
+}: {
+  demo: DemoModule;
+  agentWork: DemoAgentWorkModule;
+  history: DemoHistoryModule;
+}) {
+  // Once per mount: padding 3,276 turns is real work, and doing it on every
+  // render would measure the fixture instead of the pane.
+  const model = useMemo(() => {
+    const asked = demoTurns();
+    return asked > 0 ? demo.demoModelWithTurns(asked) : demo.DEMO_MODEL;
+  }, [demo]);
+  /**
+   * THE DEMO'S OWN PAGER, and the demo is the only session this repo may drive
+   * a guard against or put in a screenshot -- vam is public and every real
+   * transcript on this machine is somebody's work. It is a real `TranscriptPage`
+   * producer read by the same walk as any source's, and it gives all four of
+   * the answers a source can give, the blank window and the refusal included
+   * (`fixtures/demo-history.ts` states the order).
+   *
+   * ONCE PER MOUNT, like the model above: the scripted refusal is a step in a
+   * closure, so a pager rebuilt on every render would refuse forever.
+   */
+  const history = useMemo(
+    () => (demoHasHistory() ? historyModule.createDemoHistory() : null),
+    [historyModule],
+  );
   return (
-    <Canvas
-      model={DEMO_MODEL}
-      source={{
-        kind: 'demo',
-        // Refused here rather than at the server: in demo mode there is no
-        // session to refuse it, and "unknown session" is a confusing way to
-        // learn the rows were never real.
-        note: 'demo data — every write is refused',
-      }}
-    />
+    // THE AGENT READER, BESIDE THE PAGER AND FOR THE SAME REASON: without it
+    // `useAgentWorkReader()` reads the context's own default, `null`, and
+    // picking `coder`/`tester`/`reviewer` in the Agents tab drew the sentence
+    // reserved for a source with no agent surface at all -- untrue of the
+    // demo, which can answer anything (`fixtures/demo-agent-work.ts`).
+    <AgentWorkReaderProvider value={agentWork.demoAgentWork}>
+      <HistoryReaderProvider value={history}>
+        <Canvas
+          model={model}
+          source={{
+            kind: 'demo',
+            // Refused here rather than at the server: in demo mode there is no
+            // session to refuse it, and "unknown session" is a confusing way to
+            // learn the rows were never real.
+            note: 'demo data — every write is refused',
+          }}
+        />
+      </HistoryReaderProvider>
+    </AgentWorkReaderProvider>
   );
 }
 

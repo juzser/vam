@@ -29,7 +29,7 @@ const ATLAS = 'claude-code:atlas-11111111';
 /** Invented, like every value here: a project digest and vam's own prefix. */
 const PROJECT = 'p-atlas-1';
 const PANE = 'vam-atlas-a1b2c3';
-const LISTING = `${PROJECT}\t${PANE}\n`;
+const LISTING = `${PROJECT}\t\t${PANE}\n`;
 
 function harness(run: TmuxRun, panes: ReadonlyMap<string, string> = new Map()) {
   const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();

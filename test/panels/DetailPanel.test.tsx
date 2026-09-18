@@ -22,9 +22,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // `main/`: `test/canvas/Canvas.new-project.test.tsx` already does the same
 // for `whyNotARepository`, which is the precedent this follows.
 import { summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
-import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
+import type {
+  Command,
+  Decision,
+  Project,
+  Session,
+  SessionAgent,
+} from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
+  EMPTY_CHORD,
+  isReserved,
+  NO_BINDINGS,
+  resolveChord,
+} from '../../src/renderer/keyboard/chords.js';
+import {
+  AGENT_SPLIT_PX,
   ATTACH_LIMIT_BYTES,
   type AttachedFile,
   attachIntoDraft,
@@ -44,6 +57,15 @@ import {
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
 import { OUT_FONT_SIZE_VAR } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_PROMPT_SUBMIT_KEY,
+  setActivePromptSubmitKey,
+} from '../../src/renderer/prefs/submit-key.js';
+import {
+  type AgentWorkReader,
+  AgentWorkReaderProvider,
+} from '../../src/renderer/sources/agent-work-reader.js';
+import type { AgentWork } from '../../src/shared/agent-work.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
@@ -90,64 +112,35 @@ const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
 const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 
 /**
- * The header dot is the pane's only status channel, and it used to have two
- * values for four states plus an empty one: `needsYou ? waiting : running`.
- * So a `done` session, a `failed` session, AND no session at all were all
- * painted as RUNNING -- the last of those putting a live-looking dot beside
- * the words "No session selected".
+ * RETIRED (A12.2): `describe('the pane header names the session status it
+ * actually has', ...)` — three cases ("paints each of the four statuses with
+ * its own token", "breathes only for the status that is asking for
+ * something", "shows no status colour at all when no session is selected").
+ *
+ * The header, and the `[data-pane-status]` dot it drew, are gone. This pane
+ * no longer has a status channel of its own to test — `SessionList.tsx`'s own
+ * `STATUS_DOT` (unchanged by this commit) is the map that used to be
+ * duplicated here, per the removed constant's own doc ("the same tokens, so
+ * the two panes cannot disagree"); this file does not re-assert a fact that
+ * was never this pane's to own. What is genuinely new here — whether the
+ * turn on screen is still being worked — is the `out` rule's `outIsLive`,
+ * covered at length below ("the out region shows live work while the
+ * session is running", "the live line stands beside the answer").
+ * The third case was already vacuous before this change: `dotClass()`
+ * returns `''` for a missing element exactly as it does for a colourless
+ * one, so "shows no status colour" was passing whether or not the dot
+ * existed at all — it proved nothing, on its own terms, well before this
+ * commit removed the element it was written against.
  */
-describe('the pane header names the session status it actually has', () => {
-  const dotClass = () => document.querySelector('[data-pane-status]')?.getAttribute('class') ?? '';
-
-  it('paints each of the four statuses with its own token', () => {
-    for (const [status, token] of [
-      ['waiting', 'bg-waiting'],
-      ['running', 'bg-running'],
-      ['done', 'bg-done'],
-      ['failed', 'bg-failed'],
-    ] as const) {
-      cleanup();
-      draw({ entry: { project: PROJECT, session: { ...SESSION, status } } });
-      expect(dotClass(), `status ${status}`).toContain(token);
-      // Each token appears for exactly its own status, so a map collapsing two
-      // of them together fails rather than passing on a shared colour.
-      for (const other of ['bg-waiting', 'bg-running', 'bg-done', 'bg-failed']) {
-        if (other !== token)
-          expect(dotClass(), `${status} must not be ${other}`).not.toContain(other);
-      }
-    }
-  });
-
-  it('breathes only for the status that is asking for something', () => {
-    for (const [status, breathes] of [
-      ['waiting', true],
-      ['running', true],
-      ['done', false],
-      ['failed', false],
-    ] as const) {
-      cleanup();
-      draw({ entry: { project: PROJECT, session: { ...SESSION, status } } });
-      expect(dotClass().includes('vam-breathe'), `status ${status}`).toBe(breathes);
-    }
-  });
-
-  it('shows no status colour at all when no session is selected', () => {
-    // The dot claimed a running session while the title said none was picked.
-    draw({ entry: null, decision: null });
-    for (const token of ['bg-waiting', 'bg-running', 'bg-done', 'bg-failed']) {
-      expect(dotClass()).not.toContain(token);
-    }
-    expect(dotClass()).not.toContain('vam-breathe');
-  });
-});
 
 /**
  * In-flight delivery.
  *
- * `claude --resume` is a subprocess with a 120-SECOND timeout
- * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`). Before this the composer showed
- * nothing while it ran: Enter appeared to do nothing for up to two minutes,
- * and every further Enter was swallowed by `Canvas`'s `writing` guard without
+ * A reply is a run of tmux `send-keys` into the session's pane (`reply.ts`),
+ * plus the listing that resolves the pane first -- quick, but not instant.
+ * Before this the composer showed nothing while it ran: Enter appeared to do
+ * nothing, and every further Enter was swallowed by `Canvas`'s `writing` guard
+ * without
  * a word. The flag existed; it just never left `Canvas`.
  */
 describe('the composer says when a prompt is in flight', () => {
@@ -187,6 +180,103 @@ describe('the composer says when a prompt is in flight', () => {
 });
 
 /**
+ * TWO OUTCOMES MUST NOT SHARE A FACE.
+ *
+ * `main/sources/claude-code/reply.ts` types the prompt into the pane of a
+ * session vam started, genuinely reaching a running session; the factory
+ * source appends to a log nothing reads back. "Typed into the terminal" and
+ * "filed for later" are different things to have done, and the button painted one
+ * `ArrowUp` for both -- the whole distinction lived in an `aria-label` and a
+ * native `title`, neither of which is on screen.
+ *
+ * MOUNTED HERE RATHER THAN MEASURED IN A BROWSER, and that split is the
+ * point: `?demo=1` is a `'demo'` source, so `delivers` is false on every row
+ * a Playwright run can reach and only one of these two faces is ever painted
+ * there. `e2e/composer-bar-shots.mjs` holds everything that needs layout,
+ * focus or paint (the word has a box, the name contains it, the `title` is
+ * gone, Tab opens the tip); this holds the PAIRING, which is a pure
+ * prop-driven render with no layout in it.
+ */
+describe('the composer submit paints which outcome it will produce', () => {
+  const submit = () => document.querySelector('[data-prompt-record]');
+  /** The glyph's own identity, whatever lucide happens to call it. */
+  const glyph = () => submit()?.querySelector('svg')?.getAttribute('class') ?? null;
+  const word = () => (submit()?.textContent ?? '').trim();
+
+  it('says one thing for a source that delivers and another for one that records', () => {
+    draw({ draft: 'ship it', delivers: true });
+    const delivering = { word: word(), glyph: glyph(), name: submit()?.getAttribute('aria-label') };
+    // `render` APPENDS a container; without this the second panel is mounted
+    // beside the first and every `document.querySelector` below reads the
+    // one already measured -- which is how a comparison passes against
+    // itself.
+    cleanup();
+    draw({ draft: 'ship it', delivers: false });
+    const recording = { word: word(), glyph: glyph(), name: submit()?.getAttribute('aria-label') };
+
+    // FIRST, THAT THERE IS ANYTHING TO COMPARE. Both halves of every check
+    // below are relative, and two nulls are equal to each other forever --
+    // which is how a guard passes on an absence.
+    expect(delivering.glyph).not.toBeNull();
+    expect(recording.glyph).not.toBeNull();
+    expect(delivering.name).not.toBe('');
+    expect(recording.name).not.toBe('');
+
+    // THE WORD IS GONE AND THE DISTINCTION IS NOT. Operator: "drop the Send
+    // label from the button, the icon is enough." What carried the
+    // delivers/records difference was the word, so with the word gone this is
+    // the assertion that keeps the difference somewhere: a different GLYPH,
+    // and a different accessible NAME. Which icon is a design choice and is
+    // not asserted; that the two do not share one is the claim.
+    expect(delivering.word).toBe('');
+    expect(recording.word).toBe('');
+    expect(delivering.glyph).not.toBe(recording.glyph);
+    expect(delivering.name).not.toBe(recording.name);
+    expect({ delivering: delivering.name, recording: recording.name }).toEqual({
+      delivering: 'send prompt',
+      recording: 'record prompt',
+    });
+  });
+
+  it('names the act in every state, now that nothing is painted to read', () => {
+    // WCAG 2.5.3 (label in name) STOPS APPLYING when there is no visible
+    // label, and what replaces it is 1.1.1: an icon-only control has to carry
+    // its own name, in every state -- including mid-flight, which is the
+    // pairing that went wrong first when the in-flight wording was last
+    // edited, and the reason both states are still read here.
+    for (const delivers of [true, false]) {
+      for (const sending of [true, false]) {
+        cleanup();
+        draw({ draft: 'ship it', delivers, sending });
+        const name = submit()?.getAttribute('aria-label') ?? '';
+        const where = `delivers=${delivers} sending=${sending}`;
+        expect(name, where).not.toBe('');
+        expect(name.toLowerCase(), where).toContain(delivers ? 'send' : 'record');
+        // And nothing is painted inside it but the glyph.
+        expect(word(), where).toBe('');
+        expect(submit()?.querySelectorAll('svg').length, where).toBe(1);
+      }
+    }
+  });
+
+  it('carries no native `title` — the tooltip no keyboard can open', () => {
+    // The sentence moved into `Note`, which opens on focus. A `title` left
+    // beside it would announce the same string a second time and go on being
+    // unopenable from the keyboard.
+    draw({ draft: 'ship it', delivers: true });
+    expect(submit()?.hasAttribute('title')).toBe(false);
+    // The delivering note now names the terminal it types into, not a delivery
+    // it cannot confirm.
+    expect(submit()?.getAttribute('data-note')).toMatch(/terminal/i);
+    expect(submit()?.getAttribute('data-note')).not.toMatch(/delivered/i);
+    cleanup();
+    draw({ draft: 'ship it', delivers: false });
+    expect(submit()?.hasAttribute('title')).toBe(false);
+    expect(submit()?.getAttribute('data-note')).toMatch(/log/i);
+  });
+});
+
+/**
  * Session-level facts must not be captioned as turn-level ones.
  *
  * `Decision` carries no timestamp (`model.ts`), so nothing in the model can
@@ -198,24 +288,38 @@ describe('the composer says when a prompt is in flight', () => {
  * and both captions kept describing the present.
  */
 describe('the in and out rules do not date a turn the model cannot date', () => {
-  const ruleMeta = (block: string) =>
-    q<HTMLElement>(`[data-detail-block="${block}"] [data-rule-meta]`)?.textContent ?? '';
+  // The three rules are gone (`DetailPanel.transcript-flow.test.tsx`), and so
+  // now is the identity line their `in` half moved onto -- the operator asked
+  // for that too. The PROPERTY is untouched and is what this reads: a
+  // session-level fact must not be captioned as a turn-level one. So the
+  // whole `in` block is the subject now, and `out`'s meta is still read off
+  // the condensed progress line.
+  const inBlock = () => q<HTMLElement>('[data-detail-block="in"]')?.textContent ?? '';
+  /**
+   * THE ACTIVITY ON THE TURN THE PANE IS MARKING. The column draws every turn
+   * and the NEWEST one carries the activity whatever the pane is marking, so
+   * an unqualified lookup would find that line and report the present tense on
+   * a case about reading the past.
+   */
+  const activity = () =>
+    q<HTMLElement>('[data-column-turn][data-turn-current="true"] [data-progress-activity]')
+      ?.textContent ?? '';
 
-  it('the in rule names who, and claims no per-turn time', () => {
+  it('the in block claims no per-turn time, and no longer says who', () => {
     draw({ entry: ENTRY, decision: DECISIONS[2] as Decision });
-    expect(ruleMeta('in')).toContain('you');
     // 12m is SESSION.age. It must not appear against a turn three back.
-    expect(ruleMeta('in')).not.toContain('12m');
+    expect(inBlock()).not.toContain('12m');
+    expect(q('[data-detail-identity]')).toBeNull();
   });
 
-  it('the out rule shows current activity only on the turn being worked', () => {
+  it('the progress line shows current activity only on the turn being worked', () => {
     // Newest turn of a running session: the activity genuinely belongs to it.
     cleanup();
     draw({
       entry: { project: PROJECT, session: { ...SESSION, status: 'running' } },
       decision: DECISIONS[0] as Decision,
     });
-    expect(ruleMeta('out')).toContain('just now');
+    expect(activity()).toContain('just now');
 
     // An older turn: the same activity line would be describing the present
     // while the operator reads the past.
@@ -224,16 +328,27 @@ describe('the in and out rules do not date a turn the model cannot date', () => 
       entry: { project: PROJECT, session: { ...SESSION, status: 'running' } },
       decision: DECISIONS[2] as Decision,
     });
-    expect(ruleMeta('out')).not.toContain('just now');
+    expect(activity()).not.toContain('just now');
   });
 
-  it('says no session is selected rather than that the session has no steps', () => {
+  it('never claims a session that does not exist has no steps', () => {
     // With nothing focused the pane read "This session has no steps yet",
-    // which names a session that does not exist.
+    // which names a session that does not exist. That is still refused.
     draw({ entry: null, decision: null });
-    const body = document.body.textContent ?? '';
-    expect(body).not.toContain('This session has no steps yet');
-    expect(body).toMatch(/no session/i);
+    expect(document.body.textContent ?? '').not.toContain('This session has no steps yet');
+  });
+
+  it('leaves the sentence to the tab strip on a desktop pane, and says it on a phone', () => {
+    // Audit F9: the empty pane stacked "no sessions open — pick one from the
+    // sidebar" (the strip, always drawn above a desktop pane) and "No session
+    // selected — pick one in the sidebar." (here) 40px apart in otherwise
+    // empty space. One sentence, said once, by the surface that is always
+    // there. A PHONE has no tab strip, so there this is that surface.
+    draw({ entry: null, decision: null });
+    expect(document.body.textContent ?? '').not.toMatch(/no session selected/i);
+    cleanup();
+    draw({ entry: null, decision: null, phone: true });
+    expect(document.body.textContent ?? '').toMatch(/no session selected/i);
   });
 });
 
@@ -299,7 +414,45 @@ describe('a failed session says so, and does not invent a reason', () => {
   });
 });
 
-function draw(over: Partial<DetailPanelProps> = {}) {
+/**
+ * THE PANE DRAWS THE SESSION, NOT THE `decision` PROP -- so a fixture whose two
+ * halves disagree describes nothing.
+ *
+ * The pane used to render whichever single turn `decision` pointed at, which
+ * let a case hand it a turn that was not in `entry.session.decisions` at all
+ * and still see it on screen. It is a column of every turn the SESSION carries
+ * now (`Canvas.tsx` builds `decision` out of that same list, so the two never
+ * disagree in the app), and such a fixture would draw seven turns that have
+ * nothing to do with the assertion below it.
+ *
+ * So the two are reconciled here, once, rather than in thirty cases: a
+ * `decision` the entry already carries is left alone -- that is a case about
+ * WHICH of several turns is picked, and the seven-turn fixture is the whole
+ * point of it -- and an ad-hoc one becomes the session's only turn, which is
+ * what a case about how one turn RENDERS meant all along. A caller that passes
+ * its own `entry` has said what it wants and is never touched.
+ */
+function reconcile(over: Partial<DetailPanelProps>): Partial<DetailPanelProps> {
+  const picked = over.decision;
+  if (picked === undefined || picked === null) return over;
+  if ('entry' in over) return over;
+  // BY IDENTITY, not by id. The shared fixture's newest turn IS `d5`, so an
+  // id test would leave `{ id: 'd5', output: '## heading' }` sitting beside a
+  // seven-turn session that carries a DIFFERENT d5 -- the fixture disagreeing
+  // with itself in the one way that is invisible from the assertion.
+  if (ENTRY.session.decisions.includes(picked)) return over;
+  return { ...over, entry: { ...ENTRY, session: { ...ENTRY.session, decisions: [picked] } } };
+}
+
+/**
+ * The source's agent reader, published the way `App.tsx` publishes it -- a
+ * context, not a prop (`sources/agent-work-reader.ts` says why). Taken as a
+ * second argument rather than smuggled into `DetailPanelProps`, so the test
+ * mounts exactly what the app mounts.
+ */
+type Reader = AgentWorkReader | null;
+
+function draw(over: Partial<DetailPanelProps> = {}, agentWork: Reader = null) {
   const props: DetailPanelProps = {
     entry: ENTRY,
     // The newest turn, which is the one the canvas focuses by default.
@@ -314,13 +467,17 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     actionIndex: 0,
     width: 408,
     resizeHandle: null,
-    ...over,
+    ...reconcile(over),
   };
-  render(<DetailPanel {...props} />);
+  render(
+    <AgentWorkReaderProvider value={agentWork}>
+      <DetailPanel {...props} />
+    </AgentWorkReaderProvider>,
+  );
 }
 
 /** `draw`, but able to re-render with new props -- for a capability that changes. */
-function drawFor(over: Partial<DetailPanelProps> = {}) {
+function drawFor(over: Partial<DetailPanelProps> = {}, agentWork: Reader = null) {
   const build = (extra: Partial<DetailPanelProps>): DetailPanelProps => ({
     entry: ENTRY,
     decision: DECISIONS[0] as Decision,
@@ -334,25 +491,80 @@ function drawFor(over: Partial<DetailPanelProps> = {}) {
     actionIndex: 0,
     width: 408,
     resizeHandle: null,
-    ...over,
-    ...extra,
+    ...reconcile({ ...over, ...extra }),
   });
-  const view = render(<DetailPanel {...build({})} />);
+  const wrap = (extra: Partial<DetailPanelProps>) => (
+    <AgentWorkReaderProvider value={agentWork}>
+      <DetailPanel {...build(extra)} />
+    </AgentWorkReaderProvider>
+  );
+  const view = render(wrap({}));
   return {
-    rerender: (extra: Partial<DetailPanelProps>) =>
-      view.rerender(<DetailPanel {...build(extra)} />),
+    rerender: (extra: Partial<DetailPanelProps>) => view.rerender(wrap(extra)),
   };
 }
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const all = (selector: string) => [...document.querySelectorAll(selector)];
 const progress = () => q<HTMLElement>('[data-detail-block="progress"]');
-const turns = () => all('[data-progress-turn]');
-const toggle = () => q<HTMLButtonElement>('[data-progress-toggle]');
+/**
+ * THE PICKER IS GONE, THE PICK IS NOT — and these three helpers are where
+ * that distinction lives for this whole file.
+ *
+ * A12.2 collapsed `progress` from a toggle-and-list into a single `<select>`;
+ * the operator has now had the bar that `<select>` sat in removed altogether
+ * (`DetailPanel.tsx`), because the pane draws EVERY turn and a jump-to-turn
+ * control is a second way to do what the scrollbar does. So there is no
+ * in-pane control to drive any more.
+ *
+ * What survives is the model the control drove: `selectedId`/`markedId`, which
+ * the CANVAS's step focus moves. `navigateTo` is that door -- a new
+ * `focusNodeId` alongside the turn the canvas landed on, exactly what
+ * `Canvas.tsx` hands over when `h`/`l` walks onto a step. `markedTurnId` and
+ * `turnLabels` read the same facts off the column, which is where they are
+ * painted now: `data-turn-current` on the turn being read, and one
+ * `[data-progress-turn-label]` per turn, oldest first -- the ordering the
+ * options had.
+ */
+type PanelView = { readonly rerender: (extra: Partial<DetailPanelProps>) => void };
+/**
+ * PUT THE PANEL ON AN OLDER TURN, THE WAY THE RUNNING APP DOES.
+ *
+ * There is no control to click any more, and there does not need to be.
+ * `Canvas.tsx` hands this panel `decisions[0]` as the canvas's pick and the
+ * pane's SESSION as `focusNodeId`, so the turn the panel considers itself to
+ * be reading is whichever was newest WHEN THE PANE ARRIVED -- and it stays
+ * there as later turns land, because `focusNodeId` does not change and nothing
+ * tells the panel to follow. That is the state every case below wants.
+ *
+ * So: land on the session as it was when `index` turns ago was the newest one,
+ * then let the turns that have arrived since arrive. `index` counts from the
+ * newest end, the order `decisions` is in.
+ */
+function arriveOn(view: PanelView, entry: SessionEntry, index: number) {
+  const asOfThen = entry.session.decisions.slice(index);
+  const focusNodeId = entry.session.id;
+  act(() =>
+    view.rerender({
+      entry: { ...entry, session: { ...entry.session, decisions: asOfThen } },
+      decision: asOfThen[0] as Decision,
+      focusNodeId,
+    }),
+  );
+  act(() =>
+    view.rerender({ entry, decision: entry.session.decisions[0] as Decision, focusNodeId }),
+  );
+}
+const markedTurnId = () =>
+  q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.getAttribute(
+    'data-column-turn',
+  ) ?? null;
+const turnLabels = () =>
+  all('[data-column-turn] [data-progress-turn-label]').map((el) => el.textContent);
 
 afterEach(cleanup);
 
-describe('the progress region shows nothing until it is opened', () => {
+describe('the progress region is a single step, not a list of rows (A12.2)', () => {
   // Seven turns, so "the newest five" and "all of them" are different lists.
   const MANY = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map((id) => decision(id));
   const manyEntry: SessionEntry = {
@@ -360,48 +572,104 @@ describe('the progress region shows nothing until it is opened', () => {
     session: { ...SESSION, decisions: MANY },
   };
 
-  it('draws no turn collapsed, every turn expanded, and says which it is', () => {
+  /**
+   * RETIRED TWICE, and the subject outlived both shapes.
+   *
+   * First it was `'draws no turn collapsed, every turn expanded, and says
+   * which it is'` — a toggle and a `<ul>` of rows. A12.2 collapsed that into
+   * a single `<select>` and this case was rewritten against it. The
+   * `<select>` has now gone too, with the column's bar: every turn is DRAWN,
+   * so a control listing them is a second way to reach what is already on
+   * screen.
+   *
+   * The facts underneath never changed — all seven turns reachable, oldest
+   * first, the newest one included, and the pane saying which one it is
+   * reading — so the case follows them onto the column itself.
+   */
+  it('draws every turn, oldest first, and marks the one being read', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    // Zero, per the operator: collapsed, `progress` is its rule and its toggle
-    // and nothing else, so the height it costs goes to `out`.
-    expect(turns()).toHaveLength(0);
-    // And no empty box either — the list is not rendered at all, so the
-    // section cannot leave a bordered gap where its content would be.
+    // No list of rows and no picker exists at all: the column IS the list.
+    expect(all('[data-progress-turn]')).toHaveLength(0);
+    expect(all('[data-progress-jump]')).toHaveLength(0);
     expect(progress()?.querySelector('ul')).toBeNull();
-    expect(toggle()?.getAttribute('aria-expanded')).toBe('false');
-
-    act(() => toggle()?.click());
-    // ALL SEVEN, not the newest five: `PROGRESS_LINES` used to slice the data
-    // itself, which is exactly the defect this change fixes at the parser --
-    // an artificial ceiling discarding turns nothing forced it to discard.
-    // The oldest turn (d1) has to be REACHABLE, or the fix one file over
-    // bought nothing an operator can actually use. Ordered oldest-first like
-    // the ribbon: the last line is the newest turn.
-    expect(turns()).toHaveLength(7);
-    expect(turns()[0]?.textContent).toContain('step d1');
-    expect(turns()[6]?.textContent).toContain('step d7');
-    expect(toggle()?.getAttribute('aria-expanded')).toBe('true');
-
-    act(() => toggle()?.click());
-    expect(turns()).toHaveLength(0);
+    // ALL SEVEN, not the newest five: `PROGRESS_LINES` used to slice the
+    // data itself at the parser, which was the defect this whole change
+    // fixes. The oldest turn (d1) has to be REACHABLE, or the fix one file
+    // over bought nothing an operator can actually use. Oldest first, same
+    // ordering the old list used.
+    const labels = turnLabels();
+    expect(labels).toHaveLength(7);
+    expect(labels[0]).toContain('step d1');
+    expect(labels[6]).toContain('step d7');
+    // The canvas's own pick (the newest turn) is the one marked.
+    expect(markedTurnId()).toBe('d7');
   });
 
-  it('keeps the three-region structure the pane already earned', () => {
+  /**
+   * RETIRED: `'keeps the three-region structure the pane already earned'`
+   * — it asserted `toggle()?.tagName === 'BUTTON'` and that the OPENED list
+   * carried its own `overflow-y-auto` scroller. Neither survives: there is
+   * no toggle button any more (a `<select>` is the whole control, native
+   * and unstyled by this file), and there is no separate scroller for
+   * `progress` either — it is a flow child of the merged column now (see
+   * `describe('`in` still caps its own text, ...')` above for that
+   * region's own coverage). The one fact worth restating here is that
+   * `progress` is still `flex-none`: it must not stretch to fill the
+   * column the way `out` is allowed to.
+   */
+  it('is still flex-none — it does not stretch to fill the column', () => {
     draw();
-    // A real <button>, so Enter and Space work with no new global binding and
-    // no key stolen from the modal keymap.
-    expect(toggle()?.tagName).toBe('BUTTON');
-    // Regressions guarded elsewhere, restated here because this change is the
-    // one most likely to eat them: still flex-none, and once open the list is
-    // its own scroller rather than growing the pane.
     expect(progress()?.className).toContain('flex-none');
-    act(() => toggle()?.click());
-    expect(progress()?.querySelector('.vam-no-scrollbar')?.className).toContain('overflow-y-auto');
+  });
+
+  /**
+   * FOLLOWED TO THE CONTROL THAT IS LEFT. This case pinned that the region's
+   * one control was a real, labelled, keyboard-reachable element rather than
+   * a styled row -- first of a `<li>` toggle, then of the `<select>`. Neither
+   * exists; what the region has now is the pair of jumps floating over the
+   * column, and the claim is worth exactly as much about them.
+   */
+  it('offers its jumps as real, labelled controls reachable by keyboard', () => {
+    draw({ entry: manyEntry, decision: MANY[0] as Decision });
+    const column = q<HTMLElement>('[data-detail-column]') as HTMLElement;
+    // happy-dom lays nothing out, so the metrics the jump rule reads are
+    // faked: a tall content resting in the middle has both edges to offer.
+    Object.defineProperty(column, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(column, 'clientHeight', { value: 100, configurable: true });
+    column.scrollTop = 500;
+    fireEvent.scroll(column);
+    for (const [sel, label] of [
+      ['[data-out-to-top]', 'scroll to the oldest turn read'],
+      ['[data-out-to-bottom]', 'scroll to the newest turn'],
+    ]) {
+      const button = q<HTMLElement>(sel as string);
+      expect(button?.tagName, sel).toBe('BUTTON');
+      expect(button?.getAttribute('aria-label'), sel).toBe(label);
+    }
+  });
+
+  /**
+   * A CONTROL THAT CAN DO NOTHING COSTS NO DOM — the rule this case has
+   * always been about, moved from the picker (absent with one turn, since
+   * there was nothing to jump between) to the jumps that replaced it (absent
+   * while the column has no room to move).
+   */
+  it('draws no jump at all while neither would move the column', () => {
+    const one: SessionEntry = {
+      project: PROJECT,
+      session: { ...SESSION, decisions: [DECISIONS[0] as Decision] },
+    };
+    draw({ entry: one, decision: DECISIONS[0] as Decision });
+    // happy-dom reports 0 for every metric, which is exactly the state being
+    // asserted: a column resting at its own bottom with nothing above it.
+    expect(all('[data-out-to-top]')).toHaveLength(0);
+    expect(all('[data-out-to-bottom]')).toHaveLength(0);
+    expect(all('[data-progress-jump]')).toHaveLength(0);
   });
 
   it('says how many turns vam read, not a bare total it cannot prove', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    const text = toggle()?.textContent ?? '';
+    const text = q<HTMLElement>('[data-progress-count]')?.textContent ?? '';
     // Not the bare "N turns" the operator's bug report was about: on a
     // session whose transcript outgrows the tail window vam reads
     // (`source.ts`'s `TAIL_BYTES`), `decisions.length` is what vam FOUND in
@@ -425,39 +693,60 @@ describe('the progress region shows nothing until it is opened', () => {
  */
 describe('the panel remembers which turn you are reading, independent of the canvas', () => {
   // Seven turns; the canvas would only ever focus one of the newest three, so
-  // `d1`, the oldest, is reachable ONLY through this panel's own list.
+  // `d1`, the oldest, is a turn the canvas's DEFAULT pick never lands on.
   const MANY = ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'].map((id) => decision(id));
   const manyEntry: SessionEntry = { project: PROJECT, session: { ...SESSION, decisions: MANY } };
 
-  /** Clicks the progress row whose id is `id`, opening the list first. */
-  function pick(id: string) {
-    if (toggle()?.getAttribute('aria-expanded') !== 'true') act(() => toggle()?.click());
-    const row = turns().find((t) => t.textContent?.includes(`step ${id}`));
-    const button = row?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    act(() => button?.click());
-  }
-
-  const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
-  const stepLabel = () => q<HTMLElement>('[data-detail-step]')?.textContent ?? '';
+  /**
+   * THE MARKED TURN'S PROMPT, not "the first prompt on screen".
+   *
+   * The pane draws every turn now, oldest first, so an unqualified
+   * `[data-detail-scroll="in"]` is the OLDEST turn's prompt whatever the panel
+   * remembers -- which would have made every case in this block assert `d1`
+   * and pass for the wrong reason on the two that expect it. What the block is
+   * about is unchanged: which turn the panel considers itself to be reading.
+   * That is `data-turn-current` now, because picking one no longer hides the
+   * other six.
+   */
+  const markedTurn = () => q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
+  const inText = () => markedTurn()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
+  // A12.2 moved the removed header's `[data-detail-step]` chip into the `in`
+  // rule's meta beside "you", then onto the identity line -- and the operator
+  // has now had that line removed as well, and the picker that printed the
+  // labels after it. The label's home is the turn's OWN condensed line, one
+  // per turn; read off the MARKED one, it is the same fact in the same words.
+  const stepLabel = () =>
+    markedTurn()?.querySelector('[data-progress-turn-label]')?.textContent ?? '';
 
   it('shows the canvas’s own pick by default', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
     expect(inText()).toContain('ask d7');
-    expect(stepLabel()).toBe('step d7');
+    expect(stepLabel()).toContain('step d7');
   });
 
-  it('draws a turn the canvas never focused once its own row is clicked', () => {
+  /**
+   * RE-POINTED, AND THE HALF THAT CANNOT BE RE-POINTED IS NAMED.
+   *
+   * "once picked from the jump control" was the point of this case: the panel
+   * could put a turn on screen that the canvas never focuses. The control is
+   * gone, and with it the panel's ability to MARK such a turn -- nothing in
+   * the pane can now select `d1` if the canvas cannot reach it. What survives,
+   * and is the thing an operator actually wanted, is that the turn is DRAWN
+   * and readable without the canvas: the column holds all seven, `d1`'s prompt
+   * and answer included, which is why the picker could go at all.
+   */
+  it('draws every turn the canvas never focuses, prompt and answer alike', () => {
     draw({ entry: manyEntry, decision: MANY[0] as Decision });
-    pick('d1');
-    expect(inText()).toContain('ask d1');
-    expect(stepLabel()).toBe('step d1');
-    // The picked row marks itself, the same way the canvas's own newest-turn
-    // row already did before this change.
-    const row = turns().find((t) => t.textContent?.includes('step d1'));
-    expect(row?.querySelector('span')?.className ?? '').not.toBe('');
+    const oldest = q<HTMLElement>('[data-column-turn="d1"]');
+    expect(oldest).not.toBeNull();
+    expect(oldest?.querySelector('[data-detail-scroll="in"]')?.textContent).toContain('ask d1');
+    expect(oldest?.querySelector('[data-detail-scroll="out"]')?.textContent).toContain('answered');
+    // And the canvas's own pick is still the one MARKED -- drawing every turn
+    // is not the same as claiming to be reading each of them.
+    expect(markedTurnId()).toBe('d7');
   });
 
-  it('keeps the picked turn across a re-render the canvas did not cause', () => {
+  it('keeps the turn it was reading across a re-render the canvas did not cause', () => {
     // `focusNodeId` HELD CONSTANT -- the canvas's own cursor did not move,
     // which is the real-world shape of "something unrelated refreshed":
     // `Canvas.tsx` always reports a `focusedId`, it just did not change.
@@ -466,48 +755,51 @@ describe('the panel remembers which turn you are reading, independent of the can
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pick('d1');
+    arriveOn(view, manyEntry, 6);
     expect(inText()).toContain('ask d1');
-    // The canvas's OWN cursor is unchanged (still the info node) -- only
-    // something unrelated moved, e.g. the session's activity line on a poll,
-    // or -- the case that matters most -- `decision` itself, because turn ids
-    // are now content-derived (`transcript.ts`) and the canvas's DEFAULT pick
+    // The canvas's OWN cursor is unchanged (still on `d1`) -- only something
+    // unrelated moved, e.g. the session's activity line on a poll, or -- the
+    // case that matters most -- `decision` itself, because turn ids are now
+    // content-derived (`transcript.ts`) and the canvas's DEFAULT pick
     // (`decisions[0]`) genuinely gets a new id every time a new turn really
     // arrives. Neither must yank the operator back to the newest turn.
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, activity: 'still going' } },
       decision: MANY[0] as Decision,
-      focusNodeId: 'info:s1',
+      focusNodeId: 's1',
     });
     expect(inText()).toContain('ask d1');
-    expect(stepLabel()).toBe('step d1');
+    expect(stepLabel()).toContain('step d1');
   });
 
-  it('defers back to the canvas the moment the canvas’s own cursor moves', () => {
+  it('defers back to the canvas the moment the canvas’s own cursor moves again', () => {
     const view = drawFor({
       entry: manyEntry,
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pick('d1');
+    arriveOn(view, manyEntry, 6);
     expect(inText()).toContain('ask d1');
-    // `h`/`l` moved the canvas cursor onto a specific step: `focusNodeId`
-    // changes along with `decision`, which is what tells the panel this is a
-    // real navigation rather than the default pick's id merely drifting --
-    // and that wins over the in-panel pick, the panel's memory being a
-    // default, not a lock.
+    // THE PROP'S CONTRACT, which is broader than any chord bound today: a
+    // `focusNodeId` that CHANGES alongside `decision` is a navigation and the
+    // panel follows it, rather than the default pick's id merely drifting
+    // under a poll. `Canvas.tsx` currently only ever reports the pane's
+    // session here (the graph's step cursor went with the graph), so the case
+    // below is the shape that actually reaches this today -- but the rule is
+    // the prop's, not that one caller's, and the panel's memory is a default
+    // rather than a lock either way.
     view.rerender({
       entry: manyEntry,
       decision: MANY[1] as Decision,
       focusNodeId: 'step:s1:d6',
     });
     expect(inText()).toContain('ask d6');
-    expect(stepLabel()).toBe('step d6');
+    expect(stepLabel()).toContain('step d6');
   });
 
   it('defers back to the canvas on a plain session refocus too, with no step cursor at all', () => {
     // The OTHER real navigation: a different session gets focused (`j`/`k`,
-    // or a sidebar click), landing on its info node -- no step cursor,
+    // or a sidebar click), landing on the session itself -- no step cursor,
     // `focusNodeId` still changes because the SESSION changed. Session
     // identity alone already covered this before turn ids were stabilised;
     // this pins that it still does now that `focusNodeId` is the mechanism
@@ -517,34 +809,46 @@ describe('the panel remembers which turn you are reading, independent of the can
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    pick('d1');
+    arriveOn(view, manyEntry, 6);
     expect(inText()).toContain('ask d1');
     const otherSession: Session = { ...manyEntry.session, id: 's2' };
     view.rerender({
       entry: { project: PROJECT, session: otherSession },
       decision: otherSession.decisions[0] as Decision,
-      focusNodeId: 'info:s2',
+      focusNodeId: 's2',
     });
     expect(inText()).toContain('ask d7');
-    expect(stepLabel()).toBe('step d7');
+    expect(stepLabel()).toContain('step d7');
   });
 
-  it('turns off the live turn markers for a turn picked out of history', () => {
+  it('turns off the live turn markers for the older turn it is reading', () => {
     // Companion to "does not animate an older turn of a running session"
-    // above, which reaches the same state through the `decision` PROP. This
-    // reaches it through a progress-row CLICK instead, proving the in-panel
-    // selector feeds the same `isNewestTurn`/`outIsLive` rule rather than a
+    // above, which reaches the same state on FIRST RENDER through the
+    // `decision` prop. This reaches it mid-life, the way the app does: land on
+    // the session, then let newer turns arrive under it -- a different path
+    // (`followCanvas` during render, plus the layout effect that scrolls) that
+    // has to feed the same `isNewestTurn`/`outIsLive` rule rather than a
     // second one that could disagree with it.
-    draw({
-      entry: { project: PROJECT, session: { ...manyEntry.session, status: 'running' } },
-      decision: MANY[0] as Decision,
-    });
-    pick('d1');
+    // It used to come in through a progress-row click; that door went with
+    // the column's bar, and arriving-then-polling is the one that is left.
+    const running: SessionEntry = {
+      project: PROJECT,
+      session: { ...manyEntry.session, status: 'running' },
+    };
+    const view = drawFor({ entry: running, decision: MANY[0] as Decision });
+    arriveOn(view, running, 6);
     // `data-out-live` is `outIsLive` rendered, and it is not gated on empty
     // output the way `data-out-empty` is -- asserting on it (rather than
     // `data-out-empty`) is what keeps this test from passing vacuously
     // against a fixture whose every turn already has an answer.
-    expect(all('[data-out-live]')).toHaveLength(0);
+    // ON THE PICKED TURN. The column draws the newest turn too, and that one
+    // IS the live one and rightly carries the marker; the claim was never that
+    // a running session stops saying so, only that the turn being read out of
+    // history does not pretend to be it.
+    const picked = q<HTMLElement>('[data-column-turn][data-turn-current="true"]') as HTMLElement;
+    expect(picked?.getAttribute('data-column-turn')).toBe('d1');
+    expect([...picked.querySelectorAll('[data-out-live]')]).toHaveLength(0);
+    expect(all('[data-out-live]')).toHaveLength(1);
   });
 });
 
@@ -584,7 +888,17 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     project: PROJECT,
     session: { ...SESSION, id: 'sess-1', decisions },
   });
-  const inText = () => q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '';
+  /** The MARKED turn's prompt -- the column draws every turn, so an
+   *  unqualified lookup reads the oldest one whatever was picked. */
+  const marked = () => q<HTMLElement>('[data-column-turn][data-turn-current="true"]');
+  const inText = () => marked()?.querySelector('[data-detail-scroll="in"]')?.textContent ?? '';
+  /**
+   * The turn at oldest-first position `index`. It used to be the `<option>` at
+   * that position in the jump control; the control went with the column's bar,
+   * so the same turn is taken from the parser's own list -- which is newest
+   * first (`model.ts`), hence the reversal.
+   */
+  const oldestFirst = (turns: readonly Decision[]) => [...turns].reverse();
 
   it('keeps the same turn on screen after the source delivers one more turn', () => {
     // A real parse: two turns, oldest-first "ask 0" then "ask 1".
@@ -592,17 +906,21 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
     // Read the OLDEST turn, which the canvas never focuses by default.
-    act(() => toggle()?.click());
-    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    expect(oldestRow, 'fixture has no oldest row to click').not.toBeNull();
-    act(() => oldestRow?.click());
+    const oldest = oldestFirst(before)[0];
+    expect(oldest, 'fixture has no oldest turn to navigate to').not.toBeUndefined();
+    arriveOn(view, entryWith(before), 1);
     expect(inText()).toContain('ask 0');
 
     // The poll: the source is asked again and now reports THREE turns --
     // one more request landed while "ask 0" was on screen. Exactly the
-    // operator's own bug report.
+    // operator's own bug report. `focusNodeId` is held where the navigation
+    // left it: the canvas's cursor did not move, only the model refreshed.
     const after = turnsFor(['ask 0', 'ask 1', 'ask 2']);
-    view.rerender({ entry: entryWith(after), decision: after[0] as Decision });
+    view.rerender({
+      entry: entryWith(after),
+      decision: after[0] as Decision,
+      focusNodeId: 'sess-1',
+    });
 
     // Still "ask 0" -- the same real, content-derived id survived the poll.
     expect(inText()).toContain('ask 0');
@@ -613,21 +931,24 @@ describe('a selected historical turn survives a poll that delivers a new one', (
     // through: "continue" sent twice, non-adjacently. `in` shows the PROMPT,
     // identical for both occurrences by construction, so `out` -- each
     // turn's own distinct reply -- is what has to be read here.
-    const outText = () => q<HTMLElement>('[data-detail-scroll="out"]')?.textContent ?? '';
+    const outText = () => marked()?.querySelector('[data-detail-scroll="out"]')?.textContent ?? '';
     const before = turnsFor(['continue', 'something else', 'continue']);
     const view = drawFor({ entry: entryWith(before), decision: before[0] as Decision });
 
-    act(() => toggle()?.click());
-    // Both "continue" rows exist; the SECOND occurrence (newer) is what is
-    // opened here, oldest-first so it is the last of the three rows.
-    const secondContinue = turns()[2]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    expect(secondContinue, 'fixture has no second "continue" row to click').not.toBeNull();
-    act(() => secondContinue?.click());
+    // Both "continue" turns exist; the SECOND occurrence (newer) is what is
+    // navigated to here, oldest-first so it is the last of the three.
+    const secondContinue = oldestFirst(before)[2];
+    expect(secondContinue, 'fixture has no second "continue" turn').not.toBeUndefined();
+    arriveOn(view, entryWith(before), 0);
     expect(inText()).toContain('continue');
     expect(outText()).toContain('answer 2'); // the third turn's own reply
 
     const after = turnsFor(['continue', 'something else', 'continue', 'a fourth ask']);
-    view.rerender({ entry: entryWith(after), decision: after[0] as Decision });
+    view.rerender({
+      entry: entryWith(after),
+      decision: after[0] as Decision,
+      focusNodeId: 'sess-1',
+    });
 
     // Still the SECOND "continue" turn's own answer -- not the first
     // occurrence's, which a rank collision would have resolved to instead.
@@ -655,25 +976,34 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    act(() => toggle()?.click());
-    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    act(() => oldestRow?.click());
-    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d1');
+    arriveOn(view, manyEntry, 2);
+    expect(
+      q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
+    ).toContain('ask d1');
 
     // The window no longer carries `d1` at all -- every id in the new
     // decisions list is one the panel has never seen, simulating it having
-    // fallen out of `TAIL_BYTES` rather than merely off a slice.
+    // fallen out of `TAIL_BYTES` rather than merely off a slice. The canvas's
+    // own cursor is HELD where it was: the poll is what moved, not the
+    // operator, which is the whole shape of this failure.
     const REPLACED = ['d5', 'd4'].map((id) => decision(id));
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, decisions: REPLACED } },
       decision: REPLACED[0] as Decision,
-      focusNodeId: 'info:s1',
+      focusNodeId: 's1',
     });
 
     expect(document.body.textContent ?? '').toContain('scrolled out');
-    // Not the newest turn silently standing in for the one that vanished.
-    expect(document.body.textContent ?? '').not.toContain('ask d5');
+    // NOT MARKED AS THE ONE BEING READ. `d5` is on screen -- it is a turn of
+    // this session and the column draws every turn it has, which is not a
+    // substitution. The substitution this refuses is the pane pointing at
+    // `d5` and calling it the turn the operator was reading, so what is
+    // asserted is that NOTHING is marked while the pick is missing, that the
+    // pane says so in words, and that it hid nothing to say it.
+    expect(all('[data-column-turn][data-turn-current="true"]')).toHaveLength(0);
+    expect(markedTurnId()).toBeNull();
     expect(all('[data-progress-turn-missing]')).toHaveLength(1);
+    expect(all('[data-column-turn]')).toHaveLength(2);
   });
 
   it('offers a way back to the turn the canvas is actually showing', () => {
@@ -682,48 +1012,88 @@ describe('a turn that has genuinely scrolled out of the window', () => {
       decision: MANY[0] as Decision,
       focusNodeId: 'info:s1',
     });
-    act(() => toggle()?.click());
-    const oldestRow = turns()[0]?.querySelector<HTMLButtonElement>('[data-progress-select]');
-    act(() => oldestRow?.click());
+    arriveOn(view, manyEntry, 2);
 
     const REPLACED = ['d5', 'd4'].map((id) => decision(id));
     view.rerender({
       entry: { project: PROJECT, session: { ...manyEntry.session, decisions: REPLACED } },
       decision: REPLACED[0] as Decision,
-      focusNodeId: 'info:s1',
+      focusNodeId: 's1',
     });
 
     const back = q<HTMLButtonElement>('[data-progress-turn-return]');
     expect(back).not.toBeNull();
     act(() => back?.click());
-    expect(q<HTMLElement>('[data-detail-scroll="in"]')?.textContent ?? '').toContain('ask d5');
+    expect(
+      q<HTMLElement>('[data-column-turn][data-turn-current="true"]')?.textContent ?? '',
+    ).toContain('ask d5');
     expect(all('[data-progress-turn-missing]')).toHaveLength(0);
   });
 });
 
 describe('the pane drops the status line under the tab bar', () => {
-  it('says nothing in prose, and still says it with the status dot', () => {
+  it('says nothing in prose', () => {
+    // The operator asked for the banner under the tabs to go, and it stays
+    // gone. What USED to follow -- "and still says it with the status dot,
+    // two lines above where the sentence used to be" -- no longer applies:
+    // A12.2 removed that dot along with the rest of the header. See the
+    // retirement note near the top of this file (where `describe('the pane
+    // header names the session status it actually has', ...)` used to be)
+    // for where the status fact went instead.
     draw();
-    // The operator asked for the banner under the tabs to go. Nothing is lost
-    // with it: the same `waiting` status is what makes the header dot amber
-    // and breathe, two lines above where the sentence used to be.
     expect(document.body.textContent).not.toContain('waiting on you');
-    expect(q<HTMLElement>('.vam-breathe.bg-waiting')).not.toBeNull();
-
-    cleanup();
-    draw({ entry: { project: PROJECT, session: { ...SESSION, status: 'running' } } });
-    expect(q<HTMLElement>('.vam-breathe.bg-waiting')).toBeNull();
   });
 });
 
 describe('the pane wears the mockup’s own background', () => {
-  it('uses the sidebar token, the pane colour measured off both artboards', () => {
+  /**
+   * RE-POINTED, and the colour did not move.
+   *
+   * This asserted `bg-sidebar`: the mockup paints the pane and the sidebar the
+   * same value, so the pane borrowed the sidebar's token -- and with it the
+   * sidebar's SWATCH, which is what the operator asked to have split ("split
+   * the pane's colour setting from the sidebar"). `--vam-pane` starts on that
+   * same measured value in both themes, so what this case was protecting (the
+   * pane wears the artboard's fill, not some other rung of the ladder) is
+   * unchanged; what it can no longer do is pass while one swatch drives two
+   * surfaces.
+   */
+  it('uses the pane token, whose value is the pane colour off both artboards', () => {
     draw();
-    // #171717 dark / #f0eeea light in the mockup — exactly `--vam-sidebar`,
-    // so this is an existing token rather than a new one.
     const aside = q<HTMLElement>('[data-action-pane]');
-    expect(aside?.className).toContain('bg-sidebar');
+    expect(aside?.className).toContain('bg-pane');
+    expect(aside?.className).not.toContain('bg-sidebar');
     expect(aside?.className).not.toContain('bg-sunken');
+  });
+
+  /**
+   * THE BLACK BANDS THE OPERATOR REPORTED. "There are some black background
+   * areas below the prompt input and the In block" -- three blocks inside the
+   * pane painted a DARKER rung than the pane itself: the sticky prompt band on
+   * `ground`, the deepest value there is, and the question and composer blocks
+   * on `header`. All three take the pane's own fill now; the seams that
+   * matter are borders, which the two bars still carry.
+   *
+   * Class-level here and MEASURED in the browser by
+   * `e2e/pane-colour-shots.mjs`: a Tailwind utility whose token does not
+   * resolve emits nothing and reads back perfectly from `className`.
+   */
+  it('paints no band inside itself darker than the pane', () => {
+    draw();
+    for (const selector of [
+      '[data-detail-block="in"]',
+      '[data-composer-bar]',
+      '[data-question-bar]',
+    ]) {
+      const band = q<HTMLElement>(selector);
+      if (band === null) continue;
+      expect(band.className, selector).not.toContain('bg-ground');
+      expect(band.className, selector).not.toContain('bg-header');
+      expect(band.className, selector).toContain('bg-pane');
+    }
+    // The sticky band is the one that must be there to be opaque, so its
+    // absence would make this pass for the wrong reason.
+    expect(q('[data-detail-block="in"]')).not.toBeNull();
   });
 });
 
@@ -865,32 +1235,23 @@ describe('the composer is multiline, and honest about what its button does', () 
   });
 });
 
-describe('the row under the composer is the mockup’s mode row', () => {
-  it('replaces the slash tags with mode pills', () => {
+/**
+ * RETIRED (the mode control moved into the prompt block, as one icon):
+ *   - 'replaces the slash tags with mode pills' — there are no pills to
+ *     count; the icon shows the CURRENT mode only, pinned in
+ *     `DetailPanel.mode-icon.test.tsx`.
+ *   - 'advertises the chord now that one is bound, at the right-hand end' —
+ *     the resting caption is gone from the DOM by design (it cost width for a
+ *     sentence nobody reads) and now lives in the icon's accessible name,
+ *     asserted there. What that test really guarded — the chord being NAMED
+ *     somewhere a person can find it — survives in the new file.
+ * The one assertion that was about neither is kept below.
+ */
+describe('the slash tags the mode control replaced are still gone', () => {
+  it('draws no /diff placeholder under the composer', () => {
     draw();
-    const row = q<HTMLElement>('[data-mode-row]');
-    expect(row).not.toBeNull();
-    expect(all('[data-mode-pill]').map((el) => el.textContent)).toEqual(['Auto', 'Manual', 'Plan']);
-    // The slash tags this row replaced.
-    expect(row?.textContent).not.toContain('/diff');
     expect(document.querySelector('[data-placeholder="slash-diff"]')).toBeNull();
-  });
-
-  it('advertises the chord now that one is bound, at the right-hand end', () => {
-    // THE CAPTION CAME BACK, on the terms its own deletion set: it went for
-    // naming a chord no table answered to, under a note saying a real binding
-    // may bring it back and the caption alone may not. The binding is the
-    // prompt box's Shift+Tab, which presses the session's own chord in the
-    // pane vam started for it.
-    draw();
-    const tip = q<HTMLElement>('[data-mode-cycle]');
-    expect(tip).not.toBeNull();
-    expect(tip?.textContent).toContain('cycle mode');
-    // On the RIGHT, as the mockup draws it: pushed there by `ml-auto` and
-    // last in the row, which is the only way "on the right" is checkable
-    // without a layout engine.
-    expect(tip?.className).toContain('ml-auto');
-    expect(q<HTMLElement>('[data-mode-row]')?.lastElementChild).toBe(tip);
+    expect(q<HTMLElement>('[data-composer-bar]')?.textContent).not.toContain('/diff');
   });
 });
 
@@ -903,7 +1264,7 @@ describe('the row under the composer is the mockup’s mode row', () => {
  * is a pane surface at all. ABSENT, NOT DISABLED -- a dimmed switcher still
  * says a mode is choosable here, which is what the row went for once already.
  */
-describe('the mode row is drawn only where a mode can actually be chosen', () => {
+describe('the mode control is drawn only where a mode can actually be chosen', () => {
   const withBridge = (send: (...args: unknown[]) => Promise<PaneSendResult>) => {
     Object.defineProperty(window, 'api', {
       configurable: true,
@@ -926,8 +1287,8 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
 
   it('hides the whole row for a session vam did not start', () => {
     draw({ entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } } });
-    expect(q('[data-mode-row]')).toBeNull();
-    expect(q('[data-mode-pill]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
+    expect(q('[data-mode-picker]')).toBeNull();
     expect(q('[data-mode-cycle]')).toBeNull();
   });
 
@@ -937,18 +1298,20 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     // false one.
     const { vamControlled: _dropped, ...unowned } = SESSION;
     draw({ entry: { project: PROJECT, session: unowned } });
-    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
   });
 
   it('hides it where the source has no terminal surface at all', () => {
     draw({ terminal: false });
-    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
   });
 
   it('draws it for a session vam started, on a source that has a terminal', () => {
     draw({ terminal: true });
-    expect(q('[data-mode-row]')).not.toBeNull();
-    expect(all('[data-mode-pill]')).toHaveLength(3);
+    expect(q('[data-mode-toggle]')).not.toBeNull();
+    // ONE control, and all three modes behind it -- see
+    // `DetailPanel.mode-icon.test.tsx` for the popover itself.
+    expect(all('[data-mode-toggle]')).toHaveLength(1);
   });
 
   it('presses the session’s own Shift-Tab, and does not submit the draft', async () => {
@@ -1023,13 +1386,13 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
         }),
     );
     draw();
-    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    // Nothing at rest: the caption exists only while it has something to say.
+    expect(q('[data-mode-cycle]')).toBeNull();
     await press(true);
     // NOT resolved yet: this is the state the operator sees while three tmux
     // spawns at ten seconds apiece are still out.
     const inFlight = q<HTMLElement>('[data-mode-cycle]');
     expect(inFlight?.getAttribute('data-mode-cycle-state')).toBe('busy');
-    expect(inFlight?.textContent).not.toBe(resting);
     expect(inFlight?.textContent).toContain('sending');
     expect(q('[data-mode-refusal]')).toBeNull();
     await act(async () => {
@@ -1041,11 +1404,10 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
   it('reports the delivery on success, and claims only what vam knows', async () => {
     withBridge(async () => 'sent');
     draw();
-    const resting = q<HTMLElement>('[data-mode-cycle]')?.textContent;
+    expect(q('[data-mode-cycle]')).toBeNull();
     await press(true);
     const said = q<HTMLElement>('[data-mode-cycle]');
     expect(said?.getAttribute('data-mode-cycle-state')).toBe('sent');
-    expect(said?.textContent).not.toBe(resting);
     expect(said?.textContent).toContain('sent');
     // WHAT IT MAY NOT SAY: vam presses a key into the pane and never reads
     // back which mode resulted, so the delivery is the only true claim here.
@@ -1090,9 +1452,9 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
     act(() => {
       rerender({ entry: { project: PROJECT, session: { ...SESSION, id: 's2', title: 'Other' } } });
     });
-    const said = q<HTMLElement>('[data-mode-cycle]');
-    expect(said?.getAttribute('data-mode-cycle-state')).toBe('resting');
-    expect(said?.textContent).toContain('cycle mode');
+    // GONE, not reset to a resting caption: the note is drawn only when it
+    // has something to say, so "dropped" is now "absent from the document".
+    expect(q('[data-mode-cycle]')).toBeNull();
   });
 
   it('does not land A’s late answer on the session that replaced it', async () => {
@@ -1112,9 +1474,7 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
       land('refused');
       await Promise.resolve();
     });
-    expect(q<HTMLElement>('[data-mode-cycle]')?.getAttribute('data-mode-cycle-state')).toBe(
-      'resting',
-    );
+    expect(q('[data-mode-cycle]')).toBeNull();
   });
 
   it('says so when there is no bridge to press the key with', async () => {
@@ -1128,7 +1488,7 @@ describe('the mode row is drawn only where a mode can actually be chosen', () =>
 });
 
 describe('there is a way out of the prompt box without a mouse', () => {
-  it('Escape gives the keyboard back, and does not leave DOM focus behind', () => {
+  it('Mod-[ gives the keyboard back, and does not leave DOM focus behind', () => {
     let left = 0;
     draw({
       composing: true,
@@ -1144,8 +1504,20 @@ describe('there is a way out of the prompt box without a mouse', () => {
     // key, so no navigation key reaches the sidebar at all.
     expect(document.activeElement).toBe(box);
 
+    // `Mod-[` since Escape in this box became the agent's interrupt. `Mod`
+    // folds Ctrl and Cmd, and `cancelable` is what makes the handler's
+    // `preventDefault()` mean anything at all -- without it a hand-built event
+    // reports `defaultPrevented: false` whatever the handler does.
     act(() => {
-      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      box.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: '[',
+          code: 'BracketLeft',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
     });
     expect(left).toBe(1);
     // Clearing `composing` alone is not enough: it only makes the box
@@ -1153,36 +1525,158 @@ describe('there is a way out of the prompt box without a mouse', () => {
     expect(document.activeElement).not.toBe(box);
   });
 
-  it('says how to get out, in the box, while you are in it', () => {
-    draw({ composing: true });
-    expect(q<HTMLElement>('[data-prompt-escape]')?.textContent).toContain('Esc');
-    expect(q<HTMLElement>('[data-prompt-escape]')?.textContent).toContain('sidebar');
-    // Not clutter the rest of the time: the way out only matters once you are
-    // in, and this row is already carrying four things at 408px.
-    cleanup();
-    draw({ composing: false });
-    expect(q<HTMLElement>('[data-prompt-escape]')).toBeNull();
+  /**
+   * RETIRED, all four of them, with the row they were about: `'retires the
+   * caption that promised Escape went to the sidebar'`, `'names no leave key
+   * at all, on the operator's second look'`, `'brings the send caption back
+   * when the operator is not on the shipped key'` and `'keeps the send key on
+   * a phone, where it is the only key there is'`.
+   *
+   * They tracked a row that the operator narrowed in four steps and has now
+   * ended -- see the describe below, which asserts the end state directly and
+   * over every case those four covered between them. The keys they were about
+   * are asserted as BEHAVIOUR, which is where they always belonged:
+   * `'Mod-[ gives the keyboard back'` above, `DetailPanel.composer-escape.
+   * test.tsx` for the interrupt, and `DetailPanel.submit-key.test.tsx` for
+   * which keystroke really sends in each mode.
+   */
+});
+
+/**
+ * NOTHING IS EVER DRAWN UNDER THE PROMPT INPUT — the end of a sequence, not a
+ * tidy-up.
+ *
+ * The row under the composer was narrowed by the operator four times. It began
+ * as three captions (`Esc → sidebar`, `Mod-[ → leave`, the send key); `Esc →
+ * sidebar` went the day Escape became the agent's interrupt; then "drop the
+ * leave shortcut from under the prompt box"; then the send hint was narrowed
+ * to the deviation only, which left a row that drew nothing at all on a
+ * desktop with the shipped key. Now: "remove the 'Esc to interrupt' shortcut
+ * under the prompt input. Nothing is ever displayed down there." The whole row
+ * goes, the send caption on it included.
+ *
+ * ASSERTED AS A STRUCTURE, NOT AS ONE ABSENT SELECTOR. `[data-prompt-keys]`
+ * being null is true of a row that was renamed as well as of one that was
+ * deleted, so the load-bearing assertion is that the tools row is the LAST
+ * thing inside the prompt box -- there is no element under the input for
+ * anything to be drawn in.
+ */
+describe('nothing is drawn beneath the prompt input, on any route', () => {
+  /** Every state the four retired tests covered, in one table. */
+  const CASES: readonly (readonly [string, Partial<DetailPanelProps>])[] = [
+    ['desktop, box open', { composing: true }],
+    ['desktop, box closed', { composing: false }],
+    ['the phone route', { composing: true, phone: true }],
+    [
+      'a session vam cannot interrupt',
+      {
+        composing: true,
+        entry: { project: PROJECT, session: { ...SESSION, vamControlled: false } },
+      },
+    ],
+  ];
+
+  it('leaves the tools row as the last thing in the prompt box', () => {
+    let boxes = 0;
+    for (const [name, props] of CASES) {
+      cleanup();
+      draw(props);
+      const box = q<HTMLElement>('[data-prompt-box]');
+      if (box === null) continue; // `composing: false` still draws it; a closed pane may not.
+      boxes += 1;
+      expect(box.lastElementChild?.hasAttribute('data-prompt-tools'), name).toBe(true);
+      expect(q<HTMLElement>('[data-prompt-keys]'), name).toBeNull();
+    }
+    // A sweep that examined nothing passes for the wrong reason.
+    expect(boxes, 'the prompt box was on screen in every case above').toBe(CASES.length);
+  });
+
+  it('draws no caption for the send key in either mode, on either route', () => {
+    // The send hint was the last survivor of the row and was UNCONDITIONAL on
+    // a phone, so a change that only dropped the interrupt caption would leave
+    // this one drawing. Both keys, both routes.
+    for (const key of ['enter', 'shift-enter'] as const) {
+      setActivePromptSubmitKey(key);
+      try {
+        for (const phone of [false, true]) {
+          cleanup();
+          draw({ composing: true, phone });
+          expect(q<HTMLElement>('[data-prompt-send-key]'), `${key} / phone=${phone}`).toBeNull();
+        }
+      } finally {
+        setActivePromptSubmitKey(DEFAULT_PROMPT_SUBMIT_KEY);
+      }
+    }
+  });
+
+  it('keeps every key the row used to name, because a caption is not a binding', () => {
+    // THE COST OF DELETING A ROW IS THE BINDINGS IT MIGHT TAKE WITH IT. `Mod-[`
+    // is bound in the composer's own `onKeyDown` and RESERVED in `chords.ts` so
+    // nothing else can claim it; `Mod-0` reaches `focusList`; Escape is handled
+    // ahead of every table. None of the three is a caption, and none may move
+    // because a caption did. Asked of the real grammar, not of a copy of it.
+    expect(isReserved('Mod-[')).toBe(true);
+    expect(isReserved('Escape')).toBe(true);
+    expect(resolveChord(EMPTY_CHORD, 'Mod-0', NO_BINDINGS).action).toEqual({ kind: 'focusList' });
+    expect(resolveChord(EMPTY_CHORD, 'Escape', NO_BINDINGS).action).toEqual({ kind: 'cancel' });
   });
 });
 
-describe('the regions are capped in lines, and `out` gets what they give up', () => {
-  it('caps `in` at two rendered lines of its own body text', () => {
+describe('the merged column scrolls the whole turn, `in` pinned to its top', () => {
+  /**
+   * RETIRED: `'caps `in` at two rendered lines of its own body text'` — it
+   * asserted `[data-detail-scroll="in"]` carried `style.maxHeight: 59px` and
+   * its own `overflow-y-auto`. Both are gone on the operator's follow-up:
+   * a boxed, separately scrolling prompt is what still read as a separate
+   * panel once the band labels came off, so the prompt runs out in full
+   * inside the one column now. Not a coverage loss — the replacement guards
+   * live in `DetailPanel.transcript-flow.test.tsx` (`'gives `in` no box, no
+   * height cap and no scrollbar of its own'` and `'keeps exactly one
+   * scroller for the turn'`), and the sticky paint itself is measured in a
+   * real browser by `e2e/transcript-flow-shots.mjs`.
+   */
+
+  /**
+   * RETIRED: `'gives `out` the height the other two gave up'` — it asserted
+   * `[data-detail-block="out"]` carries `flex-1`, the fact that made `out`
+   * the one region with its OWN scrollbar under the old three-fixed-pane
+   * layout. A12.2 removes that layout outright: `in`, `progress` and `out`
+   * are now flow children of ONE scrolling column
+   * (`[data-detail-column]`, asserted below), and `out` no longer needs or
+   * carries `flex-1` — it just grows with its content like any other block.
+   * Not a coverage loss with nothing to show for it: the replacement test
+   * below asserts the column that took over the job.
+   */
+  it('scrolls `in`, `progress` and `out` together as one column, not `out` alone', () => {
     draw();
-    const box = q<HTMLElement>('[data-detail-scroll="in"]');
-    expect(box).not.toBeNull();
-    // Two lines of 12px/1.55 plus the box's own 10px padding and 1px border.
-    // A number, not a percentage: "two lines" is a promise about the text,
-    // and a percentage of the pane is a promise about the window.
-    expect(box?.style.maxHeight).toBe('59px');
-    // Still a scroller — capped, not clipped: the rest is one drag away.
-    expect(box?.className).toContain('overflow-y-auto');
+    const column = q<HTMLElement>('[data-detail-column]');
+    expect(column).not.toBeNull();
+    expect(column?.className).toContain('overflow-y-auto');
+    expect(column?.className).toContain('flex-1');
+    // All three sections live INSIDE the one scrolling column now.
+    for (const block of ['in', 'progress', 'out']) {
+      expect(column?.querySelector(`[data-detail-block="${block}"]`), block).not.toBeNull();
+    }
+    // `out` itself no longer claims its own scroller or its own share of the
+    // pane's height — the column does both for it now.
+    const out = q<HTMLElement>('[data-detail-block="out"]');
+    expect(out?.className).not.toContain('flex-1');
+    expect(q<HTMLElement>('[data-detail-scroll="out"]')?.className ?? '').not.toContain(
+      'overflow-y-auto',
+    );
   });
 
-  it('gives `out` the height the other two gave up', () => {
+  it('pins `in` to the top of the column with `position: sticky`', () => {
     draw();
-    const out = q<HTMLElement>('[data-detail-block="out"]');
-    expect(out?.className).toContain('flex-1');
-    expect(q<HTMLElement>('[data-detail-scroll="out"]')).not.toBeNull();
+    const inBlock = q<HTMLElement>('[data-detail-block="in"]');
+    expect(inBlock?.className).toContain('sticky');
+    expect(inBlock?.className).toContain('top-0');
+    // Opaque, or `out` text scrolling underneath would show through the two
+    // pinned lines of `in` -- and the PANE's own fill since the prompt got a
+    // bubble of its own, so the backing stops bleed-through without painting a
+    // band. It named `ground` for that job while the pane wore `sidebar`,
+    // which is how the band the operator reported got there.
+    expect(inBlock?.className).toContain('bg-pane');
   });
 });
 
@@ -1325,84 +1819,27 @@ describe('the out region renders the agent’s markdown', () => {
   });
 });
 
-describe('the in and out rules wear the mockup’s own glyphs', () => {
-  it('is a user for in and a bot for out, announced rather than drawn only', () => {
-    draw();
-    // Measured off the Response artboards: `in` is a head-and-shoulders glyph,
-    // `out` is a bot (antenna, two eyes, a mouth) — not the arrows vam had.
-    // `role="img"` is what makes the label announced at all; on a bare <span>
-    // aria-label is dropped in silence.
-    const inIcon = q<HTMLElement>('[data-detail-block="in"] [role="img"]');
-    const outIcon = q<HTMLElement>('[data-detail-block="out"] [role="img"]');
-    expect(inIcon?.getAttribute('aria-label')).toContain('you');
-    expect(outIcon?.getAttribute('aria-label')).toContain('agent');
-  });
-});
-
 /**
- * Three section rules, three colours.
+ * RETIRED: two whole describes, five tests, all about the three section
+ * rules' glyphs — `'the in and out rules wear the mockup’s own glyphs'`
+ * (`'is a user for in and a bot for out, announced rather than drawn only'`)
+ * and `'the three section rules are told apart by colour as well as by
+ * glyph'` (`'paints each icon with its own token, pairwise distinct'`,
+ * `'keeps every icon announced, so colour is never the only channel'`,
+ * `'draws three different glyphs, which is the distinction without
+ * colour'`).
  *
- * The operator could not tell `in`, `progress` and `out` apart at a glance:
- * all three drew their icon inside the rule's one `text-ink-faint` span, so
- * the pane had three headings in the same faint grey. Colour is ADDED to the
- * existing scheme, never substituted for it — a colour-only distinction is
- * invisible to a colour-blind operator, so the distinct glyph and the
- * announced `aria-label` are asserted here beside the colour and are what
- * carries the meaning when the colour does not arrive.
+ * Every one of them asserted a property of the `Rule` component: its icon,
+ * that icon's `role="img"` label, and the three distinct `text-rule-*`
+ * colour tokens it wore. The operator asked for the three bands to go, so
+ * `Rule` is deleted and there is no icon left to colour, announce or tell
+ * apart. These are not rewritten against the new shape because the shape has
+ * no counterpart: nothing labels a region visually any more. What DOES
+ * replace the announcement — the `sr-only` region names, which are the only
+ * channel a screen reader has left — is asserted in
+ * `DetailPanel.transcript-flow.test.tsx` (`'keeps each region named for a
+ * screen reader, and only for one'`).
  */
-describe('the three section rules are told apart by colour as well as by glyph', () => {
-  const BLOCKS = ['in', 'progress', 'out'] as const;
-
-  const icon = (block: string) =>
-    q<HTMLElement>(`[data-detail-block="${block}"] [role="img"]`) ?? null;
-
-  /** The colour utility on an icon, e.g. `text-rule-in`. */
-  const tone = (block: string) =>
-    (icon(block)?.getAttribute('class') ?? '').split(/\s+/).find((c) => c.startsWith('text-')) ??
-    '';
-
-  it('paints each icon with its own token, pairwise distinct', () => {
-    draw();
-    const tones = BLOCKS.map(tone);
-    for (const [i, block] of BLOCKS.entries()) {
-      // Not merely non-empty: the faint grey they all shared is a `text-`
-      // class too, and three of it would pass an "each has a colour" check.
-      expect(tones[i], `${block} carries a colour token`).not.toBe('');
-      expect(tones[i], `${block} is no longer the shared faint grey`).not.toBe('text-ink-faint');
-    }
-    // Pairwise, so two sections sharing one hue fails rather than passing on
-    // the third being different.
-    expect(new Set(tones).size, `three distinct tokens, got ${tones.join(', ')}`).toBe(3);
-  });
-
-  it('keeps every icon announced, so colour is never the only channel', () => {
-    draw();
-    const labels = BLOCKS.map((block) => {
-      const el = icon(block);
-      // `role="img"` is what makes the label announced at all; on a bare
-      // <span> aria-label is dropped in silence, which this codebase has
-      // shipped once already.
-      expect(el, `${block} has a role="img" icon`).not.toBeNull();
-      return el?.getAttribute('aria-label') ?? '';
-    });
-    // Each word is what the GLYPH means, complementing the visible label
-    // rather than repeating it: `in` is you, `out` is the agent, and the
-    // commit line is the session's turns.
-    expect(labels).toEqual(['you', 'turns', 'agent']);
-  });
-
-  it('draws three different glyphs, which is the distinction without colour', () => {
-    draw();
-    // The glyphs are a head-and-shoulders, a commit line and a bot, measured
-    // off the Response artboards in #53 — not the opposing arrows vam started
-    // with. Compare the drawn geometry, so a shared icon fails here even when
-    // the three colours pass above.
-    const shapes = BLOCKS.map((block) => icon(block)?.querySelector('svg')?.innerHTML ?? '');
-    for (const [i, block] of BLOCKS.entries())
-      expect(shapes[i], `${block} draws a glyph`).not.toBe('');
-    expect(new Set(shapes).size).toBe(3);
-  });
-});
 
 describe('the attachment button inlines a file into the text that gets recorded', () => {
   const file = (over: Partial<AttachedFile> = {}): AttachedFile => ({
@@ -1614,6 +2051,67 @@ describe('the composer draws both controls, and both do something', () => {
   });
 });
 
+/**
+ * A15.4: the default-provider CHOICE moves into the prompt input, beside the
+ * model field it used to be merely named next to. ABSENT, NOT DISABLED
+ * (`pickImageAttachment`'s own rule) governs whether it draws at all —
+ * `onSetDefaultProvider` undefined means the caller has nowhere to put a
+ * change, so no button pretends otherwise.
+ */
+describe('A15.4: the default-provider picker lives beside the model field', () => {
+  it('is absent when the caller has no way to persist a change', () => {
+    draw();
+    expect(q('[data-provider-picker-toggle]')).toBeNull();
+  });
+
+  it('names the current default with a real accessible name, immediately beside the model field', () => {
+    draw({ defaultProvider: 'claude-code', onSetDefaultProvider: () => {} });
+    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
+    const model = q<HTMLElement>('[data-model-request]');
+    expect(toggle?.tagName).toBe('BUTTON');
+    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
+    expect(model).not.toBeNull();
+    // "Beside": immediately before the model field in document order, not
+    // merely somewhere in the same pane.
+    expect(toggle !== null && model !== null).toBe(true);
+    if (toggle !== null && model !== null) {
+      expect(
+        Boolean(toggle.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).toBe(true);
+    }
+  });
+
+  it('opens a real listbox on click, marks the current provider, and closes once one is picked', () => {
+    const seen: string[] = [];
+    draw({
+      defaultProvider: 'claude-code',
+      onSetDefaultProvider: (id) => seen.push(id),
+    });
+    expect(q('[data-provider-picker]'), 'closed at rest').toBeNull();
+    act(() => {
+      q<HTMLButtonElement>('[data-provider-picker-toggle]')?.click();
+    });
+    const list = q<HTMLElement>('[data-provider-picker]');
+    expect(list?.getAttribute('role')).toBe('listbox');
+    const option = q<HTMLButtonElement>('[data-provider-option="claude-code"]');
+    expect(option?.getAttribute('role')).toBe('option');
+    expect(option?.getAttribute('aria-selected')).toBe('true');
+    act(() => {
+      option?.click();
+    });
+    expect(seen).toEqual(['claude-code']);
+    expect(q('[data-provider-picker]'), 'closes once a pick lands').toBeNull();
+  });
+
+  it('reads the default provider from a fresh vam the same way resolveProvider does', () => {
+    // No `defaultProvider` passed at all -- the honest "nothing chosen yet"
+    // case, which must not render a blank or a crash.
+    draw({ onSetDefaultProvider: () => {} });
+    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
+    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
+  });
+});
+
 describe('the out region offers the two jumps that would do something', () => {
   it('offers `to top` only with content above and `to bottom` only with content below', () => {
     expect(hasContentAbove({ scrollTop: 0, scrollHeight: 900, clientHeight: 300 })).toBe(false);
@@ -1642,12 +2140,19 @@ describe('the out region offers the two jumps that would do something', () => {
  * control that only moved vam's own highlight would look like it worked and
  * do nothing.
  */
-describe('the mode pills select, and what they select gets recorded', () => {
-  const pill = (name: string) => q<HTMLButtonElement>(`[data-mode-pill="${name}"]`);
+describe('the mode control selects, and what it selects gets recorded', () => {
+  /** Open the popover -- the icon shows only the current mode until you do. */
+  const open = () => act(() => q<HTMLButtonElement>('[data-mode-toggle]')?.click());
+  /** One of the three options, with the popover already open. */
+  const pill = (name: string) => {
+    if (q('[data-mode-picker]') === null) open();
+    return q<HTMLButtonElement>(`[data-mode-option="${name}"]`);
+  };
 
   it('writes the chosen mode into the draft as a leading line', () => {
     const seen: string[] = [];
     draw({ draft: 'ship it', onDraftChange: (next) => seen.push(next) });
+    open();
     act(() => {
       pill('plan')?.click();
     });
@@ -1657,6 +2162,7 @@ describe('the mode pills select, and what they select gets recorded', () => {
   it('clears the line when the default mode is chosen, rather than writing "unchanged"', () => {
     const seen: string[] = [];
     draw({ draft: 'mode: Plan\nship it', onDraftChange: (next) => seen.push(next) });
+    open();
     act(() => {
       pill('auto')?.click();
     });
@@ -1665,13 +2171,13 @@ describe('the mode pills select, and what they select gets recorded', () => {
 
   it('shows the selection from the draft, not from a copy of it', () => {
     draw({ draft: 'mode: Manual\nship it' });
-    expect(pill('manual')?.getAttribute('aria-pressed')).toBe('true');
-    expect(pill('auto')?.getAttribute('aria-pressed')).toBe('false');
+    expect(pill('manual')?.getAttribute('aria-selected')).toBe('true');
+    expect(pill('auto')?.getAttribute('aria-selected')).toBe('false');
   });
 
   it('reads Auto for a draft with no mode line at all', () => {
     draw({ draft: 'ship it' });
-    expect(pill('auto')?.getAttribute('aria-pressed')).toBe('true');
+    expect(pill('auto')?.getAttribute('aria-selected')).toBe('true');
   });
 
   it('lets a model request and a mode request coexist', () => {
@@ -1702,13 +2208,247 @@ describe('the empty tabs carry no tooltip, and the other notes stay', () => {
     // Each became a real control as it got a source, and none of them ever
     // carried a note explaining an emptiness.
     expect(all('[data-placeholder^="tab-"]')).toHaveLength(0);
-    for (const tab of all('[data-tab]')) {
+    for (const tab of all('[data-view]')) {
       expect(tab.closest('[data-note]')).toBeNull();
     }
     // The three the operator asked to KEEP.
     expect(q<HTMLElement>('[data-attach]')?.getAttribute('data-note')).not.toBeNull();
     expect(q<HTMLElement>('[data-model-request]')?.getAttribute('data-note')).not.toBeNull();
-    expect(q<HTMLElement>('[data-mode-row] [data-note]')).not.toBeNull();
+    expect(q<HTMLElement>('[data-mode-toggle]')?.getAttribute('data-note')).not.toBeNull();
+  });
+});
+
+/**
+ * `paneFocused` is what an unfocused pane must stay quiet about, because
+ * A15.1 mounts one `DetailPanel` PER PANE and this component was written
+ * when exactly one existed.
+ *
+ * ONE of the two behaviours it used to gate is no longer this file's:
+ * `Alt+<digit>` was a `window` listener here, and answering it in every
+ * mounted panel at once was the defect `paneFocused` was added for. It is a
+ * real binding now (`pickView`), so the canvas's own chord listener owns the
+ * keystroke and delivers it to one pane through `tabRequest` — there is no
+ * second listener left to gate. Those two cases moved to
+ * `test/canvas/Canvas.view-shortcut.test.tsx`, where the key now lives, and
+ * `test/canvas/Canvas.view-icons-focus.test.tsx` still presses it across a
+ * real split.
+ *
+ * What is still THIS file's is reporting the view back. THE LOOP IS WHY IT
+ * IS PINNED HERE. `onTabChange` is a fresh closure every render, so the
+ * report used to fire from an effect on EVERY render -- two panes showing two
+ * views wrote over each other forever, and clicking one pane's PRs icon in a
+ * split hung the shell (measured). The old guard was "only the focused pane
+ * reports"; the guard now is that nothing reports from a render at all. The
+ * report is the operator's ACT, so a mount reports nothing and a background
+ * pane may report the act performed in it.
+ *
+ * These cases fail FAST rather than hanging, which is the point of pinning
+ * them at this level rather than in a mounted shell.
+ */
+describe('a view is reported when it is PICKED, never from a render', () => {
+  it('reports nothing merely for being drawn — focused', () => {
+    const reported: string[] = [];
+    draw({ paneFocused: true, onTabChange: (next) => reported.push(next) });
+    expect(reported).toEqual([]);
+  });
+
+  it('reports nothing merely for being drawn — unfocused', () => {
+    const reported: string[] = [];
+    draw({ paneFocused: false, onTabChange: (next) => reported.push(next) });
+    expect(reported).toEqual([]);
+  });
+
+  it('reports the view the operator clicks, exactly once', () => {
+    const reported: string[] = [];
+    draw({ paneFocused: true, onTabChange: (next) => reported.push(next) });
+    const agents = document.querySelector('[data-view="agents"]') as HTMLElement;
+    expect(agents).not.toBeNull();
+    fireEvent.click(agents);
+    expect(reported).toEqual(['Agents']);
+  });
+
+  /**
+   * ONE report per ASK, and the ask is the object. `tabRequest` is how
+   * `PhoneShell`'s icon row moves the pane, and it does not reset to null --
+   * so a report that fired on every render would re-assert a view the
+   * operator picked once onto whatever the pane showed next. That is the
+   * cross-session bleed `Canvas.view-per-session.test.tsx` exists to stop,
+   * arriving through the report instead of through the state.
+   */
+  it('reports a tabRequest once, not once per render', () => {
+    const reported: string[] = [];
+    const request = { tab: 'PRs' } as const;
+    const { rerender } = render(
+      <DetailPanel
+        entry={ENTRY}
+        decision={DECISIONS[0] as Decision}
+        draft=""
+        onDraftChange={() => {}}
+        onSubmit={() => {}}
+        composing={false}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+        tabRequest={request}
+        onTabChange={(next) => reported.push(next)}
+      />,
+    );
+    expect(reported).toEqual(['PRs']);
+    // A fresh `onTabChange` closure on every render is the shape that made
+    // this fire forever. Three more renders, same ask, still one report.
+    for (let i = 0; i < 3; i += 1) {
+      rerender(
+        <DetailPanel
+          entry={ENTRY}
+          decision={DECISIONS[0] as Decision}
+          draft=""
+          onDraftChange={() => {}}
+          onSubmit={() => {}}
+          composing={false}
+          onCompose={() => {}}
+          onStopComposing={() => {}}
+          active={false}
+          actionIndex={0}
+          width={408}
+          resizeHandle={null}
+          tabRequest={request}
+          onTabChange={(next) => reported.push(next)}
+        />,
+      );
+    }
+    expect(reported).toEqual(['PRs']);
+  });
+});
+
+/**
+ * A12.2, A2.5, A5.4: the four views are icons, and each has a digit.
+ *
+ * WHAT THE KEY DOES IS NO LONGER MEASURED HERE. `Alt+<digit>` was a `window`
+ * listener inside this component; it is a real binding now (`pickView`), so
+ * the canvas's chord machine answers it and this panel only draws the
+ * outcome. The six press-a-key cases that used to live in this describe —
+ * by-name resolution with all four views drawn, the aloud refusal for a
+ * withdrawn Terminal, Agents keeping digit 4, the refusal past the last
+ * named view, and the two decline cases (a differently-modified digit, a
+ * digit typed into the composer) — moved verbatim in intent to
+ * `test/canvas/Canvas.view-shortcut.test.tsx`, which drives the listener
+ * where it now is. Left here, they would have pressed a key nothing in this
+ * file listens for and passed only while some other route happened to work.
+ *
+ * What stays is what this file can still see: an icon-only control needs a
+ * REAL accessible name, and each icon must be named for its own fixed slot
+ * in `TABS`, never its position in the drawn bar.
+ */
+describe('the view icons are named controls, each for its own fixed slot in TABS', () => {
+  it('every icon is a real <button>, in the tab order, and carries its own name', () => {
+    draw();
+    for (const icon of all('[data-view]') as HTMLButtonElement[]) {
+      expect(icon.tagName).toBe('BUTTON');
+      // Reachable by Tab: no explicit removal from the tab order.
+      expect(icon.getAttribute('tabindex')).not.toBe('-1');
+      // ICON-ONLY DOES NOT MEAN UNLABELLED. The accessible name is
+      // `aria-label` — a screen reader is not required to read a `title`, and
+      // a `title` never opens on keyboard focus at all, which is the defect
+      // this file already refused once for the old pill row.
+      const label = icon.getAttribute('aria-label');
+      expect(label, 'icon must carry its own aria-label').not.toBeNull();
+      expect(label).not.toBe('');
+    }
+  });
+
+  /**
+   * AND THE NAME IS NOT WHERE THE SHORTCUT GOES.
+   *
+   * Each label used to end `— Alt+N`, and a `title` repeated it byte for
+   * byte. That is a chord welded into the accessible name: a screen reader
+   * says it on every focus of all four buttons and the operator has no way to
+   * dismiss it, and it is a LITERAL — the operator can rebind `pickView` now,
+   * after which the name would be announcing a key that does nothing.
+   *
+   * The shortcut has two honest homes instead, both derived from the binding
+   * table: the tooltip (`ShortcutTip`, covered in
+   * `test/keyboard/shortcut-tip.test.tsx`) and the generated key sheet. The
+   * `title` is gone outright — it was identical to the `aria-label`, so it
+   * added a second, worse copy of the same string.
+   */
+  it('keeps the shortcut OUT of the accessible name, and drops the title entirely', () => {
+    draw({ terminal: false });
+    for (const icon of all('[data-view]') as HTMLButtonElement[]) {
+      const label = icon.getAttribute('aria-label') ?? '';
+      expect(label, 'no chord welded into the name').not.toMatch(/Alt[+-]/);
+      expect(icon.getAttribute('title'), 'the title was a worse copy of the label').toBeNull();
+    }
+    // The name itself survives, and so does the running-agent count, which is
+    // the only place this pane still reports it.
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-label')).toBe(
+      'Response view',
+    );
+    expect(q<HTMLElement>('[data-view="agents"]')?.getAttribute('aria-label')).toBe(
+      'Agents view, 2 running',
+    );
+  });
+});
+
+/**
+ * A15.5: the view icons stop drawing their own row and become a corner
+ * overlay instead — a dedicated `border-line border-b` strip cost a full
+ * line of height on every render whether or not the operator ever pressed
+ * one. What survives is everything the row already guaranteed (real
+ * `<button>`s, `aria-pressed`, `aria-label`, reachable by Tab — covered
+ * above) plus two new properties an overlay specifically owes: it must not
+ * steal clicks or hover off the content it floats above, and it must not be
+ * able to balloon wide enough to cover a narrow pane's whole width.
+ */
+describe('A15.5: the view icons are a corner overlay, not a reserved row', () => {
+  it('positions the icon cluster out of flow, so it reserves no row of its own', () => {
+    draw();
+    const overlay = q<HTMLElement>('[data-view-overlay]');
+    expect(overlay, 'the overlay wrapper').not.toBeNull();
+    expect(overlay?.className).toContain('absolute');
+    // The dedicated row this replaces drew a full-width bottom border to
+    // separate itself from the scrolling column below it -- exactly the
+    // reserved space A15.5 asks to stop paying for.
+    expect(overlay?.className ?? '').not.toContain('border-b');
+  });
+
+  it('lets clicks and hover fall through its own empty area to the content underneath', () => {
+    draw();
+    // The wrapper is inert everywhere except where the icons themselves
+    // paint: `pointer-events-none` on the corner box, opted back into on the
+    // nav that actually draws the buttons.
+    expect(q<HTMLElement>('[data-view-overlay]')?.className).toContain('pointer-events-none');
+    expect(q<HTMLElement>('[data-view-tabs]')?.className).toContain('pointer-events-auto');
+  });
+
+  it('caps its own width, so it cannot cover a narrow pane edge to edge', () => {
+    draw();
+    // A corner cluster, not a bar: bounded to its own content plus a fixed
+    // margin from the pane's edge, never `inset-x-0`/`w-full`, which is what
+    // let the old row span the whole pane on purpose.
+    const className = q<HTMLElement>('[data-view-overlay]')?.className ?? '';
+    expect(className).not.toContain('inset-x-0');
+    expect(className).not.toContain('w-full');
+    expect(className).toMatch(/max-w-/);
+  });
+
+  it('still truncates a long refusal instead of growing the overlay past its cap', () => {
+    // The refusal ARRIVES AS A PROP now — the canvas owns the keystroke that
+    // raises it, since `Alt+<digit>` became a real binding. The wording is
+    // the canvas's own, longest form, which is the case this cap is for.
+    draw({ terminal: false, viewNote: 'no view 5 — only 3 shown (Response, PRs, Agents)' });
+    const note = q<HTMLElement>('[data-view-note]');
+    expect(note).not.toBeNull();
+    expect(note?.className ?? '').toMatch(/max-w-/);
+    expect(note?.className ?? '').toContain('truncate');
+  });
+
+  it('still switches views by click once overlaid — the move did not break the control', () => {
+    draw({ terminal: true });
+    fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
+    expect(q<HTMLElement>('[data-view="terminal"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
@@ -1727,7 +2467,7 @@ describe('the Agents tab', () => {
     session: { ...SESSION, agents },
   });
 
-  const agentsTab = () => q<HTMLButtonElement>('[data-tab="agents"]');
+  const agentsTab = () => q<HTMLButtonElement>('[data-view="agents"]');
   const openAgents = () => {
     const button = agentsTab();
     if (button === null) throw new Error('no Agents tab to click');
@@ -1740,7 +2480,7 @@ describe('the Agents tab', () => {
     expect(agentsTab()?.tagName).toBe('BUTTON');
     // `PRs` and `Terminal` have since become controls of their own, so the bar
     // holds four buttons and no inert label.
-    expect(all('[data-tab]').map((t) => t.tagName)).toEqual([
+    expect(all('[data-view]').map((t) => t.tagName)).toEqual([
       'BUTTON',
       'BUTTON',
       'BUTTON',
@@ -1761,7 +2501,7 @@ describe('the Agents tab', () => {
     expect(q('[data-detail-block="in"]')).toBeNull();
     expect(agentsTab()?.getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     expect(q('[data-detail-block="out"]')).not.toBeNull();
     expect(q('[data-agents]')).toBeNull();
   });
@@ -1786,6 +2526,252 @@ describe('the Agents tab', () => {
     expect(all('[data-agent-row]')).toHaveLength(0);
     expect(q<HTMLElement>('[data-agents-empty]')?.textContent).not.toContain('spawned no agents');
     expect(q<HTMLElement>('[data-agents-empty]')?.textContent).toContain('does not report');
+  });
+
+  /**
+   * THE AGENTS TAB IS A NAVIGATOR NOW, not a list.
+   *
+   * The operator: "show the agent list on the left as a secondary navigator
+   * inside the agents pane, on the right the detail of what that subagent is
+   * doing, with in/out/progress". The list keeps every rule it already had --
+   * the four states, the idle toggle, the running dot -- and gains a selection
+   * that drives a detail side beside it.
+   */
+  describe('picking an agent to see what it is doing', () => {
+    const RUNNING = [
+      { id: 'agent-one', type: 'coder', description: 'write the parser', running: true },
+      { id: 'agent-two', type: 'uiux', description: 'review the pane', running: true },
+    ];
+
+    const turn = (over: Partial<Decision> = {}): Decision => ({
+      id: 'agent-one:tail:0',
+      label: 'agent-one',
+      input: 'the brief the parent wrote',
+      output: 'what it has found so far',
+      commands: [],
+      errorCount: 0,
+      steps: [{ id: 'agent-one:tail:0:0', label: 'Bash: run the tests', failed: false }],
+      ...over,
+    });
+
+    const working = (over: Partial<Extract<AgentWork, { kind: 'work' }>> = {}): AgentWork => ({
+      kind: 'work',
+      turns: [turn()],
+      brief: null,
+      whole: true,
+      ...over,
+    });
+
+    /** Draws the tab with a reader that answers whatever the test says. */
+    const withWork = (
+      answer: AgentWork | Promise<AgentWork>,
+      agents: Session['agents'] = RUNNING,
+    ) => {
+      const agentWork = vi.fn(async () => await answer);
+      draw({ entry: withAgents(agents) }, agentWork);
+      openAgents();
+      return agentWork;
+    };
+
+    const rows = () => all('[data-agent-row]');
+    const pick = (index: number) => {
+      const row = rows()[index];
+      if (row === undefined) throw new Error(`no agent row ${index}`);
+      fireEvent.click(row.querySelector('[data-agent-pick]') ?? row);
+    };
+
+    it('asks nobody until an agent is picked, and invites one instead', async () => {
+      const agentWork = withWork(working());
+      await act(async () => {});
+      expect(agentWork).not.toHaveBeenCalled();
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('Pick an agent');
+    });
+
+    it('asks about the agent that was picked', async () => {
+      const agentWork = withWork(working());
+      pick(0);
+      await act(async () => {});
+      expect(agentWork).toHaveBeenCalledWith(SESSION.id, 'agent-one');
+    });
+
+    /**
+     * THE LIST STAYS. It is a navigator, which is the whole word the operator
+     * used: picking a second agent has to be one click, not a click back and a
+     * click in.
+     */
+    it('keeps the list beside the detail once something is picked', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      expect(q('[data-agents-list]')).not.toBeNull();
+      expect(rows()).toHaveLength(2);
+      expect(q('[data-agent-detail]')).not.toBeNull();
+    });
+
+    it('marks which agent the detail is about', async () => {
+      withWork(working());
+      pick(1);
+      await act(async () => {});
+      const marked = all('[data-agent-row][data-agent-selected="true"]');
+      expect(marked).toHaveLength(1);
+      expect(marked[0]?.textContent).toContain('uiux');
+    });
+
+    it('draws the turn it read: what was asked, what came back, what it called', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('the brief the parent wrote');
+      expect(detail?.textContent).toContain('what it has found so far');
+      expect(detail?.textContent).toContain('Bash: run the tests');
+    });
+
+    /**
+     * LOADING IS ITS OWN SENTENCE. An empty detail while the read is in flight
+     * would say "this agent has done nothing", which is a claim about the
+     * agent made out of vam's own latency.
+     */
+    it('says it is still asking rather than drawing an empty agent', () => {
+      withWork(new Promise<AgentWork>(() => {}));
+      pick(0);
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('Asking');
+      expect(detail?.textContent).not.toContain('has done nothing');
+    });
+
+    it('carries the source’s own words when it could not read the agent', async () => {
+      withWork({
+        kind: 'unavailable',
+        error: { kind: 'unreachable', code: 'agent:unreadable', message: 'could not open it' },
+      });
+      pick(0);
+      await act(async () => {});
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('could not open it');
+    });
+
+    /**
+     * AN AGENT THAT HAS BEEN ASKED AND NOT ANSWERED is the commonest live
+     * case, and it is not an empty pane: the question is there and the answer
+     * is honestly absent.
+     */
+    it('says an answer has not arrived, rather than leaving the space blank', async () => {
+      withWork(working({ turns: [turn({ output: null })] }));
+      pick(0);
+      await act(async () => {});
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('the brief the parent wrote');
+      expect(detail?.textContent).toContain('no answer yet');
+    });
+
+    it('says an agent has done nothing vam could read, when that is the reading', async () => {
+      withWork(working({ turns: [] }));
+      pick(0);
+      await act(async () => {});
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain(
+        'nothing vam could read',
+      );
+    });
+
+    /**
+     * AND IT ADMITS THE MIDDLE IT DID NOT READ. Only 6% of the subagent
+     * transcripts on this machine fit in one window, so this is the usual
+     * case, not the exception -- and drawing the brief joined to the newest
+     * turn would claim the agent went straight from one to the other.
+     */
+    it('shows the brief above the gap it did not read', async () => {
+      withWork(
+        working({
+          whole: false,
+          brief: turn({ id: 'agent-one:head:0', input: 'the original brief', output: null }),
+        }),
+      );
+      pick(0);
+      await act(async () => {});
+      const detail = q<HTMLElement>('[data-agent-detail]');
+      expect(detail?.textContent).toContain('the original brief');
+      expect(q('[data-agent-gap]')).not.toBeNull();
+    });
+
+    it('draws no gap marker when it read the whole agent', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      expect(q('[data-agent-gap]')).toBeNull();
+    });
+
+    it('says so when the source cannot report agent work at all', async () => {
+      draw({ entry: withAgents(RUNNING) }, null);
+      openAgents();
+      pick(0);
+      await act(async () => {});
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('cannot report');
+    });
+
+    /**
+     * THE NARROW PANE STILL HAS A WAY BACK. Below the two-column width the
+     * detail takes the pane, so the control that returns to the list is the
+     * only way back to it -- and it is named for where it goes.
+     */
+    it('offers a way back to the list, named for where it goes', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      const back = q<HTMLElement>('[data-agent-back]');
+      expect(back).not.toBeNull();
+      expect(back?.textContent?.toLowerCase()).toContain('agents');
+    });
+
+    it('returns to nothing-picked when the way back is pressed', async () => {
+      withWork(working());
+      pick(0);
+      await act(async () => {});
+      fireEvent.click(q<HTMLButtonElement>('[data-agent-back]') as HTMLButtonElement);
+      expect(all('[data-agent-row][data-agent-selected="true"]')).toHaveLength(0);
+      expect(q<HTMLElement>('[data-agent-detail]')?.textContent).toContain('Pick an agent');
+    });
+
+    /**
+     * AND A SELECTION DOES NOT OUTLIVE ITS AGENT. Rows come off a poll: an
+     * agent that finishes leaves the running-only list, and a detail still
+     * captioned with it would be describing a row that is no longer there.
+     */
+    it('drops a selection when that agent leaves the list', async () => {
+      const agentWork = vi.fn(async () => working());
+      const view = drawFor({ entry: withAgents(RUNNING) }, agentWork);
+      openAgents();
+      pick(0);
+      await act(async () => {});
+      expect(all('[data-agent-row][data-agent-selected="true"]')).toHaveLength(1);
+      view.rerender({ entry: withAgents([RUNNING[1] as SessionAgent]) });
+      await act(async () => {});
+      expect(all('[data-agent-row][data-agent-selected="true"]')).toHaveLength(0);
+    });
+  });
+
+  /**
+   * THE SPLIT IS A CLASS TAILWIND CAN FIND, AND THIS IS WHAT PROVES IT.
+   *
+   * Tailwind generates a utility only when it finds the COMPLETE string in the
+   * source, so `@min-[${AGENT_SPLIT_PX}px]:flex-row` generates nothing at all
+   * -- the markup reads correct here, the DOM reads correct here, and the pane
+   * paints one column at every width. The number is therefore typed literally
+   * in the class and named in `AGENT_SPLIT_PX`, and this is the assertion that
+   * stops the two from drifting apart. The geometry itself is measured in a
+   * real browser (`e2e/agents-navigator-shots.mjs`); this only catches the
+   * cheaper half, which is the half that looks fine in review.
+   */
+  it('splits on a literal class that matches the width it names', () => {
+    draw({ entry: withAgents([{ id: 'a', type: 'coder', description: 'x', running: true }]) });
+    openAgents();
+    const split = q<HTMLElement>('[data-agents-split]');
+    expect(split?.className).toContain(`@min-[${AGENT_SPLIT_PX}px]:flex-row`);
+    // And the container it queries is an ANCESTOR, never itself: a container
+    // query does not apply to the element that declares the container.
+    const container = q<HTMLElement>('[data-agents]');
+    expect(container?.className).toContain('@container');
+    expect(container).not.toBe(split);
+    expect(container?.contains(split as Node)).toBe(true);
   });
 
   const idleToggle = () => q<HTMLButtonElement>('[data-agents-toggle]');
@@ -2277,6 +3263,151 @@ describe('the ! typeahead replaces the standing command strip', () => {
   });
 });
 
+/**
+ * WHICH TURNS THE `!` LIST DRAWS FROM.
+ *
+ * The operator reported that typing `!` showed nothing. It was not missing:
+ * the list was sourced from the FOCUSED turn alone, and the focused turn is
+ * the newest one unless `h`/`l` moved -- the turn that has just answered,
+ * which is exactly the turn least likely to have proposed a command yet. So
+ * the feature was invisible on the ordinary session while working perfectly on
+ * the one turn in twenty that happened to carry one.
+ *
+ * The column draws the whole session now, so the source is the whole column:
+ * the focused turn first (it is the one being read, so it is the one being
+ * reached for), then every other turn newest-first. Everything the operator
+ * can scroll to, they can complete.
+ */
+describe('the ! list is drawn from every turn in the column, not the focused one alone', () => {
+  const withCommands = (id: string, commands: Command[]): Decision => ({
+    id,
+    label: `step ${id}`,
+    input: `ask ${id}`,
+    output: 'answered',
+    commands,
+  });
+
+  const suggested = () =>
+    all('[data-bang-suggestion]').map((row) =>
+      (row.querySelector('[data-bang-command]')?.textContent ?? '').trim(),
+    );
+  const box = () =>
+    q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]') as HTMLTextAreaElement;
+
+  /** A session whose turns are newest-first, like the real source's. */
+  const sessionOf = (decisions: readonly Decision[]): SessionEntry => ({
+    project: PROJECT,
+    session: { ...SESSION, decisions },
+  });
+
+  function Composer(props: { readonly entry: SessionEntry; readonly decision: Decision | null }) {
+    const [draft, setDraft] = useState('');
+    return (
+      <DetailPanel
+        entry={props.entry}
+        decision={props.decision}
+        draft={draft}
+        onDraftChange={setDraft}
+        onSubmit={() => {}}
+        composing={true}
+        onCompose={() => {}}
+        onStopComposing={() => {}}
+        active={false}
+        actionIndex={0}
+        width={408}
+        resizeHandle={null}
+      />
+    );
+  }
+
+  function type(text: string) {
+    fireEvent.change(box(), { target: { value: text } });
+  }
+
+  it('offers an older turn’s command while the focused turn has none', () => {
+    // THE REPORTED BUG, as a test. `d5` is newest and proposes nothing, which
+    // is the ordinary shape of a session that has just answered.
+    const decisions = [
+      withCommands('d5', []),
+      withCommands('d4', [{ id: 'c1', label: 'push', command: 'git push -u origin work' }]),
+    ];
+    render(<Composer entry={sessionOf(decisions)} decision={decisions[0] as Decision} />);
+    type('!');
+    expect(suggested()).toEqual(['git push -u origin work']);
+  });
+
+  it('puts the focused turn first and the rest newest-first behind it', () => {
+    const decisions = [
+      withCommands('d5', [{ id: 'a', label: 'newest', command: 'echo newest' }]),
+      withCommands('d4', [{ id: 'b', label: 'focused', command: 'echo focused' }]),
+      withCommands('d3', [{ id: 'c', label: 'oldest', command: 'echo oldest' }]),
+    ];
+    render(<Composer entry={sessionOf(decisions)} decision={decisions[1] as Decision} />);
+    type('!echo');
+    expect(suggested()).toEqual(['echo focused', 'echo newest', 'echo oldest']);
+  });
+
+  it('shows a command proposed by two turns once, not twice', () => {
+    // Agents repeat "run the gate" every round. A list that repeated with them
+    // would push the rest of the session off the bottom of the popover.
+    const repeated = { id: 'gate', label: 'rerun the gate', command: 'pnpm -s test' };
+    const decisions = [
+      withCommands('d5', [repeated]),
+      withCommands('d4', [{ ...repeated, id: 'gate-again', label: 'run the gate again' }]),
+    ];
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!');
+    expect(suggested()).toEqual(['pnpm -s test']);
+  });
+
+  it('caps the list and says how many it is not drawing', () => {
+    // TRUNCATION IS DISCLOSED, NEVER SILENT. A long session can propose
+    // dozens; a popover that showed a cropped list with no sign of it would
+    // teach the operator that what they see is all there is.
+    const decisions = Array.from({ length: 12 }, (_, i) =>
+      withCommands(`d${i}`, [{ id: `c${i}`, label: `step ${i}`, command: `echo ${i}` }]),
+    );
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!');
+    expect(suggested()).toHaveLength(8);
+    expect(q('[data-bang-more]')?.textContent ?? '').toContain('4 more');
+    // And narrowing gets rid of the note rather than leaving it standing.
+    // (No space in the query: `bangQuery` stops the list at the first one.)
+    type('!11');
+    expect(suggested()).toEqual(['echo 11']);
+    expect(q('[data-bang-more]')).toBeNull();
+  });
+
+  /**
+   * WHAT GOES IN IS WHAT WAS SHOWN, character for character.
+   *
+   * This is the one assertion in the file that is about SAFETY rather than
+   * about a list. Since `deliver.ts`, a recorded prompt really is appended to
+   * a live session, so a completed `!` line is a bash command a running agent
+   * will run. The operator reads the row and presses Enter; if the row and the
+   * insertion could ever differ -- a clip for the column's width, a shell
+   * escape, a normalised quote -- they would be approving one command and
+   * sending another.
+   *
+   * Written against the RENDERED row rather than against the fixture, which is
+   * what makes it more than a restatement: a change that cropped the row would
+   * pass a fixture comparison and fail this one.
+   */
+  it('inserts exactly the characters the row displayed, however long they are', () => {
+    const long =
+      'osascript -e \'tell application "Terminal" to do script "cd /w/x && pnpm -s test"\'';
+    const decisions = [withCommands('d5', [{ id: 'c1', label: 'open a terminal', command: long }])];
+    render(<Composer entry={sessionOf(decisions)} decision={null} />);
+    type('!osa');
+    const shown = (
+      all('[data-bang-suggestion]')[0]?.querySelector('[data-bang-command]')?.textContent ?? ''
+    ).trim();
+    expect(shown).toBe(long);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+    expect(box().value).toBe(`!${shown}`);
+  });
+});
+
 /** The `/` typeahead: `session.slashCommands`, built like `!` above. */
 describe('the / typeahead offers the provider’s own commands', () => {
   const SLASH_COMMANDS = [
@@ -2381,6 +3512,72 @@ describe('the / typeahead offers the provider’s own commands', () => {
     expect(q('[data-slash-suggest]')).not.toBeNull();
     expect(q('[data-bang-suggest]')).toBeNull();
   });
+
+  /**
+   * THE TWO UNKNOWNS, ON SCREEN. `pull-requests.ts:12-14` states the rule and
+   * this is the place it is either kept or broken: the `/` list has tiers that
+   * fail differently, and the one made of BUILT-INS is not files -- vam has to
+   * ask the installed CLI for it, and that question can fail. A list fifty
+   * entries short with nothing said about it is "vam could not read the
+   * commands" wearing "no commands match"'s clothes.
+   */
+  describe('a list vam could not fully read says so', () => {
+    const GAP = { code: 'cli-missing', message: 'no `claude` on PATH, so vam cannot list its own' };
+    const withGap = (commands = SLASH_COMMANDS): SessionEntry => ({
+      project: PROJECT,
+      session: { ...SESSION, slashCommands: commands, slashCommandGap: GAP },
+    });
+
+    it('draws nothing at all when nothing matches and nothing failed', () => {
+      // THE OTHER UNKNOWN, pinned so the two cannot converge: a query with no
+      // answer closes the box, and says nothing, because there is nothing to
+      // say.
+      composer();
+      type('/zzz');
+      expect(q('[data-slash-suggest]')).toBeNull();
+      expect(q('[data-slash-gap]')).toBeNull();
+    });
+
+    it('says why the list is short when a query finds nothing and a tier failed', () => {
+      composer(withGap());
+      type('/zzz');
+      expect(q('[data-slash-suggest]')).toBeNull();
+      expect(q('[data-slash-gap]')?.textContent ?? '').toContain('no `claude` on PATH');
+    });
+
+    it('still says it while the list has matches to offer', () => {
+      // A short list that works is the dangerous case: it looks complete.
+      composer(withGap());
+      type('/');
+      expect(suggestedNames()).toEqual(['compact', 'notify', 'review']);
+      expect(q('[data-slash-gap]')?.textContent ?? '').toContain('no `claude` on PATH');
+    });
+
+    it('says nothing when the source read every tier it has', () => {
+      composer();
+      type('/');
+      expect(suggestedNames()).toHaveLength(3);
+      expect(q('[data-slash-gap]')).toBeNull();
+    });
+
+    it('caps the list and counts what it is not drawing', () => {
+      // The CLI's own list runs to fifty-odd commands. Unbounded, the popover
+      // becomes a page floating over the composer, and a page cropped without
+      // saying so is a page that lies about its own length.
+      const many = Array.from({ length: 12 }, (_, i) => ({
+        id: `builtin:c${i}`,
+        name: `wombat${i}`,
+        description: null,
+      }));
+      composer({ project: PROJECT, session: { ...SESSION, slashCommands: many } });
+      type('/wombat');
+      expect(suggestedNames()).toHaveLength(8);
+      expect(q('[data-slash-more]')?.textContent ?? '').toContain('4 more');
+      type('/wombat11');
+      expect(suggestedNames()).toEqual(['wombat11']);
+      expect(q('[data-slash-more]')).toBeNull();
+    });
+  });
 });
 
 describe('a turn with no answer says which kind of nothing it is', () => {
@@ -2391,10 +3588,27 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     output,
     commands: [],
   });
-  const status = (s: Session['status']) => ({
-    project: PROJECT,
-    session: { ...SESSION, status: s },
-  });
+  /**
+   * ONE TURN, AND IT IS THIS ONE. The pane draws every turn the SESSION
+   * carries, so an ad-hoc `decision` beside the five-turn shared fixture put
+   * five other turns on screen and none of them was the one under test.
+   *
+   * ACTIVITY WITHHELD, because this block is about `noAnswerNote`. Now that the
+   * turn under test IS the session's newest, a running session draws its live
+   * caption on it -- and that caption prefers the session's own `activity`,
+   * which the shared fixture has. Leaving it in would have measured the caption
+   * instead of the sentence underneath it.
+   */
+  const show = (output: string | null, s: Session['status'] = SESSION.status) => {
+    const only = withOutput(output);
+    draw({
+      decision: only,
+      entry: {
+        project: PROJECT,
+        session: { ...SESSION, status: s, activity: null, decisions: [only] },
+      },
+    });
+  };
 
   it('renders an explicit line for an empty answer rather than blank space', () => {
     // `''` is a distinct state: a turn that resolved to nothing. But `'' !==
@@ -2402,14 +3616,14 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     // empty, and the operator got an `OUT` rule over blank space --
     // indistinguishable from a failed render.
     expect(splitAnswers('')).toEqual([]);
-    draw({ decision: withOutput('') });
+    show('');
     expect(all('[data-out-line]')).toHaveLength(0);
     const note = q<HTMLElement>('[data-out-empty]');
     expect(note?.textContent ?? '').toContain('nothing');
   });
 
   it('says "still running" only for a session that is running', () => {
-    draw({ decision: withOutput(null), entry: status('running') });
+    show(null, 'running');
     expect(q<HTMLElement>('[data-out-empty]')?.textContent ?? '').toContain('still running');
   });
 
@@ -2419,11 +3633,84 @@ describe('a turn with no answer says which kind of nothing it is', () => {
     // for something that will never arrive.
     for (const s of ['done', 'failed'] as const) {
       cleanup();
-      draw({ decision: withOutput(null), entry: status(s) });
+      show(null, s);
       const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
       expect(text, `status ${s}`).toContain('ended without an answer');
       expect(text, `status ${s}`).not.toContain('still running');
     }
+  });
+
+  /**
+   * THE SENTENCE THAT WAS NOT A READING AT ALL.
+   *
+   * Reported from use: this pane said "this turn ended without an answer"
+   * while the Terminal tab beside it held the agent's full reply. The cause is
+   * one file over -- a transcript line can be larger than the whole byte
+   * window vam reads, and a window holding one of those holds no conversation
+   * at all, so the only thing left able to open a turn is the `last-prompt`
+   * marker and that branch has no answer to give (`tail.ts`, `Decision.unread`).
+   *
+   * EVERY ABSENCE SENTENCE IS A CLAIM ABOUT WHAT A SOURCE REPORTED, and on
+   * this turn no source reported anything. So `unread` shadows all four of
+   * them, at every status: a session vam cannot read is not a session whose
+   * turn ended without an answer, and it is not one still working on it
+   * either.
+   */
+  it('refuses every absence sentence for a turn vam could not read', () => {
+    for (const s of ['done', 'failed', 'running', 'waiting', 'idle'] as const) {
+      cleanup();
+      const only: Decision = { ...withOutput(null), unread: true };
+      draw({
+        decision: only,
+        entry: {
+          project: PROJECT,
+          session: { ...SESSION, status: s, activity: null, decisions: [only] },
+        },
+      });
+      const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+      expect(text, `status ${s}`).toContain('could not read');
+      expect(text, `status ${s}`).not.toContain('ended without an answer');
+      expect(text, `status ${s}`).not.toContain('no answer for this turn yet');
+      expect(text, `status ${s}`).not.toContain('resolved to nothing');
+    }
+  });
+
+  /**
+   * AND THE ACTIVITY LINE DOES NOT OUTRANK IT EITHER.
+   *
+   * A running session's newest turn prefers `Session.activity` over any of
+   * these sentences, because a live caption naming the tool the agent is on is
+   * better than prose. But `activity` is read off the SAME window, so on a
+   * window vam could not read it is at best stale -- a reading taken before,
+   * or from somewhere else -- and drawing it here would name work as this
+   * turn's working on the one turn vam has no working for. This is the
+   * `unconfirmed` rule next to it, for the same reason and one absence over.
+   */
+  it('keeps the unread sentence on a running turn that has an activity line', () => {
+    const only: Decision = { ...withOutput(null), unread: true };
+    draw({
+      decision: only,
+      entry: {
+        project: PROJECT,
+        session: {
+          ...SESSION,
+          status: 'running',
+          activity: 'Bash: run the tests',
+          decisions: [only],
+        },
+      },
+    });
+    const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+    expect(text).toContain('could not read');
+    expect(text).not.toContain('run the tests');
+  });
+
+  /** And a turn vam DID read keeps every sentence it had. */
+  it('says nothing about reading on an ordinary unanswered turn', () => {
+    show(null, 'done');
+    const text = q<HTMLElement>('[data-out-empty]')?.textContent ?? '';
+    expect(text).toContain('ended without an answer');
+    expect(text).not.toContain('could not read');
   });
 });
 
@@ -2503,9 +3790,14 @@ describe('the out region shows live work while the session is running', () => {
     // `decisions` is newest first, so d3 is three turns back: the activity
     // would be describing the present while the operator reads the past.
     draw({ entry: running('editing transcript.ts'), decision: DECISIONS[2] as Decision });
-    expect(all('[data-out-empty]')).toHaveLength(0);
-    expect(cursor()).toBeNull();
-    expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+    // WITHIN THAT TURN. The column draws the newest turn as well, and it is
+    // the one the caption belongs to -- scoping to the document would now be
+    // asserting that a running session never animates at all.
+    const older = q<HTMLElement>('[data-column-turn][data-turn-current="true"]') as HTMLElement;
+    expect(older).not.toBeNull();
+    expect([...older.querySelectorAll('[data-out-empty]')]).toHaveLength(0);
+    expect(older.querySelector('[data-out-empty] [data-out-running]')).toBeNull();
+    expect(older.textContent ?? '').not.toContain('editing transcript.ts');
   });
 
   it('still says the session is working under reduced motion', () => {
@@ -2516,8 +3808,14 @@ describe('the out region shows live work while the session is running', () => {
     expect(reduced).toContain('.vam-ellipsis');
     expect(reduced).toMatch(/\.vam-ellipsis[^}]*\{[^}]*opacity:\s*1/s);
     expect(css).toContain('@keyframes vam-ellipsis');
-    // The cursor it replaces is gone from the stylesheet entirely.
-    expect(css).not.toContain('vam-term-cursor');
+    // The cursor it replaces is gone from the stylesheet entirely -- as the
+    // CLASS and the KEYFRAMES it shipped as (#103). The bare stem is no
+    // longer a safe substring to forbid: the terminal's colour scheme
+    // declares a custom PROPERTY `--vam-term-cursor` for the caret's colour
+    // (`prefs/terminal-scheme.ts`), which is a colour, not an animation.
+    expect(css).not.toContain('.vam-term-cursor');
+    expect(css).not.toContain('@keyframes vam-term-cursor');
+    expect(css).not.toMatch(/animation:[^;]*vam-term-cursor/);
   });
 
   /**
@@ -2589,11 +3887,19 @@ describe('the live line stands beside the answer, not instead of it', () => {
     output: string | null,
     activity: string | null = 'editing transcript.ts',
     status: Session['status'] = 'running',
-  ) =>
+  ) => {
+    // ONE TURN, AND IT IS THE ONE ON TRIAL. The pane draws every turn the
+    // SESSION carries now, so handing it an ad-hoc `decision` beside the
+    // five-turn shared fixture drew five turns none of which had this output.
+    const only = turn(output);
     draw({
-      entry: { project: PROJECT, session: { ...SESSION, status, activity } },
-      decision: turn(output),
+      entry: {
+        project: PROJECT,
+        session: { ...SESSION, status, activity, decisions: [only] },
+      },
+      decision: only,
     });
+  };
   const liveLine = () => q<HTMLElement>('[data-out-live]');
   const cursor = () => q<HTMLElement>('[data-out-live] [data-out-running]');
 
@@ -2662,9 +3968,18 @@ describe('the live line stands beside the answer, not instead of it', () => {
       },
       decision: DECISIONS[2] as Decision,
     });
-    expect(all('[data-out-live]')).toHaveLength(0);
-    expect(all('[data-out-running]')).toHaveLength(0);
-    expect(document.body.textContent ?? '').not.toContain('editing transcript.ts');
+    // ON THIS TURN, which is the whole claim. The column draws the newest turn
+    // too, and that one IS live and correctly carries the line -- asserting
+    // over the whole document would now be asserting that a running session
+    // never says it is running.
+    const older = q<HTMLElement>('[data-column-turn][data-turn-current="true"]') as HTMLElement;
+    expect(older).not.toBeNull();
+    expect([...older.querySelectorAll('[data-out-live]')]).toHaveLength(0);
+    expect([...older.querySelectorAll('[data-out-running]')]).toHaveLength(0);
+    expect(older.textContent ?? '').not.toContain('editing transcript.ts');
+    // And the live line is where it belongs: on the newest turn, once.
+    expect(all('[data-out-live]')).toHaveLength(1);
+    expect(q<HTMLElement>('[data-column-turn][data-turn-newest] [data-out-live]')).not.toBeNull();
   });
 });
 
@@ -2684,7 +3999,7 @@ describe('the PRs tab', () => {
     session: { ...SESSION, ...(pullRequests === undefined ? {} : { pullRequests }) },
   });
 
-  const prsTab = () => q<HTMLButtonElement>('[data-tab="prs"]');
+  const prsTab = () => q<HTMLButtonElement>('[data-view="prs"]');
   const openPrs = () => {
     const button = prsTab();
     if (button === null) throw new Error('no PRs tab to click');
@@ -2726,7 +4041,7 @@ describe('the PRs tab', () => {
     expect(q('[data-agents]')).toBeNull();
     expect(prsTab()?.getAttribute('aria-pressed')).toBe('true');
 
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     expect(q('[data-prs]')).toBeNull();
     expect(q('[data-detail-block="out"]')).not.toBeNull();
   });
@@ -2841,8 +4156,8 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     // Response, then every other tab that is not Terminal. None of them may
     // reach tmux.
     draw();
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="prs"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
     await act(async () => {
       await Promise.resolve();
     });
@@ -2857,13 +4172,15 @@ describe('the Terminal tab costs nothing until it is opened', () => {
         kind: 'ok',
         name: 'vam-sprint-board-reorder-a1b2c3',
         text: 'the pane',
+        // This stub never asked tmux, and `unreadable` is what that is.
+        cursor: { kind: 'unreadable' },
       }),
     );
     withBridge(read);
     draw();
 
     await act(async () => {
-      fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+      fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
       await Promise.resolve();
     });
     // BY PROJECT ID AND ROW, never by the session title. The project alone
@@ -2875,7 +4192,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
 
     const whileOpen = read.mock.calls.length;
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     await act(async () => {
       await Promise.resolve();
     });
@@ -2896,6 +4213,8 @@ describe('the Terminal tab costs nothing until it is opened', () => {
         kind: 'ok',
         name: 'vam-sprint-board-reorder-a1b2c3',
         text: 'the pane',
+        // This stub never asked tmux, and `unreadable` is what that is.
+        cursor: { kind: 'unreadable' },
       }),
     );
     const send = vi.fn(async () => 'sent' as const);
@@ -2906,7 +4225,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     draw();
 
     await act(async () => {
-      fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+      fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
       await Promise.resolve();
     });
     const pane = q<HTMLElement>('[data-terminal-pane]');
@@ -2928,13 +4247,13 @@ describe('the Terminal tab costs nothing until it is opened', () => {
 describe('the Terminal tab is offered only by a source that has one', () => {
   it('drops the tab entirely for a source that says it has no terminal', () => {
     draw({ terminal: false });
-    expect(q('[data-tab="terminal"]')).toBeNull();
-    expect(all('[data-tab]').map((t) => t.getAttribute('data-tab'))).not.toContain('terminal');
+    expect(q('[data-view="terminal"]')).toBeNull();
+    expect(all('[data-view]').map((t) => t.getAttribute('data-view'))).not.toContain('terminal');
   });
 
   it('keeps it for a source that has one', () => {
     draw({ terminal: true });
-    expect(q('[data-tab="terminal"]')).not.toBeNull();
+    expect(q('[data-view="terminal"]')).not.toBeNull();
   });
 
   it('falls back to Response when the showing tab is withdrawn', () => {
@@ -2942,11 +4261,11 @@ describe('the Terminal tab is offered only by a source that has one', () => {
     // from a source without one. A tab bar with nothing selected and a pane
     // drawing a withdrawn tab is the state this prevents.
     const { rerender } = drawFor({ terminal: true });
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
     expect(q('[data-terminal]')).not.toBeNull();
     rerender({ terminal: false });
     expect(q('[data-terminal]')).toBeNull();
-    expect(q<HTMLElement>('[data-tab="response"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(q<HTMLElement>('[data-view="response"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 });
 
@@ -2979,13 +4298,13 @@ describe('the composer is hidden while the Terminal tab is open', () => {
   });
 
   const openTerminal = () =>
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="terminal"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="terminal"]') as HTMLButtonElement);
 
   it('draws the prompt box, the mode row and the attach button on Response', () => {
     withBridge();
     draw();
     expect(q('[data-prompt-box]')).not.toBeNull();
-    expect(q('[data-mode-row]')).not.toBeNull();
+    expect(q('[data-mode-toggle]')).not.toBeNull();
     expect(q('[data-attach]')).not.toBeNull();
     expect(q('[data-model-request]')).not.toBeNull();
   });
@@ -3002,7 +4321,7 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     });
     expect(q('[data-terminal]')).not.toBeNull();
     expect(q('[data-prompt-box]')).toBeNull();
-    expect(q('[data-mode-row]')).toBeNull();
+    expect(q('[data-mode-toggle]')).toBeNull();
     expect(q('[data-attach]')).toBeNull();
     expect(q('[data-model-request]')).toBeNull();
     expect(q('textarea')).toBeNull();
@@ -3015,7 +4334,7 @@ describe('the composer is hidden while the Terminal tab is open', () => {
       openTerminal();
       await Promise.resolve();
     });
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="response"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
     // The draft lives above this pane, so leaving the tab cannot have eaten
     // it: hiding the box may not cost the operator what they had typed.
     expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
@@ -3026,24 +4345,94 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     // and nothing about them makes the prompt box the wrong place to type.
     withBridge();
     draw();
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="prs"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
-    fireEvent.click(q<HTMLButtonElement>('[data-tab="agents"]') as HTMLButtonElement);
+    fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
   });
 });
 
 /** The `out` text size is a pref, put on the document root and consumed as
  *  the ROOT of `out`'s `em` scale (`out-font-size.test.tsx` pins the scale).
- *  What matters here is that exactly one element reads it: a second would make
- *  part of `out` scale twice, and none would make the setting inert. */
+ *  What matters here is that exactly one element PER TURN reads it: a second
+ *  inside one turn would make part of that answer scale twice, and none would
+ *  make the setting inert. One per turn rather than one per pane since the
+ *  column draws them all -- what would be wrong is a count that does not match
+ *  the turns, which is what this compares. */
 describe('the out text size roots on the out container and nowhere else', () => {
-  it('is worn by the out scroll container alone', () => {
+  it('is worn by the out scroll containers alone, one per turn', () => {
     draw();
+    const turns = all('[data-column-turn]');
+    expect(turns.length).toBeGreaterThan(1);
     const wearing = all('*').filter((el) => el.className.toString().includes(OUT_FONT_SIZE_VAR));
-    expect(wearing).toHaveLength(1);
-    expect(wearing[0]?.getAttribute('data-detail-scroll')).toBe('out');
-    // The pane above `out` keeps the sizes it was drawn with.
-    expect(q('[data-detail-block="in"]')?.className ?? '').not.toContain(OUT_FONT_SIZE_VAR);
+    expect(wearing).toHaveLength(turns.length);
+    for (const el of wearing) expect(el.getAttribute('data-detail-scroll')).toBe('out');
+    // The prompt above each answer keeps the sizes it was drawn with.
+    for (const block of all('[data-detail-block="in"]')) {
+      expect(block.className.toString()).not.toContain(OUT_FONT_SIZE_VAR);
+    }
+  });
+});
+
+/**
+ * THE SIXTH OPERATOR REQUEST ON THIS PANE, AND THE LAST ONE THAT SHOULD NEED A
+ * TEST HERE.
+ *
+ * This block used to hold `EXPECTED_SIZE_COUNTS`: a per-size ledger of every
+ * literal `text-[Npx]` in `DetailPanel.tsx`, kept exact so that a missed call
+ * site reddened. It was the right shape for a one-file sweep and it is the
+ * wrong shape now — the file has no literal sizes left. Every one of its sixty
+ * is a role on the named scale (`styles.css`, `--text-meta` / `--text-control`
+ * / `--text-body` / `--text-heading`), and the ledger has moved to
+ * `test/renderer/type-scale.test.ts`, which asks the same question of the
+ * WHOLE renderer rather than of this file: no raw `text-[Npx]` outside four
+ * named exceptions, and nothing under the 11px floor.
+ *
+ * What stays here is the half that ledger could never do, because it is about
+ * `out` and `out` is not a class in this file at all: the answer text is sized
+ * by the operator's own pref (`DEFAULT_OUT_FONT_SIZE`, `OUT_FONT_SIZE_VAR`)
+ * and must not move a pixel because of a change to the type around it. A
+ * check that only asserted a sibling moved would still pass with `out`
+ * dragged along, so both halves are asserted together.
+ */
+describe('the scale reaches this pane, and out is still the operator’s to set', () => {
+  it('RENDERED: a representative sibling is on the scale, and carries no literal size', () => {
+    draw();
+    // `data-model-request` sat beside the composer at 11px — a literal, and
+    // the thing the previous ledger pinned. It is `control` now, which is the
+    // step a text input takes. Reverting it in `DetailPanel.tsx` alone must
+    // redden this line.
+    const model = q<HTMLElement>('[data-model-request]');
+    expect(model?.className).toContain('text-control');
+    expect(model?.className).not.toMatch(/text-\[\d/);
+  });
+
+  it('RENDERED: the out container is byte-for-byte the var()-driven class it was', () => {
+    draw();
+    // Unchanged by anything above, because it was never a literal px class to
+    // convert: the pref writes `--vam-out-font-size` and this reads it. The
+    // `12px` fallback is the value a document with no pref applied resolves
+    // to, and it is deliberately NOT the scale's `body` — `prefs.ts` owns that
+    // default (`DEFAULT_OUT_FONT_SIZE`) and a second spelling of it here would
+    // be a second answer.
+    const out = q<HTMLElement>('[data-detail-scroll="out"]');
+    expect(out?.className).toContain('text-[length:var(--vam-out-font-size,12px)]');
+  });
+
+  it('SOURCE: no literal text-[Npx] is left in this file at all', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/renderer/panels/DetailPanel.tsx'),
+      'utf8',
+    );
+    // The out container's own `text-[length:var(...)]` and `OUT_MARKDOWN`'s
+    // `em`-scaled classes both fail this pattern by construction — neither is
+    // a bare `text-[<digits>px]` — so nothing has to be excluded by hand.
+    const found = [...source.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)].map((m) => m[1] as string);
+    expect(found).toEqual([]);
+    // And the file really did reach for the scale, rather than losing its type
+    // classes: a count, so that deleting sixty classes cannot pass as
+    // converting them.
+    const roles = [...source.matchAll(/text-(meta|control|body|heading)\b/g)];
+    expect(roles.length).toBeGreaterThanOrEqual(60);
   });
 });

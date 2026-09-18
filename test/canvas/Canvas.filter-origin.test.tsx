@@ -8,9 +8,10 @@
  * quietly lose work:
  *
  *  - A session vam has NOT classified stays visible, under either toggle.
- *  - Both toggles narrow the canvas as well as the sidebar, because `Canvas`
- *    builds its layout from the filtered model — one navigable set, three
- *    views (`Canvas.filter-reach.test.tsx` is the general form of this).
+ *  - Both toggles narrow every view built from the filtered model, not only
+ *    the sidebar's own row list — pinned in general, once, by
+ *    `Canvas.filter-reach.test.tsx`; this file only re-derives `rowIds()`
+ *    since the (now-deleted) canvas used to be the second reader it pinned.
  *  - Each toggle says how many sessions it takes away, so turning one on is
  *    never a disappearance you have to notice for yourself.
  */
@@ -58,13 +59,6 @@ const rowIds = () =>
     .map((el) => el.getAttribute('data-session-row') ?? '')
     .sort();
 
-const drawnIds = () =>
-  [...document.querySelectorAll('.react-flow__node')]
-    .map((el) => el.getAttribute('data-id') ?? '')
-    .filter((id) => id.startsWith('info:'))
-    .map((id) => id.slice('info:'.length))
-    .sort();
-
 const toggle = (key: string) =>
   document.querySelector<HTMLButtonElement>(`[data-origin-toggle="${key}"]`);
 
@@ -101,7 +95,6 @@ describe('hiding sessions nobody sat down to', () => {
   it('hides the agent-made one by default, on the canvas as well as the list', () => {
     render(<Canvas model={MODEL} />);
     expect(rowIds()).toEqual(['silent', 'spoken', 'unclassified']);
-    expect(drawnIds()).toEqual(['silent', 'spoken', 'unclassified']);
   });
 
   it('brings it back when the toggle is turned off', () => {
@@ -113,7 +106,6 @@ describe('hiding sessions nobody sat down to', () => {
 
     expect(toggle('agent')?.getAttribute('aria-pressed')).toBe('false');
     expect(rowIds()).toEqual(['made-by-agent', 'silent', 'spoken', 'unclassified']);
-    expect(drawnIds()).toEqual(['made-by-agent', 'silent', 'spoken', 'unclassified']);
   });
 
   it('narrows to what you have prompted — but keeps the unclassified one', () => {
@@ -126,7 +118,6 @@ describe('hiding sessions nobody sat down to', () => {
     // `silent` goes (counted, zero). `unclassified` stays (never counted) —
     // the whole point: an unchecked session is not a hidden one.
     expect(rowIds()).toEqual(['spoken', 'unclassified']);
-    expect(drawnIds()).toEqual(['spoken', 'unclassified']);
   });
 
   it('says how many each toggle takes away, over the whole workspace', () => {

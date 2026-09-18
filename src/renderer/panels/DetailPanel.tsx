@@ -1,5 +1,5 @@
 /**
- * The right panel: the focused step, in full, and the place you answer it.
+ * The right panel: the focused turn, in full, and the place you answer it.
  *
  * This is the half of the split the canvas exists to make possible. Once the
  * full text lives here, a canvas card can be a strict summary without losing
@@ -39,7 +39,7 @@
  * appends to a log. `delivers` carries the difference, and with nothing said
  * the wording stays at "record".
  *
- * ## The mockup's four tabs
+ * ## The mockup's four tabs, and the fifth that was never in it
  *
  * ADE puts Response / PRs / Terminal / Agents across the top, and all four now
  * have something behind them — which was not true when this comment was first
@@ -51,6 +51,15 @@
  * reads a tmux pane, and only for sessions vam itself started, because no
  * process can take over another's controlling TTY.
  *
+ * `Files` is the operator's own addition, not the mockup's: a file manager and
+ * editor scoped to the session's own working directory, for the `.env` and
+ * "a few other files" no chat transcript was ever going to be the right place
+ * to touch. See `FilesTab.tsx`. It is withdrawn the OPPOSITE way Terminal is
+ * (`tabs.ts`'s own header) — absent unless this build actually has the
+ * desktop bridge behind it, never a per-source decline, because no source
+ * declares it and none ever will (`CHANNELS.filesRead`'s header: no remote
+ * route, by design).
+ *
  * The `LIVE_TABS` list below is the honest part: a tab is live for a SOURCE
  * that reports the thing it draws, and the factory source still reports none
  * of the three. So the tabs are real and their emptiness is source-specific, rather
@@ -59,30 +68,43 @@
 
 import {
   ArrowUp,
-  Bot,
+  Box,
   ChevronDown,
-  ChevronRight,
   ChevronsDown,
   ChevronsUp,
   CircleSlash,
-  GitCommitVertical,
+  FileText,
+  GitPullRequest,
+  Hand,
   Image as ImageIcon,
+  ListChecks,
+  MessageSquare,
+  Mic,
+  NotepadText,
   Paperclip,
-  User,
+  Sparkles,
+  SquareTerminal,
+  Users,
   X,
 } from 'lucide-react';
 import {
-  isValidElement,
   type KeyboardEvent,
+  memo,
   type ReactNode,
   type RefObject,
+  useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
-import Markdown, { type Components } from 'react-markdown';
+import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
+import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
 import type { PaneKey, PaneSendResult } from '../../shared/terminal.js';
 import type {
   AgentQuestion,
@@ -93,28 +115,72 @@ import type {
   SessionAgent,
   SessionStatus,
   SlashCommand,
+  TurnStep,
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
-import { questionKeys } from '../keyboard/question-keys.js';
+import { t } from '../i18n/strings.js';
+import { normalizeKey } from '../keyboard/chords.js';
+import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
 import { ShortcutTip } from '../keyboard/ShortcutTip.js';
-import { describeFailure } from '../sources/port.js';
-import { appendImagePath, removeImagePath } from './attach-image-path.js';
-import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
-import { FocusEdge } from './FocusEdge.js';
 import {
-  type DiffKind,
-  diffLineKind,
-  type HighlightLang,
-  resolveLang,
-  type TokenKind,
-  tokenizeCode,
-} from './highlight.js';
+  activeFocusView,
+  drawsProgressLine,
+  drawsTurnSteps,
+  drawsUnfoldControl,
+  subscribeFocusView,
+} from '../prefs/progress.js';
+// `SUBMIT_KEY_LABELS` and `DEFAULT_PROMPT_SUBMIT_KEY` are no longer imported
+// here: this file's only reader of either was the send-key caption under the
+// prompt input, which is gone with the row it sat on (see the comment at the
+// end of the prompt box). The table itself is untouched and still has a
+// reader -- the Settings picker, which is where the key is chosen and named.
+import {
+  activePromptSubmitKey,
+  submitsPrompt,
+  subscribePromptSubmitKey,
+} from '../prefs/submit-key.js';
+import {
+  activeNarrowViews,
+  narrowProseMaxWidth,
+  PROSE_RULER_CLASS,
+  PROSE_RULER_TEXT,
+  subscribeNarrowViews,
+} from '../prefs/view-width.js';
+import { useAgentWorkReader } from '../sources/agent-work-reader.js';
+import { useHistoryReader } from '../sources/history-reader.js';
+import { describeFailure, type SourceError } from '../sources/port.js';
+import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { useAgentWork } from '../sources/useAgentWork.js';
+import { appendImagePath, removeImagePath } from './attach-image-path.js';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { copyText } from './clipboard.js';
+import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
+import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
+import { type FileOpenRequest, FilesTab } from './FilesTab.js';
+import {
+  MODEL_CHOICES,
+  modelCommandLine,
+  modelCommandStrokes,
+  modelControlState,
+} from './model-command.js';
 import { Note } from './Note.js';
+import { type OutActionResult, OutActionsProvider } from './out-actions.js';
+import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
-
 import { TerminalTab } from './TerminalTab.js';
-import { TABS, type Tab, visibleTabs } from './tabs.js';
+import { narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
+import {
+  appendOlder,
+  applyWalk,
+  columnOf,
+  cursorToAsk,
+  moreState,
+  type PagerState,
+  RESTING_PAGER,
+  walkOlder,
+} from './transcript-history.js';
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -127,6 +193,24 @@ import { TABS, type Tab, visibleTabs } from './tabs.js';
  * that vam started.
  */
 const PROMPT_POLL_MS = 2_000;
+
+/**
+ * One empty turn list, shared. A frozen constant rather than a fresh `[]` at
+ * each call site: it is the initial value of a `useState` and the fallback for
+ * a pane with no session at all, and both of those are read every render.
+ */
+const NO_TURNS: readonly Decision[] = Object.freeze([]);
+
+/**
+ * HOW NEAR THE TOP COUNTS AS ASKING FOR MORE.
+ *
+ * The operator's own words were "load more when scrolling up", so the gesture
+ * is the scroll and not only the button. A margin rather than zero: at
+ * `scrollTop === 0` the reader has already hit the wall and is waiting, and the
+ * boundary block itself is about this tall, so this fires as it comes into view
+ * rather than after it has been stared at.
+ */
+const NEAR_TOP_PX = 120;
 
 /** The three things this pane needs to know about a file it was handed. */
 export type AttachedFile = {
@@ -268,38 +352,13 @@ export function setModeRequest(draft: string, mode: string): string {
 }
 
 /**
- * The header dot, per status.
- *
- * This was `needsYou ? waiting : running`, which is two values for four
- * states plus an empty one: a `done` session, a `failed` session and NO
- * SESSION AT ALL were all painted as running, the last of those putting a
- * live-looking dot beside the words "No session selected". The sidebar has
- * carried a four-way map since it was written; this is the same map, and the
- * same tokens, so the two panes cannot disagree about what a status looks
- * like.
- *
- * `null` -- no session -- gets `bg-line-strong`: present, so the header's
- * layout does not shift, and colourless, because there is no status to
- * report.
+ * The header this pane once drew its own status dot in is gone (A12.2): the
+ * sidebar row already carries the same four-way status map for every
+ * session, always visible, and the `out` rule below carries the one status
+ * fact that is actually about the turn on screen — whether IT is still being
+ * worked (`outIsLive`). A third copy in a header that no longer exists would
+ * be the same colour said a third way for no new information.
  */
-const PANE_STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
-  waiting: 'bg-waiting',
-  running: 'bg-running',
-  done: 'bg-done',
-  failed: 'bg-failed',
-};
-
-/**
- * Which statuses breathe: the ones still in motion. `waiting` is asking for
- * something and `running` is working; `done` and `failed` have stopped, and a
- * pulse on a stopped session reads as activity that is not there.
- */
-const PANE_STATUS_BREATHES: Readonly<Record<SessionStatus, boolean>> = {
-  waiting: true,
-  running: true,
-  done: false,
-  failed: false,
-};
 
 /**
  * What the operator is typing after a `!` that begins a line, or `null` when
@@ -322,6 +381,112 @@ export function bangQuery(text: string, caret: number): string | null {
   if (!typed.startsWith('!')) return null;
   const query = typed.slice(1);
   return /\s/.test(query) ? null : query;
+}
+
+/**
+ * How many suggestion rows the popover draws at once. Whatever it leaves out
+ * is COUNTED on screen (`data-bang-more`), never silently cropped.
+ *
+ * The strip this list replaced showed six, because six was one turn's worth
+ * (`commands.ts`'s own `MAX_COMMANDS`). This list is a whole session's worth,
+ * so it is eight -- enough that the newest turn's six still fit with the
+ * previous turn's beginning visible behind them, and few enough that the box
+ * does not become a page floating over the composer.
+ */
+export const MAX_BANG_ROWS = 8;
+
+/**
+ * The popover's own box, shared by both typeaheads so they cannot drift apart.
+ *
+ * `max-h-[30vh]` IS THE LOAD-BEARING PART, and it was put here by a
+ * measurement rather than by taste: the box sits in normal flow ABOVE the
+ * composer, so a tall list pushes the composer down -- and eight two-line `/`
+ * rows measured 412px in a real browser, which put the prompt box's bottom
+ * edge at 872px in an 800px window. The list had evicted the thing it exists
+ * to complete, Record button and all. `e2e/prompt-suggest-shots.mjs` measures
+ * exactly that now, on both lists.
+ *
+ * A BOUNDED HEIGHT WAS TRIED HERE AND TAKEN OUT AGAIN, which is worth
+ * recording so it is not re-added on the same reasoning. `max-h-[30vh]` plus a
+ * scrolling row container plus a `scrollIntoView` on the selected row: three
+ * moving parts, and nothing could falsify them. With the row cap at eight and
+ * the layer floating, the list fits above the composer at 800px AND at 480px
+ * -- and below 480 this pane's own blocks already overflow with no popover
+ * open at all, so a guard there would have been measuring somebody else's
+ * defect. Deleting the bound changed no measurement, so it is not here: the
+ * row cap bounds the list and this floats it, and both of those a guard can
+ * see go red.
+ */
+/**
+ * WHERE THE TYPEAHEADS ARE PAINTED, and this is a correction with a
+ * measurement behind it.
+ *
+ * They used to sit IN FLOW inside the composer's block, above the prompt box.
+ * That reads fine with one row and is wrong with eight: measured in a real
+ * browser, the `/` list's eight two-line rows came to 412px and pushed the
+ * prompt box's bottom edge to 872px in an 800px window -- the Record button
+ * and the mode row off the bottom of the screen. The list had evicted the
+ * thing it exists to complete, and a shorter cap would only have moved the
+ * window size at which it happened.
+ *
+ * FLOATING OVER THE TRANSCRIPT IS THE FIX, because it makes the composer's
+ * position independent of the list's height: `bottom-full` hangs the layer off
+ * the top edge of the block the composer is in, so nothing below it moves at
+ * all, at any viewport. That is what a popover is, and it is what the `!` list
+ * should have been from the start. `e2e/prompt-suggest-shots.mjs` measures
+ * both lists against the composer's own rect for exactly this.
+ *
+ * One layer for all three blocks -- both lists and the gap note -- so they
+ * stack in a known order instead of three absolute boxes overlapping, and
+ * rendered only when one of them has something to say, so an empty layer never
+ * sits over the transcript catching clicks.
+ */
+const SUGGEST_LAYER = 'absolute inset-x-3.5 bottom-full z-20 mb-2 flex flex-col gap-1.5';
+
+const SUGGEST_BOX =
+  'flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5';
+
+/**
+ * EVERY COMMAND THE COLUMN CARRIES, in the order they should be offered.
+ *
+ * WHY THIS IS NOT JUST THE FOCUSED TURN, which is what it used to be. The
+ * focused turn is the newest one unless `h`/`l` moved -- the turn that has
+ * just answered. A command is proposed at the END of a piece of work, so the
+ * newest turn is precisely the turn least likely to carry one, and the
+ * operator's report ("typing `!` shows nothing") was this and not a missing
+ * feature: the list worked, on the one turn in twenty that had a command in
+ * it. The column draws the whole session now, so a list narrower than the
+ * column is a list that hides what is on screen.
+ *
+ * THE ORDER, and the one place it departs from newest-first: the FOCUSED turn
+ * comes first, then everything else newest-first. `h`/`l` is a deliberate
+ * move onto a turn the operator wants to read, so its commands are the ones
+ * being reached for; with no move made it IS the newest turn and the two
+ * orders are the same list. It is also what keeps the focused turn's commands
+ * offered when it sits outside the column entirely -- a turn selected before
+ * the byte window slid past it (`selectedTurnMissing`).
+ *
+ * DEDUPLICATED ON THE COMMAND TEXT, first occurrence winning, because the
+ * command text is what gets inserted: two entries that would type the same
+ * characters are one choice wearing two labels, and rounds of the same work
+ * repeat "run the gate" verbatim on every turn. The LABEL is not part of the
+ * key -- an agent rewording its own request is not a second command.
+ */
+export function commandsInColumn(
+  focused: Decision | null,
+  column: readonly Decision[],
+): readonly Command[] {
+  const seen = new Set<string>();
+  const out: Command[] = [];
+  const turns = focused === null ? column : [focused, ...column.filter((t) => t.id !== focused.id)];
+  for (const turn of turns) {
+    for (const command of turn.commands) {
+      if (seen.has(command.command)) continue;
+      seen.add(command.command);
+      out.push(command);
+    }
+  }
+  return out;
 }
 
 /**
@@ -433,7 +598,8 @@ export type DetailPanelProps = {
   readonly onStopComposing: () => void;
   /**
    * True while `I` has moved keyboard control into this pane. `j`/`k` then walk
-   * the actions below instead of the sessions, and `Esc`/`H` hands control back.
+   * the actions below instead of the sessions, and `Esc` / `Mod-Shift-h` /
+   * `Mod-0` hands control back.
    */
   readonly active: boolean;
   /** Which action `j`/`k` has landed on while `active`. */
@@ -495,6 +661,18 @@ export type DetailPanelProps = {
    */
   readonly terminal?: boolean;
   /**
+   * Whether THIS BUILD can show a file editor at all -- `true` only once the
+   * caller has confirmed `window.api.files` exists. See `tabs.ts`'s
+   * `visibleTabs` header for why this defaults the OPPOSITE way `terminal`
+   * does: there is no per-source capability behind Files to read (nothing
+   * declares it, nothing ever will -- `CHANNELS.filesRead`'s own header), so
+   * `undefined`/`false` both withdraw the tab and only an explicit `true`
+   * shows it. Every existing caller of this panel, including every test that
+   * predates this tab, keeps Files withdrawn without needing to learn a new
+   * prop.
+   */
+  readonly files?: boolean;
+  /**
    * Opens the native image picker for the focused session, scoped to and
    * validated against its own working directory -- present only when
    * `SourceCapabilities.promptAttachments` is true AND this shell can reach
@@ -508,12 +686,12 @@ export type DetailPanelProps = {
   /**
    * True while a write is in flight.
    *
-   * `claude --resume` is a subprocess with a 120-second timeout
-   * (`deliver.ts`'s `DELIVER_TIMEOUT_MS`), so this is not a flicker: Enter can
-   * start something that runs for two minutes. `Canvas` has had the flag since
-   * the composer was written -- it guards against a double submit -- and it
-   * never reached the pane, so the operator saw nothing happen and every
-   * further Enter was swallowed without a word.
+   * A reply is a run of tmux `send-keys` into the session's pane (`reply.ts`),
+   * each a subprocess of its own, plus the listing that resolves the pane
+   * first: quick, but not instant, and a multi-line prompt is several of them.
+   * `Canvas` has had the flag since the composer was written -- it guards
+   * against a double submit -- and it never reached the pane, so the operator
+   * saw nothing happen and every further Enter was swallowed without a word.
    */
   readonly sending?: boolean;
   /**
@@ -526,6 +704,18 @@ export type DetailPanelProps = {
    * asking twice for the same tab an ask, which `Tab | null` could not say.
    */
   readonly tabRequest?: { readonly tab: Tab } | null;
+  /**
+   * What the last view shortcut REFUSED, drawn as a `role="status"` line
+   * beside the icons — or null at rest.
+   *
+   * A PROP, not state, since `Alt+<digit>` became a real binding: the chord
+   * machine in `Canvas.tsx` owns the keystroke now (`pickView`), so it is
+   * the only thing that can know a digit was refused. This panel used to
+   * hold both the listener and the note; keeping the note here while the
+   * listener moved would mean a second listener, which is the whole hole
+   * promotion closed.
+   */
+  readonly viewNote?: string | null;
   /**
    * The tab a previous run left showing, as an OPAQUE STRING, and the way to
    * report a change back.
@@ -541,6 +731,65 @@ export type DetailPanelProps = {
    * Both optional, and the pane works with neither: without them the tab is
    * component state that starts at the default, exactly as it was.
    */
+  /**
+   * Whether THIS pane is the one holding the keyboard -- the canvas's own
+   * `focusedPaneId`, passed down rather than re-derived, because a second
+   * notion of focus in this file could disagree with the ring the canvas
+   * paints (`data-split-focused`).
+   *
+   * It gates TWO things, and they are the same claim twice: whether the
+   * view-icon overlay is DRAWN, and whether this instance's `Alt+<digit>`
+   * listener ANSWERS. Operator instruction -- the four icons repeated in
+   * every pane of a split, over content the background pane must not be
+   * swapping either. The second half was missing while this comment asserted
+   * it, so every pane consumed the key at once; `tabRequest` was already
+   * focused-only, and now the two routes agree. Hidden means NOT DRAWN, never
+   * drawn-and-inert: `ViewIcons`' promise that each icon is a real button Tab
+   * reaches is kept whole in the pane that has focus, and an invisible row
+   * still catching clicks would be the worse trade.
+   *
+   * Defaults to `true`: an unsplit shell is the focused pane, and so is the
+   * desktop detail column, which has no pane identity at all.
+   */
+  readonly paneFocused?: boolean;
+  /**
+   * The last send in THIS session that failed, or null -- the sentence the
+   * status bar already showed, drawn again where the operator is looking.
+   *
+   * Operator instruction. A refused send rolls its optimistic turn back and
+   * puts the words back in the composer, so from the pane a send that failed
+   * and a send never attempted were the same picture; the only trace was one
+   * line in the status bar that the next act overwrote. The caller owns the
+   * string because the caller is the one that performs the send and already
+   * holds the sentence (`noteFailure`'s return) -- this component would have
+   * to re-derive it from a source it does not talk to.
+   *
+   * ONE SENTENCE, NOT A LIST. The error log is the history; this is the
+   * standing verdict on the last thing the operator tried, and it goes away
+   * when they try again.
+   */
+  readonly sendFailure?: string | null;
+  /**
+   * The view this pane is showing, when the CALLER owns that fact.
+   *
+   * WHY A CALLER OWNS IT AT ALL. A view is a per-session choice -- operator
+   * instruction: "when session 1 switches to the PRs view, the rest of the
+   * sessions do not switch" -- and this component cannot keep that promise by
+   * itself. A pane reuses ONE instance for every session it shows, so a view
+   * held in local state here is a fact about the PANE, and switching the
+   * session tab handed the next session whatever the last one was left on.
+   * `Canvas.tsx` keeps a per-session record beside the drafts and action
+   * cursors it already keys that way, and names the current session's entry
+   * here.
+   *
+   * An OPAQUE STRING for the same reason `initialTab` is one: the validating
+   * happens here, against `TABS`, so a caller need not know the vocabulary.
+   *
+   * ABSENT means this pane owns its own view, seeded from `initialTab` --
+   * what every caller predating the split shell does, and what keeps this
+   * component usable on its own.
+   */
+  readonly tab?: string | null;
   readonly initialTab?: string | null;
   readonly onTabChange?: (tab: string) => void;
   /**
@@ -562,6 +811,30 @@ export type DetailPanelProps = {
    * that hook carries -- SOMETHING on screen names the session about to be
    * written to -- is kept rather than dropped with the block.
    */
+  /**
+   * WHERE THIS PROJECT'S PULL REQUESTS ARE READ FROM, and the two acts that
+   * change it. Built by `Canvas`, which owns `prefs` and `savePrefs`.
+   *
+   * ABSENT is the browser build and the phone: `dialog` is a desktop bridge,
+   * and a control that cannot open a directory picker is a control that cannot
+   * act. The PRs list itself still draws -- main applies the override for both
+   * surfaces, since one `DESKTOP_SOURCE` serves the IPC and the remote server
+   * alike -- so what is missing here is the way to CHANGE it, not the effect.
+   */
+  readonly prRepo?: {
+    /** The chosen directory, or `null` for the session's own. */
+    readonly directory: string | null;
+    /**
+     * What to call the repository when nothing is overridden: the project's
+     * own name, which is the one the sidebar groups this session under.
+     *
+     * Optional because the heading has a truthful fallback without it, and a
+     * caller that has not wired it up should get that rather than a blank.
+     */
+    readonly projectName?: string;
+    readonly choose: () => void;
+    readonly clear: () => void;
+  };
   readonly phone?: boolean;
   readonly resizeHandle: ReactNode;
   /**
@@ -570,10 +843,57 @@ export type DetailPanelProps = {
    * the composer rather than drawing one that would be refused.
    */
   readonly records?: boolean;
+  /**
+   * A15.4: the provider a fresh vam starts NEW sessions with —
+   * `prefs.defaultProvider`, read here only to DRAW the current choice next
+   * to the model field it used to be merely named beside. Optional, and
+   * `undefined` reads as the same default `resolveProvider` (`shared/
+   * providers.js`) gives every other unusable value, so a caller that has
+   * not wired this up yet still gets a sane label rather than a blank one.
+   */
+  readonly defaultProvider?: ProviderId;
+  /**
+   * Persists a NEW default provider, or `undefined` to withdraw the control
+   * entirely — ABSENT, NOT DISABLED, the same rule `pickImageAttachment`
+   * follows above: a caller with nowhere to put the choice should not draw
+   * a button that looks pickable and refuses when pressed.
+   *
+   * THIS SETS THE GLOBAL DEFAULT, NOT THIS SESSION'S OWN PROVIDER — a fact
+   * about the plumbing, not a design choice. `defaultProvider` is read once,
+   * at NEW session creation (`sources/http-factory.ts`,
+   * `sources/preload-factory.ts`); every reply to a session already running is
+   * typed into its pane (`main/sources/claude-code/reply.ts`), which never
+   * consults it. A control drawn beside THIS session's composer
+   * that claimed to change how ITS next reply is handled would be exactly
+   * the lie `setModelRequest`'s own comment refuses elsewhere in this file —
+   * there is no channel that would make it true. So the choice made here
+   * changes what the NEXT session created starts with, wherever it is
+   * started from; it is the same preference Settings writes, reachable from
+   * where the operator is already looking.
+   */
+  readonly onSetDefaultProvider?: (id: ProviderId) => void;
+  /**
+   * `prefs.filesTreeWidth` — the width the operator last dragged the Files
+   * tab's tree to, or `null`/absent for "never dragged", which draws the
+   * clamped share that tree has always drawn. Read here only to hand on to
+   * `FilesTab`; this panel has no opinion about it.
+   */
+  readonly filesTreeWidth?: number | null;
+  /**
+   * Persists a new tree width, or `undefined` to withdraw the drag handle
+   * entirely — ABSENT, NOT DISABLED, the same rule `onSetDefaultProvider`
+   * above follows: a caller with nowhere to put the number must not draw a
+   * grip that looks draggable and springs back the moment it is released.
+   *
+   * GLOBAL, not this pane's and not this session's — see the field's own
+   * comment in `prefs.ts` for why an arrangement the operator would otherwise
+   * re-make on every split is stored once.
+   */
+  readonly onFilesTreeWidth?: (width: number) => void;
 };
 
 /**
- * The tab bar's four entries. All four now select something.
+ * The four views. All four now select something.
  *
  * `Agents` joined `Response` when a source that actually reports a roster
  * arrived (`Session.agents`), `PRs` joined them when one learned to ask `gh`,
@@ -583,44 +903,187 @@ export type DetailPanelProps = {
  * gone with it.
  *
  * The list itself now lives in `tabs.ts`, and re-exported rather than moved
- * because `Mod-<digit>` counts POSITIONS in the DRAWN bar: the count had to
- * become something the handler and the key sheet could read without importing
- * this component, and a handler with its own idea of how many tabs there are
- * is a fifth digit that opens nothing.
+ * because `Alt+<digit>` (A12.2, A5.4) counts POSITIONS in the DRAWN bar: the
+ * count had to become something the handler and the key sheet could read
+ * without importing this component, and a handler with its own idea of how
+ * many views there are is a fifth digit that opens nothing.
  */
 export { TABS, type Tab } from './tabs.js';
 
 /**
- * The mockup's mode segments, and which one it draws as current. Presentation
- * only: the factory exposes no per-session mode, so these are drawn and
- * labelled as placeholders in the same way the tab bar's three empty tabs are.
+ * The three modes, and which one the draft says is current.
+ *
+ * They were a row of pills under the prompt input; the operator asked for one
+ * ICON, beside the model field, showing only the mode that is current. The
+ * list stays whole because all three must still be REACHABLE — the icon opens
+ * a small popover over it, the pattern the provider picker beside it already
+ * set, rather than a second idea of what a chooser looks like in this row.
  */
 const MODES = ['Auto', 'Manual', 'Plan'] as const;
 
+type Mode = (typeof MODES)[number];
+
 /**
- * The mockup's segmented control: one filled pill on a sunken well, not
- * underlined labels.
+ * HOW EACH MODE IS DRAWN AND WHAT IT MEANS — one row per mode, because the
+ * four facts below all answer the same question and a reader who knows one has
+ * to be able to find the others.
  *
- * The Agents badge has a real source (`runningAgents`) and is omitted at
- * zero. PRs still ships with NO badge, even now that it has data: a count
- * there would have to read as zero both for a branch with no pull request and
- * for a session vam could not ask about, which is the one conflation this
- * pane exists to avoid.
+ * THE GLYPH, chosen for what the mode MEANS and not for decoration — two that
+ * read alike would make the control unreadable at a glance.
  *
- * EVERY PILL IS A REAL <button> NOW — Tab reaches it, Enter and Space activate
- * it, and `aria-pressed` says which one is showing. The three
- * that were plain labels became buttons as each got something behind it; the
- * rule that made them labels stands unchanged for any future one, because a
- * focus stop that activates nothing and explains nothing is a keyboard trap
- * with a hover state.
+ * THE HUE, at the operator's ask: "the icon needs to be filled with colour
+ * (for example auto is yellow)." Until then the glyph was `ink-dim` in all
+ * three states, so SHAPE was the only channel that said which mode was
+ * current — and shape is the one an operator has to already know the key for.
+ * The three tokens are in `styles.css`, under their own names rather than
+ * borrowed from the status palette; that comment carries the whole argument
+ * and the measured ratios.
+ *
+ * WHETHER IT IS FILLED, AND THIS IS A MEASUREMENT RATHER THAN A TASTE. Lucide
+ * ships strokes, and "fill it" is not free on a stroke: rendered at the real
+ * 12px and at 64px on this card, `Sparkles` fills into a solid four-point star
+ * and reads BETTER filled than stroked, but `Hand` is four OPEN finger
+ * outlines and filling each one closes it into a wedge — the open hand becomes
+ * a fist, which is a different gesture, not a bolder hand. `ListChecks` is
+ * three zero-area rules and two check polylines, so a fill paints nothing at
+ * all at 12px and turns the ticks into solid arrowheads above it. So the fill
+ * goes where it survives and the other two take their colour on the STROKE,
+ * one weight heavier so the three read as one control rather than as a solid
+ * mark beside two hairlines.
+ *
+ * A FILLED GLYPH CARRIES NO STROKE, at the operator's second ask: "in the
+ * mode switch in the prompt input, when the mode is filled it should not have
+ * a stroke, or the icon looks too thick." It was drawn both ways at once --
+ * `Sparkles` was filled in `currentColor` AND stroked at 1.7 on top of the
+ * fill, which at 12px puts most of a pixel of extra ink outside every edge of
+ * a shape that is already solid. The star read as a blob beside two hairline
+ * glyphs. So the two channels are now exclusive, and that is the invariant
+ * `DetailPanel.mode-icon.test.tsx` states over the RENDERED glyphs and
+ * `e2e/prompt-mode-icon-shots.mjs` re-asks of the paint: FILLED means
+ * `strokeWidth: 0`, STROKED means `fill: 'none'`. Nothing is drawn twice.
+ *
+ * WHAT DROPPING THE STROKE COSTS, measured in the browser rather than guessed:
+ * `Sparkles` is four shapes, and `getBBox` gives them as 20x20 (the star), 0x4,
+ * 4x0 and a 4x4 circle. The two middle ones are ZERO-AREA -- they exist only as
+ * a stroke, the little cross above the star -- so at `strokeWidth: 0` they paint
+ * nothing and the mark becomes the star and its dot. That is a real loss and it
+ * is accepted rather than unnoticed: at the shipped 12px those accents were two
+ * four-unit hairlines, and the star is what carries the glyph. The same
+ * arithmetic is why `ListChecks` could never be filled -- three of its five
+ * shapes are zero-area, so a fill paints almost nothing at all.
+ *
+ * THE SENTENCE, which used to be this comment's own gloss and is now shipped:
+ * the tooltip says which mode is current and what that mode does, because a
+ * hue means nothing until something names it.
  */
-function TabBar({
+type ModeSkin = {
+  readonly Glyph: typeof Sparkles;
+  /** The `text-mode-*` utility, one per mode — see `styles.css`. */
+  readonly ink: string;
+  /** `currentColor` where the glyph survives being filled, `none` where it does not. */
+  readonly fill: 'currentColor' | 'none';
+  /** Zero wherever `fill` is `currentColor` -- the two channels are exclusive. */
+  readonly strokeWidth: number;
+  /** What the mode does, in the operator's terms, for the tooltip. */
+  readonly means: string;
+};
+
+const MODE_SKIN: Readonly<Record<Mode, ModeSkin>> = {
+  Auto: {
+    Glyph: Sparkles,
+    ink: 'text-mode-auto',
+    fill: 'currentColor',
+    strokeWidth: 0,
+    means: 'the agent decides its own next step',
+  },
+  Manual: {
+    Glyph: Hand,
+    ink: 'text-mode-manual',
+    fill: 'none',
+    strokeWidth: 2.2,
+    means: 'a hand on each step',
+  },
+  Plan: {
+    Glyph: ListChecks,
+    ink: 'text-mode-plan',
+    fill: 'none',
+    strokeWidth: 2.2,
+    means: 'it writes the list before it touches anything',
+  },
+};
+
+/**
+ * The mode icon, drawn the one way — in the toggle and in the popover's three
+ * options both, because the picker is where an operator LEARNS which hue is
+ * which and a coloured toggle over a grey list would teach nothing.
+ */
+function ModeGlyph({ mode }: { readonly mode: Mode }) {
+  const skin = MODE_SKIN[mode];
+  return (
+    <skin.Glyph
+      data-mode-glyph={mode.toLowerCase()}
+      size={12}
+      fill={skin.fill}
+      strokeWidth={skin.strokeWidth}
+      className={skin.ink}
+    />
+  );
+}
+
+/** One glyph per view — chosen for what each shows, not decoration. */
+const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
+  Response: MessageSquare,
+  PRs: GitPullRequest,
+  Terminal: SquareTerminal,
+  Agents: Users,
+  Files: FileText,
+};
+
+/**
+ * A12.2: the four views stop being a labelled pill row and become small
+ * ICONS in the top-right of the tab — the operator's own words, "they stop
+ * being called tabs", now that a session IS a tab (A11) and calling both
+ * things the same word is the collision the sidebar's project/repo naming
+ * already hit once.
+ *
+ * ICON-ONLY DOES NOT MEAN UNLABELLED. `aria-label` carries the NAME — just
+ * the name, since the operator asked for tooltips here. It used to end
+ * `— Alt+N`, with a byte-identical `title` beside it, and both are gone:
+ *
+ *   - the chord in the accessible NAME is announced on every focus of all
+ *     four buttons and cannot be dismissed, which is noise a screen-reader
+ *     user pays for four times over;
+ *   - and it was a LITERAL. `Alt+<digit>` is a real binding now (`pickView`
+ *     in `keyboard/chords.ts`), so an operator who rebinds it would have
+ *     been left with a name announcing a key that does nothing — the
+ *     "caption that lies" this project already deleted from the key sheet.
+ *   - the `title` was the same string a second time, and the worse copy: no
+ *     browser opens one on keyboard focus, so it was invisible to the
+ *     primary input device of a keyboard-first tool.
+ *
+ * The shortcut lives in `ShortcutTip` instead, which re-reads the binding
+ * table on every open, and in the generated key sheet. Derived in both, so
+ * neither can go stale — and `ShortcutTip` prints NOTHING for an unbound
+ * action rather than an empty bracket.
+ *
+ * The Agents badge survives unchanged (a real source, omitted at zero) and
+ * is now the ONLY place the running-agent count is shown in this pane, which
+ * is why the count stays in the name — see the identity line in the `in`
+ * block for why the header's old "N agents" line does not need a second
+ * home.
+ *
+ * EVERY ICON IS STILL A REAL <button> — Tab reaches it, Enter and Space
+ * activate it, `aria-pressed` says which one is showing. That property is
+ * what this file has always meant by "not a keyboard trap with a hover
+ * state", and shrinking the control to an icon does not get to spend it.
+ */
+function ViewIcons({
   tabs,
   runningAgents,
   current,
   onSelect,
 }: {
-  /** The tabs this source offers -- `TABS` minus the ones it has said it lacks. */
+  /** The views this source offers -- `TABS` minus the ones it has said it lacks. */
   readonly tabs: readonly Tab[];
   readonly runningAgents: number;
   readonly current: Tab;
@@ -636,54 +1099,81 @@ function TabBar({
     <nav
       aria-label="views"
       /* This bar is DESKTOP-ONLY now -- see the `phone` gate at its call site.
-         The rule that used to hide it while the phone keyboard was up
-         (`.vam-phone-typing [data-view-tabs]`) is gone: a phone that never
-         draws this bar makes that selector match nothing, and a rule matching
-         nothing is indistinguishable from a rule that works. The phone's own
-         icon row deliberately does NOT wear this hook, so no rule written for
-         a desktop bar can silently collect it. */
+         The phone's own icon row deliberately does NOT wear this hook, so no
+         rule written for a desktop bar can silently collect it. */
       data-view-tabs
-      className="mb-[11px] flex items-center gap-[3px] rounded-[9px] border border-line-loud bg-well p-[3px]"
+      /* `pointer-events-auto` opts back into clicks the corner overlay's own
+         wrapper declines (A15.5) — without it these buttons would be inert,
+         not merely see-through. The pill fill (`bg-pane`, matching the
+         pane) plus a hairline border is what keeps the glyphs legible over
+         whatever scrolls beneath rather than letting icon and letterform
+         overlap into noise. */
+      className="pointer-events-auto flex flex-none items-center gap-1 rounded-[9px] border border-line-strong bg-pane px-1 py-1 shadow-sm"
     >
-      {tabs.map((tab, index) => {
+      {tabs.map((tab) => {
         const selected = tab === current;
         const badge = tab === 'Agents' && runningAgents > 0 ? runningAgents : null;
-        const shape = [
-          'vam-tap flex h-[26px] flex-1 items-center justify-center gap-[5px] rounded-[7px] text-[12px]',
-          selected ? 'bg-line-strong font-medium text-ink' : 'text-ink-dim',
-        ].join(' ');
-        const label = (
-          <>
-            {tab}
-            {badge !== null && (
-              <span
-                className={[
-                  'font-mono text-[9.5px]',
-                  selected ? 'text-ink-dim' : 'text-ink-faint',
-                ].join(' ')}
-              >
-                {badge}
-              </span>
-            )}
-          </>
-        );
+        const Icon = VIEW_ICON[tab];
+        // The digit named here MUST be `tab`'s own fixed slot in `TABS`, not
+        // its position in `tabs` (the drawn list): `visibleTabs` withdraws
+        // Terminal without renumbering anything after it (A15.6), so
+        // captioning from `tabs`' own index would tell the operator to press
+        // a digit `tabForDigit` refuses — the exact defect fixed there, just
+        // spoken instead of wired.
+        const digit = TABS.indexOf(tab) + 1;
+        const name = badge === null ? `${tab} view` : `${tab} view, ${badge} running`;
         return (
-          // `position` selects a session in Select and a tab in Insert; a
-          // pill IS the Insert reading, so it says which one it means.
-          <ShortcutTip
-            key={tab}
-            label={tab}
-            action={{ kind: 'position', digit: index + 1 }}
-            mode="insert"
-          >
+          // The chord is READ from the table on every open, off the same
+          // fixed digit the name is derived from -- so a rebind moves the
+          // hint, and an unbound view simply shows its name.
+          <ShortcutTip key={tab} label={name} action={{ kind: 'pickView', digit }}>
             <button
               type="button"
-              data-tab={tab.toLowerCase()}
+              data-view={tab.toLowerCase()}
               aria-pressed={selected}
+              aria-label={name}
               onClick={() => onSelect(tab)}
-              className={`${shape} cursor-pointer ${selected ? '' : 'hover:bg-raised hover:text-ink'}`}
+              className={[
+                'vam-tap relative flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[7px]',
+                selected
+                  ? 'bg-line-strong text-ink'
+                  : // `raised`, NOT `line-strong` like the card-backed menus
+                    // further down this file. This bar sits on `bg-pane`, where
+                    // `raised` is already the rung above the ground -- and
+                    // `line-strong` is what SELECTED wears one line up, so
+                    // hovering to it would make an unselected tab
+                    // indistinguishable from the open one.
+                    'text-ink-dim hover:bg-raised hover:text-ink',
+              ].join(' ')}
             >
-              {label}
+              <Icon size={13} strokeWidth={1.7} aria-hidden="true" />
+              {badge !== null && (
+                <span
+                  data-view-badge
+                  /* THE PAINT IS NOT THE ANNOUNCEMENT: the count is in the
+                     button's own `aria-label` above, so drawing it twice
+                     would have a screen reader say it twice. */
+                  aria-hidden="true"
+                  /* `running`, NOT `waiting`, and this is a correction rather
+                     than a preference. Amber has one meaning in this app and
+                     `styles.css` states it at `--color-waiting`: a session
+                     blocked on your answer. This badge counts agents that are
+                     RUNNING, so wearing amber made a working session read as
+                     one needing intervention -- on the row where that is the
+                     most expensive thing to get wrong. Green is the hue this
+                     count already owns.
+
+                     And the numeral could not be read either way: pale ink on
+                     that amber measured 1.834:1 in dark and 2.499:1 in light,
+                     against WCAG 1.4.3's 4.5. `on-running` is the ink the
+                     green fill needs (11.36:1 / 7.13:1), and 9px of mono in a
+                     13px circle goes up to 10.5 in 16 -- the smallest badge
+                     that fits two digits at that size without clipping. */
+                  className="absolute -top-[4px] -right-[4px] flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-running px-[4px] font-mono text-meta text-on-running leading-none"
+                >
+                  {badge}
+                </span>
+              )}
             </button>
           </ShortcutTip>
         );
@@ -731,35 +1221,121 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
  * to look at, on the strength of never having looked. That is the failure
  * this component is shaped to make impossible.
  */
-function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestList | undefined }) {
+function PullRequestsTab({
+  pullRequests,
+  repo,
+}: {
+  readonly pullRequests: PullRequestList | undefined;
+  readonly repo?: DetailPanelProps['prRepo'];
+}) {
+  /**
+   * WHICH DIRECTORY THIS PANE IS ASKING FROM, and how to point it elsewhere.
+   *
+   * THE PROBLEM, IN THE OPERATOR'S WORDS: a session started from an
+   * orchestrator or a factory runs in that factory's directory, so the pane
+   * reports the factory's pull requests while the work is in another
+   * repository. Nothing on screen said which directory was being asked, so the
+   * answer looked wrong rather than aimed wrong.
+   *
+   * A HEADING, AT THE TOP, ON THE OPERATOR'S SECOND LOOK. It shipped as a
+   * footer under the list, on the argument that the way to change something
+   * belongs beside the answer it changes. That was the wrong way round: the
+   * repository is what this whole pane is ABOUT, and a reader who has to reach
+   * the bottom to learn which one they are looking at has already read the
+   * list under the wrong assumption. "Put a heading section at the top -- the
+   * current repo on the left, choose-another on the right, as a button."
+   *
+   * SO IT IS DRAWN ALWAYS, not only when overridden. A name is not a sentence:
+   * the old row spent a line saying "asking in this session's own directory",
+   * which restated the default forever; a heading reading `factory` is the
+   * same fact as a label, and it is the one the reader needs BEFORE the list
+   * rather than after it.
+   *
+   * The way back out (`prs.repo.clear`) draws only once there is something to
+   * go back from, and sits inboard of the button rather than beside the name:
+   * a control that undoes nothing is not drawn at all, and the choose button
+   * stays in one place whether or not it is there.
+   */
+  /**
+   * THE NAME OF THE REPOSITORY THIS PANE IS ASKING IN.
+   *
+   * The last segment of the chosen directory, which is what a repository is
+   * called, or the project's own name when nobody has chosen one. A heading is
+   * a NAME: the full path is on `title`, where it settles which of two
+   * checkouts this is without spending the row on it.
+   */
+  const repoName =
+    repo?.directory === null || repo?.directory === undefined
+      ? (repo?.projectName ?? t('prs.repo.session'))
+      : (repo.directory.replace(/\/+$/, '').split('/').pop() ?? repo.directory);
+  const heading =
+    repo === undefined ? null : (
+      <div
+        data-prs-repo
+        data-prs-repo-overridden={repo.directory === null ? undefined : 'true'}
+        className="flex flex-none items-center gap-2 border-line border-b pb-2"
+      >
+        <span
+          data-prs-repo-name
+          title={repo.directory ?? undefined}
+          className="min-w-0 flex-1 truncate font-medium text-control text-ink"
+        >
+          {repoName}
+        </span>
+        {repo.directory === null ? null : (
+          <button
+            type="button"
+            data-prs-repo-clear
+            onClick={repo.clear}
+            className={`vam-hit-24 flex-none cursor-pointer rounded px-1 text-ink-faint text-meta hover:text-ink ${FOCUS_RING}`}
+          >
+            {t('prs.repo.clear')}
+          </button>
+        )}
+        <button
+          type="button"
+          data-prs-repo-choose
+          onClick={repo.choose}
+          className={`vam-hit-24 flex-none cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
+        >
+          {t('prs.repo.choose')}
+        </button>
+      </div>
+    );
+  const framed = (body: ReactNode) => (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      {heading}
+      {body}
+    </div>
+  );
   if (pullRequests === undefined) {
-    return (
-      <p data-prs data-prs-absent className="text-[11px] text-ink-faint">
+    return framed(
+      <p data-prs data-prs-absent className="text-control text-ink-faint">
         This source does not report pull requests for a session.
-      </p>
+      </p>,
     );
   }
   if (pullRequests.kind === 'unavailable') {
-    return (
+    return framed(
       <p
         data-prs
         data-prs-unavailable
         data-prs-code={pullRequests.code}
-        className="text-[11px] text-ink-faint"
+        className="text-control text-ink-faint"
       >
         {/* vam could not ask. Not "there are none". */}
         {pullRequests.message}
-      </p>
+      </p>,
     );
   }
   if (pullRequests.prs.length === 0) {
-    return (
-      <p data-prs data-prs-empty className="text-[11px] text-ink-faint">
+    return framed(
+      <p data-prs data-prs-empty className="text-control text-ink-faint">
         This branch has no pull request on GitHub.
-      </p>
+      </p>,
     );
   }
-  return (
+  return framed(
     <ul data-prs className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
       {pullRequests.prs.map((pr) => (
         <li
@@ -767,7 +1343,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
           data-pr-row
           data-pr-state={pr.state}
           data-pr-checks={pr.checks}
-          className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+          className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
         >
           <span
             data-pr-checks-mark
@@ -777,10 +1353,10 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
           <span className="min-w-0 flex-1">
             {/* Truncated, not shortened: the pane is a narrow column, and the
                 whole title stays in the DOM for anything that reads it. */}
-            <span data-pr-title className="block truncate text-[11.5px] text-ink">
+            <span data-pr-title className="block truncate text-body text-ink">
               {pr.title}
             </span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px]">
+            <span className="mt-0.5 flex items-center gap-1.5 text-meta">
               <span data-pr-number className="font-mono text-ink-faint">
                 {`#${pr.number}`}
               </span>
@@ -792,7 +1368,7 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
           </span>
         </li>
       ))}
-    </ul>
+    </ul>,
   );
 }
 
@@ -834,19 +1410,254 @@ function PullRequestsTab({ pullRequests }: { readonly pullRequests: PullRequestL
  * working. The roster is capped at the source (`agent-roster.ts`), so this
  * renders everything it is given and counts only what it hides.
  */
-function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | undefined }) {
+/**
+ * THE WIDTH AT WHICH THE LIST AND THE DETAIL SIT SIDE BY SIDE.
+ *
+ * WRITTEN OUT AS `420` IN EVERY CLASS BELOW, and this constant is what a test
+ * reads rather than what the markup interpolates. Tailwind finds classes by
+ * scanning source TEXT for complete strings: `@min-[${AGENT_SPLIT_PX}px]:flex`
+ * is not a string it can find, so the rule would simply never be generated and
+ * the pane would silently have one column at every width. This repo has
+ * already paid for that exact shape once -- a selector that matched nothing,
+ * live through review and merge -- so the number is typed where Tailwind can
+ * read it and named here where a person can.
+ *
+ * A CONTAINER QUERY, NOT A VIEWPORT ONE, and that is the whole reason this is
+ * a number in CSS rather than the `phone` prop: the detail pane is resizable
+ * between `DETAIL_MIN` (320) and `DETAIL_MAX` (520), so a desktop pane can be
+ * narrower than a phone screen. Asking the viewport would put two columns in a
+ * 320px pane and one column on a 430px phone -- both backwards.
+ *
+ * 420 is where both halves still do their job: the navigator needs ~150px
+ * before an agent type like `security-reviewer` stops being readable at all,
+ * and a turn needs ~250px before its prose stops reading as prose (the same
+ * floor `DETAIL_MIN`'s own note argues from). Below it the detail takes the
+ * pane and `data-agent-back` is the way out.
+ */
+export const AGENT_SPLIT_PX = 420;
+
+/**
+ * ONE TURN OF AN AGENT'S THREAD: what it was asked, what it said, what it
+ * called.
+ *
+ * DELIBERATELY NOT `TurnBlock`. That component carries the session's own
+ * conversation and everything the operator can DO to it -- unfold, the prompt
+ * menu, the answer menu, focus view, cancel -- and none of those exist here:
+ * there is no channel from this pane into a subagent, so a copy of it wearing
+ * dead affordances would promise a control that does nothing. What IS shared
+ * is `StepRow`, which is the genuinely common piece, and it is imported rather
+ * than reproduced.
+ */
+function AgentTurn({ turn }: { readonly turn: Decision }) {
+  const steps = turn.steps ?? [];
+  const shown = steps.slice(0, MAX_STEP_ROWS);
+  const hidden = steps.length - shown.length;
+  return (
+    <li data-agent-turn={turn.id} className="flex min-w-0 flex-col gap-1.5">
+      <div
+        data-agent-turn-in
+        className="vam-clamp-6 min-w-0 whitespace-pre-wrap break-words rounded-[9px] bg-raised px-2.5 py-2 text-body text-ink"
+      >
+        {turn.input}
+      </div>
+      <div
+        data-agent-turn-out
+        /* `text-ink-dim`: there is no `--color-ink-soft` token and never was,
+           so this class named nothing and the line simply inherited whatever
+           ink its parent wore -- the quieter tone it asks for was never
+           painted. Found by the sweep that `test/renderer/colour-tokens.test.ts`
+           now runs on every build. */
+        className="min-w-0 whitespace-pre-wrap break-words px-2.5 text-body text-ink-dim"
+      >
+        {/* ABSENT IS ITS OWN SENTENCE. An agent that has been asked and has
+            not answered is the commonest live case, and a blank space there
+            reads as an agent that answered with nothing. */}
+        {turn.output ?? <span className="text-ink-faint italic">no answer yet</span>}
+      </div>
+      {steps.length > 0 && (
+        <ul
+          data-agent-turn-steps
+          className="flex min-w-0 flex-col gap-0.5 px-2.5 font-mono text-meta text-ink-faint"
+        >
+          {shown.map((step) => (
+            <StepRow key={step.id} step={step} />
+          ))}
+          {/* The cap says its own size, on the rule `MAX_STEP_ROWS` states:
+              a fold that will not name what it folded is the thing this
+              surface exists to refuse. */}
+          {hidden > 0 && (
+            <li data-agent-steps-more>{t('steps.more', { count: String(hidden) })}</li>
+          )}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+/** One plain sentence, which is all any of this pane's empty states get. */
+function AgentNote({ children, mark }: { readonly children: ReactNode; readonly mark?: string }) {
+  return (
+    <p {...(mark === undefined ? {} : { [mark]: true })} className="text-control text-ink-faint">
+      {children}
+    </p>
+  );
+}
+
+/**
+ * WHAT ONE AGENT IS DOING -- the right-hand side of the navigator.
+ *
+ * FIVE STATES AND FIVE SENTENCES, on the rule the list beside it already
+ * keeps: nothing picked, still asking, vam could not read, read and found
+ * nothing, and the work itself. The two in the middle are the ones a careless
+ * version collapses, and collapsing them makes vam's own latency or vam's own
+ * failure read as a fact about the agent.
+ */
+function AgentDetail({
+  work,
+  state,
+  onBack,
+}: {
+  readonly work: AgentWork | null;
+  readonly state: 'idle' | 'loading' | 'ready';
+  readonly onBack: () => void;
+}) {
+  const body = () => {
+    if (state === 'idle') {
+      return <AgentNote>Pick an agent to see what it is doing.</AgentNote>;
+    }
+    if (state === 'loading' || work === null) {
+      return <AgentNote>Asking this agent’s transcript…</AgentNote>;
+    }
+    if (work.kind === 'unavailable') {
+      // The source's own words, whole. `port.ts` built them to be read.
+      return <AgentNote>{work.error.message}</AgentNote>;
+    }
+    if (work.turns.length === 0 && work.brief === null) {
+      return <AgentNote>This agent has done nothing vam could read yet.</AgentNote>;
+    }
+    return (
+      <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        {work.brief !== null && <AgentTurn turn={work.brief} />}
+        {/* THE MIDDLE VAM DID NOT READ, said rather than hidden. Only 6% of
+            the subagent transcripts measured fit in one window, so this is the
+            usual case; drawing the brief joined to the newest turn would claim
+            the agent went straight from one to the other. */}
+        {!work.whole && (
+          <li data-agent-gap className="px-2.5 text-meta text-ink-faint">
+            — vam read this agent’s beginning and its newest work, not the middle —
+          </li>
+        )}
+        {work.turns.map((turn) => (
+          <AgentTurn key={turn.id} turn={turn} />
+        ))}
+      </ul>
+    );
+  };
+
+  return (
+    <div data-agent-detail className="flex min-h-0 flex-1 flex-col gap-2">
+      {/* THE WAY BACK, named for where it GOES rather than for its container
+          -- the rule the phone shell's own control keeps. It is drawn only
+          below the split, where the detail has taken the pane; above it the
+          list is already on screen and a back control would point at it. */}
+      {state !== 'idle' && (
+        <button
+          type="button"
+          data-agent-back
+          onClick={onBack}
+          className={
+            'flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink @min-[420px]:hidden'
+          }
+        >
+          ‹ All agents
+        </button>
+      )}
+      {body()}
+    </div>
+  );
+}
+
+/**
+ * The Agents tab: which subagents this session spawned, running ones first and
+ * by default running ones only -- and what the one you pick is doing.
+ *
+ * FOUR STATES, AND THREE OF THEM DRAW NO ROW FOR DIFFERENT REASONS
+ * (model.ts). Absent is a source with no agent surface at all — the factory
+ * reports a live count and nothing about which agents they are — and empty is
+ * a source that looked and found none, which is the common case, since most
+ * sessions never spawn a subagent. The third is new with the filter: agents
+ * exist and none of them is running. That one must NOT fall through to
+ * "spawned no agents", which would be the caption outrunning the data while
+ * twenty finished agents sit one keypress away; it says how many there are and
+ * keeps the toggle on screen beside it. Each gets one plain sentence. None
+ * gets a spinner or a placeholder row: this pane has spent several rounds
+ * having invented content removed from it.
+ *
+ * The default is running-only because that is what the operator opened the tab
+ * to see; the toggle exists because a filter with no way out hides work. It
+ * carries the count of what it is hiding, so a hidden row is never silently
+ * invisible — and it counts IDLE agents, never running ones, precisely so it
+ * cannot be read against the tab's `●N` running badge, which counts the whole
+ * directory before the roster cap and may legitimately exceed the rows here.
+ *
+ * The toggle's state is component state, not a `prefs.ts` field, for the same
+ * reason the chosen tab is: nothing outside this pane has an opinion about it,
+ * and persisting a presentation toggle would put it in a payload every other
+ * surface has to migrate around. Unlike the tab it resets per pane render,
+ * which is the wanted default — the next session is asked the same question.
+ *
+ * It is a button, not a key chord: nothing binds it, so nothing captions it as
+ * bound.
+ *
+ * A row survives an unreadable meta file. The agent's id and whether it is
+ * running come from its own transcript, so they are facts whatever the meta
+ * file says; the labels are what goes `unknown`, and the row still says who is
+ * working. The roster is capped at the source (`agent-roster.ts`), so this
+ * renders everything it is given and counts only what it hides.
+ *
+ * ── AND IT IS A NAVIGATOR NOW ────────────────────────────────────────────
+ * The operator asked for the list to become a secondary navigator with the
+ * selected agent's work beside it. The list keeps every rule above; what is
+ * new is a SELECTION, which drives one on-demand read (`useAgentWork`). The
+ * selection lives here rather than in `prefs.ts` for the toggle's own reason,
+ * and it is DROPPED when its agent leaves the list: rows come off a poll, a
+ * finishing agent falls out of the running-only filter, and a detail still
+ * captioned with it would describe a row that is no longer on screen.
+ */
+function AgentsTab({
+  agents,
+  sessionId,
+}: {
+  readonly agents: readonly SessionAgent[] | undefined;
+  readonly sessionId: string;
+}) {
+  /**
+   * FROM CONTEXT, not from a prop, and `agent-work-reader.ts` carries the
+   * argument: this is the source's member rather than this pane's, it takes
+   * the session id it acts on, and every split leaf wants the same function.
+   * `null` is an honest "this source cannot look", never a stub.
+   */
+  const agentWork = useAgentWorkReader() ?? undefined;
   const [showIdle, setShowIdle] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);
+
+  const idleCount = (agents ?? []).filter((agent) => !agent.running).length;
+  const shown = showIdle ? (agents ?? []) : (agents ?? []).filter((agent) => agent.running);
+  // A SELECTION MAY NOT OUTLIVE ITS ROW. Derived rather than cleaned up in an
+  // effect: an effect would render once with the stale pairing on screen, and
+  // the stale pairing is a detail captioned with an agent that is not there.
+  const selected = shown.some((agent) => agent.id === picked) ? picked : null;
+  const work = useAgentWork(sessionId, selected, agentWork);
+
   if (agents === undefined || agents.length === 0) {
     return (
-      <p data-agents data-agents-empty className="text-[11px] text-ink-faint">
+      <p data-agents data-agents-empty className="text-control text-ink-faint">
         {agents === undefined
           ? 'This source does not report which agents a session is running.'
           : 'This session has spawned no agents.'}
       </p>
     );
   }
-  const idleCount = agents.filter((agent) => !agent.running).length;
-  const shown = showIdle ? agents : agents.filter((agent) => agent.running);
   const toggle =
     idleCount === 0 ? null : (
       <button
@@ -854,170 +1665,169 @@ function AgentsTab({ agents }: { readonly agents: readonly SessionAgent[] | unde
         data-agents-toggle
         aria-pressed={showIdle}
         onClick={() => setShowIdle((open) => !open)}
-        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[10.5px] text-ink-faint hover:bg-raised hover:text-ink"
+        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink"
       >
         {showIdle ? `hide ${idleCount} idle` : `show ${idleCount} idle`}
       </button>
     );
   return (
-    <div data-agents className="flex min-h-0 flex-1 flex-col gap-1.5">
-      {shown.length === 0 ? (
-        <p data-agents-empty className="text-[11px] text-ink-faint">
-          {agents.length === 1
-            ? 'This session’s one agent is not running right now.'
-            : `None of this session’s ${agents.length} agents is running right now.`}
-        </p>
-      ) : (
-        <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
-          {shown.map((agent) => (
-            <li
-              key={agent.id}
-              data-agent-row
-              data-agent-running={agent.running ? 'true' : 'false'}
-              className="flex items-center gap-2 rounded-[9px] border border-line bg-panel px-3 py-2"
+    <div
+      data-agents
+      /* THE QUERY CONTAINER IS THE OUTER BOX AND THE RESPONDING ROW IS INSIDE
+         IT. A container query does not apply to the element that DECLARES the
+         container, so `@container` and `@min-[420px]:flex-row` on one div is a
+         rule that can never fire -- the pane would be one column at every
+         width and nothing on screen would say so. Hence two boxes, and a
+         browser guard that measures where the halves actually land: a class
+         that was merely TYPED proves nothing about what paints. */
+      className="@container flex min-h-0 flex-1 flex-col"
+    >
+      <div data-agents-split className="flex min-h-0 flex-1 flex-col gap-3 @min-[420px]:flex-row">
+        {shown.length === 0 ? (
+          <div data-agents-list className="flex min-h-0 flex-1 flex-col gap-1.5">
+            <p data-agents-empty className="text-control text-ink-faint">
+              {agents.length === 1
+                ? 'This session’s one agent is not running right now.'
+                : `None of this session’s ${agents.length} agents is running right now.`}
+            </p>
+            {toggle}
+          </div>
+        ) : (
+          <>
+            {/* THE NAVIGATOR. Below the split it yields the pane to the detail
+              once something is picked; above it, it stays -- picking a second
+              agent has to be one click, which is the whole word "navigator". */}
+            <div
+              data-agents-list
+              className={[
+                'flex min-h-0 flex-col gap-1.5',
+                '@min-[420px]:w-[9.5rem] @min-[420px]:flex-none',
+                'flex-1',
+                selected === null ? '' : '@max-[420px]:hidden',
+              ].join(' ')}
             >
-              {/* The same dot the pane header uses for a session, meaning the same
-              thing: filled and breathing while it works, quiet when it is
-              done. `running` here is "wrote to its transcript in the last few
-              minutes", which is all the source can see. */}
-              <span
-                className={[
-                  'h-1.5 w-1.5 flex-none rounded-full',
-                  agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
-                ].join(' ')}
-              />
-              <span className="min-w-0 flex-1">
-                <span data-agent-type className="block truncate text-[11.5px] text-ink">
-                  {/* No type means no readable meta file beside the transcript, so
-                  the id is the only name this agent has. */}
-                  {agent.type ?? `${agent.id} (type unknown)`}
-                </span>
-                <span
-                  data-agent-description
-                  className="mt-0.5 block truncate text-[10.5px] text-ink-faint"
-                >
-                  {/* Truncated, not wrapped: the pane is 408px and a spawn
-                  description is a sentence. The whole roster stays scannable. */}
-                  {agent.description ?? 'no description recorded'}
-                </span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {toggle}
-    </div>
-  );
-}
-
-/** A section rule: `IN ────────── you · 12m`. The mockup's own divider. */
-/**
- * A section rule: an icon, a hairline, and the section's own metadata.
- *
- * The icon replaced the words IN / OUT / PROGRESS. The mockup has no such
- * block at all — input and output are vam's own construct, because a
- * factory decision has both and the ADE design never modelled one — so
- * this follows the mockup's IDIOM rather than copying a specific glyph: it
- * labels small repeated things with an icon, not a word, and reserves letter-
- * spaced capitals for state (NEEDS YOU, RUNNING, DONE).
- *
- * The three glyphs are a head-and-shoulders, a commit line and a bot, measured
- * off the Response artboards in #53 — which replaced the opposing arrows vam
- * started with, so the paragraph here that still described arrows was wrong
- * and is gone. `aria-label` carries the word that was removed, and
- * `role="img"` is what makes that label announced at all — a bare <span> has
- * no implicit role and would drop it silently, which this codebase has already
- * shipped once.
- *
- * `tone` colours the ICON only, and only the icon. Three faint-grey headings
- * were indistinguishable at a glance, which is what the operator reported; the
- * label stays `text-ink-faint` because letter-spaced capitals are this
- * design's idiom for STATE (NEEDS YOU, RUNNING, DONE) and three coloured ones
- * would make a region heading read as a session status. The hairline and the
- * meta stay grey too: the hairline is the structure all three share and
- * colouring it would triple the pane's colour weight while adding no
- * distinction, and the meta carries VALUES (`you`, `12 turns`, the activity),
- * which are data, not a label. Colour is added to the glyph and the announced
- * label, never substituted for either — a colour-only distinction is no
- * distinction to a colour-blind operator.
- */
-function Rule({
-  label,
-  meta,
-  icon,
-  iconLabel,
-  tone,
-}: {
-  readonly label: string;
-  /** Usually a value; `progress` puts its expand control here instead. */
-  readonly meta: ReactNode;
-  readonly icon: ReactNode;
-  /**
-   * What a screen reader says for the glyph — `you`, not `in`. It is a
-   * separate prop, and required, so that adding a section cannot ship a
-   * silent icon: `progress` had exactly that gap, drawing its glyph outside
-   * any `role="img"` and announcing nothing.
-   */
-  readonly iconLabel: string;
-  /** The section's own colour token, worn by the icon and nothing else. */
-  readonly tone: string;
-}) {
-  return (
-    <div className="flex items-center gap-[7px]">
-      <span className="flex flex-none items-center gap-[5px] text-ink-faint">
-        <span role="img" aria-label={iconLabel} className={`flex ${tone}`}>
-          {icon}
-        </span>
-        <span className="font-mono text-[9.5px] tracking-[0.12em] uppercase">{label}</span>
-      </span>
-      <span className="h-px flex-1 bg-line" />
-      <span data-rule-meta className="font-mono text-[9.5px] text-ink-faint">
-        {meta}
-      </span>
+              <ul className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
+                {shown.map((agent) => (
+                  <li
+                    key={agent.id}
+                    data-agent-row
+                    data-agent-running={agent.running ? 'true' : 'false'}
+                    data-agent-selected={agent.id === selected ? 'true' : undefined}
+                  >
+                    <button
+                      type="button"
+                      data-agent-pick={agent.id}
+                      aria-current={agent.id === selected ? 'true' : undefined}
+                      onClick={() => setPicked(agent.id)}
+                      className={[
+                        'flex w-full cursor-pointer items-center gap-2 rounded-[9px] border px-3 py-2 text-left',
+                        agent.id === selected
+                          ? 'border-line-strong bg-raised'
+                          : 'border-line bg-card hover:bg-raised',
+                      ].join(' ')}
+                    >
+                      {/* The same dot the pane header uses for a session, meaning the same
+                    thing: filled and breathing while it works, quiet when it is
+                    done. `running` here is "wrote to its transcript in the last few
+                    minutes", which is all the source can see. */}
+                      <span
+                        className={[
+                          'h-1.5 w-1.5 flex-none rounded-full',
+                          agent.running ? 'bg-running vam-breathe' : 'bg-line-strong',
+                        ].join(' ')}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span data-agent-type className="block truncate text-body text-ink">
+                          {/* No type means no readable meta file beside the transcript, so
+                        the id is the only name this agent has. */}
+                          {agent.type ?? `${agent.id} (type unknown)`}
+                        </span>
+                        <span
+                          data-agent-description
+                          className="mt-0.5 block truncate text-meta text-ink-faint"
+                        >
+                          {/* Truncated, not wrapped: a spawn description is a sentence
+                        and the whole roster stays scannable. */}
+                          {agent.description ?? 'no description recorded'}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {toggle}
+            </div>
+            <div
+              className={[
+                'flex min-h-0 min-w-0 flex-1 flex-col',
+                selected === null ? '@max-[420px]:hidden' : '',
+              ].join(' ')}
+            >
+              <AgentDetail work={work.work} state={work.state} onBack={() => setPicked(null)} />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 /**
- * How tall two lines of `in` are, in pixels.
+ * THE THREE BAND SEPARATORS ARE GONE (the `Rule` component with them).
  *
- * The operator asked for two lines of `in`, with the height it gives up going
- * to `out`. A percentage of the pane would be a promise about the window
- * instead of a promise about the text, so this is derived from the type it
- * caps: two lines of the 12px/1.55 body, plus the box's own 10px padding top
- * and bottom and its 1px border.
+ * `in`, `progress` and `out` each used to open with a rule: a coloured glyph,
+ * the region's word in letter-spaced capitals, a hairline across the pane and
+ * a meta slot on the right. The operator asked for all three to go, for the
+ * content to run out full, and for progress to condense -- the shape the
+ * Claude Code plugin for VSCode has, where the prompt and the answer read as
+ * continuous prose and the intermediate work collapses into one line you can
+ * open.
+ *
+ * A separator can go; what it carried cannot. Each of the three meta slots
+ * held something real, and each has a home below:
+ *  - `in` held `you · <turn label>`, which joins the identity line that was
+ *    already directly above it (project, epic) -- one row instead of two;
+ *  - `progress` held the turns-read count and the jump `<select>`, which are
+ *    now the condensed progress line itself;
+ *  - `out` held the session's current activity and the two scroll-to-edge
+ *    buttons, which move to that same line -- the one row of chrome the
+ *    column has left, and the only place they stay reachable without a
+ *    heading to hang off.
+ *
+ * The words survive as screen-reader-only region names (`sr-only` spans on
+ * each section). A sighted reader still has the prompt's box, the spacing and
+ * the prose to tell the three apart; a screen-reader user had only those
+ * three words, and dropping them would trade a visual tidy-up for a real
+ * loss -- this pane's own three-states reasoning (`noAnswerNote`, model.ts)
+ * exists precisely so a region never goes silent about what it knows.
  */
-const IN_BODY_PX = 12;
-const IN_LEADING = 1.55;
-const IN_LINES = 2;
-const IN_MAX_HEIGHT = Math.round(IN_BODY_PX * IN_LEADING * IN_LINES) + 22;
 
 /**
- * How many turns' worth of height `progress` opens to before it scrolls.
+ * `in` USED TO CAP ITSELF AT TWO LINES (`IN_BODY_PX`, `IN_LEADING`,
+ * `IN_LINES`, `IN_MAX_HEIGHT`, all gone with the box that wore them).
  *
- * Collapsed it shows NONE: it is context, and the operator asked for the whole
- * region to cost only its own header until it is asked for.
+ * The cap came with its own scrollbar and its own bordered panel, and that
+ * combination is what the operator was still reading as a separate block once
+ * the band labels came off: a boxed, independently scrolling prompt stacked
+ * on top of an answer is two panels however few captions it has. So the
+ * prompt is prose in the one column now -- full length, no border, no
+ * scroller -- and it stays readable while you scroll by STICKING to the top
+ * of that column instead of by reserving height forever.
  *
- * USED TO BE A DATA CAP -- `orderedTurns.slice(-PROGRESS_LINES)` -- which
- * discarded every turn past the newest five from the LIST ITSELF, not merely
- * from view. That was dead code for as long as the parser kept at most three
- * turns (`transcript.ts`'s old `MAX_DECISIONS`), and it would have been the
- * exact same bug as the one this whole change fixes the moment the parser
- * stopped discarding: an operator could open this list and still never reach
- * the turn they were looking for. Now that the list can genuinely hold more
- * than five, the constant sizes the BOX instead (the same move `IN_MAX_HEIGHT`
- * above makes, and for the same reason -- a promise about the text, not about
- * the window): five rows are visible without scrolling, matching how compact
- * `in`'s two lines and `out`'s own space already are, and every turn beyond
- * that is one scroll away rather than gone.
+ * The pathological case is honest to name: a very long prompt now sticks at
+ * full length and can cover the pane. Capping it again would restore exactly
+ * the seam this removes, and clipping it would hide text; the operator asked
+ * for the content to run out full, so it does.
  */
-const PROGRESS_ROW_PX = 10; // the list's own `text-[10px]`
-const PROGRESS_ROW_LEADING = 1.5; // close to `IN_LEADING`, for the same single-line rows
-const PROGRESS_ROW_GAP_PX = 6; // `gap-1.5` between rows
-const PROGRESS_LINES = 5;
-const PROGRESS_MAX_HEIGHT =
-  Math.round(PROGRESS_LINES * PROGRESS_ROW_PX * PROGRESS_ROW_LEADING) +
-  (PROGRESS_LINES - 1) * PROGRESS_ROW_GAP_PX;
+
+/**
+ * `progress` used to open into a scrollable list of turns, capped to about
+ * five rows' worth of height before it scrolled on its own (`PROGRESS_LINES`,
+ * `PROGRESS_MAX_HEIGHT`). A12.2 collapses it into a single `<select>` instead
+ * (see the `progress` block below) — one control regardless of how many
+ * turns exist, so there is no list height left to cap. Both constants died
+ * with the list; nothing else read them.
+ */
 
 /** What `to-canvas.ts` joins each summarised answer with, and splits on here. */
 const ANSWER_SEPARATOR = ' · ';
@@ -1071,8 +1881,51 @@ export function splitAnswers(output: string): string[] {
  * A `waiting` session gets neither sentence: its turn has not ended, and the
  * prose about whose move it is was removed from this pane deliberately -- the
  * breathing amber dot in the header says it.
+ *
+ * A THIRD ABSENCE, and it is not a reading at all. On a turn vam painted
+ * itself (`unconfirmed`, model.ts) there is no source report to describe:
+ * every sentence below is a claim about what a source said, and the last of
+ * them -- "this turn ended without an answer" -- is the one vam least can
+ * support, because nothing ended. It was the sentence the operator was shown
+ * beside a Terminal tab holding the agent's actual answer. So the paint gets
+ * its own, which says only what is true: the words went out and vam has not
+ * heard back yet.
+ *
+ * A FOURTH, AND IT IS THE SAME SENTENCE CAUGHT A SECOND TIME. The paint was
+ * one route to "this turn ended without an answer" beside a Terminal tab
+ * holding the reply; a turn vam could not READ is the other, and it survived
+ * the first fix because it is not a paint -- the source really did report this
+ * turn, from a byte window that held no conversation in it at all. A single
+ * transcript line can be larger than the whole window (`tail.ts`: 670 such
+ * lines across 23 of the 85 transcripts measured, the largest 1,356,930
+ * bytes), and then the only line left able to open a turn is the `last-prompt`
+ * marker, whose branch has no answer to give. `Decision.unread` is a source
+ * saying so, and it shadows every sentence below: a session vam cannot read is
+ * not a session whose turn ended without an answer, and not one still working
+ * on it either.
  */
-function noAnswerNote(output: string | null, status: SessionStatus | null): string {
+function noAnswerNote(
+  output: string | null,
+  status: SessionStatus | null,
+  unconfirmed: boolean | undefined,
+  unread: boolean | undefined,
+): string {
+  // FIRST, and it shadows none of the sentences under it: a paint's `output` is
+  // `null` by construction (`optimistic.ts`), so the two answers-exist branches
+  // below were never reachable for one anyway. What it does displace is the
+  // status-derived tail, which reads the SESSION's status -- and a session that
+  // is `done` is not evidence about a turn the source has never mentioned.
+  if (unconfirmed === true) {
+    return '\u2014 waiting for the source to report this turn back \u2014';
+  }
+  // SECOND, and above the status-derived tail for the same reason the paint is:
+  // the SESSION's status is not evidence about a turn whose transcript vam
+  // could not reach. `done` does not mean this turn ended; `running` does not
+  // mean its answer is still coming. Both may already be written down in a
+  // window vam was not allowed to read.
+  if (unread === true) {
+    return '\u2014 vam could not read the answer to this turn \u2014';
+  }
   // A live turn that HAS an answer still gets a line, and the absence wordings
   // would all be lies about it: it is not empty, and it is not answerless. All
   // this line asserts there is what the caret asserts -- the session is
@@ -1085,202 +1938,15 @@ function noAnswerNote(output: string | null, status: SessionStatus | null): stri
 }
 
 /**
- * How each markdown element is dressed, in vam's own tokens.
+ * `out`'s markdown component map, which lives in `./out-markdown.tsx` now --
+ * it grew a second caller (`FilesTab.tsx`'s markdown preview) and importing
+ * it from here would have been an import cycle through this file.
  *
- * Every colour here is a token from `styles.css`, which carries a dark and a
- * light value for each — so this follows the theme rather than pinning one
- * half of it. The body keeps the size and colour the flat rendering already
- * had (12px/1.6 in `ink-dim`, measured off the mockup's Response artboards);
- * everything else is built around that so a heading or a table reads as a
- * step up from the body rather than as a different app.
- *
- * Two elements get their own scroller: a fenced block and a table have no
- * width of their own and this pane is resizable and 408px by default, so
- * without it the widest line in an answer decides how wide the pane is.
- *
- * `a` and `img` are the two that do NOT render as themselves, and the reason
- * is the same for both: `out` is an AGENT's text, which vam cannot vouch for.
- * An image would be a remote fetch that tells whoever wrote the answer that
- * this pane opened. A link would be a control that does nothing: the shell
- * denies `window.open` and every off-origin navigation (see src/main), which
- * is the correct policy. So the address is printed instead, in a region where
- * text is selectable, and opening it is a deliberate copy-and-paste.
+ * RE-EXPORTED rather than moved silently: `test/panels/out-colour.test.tsx`
+ * and `test/panels/out-font-size.test.tsx` both reach it at this path, and
+ * this is the file whose name says what the map is FOR.
  */
-/**
- * The fence palette: which token kind wears which colour.
- *
- * Every class here is a TOKEN utility, never a literal colour (13.1), and none
- * of them is one of the four status colours — see the note beside them in
- * styles.css for why an added line must not be `running` green.
- */
-const SYNTAX_CLASS: Record<TokenKind, string> = {
-  plain: '',
-  comment: 'text-syn-comment',
-  string: 'text-syn-string',
-  number: 'text-syn-number',
-  keyword: 'text-syn-keyword',
-};
-
-const DIFF_CLASS: Record<DiffKind, string> = {
-  plain: '',
-  add: 'text-diff-add',
-  del: 'text-diff-del',
-  hunk: 'text-diff-hunk',
-  file: 'text-diff-file',
-};
-
-/**
- * The `<code>` react-markdown puts inside a `<pre>`, read back as text plus
- * the fence's infostring.
- *
- * Returns null rather than guessing whenever the child is not the single plain
- * string a fence produces — a fence whose content is anything else is rendered
- * exactly as it was.
- */
-function readFence(
-  children: ReactNode,
-): { readonly code: string; readonly lang: string | null } | null {
-  const only = Array.isArray(children) && children.length === 1 ? children[0] : children;
-  if (!isValidElement<{ className?: string; children?: ReactNode }>(only)) return null;
-  const inner = only.props.children;
-  const code =
-    typeof inner === 'string'
-      ? inner
-      : Array.isArray(inner) && inner.every((k) => typeof k === 'string')
-        ? inner.join('')
-        : null;
-  if (code === null) return null;
-  return { code, lang: /language-([\w+#-]+)/.exec(only.props.className ?? '')?.[1] ?? null };
-}
-
-/**
- * A fence, coloured.
- *
- * Elements, never an HTML string: `out` is untrusted text and this is the wall
- * `OUT_MARKDOWN`'s note describes. A `<script>` an agent printed reaches the
- * DOM here as the characters of a `<script>`, as it did before there was any
- * colour at all.
- */
-function Fence({ code, lang }: { readonly code: string; readonly lang: HighlightLang }) {
-  // Keyed by BYTE OFFSET, not by list index: offsets are unique even when the
-  // same line or the same token repeats, which in a patch they constantly do.
-  let at = 0;
-  const parts: { readonly key: string; readonly text: string; readonly cls: string }[] = [];
-  if (lang === 'diff') {
-    const lines = code.split('\n');
-    for (const [i, line] of lines.entries()) {
-      const text = i === lines.length - 1 ? line : `${line}\n`;
-      parts.push({ key: `${at}`, text, cls: DIFF_CLASS[diffLineKind(line)] });
-      at += text.length;
-    }
-  } else {
-    for (const tok of tokenizeCode(code, lang)) {
-      parts.push({ key: `${at}`, text: tok.text, cls: SYNTAX_CLASS[tok.kind] });
-      at += tok.text.length;
-    }
-  }
-  // Wrapped in a `<code>`, unclassed: the untouched path keeps react-markdown's
-  // `<pre><code>`, so this one must too, or the fence's DOM shape would depend
-  // on its infostring and the `<pre>`'s own `[&_code]` rules would reach only
-  // half the fences. Unclassed because those rules are exactly what is left of
-  // the chip styling once the `<pre>` has reset it.
-  return (
-    <code>
-      {parts.map((part) => (
-        <span key={part.key} className={part.cls}>
-          {part.text}
-        </span>
-      ))}
-    </code>
-  );
-}
-
-/**
- * `out`'s type scale, in `em` against the root the pane's container carries
- * (`OUT_FONT_SIZE_VAR`, a pref).
- *
- * These were pixels — 13 / 12.5 / 12 headings, 12 body, 11.5 tables, 11 code,
- * 10.5 hints — a designed hierarchy rather than arbitrary numbers, so the
- * setting had to move all of them at once without flattening them. Each is its
- * old pixel size over the 12px root `body` already gave the pane, to three
- * decimals: 1.083 = 13/12, 1.042 = 12.5/12, 0.958 = 11.5/12, 0.917 = 11/12,
- * and 0.875 = 10.5/12 exactly. Rounding costs at most 0.01px at the largest
- * size offered, under one device pixel, so the scale is the shipped one.
- *
- * `em` not `rem`: the multiplier composes down the tree, so inline code stays
- * 11/12 OF ITS PARAGRAPH — which is what kept it a chip, not a body size.
- */
-export const OUT_MARKDOWN: Components = {
-  p: ({ children }) => <p className="text-[1em] text-ink-dim leading-[1.6]">{children}</p>,
-  h1: ({ children }) => <h1 className="font-medium text-[1.083em] text-ink">{children}</h1>,
-  h2: ({ children }) => <h2 className="font-medium text-[1.042em] text-ink">{children}</h2>,
-  h3: ({ children }) => (
-    <h3 className="font-medium text-[1em] text-ink tracking-[0.01em]">{children}</h3>
-  ),
-  ul: ({ children }) => (
-    <ul className="flex list-disc flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6]">
-      {children}
-    </ul>
-  ),
-  ol: ({ children }) => (
-    <ol className="flex list-decimal flex-col gap-1 pl-4 text-[1em] text-ink-dim leading-[1.6]">
-      {children}
-    </ol>
-  ),
-  // The bullet, not the item: `list-disc` and the item spacing already carry
-  // the list's structure, so a barely-visible marker loses nothing the
-  // `text-ink-dim` item text and the semantic `<ul>` do not already say.
-  // Genuinely decorative -- stays on `ink-ghost` (issue 201).
-  li: ({ children }) => <li className="marker:text-ink-ghost">{children}</li>,
-  strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
-  em: ({ children }) => <em className="text-ink-dim italic">{children}</em>,
-  del: ({ children }) => <del className="text-ink-faint">{children}</del>,
-  hr: () => <hr className="border-line border-t" />,
-  blockquote: ({ children }) => (
-    <blockquote className="border-quote border-l-2 pl-2.5 text-[1em] text-quote leading-[1.6]">
-      {children}
-    </blockquote>
-  ),
-  // Styled as an inline chip, and reset back to plain text inside a fence by
-  // the `pre` rule below — react-markdown stopped telling a component which of
-  // the two it is, and the parent knows without being told.
-  code: ({ children }) => (
-    <code className="rounded-[4px] bg-raised px-1 py-[1px] font-mono text-[0.917em] text-chip">
-      {children}
-    </code>
-  ),
-  pre: ({ children }) => {
-    const fence = readFence(children);
-    const lang = fence === null ? null : resolveLang(fence.lang);
-    return (
-      <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-canvas px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
-        {fence !== null && lang !== null ? <Fence code={fence.code} lang={lang} /> : children}
-      </pre>
-    );
-  },
-  table: ({ children }) => (
-    <div className="vam-no-scrollbar overflow-x-auto">
-      <table className="w-max border-collapse text-[0.958em] text-ink-dim">{children}</table>
-    </div>
-  ),
-  th: ({ children }) => (
-    <th className="border border-line bg-raised px-2 py-1 text-left font-medium text-chip">
-      {children}
-    </th>
-  ),
-  td: ({ children }) => <td className="border border-line px-2 py-1 align-top">{children}</td>,
-  a: ({ href, children }) => (
-    <span className="text-done">
-      {children}
-      {href !== undefined && (
-        <span className="font-mono text-[0.875em] text-ink-faint"> ({href})</span>
-      )}
-    </span>
-  ),
-  img: ({ alt }) => (
-    <span className="font-mono text-[0.875em] text-ink-faint">{alt === '' ? 'image' : alt}</span>
-  ),
-};
+export { OUT_MARKDOWN, OUT_URL_TRANSFORM };
 
 /**
  * One answer: the machine-ish head it was built with, then its own markdown.
@@ -1329,7 +1995,16 @@ function OutText({ output }: { readonly output: string }) {
               </span>
             )}
             <div data-out-body className="flex min-w-0 flex-col gap-2">
-              <Markdown remarkPlugins={[remarkGfm]} components={OUT_MARKDOWN}>
+              {/* `urlTransform` is vam's own, and it is a NARROWING: see
+                  `OUT_URL_TRANSFORM`. react-markdown's default silently
+                  blanks four schemes and admits four others, which left this
+                  pane with two disagreeing lists and a refusal that could not
+                  name what it refused. */}
+              <Markdown
+                remarkPlugins={[remarkGfm]}
+                components={OUT_MARKDOWN}
+                urlTransform={OUT_URL_TRANSFORM}
+              >
                 {body}
               </Markdown>
             </div>
@@ -1377,6 +2052,76 @@ function OutText({ output }: { readonly output: string }) {
 const NUMBERED_OPTIONS: readonly (string | undefined)[] = Array.from({ length: 9 }, (_, index) =>
   String(index + 1),
 );
+
+/**
+ * THE FOCUS RING, and it is the app's, not a new one.
+ *
+ * `SettingsOverlay.tsx`, `PairingPanel.tsx` and `phone/PhoneShell.tsx` each
+ * declare this exact string, with the reasoning written out in the first of
+ * them: the renderer's other `focus-visible` (`TerminalTab.tsx`) draws
+ * `line-strong`, which is 1.25:1 on `panel` in dark and therefore invisible in
+ * the default theme, while `ink` measures 14.9 / 17.7 and clears every fill
+ * this pane paints. The offset is load-bearing too -- flush against a
+ * control's own border an outline reads as a thicker border rather than as a
+ * cursor.
+ *
+ * A fourth copy rather than a shared export because the three that exist are
+ * three copies already and one of the files holding them is being edited on
+ * another branch; the string is what is shared, and `e2e/tooltip-shots.mjs`
+ * measures the ring as PAINT rather than trusting any of the four.
+ */
+const FOCUS_RING =
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+/**
+ * THE FILL A CONTROL ON THIS CARD TAKES WHEN IT IS TOUCHED, and the reason it
+ * is not `raised`.
+ *
+ * PR 288 repointed the question card from `bg-panel` to `bg-card` and moved
+ * most hover fills with it. The options were missed, and the miss inverted
+ * them: `--vam-raised` is a rung above `panel`, which is what the card used to
+ * be, and a rung BELOW `card`, which is what it is now. Measured on the
+ * painted node, a hovered option sat at 1.032:1 UNDER the card holding it. So
+ * touching an answer punched it below its own surface -- the exact hole PR 288
+ * existed to remove, one level further in, in the flow that unblocks an agent
+ * waiting on a reply.
+ *
+ * `line-strong` rather than a token of its own, because this file already
+ * paints exactly this object: every `[data-tap-skin]` in the composer is
+ * `bg-card hover:bg-line-strong`, which IS "a control on a card, touched". A
+ * second name for a value already spent on that role would be two names for
+ * one decision.
+ *
+ * DIRECTION IS PER THEME AND THAT IS NOT A DODGE. Dark climbs
+ * pane < card < control, so this fill is lighter than the card: 1.125:1, ΔE
+ * 4.29, against the card's own step off the pane of ΔE 2.95. Light's card is
+ * the theme's white -- there is nothing above it -- so its controls darken
+ * instead, as `segment-on`, every tap skin here and the artboard's own answer
+ * pills already do: ΔE 14.63 against a card step of 6.24.
+ * `e2e/pane-colour-shots.mjs` re-measures every one of those numbers on the
+ * painted node, hovered, marked and folded, in both themes.
+ */
+const OPTION_FILL = 'bg-line-strong';
+
+/**
+ * THE OTHER HALF OF THE SAME DECISION, and it cannot be dropped.
+ *
+ * A card is already at the ceiling its own captions allow -- `styles.css` says
+ * so where it fixes `--vam-card`: `ink-quiet`/`ink-faint` measure 4.735:1
+ * there and fail one step lighter. So ANY fill a rung above the card puts an
+ * option's quietest greys under WCAG 1.4.3, and measurement agrees: on
+ * `line-strong` the faint grey reads 4.208:1 in dark and 3.691:1 in light.
+ *
+ * The fill and the ink therefore move TOGETHER. The number and the preview
+ * lift to `ink-dim` (5.942:1 dark, 5.304:1 light) exactly while the fill is
+ * under them, which keeps the resting hierarchy -- label, then description,
+ * then the number and the preview -- that painting them `ink-dim` outright
+ * would collapse. Both halves are held separately by the e2e guard: the fill
+ * without the lift reddens the ink checks, the lift without the fill reddens
+ * the elevation checks.
+ */
+const OPTION_QUIET_INK =
+  'text-ink-faint group-hover:text-ink-dim group-data-[picked=true]:text-ink-dim';
 
 /**
  * What Submit is allowed to claim, in the operator's words.
@@ -1520,61 +2265,12 @@ const KEY_STRIP: readonly {
   },
 ];
 
-/**
- * What a session says it is waiting on, and whether vam can do anything about
- * it.
- *
- * WHY THIS IS SEPARATE FROM THE QUESTION CARD. The card is drawn from
- * `AskUserQuestion` records in the transcript. The commonest thing a session
- * actually blocks on -- a tool-approval prompt -- has no transcript record
- * while it is open, so `questions` is empty for it, no card is drawn, and the
- * pane used to show NOTHING for a session that was stuck. This is drawn from
- * the session's own per-process file, which is the only surface that says so
- * (`waitingFor` in `model.ts`).
- *
- * THE ASYMMETRY IS STATED, NOT HIDDEN. vam can SEE any session waiting; it can
- * only type into one it started. So the second line names which of the three
- * cases this row is in, and the third state -- vam never got to ask tmux -- is
- * kept apart from "vam did not start this", because a refusal that names the
- * wrong cause sends the operator somewhere the answer is not.
- */
-function WaitingNote({
-  waitingFor,
-  vamControlled,
-}: {
-  readonly waitingFor: string | null;
-  readonly vamControlled: boolean | undefined;
-}) {
-  const reach =
-    vamControlled === true ? 'answerable' : vamControlled === false ? 'unreachable' : 'unknown';
-  const remedy =
-    reach === 'answerable'
-      ? 'vam started this session — the Terminal tab types into its pane'
-      : reach === 'unreachable'
-        ? 'vam did not start this session, so it cannot type into it — answer it in the terminal it is running in'
-        : 'vam could not ask tmux which pane this is, so it cannot say whether it could reach it';
-  return (
-    <div
-      data-session-waiting
-      data-waiting-reach={reach}
-      className="flex flex-col gap-1 rounded-[10px] border border-waiting bg-panel px-2.5 py-2"
-    >
-      <p className="text-[11.5px] text-ink">
-        {/* The cause VERBATIM. The observed values are a sample of an open set,
-          so an unrecognised one is printed rather than swallowed -- a session
-          waiting on something vam has no word for is still waiting. */}
-        waiting on you — {waitingFor ?? 'the session did not say what for'}
-      </p>
-      <p className="text-[10.5px] text-ink-faint">{remedy}</p>
-    </div>
-  );
-}
-
 function QuestionCard({
   questions,
   firstOptionRef,
   onChat,
   onAnswer,
+  onSuggest,
 }: {
   /**
    * THE WHOLE SET asked by one `AskUserQuestion` call, in asking order.
@@ -1595,6 +2291,19 @@ function QuestionCard({
    * cannot write to is a control that lies about what it will do.
    */
   readonly onAnswer: ((request: AnswerRequest) => Promise<AnswerResult>) | null;
+  /**
+   * What the composer should OFFER as a ghost, whenever there is a composer to
+   * offer it in -- the label of the showing step's mark, or its first option
+   * where nothing is marked yet, and `null` when this step has nothing to
+   * suggest. The card owns `marks` and `showing`, so the alternative was
+   * re-deriving a suggestion in the pane that could disagree with the card the
+   * operator is looking at.
+   *
+   * It is a SUGGESTION and nothing more: what the composer does with it is the
+   * existing record-or-submit path, unchanged. See the prompt box's own Tab
+   * branch.
+   */
+  readonly onSuggest?: (label: string | null) => void;
 }) {
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
@@ -1611,6 +2320,23 @@ function QuestionCard({
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
+  /**
+   * WHY THE LAST SUBMIT DID NOT GO, when the reason is on this side.
+   *
+   * Separate from `outcome`, which is what the SESSION'S PICKER said: a set
+   * short of a mark never reached it, so filing that under the same state
+   * would put words in the picker's mouth.
+   *
+   * It exists because Submit used to be `disabled` while any step was
+   * unmarked -- visible, faint, taking no click and no focus, and explaining
+   * nothing. That is "absent, not dimmed" broken in the one flow that
+   * releases a blocked agent, and it was worst on a call carrying ONE
+   * question: the marked-count hint only rendered past the first, so a lone
+   * unanswered question got no sentence at all. The control is operable now
+   * and refuses out loud, naming the step it is short of and putting the
+   * cursor on it.
+   */
+  const [refusal, setRefusal] = useState<string | null>(null);
   /**
    * WHAT A PREVIOUS SUBMIT ALREADY GOT INTO THE PICKER, in asking order.
    *
@@ -1648,6 +2374,24 @@ function QuestionCard({
   /** The pending steps still waiting for a mark -- what Submit is short of. */
   const unmarked = pending.filter((one) => (marks[one.id] ?? []).length === 0);
   const takenIds = new Set(openSteps.slice(0, taken.length).map((one) => one.id));
+  /**
+   * An ANSWERED step suggests nothing: there is nothing left to reply with.
+   * A multi-select's marks are joined the way the operator would have typed
+   * them, because that is all the composer can carry -- text.
+   */
+  const suggested =
+    question === undefined || question.answer !== null
+      ? null
+      : picked.length > 0
+        ? picked.join(', ')
+        : (question.options[0]?.label ?? null);
+  useEffect(() => {
+    onSuggest?.(suggested);
+    // Withdrawn on the way out, so a card that unmounts -- the question was
+    // answered, the session changed -- cannot leave a stale offer standing in
+    // a composer that outlives it.
+    return () => onSuggest?.(null);
+  }, [suggested, onSuggest]);
 
   /**
    * Steps CLAMP where options wrap, and the difference is deliberate. A list of
@@ -1666,13 +2410,39 @@ function QuestionCard({
    * clamp turned into a no-op asks for nothing, because the cursor is already
    * where the operator put it.
    */
+  /**
+   * WHICH STEP HAS FOLDED ITS OPTIONS AWAY, by question id.
+   *
+   * Operator: "after choosing an option, shouldn't the option panel hide?" —
+   * asked, not specified, and the trap in it is this card's own rule: A PICK
+   * IS ONLY A MARK. A list that simply vanishes on a click reads as "sent",
+   * which is the defect this file has spent its whole life refusing. So the
+   * fold keeps the mark on screen, keeps `data-question-note` (the sentence
+   * that says a mark is not a delivery) under it, and keeps a way back in.
+   *
+   * KEYED BY QUESTION so walking to another step of the same call arrives
+   * expanded — the fold is about the step you just answered, not the card.
+   *
+   * SET ON A POINTER PICK ONLY. The listbox owns the picker's keyboard (the
+   * digits, `j`/`k`, `h`/`l`, `c`) through a listener on the element itself,
+   * so folding after a keyboard pick would unmount the grammar mid-sequence
+   * and drop the cursor to `document.body`. `UIEvent.detail` carries which
+   * one happened, the same fact the tab strip reads for the same reason.
+   *
+   * AND SINGLE-SELECT ONLY: on a multi-select, one pick is not a choice made.
+   */
+  const [foldedStep, setFoldedStep] = useState<string | null>(null);
   const [landing, setLanding] = useState<number | null>(null);
   const stepTabRef = useRef<HTMLButtonElement>(null);
-  const walk = (by: number) => {
+  /** Whether it moved. The caller needs the answer: a step that clamped is a
+   *  keystroke the card did not use, and `h` means something else when it is
+   *  not walking (see `onKeys`). */
+  const walk = (by: number): boolean => {
     const next = Math.min(Math.max(showing + by, 0), questions.length - 1);
-    if (next === showing) return;
+    if (next === showing) return false;
     setShowing(next);
     setLanding(next);
+    return true;
   };
 
   /**
@@ -1689,6 +2459,9 @@ function QuestionCard({
    * operator clicked.
    */
   const showingTaken = question !== undefined && takenIds.has(question.id);
+  /** This step's options are folded away behind its own mark — see
+   *  `foldedStep`. Never with nothing marked: there would be nothing to fold. */
+  const folded = question !== undefined && foldedStep === question.id && picked.length > 0;
   useEffect(() => {
     if (landing === null) return;
     setLanding(null);
@@ -1716,6 +2489,7 @@ function QuestionCard({
     }));
     if (onAnswer === null || sending || steps.length === 0) return;
     if (steps.some((one) => one.labels.length === 0)) return;
+    setRefusal(null);
     setSending(true);
     const result = await onAnswer({ steps });
     setOutcome(result);
@@ -1726,7 +2500,36 @@ function QuestionCard({
     setSending(false);
   };
 
-  const toggle = (label: string) =>
+  /**
+   * What Submit does when the set is not complete: say which step is short,
+   * and go to it.
+   *
+   * WALKING IS HALF THE ANSWER. A card shows one step at a time, so naming a
+   * step the operator then has to go and find is a refusal that costs them
+   * the search. `landing` is the same channel the `h`/`l` walk uses, so the
+   * cursor ends up on that step's first option and the next keystroke marks
+   * it.
+   */
+  const refuse = (short: AgentQuestion) => {
+    const at = questions.indexOf(short);
+    const named = short.header ?? `step ${at + 1}`;
+    setRefusal(`not sent — ${named} has no mark yet: ${short.question}`);
+    if (at < 0) return;
+    setShowing(at);
+    setLanding(at);
+  };
+
+  const toggle = (label: string, viaPointer = false) => {
+    // The refusal named a missing mark. Marking anything is the operator
+    // answering it, so it stops being on screen -- a refusal that outlives
+    // its cause is the next thing to be ignored.
+    setRefusal(null);
+    if (viaPointer && question !== undefined && !question.multiSelect) {
+      // Fold only when the click MARKS. Clicking the marked option again
+      // clears it, and folding on that would hide an empty list behind a
+      // summary with nothing to summarise.
+      setFoldedStep((marks[question.id] ?? []).includes(label) ? null : question.id);
+    }
     setMarks((current) => {
       if (question === undefined) return current;
       const held = current[question.id] ?? [];
@@ -1741,66 +2544,107 @@ function QuestionCard({
             : [label],
       };
     });
+  };
 
-  // The list walks with the arrows, and jumps with the numbers; every option is
-  // a real button, so Enter and Space already mark one and Tab already leaves.
-  //
-  // The digits are BARE, and safely so because this listener is the listbox's:
-  // it can only fire while the keyboard is already inside the options list,
-  // which is where `i` puts it. The canvas grammar binds no bare digit at all,
-  // and the bare letters that do mean something there (`j`, `k`, and the rest)
-  // are letters. So a number here cannot be a keystroke meant for somewhere
-  // else -- and with no question open there is no list to hold focus.
+  /**
+   * The listbox's keys — ONE RESOLUTION, AND IT IS NOT THIS FILE'S.
+   *
+   * `resolveQuestionKey` (`keyboard/question-keys.ts`) turns a NORMALIZED
+   * keystroke into what the card should do, with the operator's own bindings
+   * ahead of the built-in digits and Enter/Space. That module carries the
+   * argument and audit F2, which is what this listener used to be: a second
+   * vocabulary (raw `event.key`) resolved in a second order (its own digits
+   * first), so a motion rebound onto `1` was silently lost and one rebound
+   * onto `Mod-j` could never match at all.
+   *
+   * The blanket "reject anything modified" guard is gone with it, and nothing
+   * is weaker for that: a normalized `Mod-c` is not `c` and a normalized
+   * `Mod-2` is not `2`, so the copy chord and the tab chords reach the window
+   * listener by construction instead of by this file listing them.
+   *
+   * The digits stay BARE, and one of the two reasons that was safe has EXPIRED
+   * -- corrected here rather than left to be believed. This paragraph used to
+   * end "and the canvas grammar binds no bare digit". IT BINDS NINE OF THEM
+   * NOW: `1`..`9` are `pickView`'s one-key spelling (`SELECT_DIGITS`,
+   * `keyboard/chords.ts`), added at the operator's request.
+   *
+   * The other reason stands and was always the load-bearing one: this listener
+   * only fires while the keyboard is already inside the options list, it sits
+   * BELOW the window listener in the bubble path, and it cancels what it
+   * handled -- so the card claims a digit first and `Canvas.tsx` returns on
+   * `defaultPrevented`. The new binding adds a second, independent guard
+   * rather than relying on that: a bare digit is Select-only
+   * (`isSelectOnlyChord`), and an open question card is an insert scope.
+   */
   const onKeys = (event: KeyboardEvent<HTMLDivElement>) => {
-    // A MODIFIED key is never one of ours. Scope is what makes the bare keys
-    // below safe -- this listener only hears anything while the keyboard is
-    // already in the options list -- but scope says nothing about modifiers,
-    // and reading `event.key` alone made `Cmd+C` match the `c` branch (killing
-    // the copy and opening the composer) and `Cmd+2` mark an option on its way
-    // to the chord layer. A chord is not text and not a pick, so it belongs to
-    // the grammar and this stands aside, which is the same rule the prompt box
-    // already follows.
-    if (event.metaKey || event.ctrlKey || event.altKey) return;
-    // `c` for chat, the way out of the picker and into prose. Scoped like the
-    // digits: the listener is the listbox's, so it only hears a key while the
-    // keyboard is already in the options list -- which is where `i` puts it.
-    // The entry itself is a button outside the list, reached by Tab or mouse
-    // and activated by Enter, Space or a click, like any other.
-    if (keys.chat.includes(event.key)) {
+    const action = resolveQuestionKey(normalizeKey(event));
+    if (action === null) return;
+    const buttons = [
+      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
+    ];
+    if (action.kind === 'chat') {
+      // The way out of the picker and into prose. The entry itself is a button
+      // outside the list, reached by Tab or mouse and activated by Enter,
+      // Space or a click, like any other.
       event.preventDefault();
       onChat();
       return;
     }
-    const buttons = [
-      ...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-question-option]'),
-    ];
-    if (/^[1-9]$/.test(event.key)) {
-      const at = Number(event.key) - 1;
-      const option = question?.options[at];
+    if (action.kind === 'mark') {
+      const option = question?.options[action.at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       // The keyboard follows the mark, so the arrows walk on from where you
       // landed rather than from wherever you were.
-      buttons[at]?.focus();
+      buttons[action.at]?.focus();
       return;
     }
     /**
      * `j`/`k` walk the options and `h`/`l` walk the STEPS — the Insert half of
-     * the operator's table, with both axes meaning something now.
+     * the operator's table, with both axes meaning something.
      *
      * The horizontal pair used to do nothing at all, deliberately: unhandled,
-     * it falls through to the canvas grammar and walks the node graph under a
-     * pane the operator is reading, which is the same "the keys work, they
-     * just do the wrong thing" failure the mode naming exists to end. It is
-     * still stopped from reaching the canvas; a set of questions simply gives
-     * it the meaning the vertical pair always had, and it is the obvious one
-     * -- down the options, across the questions. `H` — capital, a different key — is still the way
-     * back to Select, and Escape still leaves.
+     * it falls through to the canvas grammar and walks under a pane the
+     * operator is reading, which is the same "the keys work, they just do the
+     * wrong thing" failure the mode naming exists to end. It is still stopped
+     * from reaching the canvas; a set of questions simply gives it the meaning
+     * the vertical pair always had — down the options, across the questions.
+     * THE WAYS BACK TO SELECT, named correctly: Escape (which peels the
+     * keyboard itself -- `case 'cancel'` in `Canvas.tsx`), `Cmd/Ctrl+Shift+H`,
+     * and `h` itself once there is no step left to walk back to. This comment
+     * used to name a bare `H`; that binding is gone -- the operator moved it
+     * to `Mod-Shift-h` because macOS claims `Cmd+H` for Hide -- and a bare `H`
+     * now reaches no table at all.
+     *
+     * BEFORE the option-cursor check below, because a step whose question is
+     * already answered draws no options at all: gating the step walk on a
+     * focused option would strand the keyboard on that step.
      */
-    if (keys.prev.includes(event.key) || keys.next.includes(event.key)) {
-      event.preventDefault();
-      walk(keys.next.includes(event.key) ? 1 : -1);
+    if (action.kind === 'walkStep') {
+      const walked = walk(action.delta);
+      /**
+       * A CLAMPED `h` IS NOT THIS CARD'S KEY -- and that one line is the
+       * difference between the sheet telling the truth and not.
+       *
+       * `h` carries a second meaning the card does not own: everywhere else in
+       * Insert it hands the keyboard back to Select, which is what the sheet
+       * promises ("previous step of a question with several, else back to
+       * Select"). Claiming the key unconditionally made the `else` unreachable
+       * -- `preventDefault` fired whether or not the walk moved, the canvas
+       * listener stood down at `event.defaultPrevented`, and a clamp at step 0
+       * ate the keystroke in silence. A single question has only step 0, so
+       * that was every ordinary question vam draws.
+       *
+       * `l` is NOT symmetric here, and the asymmetry is the point rather than
+       * an oversight: `l` has no second meaning to fall through to, so letting
+       * it pass would buy one refusal sentence on the status bar for an
+       * ordinary press inside a widget the operator is reading. `Canvas.
+       * cursor-mode.test.tsx` pins that silence deliberately ("a refusal on an
+       * ordinary walk would be exactly the noise that teaches an operator to
+       * stop reading the bar"), and nothing here disturbs it.
+       */
+      if (walked || action.delta > 0) event.preventDefault();
       return;
     }
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -1817,19 +2661,15 @@ function QuestionCard({
      * in the list — mark this option — because the canvas listener stands
      * aside for a key that has already been answered.
      */
-    if (event.key === 'Enter' || event.key === ' ') {
+    if (action.kind === 'toggle') {
       const option = question?.options[at];
       if (option === undefined) return;
       event.preventDefault();
       toggle(option.label);
       return;
     }
-    const down = keys.down.includes(event.key);
-    const up = keys.up.includes(event.key);
-    if (!down && !up) return;
     event.preventDefault();
-    const step = down ? 1 : -1;
-    buttons[(at + step + buttons.length) % buttons.length]?.focus();
+    buttons[(at + action.delta + buttons.length) % buttons.length]?.focus();
   };
 
   if (question === undefined) return null;
@@ -1841,7 +2681,7 @@ function QuestionCard({
       data-question-select={question.multiSelect ? 'multi' : 'single'}
       data-question-waiting={waiting ? 'true' : undefined}
       className={[
-        'flex flex-col gap-1.5 rounded-[10px] border bg-panel px-2.5 py-2',
+        'flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
         waiting ? 'border-waiting' : 'border-line-strong',
       ].join(' ')}
     >
@@ -1854,7 +2694,7 @@ function QuestionCard({
           wearing a different shape. */}
       {questions.length > 1 && (
         <nav
-          // NOT a tablist, for the reason `TabBar` above is not one: the
+          // NOT a tablist, for the reason `ViewIcons` above is not one: the
           // region a step changes is the card below, which is no `tabpanel` of
           // theirs and never was. A `nav` is what this is -- navigation within
           // one call -- and a `nav` can carry the name a bare box cannot, which
@@ -1865,12 +2705,20 @@ function QuestionCard({
           // options list carries them, and a step whose question is already
           // answered HAS no options list. Without this the keyboard reaches
           // that step and cannot leave it.
+          //
+          // THROUGH THE SAME RESOLUTION THE LIST USES (audit F2). It read the
+          // literals `h`, `l` and the two arrows, so an operator who moved the
+          // horizontal motion kept a strip answering the keys they had moved
+          // AWAY from and ignoring the ones they had moved to — the identical
+          // defect `question-keys.ts` was written to end one element over, in
+          // a second copy nobody looked at. Only `walkStep` is taken: the
+          // tabs are real buttons, so Enter and Space activate them natively
+          // and a `toggle` claimed here would cancel that.
           onKeyDown={(event) => {
-            if (event.metaKey || event.ctrlKey || event.altKey) return;
-            const forward = event.key === 'l' || event.key === 'ArrowRight';
-            if (!forward && event.key !== 'h' && event.key !== 'ArrowLeft') return;
+            const action = resolveQuestionKey(normalizeKey(event));
+            if (action?.kind !== 'walkStep') return;
             event.preventDefault();
-            walk(forward ? 1 : -1);
+            walk(action.delta);
           }}
           className="flex flex-wrap items-center gap-1 border-line border-b pb-1.5"
         >
@@ -1894,7 +2742,7 @@ function QuestionCard({
                 // (`styles.css`); the phone floor is 44 and these were 21 tall.
                 // The question surface reached a phone viewport for the first
                 // time when the demo fixture gained a question at all.
-                'vam-tap cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-[10px]',
+                'vam-tap cursor-pointer rounded-[5px] border px-1.5 py-0.5 text-control',
                 index === showing ? 'border-running text-ink' : 'border-line text-ink-faint',
               ].join(' ')}
             >
@@ -1902,18 +2750,18 @@ function QuestionCard({
               {one.answer !== null || (marks[one.id] ?? []).length > 0 ? ' ✓' : ''}
             </button>
           ))}
-          <span data-question-position className="ml-auto text-[10px] text-ink-faint">
+          <span data-question-position className="ml-auto text-meta text-ink-faint">
             step {showing + 1} of {questions.length}
           </span>
         </nav>
       )}
       <div className="flex min-w-0 flex-col gap-0.5">
         {question.header !== null && (
-          <span data-question-header className="text-[10px] text-ink-faint uppercase tracking-wide">
+          <span data-question-header className="text-meta text-ink-faint uppercase tracking-wide">
             {question.header}
           </span>
         )}
-        <span data-question-text className="text-[11.5px] text-ink">
+        <span data-question-text className="text-body text-ink">
           {question.question}
         </span>
       </div>
@@ -1921,67 +2769,100 @@ function QuestionCard({
         // THIS step is settled while others may not be. It shows what was
         // answered and offers nothing to mark; the set's Submit below is for
         // whatever is still open.
-        <span data-question-answer className="text-[10.5px] text-ink-dim">
+        <span data-question-answer className="text-control text-ink-dim">
           resolved — {question.answer}
         </span>
       ) : (
         <>
-          {/* A listbox, not a form control: nothing here is submitted, and
-              `aria-multiselectable` is the one honest way to say that several
-              may be marked. */}
-          <div
-            role="listbox"
-            aria-multiselectable={question.multiSelect}
-            aria-label="the options this question offers"
-            onKeyDown={onKeys}
-            className="flex flex-col gap-1"
-          >
-            {question.options.map((option, index) => (
+          {folded ? (
+            /* THE FOLD, and everything it is careful to keep. The mark
+               itself, so nothing is hidden about what was chosen; the way
+               back into the list; and — drawn below by the card, not here —
+               `data-question-note`, the sentence saying a mark is not a
+               delivery. "Marked, not sent" is repeated here rather than left
+               to that note alone, because this row is what replaces the list
+               and it must not be readable as a receipt. */
+            <div
+              data-question-collapsed
+              className={`flex items-baseline gap-2 rounded-[6px] border border-running px-1.5 py-1 ${OPTION_FILL}`}
+            >
+              <span data-question-marked className="min-w-0 flex-1 text-control text-ink">
+                {picked.join(', ')}
+                {/* `ink-dim`, not `ink-faint`: this row RESTS on the fill,
+                    so there is no hover state to lift its ink and
+                    `OPTION_QUIET_INK` would never fire. 4.21:1 at faint,
+                    5.94:1 here. */}
+                <span className="text-meta text-ink-dim"> — marked, not sent</span>
+              </span>
               <button
-                key={option.label}
-                ref={index === 0 ? firstOptionRef : undefined}
                 type="button"
-                role="option"
-                aria-selected={picked.includes(option.label)}
-                data-question-option
-                data-question-number={NUMBERED_OPTIONS[index]}
-                data-picked={picked.includes(option.label) ? 'true' : undefined}
-                onClick={() => toggle(option.label)}
-                className={[
-                  'vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
-                  picked.includes(option.label)
-                    ? 'border-running bg-raised'
-                    : 'border-line hover:bg-raised',
-                ].join(' ')}
+                data-question-expand
+                onClick={() => setFoldedStep(null)}
+                className="vam-tap flex-none cursor-pointer rounded-[6px] px-1.5 py-0.5 text-control text-ink-dim underline decoration-dotted hover:text-ink"
               >
-                <span className="flex max-w-full items-baseline gap-1.5 text-[11px] text-ink">
-                  {NUMBERED_OPTIONS[index] !== undefined && (
-                    <span className="text-[10px] text-ink-faint tabular-nums">
-                      {NUMBERED_OPTIONS[index]}
+                change
+              </button>
+            </div>
+          ) : (
+            /* A listbox, not a form control: nothing here is submitted, and
+              `aria-multiselectable` is the one honest way to say that several
+              may be marked. */
+            <div
+              role="listbox"
+              aria-multiselectable={question.multiSelect}
+              aria-label="the options this question offers"
+              onKeyDown={onKeys}
+              className="flex flex-col gap-1"
+            >
+              {question.options.map((option, index) => (
+                <button
+                  key={option.label}
+                  ref={index === 0 ? firstOptionRef : undefined}
+                  type="button"
+                  role="option"
+                  aria-selected={picked.includes(option.label)}
+                  data-question-option
+                  data-question-number={NUMBERED_OPTIONS[index]}
+                  data-picked={picked.includes(option.label) ? 'true' : undefined}
+                  onClick={(event) => toggle(option.label, event.detail > 0)}
+                  className={[
+                    // `group` is what lets the quiet spans below hear about a
+                    // hover on this button -- see `OPTION_QUIET_INK`.
+                    'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                    picked.includes(option.label)
+                      ? `border-running ${OPTION_FILL}`
+                      : `border-line hover:${OPTION_FILL}`,
+                  ].join(' ')}
+                >
+                  <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
+                    {NUMBERED_OPTIONS[index] !== undefined && (
+                      <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+                        {NUMBERED_OPTIONS[index]}
+                      </span>
+                    )}
+                    <span className="min-w-0">{option.label}</span>
+                  </span>
+                  {option.description !== null && (
+                    <span data-question-description className="max-w-full text-meta text-ink-dim">
+                      {option.description}
                     </span>
                   )}
-                  <span className="min-w-0">{option.label}</span>
-                </span>
-                {option.description !== null && (
-                  <span data-question-description className="max-w-full text-[10.5px] text-ink-dim">
-                    {option.description}
-                  </span>
-                )}
-                {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
+                  {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
                   it and set in mono because that is usually what it is -- a
                   colour, a path, a line of the thing that would be written. It
                   was in the record all along and drawn nowhere. */}
-                {(option.preview ?? null) !== null && (
-                  <span
-                    data-question-preview
-                    className="max-w-full truncate font-mono text-[10px] text-ink-faint"
-                  >
-                    {option.preview}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+                  {(option.preview ?? null) !== null && (
+                    <span
+                      data-question-preview
+                      className={`max-w-full truncate font-mono text-meta ${OPTION_QUIET_INK}`}
+                    >
+                      {option.preview}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
               model's own options and nothing else, and the free-text row is
               the CLI's own UI. So vam appends it and SAYS it appended it —
@@ -1992,18 +2873,18 @@ function QuestionCard({
             data-question-chat
             data-question-synthetic="true"
             onClick={onChat}
-            className="vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:bg-raised"
+            className={`group vam-tap flex cursor-pointer items-baseline gap-1.5 rounded-[6px] border border-line border-dashed px-1.5 py-1 text-left hover:${OPTION_FILL}`}
           >
             {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
               not printed at all when the key is not held -- a caption naming a
               key that does nothing is the defect, not the absence of one. */}
             {keys.chat[0] !== undefined && (
-              <span data-question-chat-key className="text-[10px] text-ink-faint tabular-nums">
+              <span data-question-chat-key className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
                 {keys.chat[0]}
               </span>
             )}
-            <span className="min-w-0 text-[11px] text-ink">Chat about this</span>
-            <span className="min-w-0 text-[10.5px] text-ink-faint">
+            <span className="min-w-0 text-control text-ink">Chat about this</span>
+            <span className={`min-w-0 text-meta ${OPTION_QUIET_INK}`}>
               — vam adds this one; it opens the box below
             </span>
           </button>
@@ -2019,31 +2900,65 @@ function QuestionCard({
           <button
             type="button"
             data-question-submit
-            disabled={unmarked.length > 0 || sending}
-            onClick={() => void send()}
+            /* `sending` ONLY. It used to read `unmarked.length > 0 ||
+               sending`, which took the click, the focus and the explanation
+               away together -- see `refusal`. The in-flight half stays: a
+               second Submit while the first is out would type into a picker
+               that is already moving. */
+            disabled={sending}
+            /* What the control is short of, as a fact rather than as a
+               colour, for anything that has to check the state without
+               reading a sentence. */
+            data-question-short={unmarked.length > 0 ? 'true' : undefined}
+            onClick={() => {
+              const short = unmarked[0];
+              if (short === undefined) {
+                void send();
+                return;
+              }
+              refuse(short);
+            }}
             className={[
-              'rounded-[6px] border px-1.5 py-1 text-[11px]',
-              unmarked.length > 0 || sending
+              'rounded-[6px] border px-1.5 py-1 text-control',
+              sending
                 ? 'cursor-default border-line text-ink-faint'
-                : 'cursor-pointer border-running text-ink hover:bg-raised',
+                : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
           >
             {sending ? 'Submitting…' : 'Submit'}
           </button>
-          {questions.length > 1 && (
-            <span data-question-progress className="text-[10px] text-ink-faint">
-              {pending.length - unmarked.length} of {pending.length} marked
+          {/* WHAT IS STILL MISSING, and now for one question as well as for
+              several. This was `questions.length > 1`, so the commonest call
+              there is -- a single question -- had a faint Submit above a
+              sentence about marking and nothing saying the mark was what it
+              was waiting for. Silent once the set is complete: at that point
+              the button says everything. */}
+          {(pending.length > 1 || unmarked.length > 0) && (
+            <span data-question-progress className="text-meta text-ink-faint">
+              {pending.length > 1
+                ? `${pending.length - unmarked.length} of ${pending.length} marked`
+                : 'not marked yet — pick an option above'}
             </span>
           )}
         </div>
       )}
+      {refusal !== null && (
+        /* `waiting` amber, the same ink the mode row's refusal takes: this is
+           a control declining to act, not a report from the session. The two
+           are separate elements for the same reason they are separate state
+           -- an operator must be able to tell "vam did not send this" from
+           "the picker said no". */
+        <p data-question-refusal className="text-control text-waiting">
+          {refusal}
+        </p>
+      )}
       {outcome !== null && (
-        <p data-question-outcome data-outcome={outcome.kind} className="text-[10px] text-ink-dim">
+        <p data-question-outcome data-outcome={outcome.kind} className="text-control text-ink-dim">
           {outcomeWording(outcome)}
         </p>
       )}
       {open && (
-        <p data-question-note className="text-[10px] text-ink-faint">
+        <p data-question-note className="text-control text-ink-faint">
           {onAnswer === null
             ? // Still exactly true where there is no delivery: nothing here can
               // reach the tool call, and a control that implied otherwise would
@@ -2058,6 +2973,684 @@ function QuestionCard({
     </div>
   );
 }
+
+/**
+ * The mark for one turn, and the only place these glyphs are chosen -- the
+ * `<select>`, the expanded list and the turn's own line in the column would
+ * otherwise draw the same conditional three times, which is how they come to
+ * disagree about what a turn is.
+ *
+ * FAILURE OUTRANKS PROGRESS. `◌` says "not finished" and `✓` says "finished",
+ * and both are true of a turn whose tools blew up -- which is exactly how the
+ * fold came to cost the operator the alarm while keeping the detail. `!` means
+ * SOMETHING INSIDE THIS TURN FAILED, which is a narrower claim than "this turn
+ * failed": the count beside the line says how many, and the turn may well have
+ * recovered. It is still the thing worth seeing from a collapsed row.
+ */
+function turnMark(d: Decision): string {
+  return (d.errorCount ?? 0) > 0 ? '!' : d.output === null ? '◌' : '✓';
+}
+
+/**
+ * HOW MANY OF A TURN'S CALLS THE COLUMN DRAWS, and the number is measured
+ * rather than chosen.
+ *
+ * Over the 77 real session transcripts on this machine: a turn that fits
+ * inside one 128 KiB window -- which is every turn a live poll reads, because
+ * that window IS the poll -- made a median of 3 calls, a p90 of 8, and at most
+ * 20, across 387 such turns. So at 20 nothing a running session shows is ever
+ * cut, and this is not a fold on the working the operator just asked to see.
+ *
+ * IT EXISTS FOR THE OTHER HALF OF THAT CORPUS. A turn whose bytes SPAN the
+ * window -- the case `history.ts` widens the read for, up to 4 MiB, so that a
+ * scrolled-back page carries whole turns -- ran to a median of 30 calls and a
+ * largest of 2,144 (785 turns). Two thousand rows under one prompt is that
+ * turn's answer pushed off the screen by its own working, on a column the
+ * operator is scrolling through history in.
+ *
+ * AND WHAT IS CUT IS SAID, IN A NUMBER VAM HELD. `steps` is already a list of
+ * what was READ; a cap that would not name its own remainder would be the
+ * second, silent fold on a surface built to refuse exactly that.
+ */
+const MAX_STEP_ROWS = 20;
+
+/**
+ * ONE CALL, AS A ROW. The mark is a glyph and a colour, and a failure may
+ * depend on neither: the word rides in `sr-only` beside it, because the count
+ * on the line above says something failed and only this says which one.
+ */
+function StepRow({ step }: { readonly step: TurnStep }) {
+  return (
+    <li
+      data-progress-step={step.id}
+      data-progress-step-failed={step.failed ? 'true' : undefined}
+      className="flex min-w-0 items-center gap-1.5"
+    >
+      <span aria-hidden="true" className={step.failed ? 'text-failed' : undefined}>
+        {step.failed ? '!' : '·'}
+      </span>
+      {step.failed && <span className="sr-only">{t('steps.failed')}</span>}
+      <span data-progress-step-label className="min-w-0 truncate">
+        {step.label}
+      </span>
+    </li>
+  );
+}
+
+/**
+ * ONE TURN OF THE TRANSCRIPT, as a block of the column.
+ *
+ * The pane used to draw exactly one of these -- whichever turn `selectedId`
+ * pointed at -- while `entry.session.decisions` already carried up to
+ * `MAX_DECISIONS` (3,276) of them, newest first. The operator asked for the
+ * whole session, scrolled, with the prompt pinned: "show the WHOLE session,
+ * load more when scrolling up, and the sticky In should follow wherever you
+ * scroll." So the column maps every turn through this, oldest at the top.
+ *
+ * ITS OWN BOX, AND THAT IS THE MECHANISM, NOT A TIDINESS. `position: sticky`
+ * is bounded by the sticky element's CONTAINING BLOCK: with every `in` a flat
+ * sibling of the column, each one would pin at `top: 0` for the rest of the
+ * scroll and pile up behind the next -- and a shorter prompt arriving on top
+ * of a taller one leaves the taller one's tail sticking out below it. Wrapped,
+ * each `in` is released exactly when its own turn scrolls past, which is what
+ * "the In of the turn you are inside" means and what the operator's "follows
+ * wherever you scroll" asked for. The cost of the wrapper is paid at
+ * `--vam-turn-cap` -- see the `max-h` below.
+ *
+ * MEMOISED, because at 3,276 turns this is the difference between a keystroke
+ * in the composer costing one render and costing 3,276 of them. Every prop is
+ * a primitive or the turn object itself, which `transcript.ts` rebuilds only
+ * when its content actually changes (ids are content-derived), so the default
+ * shallow compare is the right one.
+ */
+const TurnBlock = memo(function TurnBlock({
+  decision,
+  marked,
+  newest,
+  live,
+  activity,
+  waitingCause,
+  age,
+  status,
+  reserveCorner,
+  focusView,
+  unfolded,
+  onUnfold,
+  onPromptMenu,
+  onAnswerMenu,
+}: {
+  readonly decision: Decision;
+  /** Is this the turn the picker (or the canvas) has landed on? */
+  readonly marked: boolean;
+  /** Is this the newest turn vam read -- the only one "right now" is about? */
+  readonly newest: boolean;
+  /** Is the session still working on THIS turn? `newest` and `running`. */
+  readonly live: boolean;
+  readonly activity: string | null;
+  readonly waitingCause: string | null;
+  readonly age: string | null;
+  readonly status: SessionStatus | null;
+  /**
+   * HOW MUCH OF THIS BUBBLE'S FIRST LINE THE VIEW PILL SITS OVER, in px --
+   * 0 when no pill is drawn. The pane's own `cornerOverhang`, which is the
+   * pill's width less the distance this bubble's right edge already sits
+   * inside the pane's; see its comment. Not the pill's full width: reserving
+   * that costs ~60px of the first line for a gap nothing is painted in, and
+   * `e2e/narrow-pane-overlay-shots.mjs` fails on THAT as well as on covering
+   * the text -- a reservation is wrong in both directions.
+   */
+  readonly reserveCorner: number;
+  /** Focus view, as the operator set it -- see `prefs/progress.ts`. */
+  readonly focusView: boolean;
+  /** Has the operator pressed this turn's way back? */
+  readonly unfolded: boolean;
+  /** Ask for this turn's working. Given the turn's id, never a closure per
+   *  turn: the column can hold hundreds of these. */
+  readonly onUnfold: (id: string) => void;
+  /** Right-click on this turn's In bubble. Given the turn's id and the
+   *  pointer, on the same rule as `onUnfold`: one stable callback for a column
+   *  that can hold 3,276 of these, not a closure per turn. */
+  readonly onPromptMenu: (id: string, at: { readonly x: number; readonly y: number }) => void;
+  /** The same, for its answer. */
+  readonly onAnswerMenu: (id: string, at: { readonly x: number; readonly y: number }) => void;
+}) {
+  const failed = decision.errorCount ?? 0;
+  const ageNote = promptAgeNote(decision);
+  /**
+   * DOES THIS TURN SPEND A ROW ON ITS OWN WORKING?
+   *
+   * The rule is `drawsProgressLine`, in `prefs/progress.ts`, and it is there
+   * rather than inline for one reason: it is the thing that must never fold a
+   * failure away, and a conditional written here would be a second opinion
+   * about that -- which is how the two come to disagree. Everything it needs
+   * is on this block already, so nothing is computed for it.
+   */
+  const turnFacts = {
+    errorCount: decision.errorCount,
+    newest,
+    activity,
+    waitingCause,
+    unfolded,
+  };
+  const showProgress = drawsProgressLine(focusView, turnFacts);
+  /**
+   * AND THE WAY BACK, FROM THE SAME PAIR OF PREDICATES. Not `!showProgress`:
+   * that would draw one on every turn while focus view is off, where nothing
+   * is folded and there is nothing to restore. `drawsUnfoldControl` is the
+   * complement of the line WITHIN focus view, written once so the two cannot
+   * drift into a turn that has neither.
+   */
+  const showUnfold = drawsUnfoldControl(focusView, turnFacts);
+  /**
+   * AND THE WORKING ITSELF -- the calls the turn made, which is the thing
+   * "hide tool calls" was always about. Same file, same reason: three
+   * predicates written in one place, where the invariant that binds them (a
+   * step is never drawn where the line is not) can be swept.
+   *
+   * CAPPED HERE AND NOT AT THE SOURCE. `steps` is a list of what vam READ, and
+   * the reader's budget is the window, exactly as it is for `MAX_DECISIONS`;
+   * how many rows a COLUMN can spend is a different question with a different
+   * answer, and `dropped` below is what makes the cap say its own size.
+   */
+  const steps = decision.steps ?? [];
+  const showSteps = drawsTurnSteps(focusView, turnFacts) && steps.length > 0;
+  const dropped = Math.max(0, steps.length - MAX_STEP_ROWS);
+  return (
+    <article
+      data-column-turn={decision.id}
+      /* MARKED, NOT SHOWN ALONE. `selectedId` used to decide which turn was
+         drawn at all; in a column that is the wrong verb -- the others do not
+         go away, the column scrolls to this one and says which one it is. */
+      data-turn-current={marked ? 'true' : undefined}
+      data-turn-newest={newest ? 'true' : undefined}
+      /* `relative` is what makes this the sticky block's containing block --
+         see the note above. `gap` matches the column's own so a turn's three
+         parts sit at the same rhythm as the turns do. */
+      className="relative flex flex-none flex-col gap-1.5"
+    >
+      {/* STICKY, not merely first: `position: sticky` against the column's own
+          scroll (the operator's ask -- "the sticky In should follow wherever
+          you scroll"), with an opaque background -- the pane's own, see the
+          fill note below -- so the answer scrolling underneath does not bleed
+          through the prompt.
+
+          BOUNDED, because an unbounded sticky block is not a pin, it is a lid
+          (audit F2, measured: a 3,822-character prompt left the answer 19px
+          and a 10,920-character one covered `progress` and `out` AT MAXIMUM
+          SCROLL). What is capped is what STICKS: the paragraph keeps its full
+          length and gets its own scroll inside the bubble, so nothing typed is
+          truncated. That is VSCode's sticky-scroll bargain.
+
+          `45cqh` RATHER THAN `45%`, AND THAT IS THE WRAPPER'S BILL. A
+          percentage max-height resolves against the CONTAINING BLOCK: the
+          column has a definite height (`flex-1` down a `min-h-0` chain), the
+          `<article>` above does not, so the very same `45%` that bounded the
+          pin while one turn was drawn resolves to `none` inside a wrapper --
+          audit F2 back, with not one class changed to notice it by. A
+          container query unit resolves against the nearest SIZE CONTAINER
+          instead, which the column declares (`container-type: size` in its own
+          class list), so the cap is 45% of the column however deep in the tree
+          the block sits. Measured on this head: column 400px, resolved
+          `max-height: 180px`, both turns, wrapper and all. And measured in CI
+          as RESOLVED PIXELS by `e2e/transcript-column-shots.mjs` -- a cap that
+          quietly became `none` (or stayed the unresolvable `45%`, which
+          `getComputedStyle` cheerfully reports back verbatim) is exactly the
+          shape of bug a class-name assertion cannot see. */}
+      {/* FULL-BLEED TO BOTH PANE EDGES, which is two different numbers since
+          the column reserved its right-hand strip for the floating jumps:
+          `-ml-3.5` gives back the column's left padding, `-mr-11` gives back
+          that strip, and each side's padding puts the content back. The FILL
+          has to reach both edges or the transcript shows through beside the
+          pinned prompt; the CONTENT must not reach the right one, or the
+          bubble would run under a jump.
+
+          `bg-pane`, NOT `bg-ground`. This band is what the operator reported
+          as "black background areas ... the In block": `ground` is the darkest
+          value in the palette and the pane it bands is two steps up it, so a
+          strip that exists purely to stop the transcript bleeding through was
+          painting itself darker than the surface it sits in. The
+          band's job is to be invisible and the BUBBLE is the thing meant to be
+          seen; opacity is what it needs, not depth. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the rule is RIGHT
+          about this one and the answer is still a suppression, so the reason
+          is written out. A transcript block has no focusable child, so the
+          Menu key -- which fires `contextmenu` on the FOCUSED element -- cannot
+          open this menu, and unlike the session row and the tab there is no
+          button here to move the handler onto. Making one would mean a tab
+          stop per turn, and the column draws up to 3,276 of them.
+          WHAT MAKES IT SOUND: neither ACT is pointer-only. Copy is `yy` and
+          cancel is Escape in the composer, both bound, both in the key sheet.
+          This menu is a shortcut to acts the keyboard already has -- which is
+          what the rule exists to guarantee -- rather than the only route to
+          them. If an act is ever added here that has no chord, this comment
+          stops being true and the suppression has to go. */}
+      <section
+        data-detail-block="in"
+        /* THE BAND, not just the bubble: the operator aiming at a prompt aims
+           at the block it sits in, and the tinted bubble is inset from it.
+           `preventDefault` is what stops Electron opening the SHELL's menu --
+           Reload, Inspect Element -- over a transcript. */
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onPromptMenu(decision.id, { x: event.clientX, y: event.clientY });
+        }}
+        className="-ml-3.5 -mr-11 sticky top-0 z-10 flex max-h-[45cqh] min-h-0 flex-none flex-col gap-1 bg-pane pt-1.5 pr-11 pb-1.5 pl-3.5"
+      >
+        {/* The region's name, announced and not drawn. */}
+        <span className="sr-only">in</span>
+        {/* HOW OLD THE PIN IS -- see `promptAgeNote`. Above the bubble rather
+            than inside it: the bubble is the operator's own words and nothing
+            vam writes belongs in there. `text-ink-dim` and `text-meta`, the
+            same dim the branch and the age already use, because a long turn is
+            ORDINARY and an error colour would be a claim of its own. */}
+        {ageNote !== null && (
+          <span data-prompt-age className="flex-none font-mono text-ink-dim text-meta">
+            {ageNote}
+          </span>
+        )}
+        {/* THE BUBBLE (operator: "the IN prompt should have a different colour
+            so it stands out, and sit in a bubble"). A tinted, rounded ground
+            INSIDE the one continuous column, not the bordered band PR 266
+            deleted. It is also the element the `max-h` above bounds against:
+            `overflow-y-auto` here is what keeps a 10,000-character prompt
+            whole while the block it sticks in stays capped. */}
+        <div
+          data-detail-scroll="in"
+          /* The scrollbar is NOT hidden here, unlike the column's. It is the
+             only thing on screen saying the prompt continues past the
+             bubble's bottom edge, and a bound nobody can see is how "the
+             answer is unreachable" became "the prompt is". */
+          /* PADDING IS WHAT MAKES THE TINT A SHAPE, and it is bounded on BOTH
+             sides -- 10x8, held to a 7-12px band measured AS PAINT by
+             `e2e/long-prompt-shots.mjs`, because a padding rule that matches
+             nothing has passed review in this project before. */
+          /* `bg-in-bubble`, NOT `bg-raised`. The operator has asked about this
+             bubble four times: once for it to exist, then -- having got it --
+             "the In bubble needs more contrast within the pane", then "lean
+             it towards grey", and now, having seen the teal on screen again:
+             "drop it for a plain grey that contrasts with the panel
+             background". `raised` on a `pane` band measures 1.030:1 in dark
+             and 1.015:1 in light, three units per channel, which is under the
+             step at which a person reliably sees an edge: the bubble was in
+             the DOM and not on the screen.
+
+             "THE PANEL BACKGROUND" IS THIS ELEMENT'S OWN GROUND, `bg-pane`
+             (the `data-detail-block="in"` band two levels up), NOT
+             `--vam-panel` -- a separate, lower token. Named here because the
+             two are easy to conflate and only one of them is what this
+             bubble is actually drawn on.
+
+             THE FILL IS NOW A STRAIGHT GREY IN DARK -- `--vam-in-bubble`'s
+             own value is in `styles.css`, not restated here: `a*`/`b*`
+             zeroed, `L*` carried across unchanged, so the
+             ratio against the pane holds where it read as a teal -- 1.499:1,
+             over the palette's 1.4 floor -- and ΔE now reads 11.41 off pure
+             lightness, over the 6.24 floor and over four times `--vam-raised`'s
+             own step off the pane, both measured as paint by
+             `e2e/pane-colour-shots.mjs` and as tokens by
+             `test/renderer/surface-elevation.test.ts`. Light is not part of
+             this ask and keeps its own cool-leaning fill.
+
+             THE INK BELOW IS PART OF THE CHOICE, AND IT MOVED TOO -- the
+             operator's separate ask for a lighter prompt. `text-ink`, not
+             `text-ink-dim`: 6.887:1 on the dark fill, up from 4.782; 17.17:1
+             in light. `text-ink-faint` still reads under floor on the dark
+             fill (3.718:1) and must not be used here. The guard measures the
+             ink this element is really painted with, so that constraint is
+             enforced rather than noted. */
+          className="min-h-0 min-w-0 overflow-y-auto rounded-[10px] bg-in-bubble px-2.5 py-2"
+        >
+          <p className="whitespace-pre-wrap break-words text-body text-ink">
+            {/* THE RESERVED CORNER, audit F1's obligation. A float rather than
+                padding because only the FIRST LINE meets the pill: padding
+                would indent all 300 lines of a long prompt to clear something
+                34px tall. The bound is measured by
+                `e2e/narrow-pane-overlay-shots.mjs`, which fails both if the
+                reservation misses the pill and if it runs far past it --
+                over-reserving takes the prompt's opening words out for
+                nothing, which is what the deleted identity line's 7rem did.
+
+                66px, DOWN FROM 6rem, AND NOT A TASTE. Measured at five widths,
+                the pill's left edge is 46px past this bubble's content edge
+                now that the column reserves a 44px strip on the right for the
+                floating jumps (see `data-detail-column`) and the bubble ends
+                10px inside it. 66 covers those 46 with the same 20px of slack
+                the 96 carried before the strip existed; leaving it at 96 would
+                have reserved 50px of first line for something already clear,
+                and the guard above would have said so.
+
+                ON EVERY TURN, not only on the pinned one. The pill floats over
+                the top-right corner of the COLUMN, so whichever turn's prompt
+                is pinned there is the one it covers -- and which turn that is
+                changes with every scroll event. Reserving only for the pinned
+                one would mean rewriting the DOM as you scroll and reflowing a
+                paragraph under the reader's eye each time a new turn takes the
+                pin; reserving on all of them costs a shorter first line in the
+                turns that are not pinned and cannot be wrong at any scroll
+                offset. Only when the overlay is actually drawn -- an unfocused
+                pane paints no pill. */}
+            {reserveCorner > 0 && (
+              <span
+                data-detail-corner-reserve
+                aria-hidden="true"
+                className="float-right h-[22px]"
+                /* EXACTLY THE PART OF THE PILL THAT OVERHANGS THIS BUBBLE --
+                   measured, both edges, every time either can have moved.
+                   The `66px` this replaces was fitted to a THREE-icon pill
+                   (90px) and survived only because this bubble's right edge
+                   already sat ~44px inside the pane's, leaving 46px to
+                   cover. A source with a terminal draws four icons and one
+                   with the file bridge draws five (146px): ~102px to cover,
+                   and the first line of the pinned prompt -- the most-read
+                   text in the app -- would have run under the difference.
+                   Reserving the pill's whole width instead is the OTHER
+                   failure the guard names: 60px of a narrow pane's first
+                   line spent on a gap nothing was ever painted in. Only the
+                   overhang is right, and only measurement knows it. */
+                style={{ width: reserveCorner }}
+              />
+            )}
+            {decision.input}
+          </p>
+        </div>
+      </section>
+
+      {/* THE TURN'S OWN CONDENSED LINE. It used to be the session's -- one
+          line for the whole pane, carrying the turn count and the picker,
+          because only one turn was ever on screen. In a column those are facts
+          about the COLUMN and have moved to its two ends (the boundary block
+          at the top, the navigation bar at the bottom); what is left here is
+          what is true of THIS turn: which turn it is, and whether anything
+          inside it failed.
+
+          AND WHETHER IT IS DRAWN AT ALL IS THE OPERATOR'S, since they asked
+          for concise mode to be adjustable. ABSENT, NOT DIMMED, and the whole
+          `<section>` goes rather than the line inside it: the region carries
+          the announced name `progress`, and a wrapper left behind would have a
+          screen reader open a region containing nothing. `display: none` in a
+          stylesheet would have left exactly that wrapper, which is the second
+          reason this is a React condition and not CSS -- the first being that
+          a hidden element is still an element, and a guard that reads the DOM
+          could not tell the two modes apart at all. */}
+      {/* THE WAY BACK, WHERE THE WORKING WAS.
+
+          "Folded activity stays one click away" -- and the setting this
+          replaces had no such clause, which is why it was a deletion with a
+          preference in front of it rather than a fold. So a folded turn is
+          never left with nothing: it draws this instead, in the same place,
+          and pressing it puts that turn's line back.
+
+          A BUTTON, NAMED IN WORDS. A control that cannot be found is the same
+          defect as one that cannot act, so this is not a hover affordance and
+          not a bare glyph: it takes a tab stop and its accessible name says
+          what pressing it produces. The drawn part is deliberately almost
+          nothing -- an ellipsis at the progress line's own size and ink -- so
+          that folding still BUYS the operator the quiet page they asked for.
+          A chip as loud as the line it replaced would be the setting doing
+          nothing at all.
+
+          ONE TURN, NOT THE COLUMN. The name says "this turn" because there is
+          one per turn and they are otherwise identical, and because a control
+          that unfolded everything would be a second copy of the setting
+          reached from a place that promised something smaller. */}
+      {showUnfold && (
+        <button
+          type="button"
+          data-turn-unfold={decision.id}
+          onClick={() => onUnfold(decision.id)}
+          aria-label={`show this turn's working — ${decision.label}`}
+          /* OUT OF FLOW, AND THAT IS THE WHOLE DESIGN RATHER THAN A DETAIL.
+             vam folds ONE line per turn, so a way back that takes a row of its
+             own gives the row straight back and the setting buys nothing --
+             measured, and `e2e/transcript-column-shots.mjs` caught exactly
+             that: "collapsed 959px vs shown 959px". So it is absolutely
+             positioned in the turn's own top-right corner (the `article` is
+             already `relative` for the sticky block) and costs no height at
+             all. Right rather than left: the prompt bubble and the answer both
+             start at the left edge, and `reserveCorner` only applies to the
+             newest turn, which focus view never folds.
+
+             A REAL 24x24 BOX RATHER THAN `vam-hit-24`, and the difference is
+             load-bearing here: that utility sets `position: relative` on the
+             element it grows, and being an unlayered rule it beats Tailwind's
+             layered `absolute` -- measured, the button came back
+             `position: relative` and the fold saved nothing. Out of flow, the
+             box costs no height anyway, so the hit area can simply BE the
+             element and the drawn mark stays small inside it.
+
+             `ink-quiet`, not `ink-ghost` -- issue 201 ruled `ghost` out of
+             anything that has to be READ, and on a folded turn this is the
+             only thing there is to read. */
+          /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
+             floor 24 does not meet -- five of these draw on one folded
+             screen, and this is the ONLY route back to a folded turn's
+             working. Out of flow, so the extra box costs no height.
+
+             IT GROWS INWARD, AND THAT IS THE POINT. Anchored at `right-0`,
+             the 44 box ends where the 24 one did -- flush against the
+             `data-out-to-top` chevron's own 44px column at x=346, with no
+             overlap. Re-anchoring it outward to keep the mark still was
+             tried and measured: x=312..356 against a chevron at 346..390, so
+             two different actions shared 10px of hit area. A mark that moves
+             10px is a smaller cost than a tap that does the wrong thing. */
+          className={`vam-tap -top-1 absolute right-0 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
+        >
+          {/* The phone's other half: hit 44, PAINT 30, the pattern the view
+              icons and the keystroke strip already use. On the desktop this
+              span is unstyled and the box stays 24. */}
+          <span data-tap-skin aria-hidden="true">
+            ···
+          </span>
+        </button>
+      )}
+      {showProgress && (
+        <section data-detail-block="progress" className="flex flex-none flex-col gap-1">
+          {/* Announced, not drawn. */}
+          <span className="sr-only">progress</span>
+          <div
+            data-progress-line
+            className="flex items-center gap-1.5 font-mono text-meta text-ink-faint"
+          >
+            <span data-progress-turn-label className="flex min-w-0 items-center gap-1 truncate">
+              {/* Answered, still open, or carrying a failure -- the same marks
+                the picker draws, from the same function. Decorative, so
+                hidden: the label is what a screen reader should read. */}
+              <span aria-hidden="true" className={failed > 0 ? 'text-failed' : undefined}>
+                {turnMark(decision)}
+              </span>
+              <span className="min-w-0 truncate">{decision.label}</span>
+            </span>
+            {/* THE FOLD MAY COST DETAIL, NEVER ALARM. A turn's mark cannot say
+              how many tool calls blew up inside it, and the count is what the
+              operator would otherwise have to open the turn to find. Drawn
+              only above zero: ABSENT is "this source cannot report tool
+              failures" and ZERO is "vam looked and found none", and neither is
+              news. */}
+            {failed > 0 && (
+              <span data-progress-failed className="text-failed">
+                · {failed} failed
+              </span>
+            )}
+            {/* `session.activity` is what the session is doing RIGHT NOW, so it
+              belongs to the turn currently being worked and to no other -- on
+              an older turn it described the present while the operator read
+              the past. In a column that turn is the last one, at the bottom,
+              which is where the eye already is. */}
+            {newest && activity !== null && (
+              <>
+                {/* The line's own middot, so the label and the activity do not
+                  run together into one phrase. Decorative: a screen reader
+                  reads two values. */}
+                <span aria-hidden="true">·</span>
+                <span data-progress-activity className="min-w-0 truncate">
+                  {activity}
+                </span>
+              </>
+            )}
+            {/* WHAT IT IS BLOCKED ON, in the session's own words. The pane used
+              to compute `waitingFor` and spend it as a boolean, so every
+              waiting session read the same on screen: "it needs something" and
+              "it needs permission to run rm" were one picture. VERBATIM,
+              because the observed causes are a sample of an open set
+              (`session-status.ts`). */}
+            {newest && waitingCause !== null && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span data-progress-waiting className="min-w-0 truncate text-waiting">
+                  {waitingCause}
+                </span>
+              </>
+            )}
+          </div>
+          {/* THE CALLS THE TURN MADE, which is what "show the whole progress"
+              asked for. Before this the line above was the whole of a turn's
+              working on screen -- its mark and the agent's name -- while the
+              reader had parsed every `tool_use` part and kept one.
+
+              INSIDE THIS SECTION, NOT BESIDE IT. That is what keeps focus view
+              folding ONE thing: `drawsTurnSteps` is a strict subset of
+              `drawsProgressLine` (swept in `prefs.focus-view.test.ts`), so
+              there is no state where a row outlives the line it belongs to.
+
+              AN ORDERED LIST, because the order is the content: this is what
+              the turn did and then did next. `list-none` is explicit rather
+              than left to the preflight -- a marker column here would indent
+              every row past the line it sits under. */}
+          {showSteps && (
+            <ol
+              data-progress-steps
+              className="flex min-w-0 list-none flex-col gap-0.5 pl-3 font-mono text-ink-faint text-meta"
+            >
+              {steps.slice(0, MAX_STEP_ROWS).map((step) => (
+                <StepRow key={step.id} step={step} />
+              ))}
+              {/* WHAT THE CAP LEFT OUT, as a number vam read. A list that is a
+                  count of what was READ cannot then quietly draw fewer than it
+                  holds: that is the silent fold this surface exists against,
+                  and it is the same qualifier `turns read` carries one level
+                  up. */}
+              {dropped > 0 && (
+                <li data-progress-steps-more className="text-ink-quiet">
+                  {t('steps.more', { count: String(dropped) })}
+                </li>
+              )}
+            </ol>
+          )}
+        </section>
+      )}
+
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the rule is RIGHT
+          about this one and the answer is still a suppression, so the reason
+          is written out. A transcript block has no focusable child, so the
+          Menu key -- which fires `contextmenu` on the FOCUSED element -- cannot
+          open this menu, and unlike the session row and the tab there is no
+          button here to move the handler onto. Making one would mean a tab
+          stop per turn, and the column draws up to 3,276 of them.
+          WHAT MAKES IT SOUND: neither ACT is pointer-only. Copy is `yy`, which copies
+          this turn's commands, and the answer itself is selectable text.
+          This menu is a shortcut to acts the keyboard already has -- which is
+          what the rule exists to guarantee -- rather than the only route to
+          them. If an act is ever added here that has no chord, this comment
+          stops being true and the suppression has to go. */}
+      <section
+        data-detail-block="out"
+        /* The "detail pane" half of the same request. One item, so the handler
+           is the same one the bubble uses with a different `kind`. */
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onAnswerMenu(decision.id, { x: event.clientX, y: event.clientY });
+        }}
+        className="flex flex-none flex-col gap-1.5"
+      >
+        <span className="sr-only">out</span>
+        <div
+          data-detail-scroll="out"
+          className="flex flex-col gap-2 text-[length:var(--vam-out-font-size,12px)]"
+        >
+          {decision.output !== null && decision.output !== '' && (
+            <OutText output={decision.output} />
+          )}
+          {(decision.output === null || decision.output === '' || live) && (
+            /* The live line and the answer are not alternatives, and treating
+               them as one is what made this line unreachable in practice: it
+               used to render only when `output` was empty, but `transcript.ts`
+               writes `turns[last].output` on every assistant text, so a
+               running session has an answer within seconds and the operator
+               never saw the line again. It is rendered whenever the turn is
+               live, and BELOW the answer: here is what the session has said,
+               here is what it is doing now. When there is no answer it is the
+               only thing in the region, so the empty-turn sentence prints
+               once, in this same element, rather than in a second one.
+
+               While the session is working, this line is the only thing in the
+               pane that changes -- so it carries the work rather than a
+               sentence that reads the same on a session that has quietly died.
+               The idiom is the agent's own running caption: a star, the word
+               for what it is doing, and an ellipsis that animates. The WORD is
+               `activity` -- the newest tool call the source reported -- so it
+               cycles as the work does, off data vam has, rather than off a
+               rotating list of invented gerunds. Under
+               `prefers-reduced-motion` the dots park on at full opacity
+               (styles.css), which still reads as "still going". It is withheld
+               from every stopped status -- `live` is `running` AND
+               newest-turn only. A null `activity` is a source that cannot say
+               (model.ts): the sentence stays as the word and no words are
+               invented, because it asserts only that the session is running,
+               which it is. */
+            <p
+              data-out-empty={decision.output === null || decision.output === '' ? true : undefined}
+              data-out-live={live ? 'true' : undefined}
+              className="text-control text-ink-faint"
+            >
+              {live ? (
+                /* Star and word share one accent, the app's own `running`
+                   token; the detail is dim. Decorative marks are hidden from
+                   assistive tech, which should read the activity and not a
+                   star and three dots. */
+                <span data-out-running className="text-running">
+                  <span aria-hidden="true" data-out-running-star className="vam-running-star">
+                    {'✳'}
+                  </span>{' '}
+                  <span data-out-running-word className="vam-running-word">
+                    {/* `activity` is the newest tool call the source read, and
+                        on a turn vam painted itself that reading is about the
+                        PREVIOUS turn -- it was taken before this prompt was
+                        sent. Drawing it here would name work the agent did
+                        earlier as this turn's working, which is the same
+                        unsupported claim `noAnswerNote` refuses one line down.
+                        So the paint's own sentence wins over it. */}
+                    {decision.unconfirmed === true || decision.unread === true
+                      ? noAnswerNote(decision.output, status, decision.unconfirmed, decision.unread)
+                      : (activity ??
+                        noAnswerNote(
+                          decision.output,
+                          status,
+                          decision.unconfirmed,
+                          decision.unread,
+                        ))}
+                  </span>
+                  <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
+                    <span>.</span>
+                    <span>.</span>
+                    <span>.</span>
+                  </span>
+                  {age !== null && (
+                    <span data-out-running-detail className="text-ink-faint">
+                      {' '}
+                      (last active {age} ago)
+                    </span>
+                  )}
+                </span>
+              ) : (
+                noAnswerNote(decision.output, status, decision.unconfirmed, decision.unread)
+              )}
+            </p>
+          )}
+        </div>
+      </section>
+    </article>
+  );
+});
 
 export function DetailPanel(props: DetailPanelProps) {
   const {
@@ -2076,12 +3669,17 @@ export function DetailPanel(props: DetailPanelProps) {
     answer,
     prompt,
     terminal,
+    files,
     pickImageAttachment,
     sending = false,
     width,
     resizeHandle,
     records,
+    prRepo,
     phone = false,
+    defaultProvider,
+    onSetDefaultProvider,
+    paneFocused = true,
   } = props;
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -2124,10 +3722,24 @@ export function DetailPanel(props: DetailPanelProps) {
   const sessionKey = entry?.session.id ?? null;
   const sessionKeyRef = useRef(sessionKey);
   const focusNodeRef = useRef(focusNodeId);
+  /**
+   * WHICH TURN THE COLUMN SHOULD BE SCROLLED TO, once, on the next paint.
+   *
+   * A ref rather than state because nothing renders from it: it is a
+   * one-shot instruction to the layout effect below, consumed and cleared
+   * there. Set by an explicit pick and by a canvas navigation -- the two
+   * things that mean "take me to that turn" now that picking one no longer
+   * hides the rest. Session identity is deliberately NOT here: a new document
+   * opens at its newest turn, which is the stick-to-bottom effect's job, and
+   * an instruction to scroll into the middle of it would fight that.
+   */
+  const scrollToTurnRef = useRef<string | null>(null);
   let followCanvas = false;
+  let sessionChanged = false;
   if (sessionKeyRef.current !== sessionKey) {
     sessionKeyRef.current = sessionKey;
     followCanvas = true;
+    sessionChanged = true;
   }
   // `undefined` (no caller offering the signal, e.g. `PhoneShell`) is never a
   // "change" -- only a caller that actually reports a node id can ask this
@@ -2135,22 +3747,90 @@ export function DetailPanel(props: DetailPanelProps) {
   if (focusNodeId !== undefined && focusNodeRef.current !== focusNodeId) {
     focusNodeRef.current = focusNodeId;
     followCanvas = true;
+    // WITHIN ONE SESSION ONLY. Focusing a different session changes this id
+    // too, and there the bottom is where the column must open -- landing
+    // mid-history is the half-read flash `focusKey` has always existed to
+    // avoid.
+    if (!sessionChanged && canvasDecisionId !== null) scrollToTurnRef.current = canvasDecisionId;
   }
   if (followCanvas && selectedId !== canvasDecisionId) setSelectedId(canvasDecisionId);
   /**
-   * A PICK THE WINDOW NO LONGER CARRIES AT ALL -- not merely off the newest
-   * slice, but genuinely absent from `entry.session.decisions`, the same gap
-   * `source.ts` already documents for `questions` past `TAIL_BYTES`: vam
-   * cannot tell "answered a while ago" from "never happened" for something
-   * outside the window, so it must not pretend otherwise. Checked before
-   * falling back to `canvasDecision`, which is what stops that fallback from
-   * quietly relabelling a different turn as the one the operator picked.
+   * THE SOURCE'S BACKWARD PAGER, or `null` when this source has none.
+   *
+   * Read from context rather than taken as a prop, and `sources/history-reader.ts`
+   * carries the argument for that: it is the one member this pane uses that
+   * belongs to the SOURCE rather than to this pane, it takes the session id it
+   * acts on as an argument, and every split leaf wants the same function.
+   * `null` is a real answer -- an honest "this source cannot read further
+   * back" -- never a stub that resolves empty, because a stub is how "nothing
+   * older" and "vam could not ask" become one sentence.
+   */
+  const readHistory = useHistoryReader();
+  /**
+   * THE TURNS THIS PANE HAS WALKED BACK INTO, newest first, and where the walk
+   * has got to. Two pieces of state, one subject.
+   *
+   * WHY THEY LIVE HERE, in this component, rather than in the model:
+   *
+   *  - `entry` is rebuilt WHOLESALE by the poll (`useSourceModel`), so anything
+   *    written into it would be erased every ten seconds by the very thing it
+   *    has to survive;
+   *  - the thing that must not move when a page lands is THIS pane's scroll
+   *    offset, and `Canvas.tsx` mounts one `DetailPanel` per split leaf -- two
+   *    panes on the same session scroll independently, so a store shared
+   *    between them would tie one operator's scroll-back to the other's;
+   *  - and it is per-pane state that nothing outside this pane renders from,
+   *    which is the same test `cycleNote` and the tab already pass.
+   *
+   * ONLY THE OLDER HALF IS REMEMBERED, and `transcript-history.ts` carries the
+   * argument in full: the live list is used exactly as the poll delivered it,
+   * so this pane holds no second opinion about a turn the poll is still
+   * carrying, and `Canvas.tsx`'s optimistic paint -- with the retraction that
+   * follows a refused write -- stays the poll's business rather than becoming a
+   * phantom this pane preserves.
+   */
+  const [older, setOlder] = useState<readonly Decision[]>(NO_TURNS);
+  const [pager, setPager] = useState<PagerState>(RESTING_PAGER);
+  /**
+   * WHICH SESSION A WALK IS RUNNING FOR, or `null` when none is. A ref, because
+   * nothing renders from it -- `pager.phase` is what the block draws -- and
+   * because it has to be readable and writable between two ticks of one async
+   * function without a render in between, which is what makes "one request in
+   * flight" a guarantee rather than a race.
+   */
+  const readingRef = useRef<string | null>(null);
+  // A NEW SESSION IS A NEW DOCUMENT: another session's turns must not be above
+  // it, its cursor is meaningless here, and a walk still in flight for the old
+  // one must not be allowed to block this one's first ask. Read from a local
+  // for THIS render -- the state updates queued here land on the next one, and
+  // drawing the old session's history for one frame is the half-read flash
+  // `focusKey` has always existed to avoid.
+  if (sessionChanged) readingRef.current = null;
+  if (sessionChanged && older.length > 0) setOlder(NO_TURNS);
+  if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
+  const olderNow = sessionChanged ? NO_TURNS : older;
+  const pagerNow = sessionChanged ? RESTING_PAGER : pager;
+  const mergedColumn = columnOf(entry?.session.decisions ?? NO_TURNS, olderNow);
+  /**
+   * A PICK THE COLUMN NO LONGER CARRIES AT ALL -- not merely off the newest
+   * slice, but genuinely absent, the same gap `source.ts` already documents for
+   * `questions` past `TAIL_BYTES`: vam cannot tell "answered a while ago" from
+   * "never happened" for something outside the window, so it must not pretend
+   * otherwise. Checked before falling back to `canvasDecision`, which is what
+   * stops that fallback from quietly relabelling a different turn as the one
+   * the operator picked.
+   *
+   * AGAINST THE COLUMN, NOT AGAINST `decisions`, and that changed with paging.
+   * The column now holds turns the live tail does not -- ones read back into
+   * it, and ones the tail's byte window has since slid past -- so asking
+   * `decisions` alone would print "the turn you were reading has scrolled out
+   * of what vam can see" over a turn that is on screen, forty pixels below.
    */
   const selectedTurnMissing =
     entry !== null &&
     selectedId !== null &&
     selectedId !== canvasDecisionId &&
-    !entry.session.decisions.some((d) => d.id === selectedId);
+    !mergedColumn.some((d) => d.id === selectedId);
   /**
    * RENDERED FROM THE PROP WHEN IT MATCHES, RATHER THAN RE-FOUND BY ID. While
    * this panel is following the canvas's own pick (the common case),
@@ -2158,16 +3838,19 @@ export function DetailPanel(props: DetailPanelProps) {
    * from this same `entry.session.decisions` -- so using it as given is what
    * keeps a streaming answer on the newest turn live. A re-lookup would still
    * find the same id, but there is no reason to add one. Only once the
-   * operator has picked something else does this reach into
-   * `entry.session.decisions` for it, which is the one place that turn's
-   * current content actually lives -- and `null` when it is not there at
-   * all, so `selectedTurnMissing`'s message draws instead of a substitute.
+   * operator has picked something else does this reach into the COLUMN for it,
+   * which is the one place that turn's current content actually lives -- the
+   * merged list rather than `decisions`, for `selectedTurnMissing`'s own reason
+   * above, and it stays fresh because `columnOf` puts the poll's own list
+   * first: a turn the poll still carries is found there, in the poll's copy,
+   * before the pager's older one is ever reached. `null` when it is not there
+   * at all, so `selectedTurnMissing`'s message draws instead of a substitute.
    */
   const decision: Decision | null = selectedTurnMissing
     ? null
     : selectedId === canvasDecisionId
       ? canvasDecision
-      : (entry?.session.decisions.find((d) => d.id === selectedId) ?? canvasDecision);
+      : (mergedColumn.find((d) => d.id === selectedId) ?? canvasDecision);
   /**
    * WHAT THE LAST SHIFT-TAB DID, in flight and afterwards, or `null` at rest.
    *
@@ -2213,20 +3896,40 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
   /**
-   * ONE KEYSTROKE, into this session's pane, shared by the mode row's own
-   * Shift-Tab AND every button of the phone keystroke strip -- they are the
-   * SAME channel (`window.api.terminal.send`) into the SAME pane, so one
-   * in-flight guard and one refusal caption serve both rather than each
-   * growing its own copy. `cycleNote` is the shared note; `sentText`/
-   * `busyText` are the one difference between a mode cycle and a keystroke.
+   * KEYSTROKES INTO THIS SESSION'S PANE, shared by the mode row's own
+   * Shift-Tab, every button of the phone keystroke strip, the composer's
+   * Escape AND the model picker's `/model <x>` line -- they are the SAME
+   * channel (`window.api.terminal.send`) into the SAME pane, so one in-flight
+   * guard and one refusal caption serve all of them rather than each growing
+   * its own copy. `cycleNote` is the shared note; `sentText`/`busyText` are
+   * the one difference between a mode cycle and a keystroke.
    *
-   * One press at a time, ACROSS BOTH CONTROLS: held down, a repeat here
+   * One press at a time, ACROSS EVERY CONTROL: held down, a repeat here
    * queued a `back-tab` per repeat into a live agent with nothing on screen
-   * counting them, and a phone tap repeated in a hurry is the same failure.
+   * counting them, a phone tap repeated in a hurry is the same failure, and a
+   * model picked twice while the first pick is still typing would interleave
+   * two lines in one pane.
+   *
+   * A RUN, NOT A KEY, since the model picker: `/model opus` is a line and an
+   * Enter rather than a chord, and `pressPaneKey` below is the one-stroke
+   * case of this. ONE STROKE AT A TIME, AWAITED, and the run STOPS at the
+   * first that does not land. The pane is a byte stream, so pieces sent in
+   * order arrive as one line; but a Return pressed after a refused piece
+   * would submit a mangled line into a running agent, so a refusal anywhere
+   * in the run ends it with the text sitting in the pane unsent -- `reply.ts`
+   * keeps exactly this rule for a prompt, and its refusal says so. Every
+   * stroke is aimed by main by the same rule as the first (`terminal/ipc.ts`
+   * reuses a proven pairing for two seconds, which is what makes a run of
+   * three not three listings).
+   *
    * `window.api` exists only in the Electron shell, and its absence is
    * reported rather than made into a no-op.
    */
-  const pressPaneKey = async (key: PaneKey, sentText: string, busyText: string) => {
+  const typePaneStrokes = async (
+    strokes: readonly PaneKey[],
+    sentText: string,
+    busyText: string,
+  ) => {
     if (entry === null) return;
     if (cycleNote?.kind === 'busy') return;
     const send = globalThis.window?.api?.terminal?.send;
@@ -2240,17 +3943,34 @@ export function DetailPanel(props: DetailPanelProps) {
     // BEFORE THE AWAIT: one to three tmux spawns follow, at ten seconds each.
     setCycleNote({ kind: 'busy', text: busyText });
     const mine = cycleAbout;
-    const landed = await send(entry.project.id, key, entry.session.id).catch(
-      (): PaneSendResult => 'refused',
-    );
+    let landed: PaneSendResult = 'sent';
+    let typed = 0;
+    for (const stroke of strokes) {
+      landed = await send(entry.project.id, stroke, entry.session.id).catch(
+        (): PaneSendResult => 'refused',
+      );
+      if (landed !== 'sent') break;
+      typed += 1;
+    }
     // Thirty seconds is long enough to move on, and an answer about the
     // session that was here then says nothing about the one that is here now.
     if (noteFor.current !== mine) return;
     const refusal = cycleWording(landed);
+    // A run that typed something and then stopped has left it on screen in
+    // the pane, and the caption must say so: "not sent" alone would send the
+    // operator looking for a pairing problem while the half-line sits there
+    // waiting for a Return that vam did not press.
+    const sitting =
+      refusal !== null && typed > 0 && strokes.length > 1
+        ? `${refusal} — what was typed is sitting in the pane unsent`
+        : refusal;
     setCycleNote(
-      refusal === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: refusal },
+      sitting === null ? { kind: 'sent', text: sentText } : { kind: 'refused', text: sitting },
     );
   };
+  /** The one-stroke case: the chord, the strip's keys, the composer's Escape. */
+  const pressPaneKey = (key: PaneKey, sentText: string, busyText: string) =>
+    typePaneStrokes([key], sentText, busyText);
   /**
    * Press the session's own Shift-Tab, OVER THE ONE CHANNEL THAT ALREADY
    * TYPES INTO A PANE: `terminal.send` resolves the pane in main and refuses
@@ -2270,56 +3990,207 @@ export function DetailPanel(props: DetailPanelProps) {
   /** One keystroke-strip button's press, over the shared bridge above. */
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
     pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
+  /**
+   * Type `/model <choice>` and Enter into this session's pane -- the model
+   * picker's whole act, over the shared run above.
+   *
+   * WHAT VAM MAY CLAIM AFTERWARDS is the delivery and not the model:
+   * "typed /model opus into the terminal of <title>". The CLI answers in the
+   * pane ("Set model to Opus 5 and saved as your default for new sessions",
+   * measured on 2.1.274) and vam never reads that answer back, so the caption
+   * says the session answers THERE rather than naming a model here. Naming
+   * one would be the claim nothing checked -- the same rule `cycleMode` keeps
+   * for the mode it does not read back.
+   *
+   * A choice that is not one word is refused before a key is built
+   * (`modelCommandLine`): a space would hand the CLI two arguments and a
+   * newline would submit `/model` bare, which opens the CLI's own menu --
+   * the one thing vam must never drive.
+   */
+  const sendModel = (choice: string) => {
+    if (entry === null) return Promise.resolve();
+    const line = modelCommandLine(choice);
+    const strokes = modelCommandStrokes(choice);
+    if (line === null || strokes === null) {
+      setCycleNote({
+        kind: 'refused',
+        text: 'not sent — a model is one word, and this has a space or a line break in it',
+      });
+      return Promise.resolve();
+    }
+    return typePaneStrokes(
+      strokes,
+      `typed ${line} into the terminal of ${entry.session.title} — the session answers there`,
+      `${line} · typing…`,
+    );
+  };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
   /**
-   * `progress` is context, not the thing you read, so it opens showing no turn
-   * at all — the newest five are one keystroke away.
-   * Component state rather than a prop: nothing outside this pane has an
-   * opinion about it, and routing it through the canvas would put a
-   * presentation toggle in the model every other pane has to carry.
-   */
-  const [progressOpen, setProgressOpen] = useState(false);
-  /**
-   * Which tab the pane is showing. Still component state, and still nobody
-   * else's opinion: it survives switching sessions on purpose -- an operator
-   * who opened Agents is looking at agents, not at whichever tab the last
-   * session left behind -- and it now survives a QUIT for the same reason,
-   * seeded from what the caller remembered rather than owned by it.
+   * Which view the pane is showing -- the caller's fact when it has one, this
+   * component's own when it does not.
    *
-   * The seed is validated against `TABS` here because this is where the bar is.
-   * A name that is not on the bar (an older vam's tab, a hand-edited store) is
-   * simply not a seed, so it costs the default tab and nothing else.
+   * IT USED TO BE LOCAL STATE THAT DELIBERATELY SURVIVED A SESSION SWITCH, on
+   * the reasoning that "an operator who opened Agents is looking at agents,
+   * not at whichever tab the last session left behind". The operator has
+   * overruled it: a view is a per-session choice, and switching session 1 to
+   * PRs must leave every other session where it was. The sentence above was
+   * true of ONE session in ONE pane and became false the moment a pane could
+   * show several -- `Canvas.tsx` claimed the isolation in a comment on
+   * `renderLeaf` while `key={leaf.id}` remounted nothing.
+   *
+   * The validating stays HERE, for both routes, because this is where the bar
+   * is: a name that is not on it (an older vam's tab, a hand-edited store) is
+   * simply not a view, so it costs the default and nothing else.
    */
-  const [tab, setTab] = useState<Tab>(() => {
+  const [ownTab, setOwnTab] = useState<Tab>(() => {
     const remembered = props.initialTab;
     return TABS.find((name) => name === remembered) ?? 'Response';
   });
+  const named = props.tab;
+  const controlled = named !== undefined;
+  const tab = controlled ? (TABS.find((name) => name === named) ?? 'Response') : ownTab;
   const onTabChange = props.onTabChange;
   /**
    * Report the operator's CHOICE, never `current`. `current` falls back to
-   * Response while a source withdraws the Terminal tab, and persisting that
+   * Response while a source withdraws the Terminal tab, and reporting that
    * would let walking past a session without a terminal erase a choice the
    * operator never changed.
+   *
+   * FROM THE ACT, NOT FROM AN EFFECT, and that is what closes a loop rather
+   * than opening one. This used to be `useEffect(() => onTabChange?.(tab))`
+   * gated on `paneFocused`: `onTabChange` is a fresh closure every render, so
+   * it fired on every render, and with two panes showing two different tabs
+   * each write re-rendered the other pane, which wrote back, forever --
+   * measured, a synchronous `savePrefs` loop that hung the shell. Calling it
+   * only when a view is actually PICKED means there is no render-driven write
+   * left to loop, so the `paneFocused` gate that was holding the loop shut is
+   * no longer load-bearing and is gone with it. A background pane can now
+   * report its own session's view, which is correct: it is still an act the
+   * operator performed, in the pane they performed it in.
    */
-  useEffect(() => {
-    onTabChange?.(tab);
-  }, [tab, onTabChange]);
+  const pickTab = useCallback(
+    (next: Tab) => {
+      if (!controlled) setOwnTab(next);
+      onTabChange?.(next);
+    },
+    [controlled, onTabChange],
+  );
   const tabRequest = props.tabRequest ?? null;
-  // A withdrawn tab is not refused here: `current` below already falls back to
-  // Response when the showing tab is not on offer, so asking for Terminal
-  // where there is none lands exactly where clicking would have.
+  const viewNote = props.viewNote ?? null;
+  /**
+   * A withdrawn tab is not refused here: `current` below already falls back to
+   * Response when the showing tab is not on offer, so asking for Terminal
+   * where there is none lands exactly where clicking would have.
+   *
+   * THROUGH A REF, and the reason is the loop this file has now had twice.
+   * `pickTab` closes over `onTabChange`, which every caller builds inline and
+   * therefore hands over fresh on every render. In the dependency array that
+   * makes this effect re-run on every render, re-applying a request the
+   * operator pressed once -- so a view picked in one session was re-asserted
+   * onto the next session the pane showed, which is the exact bleed the
+   * per-session view exists to stop, arriving through the fix for it. The
+   * request object is the only thing that should re-run this, so it is the
+   * only dependency.
+   */
+  const pickTabRef = useRef(pickTab);
+  pickTabRef.current = pickTab;
   useEffect(() => {
     if (tabRequest !== null) {
-      setTab(tabRequest.tab);
+      pickTabRef.current(tabRequest.tab);
     }
   }, [tabRequest]);
+  /**
+   * WHAT A CONTROL INSIDE AN AGENT'S ANSWER CAN ASK THIS PANE FOR.
+   *
+   * Published through a context rather than threaded as props, and
+   * `out-actions.ts` owes the argument for that: `OUT_MARKDOWN` is a module
+   * constant because it is a react-markdown PROP, so a map rebuilt per render
+   * would re-render every answer in the column. The PROVIDER is here, per
+   * pane, because `openFileRef` is about THIS pane's session and THIS pane's
+   * Files tab -- two split panes showing two sessions must not share one.
+   */
+  const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
+  const refSessionId = entry?.session.id ?? null;
+  const outActions = useMemo(
+    () => ({
+      /**
+       * The address is already parsed and already checked HERE (the control
+       * runs `checkLink` to decide how to draw itself); main parses and checks
+       * it again on its own side, which is where the guarantee is.
+       *
+       * ONLY ONE OF THE TWO SHELLS EVER REACHES THE BRIDGE, and it is worth
+       * saying out loud rather than leaving a reader to assume both do.
+       * `App.tsx` routes on `window.api !== undefined`: with it, the desktop
+       * canvas; without it, the browser shell (the demo and a paired phone
+       * alike), and the two are mutually exclusive. So this member answers for
+       * real in the Electron app, and everywhere else it answers the refusal
+       * below -- in words, never a press that does nothing.
+       *
+       * THAT LEAVES A PHONE WITHOUT A WAY TO OPEN A LINK, which is a real
+       * cost and not an oversight. A `window.open` fallback would work there
+       * (a phone browser has tabs; there is no application window to hijack),
+       * but it would put a call this repo denies by policy into a component
+       * that also runs inside Electron, where the denial is load-bearing --
+       * and the gate that keeps them apart would be one `undefined` check in
+       * the renderer, which is the least trusted process here. If the remote
+       * endpoint ever wants this, it should be decided for the phone
+       * deliberately, not inherited from a fallback nobody re-read.
+       */
+      openLink: async (url: string): Promise<OutActionResult> => {
+        const open = globalThis.window?.api?.link?.open;
+        if (open === undefined) {
+          return {
+            ok: false,
+            reason: 'the vam desktop app is what opens links; this build has no bridge to it.',
+          };
+        }
+        return await open(url);
+      },
+      /**
+       * THE REFERENCE CROSSES AS TEXT. Main resolves it against this session's
+       * own working directory and answers an absolute path, or refuses in the
+       * session's own words (`main/files/resolve-ipc.ts`) -- this pane never
+       * joins a root to a path, because string arithmetic cannot answer
+       * containment (`main/dialog/attach-image.ts` measured that).
+       *
+       * The tab is asked for only AFTER a path comes back. Switching first
+       * would land the operator on a Files tab showing nothing, with the
+       * reason drawn on the tab they just left.
+       */
+      openFileRef: async (reference: string): Promise<OutActionResult> => {
+        const resolve = globalThis.window?.api?.files?.resolve;
+        if (resolve === undefined || files !== true || refSessionId === null) {
+          return {
+            ok: false,
+            reason: 'the vam desktop app is what opens files; this build has no Files tab.',
+          };
+        }
+        try {
+          const target = await resolve(refSessionId, reference);
+          // A FRESH OBJECT every time: pressing the same reference twice is
+          // two asks. Same shape as `tabRequest` above, same reason.
+          setFileOpenRequest({ sessionId: refSessionId, path: target.path, line: target.line });
+          pickTabRef.current('Files');
+          return { ok: true };
+        } catch (reason) {
+          const error = reason as SourceError;
+          return {
+            ok: false,
+            reason: error.message ?? 'vam could not open that file.',
+          };
+        }
+      },
+    }),
+    [refSessionId, files],
+  );
   // Which tabs this source actually has. A withdrawn tab cannot stay SHOWING:
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
-  const tabs = visibleTabs(terminal !== false);
+  const tabs = visibleTabs(terminal !== false, files === true);
   const current = tabs.includes(tab) ? tab : 'Response';
+
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**
@@ -2336,40 +4207,24 @@ export function DetailPanel(props: DetailPanelProps) {
   }, [composing]);
 
   /**
-   * ENTERING INSERT PUTS THE KEYBOARD ON THE FIRST OPTION, AND LEAVING TAKES
-   * IT BACK — the wiring that makes "`hjkl` chooses an option in Insert" true.
+   * THIS PANE NO LONGER MOVES FOCUS TO FOLLOW THE MODE — the mode follows
+   * focus, so an effect that did both was the loop as well as the bug.
    *
-   * The option cursor is DOM focus, not a second index: the options are real
-   * buttons, so focus is already the thing the browser, the screen reader and
-   * the focus ring all agree on, and a parallel index in the canvas would be a
-   * second notion of where the cursor is — the exact duplication the mode
-   * naming exists to remove.
+   * What stood here watched `active` (`isFocused && mode === 'insert'`) and
+   * focused the first option on the way in, blurring it on the way out. Both
+   * halves were necessary while the mode was a flag, and both were incomplete:
+   * the entry took nothing when the pane had no question (audit F5 — Insert
+   * with nothing focused to insert into), and the exit blurred ONLY
+   * `[data-question-option]`, so `Mod-0` typed in the composer left a
+   * read-only textarea holding the keyboard while the bar read Select (F4).
    *
-   * Both directions are necessary. Without the first, `I` sets Insert while
-   * focus is still on the body, so `j` reaches the canvas grammar and walks
-   * the session list — the operator's original complaint. Without the second,
-   * `H` returns to Select while focus is still inside the listbox, so the list
-   * goes on eating `j` in a mode where it belongs to the sidebar. That is the
-   * same defect mirrored, and it is the one a reader will not think of.
+   * `Canvas.tsx` owns both directions now, through `keyboard/focus-scope.ts`:
+   * `focusInsertStop` on the way in — which lands on this pane's first stop in
+   * document order, the question's options when there are any and the prompt
+   * row otherwise — and `releaseInsert` on the way out, which blurs whatever
+   * is in an insert scope rather than one attribute's worth of it. One
+   * authority for where the keyboard is, which is the whole point.
    */
-  const wasActive = useRef(false);
-  useEffect(() => {
-    const leaving = wasActive.current && !active;
-    wasActive.current = active;
-    if (active) {
-      firstOptionRef.current?.focus();
-      return;
-    }
-    // ONLY ON THE WAY OUT, never on a first render. `i` focuses an option from
-    // the effect above while `active` is still false — the composer path, which
-    // does not touch the mode — so a blur that fired whenever `active` was
-    // false would undo it on mount and leave the keyboard nowhere.
-    if (!leaving) return;
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement && focused.hasAttribute('data-question-option')) {
-      focused.blur();
-    }
-  }, [active]);
 
   /**
    * The `out` region rides its own bottom: the newest output is the thing a
@@ -2402,6 +4257,121 @@ export function DetailPanel(props: DetailPanelProps) {
   };
 
   /**
+   * WHERE THE READER WAS, taken the instant before a page is prepended and
+   * spent by the layout effect below. A ref rather than state because nothing
+   * renders from it and because it has to survive between an async resolution
+   * and the very next commit, with no render of its own in between.
+   */
+  const anchorRef = useRef<{ readonly scrollHeight: number; readonly scrollTop: number } | null>(
+    null,
+  );
+  /**
+   * PUT BACK WHERE THEY WERE, AFTER CONTENT WAS ADDED ABOVE THEM.
+   *
+   * THE DEFECT EVERY INFINITE-SCROLL SHIPS. A scroll offset is measured from
+   * the TOP of the content, so inserting anything above the viewport moves
+   * everything the reader is looking at down by exactly the height of what was
+   * inserted -- mid-sentence, while they read. The fix is arithmetic and it is
+   * not optional: remember `scrollHeight` before, and add whatever it grew by
+   * to `scrollTop` after.
+   *
+   * NOT LEFT TO THE BROWSER. Chrome and Safari both implement CSS scroll
+   * anchoring, which does exactly this by itself -- except that it is
+   * SUPPRESSED WHILE THE SCROLLER IS AT ITS TOP, and the top is the one place
+   * this feature is ever used from. Relying on it would mean shipping the bug
+   * with a spec citation attached.
+   *
+   * A LAYOUT EFFECT, so the correction lands in the same frame the turns do:
+   * a passive effect would paint the jumped position once and then fix it,
+   * which is the flicker rather than the fix. NO DEPENDENCY ARRAY, the same
+   * reasoning `scrollToTurnRef`'s effect states below: the instruction is set
+   * from an async resolution, and a dependency list would have to name every
+   * path that can set a ref.
+   *
+   * `stuckRef` IS NOT TOUCHED. A reader at the top is by definition not at the
+   * bottom, and this correction is what keeps them where they were rather than
+   * a navigation of its own.
+   */
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    if (anchor === null) return;
+    anchorRef.current = null;
+    const box = outRef.current;
+    if (box === null) return;
+    const grew = box.scrollHeight - anchor.scrollHeight;
+    if (grew <= 0) return;
+    box.scrollTop = anchor.scrollTop + grew;
+    syncJumps(box);
+  });
+
+  /**
+   * ONE STEP BACK THROUGH THE TRANSCRIPT: the whole of the join, and the only
+   * thing that calls the source's pager.
+   *
+   * ONE WALK AT A TIME, and the guard is a ref rather than `pager.phase`
+   * because two scroll events in one frame both read the same pre-render state:
+   * a check against rendered state would let both through and fire two requests
+   * for the same cursor. The gesture is not DROPPED either -- the walk that is
+   * already running is for the same cursor, so a second one would be a second
+   * copy of the answer that is already coming.
+   *
+   * THE CURSOR IS NOT OURS TO INVENT (`cursorToAsk`): the first ask passes the
+   * id of the oldest turn on screen, which is the shape PR 283's overlap fix is
+   * keyed on, and every ask after that passes back verbatim what the previous
+   * page handed over.
+   *
+   * THE ANSWER MAY BE ABOUT A SESSION THAT IS NO LONGER HERE. A walk can take
+   * three reads of up to 8 MiB each; the pane can be moved to another session
+   * in that time, and everything below is dropped when it has been -- an answer
+   * about the session that was here then says nothing about the one that is
+   * here now, the same rule `pressPaneKey` above already keeps for its own
+   * refusals.
+   */
+  const readOlder = () => {
+    const sessionId = entry?.session.id;
+    if (sessionId === undefined || readHistory === null) return;
+    if (readingRef.current !== null) return;
+    if (pagerNow.phase === 'start') return;
+    const cursor = cursorToAsk(pagerNow.cursor, mergedColumn);
+    // Nothing on screen to page before, and no cursor either: there is no
+    // question to ask, so no request is made and nothing is drawn as pending.
+    if (cursor === null) return;
+    readingRef.current = sessionId;
+    setPager((now) => ({ ...now, phase: 'reading', error: null }));
+    void walkOlder(readHistory, sessionId, cursor).then((walk) => {
+      if (readingRef.current === sessionId) readingRef.current = null;
+      if (sessionKeyRef.current !== sessionId) return;
+      // BEFORE THE STATE THAT ADDS THEM, and this ordering is the anchoring:
+      // the offsets have to be the ones from the frame the reader is still
+      // looking at, not the ones after React has laid the new turns out.
+      const box = outRef.current;
+      if (walk.kind === 'page' && walk.turns.length > 0 && box !== null) {
+        anchorRef.current = { scrollHeight: box.scrollHeight, scrollTop: box.scrollTop };
+      }
+      if (walk.kind === 'page' && walk.turns.length > 0) {
+        setOlder((held) => appendOlder(held, walk.turns));
+      }
+      setPager((now) => applyWalk(now, walk));
+    });
+  };
+  /**
+   * "Load more when scrolling up" -- the operator's own words, so the scroll IS
+   * the gesture and the control below is the second way to ask, not the first.
+   *
+   * Only while there is genuinely more to ask for: a source with no pager, a
+   * proven start and a read that just failed all fall through here, so a reader
+   * resting at the top of a column that cannot grow makes no requests at all.
+   * A FAILED read in particular is deliberately not retried by scrolling --
+   * that would be a retry loop nobody asked for, running as fast as scroll
+   * events arrive; the control says the words and waits to be pressed.
+   */
+  const askIfNearTop = (box: HTMLElement) => {
+    if (box.scrollTop > NEAR_TOP_PX) return;
+    if (moreState(pagerNow, readHistory) !== 'available') return;
+    readOlder();
+  };
+
+  /**
    * Images pasted into THIS composition. They are held, not sent: vam's write
    * is text, so only the `[image #N]` placeholder travels (`composer-paste.ts`).
    * The list is dropped when the draft empties, which is what a sent or
@@ -2416,6 +4386,61 @@ export function DetailPanel(props: DetailPanelProps) {
   /** The file waiting in the draft, and the last refusal, if there was one. */
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
+  /**
+   * SPEAKING A PROMPT INSTEAD OF TYPING IT (operator: "add a record feature so
+   * a prompt can be spoken, with the icon next to Send").
+   *
+   * `dictation.ts` wraps the platform's own recogniser -- vam records no audio
+   * and sends none; what comes back is text. Three pieces of state, because
+   * they answer three different questions: is a recogniser THERE at all (read
+   * once, at mount, since a platform does not grow one), is it LISTENING now,
+   * and what did it say when it refused.
+   */
+  const [canDictate] = useState(() => dictationAvailable());
+  const [listening, setListening] = useState(false);
+  const [dictateError, setDictateError] = useState<string | null>(null);
+  const dictation = useRef<DictationHandle | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const toggleDictation = useCallback(() => {
+    if (dictation.current !== null) {
+      dictation.current.stop();
+      dictation.current = null;
+      setListening(false);
+      return;
+    }
+    // The last refusal goes when a new attempt starts: a message about a
+    // microphone that was denied five minutes ago, sitting under a
+    // microphone that is listening now, is the stalest kind of lie.
+    setDictateError(null);
+    const handle = startDictation({
+      onText: (text) => {
+        // APPENDED, NEVER SUBSTITUTED. The operator may have typed half a
+        // prompt already, and a microphone that clears it is worse than one
+        // that does nothing. Read through a ref because the recogniser
+        // outlives the render that started it.
+        const current = draftRef.current;
+        onDraftChange(current === '' ? text : `${current} ${text}`);
+      },
+      onError: (message) => setDictateError(message),
+      onEnd: () => {
+        dictation.current = null;
+        setListening(false);
+      },
+    });
+    if (handle === null) return;
+    dictation.current = handle;
+    setListening(true);
+  }, [onDraftChange]);
+  useEffect(
+    () => () => {
+      // A pane that unmounts mid-sentence leaves a recogniser holding the
+      // microphone otherwise, with nothing left to stop it.
+      dictation.current?.stop();
+      dictation.current = null;
+    },
+    [],
+  );
   const attachedName = readAttachedName(draft);
   const takeFile = async (input: HTMLInputElement) => {
     const file = input.files?.[0];
@@ -2456,6 +4481,50 @@ export function DetailPanel(props: DetailPanelProps) {
   useEffect(() => {
     if (draft === '') setAttachedImage(null);
   }, [draft]);
+  /**
+   * A15.4: whether the default-provider picker is open. Component state,
+   * same register as `dismissed`/`pick` below for the bang/slash lists — a
+   * second `DetailPanel` instance (a split pane, A15.1) gets its own copy,
+   * never a shared one, which matters because this popover's open/closed
+   * state is about THIS pane's own composer, not a fact about the provider
+   * itself.
+   */
+  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
+  /**
+   * The mode popover's open/closed state — per pane, for the same reason the
+   * provider one above is, and NOT a copy of the mode itself: the mode lives
+   * in the draft, which is the text that actually gets recorded.
+   */
+  const [modePickerOpen, setModePickerOpen] = useState(false);
+  /**
+   * The model popover's open/closed state, per pane like the two above -- and
+   * the free-text row's own text, which is the ONE thing here that is not a
+   * copy of a fact elsewhere: a full model id the operator is still typing
+   * exists nowhere until Enter sends it, and it is cleared once it has gone.
+   * Neither is "the current model": vam never reads the CLI's answer back and
+   * so holds no opinion about which model a session is on.
+   */
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelIdText, setModelIdText] = useState('');
+  /**
+   * WHICH OF THE THREE FACES THE MODEL CONTROL WEARS for the focused session.
+   * `model-command.ts` carries the table and the argument; this reads it
+   * off the same three facts the rest of the composer reads: the source's
+   * `deliverPrompt` (`delivers`), its `terminal` capability, and whether vam
+   * started this session (`vamControlled` -- the two halves of `canCycleMode`).
+   */
+  const modelControl = modelControlState({
+    delivers,
+    terminal,
+    vamControlled: entry?.session.vamControlled,
+  });
+  /**
+   * The mode ON SCREEN, read back out of the draft on every render. A draft
+   * carrying some other word on its `mode:` line reads as the default: only
+   * these three can be picked here, and an icon has no way to draw a fourth.
+   */
+  const currentMode: Mode = MODES.find((mode) => mode === readModeRequest(draft)) ?? DEFAULT_MODE;
+  const currentProvider = resolveProvider(defaultProvider);
   const pickImage = async () => {
     if (pickImageAttachment === undefined || entry === null) return;
     let path: string | null;
@@ -2489,17 +4558,143 @@ export function DetailPanel(props: DetailPanelProps) {
     }
   }, [draft]);
 
-  // The session has stopped and the next move is yours. Keyed off the session,
-  // not off an empty `output`: a session still writing its answer is busy, not
-  // blocked, and banner-ing it would train you to ignore the banner.
-  // A different session or a different step is a different document, and the
-  // previous one's scroll position would open it half-read.
-  const focusKey = `${entry?.session.id ?? ''}/${decision?.id ?? ''}`;
+  /**
+   * THE DOCUMENT IS THE SESSION NOW, not the turn.
+   *
+   * This key used to carry the focused turn's id as well, because the pane
+   * drew one turn at a time and moving between them genuinely was moving
+   * between documents. The column draws them all, so a different turn is a
+   * different PLACE in one document -- and keeping the id here would have
+   * yanked the column back to its bottom every time a poll produced a new
+   * newest turn, which is the very thing `focusNodeId` exists to prevent.
+   * Where to scroll for a turn is `scrollToTurnRef`'s job, below.
+   */
+  const focusKey = entry?.session.id ?? '';
   const focusRef = useRef(focusKey);
-  const output = decision?.output ?? null;
-  // `output` is a change SIGNAL, not something this effect reads: new text
-  // arriving is exactly the moment the region has to stick again, and dropping it
-  // from the list would leave the pane showing the old bottom.
+  /**
+   * The change SIGNAL for "the column grew", not something the effect reads.
+   * Two halves: the newest turn's answer (a streaming session rewrites it
+   * every second or so) and how many turns there are (a new turn appended).
+   * Dropping either would leave a column that was resting at its bottom
+   * showing the old bottom.
+   */
+  const newestTurn = entry?.session.decisions[0] ?? null;
+  const output = newestTurn?.output ?? null;
+  const turnCount = entry?.session.decisions.length ?? 0;
+  /**
+   * WHICH TURN IS THE LIVE ONE. `decisions` is newest first (model.ts), so the
+   * newest is the turn a session is working on -- the only one a "what it is
+   * doing now" caption can honestly describe. An id rather than a boolean now
+   * that every turn is drawn: each block is told whether it is this one.
+   * Declared here, above the two effects that read it, rather than beside the
+   * rest of the turn derivations below.
+   */
+  const newestId = newestTurn?.id ?? null;
+  /**
+   * Whether the session is still working. The other half of "live" -- being
+   * the newest turn -- is decided per block, against `newestId`.
+   */
+  const sessionRunning = entry?.session.status === 'running';
+  /**
+   * ESCAPE IN THE COMPOSER, WHICH NOW INTERRUPTS THE AGENT.
+   *
+   * Operator request, and Claude Code's own default: Escape cancels the
+   * running prompt. Nothing new is being built to do it -- `pressPaneKey`
+   * already presses a key into this session's pane for the mode row and for
+   * every button of the phone keystroke strip, with one in-flight guard and
+   * one refusal caption, and `{kind:'escape'}` is a key the strip already
+   * sends (`TerminalTab`: "inside tmux, Escape should do what Escape does").
+   *
+   * THREE OUTCOMES, THREE SENTENCES, and that is the whole of the reasoning
+   * here. "vam pressed Escape in the pane", "there is nothing running to
+   * interrupt" and "vam has no keyboard into this session at all" are
+   * different facts about different things, and folding any two of them into
+   * one line is this pane's oldest defect (`sources/pull-requests.ts`: "'No
+   * PRs' and 'vam could not ask' must never look the same"). NONE of them may
+   * be silence: the operator pressed a key expecting an agent to stop.
+   *
+   * The two halves of `canCycleMode` are separated here rather than reported
+   * together, because they send the operator to different places: a source
+   * with no terminal has nothing to interrupt anywhere, and a session vam did
+   * not start has a terminal that belongs to somebody else.
+   */
+  /**
+   * A DIALOG TAKES ESCAPE BEFORE THE AGENT DOES -- Claude Code's own rule
+   * ("Interrupt Claude, or close a dialog ... When a dialog is open, `Esc`
+   * closes the dialog"), and the one this composer now has to keep in three
+   * places rather than one.
+   *
+   * Returns whether it CLOSED something, so every caller can answer the same
+   * question the same way. The two typeahead lists answer Escape earlier in
+   * the box's own handler, where they already own the arrow keys; these three
+   * popovers (provider, mode, model) are opened by a POINTER, which leaves the
+   * keyboard on a button rather than in the textarea, so they need the answer
+   * from there as well.
+   *
+   * Before this they closed only by picking a row or re-clicking their own
+   * toggle. That was survivable while Escape merely left the box; it is not
+   * now, because an Escape that reaches past an open popover stops an agent.
+   */
+  const closeOpenPopover = (): boolean => {
+    if (!modePickerOpen && !providerPickerOpen && !modelPickerOpen) return false;
+    setModePickerOpen(false);
+    setProviderPickerOpen(false);
+    setModelPickerOpen(false);
+    return true;
+  };
+  /**
+   * Escape on a popover's own widgets -- its TOGGLE and its LISTBOX, which are
+   * the two elements the keyboard can actually be on once a pointer opened it.
+   *
+   * On those two rather than on the wrapper around them, and that is an a11y
+   * rule rather than a style: a `div` carrying a key handler and no role is a
+   * control a screen reader cannot find (`noStaticElementInteractions`). Both
+   * of these already ARE controls -- a `button` and a `role="listbox"`.
+   *
+   * `stopPropagation` so the shell's own Escape does not peel a second layer
+   * on the same keystroke: one Escape, one dismissal, which is the rule
+   * `Canvas`'s `cancel` case states for every other overlay in the app.
+   */
+  const dismissPopoverOnEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape') return;
+    if (!closeOpenPopover()) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  /**
+   * WHY AN INTERRUPT WOULD BE REFUSED, or `null` when it would not.
+   *
+   * The three refusals were inline in `interruptRun` until the right-click
+   * menu needed them BEFORE the click: a menu item can say "vam did not start
+   * this session" while it is still disabled, which is the one thing a
+   * keystroke cannot do. Derived here so both routes read the same three
+   * conditions in the same order -- two copies of this would be two answers to
+   * "can vam stop it", and the pane's oldest defect is two different facts
+   * that look the same.
+   */
+  const interruptRefusal: string | null =
+    terminal === false
+      ? 'not sent — this source has no session terminal to interrupt'
+      : entry === null || entry.session.vamControlled !== true
+        ? 'not sent — vam did not start this session, so it has no keyboard into it'
+        : !sessionRunning
+          ? 'nothing running to interrupt — this session is not working'
+          : null;
+
+  const interruptRun = () => {
+    if (interruptRefusal !== null) {
+      setCycleNote({ kind: 'refused', text: interruptRefusal });
+      return;
+    }
+    // SENT, NOT CANCELLED. vam presses the key and never reads back what the
+    // agent did with it, exactly as the mode cycle never reads the mode back;
+    // claiming the run stopped would be a claim nothing checked.
+    void pressPaneKey(
+      { kind: 'escape' },
+      'Esc sent — vam does not read back what it interrupted',
+      'Esc · sending…',
+    );
+  };
   // biome-ignore lint/correctness/useExhaustiveDependencies: stick again on new output
   useEffect(() => {
     const box = outRef.current;
@@ -2513,9 +4708,111 @@ export function DetailPanel(props: DetailPanelProps) {
     box.scrollTop = box.scrollHeight;
     stuckRef.current = true;
     syncJumps(box);
-  }, [focusKey, output]);
+  }, [focusKey, output, turnCount]);
 
-  const commands = decision?.commands ?? [];
+  /**
+   * KEEP THE BOTTOM WHEN THE PANE'S OWN FURNITURE MOVES.
+   *
+   * MEASURED ON THIS HEAD, and the reason this exists: opening `factory-sse-1`
+   * in the demo left the column resting at scrollTop 431 of 520 -- 89px short
+   * of its own end -- every single time. The effect above does stick it, and
+   * correctly; what happens next is that the pane's PROMPT POLL resolves, a
+   * question card appears below the column and the composer withdraws, and the
+   * column's own height drops by 89px. Its content did not change, so nothing
+   * in the dependency list above changed, and the scroller was simply left 89px
+   * up a transcript it had just been told to show the end of. The single-turn
+   * pane had the same hole and it did not show: one turn rarely overflowed.
+   *
+   * A ResizeObserver ON THE SCROLLER, because the fact that changed is the
+   * scroller's own size -- not its content, which the effect above already
+   * watches. Together they cover both halves of "stuck": the content grew, and
+   * the window onto it shrank. Guarded on `stuck`, so it can only ever act for
+   * a reader who was at the bottom already; a reader who scrolled up is left
+   * exactly where they were, which is the whole rule this pane keeps.
+   *
+   * Re-attached when the column comes and goes -- another tab, an empty
+   * session -- because that is when the element behind `outRef` changes.
+   * `typeof` guarded for happy-dom, where the unit suite runs.
+   */
+  const columnMounted = current === 'Response' && turnCount > 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `syncJumps` is a fresh closure every render, so listing it would tear down and re-attach the observer on every keystroke in the composer -- it only ever calls `setJumps`, which is stable
+  useEffect(() => {
+    const box = outRef.current;
+    if (box === null || !columnMounted) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!stuckRef.current) {
+        syncJumps(box);
+        return;
+      }
+      box.scrollTop = box.scrollHeight;
+      syncJumps(box);
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [columnMounted]);
+
+  /**
+   * TAKE THE COLUMN TO A PICKED TURN — the one-shot instruction
+   * `scrollToTurnRef` carries, consumed here.
+   *
+   * A LAYOUT effect, not a passive one: the turn is scrolled to in the same
+   * frame it was picked in, so nothing paints at the old offset first.
+   *
+   * NO DEPENDENCY ARRAY on purpose. The instruction is set during render (a
+   * canvas navigation) and from an event handler (a pick), and both are
+   * followed by a render; a dependency list would have to name every path
+   * that can set a ref, which is the list that goes stale. The body reads one
+   * ref and returns, so running it after every render costs nothing.
+   *
+   * MEASURED AGAINST THE COLUMN, not `scrollIntoView`: that would scroll every
+   * scrollable ancestor, including the page, to bring a turn into view inside
+   * a pane that was already showing. The delta between the two boxes moves
+   * exactly one scroller, which is the one this is about.
+   */
+  useLayoutEffect(() => {
+    const want = scrollToTurnRef.current;
+    if (want === null) return;
+    scrollToTurnRef.current = null;
+    const box = outRef.current;
+    if (box === null) return;
+    /**
+     * THE NEWEST TURN IS THE BOTTOM, and asking for it means asking for the
+     * end of the transcript.
+     *
+     * MEASURED, not anticipated: the canvas's default pick is `decisions[0]`,
+     * so opening a session emits a navigation to the NEWEST turn one render
+     * after the session key changed. Aligning that turn's top edge undid the
+     * stick-to-bottom that had just run -- the column opened at scrollTop 431
+     * of 520, showing the newest prompt with its own answer cut off below the
+     * fold, on every single open. Its top edge is not where anyone wants to
+     * be for the turn that is still being written; its end is.
+     */
+    if (want === newestId) {
+      box.scrollTop = box.scrollHeight;
+      stuckRef.current = true;
+      syncJumps(box);
+      return;
+    }
+    const target = [...box.querySelectorAll('[data-column-turn]')].find(
+      (el) => el.getAttribute('data-column-turn') === want,
+    );
+    // A turn that is not mounted is not an error here: `selectedTurnMissing`
+    // is what says so on screen, and silently scrolling somewhere else would
+    // be the substitution that whole mechanism refuses.
+    if (target === undefined) return;
+    box.scrollTop += target.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    // Landing anywhere but the bottom is letting go of it -- done here rather
+    // than left to the scroll event, because new output arriving before that
+    // event lands would otherwise find `stuck` still true and yank the column
+    // straight back down over the turn just asked for.
+    stuckRef.current = isAtBottom(box);
+    syncJumps(box);
+  });
+
+  // THE WHOLE COLUMN, not the focused turn -- see `commandsInColumn` for why
+  // the narrower source made the feature look absent.
+  const commands = commandsInColumn(decision, mergedColumn);
   const slashCommands = entry?.session.slashCommands ?? [];
   /**
    * The typeaheads' shared state. `caret` is read off the box on every
@@ -2527,7 +4824,12 @@ export function DetailPanel(props: DetailPanelProps) {
   const [dismissed, setDismissed] = useState(false);
   const [pick, setPick] = useState(0);
   const query = composing ? bangQuery(draft, caret) : null;
-  const matches = query === null ? [] : matchCommands(commands, query);
+  const allMatches = query === null ? [] : matchCommands(commands, query);
+  // CROPPED FOR THE BOX, COUNTED ON IT. `bangHidden` is what the popover says
+  // out loud; a list cut to fit with no sign of the cut would teach the
+  // operator that what they can see is all the session proposed.
+  const matches = allMatches.slice(0, MAX_BANG_ROWS);
+  const bangHidden = allMatches.length - matches.length;
   // Closed when nothing matches. A list that stayed to say "no matches" is a
   // stale box over the composer; its absence already says it.
   const suggesting = !dismissed && matches.length > 0;
@@ -2539,31 +4841,38 @@ export function DetailPanel(props: DetailPanelProps) {
     setDismissed(true);
   };
   const slashQuery = composing ? slashCommandQuery(draft, caret) : null;
-  const slashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  const allSlashMatches = slashQuery === null ? [] : matchSlashCommands(slashCommands, slashQuery);
+  // Capped and counted, for `bangHidden`'s reason -- and this list needs it
+  // more: the provider's own is fifty-odd commands long.
+  const slashMatches = allSlashMatches.slice(0, MAX_BANG_ROWS);
+  const slashHidden = allSlashMatches.length - slashMatches.length;
   const slashSuggesting = !dismissed && slashMatches.length > 0;
   const slashPicked = Math.min(pick, slashMatches.length - 1);
+  /**
+   * WHY THE `/` LIST IS SHORT OF THE PROVIDER'S OWN, when the source knows.
+   *
+   * THE TWO UNKNOWNS, AND THIS IS WHERE THEY ARE KEPT APART. `slashCommands`
+   * has tiers that fail differently (`model.ts`): the ones made of files are
+   * silent because a directory that is not there means the operator wrote no
+   * commands, but the BUILT-INS are asked of the installed CLI and that
+   * question can genuinely fail. A list fifty entries short with nothing said
+   * about it is "vam could not read the commands" wearing "no commands match"'s
+   * clothes -- `pull-requests.ts` states the rule this serves.
+   *
+   * DRAWN WHENEVER THE `/` LIST IS BEING ASKED FOR, whether or not anything
+   * matched, and it is the second case that decides the shape: a query that
+   * finds nothing closes the list, so a note attached only to the list would
+   * vanish exactly when the operator most needs to know that the list they are
+   * typing into is not the whole one.
+   */
+  const slashGapNote =
+    !dismissed && slashQuery !== null ? (entry?.session.slashCommandGap ?? null) : null;
   const acceptSlashSuggestion = (command: SlashCommand) => {
     const next = applySlashCommand(draft, caret, command.name);
     onDraftChange(next.text);
     setCaret(next.caret);
     setDismissed(true);
   };
-  /**
-   * Whether the decision on screen is the one the session is working on.
-   * `decisions` is newest first (model.ts), so the newest is the live turn --
-   * the only one a "what it is doing now" caption can honestly describe.
-   */
-  const isNewestTurn =
-    decision !== null && entry !== null && entry.session.decisions[0]?.id === decision.id;
-  /**
-   * Whether the empty `out` describes work still happening. Both halves are
-   * required: only a `running` session is still working, and only the newest
-   * turn is the one it is working on.
-   */
-  const outIsLive = isNewestTurn && entry?.session.status === 'running';
-  /** The words themselves — `null` when there is no live turn, or when the
-   * source cannot say what it is doing. */
-  const liveActivity = outIsLive ? entry.session.activity : null;
   /**
    * The question the card draws: the newest OPEN one, and only if there is
    * none, the newest answered one -- what is still being asked outranks what
@@ -2582,6 +4891,18 @@ export function DetailPanel(props: DetailPanelProps) {
     entry === null || !('waitingFor' in entry.session)
       ? undefined
       : (entry.session.waitingFor ?? null);
+  /**
+   * The cause COLLAPSED TO WORDS OR NOTHING, for the one place that prints it.
+   *
+   * The three states above are what the model owes a reader; a line of text
+   * can only draw one of them. Absent and null both come out as nothing here,
+   * and deliberately the same nothing: "no surface reports a wait" and
+   * "waiting, cause unnamed" differ in what vam KNOWS, not in anything it
+   * could honestly write on that row. Inventing a word for the second -- a
+   * "waiting" or an "unknown" -- would put a cause on screen that no session
+   * ever reported, which is the one failure this field cannot afford.
+   */
+  const waitingCause = typeof waitingFor === 'string' && waitingFor !== '' ? waitingFor : null;
   /**
    * THE SET, not the question. One `AskUserQuestion` call can carry several,
    * and drawing the newest open one put question TWO of a two-question call on
@@ -2687,12 +5008,135 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
+  /** What `QuestionCard` says the open step would answer with -- see `onSuggest`. */
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  /**
+   * THE OFFER STANDING IN THE PROMPT BOX, and the whole condition under which
+   * the box takes `Tab` at all.
+   *
+   * Operator request: the prompt input should follow the suggestion, and Tab
+   * should accept it -- the shell's inline completion, one key for a routine
+   * reply. Two things decide the shape of it:
+   *
+   *  - AN EMPTY DRAFT ONLY. A ghost over text the operator typed would either
+   *    hide it or fight it, and a Tab that overwrote a half-written reply is a
+   *    worse trade than the key it saves.
+   *  - `Tab` IS HOW A KEYBOARD LEAVES A TEXTAREA (see the box's own key
+   *    handler). Taking it unconditionally makes this box a trap for anyone
+   *    navigating without a mouse, so it is taken ONLY while this is non-null
+   *    -- which also makes the binding self-explaining: Tab does something
+   *    extra exactly when the placeholder says there is something to accept.
+   *
+   * Accepting writes the DRAFT and delivers nothing. Whether that draft is
+   * recorded or sent is the existing button's business, and the card goes on
+   * saying that a pick is only a mark.
+   */
+  const promptSuggestion =
+    suggestion !== null && suggestion !== '' && draft === '' ? suggestion : null;
   // `records === false` is a source that has no route to record a prompt at
   // all -- a read-only server, where `/api/record-prompt` is not registered
   // and 404s. The box is then not DRAWN, rather than drawn and refused on tap:
   // a control that takes text it cannot deliver is worse than no control, and
   // the source's own sentence for the refusal is carried in `declines`.
-  const composerHidden = records === false || (openQuestion && chattingAbout !== setId);
+  /**
+   * NO SESSION, NO COMPOSER (audit F8). Since PR 268 `zv` MOVES the active
+   * tab, so an empty pane is an ordinary state rather than a cold-start one —
+   * and it was drawing a full composer over nothing: a `readOnly` textarea,
+   * attach, the provider picker, the model field, and an ENABLED record
+   * button whose click did nothing and did not even change the status bar.
+   * Six controls that cannot act, against this file's own first rule:
+   * absent, not dimmed. The withdrawal path already existed for `records ===
+   * false`; the no-session case is the same fact — there is no route from
+   * this box to a session — and now takes the same road.
+   */
+  const composerHidden =
+    entry === null || records === false || (openQuestion && chattingAbout !== setId);
+  /**
+   * Is the corner overlay on screen?
+   *
+   * It had a second reader: the identity line at the top of the column, which
+   * reserved the corner this is about to paint on (audit F1). That line is
+   * gone at the operator's ask, and the reservation with it, so the only
+   * thing left that must not run under the pill is the prompt bubble -- kept
+   * clear by its own padding, and measured as OCCLUSION rather than as a
+   * class by `e2e/narrow-pane-overlay-shots.mjs`. Kept named rather than
+   * inlined because it is also, still, the answer to "is this pane the
+   * focused one" as far as anything painted is concerned.
+   */
+  const cornerOverlay = !phone && paneFocused;
+  /**
+   * HOW WIDE THE CORNER PILL IS, from the one thing that decides it: how many
+   * view icons are on it. Every reader of this used to restate `6rem`, and
+   * that constant was only ever right for THREE.
+   *
+   * MEASURED, both ends: a focused demo pane draws Response/PRs/Agents and
+   * the pill is 90px -- 30px per icon, exactly the `6rem` (96px) the old
+   * constant reserved, gap included. A pane whose source has a terminal draws
+   * four, and one with the file bridge draws five: 146px measured, already
+   * 50px past that reservation. The four-icon case was live on the
+   * integration branch before this tab existed and no guard saw it, because
+   * every web guard runs against `?demo=1` -- no terminal, no file bridge,
+   * three icons, the only case the constant fitted. Adding `Files` puts a
+   * fifth icon on every desktop pane, which is what turned a silent overlap
+   * into the visibly clipped Save button in this tab's own header row.
+   *
+   * DERIVED AT RENDER TIME, NOT MEASURED FROM THE DOM, and that is a
+   * correction rather than a preference: measuring the pill in a layout
+   * effect and re-rendering with the result changes the height of every turn
+   * in the column AFTER the column has already scrolled to its end, which
+   * unpins the newest turn's bubble. `narrow-pane-overlay-shots.mjs` caught
+   * exactly that -- it found the pill no longer reaching the bubble at all
+   * and refused the run as vacuous rather than passing it. `tabs` is known
+   * before paint, so nothing reflows.
+   *
+   * WHAT THIS STILL DOES NOT COVER, said plainly because the old constant did
+   * not either: `data-view-note`, which adds up to 160px to the LEFT of the
+   * icons while it is drawn. It is transient, it truncates itself, and no
+   * reservation has ever accounted for it.
+   */
+  const PILL_PER_ICON = 30;
+  const cornerReserve = cornerOverlay ? tabs.length * PILL_PER_ICON + 6 : 0;
+  /**
+   * THE SAME PILL, DOWNWARDS -- how far it reaches in from the TOP of the
+   * block below, which is the half no reader needed until the Files tab put a
+   * COLUMN in the corner. A column at the right-hand edge is not moved by
+   * right-hand padding, so a horizontal reservation cannot clear it; what
+   * clears it is the height of the row above it, and that height has to be
+   * stated rather than inherited from whatever a font made the row.
+   *
+   * DERIVED FROM THE PILL'S OWN GEOMETRY, in the one file that draws it, and
+   * spelled as the arithmetic rather than as a total so each term can be
+   * checked against the element it comes from:
+   *   `top-2` on `data-view-overlay`                         ->   8px
+   *   the nav: 1px border + `py-1` + `h-6` + `py-1` + 1px    ->  34px
+   *   `py-3` on the block these tabs are mounted in          -> -12px
+   *   one gap, so the clearance is not exactly zero          ->   4px
+   * Unlike the width, none of these moves with the icon count -- the pill
+   * grows sideways, never downwards -- so this is a sum where `cornerReserve`
+   * is a product. DERIVED AT RENDER TIME, NOT MEASURED FROM THE DOM, for the
+   * reason `cornerReserve` gives above; the result is asserted as a RECTANGLE
+   * rather than as a click in `e2e/files-tab-keyboard-shots.mjs`.
+   */
+  const cornerReserveHeight = cornerOverlay ? 8 + 34 - 12 + 4 : 0;
+  /**
+   * The same pill, for a block whose right edge is NOT the pane's. The prompt
+   * bubble sits a variable distance inside it -- 44px at a 253px pane, 54px
+   * at a wide one (the jump gutter, a scrollbar) -- so it only has to clear
+   * the part of the pill that actually overhangs it, and reserving the pill's
+   * whole width takes ~60px out of the first line for nothing. Measured, that
+   * overhang is the pill's width less 34px..44px; less 28 lands inside the
+   * 0-48px window `narrow-pane-overlay-shots.mjs` allows at BOTH pane widths.
+   */
+  const cornerOverhang = cornerOverlay ? Math.max(0, tabs.length * PILL_PER_ICON - 28) : 0;
+  /**
+   * Is the failed-session banner drawn above the column? Two readers, which
+   * is why it is named: the banner itself, and the column, which hands its
+   * top padding to the sticky ground and must NOT when something is sitting
+   * in that padding already.
+   */
+  const failedBanner = current === 'Response' && entry?.session.status === 'failed';
+  /** The caller's verdict on the last send here, or null. See the prop. */
+  const sendFailure = props.sendFailure ?? null;
   /**
    * The phone keystroke strip's own gate -- structurally the SAME boolean
    * `canCycleMode` already is, shared rather than re-derived, AND the card
@@ -2724,7 +5168,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * total, which would be a lie about one session -- so those clauses are not
    * printed rather than printed as zeros.
    */
-  const liveAge = outIsLive ? entry.session.age : null;
+  const liveAge = sessionRunning ? (entry?.session.age ?? null) : null;
   /**
    * HOW MANY TURNS VAM READ -- not how many the session has had. The source's
    * transcript reader only ever opens the newest `TAIL_BYTES` of the file
@@ -2734,28 +5178,257 @@ export function DetailPanel(props: DetailPanelProps) {
    * about what happened, so this cannot be worded as the session's total --
    * see the label below, which says "read" rather than a bare count for
    * exactly this reason.
+   *
+   * OVER THE WHOLE COLUMN, which is what makes the word "read" keep its
+   * meaning now that the column can grow: a turn walked back into it was READ,
+   * by the same source, out of the same file, and leaving it out of the count
+   * would make the number smaller than the list directly below it.
    */
-  const turnsRead = entry?.session.decisions.length ?? 0;
-  // Oldest first: `decisions` arrives newest first. That
+  const turnsRead = mergedColumn.length;
+  /**
+   * CONCISE MODE, off the store rather than down a prop.
+   *
+   * `Canvas.tsx` owns the prefs state and mounts one `DetailPanel` per split
+   * leaf (`PhoneShell` mounts another), so a prop would have to be threaded
+   * through every one of them. `out`'s font size takes the same route for the
+   * same reason and lands on the document as a custom property; this one
+   * decides which elements EXIST, so it has to reach React -- a subscription,
+   * the shape `ErrorLogPanel` already reads its events by.
+   *
+   * The third argument is the server snapshot: this bundle is also built for
+   * the browser, where a hydration mismatch would be a column that renders one
+   * set of lines and then another. The same getter, because the mode is a
+   * module value with no request behind it.
+   */
+  const focusView = useSyncExternalStore(subscribeFocusView, activeFocusView, activeFocusView);
+  /**
+   * WHETHER THIS PANE'S VIEWS ARE CAPPED AT A READABLE LINE LENGTH.
+   *
+   * Read through the same seam `focusView` above it uses, and for the same
+   * reason: it is global, `Canvas.tsx` mounts one of these per split leaf and
+   * `PhoneShell` mounts another, and there is no dialogue in which a pane
+   * opened by a keystroke could be asked. `prefs/view-width.ts` carries the
+   * argument for the number and for which views it reaches.
+   */
+  const narrowViews = useSyncExternalStore(
+    subscribeNarrowViews,
+    activeNarrowViews,
+    activeNarrowViews,
+  );
+  /**
+   * HOW WIDE ONE CHARACTER OF THIS PANE'S PROSE REALLY IS, in pixels — or
+   * `null` until something has been laid out.
+   *
+   * THIS IS A MEASUREMENT AND IT USED TO BE A CONSTANT. The constant was
+   * `6.0079`, taken on one macOS machine, and the first Linux CI run measured
+   * 83.95 characters across the column it produced: the shipped font stack
+   * names Geist and does not bundle it, so what paints is the platform's own
+   * face and its advance is not ours to know. `prefs/view-width.ts` carries the
+   * whole argument; what belongs here is the mechanism, which is
+   * `terminal-size.ts`'s: render real glyphs, divide the rectangle the engine
+   * gives back.
+   *
+   * THE OBSERVER IS ON THE RULER, NOT ON THE PANE, and that is the one
+   * non-obvious line of this block. `TerminalTab.tsx` observes its own box
+   * because that is what its column count divides — and its own header records
+   * the cost of that choice: a font change does NOT move the box, so nothing
+   * fires and the effect has to re-run on the size instead. A ruler has the
+   * opposite property. Its width IS the thing that changes when the face
+   * resolves, when the operator steps `out` text, when the page is zoomed and
+   * when a webfont finally swaps in — so observing it turns all four of those
+   * into the one event this needs, and none of them is a prop or a dependency
+   * anything here could have listed.
+   */
+  const proseRulerRef = useRef<HTMLElement | null>(null);
+  const [proseAdvance, setProseAdvance] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const ruler = proseRulerRef.current;
+    if (ruler === null) return;
+    const measure = () => {
+      const width = ruler.getBoundingClientRect().width;
+      const characters = (ruler.textContent ?? '').length;
+      if (!(width > 0) || characters === 0) return;
+      // Only a real move, for `useSyncExternalStore`'s reason one screen up:
+      // an identical number written back every frame is a render per frame.
+      setProseAdvance((previous) =>
+        previous === width / characters ? previous : width / characters,
+      );
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(ruler);
+    return () => observer.disconnect();
+  }, []);
+  /**
+   * The cap itself, or `undefined` while the flag is off, while the current
+   * view caps itself, or before the ruler has been measured. One expression,
+   * because the body, the question card and the composer are ONE COLUMN --
+   * see the body's own comment for the operator's decision behind that.
+   */
+  const proseMaxWidth = narrowViews ? narrowProseMaxWidth(proseAdvance) : undefined;
+  /**
+   * The body's own, which is the same cap minus the two views that are not in
+   * it: the Terminal caps itself in `ch` (`narrowsAsProse`), and `FilesTab` is
+   * a CHILD of the body, so a cap left on for it would narrow a tree the
+   * operator drags the width of themselves. The composer and the question card
+   * need no such test — both are already withdrawn on those two views.
+   */
+  const bodyMaxWidth = narrowsAsProse(current) ? proseMaxWidth : undefined;
+  /**
+   * THE TURNS THE OPERATOR HAS ASKED BACK, and why this is React state rather
+   * than a stored field.
+   *
+   * "Folded activity stays one click away" is a READING GESTURE about one
+   * turn -- show me this one, now -- not a preference. Persisting it would
+   * answer a question nobody asked twice and accumulate turn ids for sessions
+   * the store has since pruned, which is the shape `dismissedSessions` was
+   * retired for. Keyed by `Decision.id` rather than by index: the column pages
+   * earlier turns IN at its top, so an index is a different turn one scroll
+   * later.
+   */
+  const [unfolded, setUnfolded] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * LEAVING FOCUS VIEW FORGETS THEM, and that is the gesture keeping its own
+   * meaning rather than a cleanup. Each entry says "this folded turn, open" --
+   * with nothing folded there is no such turn, so carrying the set across
+   * would leave the column holding answers to a question that stopped being
+   * asked. Coming back in, every turn is folded again, which is what the
+   * operator just asked for by coming back in.
+   */
+  const wasFocusView = useRef(focusView);
+  if (wasFocusView.current !== focusView) {
+    wasFocusView.current = focusView;
+    if (unfolded.size > 0) setUnfolded(new Set());
+  }
+  /**
+   * THE IN BUBBLE'S RIGHT-CLICK MENU -- which turn, and where the pointer was.
+   *
+   * Held by turn ID rather than by the turn object: the column re-reads the
+   * transcript on every poll, so a held object would go stale while the menu
+   * is open, and the two items are resolved against the live list at draw
+   * time instead.
+   */
+  const [promptMenu, setPromptMenu] = useState<{
+    /** Which block was right-clicked: the prompt, or the answer under it. */
+    readonly kind: 'prompt' | 'answer';
+    readonly id: string;
+    readonly at: { readonly x: number; readonly y: number };
+  } | null>(null);
+  const openPromptMenu = useCallback((id: string, at: { x: number; y: number }) => {
+    setPromptMenu({ kind: 'prompt', id, at });
+  }, []);
+  const openAnswerMenu = useCallback((id: string, at: { x: number; y: number }) => {
+    setPromptMenu({ kind: 'answer', id, at });
+  }, []);
+
+  const unfold = useCallback((id: string) => {
+    setUnfolded((open) => {
+      const next = new Set(open);
+      next.add(id);
+      return next;
+    });
+  }, []);
+  /**
+   * WHICH KEY SENDS THE DRAFT, read the same way and for the same reason: the
+   * canvas mounts one of these per split leaf and the phone mounts another, so
+   * a prop would have to be threaded through every one of them. Not a paint
+   * either -- it decides what a keystroke DOES -- so CSS could not carry it
+   * the way `--vam-out-font-size` carries the out text size.
+   */
+  const submitKey = useSyncExternalStore(
+    subscribePromptSubmitKey,
+    activePromptSubmitKey,
+    activePromptSubmitKey,
+  );
+  /**
+   * WHAT THE BOUNDARY BLOCK OFFERS AT THE TOP OF THE COLUMN, or `null` when it
+   * offers nothing. Decided in `transcript-history.ts` so that the four answers
+   * are folded in ONE place rather than in a JSX conditional that a later
+   * branch can quietly disagree with.
+   */
+  const columnMore = moreState(pagerNow, readHistory);
+  // Oldest first: the column is newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
-  const orderedTurns = [...(entry?.session.decisions ?? [])].reverse();
-  // Nothing while closed — not a shorter list, no list at all. Open, this is
-  // now EVERY turn vam read, not the newest `PROGRESS_LINES` of them: that
-  // slice used to discard the very history this change exists to keep
-  // reachable, and it was dead code besides -- see `PROGRESS_LINES`'s own
-  // comment for why the box still only shows about that many without a
-  // scroll.
-  const visibleTurns = progressOpen ? orderedTurns : [];
+  const orderedTurns = [...mergedColumn].reverse();
+  /**
+   * How many tool calls failed across the turns ON SCREEN, or `null` when no
+   * turn read carries the field at all.
+   *
+   * NULL AND ZERO ARE DIFFERENT and the difference is the point. `null` is
+   * "no turn here can report failures" -- a source with no such surface, which
+   * must draw nothing, because a confident "0 failed" over data nobody looked
+   * at is the same lie as a false badge. Zero is a reading: vam looked across
+   * every turn in view and found none.
+   *
+   * OVER THE SAME WINDOW as the count it sits beside, which is what lets the
+   * two share a line honestly: both are facts about the turns that were READ.
+   */
+  const failedRead = orderedTurns.reduce<number | null>(
+    (sum, d) => (d.errorCount === undefined ? sum : (sum ?? 0) + d.errorCount),
+    null,
+  );
+  /**
+   * The mark for one turn, and the only place these glyphs are chosen -- the
+   * `<select>` and the expanded list drew the same conditional twice, which is
+   * how they would come to disagree about what a turn is.
+   *
+   * FAILURE OUTRANKS PROGRESS. `◌` says "not finished" and `✓` says
+   * "finished", and both are true of a turn whose tools blew up -- which is
+   * exactly how the fold came to cost the operator the alarm while keeping the
+   * detail. `!` means SOMETHING INSIDE THIS TURN FAILED, which is a narrower
+   * claim than "this turn failed": the count beside the line says how many,
+   * and the turn may well have recovered. It is still the thing worth seeing
+   * from a collapsed row.
+   *
+   * MOVED TO MODULE SCOPE with the column: `TurnBlock` draws the same mark on
+   * each turn's own line, and a third copy of the conditional is exactly what
+   * this comment was already written against.
+   */
+  /**
+   * WHICH TURN THE COLUMN IS MARKING, or `null` when the pick has fallen out
+   * of the window entirely -- `selectedTurnMissing`'s case, where the column
+   * still draws every turn it HAS and says separately that the one asked for
+   * is not among them. Marking a substitute would be exactly the swap that
+   * mechanism exists to refuse.
+   */
+  const markedId = selectedTurnMissing ? null : (decision?.id ?? null);
+  /**
+   * PICK A TURN: mark it, and take the column to it.
+   *
+   * `selectedId` used to decide which turn was DRAWN. In a column that is the
+   * wrong verb -- picking must not hide six turns to show one -- so the state
+   * survives with a smaller job (which turn is marked, and which turn the `!`
+   * typeahead reads its proposed commands from) and the MOVEMENT is the
+   * scroll, applied by the layout effect above.
+   *
+   * ONE CALLER LEFT, and it is deliberate that there is one rather than none.
+   * The turn list and the `<select>` that drove this both went with the
+   * column's bar -- the column draws every turn, so a jump-to-turn control was
+   * a second way to do what the scrollbar does. What still picks a turn is
+   * "Back to the current turn" below, and the CANVAS, which sets the same
+   * state through `followCanvas` during render. The consequence, named rather
+   * than left to be discovered: nothing in this pane can now mark a turn the
+   * canvas cannot reach. Scrolling to one still works, and marking one was
+   * only ever about which turn the `!` typeahead reads -- but it IS a reach
+   * this pane used to have and no longer does.
+   */
+  const pickTurn = (id: string) => {
+    setSelectedId(id);
+    scrollToTurnRef.current = id;
+  };
 
   /**
    * What the composer's button claims, in the words the SOURCE earns.
    *
-   * PR #70 gave the Claude Code source a real channel into a running session,
-   * so for that source a prompt is handed over and answered — `record` now
-   * understates it, and an operator has to know when a message is going out.
-   * the factory source still genuinely only appends to a log, so this is per-source
-   * and not a rename: one wording for both would be wrong for one of them.
+   * The Claude Code source TYPES the prompt into the pane it owns -- a real
+   * channel into the running session, so `record` understates it and the
+   * operator has to know when a message is going out. But it is a keystroke
+   * with no echo that the turn landed, so the wording stops at "typed into the
+   * terminal" and does not promise a delivery or an answer (`Canvas.tsx`, and
+   * `sources/claude-code/reply.ts`). The factory source still genuinely only
+   * appends to a log, so this is per-source and not a rename: one wording for
+   * both would be wrong for one of them.
    */
   const composerClaim = sending
     ? // The in-flight wording keeps the delivers/records distinction. Losing it
@@ -2764,141 +5437,311 @@ export function DetailPanel(props: DetailPanelProps) {
       // watching.
       delivers === true
       ? {
+          Glyph: ArrowUp,
           label: 'sending prompt…',
-          title: 'handing the prompt to the running agent session — this can take a while',
+          title: 'typing the prompt into this session’s terminal — this can take a while',
         }
       : {
+          Glyph: NotepadText,
           label: 'recording prompt…',
           title: 'appending the prompt to this session\u2019s log',
         }
     : delivers === true
       ? {
+          Glyph: ArrowUp,
           label: 'send prompt',
-          title: 'sends the prompt into the running agent session — it is delivered, not filed',
+          // Typed into the pane vam owns, not delivered-and-confirmed: there is
+          // no echo that the turn landed (`sources/claude-code/reply.ts`), so
+          // this claims the keystroke, not the answer.
+          title:
+            'types the prompt into this session’s terminal — it appears when the session records it',
         }
       : {
+          Glyph: NotepadText,
           label: 'record prompt',
           title:
             'appends the prompt to this session\u2019s log — vam cannot hand it to a running agent',
         };
-  return (
+  /**
+   * THE `word` IS GONE FROM THIS CLAIM, with the label it painted.
+   *
+   * Operator: "drop the Send label from the button, the icon is enough." Every
+   * `word` used to be a prefix of its own `label` because WCAG 2.5.3 asks that
+   * an accessible name contain the VISIBLE one -- and that criterion applies
+   * only where a visible label exists. With none, 1.1.1 takes over and the
+   * `label` is the whole of the name.
+   *
+   * The field is deleted rather than left unread: a claim carrying a word
+   * nothing paints is the same defect as a preference nothing reads, which
+   * this repo already has a test for. What still says which outcome this
+   * button produces is the GLYPH (two of them), the `label`, and the `title`
+   * that `Note` opens on focus -- all three asserted in
+   * `test/panels/DetailPanel.test.tsx` and on the painted control in
+   * `e2e/composer-bar-shots.mjs`.
+   */
+  const ComposerGlyph = composerClaim.Glyph;
+  /*
+   * GONE WITH THE ROW IT FED: `sendVerb`, the send/record verb the key caption
+   * used. It carried the same `delivers` distinction the submit button's own
+   * name and glyphs carry, so nothing is lost by deleting it rather than
+   * leaving it computed for no reader -- which is the rule `composerClaim`'s
+   * own `word` field was already deleted under.
+   */
+  // THE PANE ITSELF, held as a value rather than returned directly, and that
+  // is about the DIFF rather than about the code: wrapping this JSX in the
+  // provider below pushes eleven hundred lines of unrelated markup one level
+  // deeper, the formatter rewrites every one of them, and the change ends up
+  // buried in its own reindentation. A wrapper should cost a wrapper.
+  const pane = (
     <aside
       data-action-pane={active ? 'active' : 'idle'}
+      /* THE SCOPE OF THE READING SIZE, and the only thing this attribute does.
+         `styles.css`'s `[data-reading-pane]` rule re-declares the type scale's
+         BODY and CONTROL steps in terms of `--vam-out-font-size`, so every
+         `text-body` and `text-control` inside this pane follows the size the
+         operator set for the answers. Operator report: "out để fontsize 15 khá
+         to nhưng phần prompt choice option hiện rất bé" -- at `out` 15 the
+         answers read comfortably and the prompt's choice options are tiny.
+         A HOOK RATHER THAN A CLASS because the declaration is a SCOPE, not a
+         style: nothing about this element paints differently, and every call
+         site inside keeps the role it already picked.
+         ITS OWN NAME, AND ON THIS ELEMENT, because `Canvas.tsx` already wraps
+         the desktop pane in `[data-detail-pane]` (the width holder) and
+         `PhoneShell` mounts this panel with no such wrapper: a scope keyed to
+         the Canvas attribute would have covered the desktop by accident and
+         the phone not at all. This element is under both. */
+      data-reading-pane=""
       style={width === undefined ? undefined : { width }}
       className={[
-        // `bg-sidebar` is the mockup's own pane fill. Measured off the
-        // `width:408px` column of artboards 1a/1b, both values are exactly what
-        // this token already holds, so no new colour was invented for it.
-        'relative flex h-full min-w-0 flex-col border-line border-l bg-sidebar',
+        // THE PANE'S OWN TOKEN, at the operator's ask ("split the pane's
+        // colour setting from the sidebar"). It was `bg-sidebar` -- the
+        // mockup's `width:408px` column of artboards 1a/1b paints the pane and
+        // the sidebar the same value, so the token was right and the SETTING
+        // was one swatch for two surfaces. `--vam-pane` starts on that same
+        // measured value in both themes (styles.css), so nothing moved; what
+        // changed is that either can move alone now.
+        'relative flex h-full min-w-0 flex-col border-line border-l bg-pane',
         // No width given means nobody is sizing this pane -- the phone shell's
         // case -- so it fills its host instead of refusing to shrink.
         width === undefined ? 'w-full' : 'shrink-0',
       ].join(' ')}
     >
       {/*
-        The pane says out loud when it holds the keyboard, and says it ONCE.
+        THE PANE DRAWS NOTHING FOR HOLDING THE KEYBOARD.
 
-        It used to say it twice: this border grew to `border-l-2` in a colour
-        as well, first `waiting` -- the amber that means "a session is waiting
-        on your answer" everywhere else -- and then `focus-edge`. The operator
-        called the border wrong, and two indicators for one fact is how they
-        come to disagree. So the border is gone in both states and the pane
-        keeps the ordinary 1px `line` every other column draws; the line along
-        the top edge is the whole signal, the same one the sidebar wears, which
-        is what was asked for.
+        It used to say so twice, then once, then not at all. First the left
+        border grew to `border-l-2` in a colour -- `waiting`, the amber that
+        means "a session is waiting on your answer" everywhere else, then
+        `focus-edge` -- and the operator called the border wrong. Then the
+        line along the top edge was the whole signal, until the operator asked
+        for that off too ("remove the running-line animation at the top of the
+        pane when focused"), the same way the sidebar's copy had already gone.
+        Being the last mount, it took the whole feature with it: component,
+        class, keyframe hook and the token pair only it read.
+
+        What still answers "where do my keys go": the status bar prints the
+        mode as a word, the focused row or card inside the mode draws its own
+        ring, and the view-icon overlay is drawn in the FOCUSED pane alone --
+        so with two panes open, only one wears it. `data-action-pane` still
+        carries `active`/`idle` for tests and for whatever draws next; it is
+        simply not painted here.
       */}
-      {active && <FocusEdge />}
       {resizeHandle}
-      <div
-        className={`flex flex-col gap-2.5 border-line border-b px-3.5 ${phone ? 'pt-2.5' : 'pt-3'}`}
-      >
-        {!phone && (
-          <div className="flex items-start gap-2">
+      {/*
+        A12.2: THE HEADER IS GONE. It used to carry five facts — the status
+        dot, the session's name, its project, its epic ("branch"), how many
+        agents are running, and which turn is focused — in a block that cost
+        real height on every render whether or not any of it had changed
+        since the operator last looked. None of the five is dropped, each
+        moved to where it is actually read:
+          - the session's NAME is the tab it already sits in (A11/A12.1) —
+            drawing it again one row down was the same word twice;
+          - STATUS is the sidebar row's own dot, which was already the same
+            four-colour map (`PANE_STATUS_DOT` used to duplicate it exactly)
+            — a second copy of an unchanged fact bought nothing; the `out`
+            rule below still shows the one status fact that is actually about
+            the turn on screen, whether IT is still being worked;
+          - PROJECT and EPIC move into the `in` block's identity line, below
+            — still always on screen while there is a turn to read, just
+            inside the column instead of above it;
+          - AGENT COUNT is the badge on the Agents icon, immediately below —
+            the same "a real source, omitted at zero" rule this pane already
+            uses everywhere else, not a new one invented for this;
+          - the focused TURN's label moves into the `in` rule's own meta
+            slot, beside "you" — see the `in` block below.
+        A15.5: what used to be that row is now a CORNER OVERLAY instead — the
+        icons cost no space of their own any more, floating over the top-right
+        corner of the scrolling column below rather than pushing it down.
+
+        Three properties an overlay owes that a reserved row got for free:
+        - IT MUST NOT STEAL INPUT FROM WHAT IT FLOATS OVER. `pointer-events-
+          none` on this wrapper, opted back into on the `<nav>` itself
+          (`ViewIcons`), means only the pixels the icons actually paint can
+          catch a click or a hover — the wrapper's own empty area is inert,
+          so it never shadows a click meant for the content underneath.
+        - IT MUST NOT BALLOON AT A NARROW WIDTH. Sized to its own content
+          (no `inset-x-0`/`w-full`) and capped by `max-w-` against the pane's
+          own width. The refusal note is capped and truncated the same way,
+          so a long one grows the ellipsis, never the overlay.
+
+          THIS USED TO SAY the overlay "can only ever cover the few pixels
+          its glyphs occupy — never the whole line of text beneath it". That
+          was true of the WRAPPER, which is `pointer-events-none` and
+          transparent, and false of the filled pill inside it, which is
+          opaque: measured at a 253px pane, the nav ran x 924–1014 over an
+          identity line running to x 1010, so its last 86px — project and
+          epic, the two facts the removed header relocated there — were laid
+          out, measured as visible by `truncate`, and then painted over
+          (audit F1). An overlay owes a FOURTH property, and it cannot be
+          discharged from here: WHAT IT FLOATS OVER MUST STAY CLEAR OF ITS
+          CORNER. The identity line discharged it by reserving 7rem, and the
+          operator has since had that line removed altogether; what the pill
+          floats over now is the prompt bubble, kept clear by the bubble's own
+          padding -- a paint choice, so it is measured rather than trusted.
+          `e2e/narrow-pane-overlay-shots.mjs` asks which element is on top of
+          each painted glyph, which is the only way to see occlusion.
+
+          A comment asserting a property the code does not have is worse than
+          no comment: it is how this defect passed review.
+        - IT MUST NOT TRAP FOCUS. `position` is a paint property; a browser's
+          default Tab order follows DOM order, not screen position, so
+          moving the icons out of the flow cannot create the kind of focus
+          loop a modal's own trap would. Nothing here listens for `Tab` at
+          all, which is A5.3's contract (decline what you do not own) kept
+          by simply not touching it.
+
+        `z-20` outranks the `in` block's own `sticky z-10` header (below):
+        both sit in the same stacking context once the sticky element is
+        actually stuck, and without an explicit order the later one in DOM
+        order — the sticky header — would paint over these buttons the
+        moment the reader scrolls, defeating the one thing an "always
+        reachable" shortcut promises.
+      */}
+      {/* FOCUSED PANE ONLY -- see `paneFocused`. */}
+      {cornerOverlay && (
+        <div
+          data-view-overlay
+          className="pointer-events-none absolute top-2 right-2.5 z-20 flex max-w-[calc(100%-1.25rem)] items-center justify-end gap-1.5"
+        >
+          {/* `Alt+<digit>`'s own refusal, said aloud (A2.5: "refuses aloud
+              when the source has none") — `role="status"` so a screen reader
+              announces it without the operator having to go looking. Capped
+              and truncated rather than growing the overlay past its own
+              corner, and sits on the LEFT of the icons: they are always
+              reachable, the refusal is not always there. */}
+          {viewNote !== null && (
             <span
-              data-pane-status={entry?.session.status ?? 'none'}
-              className={[
-                'mt-1.5 h-1.5 w-1.5 flex-none rounded-full',
-                entry === null ? 'bg-line-strong' : PANE_STATUS_DOT[entry.session.status],
-                entry !== null && PANE_STATUS_BREATHES[entry.session.status] ? 'vam-breathe' : '',
-              ].join(' ')}
-            />
-            <div className="min-w-0 flex-1">
-              {/* `data-prompt-target` lives here now, not beside the composer.
-                The operator asked for the branch line under the input to go;
-                the guarantee it carried must not go with it. One input serving
-                many sessions is the easiest possible way to send the right
-                words to the wrong agent, so SOMETHING on screen has to say
-                which session is about to be written to — and the pane header
-                already did, two lines up from where the chip was. The tests
-                that covered the chip now assert against this. */}
-              <div
-                data-prompt-target
-                className="truncate font-medium text-[14px] text-ink leading-[1.35]"
-              >
-                {entry === null ? 'No session selected' : entry.session.title}
-              </div>
-              <div className="mt-1 flex items-center gap-[5px] font-mono text-[10px] text-ink-faint">
-                <span data-prompt-project className="truncate text-ink-dim">
-                  {entry?.project.name ?? '—'}
-                </span>
-                <span>·</span>
-                <span className="truncate">{entry?.session.epic ?? '—'}</span>
-                <span>·</span>
-                <span className="flex-none">
-                  {entry === null || entry.session.runningAgents === 0
-                    ? 'no agent'
-                    : `${entry.session.runningAgents} agents`}
-                </span>
-              </div>
-            </div>
-            {/* Which step the panel is expanding. The mockup puts it at the far
-              right of the title row, where the eye lands last — it names the
-              thing you are reading, not the thing you are choosing. */}
-            {decision !== null && (
-              <span data-detail-step className="flex-none font-mono text-[10px] text-ink-dim">
-                {decision.label}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* The row that stood here carried the `x/y` step counter, its
-            expandable note, and the session age. The operator found it did no
-            work and asked for it to go, following the tick strip that stood
-            here before it. Nothing it showed is only here: the focused step is
-            named at the right of the title row above, how many turns exist is
-            the `progress` section's own counter, and the age is on the session
-            card in the sidebar and on the canvas. */}
-
-        {/* Not on a phone -- MOVED, not removed. Operator instruction: the
-            phone's session screen is the prompt screen, and a full-width strip
-            of words between the app bar and the output is chrome it cannot
-            afford (this bar, the deleted step rail and the bar's second line
-            cost 107px of an 844px viewport between them, measured). The same
-            views are icon buttons in the app
-            bar; `phone/PhoneShell.tsx` draws them, drives this pane's tab
-            through `tabRequest`, and carries the note about what that cost. */}
-        {!phone && (
-          <TabBar
+              data-view-note
+              role="status"
+              className="min-w-0 max-w-[160px] truncate rounded-[7px] border border-line-strong bg-pane px-1.5 py-0.5 text-right font-mono text-meta text-waiting"
+            >
+              {viewNote}
+            </span>
+          )}
+          <ViewIcons
             tabs={tabs}
             runningAgents={entry?.session.runningAgents ?? 0}
             current={current}
-            onSelect={setTab}
+            onSelect={pickTab}
           />
-        )}
-      </div>
+        </div>
+      )}
+      {/* Not drawn at all on a phone -- the same `!phone` gate the icon row
+          above wears. Operator instruction: the phone's session screen is the
+          prompt screen, and a full-width strip of words between the app bar
+          and the output is chrome it cannot afford. The same views are icon
+          buttons in the app bar there; `phone/PhoneShell.tsx` draws them and
+          drives this pane's view through `tabRequest`. */}
 
       {/*
-        Three regions, three scrollbars, one decision.
-        Before this the whole pane scrolled as one column, so reading a long
-        answer pushed the request that prompted it off the top — and the two
-        things you compare to decide were never on screen together. Now `in`
-        and `progress` are capped short (they are context) and `out` takes the
-        remaining height (it is the thing you read), each scrolling on its own.
-        `min-h-0` on every level is what makes a flex child actually able to
-        shrink and scroll rather than growing its parent.
+        `in`, `progress` and `out` are now ONE continuous scrollable column
+        (A12.2), shaped like the Claude Code VSCode plugin's own turn view:
+        everything inline, one scrollbar, not three fixed-height panes each
+        competing for the pane's total height and each fighting its own
+        scrollbar. `in` stays pinned to the top of THIS column via
+        `position: sticky` (below) rather than a fixed height budget, so the
+        prompt that produced a long answer never scrolls out of view while
+        you read it. `min-h-0` on every level is still what makes a flex
+        child able to shrink and scroll rather than growing its parent.
       */}
-      <div className="flex min-h-0 flex-1 select-text flex-col gap-2.5 px-3.5 py-3">
+      {/* THE BODY EVERY VIEW BUT ONE IS DRAWN INSIDE, and where the operator's
+          width choice lands (`prefs/view-width.ts`).
+
+          A MAXIMUM AND NOTHING ELSE. `narrowsAsProse` decides which views it
+          reaches: the Terminal caps itself in `ch` because eighty of its
+          characters is a COLUMN COUNT, and `FilesTab` — a child of this very
+          element, always mounted and merely `hidden` — is not in the ask and
+          is the one view a second opinion about width would harm. The cap is
+          therefore keyed to the CURRENT view rather than put on unconditionally:
+          leaving it on while Files is up would narrow a tree the operator
+          drags the width of themselves.
+
+          `mx-auto` CENTRES IT, which is a choice and not a default. The cap
+          exists to shorten the eye's return sweep; pinning the column against
+          one edge of a 1600px pane leaves a thousand pixels of void the eye
+          still has to cross to get back. The chrome that frames this body —
+          the view pill in the corner, the composer below — keeps the pane's
+          own width either way, so the column reads as a column and not as a
+          panel that failed to fill.
+
+          `w-full` is what makes `mx-auto` mean anything: a flex child sized by
+          its content has no spare inline space for auto margins to share.
+
+          AND THE COMPOSER AND THE QUESTION CARD COME WITH IT -- the operator's
+          own decision, made on a screenshot of the first cut, where this body
+          was a narrow column of prose sitting on top of full-width chrome:
+          "narrow the composer and the question card too, so the whole block is
+          one column". The first cut argued the other way (they named four
+          VIEWS, and a wide box is better to type into); what that argument
+          missed is that the transcript and the box you answer it in are ONE
+          conversation, and a seam down the middle of it is what the eye
+          actually reads. The same `proseMaxWidth` is spent in all three
+          places, so there is one column and not three that happen to agree. */}
+      <div
+        data-detail-body
+        className={`flex min-h-0 w-full flex-1 select-text flex-col gap-2.5 px-3.5 py-3 ${
+          bodyMaxWidth === undefined ? '' : 'mx-auto'
+        }`}
+        style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
+      >
+        {/* THE RULER, and it is the whole of how the cap knows what a character
+            is. Real glyphs, in this pane's own face, at the smaller of the two
+            prose sizes a response pane draws (`PROSE_RULER_FONT_SIZE`) --
+            measured by the engine rather than assumed by us, which is the
+            correction a frozen macOS advance earned on its first Linux CI run.
+
+            INSIDE THIS ELEMENT so it inherits the face the prose is set in, and
+            `absolute` so its own width is its content's and never this
+            container's -- there is no feedback loop between the cap and the
+            thing the cap is computed from.
+
+            `select-none` IS LOAD-BEARING HERE, unlike on the terminal's ten-M
+            ruler:
+            this body is `select-text`, and three hundred invisible characters
+            inside it would otherwise land in the operator's clipboard every
+            time they selected a turn. */}
+        {/* CLIPPED BY A ZERO-SIZED BOX, and that box is not decoration.
+            `absolute` takes the ruler out of FLOW but not out of its
+            ancestor's SCROLLABLE OVERFLOW: three hundred `whitespace-pre`
+            characters measure ~1750px, and on a 1280px window that put the
+            document's `scrollWidth` at 2015 and drew a horizontal scrollbar
+            across the whole app with an empty band at the right. Measured,
+            after it shipped.
+
+            A wrapper of `h-0 w-0 overflow-hidden` ends the overflow without
+            touching the measurement: clipping is visual, so the ruler's own
+            border box -- the thing `getBoundingClientRect` reports and the
+            cap divides -- is still its full natural width. Shrinking the
+            ruler instead would have been measuring a different string. */}
+        <span aria-hidden="true" className="absolute top-0 left-0 h-0 w-0 overflow-hidden">
+          <span
+            ref={proseRulerRef}
+            data-prose-ruler
+            className={`${PROSE_RULER_CLASS} pointer-events-none block w-max select-none whitespace-pre opacity-0`}
+          >
+            {PROSE_RULER_TEXT}
+          </span>
+        </span>
         {/* A failed session says so here, not only in the dot's colour.
             Measured against the real CLI: a failed row carries `cwd, id,
             kind, name, sessionId, startedAt, state` and NOTHING about why --
@@ -2906,19 +5749,61 @@ export function DetailPanel(props: DetailPanelProps) {
             reports `working` for a session the CLI calls failed, so it is not
             a second opinion worth showing. Naming the gap is the whole of
             what can honestly be said. */}
-        {current === 'Response' && entry?.session.status === 'failed' && (
+        {failedBanner && (
           <p
             data-session-failed
-            className="flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-panel px-3 py-2 text-[11px] text-failed leading-[1.45]"
+            className={[
+              'flex flex-none items-center gap-1.5 rounded-[9px] border border-failed bg-card py-2 pl-3 text-control text-failed',
+              /* THE CORNER, RESERVED -- the same obligation the prompt bubble
+                 and the column's boundary block already carry, and the banner
+                 is the third element that lands in it: on a failed session
+                 this `<p>` is the FIRST child of the column, so the view-icon
+                 pill floats over its right end, which is exactly where the
+                 "why?" control sits. Measured at a 253px pane before this
+                 line: 9 of 45 sampled glyph pixels under the pill, and
+                 `elementFromPoint` at the control's own centre returned the
+                 Agents view button -- a click meant to ask why the session
+                 died switched tab instead.
+
+                 `6rem` is the width the boundary block above already reserves
+                 for the same pill, and only while the pill is drawn: an
+                 unfocused pane paints none, and 96px taken out of a narrow
+                 pane for nothing is the over-reservation the identity line's
+                 own `7rem` was deleted for. `e2e/narrow-pane-overlay-shots.mjs`
+                 measures both halves. */
+              cornerOverlay ? '' : 'pr-3',
+            ].join(' ')}
+            style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
           >
             <span role="img" aria-label="failed" className="flex">
               <CircleSlash size={13} strokeWidth={1.6} />
             </span>
             <span className="min-w-0 flex-1">This session failed.</span>
             <Note text="the source reports no reason for the failure — a failed row carries no error, message or exit code">
-              <span className="flex-none cursor-help font-mono text-[9.5px] text-ink-faint underline decoration-dotted">
+              {/* A BUTTON, because it was a `<span>` and a `Note` on a span is
+                  the `title` this app deleted: measured in a real browser,
+                  `tabIndex` -1 and 300 Tab presses never reached it, while
+                  `Note.tsx`'s own first line promises "A note that a keyboard
+                  can read." It is the explanation for why a session died, so
+                  the keyboard-first tool was hiding its most important
+                  sentence from the keyboard.
+
+                  Not `tabIndex={0}` on the span, which is what the status
+                  bar's two notes do: those are readouts that happen to carry
+                  a note, and each needs a biome suppression to say so. This
+                  one is a control whose whole purpose is to open the note, so
+                  it is the element that means that -- Enter and Space work,
+                  it is announced as a control, and no suppression is needed.
+
+                  The name is not "why?": a screen reader reading a lone "why"
+                  out of the banner's flow has been told nothing. */}
+              <button
+                type="button"
+                aria-label="why this session failed"
+                className={`flex-none cursor-help rounded-[4px] font-mono text-control text-ink-faint underline decoration-dotted hover:text-ink ${FOCUS_RING}`}
+              >
                 why?
-              </span>
+              </button>
             </Note>
           </p>
         )}
@@ -2943,282 +5828,602 @@ export function DetailPanel(props: DetailPanelProps) {
                `undefined` in the browser build, where the tab says so instead
                of taking keys it cannot deliver. */
             send={globalThis.window?.api?.terminal?.send}
+            /* THE BRANCH, for the rule under the screen. Passed from here
+               rather than read inside the tab for the reason the three
+               members above are: this panel is where the session is in scope,
+               and a fact reached for invisibly is a fact a later edit drops
+               with nothing to notice. `null` when there is no session and when
+               the source cannot say -- `TerminalTab` draws nothing for either,
+               and its `branch` prop says why that is not a dash. */
+            branch={entry?.session.branch ?? null}
           />
         ) : current === 'Agents' ? (
-          <AgentsTab agents={entry?.session.agents} />
+          <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />
         ) : current === 'PRs' ? (
-          <PullRequestsTab pullRequests={entry?.session.pullRequests} />
-        ) : selectedTurnMissing ? (
-          // THIS TURN, NOT ANOTHER ONE. Falling through to the newest turn
-          // here would look identical to the operator to actually having
-          // read it -- exactly the swap this whole mechanism exists to
-          // refuse. Said plainly, with a way back to what the canvas is
-          // actually showing rather than a dead end.
-          <p data-progress-turn-missing className="text-[11px] text-ink-faint">
-            The turn you were reading has scrolled out of what vam can see.{' '}
-            <button
-              type="button"
-              data-progress-turn-return
-              onClick={() => setSelectedId(canvasDecisionId)}
-              className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
-            >
-              Back to the current turn
-            </button>
-          </p>
-        ) : decision === null ? (
-          <p className="text-[11px] text-ink-faint">
-            {/* Two different absences. "This session has no steps yet" named a
+          <PullRequestsTab
+            pullRequests={entry?.session.pullRequests}
+            repo={
+              prRepo === undefined
+                ? undefined
+                : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
+            }
+          />
+        ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
+        // see its own comment for why. This slot contributes nothing so the
+        // Response-column branches below it never run for a tab that is not
+        // Response.
+        null : orderedTurns.length === 0 ? (
+          entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
+          // above it, and an empty strip already says "no sessions open —
+          // pick one from the sidebar". This line said the same thing in
+          // different words 40px below it, in otherwise empty space. The
+          // PHONE has no strip, so there it is the only sentence there is and
+          // it stays.
+          null : (
+            <p className="text-control text-ink-faint">
+              {/* Two different absences. "This session has no steps yet" named a
                 session that did not exist whenever nothing was focused. */}
-            {entry === null
-              ? 'No session selected — pick one in the sidebar.'
-              : entry.session.status === 'failed'
-                ? // Final, not pending. A failed background session has no
-                  // transcript at all -- the CLI lists it while
-                  // `~/.claude/projects/` holds no `.jsonl` for its id -- and
-                  // "no steps yet" promises steps that are never coming.
-                  'This session failed with nothing recorded.'
-                : 'This session has no steps yet.'}
-          </p>
+              {entry === null
+                ? 'No session selected — pick one in the sidebar.'
+                : entry.session.status === 'failed'
+                  ? // Final, not pending. A failed background session has no
+                    // transcript at all -- the CLI lists it while
+                    // `~/.claude/projects/` holds no `.jsonl` for its id -- and
+                    // "no steps yet" promises steps that are never coming.
+                    'This session failed with nothing recorded.'
+                  : 'This session has no steps yet.'}
+            </p>
+          )
         ) : (
-          <>
-            <section data-detail-block="in" className="flex flex-none flex-col gap-1.5">
-              <Rule
-                label="in"
-                // `you`, and no time. `Decision` carries no timestamp, so
-                // nothing here can say when this turn happened -- and
-                // `session.age` is the session's LAST ACTIVITY, usually the
-                // agent's most recent write rather than when you typed this.
-                // Walk back a turn with `h` and the old caption went on
-                // describing the present. The session's age is on its sidebar
-                // row, where it is true.
-                meta="you"
-                iconLabel="you"
-                tone="text-rule-in"
-                icon={<User size={13} strokeWidth={1.6} />}
-              />
-              <div
-                data-detail-scroll="in"
-                style={{ maxHeight: IN_MAX_HEIGHT }}
-                className="vam-no-scrollbar min-h-0 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2.5"
-              >
-                <p className="whitespace-pre-wrap break-words text-[12px] text-ink-dim leading-[1.55]">
-                  {decision.input}
-                </p>
-              </div>
-            </section>
+          // THE WHOLE SESSION, AS ONE COLUMN. One scrollable region holding
+          // every turn `entry.session.decisions` carries, oldest at the top,
+          // newest at the bottom, each turn's `in` pinned to the top of the
+          // column while you are inside it — the operator's ask, and the shape
+          // the Claude Code plugin for VSCode has.
+          //
+          // The ref and the scroll handler live HERE because this is the
+          // region that scrolls; `stuckRef`/`isAtBottom` never cared which
+          // element they were reading metrics off, only whether it was resting
+          // at its own bottom.
+          //
+          // WRAPPED, and the wrapper is the whole of what the floating jumps
+          // need. `position: absolute` inside a scroller is resolved against
+          // its SCROLLED content, so a jump placed on the column itself would
+          // ride the transcript out of the frame; placed on a non-scrolling
+          // box of exactly the same size, it stays at the column's edge at
+          // every offset. The full-bleed pull (`-mx-3.5`, see below) moves up
+          // here with it so the wrapper's box IS the column's box -- an
+          // overlay measured against a box 14px narrower on each side would
+          // sit 14px inside the edge it is meant to hug.
+          <div
+            className={`relative -mx-3.5 flex min-h-0 flex-1 flex-col ${
+              failedBanner ? '' : '-mt-3'
+            }`}
+          >
+            <div
+              ref={outRef}
+              data-detail-column
+              onScroll={(event) => {
+                stuckRef.current = isAtBottom(event.currentTarget);
+                syncJumps(event.currentTarget);
+                askIfNearTop(event.currentTarget);
+              }}
+              /* FULL-BLEED, so the sticky ground inside can be. The pane body
+                 puts `px-3.5 py-3` around everything; a scroll column inside
+                 that padding can only paint as wide as the padding box, which
+                 left a 14px gutter down each side of the pinned prompt with
+                 the transcript scrolling past in it, in full view. So the
+                 padding comes OFF the body (`-mx-3.5`, on the wrapper above)
+                 and back on here: every child lays out where it did, and the
+                 ones that ask for it -- every turn's sticky ground, and the
+                 boundary block -- reach the pane's own edges with a negative
+                 margin of their own.
 
-            {/* The mockup lists the actions inside one step. The factory's unit
-                is the turn, so this lists the session's turns — the same shape
-                answering the same question, off data that exists. */}
-            {/* Closed, this is a rule and a toggle and nothing else. The three
-                regions compete for one pane's height and a turn list is the
-                least of the three to read, so it costs its own header until it
-                is asked for — and then it costs about five lines' worth of
-                height, with the rest of it (now every turn vam read, not
-                only the newest few) one scroll away rather than gone.
-                A real <button>, not a new key: Enter and Space already activate
-                one, it is reachable by Tab from the composer, and the modal
-                keymap loses nothing to it. Each ROW is now a control too --
-                see `data-progress-select` below -- so this is the turn you
-                are reading, not only the turn the canvas is. */}
-            <section
-              data-detail-block="progress"
-              className={[
-                'flex flex-none flex-col',
-                progressOpen ? 'min-h-[56px] gap-1.5' : '',
-              ].join(' ')}
+                 THE RIGHT SIDE IS 44, NOT 14, AND THAT IS THE JUMPS' RENT.
+                 They float over this column, and MEASURED over the demo
+                 session at five widths and fifteen offsets each, the answer
+                 text runs to the column's content edge at every one of them
+                 (rightmost run x=1107 of 1135, 790 of 835, 538 of 555, 421 of
+                 435, 375 of 389 -- always the padding box, exactly). So there
+                 is no corner a control can float in without covering
+                 somebody's sentence, and the only honest way to float one is
+                 to reserve the strip it lands in. Reserved UNCONDITIONALLY,
+                 not while a jump happens to be drawn: a reservation that came
+                 and went with the scroll offset would re-wrap every paragraph
+                 in the pane under the reader's eye, which is the same
+                 objection `TurnBlock`'s corner reserve already answers. 44 is
+                 the touch floor the buttons have to meet anyway (WCAG 2.2 SC
+                 2.5.5, `PhoneShell.tsx`), so the strip is exactly one hit box
+                 wide and not a pixel more.
+
+                 The TOP is the same move without the give-back: `-mt-3` (on
+                 the wrapper) hands the body's top padding to the column, which
+                 re-spends it on the boundary block below. Not when the failed
+                 banner is drawn -- there IS something above the column then,
+                 and pulling up would slide the column under it.
+
+                 `container-type:size` IS LOad-BEARING, not decoration: it
+                 makes this element the size container the `45cqh` cap on every
+                 turn's sticky prompt resolves against. Without it that cap
+                 resolves to nothing inside the per-turn wrapper and the pinned
+                 prompt can cover the answer again (audit F2). `TurnBlock`'s
+                 own comment carries the measurement. */
+              className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-3.5 pr-11 [container-type:size]"
             >
-              <Rule
-                label="progress"
-                meta={
-                  <button
-                    type="button"
-                    data-progress-toggle
-                    aria-expanded={progressOpen}
-                    onClick={() => setProgressOpen((open) => !open)}
-                    className="vam-tap flex cursor-pointer items-center gap-1 rounded-[var(--radius-sm)] px-1 py-0.5 text-ink-faint hover:bg-raised hover:text-ink"
-                  >
-                    {/* "read", not a bare count: `source.ts` only ever opens
-                        the newest `TAIL_BYTES` of the transcript, so on a
-                        session bigger than that window this is what vam
-                        FOUND, not a provable total for the session's whole
-                        life. Trailing, not leading: "read 7 turns" is an
-                        imperative -- a command this button does not carry
-                        out -- while "7 turns read" is what it actually is, a
-                        count with its qualifier attached, the same shape as
-                        every other reading on this pane. */}
-                    {turnsRead} turns read
-                    {progressOpen ? (
-                      <ChevronDown size={11} strokeWidth={1.7} />
-                    ) : (
-                      <ChevronRight size={11} strokeWidth={1.7} />
-                    )}
-                  </button>
-                }
-                // `turns`, not `progress`: the visible label already says
-                // progress, and a glyph that only repeats it is a word said
-                // twice. The commit line means the session's turns.
-                iconLabel="turns"
-                tone="text-rule-progress"
-                icon={<GitCommitVertical size={12} strokeWidth={1.7} />}
-              />
-              {progressOpen && (
-                <ul
-                  style={{ maxHeight: PROGRESS_MAX_HEIGHT }}
-                  className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pl-0.5 font-mono text-[10px] text-ink-faint"
-                >
-                  {visibleTurns.map((d) => (
-                    <li key={d.id} data-progress-turn className="flex items-center gap-2">
-                      {/* The control that reads an older turn without ever
-                          leaving this panel -- `decision` above already
-                          resolves to whichever one was clicked here, so
-                          nothing downstream has to know this exists. */}
-                      <button
-                        type="button"
-                        data-progress-select
-                        onClick={() => setSelectedId(d.id)}
-                        aria-current={d.id === decision?.id ? 'true' : undefined}
-                        className="vam-tap flex min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-sm)] py-0.5 text-left hover:bg-raised hover:text-ink"
-                      >
-                        <span className={d.output === null ? 'text-waiting' : 'text-ink-quiet'}>
-                          {d.output === null ? '◌' : '✓'}
-                        </span>
-                        <span className={`truncate ${d.id === decision?.id ? 'text-ink-dim' : ''}`}>
-                          {d.label}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+              {/*
+              WHAT THE TOP OF THE COLUMN IS — said, not left to be inferred.
 
-            <section data-detail-block="out" className="flex min-h-0 flex-1 flex-col gap-1.5">
-              <Rule
-                label="out"
-                meta={
-                  <span className="flex items-center gap-1.5">
-                    {/* `session.activity` is what the session is doing RIGHT
-                        NOW, so it belongs to the turn currently being worked
-                        and to no other. On an older turn it described the
-                        present while the operator read the past. The newest
-                        decision is the one in progress (`decisions` is newest
-                        first, per model.ts). */}
-                    {isNewestTurn ? (entry?.session.activity ?? '—') : '—'}
-                    {jumps.above && (
-                      <button
-                        type="button"
-                        data-out-to-top
-                        aria-label="scroll out to the top"
-                        onClick={() => jumpTo('top')}
-                        className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                      >
-                        <ChevronsUp size={12} strokeWidth={1.8} />
-                      </button>
-                    )}
-                    {jumps.below && (
-                      <button
-                        type="button"
-                        data-out-to-bottom
-                        aria-label="scroll out to the bottom"
-                        onClick={() => jumpTo('bottom')}
-                        className="flex cursor-pointer items-center rounded-[var(--radius-sm)] px-0.5 py-0.5 hover:bg-raised hover:text-ink"
-                      >
-                        <ChevronsDown size={12} strokeWidth={1.8} />
-                      </button>
-                    )}
-                  </span>
-                }
-                iconLabel="agent"
-                tone="text-rule-out"
-                icon={<Bot size={14} strokeWidth={1.75} />}
-              />
-              {/* The one region that grows. Everything the operator reads to
-                  decide lives in here, so it gets the height and its own
-                  scroll rather than pushing `in` off the top of the pane. */}
+              THE REPO'S DOMINANT DEFECT FAMILY, at the one place it bites
+              hardest. `sources/claude-code/pull-requests.ts` states the rule:
+              "'No PRs' and 'vam could not ask' must never look the same." A
+              column that simply stops at its oldest loaded turn claims the
+              session started there. It did not: the transcript reader only
+              ever opens the newest `TAIL_BYTES` of the file (`source.ts`).
+
+              MEASURED, over the 73 transcripts on this machine that vam
+              actually opens -- interactive sessions only; the other 863
+              `.jsonl` files on disk are subagent SIDECHAINS, which vam never
+              reads, and counting them would have made every figure here wrong
+              by an order of magnitude. The distribution is bimodal, and both
+              ends argue for this block:
+                - 41% of sessions fit ENTIRELY inside the window. For four in
+                  ten, the oldest turn drawn really is the session's first --
+                  and vam still cannot say so, which is why `session-start` is
+                  defined below and not drawn;
+                - the other end is where the operator's long-running work
+                  lives, and there the window is a sliver: 157.3 MB over 63
+                  turns shows ONE, 138.4 MB over 261 turns shows two, 122.1 MB
+                  over 89 shows one. p50 254 KB, p75 5 MB, p90 45 MB.
+              A column that ended silently would be at its most misleading
+              exactly there.
+
+              TWO STATES, AND BOTH ARE ASSERTABLE NOW — the seam this block was
+              written against has been joined:
+                - `read-limit` — "this is as far back as vam has read". True
+                  whenever the window is what ended the list.
+                - `session-start` — "the session begins here". Drawn only on
+                  `TranscriptPage.reachedStart`, which is a POSITIVE fact read
+                  off a window that began at byte 0 and is never inferred from
+                  an empty page. A boundary that guessed would be the same lie
+                  in the other direction, so nothing else may set it.
+
+              AND A CONTROL, BECAUSE THERE IS NOW SOMETHING BEHIND ONE. What
+              this comment used to say — a button with nothing behind it is
+              worse than a sentence — has not changed; what changed is that
+              `source.history` exists (`sources/port.ts`), so the button acts.
+              The rule it kept is kept: ABSENT, NOT DIMMED. The control is
+              simply not in the DOM for a source that cannot page, while a walk
+              is in flight, or once the start is proven — see `moreState` in
+              `transcript-history.ts`, which is the one place those states are
+              decided.
+
+              FOUR ANSWERS AND THEY STAY FOUR ON SCREEN, because they are four
+              different things for an operator to do about:
+                - turns arrived        → they are simply above; nothing is said.
+                - the start was proven → `session-start`, and no control.
+                - vam read further back and found no whole turn (the ORDINARY
+                  answer on a large session, ~2.5 MB of transcript per turn)
+                  → still `read-limit`, still offering to go on. Never an end.
+                - vam could not read   → `unavailable`, in the SOURCE's own
+                  words, plus a retry, because the cursor did not move.
+            */}
+              {/* THE RESERVED CORNER, audit F1's obligation, inherited by
+                whatever sits at the top of the column: at scrollTop 0 that is
+                this block, and the view-icon pill is opaque. The prompt
+                bubbles discharge it with a float (only their first line meets
+                the pill); this is two short lines that all meet it, so it is
+                padding. 6rem is the measured pill plus 24px, the same figure
+                and the same reason as the float. Only while the overlay is
+                drawn -- an unfocused pane paints no pill, and reserving for
+                one would notch every pane the operator is not in. */}
               <div
-                ref={outRef}
-                data-detail-scroll="out"
-                onScroll={(event) => {
-                  stuckRef.current = isAtBottom(event.currentTarget);
-                  syncJumps(event.currentTarget);
-                }}
-                className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto text-[length:var(--vam-out-font-size,12px)]"
+                data-column-start={pagerNow.phase === 'start' ? 'session-start' : 'read-limit'}
+                /* 11.5px, NOT the 10.5px of the turn lines this block's facts
+                 came off. The operator has twice asked for small type to come
+                 up a pixel, and a repo-wide bump is its own task (198 literals,
+                 18 files, no type scale to change in one place) -- so a NEW
+                 call site takes the size it would have AFTER that bump rather
+                 than adding one more literal below the floor. The turn lines
+                 and the bar below keep 10.5 because they are the existing
+                 progress line, moved, not new type. */
+                /* Full-bleed to BOTH pane edges, which now means two different
+                 numbers: `-ml-3.5` gives back the column's left padding and
+                 `-mr-11` gives back the jump gutter, so this block's own
+                 padding puts its text exactly where the column's content box
+                 is. One `-mx-3.5` would leave it 30px short of the right edge
+                 -- invisible here, since this block paints no ground, and a
+                 trap for whoever gives it one. */
+                className={`-ml-3.5 -mr-11 flex flex-none flex-col gap-0.5 pt-3 pb-1 pl-3.5 font-mono text-meta text-ink-faint ${
+                  cornerOverlay ? '' : 'pr-11'
+                }`}
+                style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
-                {decision.output !== null && decision.output !== '' && (
-                  <OutText output={decision.output} />
-                )}
-                {(decision.output === null || decision.output === '' || outIsLive) && (
-                  /* The live line and the answer are not alternatives, and
-                     treating them as one is what made this line unreachable in
-                     practice: it used to render only when `output` was empty,
-                     but `transcript.ts` writes `turns[last].output` on every
-                     assistant text, so a running session has an answer within
-                     seconds and the operator never saw the line again. It is
-                     rendered whenever the turn is live, and BELOW the answer:
-                     here is what the session has said, here is what it is
-                     doing now. When there is no answer it is the only thing in
-                     the region, so the empty-turn sentence prints once, in
-                     this same element, rather than in a second one.
+                {/* WRAPPING, since the qualifier below can be a PHRASE where
+                  this row has only ever held tokens.
 
-                     While the session is working, this line is the only thing
-                     in the pane that changes -- so it carries the work rather
-                     than a sentence that reads the same on a session that has
-                     quietly died. The idiom is the agent's own running caption:
-                     a star, the word for what it is doing, and an ellipsis that
-                     animates. The WORD is `activity` -- the newest tool call the
-                     source reported (transcript.ts) -- so it cycles as the work
-                     does, off data vam has, rather than off a rotating list of
-                     invented gerunds. It REPLACES the blinking block caret this
-                     line shipped with (and the `vam-breathe` pulse before that)
-                     -- one motion story, not three -- and under
-                     `prefers-reduced-motion` the dots park on at full opacity
-                     (styles.css), which still reads as "still going". It is
-                     withheld from every stopped status for the reason recorded
-                     at PANE_STATUS_BREATHES. A null `activity` is a source that
-                     cannot say (model.ts): the sentence stays as the word and no
-                     words are invented, because it asserts only that the session
-                     is running, which it is. */
+                  IT IS NOT WHAT STOPS THE OVERFLOW, and saying so would be the
+                  kind of comment this file is written against: a flex item of
+                  text shrinks and wraps inside itself, so the sentence stays
+                  on the pane either way -- MEASURED, at the 320px pane floor,
+                  by deleting this class and watching the guard stay green.
+
+                  WHAT IT SAVES IS THE COUNT. Without it, at that floor, "N
+                  turns read" is squeezed to 49px and breaks across two lines
+                  beside a three-line caveat -- two ragged columns where there
+                  should be a count and a note. With it the count keeps its one
+                  line and the caveat takes the next. Both figures are measured
+                  in `e2e/transcript-column-shots.mjs`, which fails if either
+                  the count breaks or the caveat leaves the pane.
+
+                  `gap-y-0.5`, matching the 2px this block already puts between
+                  its own two children, so a wrapped caveat sits at the block's
+                  rhythm rather than flush against the line above it. The
+                  horizontal 6px is unchanged. */}
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  {/* "read", not a bare count: only the newest `TAIL_BYTES` is
+                    ever opened, so on a session bigger than that window this
+                    is what vam FOUND, not a provable total for the session's
+                    whole life. Trailing, not leading: "read 7 turns" is an
+                    imperative -- a command this line does not carry out --
+                    while "7 turns read" is what it actually is, a count with
+                    its qualifier attached. */}
+                  <span data-progress-count>{turnsRead} turns read</span>
+                  {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
+                    its own `· N failed` on its own line below; this is the
+                    total across the window, beside the count of that same
+                    window, which is what lets the two share a line honestly.
+                    `null` is "no turn read can report failures at all" and
+                    draws nothing -- a confident "0 failed" over data nobody
+                    looked at is the same lie as a false badge. */}
+                  {failedRead !== null && failedRead > 0 && (
+                    <span data-column-failed className="text-failed">
+                      · {failedRead} failed
+                    </span>
+                  )}
+                  {/* WHAT COLLAPSING PROMISES, AND WHERE THE PROMISE IS EMPTY.
+                    While every turn draws its line, the line claims nothing
+                    about failure -- it says which turn it is. Collapsed, the
+                    ABSENCE of a line is the claim: nothing here was worth
+                    stopping for. Over a source with no failure surface at all
+                    that claim is unearned, and the operator has no way to tell
+                    it from a window vam read and found clean.
+
+                    SO IT IS SAID ONCE, HERE, and not per turn: this is a fact
+                    about the WINDOW -- the same window `turns read` and the
+                    total beside it qualify -- and a caveat repeated on every
+                    turn would be the noise the operator asked to be rid of.
+                    `failedRead === null` is exactly "no turn read carries the
+                    field at all", which is where the two unknowns part: zero
+                    is a reading and says nothing, absent is a source that
+                    cannot look and says so.
+
+                    NO EMPTY-WINDOW CASE TO GUARD, and it is worth saying why
+                    rather than guarding it twice: zero turns read would be vam
+                    having read nothing, which is not a source that cannot
+                    report -- but this whole block sits inside the branch that
+                    runs only when `orderedTurns.length > 0` (the empty column
+                    is a sentence instead, above). A `turnsRead > 0` here read
+                    as caution and was unreachable, which is worse than absent:
+                    it is a condition no test can ever falsify.
+
+                    `ink-dim`, not `failed`: this is a caveat about what vam
+                    could not see, not a report that something went wrong.
+                    Painting it as an alarm would make every source without the
+                    surface look like a source on fire. */}
+                  {focusView && failedRead === null && (
+                    <span data-column-unreadable className="text-ink-dim">
+                      · failures not reported by this source
+                    </span>
+                  )}
+                </div>
+                {/* THE SENTENCE IS THE STATE, and there are exactly two of them
+                  because there are exactly two things vam can honestly say
+                  about the top of a column. The attribute above and this line
+                  are read off the SAME fact, so a screen that says one thing to
+                  a test and another to a person is not expressible here. */}
+                <p data-column-start-note className="text-ink-faint leading-[1.5]">
+                  {pagerNow.phase === 'start'
+                    ? 'The session begins here — vam read back to its first turn.'
+                    : 'This is as far back as vam has read — not necessarily where the session began.'}
+                </p>
+                {/* WHAT VAM CAN DO ABOUT THAT, or why it cannot. Absent
+                  entirely once the start is proven: there is nothing left to
+                  ask for, so there is nothing to ask with. */}
+                {columnMore !== null && (
                   <p
-                    data-out-empty={
-                      decision.output === null || decision.output === '' ? true : undefined
-                    }
-                    data-out-live={outIsLive ? 'true' : undefined}
-                    className="text-[11.5px] text-ink-faint"
+                    data-column-more={columnMore}
+                    className="flex flex-wrap items-baseline gap-x-1.5 leading-[1.5]"
                   >
-                    {outIsLive ? (
-                      /* Star and word share one accent, the app's own `running`
-                         token; the detail is dim. Decorative marks are hidden
-                         from assistive tech, which should read the activity and
-                         not a star and three dots. */
-                      <span data-out-running className="text-running">
-                        <span aria-hidden="true" data-out-running-star className="vam-running-star">
-                          {'\u2733'}
-                        </span>{' '}
-                        <span data-out-running-word className="vam-running-word">
-                          {liveActivity ??
-                            noAnswerNote(decision.output, entry?.session.status ?? null)}
-                        </span>
-                        <span aria-hidden="true" data-out-ellipsis className="vam-ellipsis">
-                          <span>.</span>
-                          <span>.</span>
-                          <span>.</span>
-                        </span>
-                        {liveAge !== null && (
-                          <span data-out-running-detail className="text-ink-faint">
-                            {' '}
-                            (last active {liveAge} ago)
-                          </span>
-                        )}
+                    {columnMore === 'unsupported' ? (
+                      // A STATED REFUSAL, NOT A DEAD CONTROL. `history` absent
+                      // from the port is "this source has no way to page", which
+                      // is a different sentence from "there is nothing older" --
+                      // `pull-requests.ts`'s rule, at the one place in this pane
+                      // it can still be got wrong.
+                      <span data-column-more-note>
+                        This source cannot read further back than its own window.
+                      </span>
+                    ) : columnMore === 'reading' ? (
+                      // A STATUS, NEVER A DIMMED BUTTON: mid-flight a control is
+                      // either painted and inert or half-painted and live, and
+                      // both are states this pane must not have. It says what is
+                      // happening and claims nothing about what will be found --
+                      // no count, no progress bar, because vam does not know how
+                      // much is there.
+                      <span data-column-more-note role="status">
+                        Reading further back…
                       </span>
                     ) : (
-                      noAnswerNote(decision.output, entry?.session.status ?? null)
+                      <>
+                        {columnMore === 'unavailable' && pagerNow.error !== null && (
+                          // THE SOURCE'S OWN WORDS, `code: message`, the same
+                          // shape every other refusal in this pane renders --
+                          // and the reason `SourceError` travels the bridge
+                          // verbatim (`sources/port.ts`'s `describeFailure`).
+                          <span data-column-more-error className="text-failed">
+                            vam could not read further back — {pagerNow.error.code}:{' '}
+                            {pagerNow.error.message}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          data-column-more-ask
+                          onClick={readOlder}
+                          /* `vam-tap` FOR THE PHONE'S FLOOR, and it is opt-in
+                             by design (`styles.css`): the stylesheet sizes a
+                             tap target, the component decides what one is.
+                             Measured without it at 390px this link was
+                             119.2x16.5 -- half a touch target, and the only
+                             way to reach anything older than the last page. */
+                          className="vam-tap cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                        >
+                          {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
+                        </button>
+                      </>
                     )}
                   </p>
                 )}
+                {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
+                  out of the window between one poll and the next; falling
+                  through to some other turn would look identical to the
+                  operator to having actually read the one they asked for.
+                  Said here, at the boundary that explains WHY it is gone,
+                  rather than in place of the column: the rest of the session
+                  is still there to read, and hiding it to print one sentence
+                  was the old single-turn pane's constraint, not a rule. */}
+                {selectedTurnMissing && (
+                  /* No size of its own: it inherits the block's, which is the
+                   right size for it and one literal fewer to keep in step. */
+                  <p data-progress-turn-missing className="text-ink-faint leading-[1.5]">
+                    The turn you were reading has scrolled out of what vam can see.{' '}
+                    <button
+                      type="button"
+                      data-progress-turn-return
+                      onClick={() => {
+                        if (canvasDecisionId === null) setSelectedId(null);
+                        else pickTurn(canvasDecisionId);
+                      }}
+                      className="cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                    >
+                      Back to the current turn
+                    </button>
+                  </p>
+                )}
               </div>
-            </section>
-          </>
+
+              {/* EVERY TURN, OLDEST FIRST. `decisions` arrives newest first
+                (model.ts); reversed here so the newest lands at the bottom,
+                where a conversation's newest line belongs and where the column
+                opens. Keyed by the turn's own content-derived id
+                (`transcript.ts`), so a poll that appends a turn does not
+                remount the ones already on screen -- which at 3,276 turns is
+                the difference between a scroll and a freeze. */}
+              {orderedTurns.map((d) => (
+                <TurnBlock
+                  key={d.id}
+                  decision={d}
+                  marked={d.id === markedId}
+                  newest={d.id === newestId}
+                  live={d.id === newestId && sessionRunning}
+                  /* `session.activity` and `waitingFor` describe the present, so
+                   they are handed to the newest turn and to no other -- on an
+                   older turn they described the present while the operator
+                   read the past. Passed as `null` elsewhere rather than gated
+                   at the call site so the block has one rule to follow. */
+                  activity={d.id === newestId ? (entry?.session.activity ?? null) : null}
+                  waitingCause={d.id === newestId ? waitingCause : null}
+                  age={d.id === newestId ? liveAge : null}
+                  status={entry?.session.status ?? null}
+                  reserveCorner={cornerOverhang}
+                  focusView={focusView}
+                  unfolded={unfolded.has(d.id)}
+                  onUnfold={unfold}
+                  onPromptMenu={openPromptMenu}
+                  onAnswerMenu={openAnswerMenu}
+                />
+              ))}
+            </div>
+            {/* THE JUMPS, FLOATING OVER THE COLUMN — what is left of the bar
+                that used to hold them, and of two more controls that went with
+                it (the turn-list chevron, and the `<select>` that jumped to a
+                turn; the column draws every turn, so both were a second way to
+                do what the scrollbar does).
+
+                THE OPERATOR'S REPORT WAS THE STRIP, not the buttons: a
+                `bg-ground` band across the pane's full width, drawn on every
+                session whether or not either glyph in it was, eating a row of
+                the transcript to say nothing. Gone. What is left is the two
+                controls, at the two edges they take you to.
+
+                WHY THEY CAN LIVE HERE AT ALL. The bar was sticky at the BOTTOM
+                and argued for it: an operator scrolled far up must not have to
+                scroll back down to find the control that scrolls them back
+                down -- a circle. That argument survives its bar and is what
+                `absolute` discharges now: each jump is pinned to the column's
+                own edge at every offset, so neither can ever be scrolled away
+                from. What does NOT survive is the rest of it -- the top being
+                "spoken for by the pinned prompt" was true of a band that would
+                have covered it; a 28px chip in a reserved 44px gutter covers
+                no part of it (see the column's `pr-11`).
+
+                DRAWN ONLY WHILE IT WOULD MOVE THE COLUMN, the rule the bar
+                already got right and the reason this is not two permanent
+                chips: `hasContentAbove`/`hasContentBelow` (`stick-to-bottom.ts`)
+                share their slack with the stick rule, so the pane never offers
+                a jump to where it already is. That rule is also the whole of
+                "appear when scrolling": at rest at the bottom -- where a
+                session opens -- there is nothing above, so nothing is drawn,
+                and the first scroll is what brings them.
+
+                AND NO IDLE FADE. Fading a control out after a moment reads
+                well and cannot be built honestly here: mid-transition a button
+                is either half-painted and still clickable or fully painted and
+                already inert, and both are the state this pane must never
+                have. It is also the circle again -- a reader who stops to read
+                loses the control that takes them back. So a jump is either
+                there, at full opacity and hit-testable, or it is not in the
+                DOM.
+
+                `pointer-events-none` on the layer, restored on each button:
+                the layer spans the column's whole height, and a transparent
+                sheet over a transcript would swallow the selection the pane
+                exists to allow (`select-text` on the body). */}
+            <div
+              data-column-jumps
+              className="pointer-events-none absolute inset-y-0 right-0 z-30 w-11"
+            >
+              {/* BELOW THE RESERVED CORNER (audit F1), not beside it. The
+                  view-icon pill is opaque and floats at the pane's top right;
+                  measured at five widths it occupies the column's own y 8-42,
+                  x width-100 to width-10 -- so a jump at the column's top right
+                  would sit under it. `top-12` starts this one 48px down, 6px
+                  clear of the pill's bottom edge, and it is a CONSTANT: the
+                  pill is drawn only on a focused pane, and a control that moved
+                  when the operator clicked a different pane would be a control
+                  they had to look for. */}
+              {jumps.above && (
+                <button
+                  type="button"
+                  data-out-to-top
+                  aria-label="scroll to the oldest turn read"
+                  onClick={() => jumpTo('top')}
+                  /* THE HIT IS 44, THE PAINT IS 28 -- `PhoneShell.tsx`'s own
+                     bargain, for the same reason and on the same screen: the
+                     44 box is WCAG 2.2 SC 2.5.5 and this pane is the phone's
+                     session screen, while a ground painted on all 44 of it
+                     would put a slab over the transcript. */
+                  className="pointer-events-auto absolute top-12 right-0 flex h-11 w-11 cursor-pointer items-center justify-center"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
+                    <ChevronsUp size={14} strokeWidth={1.8} />
+                  </span>
+                </button>
+              )}
+              {/* At the bottom edge, where the newest turn is. `bottom-1`
+                  rather than flush, so the chip is not cut by the pane's own
+                  seam with the composer below it. */}
+              {jumps.below && (
+                <button
+                  type="button"
+                  data-out-to-bottom
+                  aria-label="scroll to the newest turn"
+                  onClick={() => jumpTo('bottom')}
+                  className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
+                    <ChevronsDown size={14} strokeWidth={1.8} />
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {/* THE LAST SEND THAT FAILED, at the foot of the out area -- directly
+            above the composer the words came from, and drawn whether or not
+            this session has a transcript yet.
+
+            Operator instruction: a send that errors must say so in the out
+            area, not only in the status bar. OUTSIDE the scrolling column on
+            purpose, because the column is not always there: a session created
+            a moment ago has no turns, so `orderedTurns.length === 0` draws
+            "This session has no steps yet" instead -- and a brand new session
+            is exactly where the first send fails. A note living inside the
+            column would have been invisible in the one case it was reported
+            for.
+
+            NOT THE `data-session-failed` BANNER, which sits above the column
+            and says something else: that one is a standing fact about the
+            session, this is the verdict on one act, and it goes away when the
+            operator tries again.
+
+            `role="status"` rather than `alert`: it appears right after the key
+            the operator pressed and the same words reach the status bar, so
+            assertive would interrupt a screen reader to repeat something. */}
+        {current === 'Response' && sendFailure !== null && (
+          <p
+            data-send-failed
+            role="status"
+            className="flex flex-none items-start gap-1.5 rounded-[9px] border border-failed bg-card px-3 py-2 text-control text-failed"
+          >
+            <span role="img" aria-label="failed" className="flex pt-[2px]">
+              <CircleSlash size={13} strokeWidth={1.6} />
+            </span>
+            <span className="min-w-0 flex-1">{sendFailure}</span>
+          </p>
+        )}
+        {/* ALWAYS MOUNTED WHILE THIS BUILD HAS THE BRIDGE -- deliberately NOT
+            gated behind `current === 'Files'` the way `TerminalTab` is gated
+            behind `current === 'Terminal'`. `TerminalTab`'s own header says
+            what it costs to unmount-and-remount: nothing, because there is a
+            poll to stop. An open file's UNSAVED TEXT is not nothing -- "the
+            worst outcome this feature can have, worse than not shipping it"
+            was the exact instruction this tab was built against -- so
+            `FilesTab` stays mounted for as long as this panel shows ANY tab,
+            keeping every open buffer's dirty text in memory across a switch
+            to Response/PRs/Terminal/Agents and back. `hidden` (`display:
+            none`) removes it from layout and from the Tab order without
+            unmounting it, which is the one property this choice needs: React
+            state survives, nothing currently on screen shows it, and it costs
+            no timer and no IPC while hidden -- `FilesTab` itself polls
+            nothing, unlike Terminal's `capture-pane`. */}
+        {files === true && (
+          <FilesTab
+            hidden={current !== 'Files'}
+            sessionId={entry?.session.id ?? null}
+            list={globalThis.window?.api?.files?.list}
+            read={globalThis.window?.api?.files?.read}
+            write={globalThis.window?.api?.files?.write}
+            // The quit guard's half of the same bridge. `beforeunload` (armed
+            // inside `FilesTab`, off the SAME derivation) covers the window
+            // closing; this covers Cmd-Q, which reaches `app.on('before-quit')`
+            // in main and never reaches the page at all. Absent in the browser
+            // build, which has no application to quit. See
+            // `src/main/quit/guard.ts`.
+            reportUnsaved={globalThis.window?.api?.files?.reportUnsaved}
+            // The view-icon corner overlay (`data-view-overlay`, further down
+            // this file) floats ABOVE this tab's own content at `top-2
+            // right-2.5`, real clicks and all -- measured directly: the Save
+            // button sat under the Agents icon until this was threaded
+            // through -- and `6rem` was not enough once this tab's own icon
+            // widened the pill, so it is the MEASURED `cornerReserve` rather
+            // than a constant. See its own comment above.
+            reserveCorner={cornerReserve}
+            // And the pill's VERTICAL footprint, which this tab needs now
+            // that its right-hand column IS the corner. See
+            // `cornerReserveHeight`'s own comment above.
+            reserveCornerHeight={cornerReserveHeight}
+            // The dragged tree width and the way to store a new one. Both
+            // come from the shell that owns `prefs`; `undefined` here draws
+            // the share and no handle, which is what the browser build and
+            // every test that has not wired a store get. See the two props'
+            // own comments above.
+            filesTreeWidth={props.filesTreeWidth ?? null}
+            onFilesTreeWidth={props.onFilesTreeWidth}
+            // "Open this file, at this line" -- from a `path:line` control in
+            // an agent's own answer, already resolved and authorised in main.
+            // See `outActions.openFileRef` above and `FileOpenRequest`.
+            openRequest={fileOpenRequest}
+          />
         )}
       </div>
 
@@ -3226,10 +6431,34 @@ export function DetailPanel(props: DetailPanelProps) {
         off the composer's so the composer could stand down while a question is
         open, and a block that outlived its contents would be a doubled seam
         and 25px of dead height in the pane's most common state. */}
-      {current !== 'Terminal' && (newestQuestion !== null || waitingFor !== undefined) && (
+      {/* Drawn for a QUESTION and nothing else now. It used to open on
+        `waitingFor` too, for the notice above the prompt input the operator
+        asked to remove; keeping that disjunct would draw a bordered empty
+        block on every waiting session -- a seam with nothing behind it. */}
+      {/* NOT ON `Files` EITHER, same reasoning as Terminal: a full-pane
+        surface with its own keyboard (the editor's own insert scope) has no
+        room for a question card floating over it, and the question this
+        card answers is the AGENT's, unrelated to a file the operator opened
+        to read or edit by hand. */}
+      {current !== 'Terminal' && current !== 'Files' && newestQuestion !== null && (
         <div
           data-question-bar
-          className="flex flex-none flex-col gap-2.5 border-line border-t bg-header px-3.5 py-3"
+          // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
+          // here holds the keyboard, the app IS in Insert. That is the whole
+          // definition of the mode now, which is why there is no flag left
+          // that could disagree with it. The card's options are also the
+          // LANDING `I` aims at, by being the first stop in document order.
+          {...insertScopeMark}
+          /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
+             see the body's comment. The SEAM is what makes this more than
+             symmetry: `border-t` above draws the rule between the answer and
+             the question, and a rule spanning the whole pane under a 470px
+             column is a line pointing at nothing. Capped here, it is the
+             column's own seam. */
+          className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
+            proseMaxWidth === undefined ? '' : 'mx-auto w-full'
+          }`}
+          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
@@ -3247,27 +6476,6 @@ export function DetailPanel(props: DetailPanelProps) {
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
-          {/* Above the card, because it is the more general fact: the card is
-            one shape of ask, this is "somebody is blocked on you" whatever the
-            shape. A session can be both -- a question on screen IS a waiting
-            state -- and then the note says which pane can answer it.
-
-            EXCEPT while a card with an open step is drawn: `data-question-note`
-            states a route of its own in BOTH branches, delivering or not, so
-            drawing the note over an open card duplicated the remedy line --
-            and in the approval case (pull request 211) the two sentences
-            named DIFFERENT routes and contradicted each other: the note said
-            the Terminal tab, the card said "type your choice in the box
-            below" (`permission-prompt-desktop.png`). While the card is open
-            it IS the waiting surface -- the ask, the options and the route
-            sentence, whether or not vam can deliver the pick. The note
-            returns once nothing on screen carries a route: no card at all, or
-            every step already resolved (`openQuestion` false), where a
-            `waitingFor` still set is an ask the settled card does not
-            represent. */}
-          {waitingFor !== undefined && (newestQuestion === null || !openQuestion) && (
-            <WaitingNote waitingFor={waitingFor} vamControlled={entry?.session.vamControlled} />
-          )}
           {newestQuestion !== null && (
             <QuestionCard
               key={setId}
@@ -3275,6 +6483,7 @@ export function DetailPanel(props: DetailPanelProps) {
               firstOptionRef={firstOptionRef}
               onChat={startChat}
               onAnswer={questionOnAnswer}
+              onSuggest={setSuggestion}
             />
           )}
         </div>
@@ -3282,14 +6491,40 @@ export function DetailPanel(props: DetailPanelProps) {
       {/* The composer, in its own block so that it can stand down while a
         question is open without the card standing down with it. Its top border
         is the seam between the two, and belongs to whichever of them is
-        drawn first. */}
-      {current !== 'Terminal' && !composerHidden && (
+        drawn first.
+
+        `bg-pane`, NOT `bg-header`. Both this block and the question block
+        above it painted `header`, a darker rung than the pane around them,
+        which is the other half of the operator's report -- "black background
+        areas below the prompt input". The SEAM is the border and always was;
+        the fill step
+        was a second separator saying the same thing in a darker colour, and it
+        is the darker colour they were looking at. Nothing else in the app
+        wears `header` now; the token stays defined, unworn, rather than being
+        deleted out from under a theme that still names it. */}
+      {/* NOT ON `Files`, for the same reason as the question bar just above:
+        the editor is a full-pane surface with its own keyboard, and a
+        composer prompting the AGENT underneath it would be a second insert
+        scope competing for the same keystrokes a person is typing into a
+        file. */}
+      {current !== 'Terminal' && current !== 'Files' && !composerHidden && (
         <div
           data-composer-bar
+          // The other insert scope, and the common one: with no question open
+          // this block is the whole of Insert. See the question bar above.
+          {...insertScopeMark}
           className={[
-            'flex flex-none flex-col gap-2.5 bg-header px-3.5 py-3',
+            // `relative` is the anchor for `SUGGEST_LAYER`, which floats the
+            // typeaheads OVER the transcript instead of pushing this block
+            // down the pane. See that constant for the measurement behind it.
+            'relative flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
+            // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
+            // -- see the body's comment for the decision and the seam argument
+            // on the question bar above for why the rule has to move with it.
+            proseMaxWidth === undefined ? '' : 'mx-auto w-full',
           ].join(' ')}
+          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
         >
           {/* First child, so it inherits `composerHidden` for free: a
               `QuestionCard` open and unanswered withdraws the whole composer
@@ -3326,7 +6561,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     // the square into a width-to-content pill, hit still 44,
                     // paint still 30 tall.
                     data-tap-pill
-                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-panel px-1.5 font-mono text-[11px] text-ink-quiet active:bg-raised"
+                    className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-quiet active:bg-line-strong"
                   >
                     {item.caption}
                   </span>
@@ -3334,78 +6569,126 @@ export function DetailPanel(props: DetailPanelProps) {
               ))}
             </nav>
           )}
-          {suggesting && (
-            <div
-              data-bang-suggest
-              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
-            >
-              <p className="px-1.5 pb-0.5 text-[10px] text-ink-faint">
-                the agent proposed these — vam does not run them; Enter picks one, Esc keeps what
-                you typed
-              </p>
-              {matches.map((command, index) => (
-                <button
-                  key={command.id}
-                  type="button"
-                  data-bang-suggestion
-                  data-selected={index === picked ? 'true' : undefined}
-                  onClick={() => acceptSuggestion(command)}
-                  className={[
-                    'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                    index === picked ? 'bg-raised' : 'hover:bg-raised',
-                  ].join(' ')}
-                >
-                  <span className="max-w-full truncate text-[11px] text-ink">{command.label}</span>
-                  <span
-                    data-bang-command
-                    className="max-w-full truncate font-mono text-[10.5px] text-ink-dim"
-                  >
-                    {command.command}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-          {slashSuggesting && (
-            <div
-              data-slash-suggest
-              className="flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-panel px-1.5 py-1.5"
-            >
-              <p className="px-1.5 pb-0.5 text-[10px] text-ink-faint">
-                the provider's own commands — Enter picks one, Esc keeps what you typed
-              </p>
-              {slashMatches.map((command, index) => (
-                <button
-                  key={command.id}
-                  type="button"
-                  data-slash-suggestion
-                  data-selected={index === slashPicked ? 'true' : undefined}
-                  onClick={() => acceptSlashSuggestion(command)}
-                  className={[
-                    'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
-                    index === slashPicked ? 'bg-raised' : 'hover:bg-raised',
-                  ].join(' ')}
-                >
-                  <span
-                    data-slash-command
-                    className="max-w-full truncate font-mono text-[11px] text-ink"
-                  >
-                    /{command.name}
-                  </span>
-                  {command.description !== null && (
-                    <span className="max-w-full truncate text-[10.5px] text-ink-dim">
-                      {command.description}
-                    </span>
+          {(suggesting || slashSuggesting || slashGapNote !== null) && (
+            <div data-suggest-layer className={SUGGEST_LAYER}>
+              {suggesting && (
+                <div data-bang-suggest className={SUGGEST_BOX}>
+                  <p className="px-1.5 pb-0.5 text-control text-ink-faint">
+                    the agent proposed these — vam does not run them; Enter picks one, Esc keeps
+                    what you typed
+                  </p>
+                  {matches.map((command, index) => (
+                    <button
+                      // KEYED ON THE COMMAND TEXT, not on `id`: the list spans
+                      // turns now and two turns number their commands from `c1`
+                      // independently, so ids collide across the column while the
+                      // text cannot -- `commandsInColumn` deduplicates on it.
+                      key={command.command}
+                      type="button"
+                      data-bang-suggestion
+                      data-selected={index === picked ? 'true' : undefined}
+                      onClick={() => acceptSuggestion(command)}
+                      className={[
+                        'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                        index === picked ? 'bg-line-strong' : 'hover:bg-line-strong',
+                      ].join(' ')}
+                    >
+                      <span className="max-w-full truncate text-control text-ink">
+                        {command.label}
+                      </span>
+                      <span
+                        data-bang-command
+                        className="max-w-full truncate font-mono text-meta text-ink-dim"
+                      >
+                        {command.command}
+                      </span>
+                    </button>
+                  ))}
+                  {bangHidden > 0 && (
+                    <p data-bang-more className="px-1.5 pt-0.5 text-meta text-ink-faint">
+                      {bangHidden} more from earlier turns — keep typing to narrow
+                    </p>
                   )}
-                </button>
-              ))}
+                </div>
+              )}
+              {slashSuggesting && (
+                <div data-slash-suggest className={SUGGEST_BOX}>
+                  <p className="px-1.5 pb-0.5 text-control text-ink-faint">
+                    the provider's own commands — Enter picks one, Esc keeps what you typed
+                  </p>
+                  {slashMatches.map((command, index) => (
+                    <button
+                      key={command.id}
+                      type="button"
+                      data-slash-suggestion
+                      data-selected={index === slashPicked ? 'true' : undefined}
+                      onClick={() => acceptSlashSuggestion(command)}
+                      className={[
+                        'flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] px-1.5 py-1 text-left',
+                        index === slashPicked ? 'bg-line-strong' : 'hover:bg-line-strong',
+                      ].join(' ')}
+                    >
+                      <span
+                        data-slash-command
+                        className="max-w-full truncate font-mono text-control text-ink"
+                      >
+                        /{command.name}
+                      </span>
+                      {command.description !== null && (
+                        <span className="max-w-full truncate text-meta text-ink-dim">
+                          {command.description}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  {slashHidden > 0 && (
+                    <p data-slash-more className="px-1.5 pt-0.5 text-meta text-ink-faint">
+                      {slashHidden} more — keep typing to narrow
+                    </p>
+                  )}
+                </div>
+              )}
+              {/* WHAT VAM COULD NOT READ, said in the source's own words, and
+              ABSENT rather than dimmed the rest of the time. It stands whether
+              or not the list above it drew: a query that matches nothing
+              closes that list, and that is exactly the moment the operator
+              needs to know they are typing against a partial list rather than
+              a complete one that has nothing for them. */}
+              {slashGapNote !== null && (
+                <div
+                  data-slash-gap
+                  className="rounded-[10px] border border-line-strong bg-card px-2.5 py-1.5"
+                >
+                  <p className="text-control text-ink-dim">
+                    vam could not read all of Claude Code's commands, so this list is short of the
+                    CLI's own: {slashGapNote.message}
+                  </p>
+                </div>
+              )}
             </div>
           )}
+          {/* THE ROW IS THE INSERT LANDING, AND THE BOX INSIDE IT IS NOT.
+              `I` moves the keyboard into the pane and `i` puts the caret in
+              the prose box; they were the same gesture in the flag's day,
+              because the flag could not tell them apart. Landing on the ROW
+              is what keeps them two: this element takes the focus, Insert's
+              own `j`/`k` still reach the window listener from it (a focused
+              TEXTAREA would be swallowed by that listener's typing guard, and
+              the refusal this pane owes for a one-stop cursor would vanish),
+              and `Enter` here is what opens the box for typing.
+
+              `data-action-id="prompt"` is the action list's name for the same
+              row; the two are deliberately not merged. One says WHICH action
+              the pane cursor is on, the other says the keyboard can be sent
+              here — a stop with no action and an action with no stop are both
+              possible, and a shared attribute would hide the day one appears. */}
           <div
             data-prompt-box
             data-action-id="prompt"
+            {...insertStopMark}
+            tabIndex={-1}
             className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-panel px-3 py-2.5',
+              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 outline-none',
               active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >
@@ -3443,6 +6726,34 @@ export function DetailPanel(props: DetailPanelProps) {
                   setImages([...images, ...outcome.images]);
                 }}
                 onKeyDown={(event) => {
+                  // AN ENTER THAT ONLY COMMITS AN IME CANDIDATE IS NOT A SEND,
+                  // and this is the first thing the box asks because EVERY
+                  // Enter branch below would otherwise answer it -- the send,
+                  // and both typeahead accepts.
+                  //
+                  // MEASURED in Chromium, the engine vam ships on, by driving
+                  // a real composition through CDP `Input.imeSetComposition`:
+                  // the commit key arrives as `{ key: 'Enter', keyCode: 13,
+                  // isComposing: true }`, which no handler reading `key` alone
+                  // can tell from a send. The operator types Vietnamese; every
+                  // accented syllable ends in that keystroke, and each one was
+                  // filing a half-typed prompt into a running agent.
+                  //
+                  // `event.nativeEvent.isComposing`, NOT `event.isComposing`.
+                  // React's synthetic keyboard event does not carry the
+                  // property at all -- its `KeyboardEventInterface` lists key,
+                  // code, location, the four modifiers, repeat, locale,
+                  // getModifierState, charCode, keyCode, which -- and
+                  // `@types/react` omits it, so the plain spelling is
+                  // `undefined` at runtime and the guard would be dead while
+                  // looking exactly like a live one.
+                  //
+                  // RETURN, NOT `preventDefault`: the composition is mid-flight
+                  // and this keystroke is what commits it. Claiming the event
+                  // would leave the operator unable to finish the syllable.
+                  // Scoped to Enter, so Escape and Tab still work for someone
+                  // typing a non-Latin script.
+                  if (event.key === 'Enter' && event.nativeEvent.isComposing) return;
                   // THE ENTER COLLISION, decided here. With the suggestion list
                   // open Enter ACCEPTS and sends nothing; only a closed list
                   // lets Enter through to `onSubmit`. Since the reply PR a send
@@ -3462,6 +6773,14 @@ export function DetailPanel(props: DetailPanelProps) {
                       setPick(Math.min(Math.max(0, picked + delta), matches.length - 1));
                       return;
                     }
+                    // ENTER, IN BOTH MODES, AND DELIBERATELY NOT `submitsPrompt`.
+                    // The send key is the operator's to swap (`prefs/submit-key.ts`);
+                    // this is not the send. Accepting a completion does not
+                    // deliver anything, Enter-accepts is the idiom every
+                    // typeahead an operator has ever used follows, and a list
+                    // that followed the pref would have NO accept key at all in
+                    // `shift-enter` mode -- Shift+Enter would be the send there.
+                    // `test/panels/DetailPanel.submit-key.test.tsx` holds this.
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
                       acceptSuggestion(suggestion);
@@ -3484,6 +6803,8 @@ export function DetailPanel(props: DetailPanelProps) {
                       setPick(Math.min(Math.max(0, slashPicked + delta), slashMatches.length - 1));
                       return;
                     }
+                    // Enter accepts here in both modes too, for the three
+                    // reasons spelled out over the `!` branch above.
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault();
                       acceptSlashSuggestion(slashSuggestion);
@@ -3496,8 +6817,10 @@ export function DetailPanel(props: DetailPanelProps) {
                     }
                   }
                   // The window listener ignores keys typed in a textarea, so this
-                  // box binds the ones it needs itself. Shift+Enter is left alone
-                  // — it is the newline the box became multiline to allow.
+                  // box binds the ones it needs itself. WHICH of Enter and
+                  // Shift+Enter sends is the operator's (`prefs/submit-key.ts`);
+                  // whichever one does not is left alone, because it is the
+                  // newline the box became multiline to allow.
                   //
                   // Shift+Tab is bound HERE, and deliberately not in the chord
                   // tables (`keyboard/chords.ts`), for two reasons that both
@@ -3507,14 +6830,55 @@ export function DetailPanel(props: DetailPanelProps) {
                   // `normalizeKey` gives Shift no token, so a table entry for
                   // `Tab` would answer a PLAIN Tab as well. Plain Tab is left
                   // alone: it is how a keyboard gets out of a textarea.
+                  // THE OFFER, ACCEPTED -- and only while there is one, which
+                  // is what keeps plain Tab the exit the rest of the time.
+                  // See `promptSuggestion` for the whole rule.
+                  if (event.key === 'Tab' && !event.shiftKey && promptSuggestion !== null) {
+                    event.preventDefault();
+                    onDraftChange(promptSuggestion);
+                    return;
+                  }
                   if (event.key === 'Tab' && event.shiftKey && canCycleMode) {
                     event.preventDefault();
                     void cycleMode();
-                  } else if (event.key === 'Enter' && !event.shiftKey) {
+                  } else if (submitsPrompt(submitKey, event)) {
                     event.preventDefault();
                     onSubmit();
+                    // NOTE WHAT HAS NO BRANCH: the Enter that does NOT send.
+                    // It has to fall out of this chain untouched so the
+                    // textarea inserts the newline itself -- a
+                    // `preventDefault()` on that path would hand the operator a
+                    // box with no send AND no newline.
                   } else if (event.key === 'Escape') {
+                    // THE INTERRUPT. With both typeahead lists closed (they
+                    // answered Escape above and still do), Escape goes into the
+                    // agent rather than out of the box -- Claude Code's own
+                    // default, at the operator's request. `preventDefault` is
+                    // what keeps `Canvas`'s `cancel` comment true: "an Escape
+                    // typed INSIDE the composer never reaches here".
+                    //
+                    // The draft is NOT cleared and the keyboard is NOT moved.
+                    // Claude does neither, and an interrupt that also cost the
+                    // operator their half-typed prompt would be a worse trade
+                    // than pressing nothing at all.
                     event.preventDefault();
+                    // A popover opened from the tools row can still be up while
+                    // the keyboard is in the box. It is a dialog, so it takes
+                    // this Escape and the agent does not.
+                    if (closeOpenPopover()) return;
+                    interruptRun();
+                  } else if (normalizeKey(event) === 'Mod-[') {
+                    // AND THE WAY OUT, which Escape used to be. `Ctrl-[` IS
+                    // Escape in vim and in a terminal, and `Mod` folds Ctrl and
+                    // Cmd (`chords.ts`), so this is `Cmd+[` on the keyboard the
+                    // operator has. Bound HERE rather than in the chord tables,
+                    // for the reason Shift+Tab above is and for one more:
+                    // `focusList` already holds `MAX_BINDINGS` chords
+                    // (`Mod-Shift-h`, `Mod-0`), and a third would be invisible in the shortcut
+                    // editor -- which draws exactly `MAX_BINDINGS` slots -- and
+                    // destroyed by the first rebind of either. It is in
+                    // `RESERVED_KEYS` instead, so nothing else can take it.
+                    //
                     // BLUR, not just `composing = false`. Clearing the flag only
                     // makes this box read-only; while it still holds DOM focus
                     // the window key listener returns early on every keystroke
@@ -3522,22 +6886,28 @@ export function DetailPanel(props: DetailPanelProps) {
                     // `j`/`k` land here and vanish and the sidebar is
                     // unreachable without a mouse. Releasing focus is what hands
                     // the keyboard back.
+                    event.preventDefault();
                     inputRef.current?.blur();
                     onStopComposing();
                   }
                 }}
+                // The ghost, in the placeholder's own faint ink: unmistakably
+                // not a draft yet, and naming the key that would make it one.
+                data-prompt-suggestion={promptSuggestion ?? undefined}
                 placeholder={
                   entry === null
                     ? 'Pick a session first'
-                    : 'Reply to agent, answer with a number, or paste a plan…'
+                    : promptSuggestion !== null
+                      ? `${promptSuggestion} — Tab to use`
+                      : 'Reply to agent, answer with a number, or paste a plan…'
                 }
-                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-[12.5px] text-ink leading-[1.55] outline-none placeholder:text-ink-faint"
+                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
                 aria-label="prompt to session"
               />
             </div>
 
             {images.length > 0 && (
-              <p data-pasted-images className="text-[10.5px] text-ink-dim leading-[1.45]">
+              <p data-pasted-images className="text-control text-ink-dim">
                 {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
                 vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
                 the image.
@@ -3545,12 +6915,27 @@ export function DetailPanel(props: DetailPanelProps) {
             )}
 
             {attachError !== null && (
-              <p data-attach-error className="text-[10.5px] text-waiting leading-[1.45]">
+              <p data-attach-error className="text-control text-waiting">
                 {attachError}
               </p>
             )}
 
-            <div className="flex items-center gap-2">
+            {/* ITS OWN LINE, NOT THE ATTACHMENT'S. Both are "the composer could
+              not do the thing you asked", and they are still different acts
+              with different fixes -- a hook named `attach-error` carrying a
+              microphone permission refusal is the kind of reuse that reads
+              fine until somebody greps for it. */}
+            {dictateError !== null && (
+              <p data-dictate-error className="text-control text-waiting">
+                {dictateError}
+              </p>
+            )}
+
+            {/* The tools row: attach, provider, model, mode — everything the
+              prompt carries besides its text, on one line under the box. The
+              hook is what lets a test say "beside the model field" without a
+              layout engine. */}
+            <div data-prompt-tools className="flex items-center gap-2">
               {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
@@ -3581,7 +6966,7 @@ export function DetailPanel(props: DetailPanelProps) {
                   <span
                     aria-hidden="true"
                     data-tap-skin
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                   >
                     <Paperclip size={12} strokeWidth={1.7} />
                   </span>
@@ -3590,7 +6975,10 @@ export function DetailPanel(props: DetailPanelProps) {
               {attachedName !== null && (
                 <span
                   data-attach-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+                  // `line-strong`, not `raised`: this chip sits inside
+                  // `data-prompt-box`, which is `bg-card` -- the same
+                  // inversion the answer options wore. See `OPTION_FILL`.
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
                 >
                   <span className="truncate">{attachedName}</span>
                   <button
@@ -3625,7 +7013,7 @@ export function DetailPanel(props: DetailPanelProps) {
                     <span
                       aria-hidden="true"
                       data-tap-skin
-                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-panel hover:bg-raised"
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
                     >
                       <ImageIcon size={12} strokeWidth={1.7} />
                     </span>
@@ -3635,7 +7023,8 @@ export function DetailPanel(props: DetailPanelProps) {
               {attachedImage !== null && (
                 <span
                   data-attach-image-chip
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-raised px-1.5 font-mono text-[10px] text-ink-dim"
+                  // The same card, the same inversion -- see `data-attach-chip`.
+                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
                 >
                   <span className="truncate">{attachedImage}</span>
                   <button
@@ -3652,133 +7041,768 @@ export function DetailPanel(props: DetailPanelProps) {
                   </button>
                 </span>
               )}
-              {/* The model field. Not a menu of names vam made up — vam has no
-              model API and the factory does the choosing — but not an inert
-              chip either: what is typed here becomes the prompt's first
-              line, in the recorded text a person reads. */}
-              <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
-                <input
-                  data-model-request
-                  value={readModelRequest(draft)}
-                  onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
-                  placeholder="model"
-                  aria-label="model requested in this prompt"
-                  className="vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-[10px] text-ink-dim outline-none placeholder:text-ink-quiet focus:text-ink"
-                />
-              </Note>
-              {/* The way OUT, shown only while you are in — the moment it is the
-              thing you need, and no width the rest of the time. It replaces
-              the `i` / `I` notes the operator asked to lose: those advertised
-              the way in, which you have already found by the time you can
-              read them. */}
-              {composing && (
+              {/* A15.4: the provider CHOICE, beside the model field it used to
+              be merely NAMED next to — Settings (`prefs.defaultProvider`,
+              `SettingsOverlay.tsx`) still owns the full picker; this is a
+              second, faster door onto the same preference, not a new one.
+
+              GLOBAL DEFAULT, NOT THIS SESSION'S PROVIDER — see the prop's
+              own doc for why: there is no channel that lets an existing
+              session's next reply run through a different agent, so a
+              control that implied otherwise would be exactly the kind of
+              lie the model field's own comment above refuses. Picking here
+              changes what the NEXT session created starts with.
+
+              ABSENT, NOT DISABLED: drawn only when the caller can actually
+              persist a change (`onSetDefaultProvider`), the same rule
+              `pickImageAttachment` follows two blocks up. */}
+              {onSetDefaultProvider !== undefined && (
+                <div className="relative flex-none">
+                  <Note text="which agent a NEW session starts with — vam's own Settings, reachable here; it does not change this session, which is already running">
+                    <button
+                      type="button"
+                      data-provider-picker-toggle
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-haspopup="listbox"
+                      aria-expanded={providerPickerOpen}
+                      aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
+                      onClick={() => setProviderPickerOpen((open) => !open)}
+                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                    >
+                      <span
+                        aria-hidden="true"
+                        data-tap-skin
+                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                      >
+                        {(() => {
+                          const mark = PROVIDER_MARKS[currentProvider.id];
+                          return mark === undefined ? (
+                            <Box size={12} strokeWidth={1.7} />
+                          ) : (
+                            <mark.Glyph size={12} />
+                          );
+                        })()}
+                      </span>
+                    </button>
+                  </Note>
+                  {providerPickerOpen && (
+                    <div
+                      data-provider-picker
+                      role="listbox"
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-label="default provider for new sessions"
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                    >
+                      {PROVIDERS.map((provider) => {
+                        const selected = provider.id === currentProvider.id;
+                        return (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            data-provider-option={provider.id}
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => {
+                              onSetDefaultProvider(provider.id);
+                              setProviderPickerOpen(false);
+                            }}
+                            className={[
+                              'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                              selected
+                                ? 'bg-line-strong text-ink'
+                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                            ].join(' ')}
+                          >
+                            {provider.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* THE MODEL CONTROL, IN THREE STATES -- `modelControlState`
+              (`model-command.ts`) carries the table and the measurements
+              behind it; this is what each row draws.
+
+                delivers   terminal    vamControlled   drawn
+                not true   any         any             the free-text request
+                                                       line, unchanged
+                true       !== false   true            a picker that types
+                                                       `/model <x>` + Enter
+                true       false       any             the picker, DISABLED
+                true       !== false   not true        the picker, DISABLED
+
+              WHY THE FIRST ROW SURVIVES. The field was written for a source
+              that only RECORDS: the prompt is filed, the factory picks the
+              model, and one leading `model: <x>` line is the request in the
+              words a reader of the log will read (`setModelRequest`). That
+              is still true there and it is kept there, note and all.
+
+              WHY THE OTHER ROWS ARE NOT THAT FIELD. On a source that DELIVERS
+              (`deliverPrompt`: Claude Code since PR 383), the draft is typed
+              into the session's tmux pane, so a `model:` line lands in the
+              CLI's prompt as words the agent reads -- it switches nothing.
+              What does switch it, measured on Claude Code 2.1.274, is
+              `/model <alias>` + Enter typed at the REPL, which is exactly one
+              line into the pane vam already types into. So the picker types
+              that, over `typePaneStrokes`, and NEVER touches the draft.
+
+              DISABLED, NOT ABSENT, WHERE VAM CANNOT TYPE -- and this is the
+              one place the control differs from the mode chip beside it,
+              which is ABSENT where no mode can be chosen. The operator asked
+              for disabled, and the two controls are about different things:
+              a mode is a property of vam's own prompt (the draft carries the
+              line), so where vam cannot set one there is nothing to show; a
+              model is a property of the SESSION, which has one whether or not
+              vam can reach it, and a greyed button says exactly that -- there
+              is a model here, and vam has no keyboard into this session to
+              change it. The note carries the remedy.
+
+              THE NOTE ON A DISABLED BUTTON HANGS ON A WRAPPER, and that is
+              not decoration: a disabled `<button>` takes no focus in any
+              browser, so a `Note` on the button itself would open on hover
+              and on nothing else -- the `title` this app deleted, unreadable
+              from the keyboard. The wrapper takes the tab stop (the
+              `StatusCell` precedent, suppression and all). HOVER NEEDS NO
+              HELP, and that is measured rather than assumed: the first draft
+              put `pointer-events-none` on the button on the belief that
+              Chromium delivers no pointer events over a disabled control, and
+              removing it reddened nothing -- on Chromium 153 (Playwright) the
+              hover reaches the wrapper's handlers and the note opens. Electron
+              44 carries a Chromium of the same generation. A rule the guard
+              cannot falsify is a rule nobody chose, so it is not here.
+              `e2e/model-picker-shots.mjs` measures that the note really
+              opens both ways, and what the dimmed label paints. */}
+              {modelControl === 'request' && (
+                <Note text="vam cannot switch models — the factory chooses; this writes your request into the prompt text that gets recorded">
+                  <input
+                    data-model-request
+                    value={readModelRequest(draft)}
+                    onChange={(event) => onDraftChange(setModelRequest(draft, event.target.value))}
+                    placeholder="model"
+                    aria-label="model requested in this prompt"
+                    /* `outline-none` is GONE, and `focus:text-ink` was never a
+                       substitute for it: recolouring TYPED TEXT says nothing on
+                       an empty field, which is the state this control is in
+                       every time it is first reached. Nothing else drew one
+                       either -- the phone stylesheet's replacement ring applies
+                       to `.vam-tap:has(> [data-tap-skin])` and this field has no
+                       inner skin -- so focusing it put a caret on screen and
+                       nothing more.
+
+                       `FOCUS_RING` is the app's own, in `ink`: measured on the
+                       painted node it is 13.4:1 in dark and 17.7:1 in light
+                       against the card behind it, well past the 3:1 WCAG 1.4.11
+                       asks, and it is a different colour from the composer box's
+                       armed border (`waiting`) so the two signals cannot be read
+                       as each other. */
+                    className={`vam-tap h-6 w-[84px] min-w-0 shrink rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                  />
+                </Note>
+              )}
+              {modelControl === 'picker' && (
+                <div className="relative flex-none">
+                  {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
+                      because it is one the operator did not ask for: measured
+                      on 2.1.274, `/model <alias>` answers "...and saved as your
+                      default for new sessions". vam cannot send the
+                      session-only form (that is the `s` key inside the
+                      interactive menu vam never drives), so the honest thing
+                      is to say what the line does. */}
+                  <Note text="model — typed into the pane vam started as /model <name>, which this session answers there; the CLI also saves the choice as its default for new sessions">
+                    <button
+                      type="button"
+                      data-model-picker
+                      data-model-picker-state="picker"
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-haspopup="listbox"
+                      aria-expanded={modelPickerOpen}
+                      /* LABELLED "model" AND NOT WITH A NAME: vam does not read
+                         the session's model back (the transcript's assistant
+                         rows carry `message.model`, but nothing surfaces it
+                         yet), and a button wearing "Opus" would be a claim
+                         nothing checked -- the same rule the mode chip keeps
+                         for the mode it does not read back. */
+                      aria-label="model — choose one for this session"
+                      onClick={() => setModelPickerOpen((open) => !open)}
+                      className="vam-tap flex h-6 shrink-0 cursor-pointer items-center text-ink-dim hover:text-ink"
+                    >
+                      <span
+                        aria-hidden="true"
+                        data-tap-skin
+                        className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                      >
+                        model
+                        <ChevronDown size={11} strokeWidth={2} />
+                      </span>
+                    </button>
+                  </Note>
+                  {modelPickerOpen && (
+                    <div
+                      data-model-picker-menu
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                    >
+                      {/* THE FIVE, as a listbox of their own rather than the
+                          popover being one: the free-text row below is an
+                          `<input>`, and an input is not an option, so a
+                          `role="listbox"` around both would be a listbox with
+                          a child no screen reader can place. */}
+                      <div
+                        role="listbox"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-label="model for this session"
+                        className="flex flex-col gap-0.5"
+                      >
+                        {MODEL_CHOICES.map((choice) => (
+                          <button
+                            key={choice.id}
+                            type="button"
+                            data-model-option={choice.id}
+                            role="option"
+                            /* NONE IS MARKED SELECTED, for the label's reason
+                               above: vam holds no fact about which model the
+                               session is on, and `aria-selected` is a claim. */
+                            aria-selected={false}
+                            onClick={() => {
+                              setModelPickerOpen(false);
+                              void sendModel(choice.id);
+                            }}
+                            className="flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* A FULL MODEL ID, for what the five aliases cannot
+                          name: `claude --help` takes "an alias for the latest
+                          model ... or a model's full name". Enter sends it as
+                          the same line; a space in it is refused before a key
+                          is built (`sendModel`). */}
+                      <input
+                        data-model-id
+                        value={modelIdText}
+                        onChange={(event) => setModelIdText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Enter') {
+                            dismissPopoverOnEscape(event);
+                            return;
+                          }
+                          // This box's own Enter, not the composer's: the
+                          // prompt box's handler submits the DRAFT on it.
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setModelPickerOpen(false);
+                          void sendModel(modelIdText);
+                          setModelIdText('');
+                        }}
+                        placeholder="full model id"
+                        aria-label="full model id — Enter to type /model with it"
+                        className={`h-6 w-[148px] rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {modelControl === 'disabled' && (
+                <Note text="vam has no terminal it owns for this session, so it cannot send /model — open it in a vam terminal">
+                  <span
+                    data-model-picker-shell
+                    // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
+                    tabIndex={0}
+                    className={`inline-flex flex-none rounded-[6px] ${FOCUS_RING}`}
+                  >
+                    <button
+                      type="button"
+                      data-model-picker
+                      data-model-picker-state="disabled"
+                      disabled
+                      aria-disabled="true"
+                      aria-label="model — vam cannot choose one for this session"
+                      /* `text-ink-faint` is the disabled ink `SettingsOverlay`'s
+                         stepper buttons take (`disabled:text-ink-faint`), and it
+                         is measured against this card in
+                         `e2e/model-picker-shots.mjs`: the label must still
+                         clear 3:1, because a greyed control an operator cannot
+                         read is a control that is not there. */
+                      className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
+                    >
+                      model
+                      <ChevronDown size={11} strokeWidth={2} />
+                    </button>
+                  </span>
+                </Note>
+              )}
+              {/* The mode, beside the model field the operator asked to put it
+              next to, as ONE icon showing only the mode that is current —
+              the three pills below the input are gone with the row they sat
+              in.
+
+              STILL ABSENT, NOT DIMMED, where no mode can be chosen
+              (`canCycleMode`): a switcher over a session vam did not start
+              is a control that lies, which is why the row was gated this way
+              in the first place and why shrinking it does not get to spend
+              that.
+
+              ICON-ONLY DOES NOT MEAN UNLABELLED — `ViewIcons` states this
+              file's rule and refuses a bare `title`: the accessible name
+              carries the mode's NAME and the chord, so the one thing the
+              glyph says to an eye is said to a screen reader too.
+
+              AND THE TOOLTIP NAMES THE MODE TOO, at the operator's ask. The
+              accessible name has led with `mode: <name>` since this became an
+              icon, while the `Note` beside it explained what the CONTROL DOES
+              and never said which mode was current — so a screen reader was
+              told and an eye was not, which is this file's own rule running
+              backwards. It leads with the same words the label does, and then
+              says what that mode MEANS, because the hue this glyph is painted
+              in has no other legend anywhere in the app.
+
+              WHAT IT DID NOT DROP TO MAKE ROOM: the two mechanisms. This
+              control writes a line into the draft and ⇧Tab presses the
+              session's own chord, and an operator who does not know both is
+              left believing one of them is broken.
+
+              The draft stays the single source of truth: read back out of it
+              on every render, never mirrored in state, because a mirror is a
+              thing that can disagree with the text actually recorded. */}
+              {canCycleMode && (
+                <div className="relative flex-none">
+                  <Note
+                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. It belongs to the session: this writes your choice into the prompt text that gets recorded, and Shift+Tab presses the session's own chord in the pane vam started.`}
+                  >
+                    <button
+                      type="button"
+                      data-mode-toggle
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-haspopup="listbox"
+                      aria-expanded={modePickerOpen}
+                      aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
+                      onClick={() => setModePickerOpen((open) => !open)}
+                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                    >
+                      {/* The glyph carries the ink now (`MODE_SKIN`), so the
+                          button no longer sets one: `text-ink-dim
+                          hover:text-ink` here would have been a second opinion
+                          about the same pixels, settled by source order rather
+                          than by intent. The hover affordance stays on the
+                          chip, which is where it was already drawn. */}
+                      <span
+                        aria-hidden="true"
+                        data-tap-skin
+                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                      >
+                        <ModeGlyph mode={currentMode} />
+                      </span>
+                    </button>
+                  </Note>
+                  {modePickerOpen && (
+                    <div
+                      data-mode-picker
+                      role="listbox"
+                      onKeyDown={dismissPopoverOnEscape}
+                      aria-label="mode for this prompt"
+                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                    >
+                      {MODES.map((mode) => {
+                        const selected = mode === currentMode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            data-mode-option={mode.toLowerCase()}
+                            role="option"
+                            aria-selected={selected}
+                            onClick={() => {
+                              onDraftChange(setModeRequest(draft, mode));
+                              setModePickerOpen(false);
+                            }}
+                            className={[
+                              'flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                              selected
+                                ? 'bg-line-strong text-ink'
+                                : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                            ].join(' ')}
+                          >
+                            {/* Coloured here too: the picker is the one place
+                                all three modes appear at once, so it is the
+                                only legend the hues have. */}
+                            <ModeGlyph mode={mode} />
+                            {mode}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+              {/* WHAT THE ⇧Tab PRESS DID, and the only channel that says so:
+              sent, still out, or refused by tmux. It kept a home when the row
+              around it was deleted, because a refusal shown as silence is
+              this pane's oldest defect, not a tidy-up — the operator would be
+              left believing a mode moved that did not.
+
+              Drawn only when there is something to say (the resting caption
+              moved into the icon's accessible name), so it costs no width at
+              rest and the row does not reflow for a caption nobody reads. */}
+              {cycleNote !== null && (
                 <span
-                  data-prompt-escape
-                  className="flex-none whitespace-nowrap font-mono text-[9.5px] text-ink-faint"
+                  data-mode-cycle
+                  data-mode-cycle-state={cycleNote.kind}
+                  data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
+                  className={[
+                    'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
+                    cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
+                  ].join(' ')}
                 >
-                  Esc → sidebar
+                  {cycleNote.text}
                 </span>
               )}
               <span className="min-w-0 flex-1" />
-              {/* The mockup draws a send arrow here. This one says RECORD, in
-              the label and in the tooltip, because the factory has no channel
-              into a running agent session — the click appends the prompt to
-              the session's log and nothing reads it back out. A button that
-              implied delivery would leave you waiting for an answer nobody is
-              coming to give. */}
-              <button
-                type="button"
-                data-prompt-record
-                onClick={onSubmit}
-                disabled={sending}
-                aria-busy={sending}
-                aria-label={composerClaim.label}
-                title={composerClaim.title}
-                className={[
-                  'flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-ink',
-                  sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
-                ].join(' ')}
-              >
-                <ArrowUp size={14} strokeWidth={1.7} className={sending ? 'vam-breathe' : ''} />
-              </button>
-            </div>
-          </div>
+              {/* THE MICROPHONE, next to Send because that is where the
+              operator asked for it and because it belongs to the same act:
+              these two are what a finished prompt is handed to.
 
-          {/* The mockup's mode row — drawn ONLY where a mode can actually be
-            chosen (`canCycleMode`), and gone entirely otherwise, which is the
-            operator's own request: a switcher for a session whose model the
-            factory picked and vam cannot touch is a control that lies, and
-            dimming it would still say a choice lives here.
+              DRAWN ONLY WHERE IT CAN LISTEN, which is not the same as where a
+              recogniser exists -- and the difference is the packaged app.
+              Chromium has `webkitSpeechRecognition` there, and vam's own main
+              process denies every permission it could ask for, so the button
+              shipped able to do nothing but apologise. `dictationAvailable`
+              answers both questions now (`dictation.ts`), is read once at
+              mount, and where it is false there is no button at all: this
+              file's own rule for the directory picker and the attachment
+              input -- a control that cannot act is not drawn dimmed, it is not
+              drawn.
 
-            The pills write the choice into the prompt as a leading `mode:`
-            line, so what was selected is in the recorded text; Shift+Tab
-            presses the session's OWN chord in the pane vam started, which is
-            what makes the row more than a highlight. Selecting Auto clears
-            the line. The well's geometry is the mockup's: 2px on `raised`,
-            24px pills at 11.5px, the current one filled with `segment-on`. */}
-          {canCycleMode && (
-            <div data-mode-row className="flex items-center gap-2">
-              {/* The note hangs off the MODE label, and the label is a <button> so
-              that a keyboard can reach it. A span with a tabIndex reads as a
-              control to a screen reader without behaving like one. */}
-              <Note text="the mode belongs to the session — Shift+Tab presses its own chord in the pane vam started, and the pills write the choice into the prompt text that gets recorded">
-                <button
-                  type="button"
-                  className="flex-none cursor-default font-mono text-[9.5px] tracking-[0.1em] text-ink-faint"
+              `aria-pressed` rather than a second icon: this is one control in
+              two states, and a screen reader is told which by the state rather
+              than by the picture. The label changes with it, because the
+              button paints no word. */}
+              {canDictate && (
+                <Note
+                  text={
+                    listening
+                      ? 'listening — press again to stop; what is heard is appended to the prompt'
+                      : "dictates into the prompt using this device's own speech recognition — vam records no audio and uploads none"
+                  }
                 >
-                  MODE
-                </button>
-              </Note>
-              <div className="flex items-center gap-0.5 rounded-[8px] border border-line-strong bg-raised p-0.5">
-                {MODES.map((mode) => {
-                  // Derived from the draft, never a second copy of it: a mirror
-                  // in component state is a thing that can disagree with the text
-                  // actually being recorded.
-                  const selected = mode === (readModeRequest(draft) || DEFAULT_MODE);
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      data-mode-pill={mode.toLowerCase()}
-                      aria-pressed={selected}
-                      onClick={() => onDraftChange(setModeRequest(draft, mode))}
+                  <button
+                    type="button"
+                    data-prompt-dictate
+                    data-prompt-dictate-on={listening ? 'true' : undefined}
+                    aria-pressed={listening}
+                    aria-label={listening ? 'stop dictating' : 'dictate the prompt'}
+                    onClick={toggleDictation}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                  >
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
                       className={[
-                        'flex h-6 cursor-pointer items-center rounded-[6px] px-2.5 text-[11.5px]',
-                        selected
-                          ? 'bg-segment-on font-medium text-ink'
-                          : 'text-ink-dim hover:text-ink',
+                        'flex h-6 w-6 items-center justify-center rounded-[6px] border',
+                        listening
+                          ? 'border-running bg-running/15 text-running'
+                          : 'border-line-strong bg-card hover:bg-line-strong',
                       ].join(' ')}
                     >
-                      {mode}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* The tip, at the right-hand end as the mockup draws it, with the
-                refusal in its place when the last press did not land. It names
-                a chord the prompt box really binds, and it exists only where
-                that binding does — this caption was deleted once for naming a
-                key no table answered to, on the stated terms that a real
-                binding may bring it back and the caption alone may not. */}
-              <span
-                data-mode-cycle
-                data-mode-cycle-state={cycleNote?.kind ?? 'resting'}
-                data-mode-refusal={cycleNote?.kind === 'refused' ? 'true' : undefined}
-                className={[
-                  'ml-auto flex-none whitespace-nowrap font-mono text-[9.5px]',
-                  cycleNote === null ? 'text-ink-faint' : '',
-                  cycleNote?.kind === 'refused' ? 'text-waiting' : '',
-                  cycleNote !== null && cycleNote.kind !== 'refused' ? 'text-ink-dim' : '',
-                ]
-                  .filter((part) => part !== '')
-                  .join(' ')}
-              >
-                {cycleNote?.text ?? '⇧Tab · cycle mode'}
-              </span>
+                      <Mic size={12} strokeWidth={1.7} className={listening ? 'vam-breathe' : ''} />
+                    </span>
+                  </button>
+                </Note>
+              )}
+              {/* TWO OUTCOMES, TWO FACES. The mockup draws a send arrow here
+              and this drew one for both of them -- for a source that types the
+              prompt into the running session's pane and for a source that
+              appends it to a log and nothing reads it back out. Those are
+              different things to have done, and the whole distinction lived in
+              an `aria-label` and a native `title`: invisible to anyone looking
+              at the screen, and a `title` opens on hover and on nothing else,
+              so on a keyboard-first tool it was invisible to the primary input
+              device as well.
+
+              So the outcome is PAINTED -- the word and the glyph both -- and
+              the sentence moves into `Note`, which opens on focus. The comment
+              that used to stand here said the button "says RECORD"; it had not
+              done that since the wording became per-source, which is the same
+              defect as the `title`, in prose. */}
+              <Note text={composerClaim.title}>
+                <button
+                  type="button"
+                  data-prompt-record
+                  /* Which outcome this button is for, as a fact a guard can
+                     read: the word is copy and may be rewritten, this is the
+                     claim. */
+                  data-prompt-delivers={delivers === true ? 'true' : undefined}
+                  onClick={onSubmit}
+                  disabled={sending}
+                  aria-busy={sending}
+                  aria-label={composerClaim.label}
+                  className={[
+                    `flex h-7 w-7 flex-none items-center justify-center rounded-[7px] bg-line-strong text-control text-ink ${FOCUS_RING}`,
+                    sending ? 'cursor-progress opacity-60' : 'cursor-pointer hover:bg-line-loud',
+                  ].join(' ')}
+                >
+                  {/* THE GLYPH ALONE. Operator: "drop the Send label from the
+                      button, the icon is enough."
+
+                      WHAT THE WORD WAS CARRYING has to go somewhere, and it
+                      does: the delivers/records distinction is two different
+                      GLYPHS (`ArrowUp` against `NotepadText`), the
+                      `aria-label` above says which act in words, and `Note`
+                      carries the whole sentence on focus and hover. WCAG 2.5.3
+                      (label in name) stops applying the moment there is no
+                      visible label; 1.1.1 takes over, and the name is what
+                      satisfies it.
+
+                      The claim's `word` went with the label: see
+                      `composerClaim` above for why a field nothing paints is
+                      deleted rather than left computed. */}
+                  <ComposerGlyph
+                    size={14}
+                    strokeWidth={1.7}
+                    aria-hidden="true"
+                    className={sending ? 'vam-breathe' : ''}
+                  />
+                </button>
+              </Note>
             </div>
-          )}
+            {/* THE KEY ROW IS GONE, AND THIS IS THE END OF A SEQUENCE RATHER
+            THAN A DELETION. The operator narrowed it four times, each time
+            after living with the last one, and the reasoning is kept here
+            because the next reader's first instinct will be to put a hint
+            back:
+
+              1. It began as three captions: `Esc → sidebar`, `Mod-[ → leave`,
+                 and the send key, on a row of their own under the input
+                 (three do not fit beside the attach/provider/model/mode
+                 controls in a 408px pane, and a caption that truncates hides
+                 whichever is last).
+              2. `Esc → sidebar` went the day Escape in this box became the
+                 agent's INTERRUPT: a hint that outlives the behaviour it
+                 describes is worse than no hint, since an operator would press
+                 it expecting to leave and stop their agent instead.
+              3. Then `Mod-[ → leave`, on a second look: "drop the leave
+                 shortcut from under the prompt box."
+              4. Then the send hint narrowed to the DEVIATION only -- silence
+                 on `Enter`, a caption on `Shift-Enter` -- which left a row
+                 that on a desktop, on the shipped key, drew nothing at all.
+              5. And now: "remove the 'Esc to interrupt' shortcut under the
+                 prompt input. Nothing is ever displayed down there." The whole
+                 row goes, the send caption on it included, because the
+                 operator's sentence is about the PLACE and not about one of
+                 its captions.
+
+            WHAT WENT IS CAPTIONS, NOT KEYS, and the distinction is the whole
+            safety of this change. `Mod-[` is still bound in this box's own
+            `onKeyDown` below and still reserved in `chords.ts` so nothing can
+            take it; `Mod-0` and `Mod-Shift-h` still reach `focusList` from in
+            here; Escape is still the interrupt; and the submit key still
+            follows the preference. `test/panels/DetailPanel.test.tsx` asserts
+            the three bindings against the real grammar so that removing a
+            caption can never quietly remove one.
+
+            WHAT IS NOW TAUGHT NOWHERE, said plainly rather than left to be
+            discovered. The `?` sheet is generated from the chord TABLES, so it
+            names `Mod-0` and `Mod-Shift-h` and it names neither `Mod-[` (bound
+            here, not in a table) nor Escape (answered ahead of every table in
+            `resolveChord`, which is why `keysheet.ts` gives `cancel` no row).
+            `Mod-[` already went untaught two steps ago; Escape-as-interrupt
+            goes untaught now, and this row was its only caption anywhere. The
+            ACT keeps two real controls -- the In bubble's right-click "Cancel
+            this turn", and the phone keystroke strip's `Esc → agent` button --
+            so what is lost is the keystroke's discoverability, not the
+            interrupt. That is a cost, it was asked for with the place named,
+            and it is recorded here rather than dressed up as a tidy-up.
+
+            SO THE TOOLS ROW ABOVE IS THE LAST THING IN THIS BOX. There is no
+            element under the input at all now -- not an empty one, not a
+            reserved band -- which is what the describe in `DetailPanel.test.
+            tsx` asserts structurally rather than by one absent selector. */}
+          </div>
         </div>
       )}
+
+      {/* THE IN BUBBLE'S MENU. Drawn once for the pane, `position: fixed`, so
+          the column's own `overflow` cannot clip it and the sticky band it was
+          opened on cannot trap it. */}
+      {promptMenu !== null &&
+        (() => {
+          const turn = orderedTurns.find((candidate) => candidate.id === promptMenu.id);
+          if (turn === undefined) {
+            // The poll dropped the turn out from under an open menu. Drawing a
+            // menu for a turn that is gone would be two wrongs: acting on the
+            // wrong turn, or acting on nothing while looking live.
+            return null;
+          }
+          // READ BACK, never assumed: in the packaged app every Chromium
+          // permission is denied and the renderer's own `navigator.clipboard`
+          // refuses, so a caller that prints "copied" without looking is
+          // telling the operator a lie. One closure for both menus.
+          const copy = (what: string, name: string) => () => {
+            void copyText(what).then((landed) => {
+              setCycleNote({
+                kind: landed ? 'sent' : 'refused',
+                text: landed
+                  ? `${name} copied to the clipboard`
+                  : 'not copied — the clipboard refused the write',
+              });
+            });
+          };
+          return (
+            <ContextMenu
+              label={promptMenu.kind === 'prompt' ? 'prompt actions' : 'answer actions'}
+              at={promptMenu.at}
+              onClose={() => setPromptMenu(null)}
+              items={
+                promptMenu.kind === 'prompt'
+                  ? promptMenuItems(turn, {
+                      live: turn.id === newestId,
+                      interruptRefusal,
+                      onCopy: copy(turn.input, 'prompt'),
+                      onCancel: interruptRun,
+                    })
+                  : answerMenuItems(turn, { onCopy: copy(turn.output ?? '', 'answer') })
+              }
+            />
+          );
+        })()}
     </aside>
   );
+
+  // THE PANE'S OWN ACTS, published to every control drawn inside an answer:
+  // the transcript's markdown AND the Files tab's markdown preview, which
+  // share one component map. See `out-actions.ts`.
+  return <OutActionsProvider value={outActions}>{pane}</OutActionsProvider>;
+}
+
+/**
+ * What a right-click on an In bubble offers.
+ *
+ * TWO ITEMS, BECAUSE THE OPERATOR SAID THEY ARE TWO THINGS: "In bubble, copy,
+ * cancel are different functions." Copy acts on the turn under the pointer;
+ * cancel acts on the SESSION, and only while the turn under the pointer is the
+ * one it is still working on.
+ *
+ * THE REFUSALS ARE SHOWN BEFORE THE CLICK, which is the only thing this menu
+ * adds that Escape-in-the-composer does not. `interruptRefusal` carries the
+ * three the pane already knows -- no terminal, not vam's session, nothing
+ * running -- and the fourth is about the TURN rather than the session: an
+ * older turn has already finished, whatever the session is doing now.
+ *
+ * Module scope, so the whole item set can be asserted without a pane.
+ */
+/**
+ * What a right-click on the ANSWER block offers.
+ *
+ * ONE ITEM, and the restraint is the design. Copy is the only thing vam can
+ * honestly do to an answer: cancelling belongs to the prompt -- it stops the
+ * turn that is producing this answer, so offering it here would be the same
+ * act named twice -- and there is no third capability to expose. A menu padded
+ * out to match the bubble's length would be inventing items.
+ */
+export function answerMenuItems(
+  turn: Decision,
+  how: { readonly onCopy: () => void },
+): ContextMenuItem[] {
+  return [
+    {
+      id: 'copy',
+      label: 'Copy answer',
+      // THE BLOCK DRAWS A SENTENCE WHERE THERE IS NO ANSWER ("this turn ended
+      // without an answer", and three more in `noAnswerNote`). Copying that
+      // would put vam's own prose on the clipboard as if the agent had
+      // written it -- which is a forgery, not an empty copy.
+      unavailable:
+        turn.output === null || turn.output === '' ? 'this turn has no answer to copy' : null,
+      onPick: how.onCopy,
+    },
+  ];
+}
+
+/**
+ * How much older a turn's prompt is than its newest step, as a sentence -- or
+ * `null` when there is nothing honest to say.
+ *
+ * ── WHY THE LINE EXISTS ───────────────────────────────────────────────────
+ * The In bubble PINS the prompt to the top of the column while the activity
+ * line under it stays live. On a long turn those two are hours apart, and
+ * nothing said so, so an hours-old prompt read as the current question. Two
+ * different things looking the same, which is this pane's oldest defect
+ * (`sources/pull-requests.ts`: "'No PRs' and 'vam could not ask' must never
+ * look the same").
+ *
+ * ── WHAT IT CLAIMS, AND THE THREE THINGS IT MUST NOT ──────────────────────
+ * It claims exactly this: the prompt was recorded at one time, the newest step
+ * under it at another, and here is the distance. Both halves are timestamps
+ * vam READ off the transcript.
+ *
+ * It does NOT say the session is stalled -- the activity line beside it says
+ * otherwise and would contradict it. It does NOT say the operator has been
+ * quiet: messages sent mid-turn reach the agent's context and are never
+ * written to the transcript, so vam draws what WAS written and cannot speak
+ * for what was not. And it does NOT say anything is wrong, because nothing is:
+ * measured over the corpus, the median turn takes 9.3 minutes, p75 28, p90 77.
+ *
+ * ── A GAP, NOT AN AGE ─────────────────────────────────────────────────────
+ * Between the two RECORDED times, never against `now`. A "3h ago" would need a
+ * third clock, would drift against a transcript that has stopped being
+ * written, and would change while the operator looked at it. This does not
+ * move once the turn's newest step has landed.
+ *
+ * ── THE THRESHOLD IS MEASURED ─────────────────────────────────────────────
+ * 30 minutes sits just past p75 (28), so the line stays away from three turns
+ * in four and speaks for the quarter long enough for the pin to mislead. A
+ * line on every turn would be noise, and noise is how an operator learns to
+ * stop reading a pane.
+ */
+export const PROMPT_AGE_FLOOR_MS = 30 * 60 * 1000;
+
+export function promptAgeNote(turn: Decision): string | null {
+  const asked = turn.promptedAt;
+  const latest = turn.latestAt;
+  // ABSENT IS ITS OWN ANSWER, not zero. `last-prompt` carries no timestamp at
+  // all (0 of 25,259 measured), so a turn whose prompt line is above the top
+  // of the read window has no recorded time -- and most sources carry neither
+  // field. Saying nothing is the honest output; "0m older" would be a claim.
+  if (typeof asked !== 'string' || typeof latest !== 'string') return null;
+  const from = Date.parse(asked);
+  const to = Date.parse(latest);
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  const gap = to - from;
+  if (gap <= PROMPT_AGE_FLOOR_MS) return null;
+  return `this prompt is ${gapLabel(gap)} older than the newest step below it`;
+}
+
+/** Coarse on purpose: the gap is a scale, not a duration to be counted. */
+function gapLabel(ms: number): string {
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.floor(hours / 24)}d`;
+}
+
+export function promptMenuItems(
+  turn: Decision,
+  how: {
+    readonly live: boolean;
+    readonly interruptRefusal: string | null;
+    readonly onCopy: () => void;
+    readonly onCancel: () => void;
+  },
+): ContextMenuItem[] {
+  return [
+    { id: 'copy', label: 'Copy prompt', onPick: how.onCopy },
+    {
+      id: 'cancel',
+      label: 'Cancel this turn',
+      danger: true,
+      // THE TURN'S OWN TEST FIRST. A finished turn cannot be interrupted even
+      // in a session that is busy on a later one, and reporting the session's
+      // reason there would answer a question nobody asked.
+      unavailable: how.live
+        ? how.interruptRefusal
+        : 'this turn has already finished — only the newest can be interrupted',
+      onPick: how.onCancel,
+    },
+  ];
 }

@@ -89,7 +89,7 @@ export function registerStreamIpc(
       recordMainFailure(
         'open the live update stream',
         'stream-open-failed',
-        `vam could not open its live update stream: ${error instanceof Error ? error.message : String(error)}. The canvas will not update on its own until vam restarts.`,
+        `vam could not open its live update stream: ${error instanceof Error ? error.message : String(error)}. Sessions will not update on their own until vam restarts.`,
       );
       return false;
     }

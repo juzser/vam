@@ -67,11 +67,26 @@ const UUID = new RegExp(
   'g',
 );
 const LONG_HEX = new RegExp(`${NOT_HEX_BEFORE}[0-9a-fA-F]{12,}${NOT_HEX_AFTER}`, 'g');
-const DOUBLE_QUOTED = /"[^"]*"/g;
+const DOUBLE_QUOTED = /"([^"]*)"/g;
 /** The leading group keeps an apostrophe in prose (`don't`) from opening a quote. */
-const SINGLE_QUOTED = /(^|[\s([:=])'[^']+'/g;
-const BACKTICKED = /`[^`]*`/g;
-const HOME_PATH = /(?:\/Users|\/home)\/([A-Za-z0-9._-]+)(\/[^\s"'`,;)\]]*)?/g;
+const SINGLE_QUOTED = /(^|[\s([:=])'([^']+)'/g;
+const BACKTICKED = /`([^`]*)`/g;
+/**
+ * `:` IS IN THE TAIL'S EXCLUSION CLASS, and it was not.
+ *
+ * A unix error names a path and then explains itself with a colon --
+ * "can't create session: /Users/x/code/acme: No such file or directory" -- and
+ * without `:` here the colon is part of the path match and disappears with it,
+ * leaving two clauses run together ("~/<redacted> No such file or directory")
+ * that read as a truncated message rather than a redacted one. The colon
+ * belongs to the sentence.
+ *
+ * It costs a path that really contains a colon its tail, which is legal on
+ * every platform vam runs on and is vanishingly rarer than `path: reason`. The
+ * PREFIX is redacted either way, which is the part that carries the username
+ * and the project.
+ */
+const HOME_PATH = /(?:\/Users|\/home)\/([A-Za-z0-9._-]+)(\/[^\s"'`,;:)\]]*)?/g;
 const PID = /\bpid[\s=:]+\d+/gi;
 /**
  * A tmux session name vam created. `vam-<slug of the project label>-<tail>`
@@ -84,6 +99,68 @@ const PID = /\bpid[\s=:]+\d+/gi;
  * label, permanently and in public.
  */
 const VAM_SESSION = /\bvam-[A-Za-z0-9_-]+/g;
+
+/**
+ * VAM'S OWN VOCABULARY, which the quoted-name rules must not eat.
+ *
+ * The rules that redact anything in quotes or backticks are right about the
+ * operator's data -- a session title, a branch, a tmux name -- and wrong about
+ * vam's own words, which is how the one actionable fact in a message went
+ * missing. `tmux/spawn.ts` writes "the `tmux` command was not found", and what
+ * arrived named nothing at all; `deliver.ts` carries Claude Code's own remedy,
+ * "Use 'claude attach' to attach to it", and the remedy was the part deleted.
+ * `report.ts` learned this shape for the body it composes ("it would swallow
+ * the failure code") and never checked the messages it composes the body OUT
+ * OF. None of these words come from the machine: they are literals in this
+ * repository and in the CLIs it drives.
+ *
+ * A CLOSED LIST, NOT A SHAPE TEST, and that is the whole safety argument. A
+ * rule like "keep a quoted run that looks like a command" would keep a session
+ * titled "claude fixes" the moment someone named one that; a run survives here
+ * only if EVERY word in it is on this list or is a flag, so an unknown word
+ * anywhere in the run redacts the whole run exactly as before. Adding a word
+ * is a deliberate act, and the cost of NOT adding one is a redaction, which is
+ * the safe direction to fail in.
+ */
+const OWN_WORDS: ReadonlySet<string> = new Set([
+  // The binaries vam spawns, and the ones it names in its own failure text.
+  'claude',
+  'tmux',
+  'gh',
+  'git',
+  'tailscale',
+  // The subcommands those failures actually print.
+  'attach',
+  'stop',
+  'resume',
+  'init',
+  'serve',
+  'funnel',
+  'has-session',
+  'new-session',
+  'send-keys',
+  'kill-session',
+  'list-sessions',
+  'display-message',
+  'set-option',
+  'capture-pane',
+  'rev-parse',
+]);
+/** A flag, which carries no name: `-p`, `--print`, `--dangerously-skip`. */
+const FLAG = /^--?[a-z][a-z0-9-]*$/;
+
+/**
+ * Is this quoted run vam's own vocabulary rather than a name off the machine?
+ *
+ * Bounded at four words because every real one is one or two ("tmux",
+ * "claude attach"), and a long run of allowlisted words is likelier to be
+ * something else that happens to be made of them.
+ */
+function ownVocabulary(inner: string): boolean {
+  const words = inner.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 4) return false;
+  return words.every((word) => OWN_WORDS.has(word) || FLAG.test(word));
+}
 
 /** Regex-escape, so a username with a `.` in it cannot become a wildcard. */
 function literal(text: string): string {
@@ -110,9 +187,18 @@ export function scrub(text: string, homeDir?: string): string {
     .replace(EMAIL, REDACTED)
     .replace(UUID, REDACTED)
     .replace(LONG_HEX, REDACTED)
-    .replace(DOUBLE_QUOTED, `"${REDACTED}"`)
-    .replace(SINGLE_QUOTED, `$1'${REDACTED}'`)
-    .replace(BACKTICKED, `\`${REDACTED}\``)
+    // Each quoting rule asks `ownVocabulary` about what it captured before
+    // replacing it -- see that function. A run that is not vam's own words is
+    // redacted exactly as it always was.
+    .replace(DOUBLE_QUOTED, (match, inner: string) =>
+      ownVocabulary(inner) ? match : `"${REDACTED}"`,
+    )
+    .replace(SINGLE_QUOTED, (match, lead: string, inner: string) =>
+      ownVocabulary(inner) ? match : `${lead}'${REDACTED}'`,
+    )
+    .replace(BACKTICKED, (match, inner: string) =>
+      ownVocabulary(inner) ? match : `\`${REDACTED}\``,
+    )
     .replace(HOME_PATH, (_match, _user, tail: string | undefined) =>
       tail === undefined || tail === '' ? '~' : `~/${REDACTED}`,
     )

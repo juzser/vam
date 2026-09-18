@@ -17,7 +17,15 @@ import {
   listLiveAgents,
   parseAgentRows,
 } from '../../src/main/sources/claude-code/agents.js';
+import {
+  clearPrRepoOverrides,
+  setPrRepoOverrides,
+} from '../../src/main/sources/claude-code/pr-repos.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
+import {
+  createProjectCommandLookup,
+  projectCommandsDir,
+} from '../../src/main/sources/claude-code/slash-commands.js';
 import {
   CLAUDE_CODE_SOURCE,
   loadClaudeCodeProjects,
@@ -79,15 +87,33 @@ describe('parseAgentRows', () => {
     ...over,
   });
 
-  it('maps an interactive session busy/idle onto running/waiting', () => {
-    const [busy, idle] = parseAgentRows(
+  it("keeps the CLI's three interactive words apart: busy is running, idle is idle, and only the CLI's own `waiting` is vam's waiting", () => {
+    const [busy, idle, waiting] = parseAgentRows(
       JSON.stringify([
         row({ status: 'busy', sessionId: 'a' }),
         row({ status: 'idle', sessionId: 'b' }),
+        row({ status: 'waiting', sessionId: 'c' }),
       ]),
     );
     expect(busy?.status).toBe('running');
-    expect(idle?.status).toBe('waiting');
+    // Measured against the real CLI: `idle` is the COMMONEST interactive
+    // value there is (3 of 5 rows on a working machine). Reading it as
+    // `waiting` put an amber "needs you" on every session the operator had
+    // simply finished with, which is the badge going off for nothing --
+    // and a signal that cries wolf is worse than no signal at all.
+    expect(idle?.status).toBe('idle');
+    expect(waiting?.status).toBe('waiting');
+  });
+
+  it('reads an interactive status this mapping was never taught as waiting -- something to go look at, never a quiet idle it cannot vouch for', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({ kind: 'interactive', status: 'some-future-word', sessionId: 'a' }),
+        row({ kind: 'interactive', status: undefined, sessionId: 'b' }),
+      ]),
+      NOW,
+    );
+    expect(rows.map((r) => r.status)).toEqual(['waiting', 'waiting']);
   });
 
   it('takes done and failed from a background session, which alone can express them', () => {
@@ -127,7 +153,7 @@ describe('parseAgentRows', () => {
     expect(rows[0]?.status).toBe('failed');
   });
 
-  it('still maps an interactive row through busy/idle, unaffected by the background fallback change', () => {
+  it('still maps an interactive row through its own `status` field, unaffected by the background fallback change', () => {
     const rows = parseAgentRows(
       JSON.stringify([
         row({ kind: 'interactive', status: 'busy' }),
@@ -135,7 +161,18 @@ describe('parseAgentRows', () => {
       ]),
       NOW,
     );
-    expect(rows.map((r) => r.status)).toEqual(['running', 'waiting']);
+    expect(rows.map((r) => r.status)).toEqual(['running', 'idle']);
+  });
+
+  it('never lets a background row reach the interactive branch: `state` decides it, and an absent `status` is not read as idle', () => {
+    const rows = parseAgentRows(
+      JSON.stringify([
+        row({ kind: 'background', state: 'stopped', status: undefined, sessionId: 'a' }),
+        row({ kind: 'background', state: 'failed', status: undefined, sessionId: 'b' }),
+      ]),
+      NOW,
+    );
+    expect(rows.map((r) => r.status)).toEqual(['done', 'failed']);
   });
 
   it('keeps two processes that resumed one session as two rows with distinct keys', () => {
@@ -526,6 +563,284 @@ describe('loadClaudeCodeProjects', () => {
     utimesSync(file, when, when);
     return file;
   };
+
+  /**
+   * WHEN THE OPERATOR IS TALKING TO A SUBAGENT AND THE SESSION FILE NEVER
+   * HEARS IT.
+   *
+   * Reported from use: a live session's row showed an IN from hours earlier.
+   * Measured on the real transcript -- the session's own file had gone quiet
+   * nine minutes before, and of the 43 text-bearing `user` lines in its last
+   * 4 MB, ZERO were operator prompts. The operator's four most recent messages
+   * were all in `<sessionId>/subagents/agent-<id>.jsonl`, which this source
+   * read for a COUNT and never for content.
+   *
+   * The row is still a session. What changed is where its newest turn may come
+   * from: the newest of the session transcript and its LIVE subagents, decided
+   * by when the operator spoke, never by which file was written last.
+   */
+  describe('an operator talking to a live subagent', () => {
+    const HANDOFF = 'The user sent a new message while you were working:';
+    const handoffLine = (words: string, at: string) => ({
+      type: 'user',
+      isMeta: true,
+      isSidechain: true,
+      timestamp: at,
+      message: { role: 'user', content: [{ type: 'text', text: `${HANDOFF}\n${words}` }] },
+    });
+    const agentSaid = (text: string, at: string) => ({
+      type: 'assistant',
+      isSidechain: true,
+      timestamp: at,
+      message: { role: 'assistant', content: [{ type: 'text', text }] },
+    });
+    const agentTool = (name: string, at: string) => ({
+      type: 'assistant',
+      isSidechain: true,
+      timestamp: at,
+      message: { role: 'assistant', content: [{ type: 'tool_use', name, input: {} }] },
+    });
+
+    /** The session's own transcript, carrying a dated prompt of its own. */
+    const sessionSaid = (text: string, at: string) =>
+      jsonl(
+        {
+          type: 'user',
+          promptSource: 'typed',
+          timestamp: at,
+          message: { role: 'user', content: [{ type: 'text', text }] },
+        },
+        userPrompt(text),
+        reply('the session answered that one'),
+      );
+
+    /** A subagent transcript beside a session, aged so the roster calls it running. */
+    const writeAgent = (sessionId: string, id: string, body: string, ageMs = 10_000) => {
+      const dir = join(root, 'proj', `${sessionId}`, 'subagents');
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, `${id}.jsonl`);
+      writeFileSync(file, body);
+      const when = (NOW - ageMs) / 1000;
+      utimesSync(file, when, when);
+    };
+
+    const loaded = async () => {
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      return project?.sessions[0];
+    };
+
+    it('shows what the operator said to the agent, not the stale session prompt', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(
+          { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a brief' }] } },
+          handoffLine('start with the second one instead', '2026-09-03T09:00:00.000Z'),
+          agentTool('Bash', '2026-09-03T09:01:00.000Z'),
+          agentSaid('on it now', '2026-09-03T09:02:00.000Z'),
+        ),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('start with the second one instead');
+    });
+
+    /**
+     * ONE STORY PER ROW. The answer and the activity come from wherever the
+     * prompt came from -- a row showing one file's question over another
+     * file's working would be the defect this repo keeps finding.
+     */
+    it('takes the answer and the activity from the same place as the question', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(
+          handoffLine('and the rest of it', '2026-09-03T09:00:00.000Z'),
+          agentTool('Grep', '2026-09-03T09:01:00.000Z'),
+          agentSaid('halfway through', '2026-09-03T09:02:00.000Z'),
+        ),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.output).toBe('halfway through');
+      expect(session?.activity).toBe('Grep');
+    });
+
+    /**
+     * AND IT NEVER COSTS THE SESSION ITS OWN PROMPT. The rule is "the newest
+     * thing the operator said", so a session prompt that came AFTER the
+     * handoff keeps the row.
+     */
+    it('leaves the row alone when the session itself heard something newer', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('just now', '2026-09-03T09:04:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('said before that', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('just now');
+    });
+
+    /**
+     * THE REPORTED SHAPE, WHICH IS THE ONE WITHOUT A CLOCK ON IT.
+     *
+     * A long transcript's newest turn is opened by `last-prompt` alone -- the
+     * operator's own `user` line is above the top of the 128 KiB window -- and
+     * that marker carries no timestamp at all. Measured on this machine: 29 of
+     * the 69 sessions whose tail holds a turn are in exactly this state, and
+     * the one session with a live agent at the moment of measuring was one of
+     * them. A rule that refused to compare here would be a fix that does
+     * nothing for the case that reported it.
+     */
+    it('shows the agent turn for a session whose own prompt carries no clock', async () => {
+      writeTranscript(
+        'proj',
+        'sess-1',
+        jsonl(userPrompt('the stale one'), {
+          type: 'assistant',
+          timestamp: '2026-09-03T08:00:00.000Z',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'answered then' }] },
+        }),
+      );
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('what they actually just asked', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('what they actually just asked');
+    });
+
+    /**
+     * AND THE FALLBACK LEANS THE SAFE WAY. Standing in for the question, the
+     * turn's newest step is an UPPER bound on when it was asked -- so a
+     * session still writing keeps its row, and the only turns the bound costs
+     * are ones where the session is demonstrably still working.
+     */
+    it('keeps the row when an undated session turn is still doing things', async () => {
+      writeTranscript(
+        'proj',
+        'sess-1',
+        jsonl(userPrompt('the stale one'), {
+          type: 'assistant',
+          timestamp: '2026-09-03T09:03:00.000Z',
+          message: { role: 'assistant', content: [{ type: 'text', text: 'still going' }] },
+        }),
+      );
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('said before that step landed', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the stale one');
+    });
+
+    /**
+     * A SESSION WITH NO LIVE SUBAGENT IS UNTOUCHED -- the same bytes read and
+     * the same row drawn as before any of this existed.
+     */
+    it('changes nothing for a session that has no subagents at all', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('the only prompt', '2026-09-03T08:00:00.000Z'));
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the only prompt');
+      expect(session?.decisions).toHaveLength(1);
+    });
+
+    it('changes nothing for a live agent the operator never spoke to', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('the only prompt', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(
+          { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a brief' }] } },
+          agentSaid('working away', '2026-09-03T09:02:00.000Z'),
+        ),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the only prompt');
+    });
+
+    /**
+     * AN AGENT THAT HAS STOPPED WRITING IS NOT A CONVERSATION. The roster
+     * already calls an agent running only if its transcript was touched in the
+     * last five minutes, and that is the same set the `●N` badge counts -- so
+     * the row and the tab never disagree about which agents are live.
+     */
+    it('ignores an agent that stopped writing long ago', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('the only prompt', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('said to a finished agent', '2026-09-03T09:00:00.000Z')),
+        60 * 60_000,
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.input).toBe('the only prompt');
+    });
+
+    /**
+     * ABSENT, NOT ZERO. `model.ts` reserves absence for "this source cannot
+     * report it" and zero for a reading, and vam does not count an agent
+     * window's tool failures or collect its calls. Saying zero would be a
+     * claim it never checked.
+     */
+    it('reports no failure count and no working for a turn it read from an agent', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.errorCount).toBeUndefined();
+      expect(session?.decisions[0]?.steps).toBeUndefined();
+    });
+
+    /**
+     * THE SESSION'S OWN TURNS ARE STILL THERE, BENEATH IT. The agent turn is
+     * the newest thing the operator said, not a replacement for the history
+     * under it -- scrolling the pane must still reach what the session did
+     * before they walked over to the agent.
+     */
+    it('keeps the session own turns under the one it read from the agent', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions.map((d) => d.input)).toEqual(['the newest ask', 'an hour ago']);
+    });
+
+    /** The row is still captioned like the session's own turns -- see the pane. */
+    it('labels it the way the session labels its own turns', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      expect(session?.decisions[0]?.label).toBe(session?.decisions[1]?.label);
+    });
+
+    /** Ids have to be unique across the two files, or the pane keys two turns alike. */
+    it('gives it an id no turn of the session transcript can mint', async () => {
+      writeTranscript('proj', 'sess-1', sessionSaid('an hour ago', '2026-09-03T08:00:00.000Z'));
+      writeAgent(
+        'sess-1',
+        'agent-aaa',
+        jsonl(handoffLine('the newest ask', '2026-09-03T09:00:00.000Z')),
+      );
+      const session = await loaded();
+      const ids = session?.decisions.map((d) => d.id) ?? [];
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids[0]).toContain('agent-aaa');
+    });
+  });
 
   /**
    * WHAT THE SESSION SAYS IT IS BLOCKED ON. A tool-approval prompt leaves no
@@ -985,7 +1300,7 @@ describe('loadClaudeCodeProjects', () => {
    */
   describe('pull requests on the session branch', () => {
     it("asks about each session branch, in that session's own directory", async () => {
-      const asked: { cwd: string; branch: string | null }[] = [];
+      const asked: { cwd: string; branch: string | null; overridden?: boolean }[] = [];
       await loadClaudeCodeProjects(
         root,
         [agent({ key: 'a#1', sessionId: 'a', cwd: '/w/atlas' })],
@@ -997,7 +1312,62 @@ describe('loadClaudeCodeProjects', () => {
           return { kind: 'ok', prs: [] };
         },
       );
-      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework' }]);
+      // `overridden: false` travels with every read now, so a FAILURE can say
+      // which directory it happened in -- see `pull-requests.ts`. False here
+      // is the claim: nothing was overridden, so the session's own directory
+      // is what was asked, which is what this test has always been about.
+      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework', overridden: false }]);
+    });
+
+    it('asks in the directory the operator pointed the PROJECT at', async () => {
+      // THE WHOLE FEATURE, at the one place it changes behaviour. A session
+      // started from an orchestrator runs in the orchestrator's directory, so
+      // asking there reports the orchestrator's pull requests while the work
+      // is in another repository. The override moves where vam STANDS -- `gh`
+      // still resolves the remote from there, so no `--repo` is ever passed
+      // and the pane still describes the repository vam is actually in.
+      const asked: { cwd: string; branch: string | null; overridden?: boolean }[] = [];
+      setPrRepoOverrides({ 'claude-code': { [projectIdOf('/w/factory')]: '/w/atlas' } });
+      try {
+        await loadClaudeCodeProjects(
+          root,
+          [agent({ key: 'a#1', sessionId: 'a', cwd: '/w/factory' })],
+          NOW,
+          async () => 'topic/rework',
+          sessionsRoot,
+          async (input) => {
+            asked.push(input);
+            return { kind: 'ok', prs: [] };
+          },
+        );
+      } finally {
+        clearPrRepoOverrides();
+      }
+      expect(asked).toEqual([{ cwd: '/w/atlas', branch: 'topic/rework', overridden: true }]);
+    });
+
+    it('asks in the session’s own directory for a project nobody pointed', async () => {
+      // The other project is overridden; this one is not, and must be
+      // untouched. An override keyed by project that leaked to its neighbours
+      // would be worse than none.
+      const asked: { cwd: string; overridden?: boolean }[] = [];
+      setPrRepoOverrides({ 'claude-code': { [projectIdOf('/w/factory')]: '/w/atlas' } });
+      try {
+        await loadClaudeCodeProjects(
+          root,
+          [agent({ key: 'b#1', sessionId: 'b', cwd: '/w/other' })],
+          NOW,
+          async () => 'topic/rework',
+          sessionsRoot,
+          async (input) => {
+            asked.push({ cwd: input.cwd, overridden: input.overridden });
+            return { kind: 'ok', prs: [] };
+          },
+        );
+      } finally {
+        clearPrRepoOverrides();
+      }
+      expect(asked).toEqual([{ cwd: '/w/other', overridden: false }]);
     });
 
     it('carries the answer onto the session, empty list and all', async () => {
@@ -1036,6 +1406,97 @@ describe('loadClaudeCodeProjects', () => {
 
     it('claims the capability it now really has', () => {
       expect(CLAUDE_CODE_SOURCE.descriptor.capabilities.pullRequests).toBe(true);
+    });
+  });
+
+  /**
+   * THE `/` LIST'S THREE TIERS, as one list per session.
+   *
+   * Built-ins are not files and have to be asked for (`builtin-commands.ts`);
+   * the user tier is one directory read per `load()`; the project tier is one
+   * read per PROJECT, which is the thing the old header said could not be
+   * done at all.
+   */
+  describe('slash commands', () => {
+    const cmd = (id: string, name: string, description: string | null = null) => ({
+      id,
+      name,
+      description,
+    });
+
+    it('merges built-ins, the user’s files and the project’s files into one list', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [cmd('user:notify', 'notify', 'the operator’s own')],
+        async () => [cmd('project:ship', 'ship', 'the project’s own')],
+        { kind: 'ok', commands: [cmd('builtin:compact', 'compact', 'the CLI’s own')] },
+      );
+      expect(project?.sessions[0]?.slashCommands?.map((c) => c.name)).toEqual([
+        'compact',
+        'notify',
+        'ship',
+      ]);
+      expect(project?.sessions[0]?.slashCommandGap).toBeUndefined();
+    });
+
+    it('asks the project tier once per DIRECTORY, not once per session', async () => {
+      // The cost contract, at the level that spends it. Two rows, one cwd.
+      const asked: string[] = [];
+      const lookup = createProjectCommandLookup(async (dir) => {
+        asked.push(dir);
+        return [];
+      });
+      await loadClaudeCodeProjects(
+        root,
+        [agent(), agent({ key: 'sess-2#101', sessionId: 'sess-2' })],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        lookup,
+        null,
+      );
+      expect(asked).toEqual([projectCommandsDir('/w/alpha')]);
+    });
+
+    /**
+     * "NO COMMANDS" AND "VAM COULD NOT ASK" ARE DIFFERENT STATES, and this is
+     * where they part company (`pull-requests.ts` states the rule). A CLI that
+     * could not be asked must not shrink the list in silence.
+     */
+    it('carries the reason when the built-ins could not be read', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [cmd('user:notify', 'notify')],
+        async () => [],
+        { kind: 'unavailable', code: 'cli-missing', message: 'no claude on PATH' },
+      );
+      expect(project?.sessions[0]?.slashCommands?.map((c) => c.name)).toEqual(['notify']);
+      expect(project?.sessions[0]?.slashCommandGap).toEqual({
+        code: 'cli-missing',
+        message: 'no claude on PATH',
+      });
+    });
+
+    it('says nothing about a gap when nobody asked for built-ins at all', async () => {
+      // NULL IS NOT A FAILURE. A caller that did not ask has not been refused,
+      // and a note saying otherwise would be vam inventing a problem.
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      expect('slashCommandGap' in (project?.sessions[0] ?? {})).toBe(false);
     });
   });
 });

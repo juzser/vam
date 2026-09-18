@@ -118,7 +118,18 @@ describe('o, on the Claude Code source', () => {
 
     expect(failure).toBeNull();
     expect(run.calls).toEqual([
-      ['new-session', '-d', '-s', 'vam-new-work-a1b2c3', '-c', '/w/demo', 'claude'],
+      [
+        'new-session',
+        '-d',
+        '-P',
+        '-F',
+        '#{pane_pid}',
+        '-s',
+        'vam-new-work-a1b2c3',
+        '-c',
+        '/w/demo',
+        'claude',
+      ],
       // The id the Terminal tab will ask by -- the SAME id `createSession` was
       // called with, not a slug re-derived from the title. The title reaches
       // the name and stops there.
@@ -170,7 +181,18 @@ describe('a new session in a chosen directory', () => {
 
     expect(failure).toBeNull();
     expect(run.calls).toEqual([
-      ['new-session', '-d', '-s', 'vam-orchard-a1b2c3', '-c', orchard, 'claude'],
+      [
+        'new-session',
+        '-d',
+        '-P',
+        '-F',
+        '#{pane_pid}',
+        '-s',
+        'vam-orchard-a1b2c3',
+        '-c',
+        orchard,
+        'claude',
+      ],
       // The SAME digest every other project id comes from. Anything else and
       // the Terminal tab would find nothing for a session vam itself started.
       ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf(orchard)],
@@ -233,6 +255,9 @@ describe('the provider the session is started with', () => {
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-orchard-a1b2c3',
       '-c',
@@ -259,6 +284,9 @@ describe('the provider the session is started with', () => {
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-new-work-a1b2c3',
       '-c',

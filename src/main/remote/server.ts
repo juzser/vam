@@ -37,7 +37,15 @@ import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
-import { authenticateDevice, type DeviceDirectory, type Identity } from './auth.js';
+import {
+  authenticateDevice,
+  authenticateStream,
+  bearerFrom,
+  type DeviceDirectory,
+  type Identity,
+  streamCookie,
+} from './auth.js';
+import type { PairedDevice } from './devices.js';
 import type { PairOutcome } from './pairing.js';
 
 /** The one address this server may ever bind. */
@@ -64,6 +72,20 @@ export type RemoteServerOptions = {
   readonly pairing?: PairPort;
   /** Where live SSE connections are held, so a revoked device can be dropped. */
   readonly streams?: StreamRegistry;
+  /**
+   * The paired devices, for `/api/devices`.
+   *
+   * A READER, NOT THE REGISTRY. What this route needs is a list; handing the
+   * whole `DeviceRegistry` over would put `grant`, `remove` and `removeAll` on
+   * an object the request path holds, and the one thing that must stay true of
+   * this route is that there is nothing on the other end of it that can change
+   * anything.
+   *
+   * Absent means the route is NOT REGISTERED -- the table has no entry and the
+   * process answers 404, the same shape read-only mode already uses for the
+   * write routes. See `routesFor`.
+   */
+  readonly pairedDevices?: () => readonly PairedDevice[];
   readonly allowWrites: boolean;
   readonly source: MainSource;
   readonly subscribe: (onChange: () => void) => () => void;
@@ -273,13 +295,35 @@ function write(
  * Capabilities whose renderer member reaches for a route this server does not
  * carry -- with the server's own words for why, because a decline is written
  * by whoever lacks the thing.
+ *
+ * `'files'` IS NOT A KEY OF `SourceCapabilities`, and that is deliberate
+ * rather than a gap this map papers over: the file-editor tab's read, write
+ * and LIST channels (`src/main/files/ipc.ts`, `./files/list-ipc.ts`) are a
+ * bridge beside the source, exactly as `dialog` and `terminal`'s own IPC are
+ * -- never a member of
+ * `MainSource#descriptor`, so there is no capability flag for `servedDescriptor`
+ * below to turn off. The entry exists anyway, in the SAME map `terminal` and
+ * `governance` are named in, because the reason this server carries no
+ * `/api/files-*` route deserves the same ledger every other declined
+ * capability gets: arbitrary file read and write over a network is AT LEAST
+ * as serious as typing into a running agent, which is `terminal`'s own
+ * standing here. `off()` below is a harmless no-op for this key --
+ * `capabilities.files` is never `true` because it never exists -- so the
+ * entry's only job is documentation, and `files-unserved.test.ts` holds two
+ * things instead: this entry is present and non-empty, and `routesFor` never
+ * registers a path answering to it, in EITHER write mode.
  */
-const UNSERVED: Partial<Record<keyof SourceCapabilities, string>> = {
+export const UNSERVED: Partial<Record<keyof SourceCapabilities | 'files', string>> = {
   renameSession: 'the remote endpoint carries no rename route',
   governance: 'the remote endpoint carries no waiver or lesson routes',
   terminal:
     'the remote endpoint does not expose the terminal surface: read, send, answer ' +
     'and resize type into a running agent and need their own rate limit and decision',
+  files:
+    'the remote endpoint carries no file-read, file-write, file-listing or ' +
+    'reference-resolving route: arbitrary file access over a network is at least ' +
+    'as serious as typing into a running agent, and it gets no route, no grant ' +
+    'and no follow-up',
 };
 
 /** The capabilities that live behind the write routes, registered or not. */
@@ -328,6 +372,41 @@ export function servedDescriptor(
   };
 }
 
+/**
+ * THE APP SHELL, AS A SHAPE.
+ *
+ * Exactly the page and the build's own asset files: `/`, `/index.html`, and
+ * ONE segment under `/assets/`. Deliberately not "paths that look static" and
+ * not a prefix -- a prefix is how a route added next year falls under an
+ * exemption nobody re-read, and a list is how the exemption drifts from what
+ * the build actually emits.
+ *
+ * WHAT IT REFUSES ON PURPOSE. `/favicon.png` is real build output and is not a
+ * secret, and it still stays behind the token: it is not in the shape, and
+ * widening the shape to admit it would mean admitting every top-level file by
+ * extension -- the "looks static" rule this shape exists to avoid. The cost is
+ * a missing tab icon before pairing.
+ *
+ * The first character must be alphanumeric, so `/assets/..` and `/assets/.env`
+ * cannot match, and there is no second slash, so nothing nests. `serveAsset`
+ * refuses to leave the root independently of this: two guards, neither relying
+ * on the other.
+ */
+const APP_SHELL_ASSET = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isAppShellPath(path: string): boolean {
+  return path === '/' || path === '/index.html' || APP_SHELL_ASSET.test(path);
+}
+
+/**
+ * Every path the route table registers, for the guard that holds each of them
+ * to the token. Exported so that sweep DERIVES its corpus rather than
+ * repeating a list which goes stale the next time a route is added.
+ */
+export function registeredRoutePaths(options: RemoteServerOptions): readonly string[] {
+  return [...routesFor(options).keys()];
+}
+
 function routesFor(options: RemoteServerOptions): Map<string, { method: string; route: Route }> {
   const table = new Map<string, { method: string; route: Route }>();
   const read = (path: string, produce: () => Promise<unknown>): void => {
@@ -343,6 +422,135 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     servedDescriptor(options.source.descriptor, options.allowWrites),
   );
   read('/api/load', async () => await options.source.load());
+
+  /**
+   * THE PAIRED DEVICES, FOR A PHONE THAT HAS NO BRIDGE TO ASK.
+   *
+   * Operator instruction: on mobile, Remote only needs to show the paired
+   * devices. The desktop reads them over IPC from the registry itself; the
+   * browser build has no `window.api` at all, so without this route the one
+   * control left on a phone opens onto an apology.
+   *
+   * A READ, registered here beside `describe` and `load` -- above the
+   * `allowWrites` return -- so a server started read-only still carries it.
+   * Nothing on the other end of it can change anything: `pairedDevices` is a
+   * reader, and there is deliberately no route that removes a device.
+   * Revocation from a device that can itself be revoked is a fight the
+   * operator cannot referee from either end, and the desktop holds the file.
+   *
+   * The caller's own id travels with the list so the phone can mark "this
+   * device" rather than making the operator match a name they typed weeks ago.
+   * It is not new information: the caller authenticated as it.
+   *
+   * NO CREDENTIAL CAN BE IN THE ANSWER: `PairedDevice` has no token field
+   * (`devices.ts` -- "it is returned once and never again"), so this is a
+   * property of the type rather than a stripping step someone can forget.
+   */
+  if (options.pairedDevices !== undefined) {
+    const pairedDevices = options.pairedDevices;
+    table.set('/api/devices', {
+      method: 'GET',
+      route: async (_request, response, { identity }) => {
+        send(
+          response,
+          200,
+          await envelope(async () => ({ you: identity.deviceId, devices: pairedDevices() })),
+        );
+      },
+    });
+  }
+
+  /**
+   * SCROLLING BACK, and it is registered as a READ -- before the `allowWrites`
+   * return below, so a server started read-only still carries it.
+   *
+   * POST only because it takes a body, not because it changes anything: it
+   * opens one transcript file and reads a window of it. This is the surface
+   * vam's phone access exists for (`tailscale serve` in front of this server),
+   * so leaving it out would have made the feature desktop-only in practice
+   * while looking wired.
+   *
+   * The answer is the page type itself, `unavailable` arm included -- the
+   * source already turned "could not read" into words, and this route forwards
+   * them whole rather than flattening them into a status code.
+   */
+  table.set('/api/history', {
+    method: 'POST',
+    route: async (_request, response, { body }) => {
+      if (!isText(body.sessionId) || !(body.cursor === null || isOptionalText(body.cursor))) {
+        send(response, 400, {
+          ok: false,
+          error: { kind: 'refused', code: 'invalid-payload', message: 'history: wrong shape' },
+        });
+        return;
+      }
+      const read = options.source.readHistory;
+      if (read === undefined) {
+        send(response, 200, {
+          ok: true,
+          value: {
+            kind: 'unavailable',
+            error: {
+              kind: 'refused',
+              code: 'unsupported:history',
+              message: 'this source cannot read earlier parts of a session',
+            },
+          },
+        });
+        return;
+      }
+      send(
+        response,
+        200,
+        await envelope(
+          async () => await read(body.sessionId as string, (body.cursor ?? null) as string | null),
+        ),
+      );
+    },
+  });
+
+  /**
+   * ONE AGENT'S WORK, beside `/api/history` and a READ like it -- available
+   * even to a server started read-only, because looking at what a subagent is
+   * doing changes nothing.
+   *
+   * It is here rather than left to the desktop for the reason `/api/history`
+   * is: the phone is what this module serves, and an Agents tab that worked
+   * only when the operator was at the machine would be an Agents tab the
+   * operator mostly cannot use.
+   */
+  table.set('/api/agent-work', {
+    method: 'POST',
+    route: async (_request, response, { body }) => {
+      if (!isText(body.sessionId) || !isText(body.agentId)) {
+        send(response, 400, {
+          ok: false,
+          error: { kind: 'refused', code: 'invalid-payload', message: 'agent-work: wrong shape' },
+        });
+        return;
+      }
+      const read = options.source.readAgentWork;
+      if (read === undefined) {
+        send(response, 200, {
+          ok: true,
+          value: {
+            kind: 'unavailable',
+            error: {
+              kind: 'refused',
+              code: 'unsupported:agent-work',
+              message: 'this source cannot report what a session’s agents are doing',
+            },
+          },
+        });
+        return;
+      }
+      send(
+        response,
+        200,
+        await envelope(async () => await read(body.sessionId as string, body.agentId as string)),
+      );
+    },
+  });
 
   table.set('/api/stream', { method: 'GET', route: stream(options) });
 
@@ -458,6 +666,12 @@ async function handlePair(
     send(response, 401, UNAUTHENTICATED);
     return;
   }
+  // SET HERE SO THE FIRST STREAM ALREADY WORKS. The phone keeps the token from
+  // the body for the header every other route needs; this is the same value,
+  // carried the one way `EventSource` can carry it (`auth.ts`). Nothing is set
+  // on a refusal above -- a caller that did not pair gets no credential, and
+  // the 401 stays byte-for-byte the one every other refusal sends.
+  response.setHeader('set-cookie', streamCookie(outcome.token));
   send(response, 200, {
     ok: true,
     value: {
@@ -534,12 +748,85 @@ export async function startRemoteServer(options: RemoteServerOptions): Promise<S
         await handlePair(options.pairing, request, response);
         return;
       }
-      const outcome = authenticateDevice(request.headers.authorization, devices);
+      // THE APP SHELL, BEFORE THE TOKEN -- the second door an unpaired caller
+      // may use, and the reason the first one is reachable at all.
+      //
+      // `/api/pair` above is a POST, and a phone that has just scanned the QR
+      // code is a browser doing a GET. With the page itself behind the token,
+      // the only way to obtain a token was a request that only the page could
+      // make: the operator scanned the code and got this file's own 401 read
+      // back at them, verbatim, including the sentence telling them to check a
+      // screen they were already looking at. Serving the shell is what turns
+      // that dead end into a form.
+      //
+      // WHAT WIDENED: an unpaired device already on the tailnet can fetch the
+      // browser bundle, where before it could fetch nothing. WHAT DID NOT: no
+      // data, no writes, no session access -- every `/api/*` path below still
+      // answers 401 without a token, which `phone-shell.test.ts` holds to by
+      // sweeping `registeredRoutePaths` rather than a list. The listener is
+      // still loopback-only behind tailnet-only Serve, with `funnel` refused
+      // by name.
+      //
+      // THE ARGUMENT RESTS ON A CLAIM ABOUT A DIRECTORY: that the served root
+      // holds build output and never user data. That claim is CHECKED -- see
+      // "the served root" in `phone-shell.test.ts` -- because a claim nothing
+      // checks is the kind that gets quietly falsified by a later change. Read
+      // that condition before widening this shape.
+      //
+      // NEVER FALLS THROUGH. A shell path that resolves to no file ends here
+      // as a 404; letting it continue would hand an unauthenticated request to
+      // the authenticated table below.
+      if (webRoot !== null && request.method === 'GET' && isAppShellPath(path)) {
+        if (await serveAsset(webRoot, path, response)) {
+          return;
+        }
+        send(response, 404, {
+          ok: false,
+          error: { kind: 'unreachable', code: 'no-such-route', message: path },
+        });
+        return;
+      }
+      /**
+       * THE STREAM IS THE ONE ROUTE A COOKIE MAY ANSWER FOR, and it is named
+       * here rather than consulted as a flag: `EventSource` takes a URL and
+       * nothing else, so `/api/stream` is the one path a header cannot reach.
+       * Every other path goes through `authenticateDevice`, which never looks
+       * at a cookie -- so a caller holding only the cookie gets the same 401
+       * everywhere else, and the sweep in `stream-cookie.test.ts` holds that
+       * over the whole route table rather than over a list.
+       *
+       * The cookie carries the SAME token, resolved by the SAME `find`, so
+       * revocation reaches it without a second path to keep in step. See
+       * `auth.ts`.
+       */
+      const outcome =
+        path === '/api/stream'
+          ? authenticateStream(request.headers.authorization, request.headers.cookie, devices)
+          : authenticateDevice(request.headers.authorization, devices);
       if (!outcome.ok) {
         // The reason is deliberately dropped rather than reported: see
         // `UNAUTHENTICATED`. It exists for this process's own tests and logs.
         send(response, 401, UNAUTHENTICATED);
         return;
+      }
+      /**
+       * RE-ISSUED TO WHOEVER JUST PROVED THEMSELVES WITH THE HEADER, and only
+       * to them.
+       *
+       * The cookie's expiry would otherwise be a cliff: a phone in daily use
+       * would lose live updates one day for no reason it could see, while its
+       * stored token went on working for every other route. Refreshing it from
+       * the header path means the cookie's life tracks the token's USE, and it
+       * cannot outlive a credential it is a copy of -- the token is read from
+       * the header that was just verified, never from the cookie, so a cookie
+       * can never renew itself.
+       *
+       * Set BEFORE the route runs, because SSE writes its own head: node
+       * merges `setHeader` values into `writeHead`'s, so this survives both.
+       */
+      const presented = bearerFrom(request.headers.authorization);
+      if (presented !== null) {
+        response.setHeader('set-cookie', streamCookie(presented));
       }
       const entry = table.get(path);
       if (entry === undefined) {

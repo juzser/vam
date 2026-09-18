@@ -14,6 +14,7 @@
  * matters here is that the command arrives split.
  */
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   capturePaneArgv,
@@ -21,22 +22,32 @@ import {
   killSessionArgv,
   listSessionsArgv,
   newSessionArgv,
+  promptKeystrokes,
   sendBackspaceArgv,
   sendBackTabArgv,
   sendEnterArgv,
   sendEscapeArgv,
   sendTextArgv,
+  tagPidArgv,
   tagSessionArgv,
+  VAM_PID_OPTION,
   VAM_PROJECT_OPTION,
   VAM_SESSION_PREFIX,
   vamSessionName,
 } from '../../src/main/sources/tmux/argv.js';
 
 describe('tmux argv', () => {
-  it('creates a detached, named session in a cwd running a command', () => {
+  it('creates a detached, named session in a cwd running a command, printing the pane’s pid', () => {
+    // `-P -F '#{pane_pid}'` costs no second round trip: tmux already knows the
+    // pid of the child it just forked before that child has done anything at
+    // all, so the SAME call that starts the session also answers the question
+    // `createVamSession` needs for `VAM_PID_OPTION` (`spawn.ts`).
     expect(newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w/demo', command: ['claude'] })).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-a1b2c3',
       '-c',
@@ -54,6 +65,9 @@ describe('tmux argv', () => {
     expect(argv).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-a1b2c3',
       '-c',
@@ -107,7 +121,18 @@ describe('tmux argv', () => {
     // the fix: tmux would then resolve the name by prefix and then by fnmatch,
     // and `send-keys` reaching a session other than the one vam meant is the
     // thing the exactness is there to prevent.
+    // The read is TWO commands in one invocation now (the cursor query and
+    // the capture), and the target-pane rule applies to both of them: a
+    // `display-message` with no `-t` answers about whatever pane tmux calls
+    // current, which is somebody else's session as easily as this one.
     expect(capturePaneArgv('vam-a1b2c3')).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-a1b2c3:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      ';',
       'capture-pane',
       '-p',
       '-e',
@@ -163,14 +188,49 @@ describe('tmux argv', () => {
     ]);
   });
 
-  it('asks the listing for the recorded project id beside each name', () => {
-    // Without the option in the format there is nothing to pair on, and the
-    // matcher is back to guessing from a truncated slug.
+  it('asks the listing for the recorded project id and pid beside each name', () => {
+    // Without the options in the format there is nothing to pair on, and the
+    // matcher is back to guessing from a truncated slug (project) or counting
+    // live rows (pid).
     expect(listSessionsArgv()).toEqual([
       'list-sessions',
       '-F',
-      `#{${VAM_PROJECT_OPTION}}\t#{session_name}`,
+      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`,
     ]);
+  });
+
+  /**
+   * THE FAMILY, COUNTED. Measured on tmux 3.7b: a client whose LC_CTYPE is not
+   * UTF-8 -- a GUI launch has none -- prints every control character of a
+   * `-F` expansion as `_`. The listing's tabs were the one member that was
+   * hit, and it cost every session vam started (`listVamSessions`). This pins
+   * the count at one: a new `-F` format that leans on a tab or a newline must
+   * either join the list here, with its parser refusing a rewritten line the
+   * way the listing's does, or use a printable separator.
+   */
+  it('puts a control character in exactly one -F format, and that one is the listing', () => {
+    const formats = new Map<string, string>();
+    for (const [name, argv] of [
+      ['newSessionArgv', newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w', command: ['claude'] })],
+      ['capturePaneArgv', capturePaneArgv('vam-a1b2c3')],
+      ['listSessionsArgv', listSessionsArgv()],
+    ] as const) {
+      const at = argv.indexOf('-F');
+      expect(at, `${name} carries a -F`).toBeGreaterThan(-1);
+      formats.set(name, argv[at + 1] ?? '');
+    }
+    const isControl = (code: number): boolean => code < 0x20 || code === 0x7f;
+    const controlled = [...formats].filter(([, format]) =>
+      [...format].some((char) => isControl(char.charCodeAt(0))),
+    );
+    expect(controlled.map(([name]) => name)).toEqual(['listSessionsArgv']);
+    // And the corpus is the whole of argv.ts: a fourth `-F` written there
+    // without joining the list above fails here, rather than going unchecked.
+    const source = readFileSync(
+      new URL('../../src/main/sources/tmux/argv.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source.match(/'-F'/g)?.length).toBe(formats.size);
   });
 
   it('records the project on the session with a BARE target, not an =target', () => {
@@ -184,6 +244,20 @@ describe('tmux argv', () => {
       'vam-a1b2c3',
       '@vam-project',
       'claude-code:demo-11111111',
+    ]);
+  });
+
+  it('records the pid on the session the same bare way, right beside the project', () => {
+    // Same target shape as `tagSessionArgv`, and the same reason: this call
+    // only ever follows immediately after the session vam just created it, so
+    // there is nothing else for a bare `-t` to resolve onto by prefix or
+    // fnmatch.
+    expect(tagPidArgv('vam-a1b2c3', '14709')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-pid',
+      '14709',
     ]);
   });
 
@@ -245,5 +319,147 @@ describe('the @vam-project boundary', () => {
       '@vam-project',
       'claude-code:demo-11111111',
     ]);
+  });
+});
+
+/**
+ * THE SECOND BOUNDARY, frozen the same way and for the same reason: this is a
+ * contract with sessions running right now, not an internal name free to be
+ * tidied. `paneForRow` (`reply.ts`) compares a row's OWN pid against exactly
+ * this option, read back from `list-sessions -F`; renaming or repointing it
+ * silently un-answers every row it used to resolve, the same way repointing
+ * `@vam-project` would.
+ */
+describe('the @vam-pid boundary', () => {
+  it('is the literal `@vam-pid`', () => {
+    expect(VAM_PID_OPTION).toBe('@vam-pid');
+  });
+
+  it('tags a session with exactly that option and nothing else', () => {
+    expect(tagPidArgv('vam-a1b2c3', '14709')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-pid',
+      '14709',
+    ]);
+  });
+});
+
+/**
+ * Typing a WHOLE prompt into a pane, newlines and all.
+ *
+ * These are PROPERTY assertions, not a copy of the array the function returns:
+ * an argv test that asserts equality with the builder's own output cannot
+ * fail for a real reason. What is pinned instead is behaviour a wrong edit
+ * would break -- that a newline inside the prompt does NOT reach the pane as a
+ * bare submit, that the operator's text is always ONE argv element, that `-l`
+ * and `--` guard every literal chunk -- plus a round-trip that reconstructs
+ * the exact prompt from the keystrokes, which is what proves nothing was lost
+ * or interpreted.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket into a pty in RAW MODE
+ * (the mode Claude Code's input runs in, unlike a cooked-mode shell):
+ *   `send-keys Enter`          delivered 0x0d (CR)   -- the REPL reads submit
+ *   `send-keys -l -- $'a<LF>b'` delivered 0x61 0x0a 0x62 -- a raw newline is 0x0a
+ *   a literal backslash        delivered 0x5c        -- a plain byte under `-l --`
+ * and the CLI's own footer (version 2.1.274) advertises `\` + Return as the
+ * interactive prompt's universal newline (the one needing no `/terminal-setup`).
+ * So an internal line break is a literal backslash then an interpreted Enter:
+ * the REPL turns a trailing `\` + submit into an inserted newline, and the bare
+ * newline a single `send-keys -l` of the whole prompt would deliver would
+ * submit the first line and drop the rest.
+ */
+const PANE = '=vam-a1b2c3:';
+
+/** Replay the keystrokes the way the REPL would, to recover the typed buffer. */
+function reconstruct(steps: readonly (readonly string[])[]): string {
+  let buffer = '';
+  for (const step of steps) {
+    if (step.includes('-l')) {
+      // A literal chunk: the operator's text is the LAST element, whole.
+      buffer += step[step.length - 1] ?? '';
+    } else {
+      // An interpreted Enter. It is a NEWLINE only because the buffer ends in
+      // the escape backslash; the REPL consumes that `\` and inserts `\n`.
+      if (!buffer.endsWith('\\')) {
+        throw new Error('an Enter inside the prompt was not preceded by the newline escape');
+      }
+      buffer = `${buffer.slice(0, -1)}\n`;
+    }
+  }
+  return buffer;
+}
+
+const isLiteral = (step: readonly string[]): boolean => step.includes('-l');
+const isEnter = (step: readonly string[]): boolean =>
+  !step.includes('-l') && step[step.length - 1] === 'Enter';
+
+describe('promptKeystrokes', () => {
+  it('types a single-line prompt as one literal chunk and adds no submit of its own', () => {
+    const steps = promptKeystrokes('vam-a1b2c3', 'ship it');
+    expect(steps).toHaveLength(1);
+    const [only] = steps;
+    // The whole prompt is ONE element, guarded by `-l --`, exactly as
+    // `sendTextArgv` builds it.
+    expect(only).toEqual(['send-keys', '-t', PANE, '-l', '--', 'ship it']);
+    // The submit is the caller's to add, never buried in here: nothing that
+    // reaches the pane from this function may press Return.
+    expect(steps.some(isEnter)).toBe(false);
+  });
+
+  it('breaks each internal newline with a backslash escape, never a bare submit', () => {
+    const prompt = 'first line\nsecond line\nthird';
+    const steps = promptKeystrokes('vam-a1b2c3', prompt);
+
+    // One interpreted Enter per newline -- and each is the escape, so each must
+    // sit immediately after a chunk whose text ends in a backslash.
+    const enters = steps.filter(isEnter);
+    expect(enters).toHaveLength(2);
+    steps.forEach((step, index) => {
+      if (!isEnter(step)) return;
+      const before = steps[index - 1];
+      expect(before && isLiteral(before)).toBe(true);
+      expect(before?.[before.length - 1]?.endsWith('\\')).toBe(true);
+    });
+
+    // No literal chunk carries a raw newline: that is the byte that would
+    // submit, and it must have been decomposed into escape + Enter.
+    for (const step of steps.filter(isLiteral)) {
+      expect(step[step.length - 1]).not.toContain('\n');
+    }
+
+    // And the keystrokes reconstruct the operator's exact text.
+    expect(reconstruct(steps)).toBe(prompt);
+  });
+
+  it('keeps every chunk one `-l -- <text>` element, so text is never read as a flag or a key', () => {
+    // A prompt full of the things tmux, a shell, or the REPL might act on: a
+    // line that starts with `-`, a `;`, a `#`, backticks and a `$`.
+    const prompt = '-rf everything\nfoo; rm -rf /\n#!/bin/sh\n`id` and $HOME\nDone';
+    const steps = promptKeystrokes('vam-a1b2c3', prompt);
+
+    for (const step of steps.filter(isLiteral)) {
+      // `-l` then `--` then exactly one payload element, and in that order:
+      // `-l` makes tmux type the text instead of pressing it, `--` stops a
+      // leading `-` being read as an option, and one element means the text
+      // is never split across argv.
+      expect(step.slice(0, 5)).toEqual(['send-keys', '-t', PANE, '-l', '--']);
+      expect(step).toHaveLength(6);
+      const dashDash = step.indexOf('--');
+      const lit = step.indexOf('-l');
+      expect(lit).toBeGreaterThanOrEqual(0);
+      expect(lit).toBeLessThan(dashDash);
+    }
+
+    // The metacharacters survive byte-for-byte -- no shell ran, nothing was
+    // interpreted -- which the round-trip proves for the whole prompt at once.
+    expect(reconstruct(steps)).toBe(prompt);
+  });
+
+  it('addresses the pane exactly, with the `=`…`:` target every send-keys uses', () => {
+    for (const step of promptKeystrokes('vam-a1b2c3', 'a\nb')) {
+      expect(step).toContain(PANE);
+    }
   });
 });

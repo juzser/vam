@@ -12,11 +12,35 @@
  * Electron's own entry is loaded by `require`.
  */
 const path = require('node:path');
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu, clipboard } = require('electron');
 
 const MAIN = path.join(__dirname, '..', '..', 'out', 'main', 'index.cjs');
 const OFF_ORIGIN = 'https://example.invalid/';
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Flatten a built `Menu` into rows. `item.accelerator` is whatever the live
+ * MenuItem carries -- typed or role-derived -- the only reading that answers
+ * "is this key still claimed by the menu?".
+ */
+function walkMenu(menu, trail) {
+  if (menu === null || menu === undefined) return [];
+  const rows = [];
+  for (const item of menu.items) {
+    const path = [...trail, item.label || `(${item.type})`];
+    rows.push({
+      path: path.join(' > '),
+      role: item.role ?? null,
+      type: item.type,
+      accelerator: item.accelerator ?? null,
+      enabled: item.enabled,
+      visible: item.visible,
+    });
+    rows.push(...walkMenu(item.submenu, path));
+  }
+  return rows;
+}
+
 
 async function waitForWindow() {
   for (let i = 0; i < 200; i += 1) {
@@ -163,6 +187,36 @@ async function main() {
   // own default is to APPROVE, so this resolves 'granted' without the fix.
   result.notificationPermission = await run('Notification.requestPermission()');
 
+  // THE MICROPHONE, AND THE CONTROL THAT USED TO ASK FOR IT.
+  //
+  // Three fields because the defect needed all three to be seen. The
+  // recogniser EXISTS here -- this is Chromium -- so feature detection said
+  // yes and a button was drawn; the permission is refused by vam's own
+  // deny-all policy, so that button could only ever apologise; and the fix is
+  // that the button is now absent in this build alone.
+  //
+  // NOTHING HERE CAN RAISE A PROMPT. `permissions.query` is a check, not a
+  // request, and the policy answers it without a dialog -- which is the whole
+  // reason it is the field to read rather than `getUserMedia`.
+  result.speechRecognitionType = await run(
+    "typeof (window.SpeechRecognition ?? window.webkitSpeechRecognition)",
+  );
+  result.micPermissionState = await run(`(async () => {
+    try {
+      const status = await navigator.permissions.query({ name: 'microphone' });
+      return status.state;
+    } catch (error) {
+      return 'threw: ' + (error && error.name ? error.name : String(error));
+    }
+  })()`);
+  // The DOM answer, with its own corpus beside it: a count of zero means
+  // nothing unless the composer it would sit in is on screen. `send` is the
+  // control it was asked to sit next to.
+  result.dictateControls = await run(
+    "document.querySelectorAll('[data-prompt-dictate]').length",
+  );
+  result.sendControls = await run("document.querySelectorAll('[data-prompt-record]').length");
+
   // `will-redirect`, behaviourally, on the REAL webContents and the REAL
   // listener `app.on('web-contents-created', ...)` attached to it -- fired
   // synthetically here because arranging a genuine same-origin-then-302
@@ -205,6 +259,141 @@ async function main() {
   result.cspHeader = await run(
     `fetch(location.href).then((r) => r.headers.get('content-security-policy')).catch((e) => 'fetch-error:' + e.message)`,
   );
+
+  // THE BUILT MENU, not the template literal in `src/main/menu.ts`: asserting
+  // the array that was written reads your own input back. This walks what
+  // `Menu.setApplicationMenu` installed, including accelerators Electron
+  // derived from a `role` rather than ones this repo typed out.
+  result.menu = walkMenu(Menu.getApplicationMenu(), []);
+
+  // COPY, PERFORMED. Every other menu assertion is structural: the `copy`
+  // role is present, its accelerator is Cmd+C. None of them proves a copy
+  // still lands on the system clipboard, and on macOS the clipboard works
+  // THROUGH the menu -- a hand-built menu is exactly where it dies silently.
+  // So the Edit > Copy item is CLICKED, over a real selection in the real
+  // renderer, and the real system clipboard is read back afterwards.
+  // In Electron 44 the main-process `clipboard` follows the W3C shape:
+  // `readText()`/`writeText()` return PROMISES and there is no
+  // `availableFormats`. Unawaited, `readText()` yields a Promise that
+  // `writeText` rejects with "conversion failure from" -- how this was found.
+  const previousClipboard = await clipboard.readText();
+  try {
+    await run(`(() => {
+      const box = document.createElement('textarea');
+      box.id = 'vam-clipboard-probe';
+      box.value = 'vam-clipboard-proof';
+      document.body.appendChild(box);
+      box.focus();
+      box.select();
+    })(); undefined`);
+    // A sentinel first, so "the value happened to be on the clipboard already"
+    // cannot pass the assertion.
+    await clipboard.writeText('sentinel-not-overwritten');
+    // `contents.copy()` IS what the `copy` role's handler invokes. Clicking
+    // the built MenuItem was tried and MEASURED not to work: with window and
+    // contents both focused and passed explicitly,
+    // `copyItem.click(undefined, win, contents)` left the sentinel untouched,
+    // because a role is dispatched natively, not through that property. So
+    // the menu's half is the structural assertion in `launch.test.ts`, and
+    // this answers the other half -- a copy out of this renderer, under this
+    // app's deny-everything permission policy, reaches the system clipboard.
+    contents.copy();
+    await sleep(500);
+    result.clipboardAfterContentsCopy = await clipboard.readText();
+    await run("document.getElementById('vam-clipboard-probe')?.remove(); undefined");
+  } catch (error) {
+    result.clipboardAfterContentsCopy = `error:${error && error.message ? error.message : String(error)}`;
+  }
+
+  // THE BRIDGE'S OWN CHANNEL, END TO END. `bridgeClipboardWriteType` above
+  // only proves `writeText` is a function; this drives it for real --
+  // renderer -> preload -> `vam:clipboard:write` -> main's own electron
+  // `clipboard` -- and then reads the system clipboard back from main.
+  //
+  // It is the only assertion that covers main's handler being `async`:
+  // `ipcMain.handle` has to settle the returned promise before the answer
+  // crosses the process boundary, and a unit test holding an injected fake
+  // cannot see that boundary at all. Seeded with a sentinel first, so "the
+  // text was already on the clipboard" cannot pass it.
+  try {
+    await clipboard.writeText('sentinel-not-overwritten');
+    result.bridgeClipboardWriteAnswer = await run(
+      "window.api.clipboard.writeText('vam-bridge-clipboard-proof')",
+    );
+    result.clipboardAfterBridgeWrite = await clipboard.readText();
+  } catch (error) {
+    result.clipboardAfterBridgeWrite = `error:${error && error.message ? error.message : String(error)}`;
+  }
+
+  // The operator's own clipboard is not collateral damage -- best effort, and
+  // never at the cost of the run.
+  try {
+    if (typeof previousClipboard === 'string' && previousClipboard.length > 0) {
+      await clipboard.writeText(previousClipboard);
+    }
+  } catch {
+    // A clipboard this could not restore is not a reason to lose the run.
+  }
+
+  // ZOOM, ROUTE BY ROUTE, on the real webContents.
+  //
+  // (a) the resting state, after `lockZoom` ran at `web-contents-created`.
+  result.zoomFactorAtRest = contents.getZoomFactor();
+  result.zoomLevelAtRest = contents.getZoomLevel();
+
+  // (b) Ctrl/Cmd + mouse wheel, through the renderer's input pipeline rather
+  // than a JS listener. See launch.test.ts: measured not to reach Chromium's
+  // wheel-zoom path at all, so this records rather than guards.
+  for (let i = 0; i < 5; i += 1) {
+    contents.sendInputEvent({
+      type: 'mouseWheel',
+      x: 400,
+      y: 300,
+      deltaX: 0,
+      deltaY: 120,
+      modifiers: ['control'],
+      canScroll: false,
+    });
+  }
+  await sleep(500);
+  result.zoomLevelAfterCtrlWheel = contents.getZoomLevel();
+  result.zoomFactorAfterCtrlWheel = contents.getZoomFactor();
+
+  // ...and with the macOS modifier, reported separately.
+  for (let i = 0; i < 5; i += 1) {
+    contents.sendInputEvent({
+      type: 'mouseWheel',
+      x: 400,
+      y: 300,
+      deltaX: 0,
+      deltaY: 120,
+      modifiers: ['meta'],
+      canScroll: false,
+    });
+  }
+  await sleep(500);
+  result.zoomLevelAfterMetaWheel = contents.getZoomLevel();
+
+  // (c) the clamp, through the very event Chromium raises for a wheel/pinch
+  // zoom. Firing it after a deliberate displacement proves the listener is
+  // attached to THIS contents and really restores 0.
+  contents.setZoomLevel(2.5);
+  contents.emit('zoom-changed', {}, 'in');
+  await sleep(200);
+  result.zoomLevelAfterZoomChanged = contents.getZoomLevel();
+
+  // (d) a zoom level PERSISTED from an earlier session. Chromium stores it
+  // per origin and re-applies it on navigation, so it survives a reload -- and
+  // a relaunch, which is how it was found: the harness left 2.5 behind and the
+  // next launch came up at zoom factor 1.577.
+  contents.setZoomLevel(2.5);
+  await contents.reload();
+  await new Promise((resolve) => contents.once('did-finish-load', resolve));
+  await sleep(300);
+  result.zoomLevelAfterReload = contents.getZoomLevel();
+  result.zoomFactorAfterReload = contents.getZoomFactor();
+  // Leave nothing behind for the next launch to inherit.
+  contents.setZoomLevel(0);
 
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
   app.exit(0);

@@ -13,6 +13,9 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   commandFromMarkdown,
+  createProjectCommandLookup,
+  mergeSlashCommands,
+  projectCommandsDir,
   readUserSlashCommands,
 } from '../../src/main/sources/claude-code/slash-commands.js';
 
@@ -71,5 +74,86 @@ describe('readUserSlashCommands', () => {
     mkdirSync(join(root, 'otter.md')); // a directory where a file was expected
     const commands = await readUserSlashCommands(root);
     expect(commands.map((c) => c.name)).toEqual(['wombat']);
+  });
+});
+
+/**
+ * PROJECT-LEVEL COMMANDS, `<cwd>/.claude/commands/*.md`.
+ *
+ * The module header used to say these could not be read because they "depend
+ * on the session's own cwd, which this source cannot reliably resolve per
+ * `load()`". That was false when it was written: `loadClaudeCodeProjects`
+ * already has `agent.cwd` in hand and already spends it on
+ * `branchOf(agent.cwd)` and `readPrs({ cwd: agent.cwd })`, per session, every
+ * load.
+ *
+ * What is true is the COST, and that is what the lookup below is about:
+ * sessions in one project share a cwd, so the directory is read once per
+ * `load()` per directory, exactly the way `createBranchLookup` handles
+ * `.git/HEAD`.
+ */
+describe('project-level commands, read per project rather than per session', () => {
+  const commandsIn = (dir: string) => {
+    mkdirSync(join(dir, '.claude', 'commands'), { recursive: true });
+    return (name: string, contents: string) =>
+      writeFileSync(join(dir, '.claude', 'commands', name), contents);
+  };
+
+  it('reads `<cwd>/.claude/commands/*.md` for a session’s own directory', async () => {
+    const project = join(root, 'atlas');
+    mkdirSync(project);
+    commandsIn(project)('ship.md', '---\ndescription: ship the branch\n---\n');
+    const lookup = createProjectCommandLookup();
+    expect(await lookup(project)).toEqual([
+      { id: 'project:ship', name: 'ship', description: 'ship the branch' },
+    ]);
+  });
+
+  it('answers an empty list for a directory with no .claude/commands at all', async () => {
+    const project = join(root, 'bare');
+    mkdirSync(project);
+    expect(await createProjectCommandLookup()(project)).toEqual([]);
+  });
+
+  it('reads each directory ONCE per load, however many sessions share it', async () => {
+    // THE COST CONTRACT, as a test. `source.ts` documents `load()` as costing
+    // kilobytes; a read per session would make it cost a read per row.
+    const seen: string[] = [];
+    const lookup = createProjectCommandLookup(async (dir) => {
+      seen.push(dir);
+      return [];
+    });
+    await Promise.all([lookup('/a'), lookup('/a'), lookup('/b'), lookup('/a')]);
+    expect(seen).toEqual([projectCommandsDir('/a'), projectCommandsDir('/b')]);
+  });
+});
+
+/**
+ * MERGING THE TIERS. One list per session, most specific first: a project
+ * command shadows a user command of the same name, which shadows a built-in.
+ */
+describe('mergeSlashCommands', () => {
+  const cmd = (id: string, name: string, description: string | null = null) => ({
+    id,
+    name,
+    description,
+  });
+
+  it('keeps the most specific of two commands sharing a name', () => {
+    const merged = mergeSlashCommands(
+      [cmd('project:ship', 'ship', 'the project’s own')],
+      [cmd('user:ship', 'ship', 'the operator’s own')],
+      [cmd('builtin:ship', 'ship', 'the CLI’s own')],
+    );
+    expect(merged).toEqual([cmd('project:ship', 'ship', 'the project’s own')]);
+  });
+
+  it('sorts by name so one list reads as one list', () => {
+    const merged = mergeSlashCommands(
+      [cmd('project:otter', 'otter')],
+      [cmd('user:wombat', 'wombat')],
+      [cmd('builtin:aardvark', 'aardvark')],
+    );
+    expect(merged.map((c) => c.name)).toEqual(['aardvark', 'otter', 'wombat']);
   });
 });

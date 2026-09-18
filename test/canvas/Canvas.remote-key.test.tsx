@@ -7,7 +7,7 @@
  * This asserts the KEYSTROKE actually opens the surface — dispatched at
  * `window`, the way an operator's press arrives — not merely that a binding
  * string exists in a table, the substitution this repo has shipped a defect
- * from before (see `Canvas.zoom-keys.test.tsx`, the same pattern).
+ * from before.
  *
  * It also asserts unpair (`onRemove`) and `Revoke all` are reachable from
  * the exact surface `.` opens, by stubbing the desktop bridge with a paired
@@ -15,7 +15,7 @@
  */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RemoteApi, RemoteState } from '../../src/preload/api.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
@@ -67,7 +67,17 @@ beforeAll(() => {
   });
 });
 
+beforeEach(() => {
+  // With no bridge, the Remote section reads the paired devices over HTTP
+  // (`PairedDeviceList`). Un-stubbed, this environment resolves `/api/devices`
+  // against a default origin and really opens a socket: a unit test making a
+  // network connection, which showed up only as an `ECONNREFUSED` printed
+  // beside a green run.
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+});
+
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   // biome-ignore lint/suspicious/noExplicitAny: the bridge is not part of the browser build's Window type
   delete (window as any).api;
@@ -118,6 +128,7 @@ describe('unpair and Revoke all are reachable from the surface `.` opens', () =>
 
   function stubRemote(): RemoteApi {
     const api: RemoteApi = {
+      openLink: vi.fn(async () => true),
       state: vi.fn(async () => STATE),
       open: vi.fn(async () => STATE),
       approve: vi.fn(async () => STATE),

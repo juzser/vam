@@ -29,6 +29,11 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL: 'http://127.0.0.1:5273',
+    // Same as `playwright.phone.config.ts` — a trace only costs anything on
+    // a FAILING test, and CI (ci.yml, `playwright-e2e` job) uploads
+    // `e2e/test-results/` on failure so a red run leaves something to open
+    // rather than only the assertion's own text.
+    trace: 'retain-on-failure',
   },
   webServer: {
     command: 'node_modules/.bin/vite --port 5273',

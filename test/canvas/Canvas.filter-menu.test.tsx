@@ -3,8 +3,8 @@
 /**
  * Filtering has ONE home, and it is the sidebar.
  *
- * The status pills (All / Running / Needs you / Done) used to be an
- * `@xyflow/react` `<Panel position="top-left">` floating over the canvas.
+ * The status pills (All / Running / Needs you / Done) used to be a floating
+ * panel pinned to the canvas's top-left corner.
  * They now live in a popover hung off a control beside the sidebar's search
  * box (operator request: "thêm icon filter cạnh ô search ở sidebar, khi
  * toggle sẽ có popover để filter các session trong sidebar").
@@ -91,10 +91,10 @@ describe('the filter popover beside the sidebar search box', () => {
   it('leaves no second filter control floating on the canvas', () => {
     render(<Canvas model={MODEL} />);
     // The pills are not rendered at all until the popover is opened, and when
-    // they are, they are in the sidebar — never inside ReactFlow's own panel.
+    // they are, they are in the sidebar — never inside the tab-strip column.
     expect(pill('all')).toBeNull();
     openMenu();
-    expect(pill('all')?.closest('.react-flow__panel')).toBeFalsy();
+    expect(pill('all')?.closest('[data-canvas-pane]')).toBeFalsy();
     expect(pill('all')?.closest('aside')).toBeTruthy();
   });
 
@@ -127,7 +127,12 @@ describe('the filter popover beside the sidebar search box', () => {
 
   it('opens on `F` and closes on Escape, handing the keyboard back to the control', () => {
     render(<Canvas model={MODEL} />);
-    fireEvent.keyDown(window, { key: 'F' });
+    // `shiftKey: true` is load-bearing, not decoration: `F` is a real Shift+F
+    // keydown, and since the CapsLock fix `normalizeKey` derives a bare
+    // letter's case from `shiftKey` rather than from `event.key` — a bare `F`
+    // with no `shiftKey` is what CapsLock produces for a plain `f`, and would
+    // open `jump`, not this popover.
+    fireEvent.keyDown(window, { key: 'F', shiftKey: true });
     expect(menu()).toBeTruthy();
     // Keyboard-first: the popover takes focus so the next key lands in it.
     expect(menu()?.contains(document.activeElement)).toBe(true);

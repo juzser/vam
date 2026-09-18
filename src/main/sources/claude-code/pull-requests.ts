@@ -26,6 +26,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { statSync } from 'node:fs';
 import type {
   PullRequest,
   PullRequestChecks,
@@ -41,6 +42,17 @@ import { cliMissingMessage } from '../../env/cli-missing.js';
 const PR_TIMEOUT_MS = 10_000;
 
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+
+/** Injected in `readPullRequestsViaCli` so the directory check is testable
+ *  without a filesystem. `statSync` rather than `existsSync`: a path that
+ *  exists and is a FILE is not somewhere `gh` can be run either. */
+const defaultExists = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
 
 /** Enough of what `gh` said to act on. */
 const MAX_CLI_MESSAGE = 400;
@@ -128,9 +140,27 @@ export function classifyGhFailure(input: {
   failure: SpawnFailure;
   stderr: string;
   branch: string;
+  /** The directory `gh` was run in. Named in a message only when it is not
+   *  the session's own -- see `overridden`. */
+  cwd: string;
+  /**
+   * Did the operator point this project somewhere other than the session's
+   * own directory?
+   *
+   * IT CHANGES THE SENTENCE, NOT THE CODE. "this session's working directory
+   * is not a git repository" is true and short while vam stands where the
+   * agent stands; the moment it stands somewhere the operator chose, that
+   * sentence names the WRONG DIRECTORY and sends them to fix a repository
+   * that was never the problem. And the inverse matters as much: quoting a
+   * path at an operator who never chose one is noise in a sentence that was
+   * already true.
+   */
+  overridden: boolean;
 }): PullRequestList {
-  const { failure, stderr, branch } = input;
+  const { failure, stderr, branch, cwd, overridden } = input;
   const said = clip(stderr);
+  /** " in /path" when the operator chose the path, and nothing otherwise. */
+  const where = overridden ? ` in ${cwd}` : '';
 
   if (failure.code === 'ENOENT') {
     return unavailable(
@@ -153,13 +183,17 @@ export function classifyGhFailure(input: {
   if (NOT_A_REPO.test(stderr)) {
     return unavailable(
       'not-a-repo',
-      "this session's working directory is not a git repository, so it has no pull requests",
+      overridden
+        ? `${cwd} is not a git repository, so it has no pull requests — this project is pointed there rather than at the session's own directory`
+        : "this session's working directory is not a git repository, so it has no pull requests",
     );
   }
   if (NO_REMOTE.test(stderr)) {
     return unavailable(
       'no-github-remote',
-      'this repository has no GitHub remote vam can ask about',
+      overridden
+        ? `the repository${where} has no GitHub remote vam can ask about — this project is pointed there rather than at the session's own directory`
+        : 'this repository has no GitHub remote vam can ask about',
     );
   }
   return unavailable(
@@ -263,7 +297,14 @@ export function parsePrList(stdout: string): PullRequestList {
 }
 
 /** What actually asks GitHub. Injectable so the throttle can be tested without a spawn. */
-export type ReadPrsFn = (input: { cwd: string; branch: string }) => Promise<PullRequestList>;
+export type ReadPrsFn = (input: {
+  cwd: string;
+  branch: string;
+  /** Optional so every existing caller and fake still compiles, and FALSE by
+   *  default because "the session's own directory" is what vam did before
+   *  anyone could choose otherwise. */
+  overridden?: boolean;
+}) => Promise<PullRequestList>;
 
 /**
  * Run `gh pr list`. Resolves to a `PullRequestList` and NEVER rejects: a
@@ -271,9 +312,35 @@ export type ReadPrsFn = (input: { cwd: string; branch: string }) => Promise<Pull
  * the reason with it.
  */
 export const readPullRequestsViaCli =
-  (binary = 'gh'): ReadPrsFn =>
-  ({ cwd, branch }) =>
-    new Promise((resolve) => {
+  (binary = 'gh', directoryExists: (path: string) => boolean = defaultExists): ReadPrsFn =>
+  ({ cwd, branch, overridden = false }) => {
+    /**
+     * THE DIRECTORY, BEFORE THE SPAWN, and this is a correction rather than a
+     * precaution.
+     *
+     * `execFile` reports `ENOENT` for TWO different things -- the binary is
+     * not on the PATH, and the `cwd` does not exist -- and the classifier
+     * above attributed all of it to a missing `gh`. While vam only ever stood
+     * in a session's own directory that was safe: an agent is running there,
+     * so it exists by construction. An override is a path the operator chose
+     * once, and a checkout can be deleted, moved or renamed -- at which point
+     * vam would tell them to install a `gh` they already have.
+     *
+     * Asking first gives that state its own sentence AND leaves `ENOENT`
+     * meaning the one thing it can then mean. It also costs nothing per poll:
+     * a directory that cannot work spawns no process at all.
+     */
+    if (!directoryExists(cwd)) {
+      return Promise.resolve(
+        unavailable(
+          'repo-missing',
+          overridden
+            ? `${cwd} is not there any more — this project is pointed at it for pull requests, so choose another directory in settings or clear the override`
+            : `${cwd} is not there any more, so vam has nowhere to ask GitHub from`,
+        ),
+      );
+    }
+    return new Promise((resolve) => {
       execFile(
         binary,
         prListArgv(branch),
@@ -281,12 +348,13 @@ export const readPullRequestsViaCli =
         (failure, stdout, stderr) => {
           resolve(
             failure
-              ? classifyGhFailure({ failure, stderr: String(stderr), branch })
+              ? classifyGhFailure({ failure, stderr: String(stderr), branch, cwd, overridden })
               : parsePrList(String(stdout)),
           );
         },
       );
     });
+  };
 
 /**
  * The floor between two real reads of one branch.
@@ -312,6 +380,10 @@ const MAX_CACHED_BRANCHES = 64;
 export type ReadPullRequests = (input: {
   cwd: string;
   branch: string | null;
+  /** Did the operator point this project at `cwd`, rather than it being the
+   *  session's own? Carried so a failure can name the directory. Optional and
+   *  false by default, so every existing caller and fake still compiles. */
+  overridden?: boolean;
 }) => Promise<PullRequestList>;
 
 /**
@@ -332,7 +404,7 @@ export function createPullRequestReader(
   const cache = new Map<string, { at: number; list: PullRequestList }>();
   const inFlight = new Map<string, Promise<PullRequestList>>();
 
-  return async ({ cwd, branch }) => {
+  return async ({ cwd, branch, overridden = false }) => {
     if (branch === null) {
       // vam has no branch for this session, so there is no question to ask.
       // Reported rather than left absent: this source HAS a pull-request
@@ -353,7 +425,7 @@ export function createPullRequestReader(
     const pending = (async () => {
       let list: PullRequestList;
       try {
-        list = await read({ cwd, branch });
+        list = await read({ cwd, branch, overridden });
       } catch (error) {
         // `readPullRequestsViaCli` turns every ordinary failure into a value,
         // so a throw here is something neither it nor this reader foresaw.

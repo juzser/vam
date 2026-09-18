@@ -15,7 +15,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
+import type { Project } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import {
   DEFAULT_SESSION_FILTERS,
@@ -24,8 +24,10 @@ import {
 import {
   BRANCH_TAIL_MAX_CHARS,
   FILTER_POPOVER_WIDTH,
+  RESTORE_STRIP_VISIBLE_MS,
   SessionList,
   type SessionListProps,
+  SIDEBAR_STEP,
 } from '../../src/renderer/panels/SessionList.js';
 import { SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 import {
@@ -42,13 +44,26 @@ function mount(entries: readonly SessionEntry[]) {
   return render(<SessionList {...baseProps(entries)} />);
 }
 
-/** Same defaults, with a few props overridden -- focus, mostly. */
+/* `openTipOn` lived here: it focused a control and read the Radix tooltip that
+   opened, which is how the per-project `+` proved its caption reached a
+   keyboard. Both of its callers went with that button -- the caption is the
+   menu item's own visible text now -- and a helper with no caller is a helper
+   that goes stale unread. `test/keyboard/shortcut-tip.test.tsx` still holds
+   the tooltip's behaviour itself. */
+
 function mountWith(entries: readonly SessionEntry[], over: Partial<SessionListProps>) {
   return render(<SessionList {...baseProps(entries)} {...over} />);
 }
 
 function addButtons(root: ParentNode) {
   return [...root.querySelectorAll('[data-new-session-in-project]')];
+}
+
+/** The route to everything a project heading used to wear as an icon. */
+function openProjectMenu(root: ParentNode, projectId: string) {
+  act(() => {
+    (root.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
+  });
 }
 
 afterEach(() => {
@@ -192,13 +207,46 @@ describe('SessionList placeholder row', () => {
     ).toBe('a/');
   });
 
-  it('shows an em-dash for the branch when the source cannot say, and names the gap', () => {
+  /**
+   * Audit item 7 (S3). Both sentences said something found nowhere else on
+   * screen -- an em-dash names a gap but not whose gap it is -- and both said
+   * it in a `title`, which opens on hover and on nothing else. Nine of these
+   * were still live at 390px, where there is no hover at all, and mobile is a
+   * real target (Tailscale Serve).
+   *
+   * A tab stop is NOT the fix here, and that is the whole reason these two
+   * differ from the status bar's notes: every one of these spans is inside the
+   * session row's own `<button>` (one element, ~250 lines of it), so a
+   * focusable child would be a nested interactive control. The row button is
+   * already a tab stop and already has an accessible name computed from its
+   * contents -- so the sentence goes into that name as `sr-only` text. The
+   * em-dash stays exactly as drawn: this is a row at rest, and the design of
+   * the quiet row is not what was broken.
+   */
+  /**
+   * THE DASH IS GONE AND THE SENTENCE IS NOT -- the half of the paragraph
+   * above that has since expired.
+   *
+   * "The design of the quiet row is not what was broken" was true of the dash
+   * read as a placeholder. What the operator reported afterwards is that the
+   * row draws a branch GLYPH beside it, so an absence was spending two marks
+   * on every row of every source that cannot report a branch -- which is most
+   * of them. Nothing is lost by drawing neither: there was no name to print
+   * either way, and the `sr-only` sentence was always the only copy of the
+   * information. The age cell keeps ITS dash, and that difference is
+   * deliberate: it holds a column open on the right edge that a number lands
+   * in, where this one held nothing open at all.
+   */
+  it('draws neither glyph nor dash for a branch the source cannot say, and still names the gap aloud', () => {
     const { container } = mount(entriesOf([makeSession({ branch: null })]));
     const branch = container.querySelector('[data-session-branch]');
-    expect(branch?.textContent).toBe('—');
+    expect(branch?.textContent).not.toContain('—');
+    expect(container.querySelector('[data-session-row] .lucide-git-branch')).toBeNull();
     // Not the old claim, which named factory on every row including a
     // Claude Code one that simply had no transcript yet.
-    expect(branch?.getAttribute('title')).toContain('cannot say');
+    expect(branch?.getAttribute('title')).toBeNull();
+    const row = container.querySelector('[data-session-row]');
+    expect(row?.textContent).toContain('cannot say which branch');
   });
 
   it('shows an em-dash for the time when the source cannot say, never a zero', () => {
@@ -206,8 +254,10 @@ describe('SessionList placeholder row', () => {
     // reported activity a moment ago; `0m` would read as the second.
     const { container } = mount(entriesOf([makeSession({ age: null })]));
     const age = container.querySelector('[data-session-age]');
-    expect(age?.textContent).toBe('—');
-    expect(age?.getAttribute('title')).toContain('cannot say');
+    expect(age?.textContent).toContain('—');
+    expect(age?.getAttribute('title')).toBeNull();
+    const row = container.querySelector('[data-session-row]');
+    expect(row?.textContent).toContain('cannot say when the session last did anything');
   });
 
   it('names the gap on the branch placeholder, and draws no verb pill for any status', () => {
@@ -242,13 +292,24 @@ describe('SessionList placeholder row', () => {
         decision('f', null),
       ],
     });
+    // A BAR IS A WIDTH, and that is what this looks for. It used to look for
+    // any `span[style]` at all, which was a safe proxy while nothing in the
+    // row carried an inline style -- until the status mark took one for its
+    // lane (`status-mark.tsx`: a class built from a constant is invisible to
+    // Tailwind's scanner, so the size has to be a style). A proxy that now
+    // matches a span with no width in it is not the assertion this test is
+    // named after; a percentage width is.
+    const percentWidth = (root: ParentNode) =>
+      [...root.querySelectorAll<HTMLElement>('[data-session-row="s1"] span[style]')].filter((el) =>
+        el.style.width.includes('%'),
+      );
     const { container } = mount(entriesOf([partial]));
-    expect(container.querySelector('[data-session-row="s1"] span[style]')).toBeNull();
+    expect(percentWidth(container)).toEqual([]);
 
     cleanup();
     const done = makeSession({ id: 's1', status: 'done', decisions: [decision('a', null)] });
     const { container: doneContainer } = mount(entriesOf([done]));
-    expect(doneContainer.querySelector('[data-session-row="s1"] span[style]')).toBeNull();
+    expect(percentWidth(doneContainer)).toEqual([]);
   });
 
   /**
@@ -361,65 +422,46 @@ describe('SessionList placeholder row', () => {
    * which equally cannot create a session, is a real button that answers on
    * the status bar. Two controls that refuse for the same reason should refuse
    * the same way.
+   *
+   * IT IS NO LONGER A `+` IN THE HEADING AT ALL -- it is the first item of
+   * that project's own menu, one icon less per heading at the operator's
+   * request. What this pair still holds is everything the fix above won: a
+   * real button, reachable, that names the project it will create in and
+   * reports that project when pressed. Where it says which project has moved
+   * from an `aria-label` to the panel the item lives in, whose own label is
+   * `<project> actions` -- which is why the assertion is on containment.
    */
-  it('makes the per-project add a real button that names its own project', () => {
-    // One button per project now, whichever holds focus, so both are asserted
-    // from a single mount and each is picked by the project it belongs to.
+  it('offers the per-project add as a real button inside that project’s own menu', () => {
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
-    expect(addButtons(container)).toHaveLength(2);
+    // No `+` left on any heading: the count is the point of the move.
+    expect(addButtons(container)).toHaveLength(0);
     for (const [projectId, name] of [
       ['p1', 'alpha'],
       ['p2', 'beta'],
     ] as const) {
-      const add = container.querySelector<HTMLElement>(
-        `[data-new-session-in-project="${projectId}"]`,
-      );
+      openProjectMenu(container, projectId);
+      const panel = container.querySelector(`[data-project-menu-panel="${projectId}"]`);
+      expect(panel?.getAttribute('aria-label')).toBe(`${name} actions`);
+      const add = panel?.querySelector<HTMLElement>('[data-project-menu-item="new-session"]');
       expect(add?.tagName).toBe('BUTTON');
-      // Unclickable to assistive tech is what `aria-hidden` meant; it is a
-      // control now, so it must be reachable and it must say which project.
+      expect(add?.getAttribute('role')).toBe('menuitem');
       expect(add?.getAttribute('aria-hidden')).toBeNull();
       expect(add?.className).toContain('cursor-pointer');
       expect(add?.className).toMatch(/hover:/);
-      expect(add?.getAttribute('aria-label')).toBe(`new session in ${name}`);
+      expect(add?.textContent).toContain('New session');
     }
   });
 
   it('reports which project the add was for', () => {
     const seen: string[] = [];
-    const entries = twoProjects();
-    render(
-      <SessionList
-        {...({
-          ...baseProps(entries),
-          // Beta holds focus, so beta is the only project showing an add.
-          focusedSessionId: 'b1',
-          filter: '',
-          filtering: false,
-          onFilterChange: noop,
-          onFilterCommit: noop,
-          onFilterCancel: noop,
-          onOpenFilter: noop,
-          renamingId: null,
-          renameDraft: '',
-          onRenameChange: noop,
-          onRenameCommit: noop,
-          onRenameCancel: noop,
-          onPick: noop,
-          onClose: noop,
-          onAdd: noop,
-          onAddInProject: (project: Project) => seen.push(project.name),
-          onNewProject: noop,
-          newSessionDecline: null,
-          onPickIcon: noop,
-          onSettings: noop,
-          theme: 'dark',
-          onToggleTheme: noop,
-          width: 264,
-          resizeHandle: null,
-        } satisfies SessionListProps)}
-      />,
-    );
-    document.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]')?.click();
+    const { container } = mountWith(twoProjects(), {
+      focusedSessionId: 'b1',
+      onAddInProject: (project: Project) => seen.push(project.name),
+    });
+    openProjectMenu(container, 'p2');
+    act(() => {
+      (container.querySelector('[data-project-menu-item="new-session"]') as HTMLElement).click();
+    });
     expect(seen).toEqual(['beta']);
   });
 
@@ -532,75 +574,49 @@ describe('the close button reveals with its own row, not with the whole list', (
 });
 
 /**
- * The per-project "new session" button is quiet at rest.
+ * THE PER-PROJECT ADD NO LONGER STANDS IN THE HEADING AT ALL.
  *
- * It sits once per project heading, so at four projects it was four outlined
- * boxes competing with the session names underneath them — the list read as a
- * row of controls rather than a list of sessions. The border arrives on hover,
- * where it is the thing you are about to press.
+ * Two describes used to live here, and both were about the same argument at
+ * two stages of the same retreat. The first ("quiet at rest") made the button
+ * borderless until hover, because at four projects it was four outlined boxes
+ * competing with the session names underneath them. The second ("by reveal,
+ * not by existing") made every heading carry one and lit only the focused
+ * project's, because cutting it from the others had read as the button having
+ * vanished.
  *
- * The box keeps its size in both states: a border that appears from nothing
- * would shift the heading by a pixel on every hover.
+ * The operator's verdict on the result was that the column still read as
+ * cluttered, and the resolution is the one neither stage reached for: the
+ * control is in the project's own menu, and the heading carries no box to be
+ * quiet about. So what is held here now is the ABSENCE -- which is a claim
+ * about every project, focused or not -- plus the thing the reveal was
+ * protecting, which is that the route exists for a project you are not
+ * currently in.
  */
-describe('the new-session button is dim until hovered', () => {
-  it('has no visible border at rest and gains one on hover', () => {
-    const { container } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
-    const buttons = [...container.querySelectorAll('[aria-label^="new session in "]')];
-    expect(buttons.length, 'no new-session buttons rendered').toBeGreaterThan(0);
-    for (const el of buttons) {
-      expect(el.className, 'transparent at rest').toContain('border-transparent');
-      expect(el.className, 'a border on hover').toContain('hover:border-line-strong');
-      // Still bordered-box sized, so hover does not move the heading.
-      expect(el.className).toMatch(/(^|\s)border(\s|$)/);
+describe('the per-project add is in the menu, not on the heading', () => {
+  it('draws no add control on any heading, whichever project holds focus', () => {
+    for (const focused of [null, 'a1', 'b1'] as const) {
+      const { container } = mountWith(twoProjects(), { focusedSessionId: focused });
+      expect(addButtons(container), `focused: ${focused}`).toHaveLength(0);
+      // And nothing else crept in to replace it: fold and menu, and that is
+      // the whole of the heading's controls.
+      for (const heading of container.querySelectorAll('[data-project-heading]')) {
+        expect([...heading.querySelectorAll('button')].length).toBe(3);
+      }
+      cleanup();
     }
   });
-});
 
-/**
- * The per-project add is present everywhere; only its reveal follows focus.
- *
- * Four projects once meant four `+` boxes standing over the session names at
- * all times, so the add was cut from every heading but the focused one -- and
- * that read, correctly, as the button having vanished. The column is answered
- * by opacity now, the same way the `...` menu answers it: every project has an
- * add, at rest it is transparent, and the project holding focus keeps its own
- * opaque. So these assert which add is *lit*, not which one exists.
- */
-function litAdd(root: ParentNode, projectId: string) {
-  const add = root.querySelector<HTMLElement>(`[data-new-session-in-project="${projectId}"]`);
-  expect(add, `no add for ${projectId}`).not.toBeNull();
-  // `opacity-100` also occurs inside `focus:opacity-100`, which is on every
-  // one of them; only the standalone class means "lit at rest".
-  return /(^|\s)opacity-100(\s|$)/.test(add?.className ?? '');
-}
-
-describe('the per-project add follows focus by reveal, not by existing', () => {
-  it('lights no add while nothing is focused, and still offers one per project', () => {
-    const { container } = mountWith(twoProjects(), { focusedSessionId: null });
-    expect(addButtons(container)).toHaveLength(2);
-    expect(litAdd(container, 'p1')).toBe(false);
-    expect(litAdd(container, 'p2')).toBe(false);
-  });
-
-  it("lights exactly one add, on the focused session's own project", () => {
-    const { container } = mountWith(twoProjects(), { focusedSessionId: 'a2' });
-    expect(litAdd(container, 'p1')).toBe(true);
-    expect(litAdd(container, 'p2')).toBe(false);
-    // And it is inside alpha's heading, not merely somewhere in the list.
+  it('offers the route for a project that does not hold focus', () => {
+    // The defect the reveal was fixing, restated against the menu: with beta
+    // focused, alpha must still have a way in. It does, and it is the same
+    // gesture for both -- no opacity, no hover, no focus to match.
+    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
+    openProjectMenu(container, 'p1');
     expect(
-      container
-        .querySelector('[data-new-session-in-project="p1"]')
-        ?.closest('[data-project-heading]')?.textContent,
-    ).toContain('alpha');
-  });
-
-  it('moves the lit add when focus moves to a session in another project', () => {
-    const { container, rerender } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
-    expect(litAdd(container, 'p1')).toBe(true);
-
-    rerender(<SessionList {...baseProps(twoProjects())} focusedSessionId="b1" />);
-    expect(litAdd(container, 'p1')).toBe(false);
-    expect(litAdd(container, 'p2')).toBe(true);
+      container.querySelector(
+        '[data-project-menu-panel="p1"] [data-project-menu-item="new-session"]',
+      ),
+    ).not.toBeNull();
   });
 
   /**
@@ -658,9 +674,13 @@ describe('the session rows are indented under their project heading', () => {
     expect(wrappers).toHaveLength(2);
 
     for (const wrapper of wrappers) {
-      // A left inset of some kind -- the value is a visual call, the
-      // existence of it is the contract.
-      expect(wrapper.className).toMatch(/(^|\s)(pl|ps|ml)-/);
+      // A left inset of exactly one unit. It used to be "of some kind, the
+      // value is a visual call" -- the value is a named constant now
+      // (`SIDEBAR_STEP`), because the call it was left to made this level step
+      // 6px where the level above it stepped 8, and a ladder whose rungs close
+      // up as it descends is why the tree read flat. The unit's own size is
+      // still a visual judgement; that it is ONE unit here is not.
+      expect((wrapper as HTMLElement).style.paddingLeft).toBe(`${SIDEBAR_STEP}px`);
       expect(wrapper.querySelector('[data-project-heading]')).toBeNull();
     }
 
@@ -987,76 +1007,42 @@ describe('SessionList project controls', () => {
     expect(container.querySelector('[data-session-row="a1"]')).not.toBeNull();
   });
 
-  it('puts the `+` after the fold and the menu in document order', () => {
-    // Document order IS tab order, and the operator wants `+` last: the two
-    // controls that belong to the heading come first, then the one that adds
-    // to it. Asserted by comparing positions, not by presence -- all three
-    // were present before the move too, so a presence check would have passed
-    // against the old order and proved nothing.
+  /**
+   * THE `+` USED TO BE THE LAST CONTROL IN THIS ROW, and three tests here held
+   * its position: after the fold and the menu in document order (which is tab
+   * order), at the far right of the spacer, and lit only for the focused
+   * project. All three are about a control the heading no longer draws.
+   *
+   * The property that survives the move is the one they were all protecting:
+   * the heading is a caption with the SMALLEST set of controls that works, and
+   * every one of them is reachable by tab in a stated order. It is two now,
+   * and the add is the first item of the menu (`SessionList.tree.test.tsx`).
+   */
+  it('leaves the heading exactly two controls, fold then menu, and ends on the menu', () => {
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
     for (const projectId of ['p1', 'p2'] as const) {
       const row = heading(container, projectId);
       const controls = [...row.querySelectorAll('button')].map((node) =>
-        node.getAttribute('data-project-collapse') !== null
-          ? 'fold'
-          : node.getAttribute('data-project-menu') !== null
-            ? 'menu'
-            : node.getAttribute('data-new-session-in-project') !== null
-              ? 'add'
+        node.getAttribute('data-project-icon') !== null
+          ? 'icon'
+          : node.getAttribute('data-project-collapse') !== null
+            ? 'fold'
+            : node.getAttribute('data-project-menu') !== null
+              ? 'menu'
               : 'other',
       );
-      expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('fold'));
-      expect(controls.indexOf('add')).toBeGreaterThan(controls.indexOf('menu'));
-      expect(controls.indexOf('fold')).toBeGreaterThan(-1);
-      expect(controls.indexOf('menu')).toBeGreaterThan(-1);
-    }
-  });
-
-  it('keeps the `+` reachable for a project that does not hold focus', () => {
-    // The operator's report: the `+` had "disappeared" from every heading but
-    // one. It is in the DOM for all of them now, on the same idiom as the `...`
-    // menu -- transparent at rest, opaque on hover or for the focused project.
-    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
-    const away = heading(container, 'p1').querySelector<HTMLElement>(
-      '[data-new-session-in-project="p1"]',
-    );
-    const home = heading(container, 'p2').querySelector<HTMLElement>(
-      '[data-new-session-in-project="p2"]',
-    );
-    expect(away).not.toBeNull();
-    // `toContain` would match inside `focus:opacity-100`, which every one of
-    // these carries; the class has to stand alone to mean anything.
-    expect(away?.className).toMatch(/(^|\s)opacity-0(\s|$)/);
-    expect(away?.className).toContain('focus:opacity-100');
-    expect(home?.className).toMatch(/(^|\s)opacity-100(\s|$)/);
-
-    act(() => {
-      fireEvent.mouseEnter(heading(container, 'p1'));
-    });
-    expect(
-      heading(container, 'p1').querySelector<HTMLElement>('[data-new-session-in-project="p1"]')
-        ?.className,
-    ).toMatch(/(^|\s)opacity-100(\s|$)/);
-  });
-
-  it('puts the `+` at the far right of the heading row', () => {
-    // Far right is the spacer's doing, not a margin: everything after the
-    // `flex-1` span is pushed to the end of the row, and `+` is the last of
-    // them. Asserted against the spacer so a stray control appended after the
-    // add would fail here rather than only in the order test.
-    const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
-    for (const projectId of ['p1', 'p2'] as const) {
-      const row = heading(container, projectId);
+      expect(controls).toEqual(['icon', 'fold', 'menu']);
+      // Far right is the spacer's doing, not a margin: everything after the
+      // `flex-1` span is pushed to the end of the row, and the menu is now the
+      // last of them -- so a stray control appended after it fails here.
       const children = [...row.children];
-      const add = row.querySelector(`[data-new-session-in-project="${projectId}"]`) as HTMLElement;
       const spacer = children.find((node) => node.className.includes('flex-1')) as HTMLElement;
       expect(spacer).not.toBeUndefined();
-      expect(children.indexOf(add)).toBeGreaterThan(children.indexOf(spacer));
-      expect(children.at(-1)).toBe(add);
+      expect(children.at(-1)).toBe(row.querySelector(`[data-project-menu="${projectId}"]`));
     }
   });
 
-  it('creates in the project whose `+` was clicked, focused or not', () => {
+  it('creates in the project whose menu was opened, focused or not', () => {
     // Argument value, in click order: an untested argument order on this exact
     // call was a review finding once, and the away project is the new path.
     const seen: string[] = [];
@@ -1064,12 +1050,16 @@ describe('SessionList project controls', () => {
       focusedSessionId: 'b1',
       onAddInProject: (project: Project) => seen.push(project.name),
     });
-    act(() => {
-      (container.querySelector('[data-new-session-in-project="p1"]') as HTMLElement).click();
-    });
-    act(() => {
-      (container.querySelector('[data-new-session-in-project="p2"]') as HTMLElement).click();
-    });
+    for (const projectId of ['p1', 'p2'] as const) {
+      openProjectMenu(container, projectId);
+      act(() => {
+        (
+          container.querySelector(
+            `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
+          ) as HTMLElement
+        ).click();
+      });
+    }
     expect(seen).toEqual(['alpha', 'beta']);
   });
 });
@@ -1106,6 +1096,10 @@ describe('SessionList project menu', () => {
     // that a derived project has nothing to remove -- see the note at the
     // menu itself for which half of that expired and which half did not.
     expect(items.map((i) => i.getAttribute('data-project-menu-item'))).toEqual([
+      // FIRST, and first on purpose: it is the only item here that makes
+      // something, and the panel focuses its first item -- so `...`+Enter is
+      // the gesture that pays for the click the move off the heading cost.
+      'new-session',
       'collapse',
       'icon',
       'remove',
@@ -1216,21 +1210,47 @@ describe('SessionList new-project control', () => {
     expect(add?.getAttribute('title')).toBeNull();
   });
 
-  it('captions the per-project `+` with what it does, and no longer calls it a placeholder', () => {
+  it('names the per-project add for what it does, and no longer calls it a placeholder', () => {
     const entries = twoProjects();
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
     expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
-    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]');
-    expect(add?.getAttribute('title')).toBe('New session in beta');
+    openProjectMenu(container, 'p2');
+    const add = container.querySelector<HTMLButtonElement>(
+      '[data-project-menu-panel="p2"] [data-project-menu-item="new-session"]',
+    );
+    // No native `title`, for the reason the header `+` lost its own: a caption
+    // that opens on hover and nothing else is unreachable from a keyboard. It
+    // needs no tooltip either -- the item is a word, and the project it means
+    // is the panel it is inside (`<project> actions`).
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(add?.textContent).toBe('New session');
   });
 
-  it('captions the per-project `+` with the refusal when the source cannot create', () => {
+  /**
+   * Audit item 1 (S2). This is the assertion that had to move surfaces --
+   * TWICE. The refusal used to be a `title` while `aria-label` promised a new
+   * session unconditionally, so a keyboard user pressed the button, got
+   * silence, and had no route to the reason; the tooltip was that route.
+   *
+   * It does not need to be a tooltip any more. The reason it was one is that
+   * an icon button has nowhere to put a sentence -- and this control is a menu
+   * item now, which has. Visible text is the surface that needs no hover, no
+   * focus and no assistive technology to reach.
+   */
+  it('prints the refusal on the item itself when the source cannot create', () => {
     const { container } = mountWith(twoProjects(), {
       focusedSessionId: 'b1',
       newSessionDecline: 'factory has no new-session command',
     });
-    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project]');
-    expect(add?.getAttribute('title')).toBe('factory has no new-session command');
+    openProjectMenu(container, 'p1');
+    const add = container.querySelector<HTMLButtonElement>(
+      '[data-project-menu-item="new-session"]',
+    );
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(add?.textContent).toContain('factory has no new-session command');
+    // Still pressable: refusing on click and saying why is honest, while a
+    // control that cannot be pressed just reads as broken.
+    expect(add?.disabled).toBe(false);
   });
 });
 
@@ -1544,5 +1564,143 @@ describe('removing a project, under a filter', () => {
       />,
     );
     expect(container.querySelector('[data-restore-project="p1"]')?.textContent).toContain('alpha');
+  });
+});
+
+/**
+ * A15.3: the restore strip is a momentary receipt for a momentary action, not
+ * a standing cost. It shows the moment a project is hidden, then lets itself
+ * go — and because it is now the OWN reason a hidden project's only route
+ * back could vanish, the filter menu grows a permanent "Hidden projects"
+ * section that never times out, so restoring stays reachable long after the
+ * strip has gone.
+ */
+describe('A15.3: the restore strip shows for a while, then goes — reachably', () => {
+  const alpha = makeProject({ id: 'p1', name: 'alpha' }, []);
+  const beta = makeProject({ id: 'p2', name: 'beta' }, []);
+  const entries: SessionEntry[] = [
+    { project: alpha, session: makeSession({ id: 'a1', title: 'one' }) },
+    { project: beta, session: makeSession({ id: 'b1', title: 'two' }) },
+  ];
+
+  it('shows the strip right away, then lets it go on its own — without un-hiding the project', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1']} onHideProject={noop} />,
+      );
+      expect(
+        container.querySelector('[data-restore-strip] [data-restore-project="p1"]'),
+      ).not.toBeNull();
+      await act(async () => {
+        vi.advanceTimersByTime(RESTORE_STRIP_VISIBLE_MS + 100);
+      });
+      expect(container.querySelector('[data-restore-strip]')).toBeNull();
+      // Gone from the strip, not un-hidden: the project is still absent from
+      // the live list, and `onHideProject` was never called by a timer.
+      expect(container.querySelector('[data-project-id="p1"]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives the strip a fresh window when another project is hidden mid-countdown', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1']} onHideProject={noop} />,
+      );
+      await act(async () => {
+        vi.advanceTimersByTime(RESTORE_STRIP_VISIBLE_MS - 500);
+      });
+      expect(container.querySelector('[data-restore-strip]'), 'not yet expired').not.toBeNull();
+      // A second project is hidden with the first countdown almost done.
+      rerender(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1', 'p2']} onHideProject={noop} />,
+      );
+      // Past the FIRST countdown's original deadline -- still showing, both
+      // named, because the second hide reset the clock rather than letting
+      // the first one expire underneath it.
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+      });
+      const strip = container.querySelector('[data-restore-strip]');
+      expect(strip, 'reset by the second hide').not.toBeNull();
+      expect(strip?.querySelector('[data-restore-project="p1"]')).not.toBeNull();
+      expect(strip?.querySelector('[data-restore-project="p2"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides the strip immediately once every hidden project is restored, never waiting out the timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(
+        <SessionList {...baseProps(entries)} hiddenProjects={['p1']} onHideProject={noop} />,
+      );
+      rerender(<SessionList {...baseProps(entries)} hiddenProjects={[]} onHideProject={noop} />);
+      await act(async () => {
+        vi.advanceTimersByTime(0);
+      });
+      expect(container.querySelector('[data-restore-strip]')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('carries its own shortcut to the filter menu on the SAME row as the chips, right-aligned', () => {
+    const onFilterMenuToggle = vi.fn();
+    const { container } = render(
+      <SessionList
+        {...baseProps(entries)}
+        hiddenProjects={['p1']}
+        onHideProject={noop}
+        onFilterMenuToggle={onFilterMenuToggle}
+      />,
+    );
+    const strip = container.querySelector('[data-restore-strip]');
+    const chip = strip?.querySelector('[data-restore-project="p1"]');
+    const shortcut = strip?.querySelector('[data-restore-strip-more]');
+    expect(shortcut, 'the shortcut hint').not.toBeNull();
+    // SAME ROW: siblings under the same parent, not a second line stacked
+    // below the chips in a wrapper of its own.
+    expect(shortcut?.parentElement).toBe(chip?.parentElement);
+    fireEvent.click(shortcut as HTMLElement);
+    expect(onFilterMenuToggle).toHaveBeenCalledWith(true);
+  });
+
+  it('lists hidden projects in the filter menu too — the route that survives the strip going away', async () => {
+    vi.useFakeTimers();
+    try {
+      const onHideProject = vi.fn();
+      const { container } = render(
+        <SessionList
+          {...baseProps(entries)}
+          hiddenProjects={['p1']}
+          onHideProject={onHideProject}
+          filterMenuOpen
+        />,
+      );
+      // Let the strip itself expire.
+      await act(async () => {
+        vi.advanceTimersByTime(RESTORE_STRIP_VISIBLE_MS + 100);
+      });
+      expect(container.querySelector('[data-restore-strip]')).toBeNull();
+      // The filter menu's own copy is untimed and still there.
+      const inMenu = container.querySelector('[data-filter-menu] [data-restore-project="p1"]');
+      expect(inMenu, 'the surviving route').not.toBeNull();
+      fireEvent.click(inMenu as HTMLElement);
+      expect(onHideProject.mock.calls).toEqual([[expect.objectContaining({ id: 'p1' }), false]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says nothing about hidden projects in the filter menu when nothing is hidden', () => {
+    const { container } = render(
+      <SessionList {...baseProps(entries)} hiddenProjects={[]} filterMenuOpen />,
+    );
+    expect(container.querySelector('[data-filter-hidden-projects]')).toBeNull();
   });
 });

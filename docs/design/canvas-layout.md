@@ -4,115 +4,9 @@ VAM = **VIM Agent Management**. This version was locked down from the
 2026-08-27 interview session.
 Constraint number one: **keyboard-driven control, mouse kept to a minimum.**
 
-## 1. Where vam sits
-
-A separate, independent app — not a fork of orca, and not a client of orca's
-backend. Orca was read during design as prior art for being CLI-agnostic and
-keyboard-first, and its keybinding vocabulary shaped the naming in
-`src/renderer/keyboard/chords.ts` (§4.1) — that is the whole of what it
-contributes. vam implements its own session model, its own adapters and its
-own remote control end to end; nothing in vam calls orca's backend or ships
-any of its code.
-
-```
-vam (web · Vite + React + ReactFlow)
- └─ adapter factory → http://127.0.0.1:4680/api/*   (read and write)
-```
-
-Web first, Electron later ⇒ **the data-access layer must be separated from
-components from the very first commit**, or wrapping it in Electron later will
-mean rewriting the UI.
-
-### 1.1 Stack
-
-**React 19 + Vite**, **`@xyflow/react`** (ReactFlow) for the canvas, and
-**Tailwind CSS v4** with vam's own tokens (`src/styles.css`) — no pre-built
-component library. Chosen for a canvas-heavy, keyboard-first UI on their own
-merits: ReactFlow is a maintained node/edge renderer with pan, zoom and a
-minimap already built in, and Tailwind's utility classes keep hand-written
-components fast to iterate on without a design-system dependency.
-
-Other libraries in `package.json`: **`cmdk`** for the command palette (§4,
-`Mod-k`), **`zustand`** for state, **`lucide-react`** for icons, **`clsx`** +
-**`tailwind-merge`** for composing class names, and **`emoji-picker-react`**
-for the icon grid (a lazy chunk, ~307kB). No `shadcn`, `radix-ui`,
-`class-variance-authority` or similar component layer — every component here
-is hand-written on vam's own tokens.
-
-## 2. A shared model, read for comparison
-
-Not invented — the idea that a session can reach a point where it is
-genuinely waiting on a person, not just running, is not unique to vam. Two
-other systems were read for how they name it, purely as a comparison; neither
-is a dependency, and only the `factory` row describes something vam actually
-talks to:
-
-| shared concept | orca (read for comparison only) | factory (implemented) |
-|---|---|---|
-| project | `worktree-catalog`, `repo`, `folder-workspace` | `tasks` + worktree |
-| session | `orchestration.runList` / `runShow` | `sessions`, `epics` |
-| running agent (`●`) | `orchestration.workerList`, `agent-status-*` | `agents`, `dispatches` |
-| **decision** | `orchestration.gateList` / `gateResolve` | `waivers`, `gate-outcome`, plan sign-off |
-
-## 3. Layout
-
-ReactFlow canvas. **Nested groups**: project is the parent node, session is
-the child. **No arrows** between sessions — the canvas is a control panel, not
-a diagram. Design scale: **3–5 repos × 1–3 sessions**.
-
-```
-┌─ VAM ─────────────────────────────────────────────────────── ⣾ 4 agents ─┐
-│                                                                           │
-│  ╔═ factory ═══════════════════════════════╗  ╔═ vam ═════════════════╗   │
-│  ║ ┌─ task-1 · epic-2 ─────────── ●3 ─┐    ║  ║ ┌─ epic-1 ──── ●1 ─┐  ║   │
-│  ║ │ ⣾ coder · round 2 · sonnet · 4m │     ║  ║ │ ⣾ planner · 1m   │  ║   │
-│  ║ ├─────────────────────────────────┤     ║  ║ ├──────────────────┤  ║   │
-│  ║ │ ▸ reviewer                      │     ║  ║ │ ▸ plan draft     │  ║   │
-│  ║ │   in : diff 340 lines, 6 files  │     ║  ║ │   in : goal      │  ║   │
-│  ║ │   out: 2 findings (1×S2)        │     ║  ║ │   out: 7 tasks   │  ║   │
-│  ║ │ ▸ verifier                      │     ║  ║ │ ▸ spec-review    │  ║   │
-│  ║ │   in : S2 "race in queue"       │     ║  ║ │   in : plan-v1   │  ║   │
-│  ║ │   out: confirmed                │     ║  ║ │   out: 2×S2      │  ║   │
-│  ║ │ ▸ gate                     ⏸    │     ║  ║ │ ▸ sign-off  ⏸    │  ║   │
-│  ║ │   in : 1 S2 not fixed           │     ║  ║ │   in : plan-v2   │  ║   │
-│  ║ │   out: — waiting on you —       │     ║  ║ │   out: — waiting —│  ║   │
-│  ║ └─────────────────────────────────┘     ║  ║ └──────────────────┘  ║   │
-│  ║ ┌─ task-2 ─────────────────── ●0 ─┐     ║  ╚═══════════════════════╝   │
-│  ║ │ ✓ merged · 2h ago               │      ║                              │
-│  ║ └─────────────────────────────────┘      ║                              │
-│  ╚═════════════════════════════════════════╝                              │
-├───────────────────────────────────────────────────────────────────────────┤
-│ Select   factory/task-1   ⏸ 2 waiting on you   hjkl f / gt  yy  ^K        │
-└───────────────────────────────────────────────────────────────────────────┘
-```
-
-### Session node
-
-- **Header**: id · epic · `●N` agents running.
-- **Activity line** (1 line, truncated, spinner when live). Source: a
-  per-worker heartbeat event on the factory's side (see §5.1 for the
-  measured SSE path this rides on).
-- **Exactly the 3 most recent decisions**, each with its own `in:` / `out:`
-  pair of lines. A step = **a decision point**, not every agent turn, not
-  every phase.
-- The agent's full, detailed progress **does not surface** — only `Enter`
-  shows it.
-
-### Ordering
-
-Default auto-layout (priority: waiting-on-you → running → newest).
-
-**Nodes are not moved by hand.** Dragging and the stored positions it wrote
-were removed: a saved position freezes a node where it was left, and the
-ordering above only means anything if it can still happen after the page is
-open, which is the only time anyone is watching. The canvas sets
-`nodesDraggable={false}` and every node is built with `draggable: false`.
-
-**The icon is stored per user, for a reason of its own.** The factory has no
-route to store an icon, and that is not the answer — nobody asked it. An icon
-is about how you like to look at the work, not a fact about the work; it
-belongs to the browser, and §3 already said it: saved per user, **and does
-not go into the event log**.
+> The sections that once described the node-graph canvas (stack, the shared
+> orca/factory model, node layout) were cut in the 0.2 migration; this
+> document now starts substantively at §4.
 
 ## 4. Keyboard
 
@@ -125,12 +19,12 @@ NORMAL; Insert is the resting state of the response pane.
 | key | action |
 |---|---|
 | `j` `k` (Select) | up and down the SESSION LIST, in the order the sidebar prints |
-| `h` `l` (Select) | left and right across the canvas — **computed geometrically at press time** |
+| `h` `l` (Select) | previous / next tab of the active project — **a closed ring that wraps** |
 | `h j k l` (Insert) | the options of an open question; `h` alone returns to Select |
-| `f` | shows a jump label on every node, type the label to land there |
+| `f` | shows a jump label on every sidebar row (first 20), type the label to land there |
 | `/` `n` `N` | search by session/task name |
 | `gt` `gT` | move to next / previous project |
-| `gg` `G` | first / last node |
+| `gg` `G` | first / last session in the sidebar |
 | `Enter` | opens detail (the agent's full process) |
 | `yy` | **copies the command you need to run by hand to the clipboard** |
 | `Ctrl-K` | command palette |
@@ -142,11 +36,12 @@ NORMAL; Insert is the resting state of the response pane.
 | `Mod-1` … `Mod-9` | a **position**, in whichever pane has the keyboard: a session in the sidebar, a tab in the response pane (`Mod-9` = the LAST session) |
 | `1` … `9` (in an open question) | marks the option beside that number |
 
-**Vertical is the LIST; horizontal is the canvas.** `j`/`k` walk the sidebar's
+**Vertical is the LIST; horizontal is the TAB STRIP.** `j`/`k` walk the sidebar's
 own order, so the cursor moves through the sessions in the order they are
 printed rather than through whatever happens to be geometrically below.
-`h`/`l` stay geometric, computed from real coordinates at press time and not
-from a fixed index, because across a row there is no list to follow.
+`h`/`l` walk previous/next tab of the active project (`projectTabIds`), a
+closed ring that wraps — including the one-tab ring — unlike `j`/`k`'s
+open-ended list, which does not.
 
 **The digit row means a position, in whatever the keyboard is pointed at.**
 That is the rule; the table above is only today's reading of it. Two earlier
@@ -211,7 +106,7 @@ registry keyed by action id rather than scattered `onKeyDown` handlers,
 conflict detection between bindings, a double-tap concept (`gg`/`yy`'s
 shape), gating a binding by which layer is focused, and arbitrating who gets
 a keystroke when a terminal is present. vam's own implementation of each of
-those (`resolveChord`, `bindingConflict`, `PREFIXES`, the mode read in
+those (`resolveChord`, `bindingClashes`, `PREFIXES`, the mode read in
 `Canvas.tsx`) is independent code, written for vam's own data shapes; reading
 orca only fixed the names for problems vam had to solve anyway.
 
@@ -284,9 +179,18 @@ missing, so a bad write into the event log corrupts the factory's memory —
 it is not a UI bug, and the write path is staged carefully rather than
 wired up all at once.
 
-**Epic 1 stopped at: canvas read-only, one factory source.** Nothing was
+**Epic 1 stopped at: read-only, one factory source.** Nothing was
 written yet, so nothing could be corrupted yet, and the layout got looked at
 with real eyes before it was wired to the write path.
+
+**The icon is stored per user, for a reason of its own.** The factory has no
+route to store an icon, and that is not the answer — nobody asked it. An icon
+is about how you like to look at the work, not a fact about the work; it
+belongs to the browser: saved per user, and does not go into the event log.
+
+Web first, Electron later ⇒ **the data-access layer must be separated from
+components** from the very first commit, or wrapping it in Electron later
+would mean rewriting the UI.
 
 ### 5.1 Epic 2 — write path wired up
 
@@ -295,8 +199,8 @@ Reads **do not** wait on SSE. `GET /api/overview` was already returning
 right away; SSE only changes how the data *arrives* (poll → push), not
 whether there is data at all.
 
-SSE landed as two files, not one: `src/adapter/stream.ts` (reads
-`hello`/`change` frames, no React dependency) and `src/adapter/useCanvas.ts`
+SSE landed as two files, not one: `src/renderer/adapter/stream.ts` (reads
+`hello`/`change` frames, no React dependency) and `src/renderer/adapter/useCanvas.ts`
 (wires that stream into the React lifecycle: calls `load()` on mount, on
 `hello`, and on a valid `change`). Split into two because the frame reader
 has no React dependency, so it could be tested and land ahead of
@@ -327,7 +231,7 @@ vite dev proxy against a real factory server:**
      `{"event":"error","readyState":2,"tMs":3704}`.
 
    The source of that "give up" is the vite dev proxy sitting between the
-   browser and the server, not vam's client: `src/adapter/stream.ts` is
+   browser and the server, not vam's client: `src/renderer/adapter/stream.ts` is
    correct as written.
 3. `heartbeatMs` and `floorMs` — carried in the `hello` frame — are **not
    observable** from the browser: keep-alive is an SSE comment, and

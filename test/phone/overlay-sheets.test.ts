@@ -45,6 +45,29 @@ describe('the overlay sheet rules', () => {
     expect(sheetRules).toMatch(/height: auto;/);
   });
 
+  /**
+   * THE ONE ICON-PICKER RULE THE DEFAULT GATE CAN SEE, and it is worth saying
+   * why it is only a scan.
+   *
+   * The picker is the single host here with a NESTED scroller, and what keeps
+   * its emoji grid reachable above an iOS keyboard is that the grid is a whole
+   * sheet tall: everything above it is then overflow, so the sheet can scroll
+   * those rows away (`styles.css` argues it where the rule lives). That is a
+   * layout fact and this file lays nothing out — `e2e/phone-shell.pw.ts`
+   * measures it at 390x844, and this line is bounded by that one.
+   *
+   * IT IS STILL WORTH THE LINE, because `test:e2e:phone` is NOT one of the
+   * commands this project's local gate runs: the regression this guards
+   * against reached CI having passed every check a person runs by hand. A scan
+   * that proves the declaration was TYPED is the only thing in the default
+   * suite that can notice it being deleted.
+   */
+  it('gives the icon picker grid a sheet of its own to scroll above', () => {
+    expect(sheetRules).toMatch(
+      /\.vam-phone \[data-icon-picker\] > \.epr-main \{[^}]*min-height: 85dvh;/,
+    );
+  });
+
   it('clears the home indicator at the edge it is now anchored to', () => {
     expect(sheetRules).toMatch(/padding-bottom: max\(12px, env\(safe-area-inset-bottom\)\);/);
   });
@@ -69,7 +92,7 @@ describe('the overlay sheet rules', () => {
     // The command palette and the key sheet are reached by `Ctrl-K` and `?`,
     // and there are no chords on a phone. A sheet geometry would make them
     // look reachable while nothing can open them.
-    expect(read('../../src/renderer/canvas/CommandPalette.tsx')).not.toContain('data-overlay-host');
-    expect(read('../../src/renderer/canvas/KeySheet.tsx')).not.toContain('data-overlay-host');
+    expect(read('../../src/renderer/panels/CommandPalette.tsx')).not.toContain('data-overlay-host');
+    expect(read('../../src/renderer/panels/KeySheet.tsx')).not.toContain('data-overlay-host');
   });
 });

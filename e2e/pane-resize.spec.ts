@@ -50,8 +50,37 @@ function sidebarAside(page: Page) {
   return page.locator('[data-pane-resize-handle="sidebar"]').locator('xpath=ancestor::aside[1]');
 }
 
+/**
+ * Which session currently holds the keyboard, read off `[data-row-cursor]`
+ * (`SessionList.tsx`) — the marker `onSidebarPick` (`Canvas.tsx`) drives on
+ * every row click via `focusSession`.
+ *
+ * NOT `[data-prompt-target]`. That chip lived in `DetailPanel`'s header and
+ * named the session on screen there; the header (status dot, title,
+ * project/epic/agent row) was removed whole in #259 ("remove the header,
+ * turn views into icons"), which deleted `[data-prompt-target]` with it
+ * (`git log -S'data-prompt-target'` on `DetailPanel.tsx`) — its own comment
+ * at the time said the guarantee "moves" to `[data-detail-identity]`, and
+ * #279 ("the pane loses its... identity row") removed that too, at the
+ * operator's further ask. Desktop carries no on-screen text naming the
+ * focused session's id anymore; `[data-row-cursor]`, the sidebar's own
+ * cursor bar, is what is left.
+ */
+async function focusedSessionId(page: Page): Promise<string | null> {
+  const row = page.locator('[data-session-row]:has([data-row-cursor])');
+  if ((await row.count()) === 0) return null;
+  return row.first().getAttribute('data-session-row');
+}
+
 function detailAside(page: Page) {
-  return page.locator('[data-pane-resize-handle="detail"]').locator('xpath=ancestor::aside[1]');
+  // Not `[data-pane-resize-handle="detail"]` — the 0.2 two-pane migration
+  // (#260, `src/renderer/prefs/panes.ts`) left exactly one PaneResizer
+  // (`pane="sidebar"`, `Canvas.tsx`); the detail pane fills whatever width
+  // the sidebar leaves and was never given a resize handle of its own — its
+  // `resizeHandle` prop is passed `null`. `[data-action-pane]` is the detail
+  // `<aside>`'s own root marker (`DetailPanel.tsx`), present whether or not
+  // any handle names it, so it is the stable way to find this pane.
+  return page.locator('[data-action-pane]');
 }
 
 test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', () => {
@@ -76,21 +105,20 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
     // pixel offset from the border — the substantive claim (a click close to
     // the border, on real content, still reaches it) is unchanged.
     await page.mouse.click(rowBox.x + rowBox.width - 4, rowY);
-    // Which session the click focused, read off the detail pane's header: the
-    // status bar's `project/session` cell was removed at the operator's
-    // request, and this is where that fact is stated now.
-    await expect(page.locator('[data-prompt-target]')).toHaveText('crosscheck-2');
+    // Which session the click focused — see `focusedSessionId`'s own
+    // comment for why this reads `[data-row-cursor]` and not a text chip.
+    await expect.poll(() => focusedSessionId(page)).toBe('crosscheck-2');
 
     // Return to a known baseline before probing the zone itself.
     await page.locator('[data-session-row="factory-sse-1"]').click();
-    await expect(page.locator('[data-prompt-target]')).toHaveText('factory-sse-1');
+    await expect.poll(() => focusedSessionId(page)).toBe('factory-sse-1');
 
     // (b) at `sidebarRight - 1`, inside the 4px zone — no focus change, no
     // text selection, and the zone (not the row underneath) is what the
     // browser says was actually hit.
-    const focusBefore = await page.locator('[data-prompt-target]').innerText();
+    const focusBefore = await focusedSessionId(page);
     await page.mouse.click(sidebarRight - 1, rowY);
-    await expect(page.locator('[data-prompt-target]')).toHaveText(focusBefore);
+    expect(await focusedSessionId(page)).toBe(focusBefore);
     const selectionAfterB = await page.evaluate(() => window.getSelection()?.toString() ?? '');
     expect(selectionAfterB).toBe('');
     const hitAtB = await page.evaluate(
@@ -99,20 +127,32 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
     );
     expect(hitAtB).toBe('sidebar');
 
-    // (c) 6px to the canvas side of the same border — reaches the canvas,
-    // never the handle and never the sidebar's own <aside>.
+    // (c) 6px to the detail side of the same border — reaches the DETAIL
+    // pane's own content, never the handle. NOT "reaches the canvas,
+    // never... the sidebar's own <aside>" (this check's wording before the
+    // two-pane migration, #260): that phrasing is from the three-pane world,
+    // where a canvas column sat between the sidebar and the detail pane and
+    // a point just past the zone landed in neither `<aside>`. `panes.ts`'s
+    // own header records that the canvas, and the reservation math that
+    // protected it, are gone — "the detail pane... fills everything to the
+    // sidebar's right" — so this point now lands INSIDE the detail pane's
+    // `<aside>` (`[data-action-pane]`, `DetailPanel.tsx`) directly, by
+    // construction, not beside it. Measured: `insideAside` (any `<aside>`,
+    // the old assertion's own check) is `true` here today, which is why this
+    // now asks the more specific question — the DETAIL aside, not merely
+    // some aside — rather than loosen the old boolean to match.
     const reachC = await page.evaluate(
       ([x, y]) => {
         const el = document.elementFromPoint(x, y);
         return {
           hitHandle: el?.closest('[data-pane-resize-handle]') !== null,
-          insideAside: el?.closest('aside') !== null,
+          insideDetailAside: el?.closest('[data-action-pane]') !== null,
         };
       },
       [sidebarRight + 6, rowY] as const,
     );
     expect(reachC.hitHandle).toBe(false);
-    expect(reachC.insideAside).toBe(false);
+    expect(reachC.insideDetailAside).toBe(true);
 
     // (d) no overlay at rest, and none survives a completed drag's mouseup.
     expect(await page.locator('[data-pane-resize-overlay]').count()).toBe(0);
@@ -125,50 +165,21 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
     await page.mouse.up();
     expect(await page.locator('[data-pane-resize-overlay]').count()).toBe(0);
 
-    // --- detail pane's left border (e) — the same three probes, mirrored.
-    // The detail pane has no click-to-focus row, so the positive/negative
-    // proof here is which element the browser says the point actually hit —
-    // the same technique (c) already used, applied on both sides of the zone
-    // so a vanished handle cannot pass this trivially (§ falsifier note).
-    const detailBox = await requireBox(detailAside(page));
-    const detailLeft = detailBox.x;
-    const detailY = detailBox.y + 40; // inside the header, well clear of both edges
-
-    // (a)-equivalent: 6px inside the pane, on real pane content.
-    const reachDetailContent = await page.evaluate(
-      ([x, y]) => {
-        const el = document.elementFromPoint(x, y);
-        return {
-          insideDetailAside: el?.closest('[data-action-pane]') !== null,
-          hitHandle: el?.closest('[data-pane-resize-handle]') !== null,
-        };
-      },
-      [detailLeft + 6, detailY] as const,
-    );
-    expect(reachDetailContent.insideDetailAside).toBe(true);
-    expect(reachDetailContent.hitHandle).toBe(false);
-
-    // (b)-equivalent: inside the zone.
-    const hitDetailZone = await page.evaluate(
-      ([x, y]) => document.elementFromPoint(x, y)?.getAttribute('data-pane-resize-handle') ?? null,
-      [detailLeft + 1, detailY] as const,
-    );
-    expect(hitDetailZone).toBe('detail');
-
-    // (c)-equivalent: 6px to the canvas side — reaches the canvas, not the
-    // handle and not the detail <aside>.
-    const reachDetailCanvas = await page.evaluate(
-      ([x, y]) => {
-        const el = document.elementFromPoint(x, y);
-        return {
-          hitHandle: el?.closest('[data-pane-resize-handle]') !== null,
-          insideAside: el?.closest('aside') !== null,
-        };
-      },
-      [detailLeft - 6, detailY] as const,
-    );
-    expect(reachDetailCanvas.hitHandle).toBe(false);
-    expect(reachDetailCanvas.insideAside).toBe(false);
+    // There used to be a mirrored "(e) detail pane's own left border" block
+    // here, probing `[data-pane-resize-handle="detail"]` as an independent
+    // zone from the far side. It is gone, not merely renamed: the two-pane
+    // migration (#260) left exactly one PaneResizer (`detailAside`'s own
+    // comment, above), so "the sidebar's right border" and "the detail
+    // pane's left border" are now the SAME physical boundary and the SAME
+    // element, not two handles with a canvas between them — a second,
+    // independent probe of it would either duplicate (a)-(d) above or assert
+    // something the current DOM cannot produce (a `data-pane-resize-handle`
+    // value of `'detail'`, which no longer exists; an "outside every
+    // `<aside>`" gap on its far side, which (c) above just measured is now
+    // false). The one thing that block established beyond (a)-(d) — that
+    // content just past the zone, approached from the detail side, is real
+    // detail-pane content — (c) now asserts directly, from the sidebar side,
+    // since there is no longer a second side to approach it from.
   });
 
   test('hover tints the handle and the computed cursor is col-resize, both directions (AC-3f)', async ({
@@ -249,7 +260,25 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
 
     const storedBefore = await page.evaluate(() => localStorage.getItem('vam.prefs.v1'));
 
-    await page.setViewportSize({ width: 700, height: 800 });
+    // 520px, not 700 — two facts pin this to an EXACT width, not merely a
+    // narrow one. (1) `layoutWidths` (`panes.ts`) only floors both panes at
+    // their MIN at or below `SIDEBAR_MIN + DETAIL_MIN = 520`
+    // (`dragCeiling`'s own comment) — 880 before the two-pane migration
+    // (#260) folded the canvas's own reservation out of the formula; this
+    // test's 700 predates that migration (last touched at #229) and, at
+    // today's threshold, sits ABOVE it, so the sidebar rendered at its
+    // dragged 324px, not SIDEBAR_MIN. (2) `usePhoneViewport`
+    // (`phone/viewport.ts`) switches the WHOLE SHELL to the phone layout —
+    // no `[data-pane-resize-handle]` at all — at `PHONE_MAX_WIDTH = 519`,
+    // one pixel BELOW this same 520: "one pixel under
+    // [SIDEBAR_MIN + DETAIL_MIN], the columns... cannot exist" (that file's
+    // own comment). So 520 is not "narrow enough", it is the single width at
+    // which the desktop shell still renders AND both panes are already
+    // floored — verified empirically: 500 renders the phone shell instead
+    // (this test then times out below, at `sidebarAside`, waiting for a
+    // resize handle a phone-width viewport never draws) and 700 renders
+    // desktop at the dragged, un-floored width.
+    await page.setViewportSize({ width: 520, height: 800 });
     // Let the resize listener's re-render settle.
     await page.waitForTimeout(150);
 
@@ -288,9 +317,26 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
     const hoverPath = path.join(IMAGES_DIR, 'pane-resize-hover.png');
     await page.screenshot({ path: hoverPath });
 
-    // wide — sidebar dragged wider than 264, detail dragged narrower than 408.
+    // wide — sidebar dragged wider than 264, which leaves the detail pane
+    // correspondingly narrower: the two-pane layout has no canvas absorbing
+    // the difference anymore (`panes.ts` — "the detail pane... fills
+    // everything to the sidebar's right"), so widening the ONE shared
+    // handle is the whole story now. This used to drag a SECOND, independent
+    // `[data-pane-resize-handle="detail"]` afterward, to narrow the detail
+    // pane further against a literal `408` (`DEFAULT_PANES.detail`, a
+    // number that only ever meant anything when a canvas gave the detail
+    // pane its own fixed default width to shrink from). Neither survives
+    // the two-pane migration (#260): there is no second handle to drag
+    // (`detailAside`'s own comment above has the full history), and at this
+    // viewport the detail pane's UNDRAGGED width is already nowhere near
+    // 408 — it is whatever the window leaves once the sidebar is priced,
+    // routinely four figures at a desktop size. So "narrower" is now asked
+    // of the one real lever this UI has: narrower than its own width before
+    // the drag, not narrower than a constant that stopped describing
+    // anything this pane renders.
     await page.mouse.move(10, 10);
     const sHandle = await requireBox(page.locator('[data-pane-resize-handle="sidebar"]'));
+    const detailBeforeDrag = await requireBox(detailAside(page));
     await page.mouse.move(sHandle.x + sHandle.width / 2, sHandle.y + sHandle.height / 2);
     await page.mouse.down();
     await page.mouse.move(sHandle.x + sHandle.width / 2 + 120, sHandle.y + sHandle.height / 2, {
@@ -298,18 +344,10 @@ test.describe('pane resize — real-browser probes (vam-pane-resize/task-4)', ()
     });
     await page.mouse.up();
 
-    const dHandle = await requireBox(page.locator('[data-pane-resize-handle="detail"]'));
-    await page.mouse.move(dHandle.x + dHandle.width / 2, dHandle.y + dHandle.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(dHandle.x + dHandle.width / 2 + 100, dHandle.y + dHandle.height / 2, {
-      steps: 10,
-    });
-    await page.mouse.up();
-
     const sidebarWide = await requireBox(sidebarAside(page));
     const detailNarrow = await requireBox(detailAside(page));
     expect(sidebarWide.width).toBeGreaterThan(264);
-    expect(detailNarrow.width).toBeLessThan(408);
+    expect(detailNarrow.width).toBeLessThan(detailBeforeDrag.width);
 
     await page.mouse.move(10, 10); // park the pointer away from any handle
     const widePath = path.join(IMAGES_DIR, 'pane-resize-wide.png');

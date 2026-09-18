@@ -1,8 +1,8 @@
 /**
  * The two things that are yours rather than the factory's.
  *
- * §3 already decided this and the code had not caught up: "draggable and
- * remembers position. Position is saved per user, **and does not go into
+ * The design already decided this and the code had not caught up: "draggable
+ * and remembers position. Position is saved per user, **and does not go into
  * the event log**." Where you dragged a card and which emoji you put on a
  * session are facts about how you like to look at the work — they are not
  * facts about the work, so they must not become events. The factory is right
@@ -27,18 +27,64 @@ import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
 import {
-  ALL_VISIBLE,
-  type ColumnId,
-  clampPaneWidth,
-  DEFAULT_ORDER,
-  DEFAULT_PANES,
-  LAYOUTS,
-  type Layout,
-  type LayoutName,
-  type Pane,
-} from './panes.js';
+  clampEditorIndent,
+  DEFAULT_EDITOR_HIGHLIGHT,
+  DEFAULT_EDITOR_INDENT,
+  readEditorHighlight,
+  setActiveEditorSettings,
+} from './editor.js';
+import { clampStoredTreeWidth } from './files-tree-width.js';
+import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
+import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
+import {
+  DEFAULT_PROMPT_SUBMIT_KEY,
+  type PromptSubmitKey,
+  readPromptSubmitKey,
+  setActivePromptSubmitKey,
+} from './submit-key.js';
+import {} from './tab-indicators.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  readTerminalFontSize,
+  setActiveTerminalFontSize,
+} from './terminal-font.js';
+import {
+  DEFAULT_TERMINAL_SCHEME_PREF,
+  readTerminalSchemePref,
+  setActiveTerminalScheme,
+  type TerminalSchemePref,
+} from './terminal-scheme.js';
+import { DEFAULT_NARROW_VIEWS, readNarrowViews, setActiveNarrowViews } from './view-width.js';
 
 const KEY = 'vam.prefs.v1';
+
+/**
+ * A FIELD THAT WAS RETIRED, AND WHY IT NEEDED NO MIGRATION.
+ *
+ * `dismissedSessions` shipped in PR 248: a field here, a reader branch, a
+ * source-key migration, a TTL exemption, three exported helpers
+ * (`isSessionDismissed`, `setSessionDismissed`, `applySessionDismissals`) and
+ * its own test file — and no caller anywhere in `src/`. No surface ever
+ * dismissed a row and no model was ever filtered by one. Its doc described,
+ * in the present tense, a capability the operator did not have.
+ *
+ * SO NOTHING IS BEING TAKEN FROM ANYBODY, and that is the difference from
+ * `RETIRED_TOKENS` and `LEGACY_GROUND_TOKEN` further down, which are read,
+ * written back and applied precisely because an operator CAN have a value
+ * under them. There was no write path here to produce a stored
+ * `dismissedSessions` at all: `readPrefs` builds an explicit object field by
+ * field, so a key nobody wrote is a key nobody reads, and the next write
+ * simply does not carry it.
+ *
+ * The problem it was built for is real and is still open: a background row a
+ * source reports `done`/`failed` has no job left to close, so `closeSession`
+ * refuses it forever (`stop.ts`'s `already-finished`) and the row sits in the
+ * sidebar for up to `BACKGROUND_WINDOW_MS` (`agents.ts`: 14 days). Solving it
+ * needs an affordance on the row and a route back — a stored list on its own
+ * was never the hard half, and keeping the unused half was not progress
+ * toward the other one. `test/prefs/prefs.no-write-only-field.test.ts` is what
+ * stops the next one shipping the same way.
+ */
 
 /**
  * How long an untouched entry survives.
@@ -87,77 +133,6 @@ export type Theme = 'dark' | 'light' | 'system';
 
 /** Dark is the default: it is the theme vam was designed in (artboard 1a). */
 export const DEFAULT_THEME: Theme = 'dark';
-
-/**
- * How much of the canvas a focused session's row should take up.
- *
- * Lives here rather than in `Canvas.tsx` because it is now a stored value and
- * the store is what owns a default; `FOCUS_VIEWPORT_SHARE` there is this
- * constant, re-exported, so there is still exactly one 0.6 in the tree.
- */
-export const DEFAULT_FOCUS_SHARE = 0.6;
-
-/**
- * The range the picker offers and every read clamps into.
- *
- * Below 0.3 the row is a speck in the middle of an empty canvas; above 1 the
- * derived padding goes negative and ReactFlow fits the row past the edges of
- * the viewport, which is the one input that makes the canvas draw nothing at
- * all. Both ends are therefore correctness bounds, not taste.
- */
-export const FOCUS_SHARE_MIN = 0.3;
-export const FOCUS_SHARE_MAX = 1;
-
-/**
- * Off: the canvas never frames a session by itself, it only follows focus.
- *
- * A value outside the range above rather than a second boolean field, because
- * a boolean beside a share is two ways to say the same thing and they can
- * disagree in storage. Zero reads literally as "the session takes none of the
- * canvas", which is not a framing anyone could want, so it is free to mean
- * this instead.
- *
- * It exists because the operator asked for the automatic framing to be removed
- * once already. Whoever wants it gone again should be able to say so here
- * rather than by asking for the code to be deleted a second time.
- */
-export const FOCUS_SHARE_OFF = 0;
-
-/**
- * Total, like `clampPaneWidth`: a stored share can be a string an older vam
- * wrote, a `NaN` from a hand-edited payload, or an Infinity from devtools, and
- * none of those may reach `focusPadding` — a `NaN` padding is a canvas that
- * renders nothing and says nothing.
- *
- * `FOCUS_SHARE_OFF` passes through whole. It is the one value below the
- * minimum that is not garbage, and clamping it up to 0.3 would make "off"
- * unstorable.
- */
-export function clampFocusShare(share: number): number {
-  if (typeof share !== 'number' || Number.isNaN(share)) {
-    return DEFAULT_FOCUS_SHARE;
-  }
-  if (share === FOCUS_SHARE_OFF) {
-    return FOCUS_SHARE_OFF;
-  }
-  return Math.min(FOCUS_SHARE_MAX, Math.max(FOCUS_SHARE_MIN, share));
-}
-
-/**
- * Where a stepper lands when it is asked to move to `next`.
- *
- * Off and the smallest useful share are ADJACENT: there is nothing between
- * them, so a step into the gap means "cross it" rather than "clamp back to the
- * side you came from". Without this the control is a one-way door — the minus
- * button at 30% would ask for 25%, `clampFocusShare` would return 30%, and off
- * would be reachable only by typing a zero into the box.
- */
-export function nudgeFocusShare(current: number, next: number): number {
-  if (next >= FOCUS_SHARE_MIN) {
-    return clampFocusShare(next);
-  }
-  return current === FOCUS_SHARE_OFF ? FOCUS_SHARE_MIN : FOCUS_SHARE_OFF;
-}
 
 /** The root text size of the `out` pane, in px.
  *
@@ -244,20 +219,6 @@ export type Prefs = {
   readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
   /**
-   * The share of the canvas WIDTH a focused session is framed to occupy, or
-   * `FOCUS_SHARE_OFF` for "never frame it". Same TTL exemption as `theme` and
-   * `panes`, for the same reason: it is a fact about how you like to read the
-   * canvas, not about a session.
-   *
-   * It spent a release marked deprecated, read by nothing: the framing it
-   * configured had been removed and deleting a persisted field is a data
-   * migration, not a delete. The operator then asked for framing back in a
-   * different shape — the whole session rather than one node, and this share
-   * rather than a constant — so the field is live again, at the meaning it
-   * always had. Keeping it was what made that a UI change and not a migration.
-   */
-  readonly focusViewportShare: number;
-  /**
    * The two dragged pane widths, always present — there are exactly two
    * panes and both are known at compile time, so this is not a keyed map.
    * Not pruned by the TTL `icons` gets: a pane width is a fact about the
@@ -265,14 +226,6 @@ export type Prefs = {
    * that already exempts `theme` (epic.md §4.1).
    */
   readonly panes: { readonly sidebar: number; readonly detail: number };
-  /**
-   * Which panes are drawn. NEXT TO `panes`, not inside it: a width is a
-   * number every path already clamps into `[MIN, MAX]`, and folding "not
-   * drawn" into that number would mean unpicking the clamp that keeps a
-   * garbage width from rendering as a pane that has vanished. Same TTL
-   * exemption as `panes` and `theme`, for the same reason.
-   */
-  readonly paneVisibility: Layout;
   /**
    * Source id → project id → the emoji you gave that project's heading.
    *
@@ -304,6 +257,35 @@ export type Prefs = {
    */
   readonly projectNames: Readonly<Record<string, Readonly<Record<string, RenameChoice>>>>;
   /**
+   * Source id → project id → the DIRECTORY vam asks GitHub from for that
+   * project's sessions. Absent everywhere by default.
+   *
+   * THE PROBLEM IT SOLVES. A session started from an orchestrator or a factory
+   * runs in that factory's directory, so `pull-requests.ts` -- which asks `gh`
+   * from the session's own cwd, deliberately and with no `--repo` -- reports
+   * the factory's pull requests while the work is in another repository
+   * entirely. The operator asked for a way to point it.
+   *
+   * PER PROJECT, BECAUSE A PROJECT IS A CWD. The README states it: "there is
+   * no stored project in vam: a project is live sessions grouped by their
+   * cwd." The thing being corrected here IS that cwd, so the correction
+   * belongs at the same grain. Per session it would let two sessions with an
+   * identical cwd disagree about which repository that cwd is, which is not
+   * inconvenient but incoherent.
+   *
+   * A DIRECTORY, NEVER AN `owner/name`. `pull-requests.ts` runs `gh` with no
+   * `--repo` on purpose: "naming a repository here would let a session's pane
+   * describe a repository the session is not in." A directory keeps that true
+   * -- `gh` still resolves the remote itself -- and only moves where vam
+   * stands to ask.
+   *
+   * TWO LEVELS for `projectNames`' reason: a project id is unique only within
+   * its source. Exempt from the icon TTL like `projectNames` is not: an
+   * override is about a directory on this machine, and the project it names
+   * can go quiet for a month without the operator's choice becoming wrong.
+   */
+  readonly prRepos: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
    * The filter popover's two origin toggles. Exempt from the icon TTL for the
    * same reason `theme` and `panes` are: it describes the person, not a
    * session that may have stopped existing.
@@ -334,26 +316,6 @@ export type Prefs = {
    * decision the operator made, not a session that has stopped existing.
    */
   readonly hiddenProjects: Readonly<Record<string, readonly string[]>>;
-  /**
-   * Source id → the ROW ids (`session.id`, i.e. `<sessionId>#<pid>` -- see
-   * `agents.ts`) of sessions the operator DISMISSED from the sidebar.
-   *
-   * THE SAME TWO-LEVEL SHAPE AND REASONING AS `hiddenProjects`, one level
-   * down: a session row is unique only within its source, and this list is
-   * what makes a dismissal stick, reversibly, without deleting anything a
-   * source could report. It exists for a case `hiddenProjects` cannot cover:
-   * a BACKGROUND row the source itself already reports `done` or `failed`
-   * (`stop.ts`'s `already-finished` refusal) has no running job left to
-   * close, so `closeSession` correctly refuses it forever -- and absent a
-   * way to dismiss the ROW, that refusal repeats on every attempt for up to
-   * `BACKGROUND_WINDOW_MS` (`agents.ts`: 14 days). Dismissing removes the
-   * row from view; it never ends a session, and never removes the project it
-   * belongs to. Exempt from the icon TTL for `hiddenProjects`'s reason: it
-   * records a decision the operator made, not a session that stopped
-   * existing -- and, unlike an icon, there is nothing here worth restoring
-   * to a default once forgotten.
-   */
-  readonly dismissedSessions: Readonly<Record<string, readonly string[]>>;
   /**
    * Source id → the groups the operator made in that source, in the order
    * they were made. UI "project"; see the vocabulary table in
@@ -427,12 +389,12 @@ export type Prefs = {
    * Where the operator was looking when they last quit: a SESSION, keyed by
    * its source, or `null` for "nothing was focused".
    *
-   * A session rather than a node id, which is the whole decision here. Node
-   * ids are derived from the layout and change whenever the model, the filters
-   * or the fold state change, so a stored node id would go stale between one
-   * launch and the next without anything having ended. A session id under its
-   * source is the identity `icons` and `renames` already store, and it is what
-   * a re-laid-out canvas can still be matched against (`focus.ts`).
+   * A session rather than a node id, which is the whole decision here. A
+   * remembered focus stores a session id under its source; candidates are
+   * rebuilt whenever the model, the filters or the fold state change, so a
+   * stored one goes stale rather than pointing at a session that has since
+   * ended. A session id under its source is the identity `icons` and
+   * `renames` already store, and it is the one `focus.ts` matches against.
    *
    * EXEMPT FROM THE ICON TTL, and for a different reason than `theme` is. This
    * IS a fact about a session, so the "not about the person" argument does not
@@ -462,20 +424,174 @@ export type Prefs = {
    * first is a fact about you, not about a session.
    */
   readonly detailTab: string | null;
+  /**
+   * How much of each turn's working the transcript column draws — `shown` or
+   * `collapsed`. See `progress.ts` for what the two differ by and for the one
+   * thing `collapsed` may never fold away.
+   *
+   * GLOBAL, not per pane and not per session, and the argument is about what
+   * the operator is choosing. This is a reading preference — how densely they
+   * want a transcript to read — the same kind of fact as `theme` and
+   * `outFontSize`, both of which are one value for the whole app. Per pane it
+   * would be an arrangement rather than a preference, and one the operator
+   * would have to re-make on every split (`Canvas.tsx` mounts a fresh
+   * `DetailPanel` per leaf, and a pane opened by a keystroke has no dialogue
+   * in which to be asked). Per session it would be worse: it would key a
+   * display choice to a session id, which the TTL prunes and which
+   * `lastFocus`'s own note explains cannot be relied on to keep meaning.
+   *
+   * Exempt from the icon TTL for the reason `theme` is: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly focusView: boolean;
+  /**
+   * Which key in the prompt box sends the draft — `enter` or `shift-enter`.
+   * The other one takes a newline; see `submit-key.ts` for why the two swap
+   * together and why this is a named pair rather than a boolean.
+   *
+   * GLOBAL, for the reason `focusView` is: there is one composer idiom and
+   * an operator's hands do not change between panes. Per pane it would be an
+   * arrangement they had to re-make on every split; per session it would key a
+   * habit to an id the TTL prunes.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly promptSubmitKey: PromptSubmitKey;
+  /**
+   * Whether the file editor colours what it can tokenise (`FilesTab.tsx`).
+   *
+   * GLOBAL, for the reason `focusView` is: it is a reading preference rather
+   * than an arrangement, and `Canvas.tsx` mounts one `FilesTab` per split leaf
+   * with no dialogue in which one pane could be asked. Exempt from the icon
+   * TTL like `theme`: it describes the person, not a session that stopped
+   * existing.
+   */
+  readonly editorHighlight: boolean;
+  /**
+   * How many SPACES one indent step is in the file editor — what Tab inserts,
+   * and what a JSON format indents by.
+   *
+   * A COUNT OF SPACES, never a tab byte, and `prefs/editor.ts` carries the
+   * whole argument: the editor's line-number gutter and its text share one
+   * line box, and a tab's RENDERED width is the one thing those two columns
+   * would answer differently.
+   */
+  readonly editorIndent: number;
+  /**
+   * How wide the Files tab's tree was last DRAGGED to, in pixels -- or `null`
+   * for "never dragged", which is a real value rather than a missing one.
+   *
+   * NULL IS THE ONE DESIGN DECISION HERE. The tree shipped as a CLAMPED SHARE
+   * (`w-[38%] min-w-[7.5rem] max-w-[13.5rem]`, `FilesTab.tsx`), which gives a
+   * wide pane a readable column and a narrow one a floor. A stored pixel width
+   * cannot express that, so a default number would have moved the tree on
+   * every narrow pane of every operator who never touched the handle --
+   * exactly what `DEFAULT_PANES` exists to avoid on the other two boundaries.
+   * `null` keeps the share; a drag replaces it with a number; nothing in
+   * between has to be migrated.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView` and
+   * `editorIndent` give at length: `Canvas.tsx` mounts one `DetailPanel` --
+   * hence one `FilesTab` -- per split leaf and `PhoneShell` mounts another,
+   * so per pane it would be an arrangement the operator had to re-make on
+   * every split, with no dialogue in which a pane opened by a keystroke could
+   * be asked. Per session it would key an arrangement to an id the TTL prunes.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   *
+   * Stored in PIXELS and clamped ONLY against `[TREE_WIDTH_MIN,
+   * TREE_WIDTH_MAX]` -- never against a container. See
+   * `files-tree-width.ts`'s header for why a container clamp on this write
+   * path would collapse the operator's width the first time they looked at
+   * another tab.
+   */
+  readonly filesTreeWidth: number | null;
+  /**
+   * How large the tmux screen is drawn, in pixels, out of the few sizes
+   * `prefs/terminal-font.ts` offers.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView`,
+   * `editorIndent` and `filesTreeWidth` give at length: `Canvas.tsx` mounts
+   * one `DetailPanel` -- hence one `TerminalTab` -- per split leaf and
+   * `PhoneShell` mounts another, so per pane it would be an arrangement the
+   * operator had to re-make on every split, with no dialogue in which a pane
+   * opened by a keystroke could be asked. Per session it would key a reading
+   * preference to an id the TTL prunes.
+   *
+   * IT IS NOT ONLY PAINT, which is what makes it unlike `outFontSize` next to
+   * it in this record: the size decides the advance of one character, and the
+   * advance decides how many COLUMNS tmux is told to compose at
+   * (`terminal-size.ts`). That is why `terminal-font.ts` is a store with a
+   * subscription rather than a custom property on the root -- see its header
+   * for the defect the property version would ship.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalFontSize: number;
+  /**
+   * The colours the tmux screen is drawn in: a named theme per APP theme,
+   * the colours moved off each, and how opaque the ground is painted.
+   *
+   * ITS OWN FIELD AND NOT A BUCKET OF `palette`, because it is not an
+   * override layer over the stylesheet: `prefs/terminal-scheme.ts` argues
+   * that the screen owns its colours the way an emulator does, and a scheme
+   * is a whole table of twenty-three rather than a few tokens moved off
+   * `styles.css`. Per app theme for the reason `palette` is -- a scheme is
+   * chosen against the screen it will be worn on.
+   *
+   * GLOBAL, not per pane and not per session, for the reason
+   * `terminalFontSize` above gives, and read the same way: a store with a
+   * subscription, because the resolved colours land on the screen's OWN
+   * element as custom properties (never on `:root`, or every surface that
+   * reads `--vam-ansi-*` would move with them), and an element's inline
+   * style is a React value.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly terminalScheme: TerminalSchemePref;
+  /**
+   * Whether the Response, PRs, Agents and Terminal views are capped at a
+   * readable line length instead of filling the pane.
+   *
+   * GLOBAL, not per pane and not per session, for the reason `focusView`,
+   * `editorIndent`, `filesTreeWidth` and `terminalFontSize` give at length:
+   * `Canvas.tsx` mounts one `DetailPanel` -- hence one of each of these four
+   * views -- per split leaf and `PhoneShell` mounts another, so per pane it
+   * would be an arrangement the operator had to re-make on every split, with
+   * no dialogue in which a pane opened by a keystroke could be asked. Per
+   * session it would key a reading preference to an id the TTL prunes.
+   *
+   * ONE FLAG FOR FOUR VIEWS BECAUSE IT IS ONE PROMISE: no more than eighty
+   * characters on a line. `prefs/view-width.ts` carries the whole argument,
+   * including why the Terminal belongs with the prose views and why the pixel
+   * maximum is nevertheless different there.
+   *
+   * IT IS NOT ONLY PAINT, the same way `terminalFontSize` above it is not:
+   * narrowing the Terminal shrinks the box `terminal-size.ts` divides by the
+   * measured advance, so tmux is told a smaller column count and a running
+   * agent's screen is re-wrapped. That is why the flag is a store with a
+   * subscription rather than a custom property on the root.
+   *
+   * Exempt from the icon TTL like `theme` and `panes`: it describes the
+   * person, not a session that stopped existing.
+   */
+  readonly narrowViews: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
   icons: {},
   theme: DEFAULT_THEME,
-  focusViewportShare: DEFAULT_FOCUS_SHARE,
   panes: DEFAULT_PANES,
-  paneVisibility: ALL_VISIBLE,
   projectIcons: {},
   projectNames: {},
+  prRepos: {},
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   hiddenProjects: {},
-  dismissedSessions: {},
   groups: {},
   collapsedGroups: {},
   renames: {},
@@ -485,6 +601,14 @@ export const EMPTY_PREFS: Prefs = {
   defaultProvider: DEFAULT_PROVIDER_ID,
   lastFocus: null,
   detailTab: null,
+  focusView: DEFAULT_FOCUS_VIEW,
+  promptSubmitKey: DEFAULT_PROMPT_SUBMIT_KEY,
+  editorHighlight: DEFAULT_EDITOR_HIGHLIGHT,
+  editorIndent: DEFAULT_EDITOR_INDENT,
+  filesTreeWidth: null,
+  terminalFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
+  narrowViews: DEFAULT_NARROW_VIEWS,
 };
 
 /**
@@ -551,13 +675,12 @@ function parsePrefs(
   const record = parsed as {
     icons?: unknown;
     panes?: unknown;
-    paneVisibility?: unknown;
     projectIcons?: unknown;
     projectNames?: unknown;
+    prRepos?: unknown;
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
-    dismissedSessions?: unknown;
     groups?: unknown;
     collapsedGroups?: unknown;
     renames?: unknown;
@@ -581,20 +704,10 @@ function parsePrefs(
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
-    // Per field like every line around it: a payload from a vam that predates
-    // this setting has no key at all, and a garbage one costs only itself.
-    focusViewportShare: readFocusShare(
-      (parsed as { focusViewportShare?: unknown }).focusViewportShare,
-    ),
     // Same argument as theme: not pruned, and defensive against an absent
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
     panes: readPanes(record.panes),
-    // Per FIELD again, which is the whole reason this sits beside `panes`
-    // rather than in it: every payload already in a browser has no
-    // `paneVisibility` key at all, and each of those reads back as "all three
-    // panes are drawn" without a version number or a migration.
-    paneVisibility: readPaneVisibility(record.paneVisibility),
     // Same TTL as session icons, same reasoning: a project's glyph is not
     // worth remembering forever either. Same old-id migration too -- a
     // project's glyph is keyed by source exactly like a session's is.
@@ -622,6 +735,13 @@ function parsePrefs(
       ),
       cutoff,
     ),
+    // NOT PRUNED, unlike `projectNames` directly above, and the difference is
+    // the field's meaning rather than an oversight: the icon TTL exists to
+    // stop the store keeping rows for sessions that stopped existing, and an
+    // override is a fact about a DIRECTORY on this machine. A project that
+    // goes quiet for a month has not made the operator's choice wrong, and
+    // expiring it would silently point the pane back at the factory.
+    prRepos: readBuckets(record.prRepos, readRepoPath),
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
@@ -638,17 +758,6 @@ function parsePrefs(
     // that predates removal has no key, and reads back as "nothing removed".
     hiddenProjects: migrateSourceKey(
       readIdsBySource(record.hiddenProjects),
-      LEGACY_HTTP_SOURCE_ID,
-      migrateSource,
-      mergeIdLists,
-    ),
-    // Same shape and same reasoning as `hiddenProjects` immediately above,
-    // one level down: a payload from a vam that predates dismissal has no
-    // key at all, and reads back as "nothing dismissed" -- the state the
-    // whole app already renders. Old-id migrated the same way, for the same
-    // reason: a row dismissed under the old source id is still dismissed.
-    dismissedSessions: migrateSourceKey(
-      readIdsBySource(record.dismissedSessions),
       LEGACY_HTTP_SOURCE_ID,
       migrateSource,
       mergeIdLists,
@@ -711,6 +820,50 @@ function parsePrefs(
     // Anything that is not a string is "no tab remembered", which is what a
     // payload from a vam predating this field already says by having no key.
     detailTab: readDetailTab((parsed as { detailTab?: unknown }).detailTab),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted: a value this vam cannot read must come back as the mode that
+    // hides nothing. `readFocusView` is where that direction is argued -- and
+    // where the retired `turnProgress` word is carried across, which is why
+    // BOTH keys are handed to it rather than only the new one.
+    focusView: readFocusView(
+      (parsed as { focusView?: unknown }).focusView,
+      (parsed as { turnProgress?: unknown }).turnProgress,
+    ),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, in the one safe direction: a word this vam has no mode for
+    // must read back as the key the box has always sent on. `readPromptSubmitKey`
+    // is where that direction is argued.
+    promptSubmitKey: readPromptSubmitKey((parsed as { promptSubmitKey?: unknown }).promptSubmitKey),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, in the same two safe directions `prefs/editor.ts` argues:
+    // an unreadable flag keeps the colours, and an unreadable width lands on
+    // the two spaces the editor indented by before there was a setting.
+    editorHighlight: readEditorHighlight((parsed as { editorHighlight?: unknown }).editorHighlight),
+    editorIndent: clampEditorIndent((parsed as { editorIndent?: unknown }).editorIndent),
+    // Per field like every line above it, and the only one whose default is
+    // `null` rather than a value: "never dragged" is what the tree's own
+    // clamped share answers to, and a payload predating this field is exactly
+    // that. A number IS clamped, because a hand-edited width must not render
+    // a column nobody could have chosen.
+    filesTreeWidth: readFilesTreeWidth((parsed as { filesTreeWidth?: unknown }).filesTreeWidth),
+    // Per field like every line above it, and normalised rather than merely
+    // defaulted, for the reason `readTerminalFontSize` argues: a size this
+    // vam does not offer is one no dialog could show as chosen, so it reads
+    // back as the size the pane ships at.
+    terminalFontSize: readTerminalFontSize(
+      (parsed as { terminalFontSize?: unknown }).terminalFontSize,
+    ),
+    // Per field like every line above it -- and per field INSIDE it as well:
+    // `readTerminalSchemePref` lets an unknown theme id cost the id, a bad
+    // override cost that override and a string opacity cost the opacity,
+    // each alone, because a hand-edited scheme is still mostly the
+    // operator's own colours.
+    terminalScheme: readTerminalSchemePref((parsed as { terminalScheme?: unknown }).terminalScheme),
+    // Per field like every line above it, and normalised in the safe
+    // direction `readNarrowViews` argues: a payload this vam cannot read must
+    // not re-shape four views -- and re-wrap a running tmux session -- on the
+    // strength of a choice nobody made.
+    narrowViews: readNarrowViews((parsed as { narrowViews?: unknown }).narrowViews),
   };
 }
 
@@ -741,13 +894,6 @@ export function isProjectCollapsed(prefs: Prefs, source: string, projectId: stri
   return prefs.collapsedProjects[source]?.includes(projectId) === true;
 }
 
-/**
- * Fold or unfold one project.
- *
- * Unfolding REMOVES the id, and removing the last id removes the source's
- * bucket: the stored shape then matches a fresh install exactly, which is
- * what makes "expand everything" leave no residue behind to read back.
- */
 /**
  * Add or remove one id from one source's bucket.
  *
@@ -806,35 +952,6 @@ export function setProjectHidden(
   return {
     ...prefs,
     hiddenProjects: withIdBySource(prefs.hiddenProjects, source, projectId, hidden),
-  };
-}
-
-/** Has this source's session row been dismissed from the sidebar? */
-export function isSessionDismissed(prefs: Prefs, source: string, sessionRowId: string): boolean {
-  return prefs.dismissedSessions[source]?.includes(sessionRowId) === true;
-}
-
-/**
- * Dismiss one session row, or bring it back -- `setProjectHidden`, one level
- * down.
- *
- * ROW, NOT SESSION, NOT PROCESS: this changes only what the sidebar draws.
- * Nothing here calls `closeSession` and nothing here can -- a row worth
- * dismissing is, by construction, one `closeSession` already has nothing left
- * to do to (see `dismissedSessions`'s own doc). Keyed by `session.id`
- * (`<sessionId>#<pid>`), exactly as `icons` and `renames` already are, so two
- * different processes that resumed the same underlying session id are two
- * different rows to dismiss.
- */
-export function setSessionDismissed(
-  prefs: Prefs,
-  source: string,
-  sessionRowId: string,
-  dismissed: boolean,
-): Prefs {
-  return {
-    ...prefs,
-    dismissedSessions: withIdBySource(prefs.dismissedSessions, source, sessionRowId, dismissed),
   };
 }
 
@@ -966,8 +1083,7 @@ export function setGroupIcon(
  * At most one group per project, and it is enforced here rather than left to
  * the caller because the cost of getting it wrong is not cosmetic: membership
  * is array position, so a project in two groups has its sessions walked twice
- * and mints two nodes carrying the same `info:<sessionId>` id -- which breaks
- * the canvas and the keys `j`/`k` step through.
+ * and the session id the sidebar keys its rows on stops being unique.
  */
 export function addProjectToGroup(
   prefs: Prefs,
@@ -1055,13 +1171,7 @@ function readTheme(raw: unknown): Theme {
   return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : DEFAULT_THEME;
 }
 
-/** `clampFocusShare` is total, so a non-number falls through to `NaN` and
- * lands on the default, exactly like a malformed pane width. */
-function readFocusShare(raw: unknown): number {
-  return clampFocusShare(typeof raw === 'number' ? raw : Number.NaN);
-}
-
-/** Same shape as `readFocusShare`: a non-number falls through to `NaN` and
+/** Same shape as `clampPaneWidth`: a non-number falls through to `NaN` and
  *  lands on the default, and a number out of range is pulled into it. */
 function readOutFontSize(raw: unknown): number {
   return clampOutFontSize(typeof raw === 'number' ? raw : Number.NaN);
@@ -1097,6 +1207,31 @@ export function setDetailTab(prefs: Prefs, detailTab: string | null): Prefs {
   return { ...prefs, detailTab };
 }
 
+/**
+ * Anything that is not a finite number reads as "never dragged" -- which is
+ * what a payload predating this field already says by having no key, and what
+ * a devtools edit should cost too. A number that IS finite is clamped rather
+ * than dropped: an out-of-range width is a width someone meant, just not one
+ * the column can render.
+ */
+function readFilesTreeWidth(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isFinite(raw) ? clampStoredTreeWidth(raw) : null;
+}
+
+/**
+ * Store the width the tree was dragged to, or `null` to hand it back its
+ * clamped share. Clamped on the way in as well, like `setOutFontSize`: the
+ * handle cannot produce an out-of-range width, but a future caller could.
+ *
+ * NOTE WHAT IS NOT CLAMPED HERE: the container. `renderedTreeWidth` is the
+ * only place a container is consulted and it is a RENDER-time function --
+ * see `files-tree-width.ts`. A width narrowed against a hidden (0px) pane and
+ * written back here would be the operator's chosen width, gone, for good.
+ */
+export function setFilesTreeWidth(prefs: Prefs, width: number | null): Prefs {
+  return { ...prefs, filesTreeWidth: width === null ? null : clampStoredTreeWidth(width) };
+}
+
 /** Written whenever focus lands somewhere; `null` forgets the pointer. */
 export function setLastFocus(prefs: Prefs, lastFocus: FocusChoice | null): Prefs {
   return { ...prefs, lastFocus };
@@ -1113,56 +1248,6 @@ function readPanes(raw: unknown): Prefs['panes'] {
   };
 }
 
-/** A missing or garbage field means "drawn", per field: the safe direction to
- * fail is showing a pane you wanted hidden, never hiding one you did not. The
- * order gets the same treatment one field along — every payload already in a
- * browser predates it, and each of those reads back as the shipped sequence. */
-function readPaneVisibility(raw: unknown): Layout {
-  const { sidebar, canvas, detail, order } = (
-    typeof raw === 'object' && raw !== null ? raw : {}
-  ) as {
-    sidebar?: unknown;
-    canvas?: unknown;
-    detail?: unknown;
-    order?: unknown;
-  };
-  const columns = readColumnOrder(order);
-  return {
-    sidebar: sidebar !== false,
-    canvas: canvas !== false,
-    detail: detail !== false,
-    // Absent stays ABSENT rather than being materialised as the default: the
-    // field is optional in `Layout`, `columnOrder()` answers for it, and a
-    // payload that never named an order round-trips through here unchanged.
-    ...(columns === undefined ? {} : { order: columns }),
-  };
-}
-
-/**
- * Total: anything that is not a permutation of the three column ids reads as
- * "no order stored", which `columnOrder()` answers with the shipped sequence. A partial or repeated list is rejected whole rather
- * than repaired, because half an order is a column that would not be drawn at
- * all — and a dropped column is exactly the failure `readPaneVisibility`
- * refuses one field above.
- */
-function readColumnOrder(raw: unknown): readonly ColumnId[] | undefined {
-  if (!Array.isArray(raw) || raw.length !== DEFAULT_ORDER.length) {
-    return undefined;
-  }
-  const named = new Set(raw.filter((id): id is ColumnId => DEFAULT_ORDER.includes(id as ColumnId)));
-  return named.size === DEFAULT_ORDER.length ? (raw as readonly ColumnId[]) : undefined;
-}
-
-/** Written by the layout chords. */
-export function setPaneVisibility(prefs: Prefs, paneVisibility: Layout): Prefs {
-  return { ...prefs, paneVisibility };
-}
-
-/** One of the named layouts, applied. */
-export function setLayout(prefs: Prefs, layout: LayoutName): Prefs {
-  return setPaneVisibility(prefs, LAYOUTS[layout]);
-}
-
 /** `clampPaneWidth` is already total, so a non-number falls through to `NaN`
  * and lands on the pane's default, exactly like any other malformed field. */
 function readPaneWidth(pane: Pane, raw: unknown): number {
@@ -1172,11 +1257,6 @@ function readPaneWidth(pane: Pane, raw: unknown): number {
 /** Flip it. Written by the sidebar's one toggle and by the settings overlay. */
 export function setTheme(prefs: Prefs, theme: Theme): Prefs {
   return { ...prefs, theme };
-}
-
-/** Clamped on the way in, so nothing downstream has to wonder. */
-export function setFocusShare(prefs: Prefs, share: number): Prefs {
-  return { ...prefs, focusViewportShare: clampFocusShare(share) };
 }
 
 /** Clamped on the way in as well, for the same reason: the slider cannot
@@ -1189,6 +1269,48 @@ export function setOutFontSize(prefs: Prefs, size: number): Prefs {
  *  a provider vam has no command for. */
 export function setDefaultProvider(prefs: Prefs, id: unknown): Prefs {
   return { ...prefs, defaultProvider: readProviderId(id) };
+}
+
+/** Normalised on the way in as well as on the way out, for the same reason and
+ *  in the same direction: a caller that stored something unreadable would take
+ *  the column's progress lines away on the strength of it. */
+export function setFocusView(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, focusView: readFocusView(on, undefined) };
+}
+
+/** Normalised on the way in as well as on the way out, for the same reason and
+ *  in the same direction: a caller that stored an unknown word would move the
+ *  operator's send key on the strength of it. */
+export function setPromptSubmitKey(prefs: Prefs, key: unknown): Prefs {
+  return { ...prefs, promptSubmitKey: readPromptSubmitKey(key) };
+}
+
+/** Normalised on the way in as well as on the way out, for the reason every
+ *  setter above it is: a caller that stored something unreadable would take
+ *  the editor's colours away on the strength of it. */
+export function setEditorHighlight(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, editorHighlight: readEditorHighlight(on) };
+}
+
+/** Clamped on the way in as well, like `setOutFontSize`: the stepper cannot
+ *  produce an out-of-range width, but a future caller could. */
+export function setEditorIndent(prefs: Prefs, width: unknown): Prefs {
+  return { ...prefs, editorIndent: clampEditorIndent(width) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it: the dialog can only offer sizes off the list, but a future caller could
+ *  store one that is not on it, and the pane would then be drawn at a size the
+ *  dialog shows nobody having chosen. */
+export function setTerminalFontSize(prefs: Prefs, size: unknown): Prefs {
+  return { ...prefs, terminalFontSize: readTerminalFontSize(size) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter above
+ *  it: the switch can only send a boolean, but a hand-edited payload and a
+ *  future caller can send anything, and only a literal `true` may narrow. */
+export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
+  return { ...prefs, narrowViews: readNarrowViews(narrow) };
 }
 
 /**
@@ -1410,10 +1532,54 @@ export function setProjectRename(
 }
 
 /**
+ * A stored override, or nothing. Total, and in the one safe direction: a value
+ * that is not a non-empty string is an ABSENCE, which is the session's own
+ * directory -- never `''`, which `execFile` would read as "wherever the app
+ * was launched from".
+ */
+function readRepoPath(entry: unknown): string | null {
+  if (typeof entry !== 'string') return null;
+  const trimmed = entry.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * Point one project's pull-request reads at a directory, or clear it.
+ *
+ * An empty (or blank) value CLEARS, exactly as `setProjectRename`'s empty
+ * title does, and for a sharper reason: an empty string handed to `execFile`
+ * as a `cwd` is the process's own working directory, so storing one would
+ * answer about a repository nobody chose. Clearing is the only reading of ""
+ * that cannot lie.
+ */
+export function setProjectPrRepo(
+  prefs: Prefs,
+  sourceId: SourceId,
+  projectId: string,
+  directory: string,
+): Prefs {
+  const bucket = prefs.prRepos[sourceId] ?? emptyMap<string>();
+  const trimmed = directory.trim();
+  const nextBucket =
+    trimmed === '' ? withoutEntry(bucket, projectId) : withEntry(bucket, projectId, trimmed);
+  const prRepos =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.prRepos, sourceId, nextBucket)
+      : withoutEntry(prefs.prRepos, sourceId);
+  return { ...prefs, prRepos };
+}
+
+/** The directory this project's pull requests are read from, or `null` for
+ *  "the session's own", which is what vam did before this existed. */
+export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): string | null {
+  return readRepoPath(prefs.prRepos[sourceId]?.[projectId]);
+}
+
+/**
  * Put the stored names onto the model, once, before anything reads it -- the
  * same trick `applyIcons` plays one field over, and for the same reason: the
- * sidebar, the canvas node and the detail panel all render `session.title`,
- * and none of them should have to know that a title can be local.
+ * sidebar and the detail panel both render `session.title`,
+ * and neither should have to know that a title can be local.
  *
  * `projectNames` defaults to `{}` for the same reason `applyIcons`'
  * `projectIcons` argument does: every existing two-argument call site
@@ -1459,8 +1625,8 @@ export function applyRenames(
 /**
  * Put the stored icons onto the model, once, before anything reads it.
  *
- * The sidebar and the canvas node both render `session.icon`, and neither
- * should know that an icon is a local preference rather than something the
+ * Only the tab strip renders `session.icon` today, and it should not
+ * know that an icon is a local preference rather than something the
  * factory said. Applying it here means one place knows. Looked up per
  * project's `source`, not by session id alone — two sources can name a
  * session the same thing (AC-1). `projectIcons` follows the same rule one
@@ -1497,44 +1663,6 @@ export function applyIcons(
           const choice = bucket[session.id];
           return choice === undefined ? session : { ...session, icon: choice.icon };
         }),
-      };
-    }),
-  };
-}
-
-/**
- * Drop a project's DISMISSED session rows before anything reads the model --
- * one further step than `applyIcons`/`applyRenames`, which annotate a row
- * rather than remove it. This is the row half of `setSessionDismissed`'s
- * doc: a dismissal is local and reversible (undo it and the row reappears on
- * the next poll that still reports it), and it ends nothing -- the session
- * itself, if it is still running, is untouched.
- *
- * Same defensive shape as `applyIcons`: a project with no source has no
- * bucket to look one up in, and an empty `dismissedSessions` returns the
- * SAME model object rather than a shallow copy, so a canvas with nothing
- * dismissed costs nothing extra on every poll.
- */
-export function applySessionDismissals(
-  model: CanvasModel,
-  dismissedSessions: Prefs['dismissedSessions'],
-): CanvasModel {
-  if (Object.keys(dismissedSessions).length === 0) {
-    return model;
-  }
-  return {
-    ...model,
-    projects: model.projects.map((project) => {
-      if (project.source === undefined) {
-        return project;
-      }
-      const bucket = dismissedSessions[project.source];
-      if (bucket === undefined || bucket.length === 0) {
-        return project;
-      }
-      return {
-        ...project,
-        sessions: project.sessions.filter((session) => !bucket.includes(session.id)),
       };
     }),
   };
@@ -1807,14 +1935,30 @@ export type PaletteOverrides = Readonly<Record<string, string>>;
 export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
 
 /**
- * The colours the operator may adjust — TEN of about thirty, chosen rather
+ * The colours the operator may adjust — ELEVEN of about thirty, chosen rather
  * than enumerated.
  *
  * Two families, because they are the two that change the app's character: the
- * surfaces you look at all day (canvas, panel, sidebar, raised) with the ink
+ * surfaces you look at all day (pane, panel, sidebar, raised) with the ink
  * that has to stay readable on them, and the status family (running, waiting,
- * done, failed) plus the cursor ring, which is what a glance at the canvas is
- * actually reading.
+ * done, failed) plus the cursor ring, which is what a glance at the session
+ * list is actually reading.
+ *
+ * `pane` IS THE DETAIL PANE'S OWN FILL, and it is here because the operator
+ * asked for it to be: the pane was painted `bg-sidebar` -- the mockup gives
+ * the two the same value -- so the sidebar swatch moved the whole right-hand
+ * pane with it and there was no way to pull them apart. They are separate
+ * tokens now, starting on the same value (styles.css), and `seedSplits` below
+ * carries a stored sidebar override onto the new one so the split is
+ * invisible until the operator moves one of them.
+ *
+ * `ground` USED TO BE HERE AND IS NOT ANY MORE -- operator: "the ground
+ * setting is unnecessary". It was the deepest surface, and what it actually
+ * painted inside the pane (the sticky prompt's band) now takes the pane's own
+ * fill, so the swatch was setting a colour the operator could barely see. The
+ * TOKEN stays: it still paints the page behind the panes, the code fence
+ * (whose syntax colours were measured against it -- styles.css) and the modal
+ * scrims. See `RETIRED_TOKENS`.
  *
  * The rest are deliberately NOT here, and the reason is the same for all of
  * them: they are measured against these. The tints and washes
@@ -1834,19 +1978,142 @@ export type ThemePalettes = Readonly<Record<EffectiveTheme, PaletteOverrides>>;
  * the other theme on the first pick.)
  */
 export const PALETTE_TOKENS: readonly { readonly token: string; readonly label: string }[] = [
-  { token: '--vam-canvas', label: 'canvas' },
+  { token: '--vam-pane', label: 'pane' },
   { token: '--vam-panel', label: 'panel' },
+  /* `card` IS THE FILL OF ANYTHING SITTING ON THE PANE OR THE SIDEBAR, and
+     it is here for the same reason `pane` is: it was carved out of a token the
+     operator could already set. Every card in the detail pane and the sidebar
+     painted `bg-panel` until the operator's second report of "black patches",
+     which was `panel` measuring 1.028:1 DARKER than the two surfaces it was
+     drawn on (styles.css). `seedCard` below carries a stored panel override
+     onto it so the repoint takes nothing away. */
+  { token: '--vam-card', label: 'card' },
   { token: '--vam-sidebar', label: 'sidebar' },
   { token: '--vam-raised', label: 'raised' },
+  /* THE ONE COLOUR THE OPERATOR HAS ASKED ABOUT TWICE. First for the prompt
+     to "have a different colour so it stands out, and sit in a bubble", then
+     -- having got a bubble filled with `raised`, 1.030:1 against the band
+     behind it -- for it to have "more contrast within the pane". A swatch is
+     the honest end of that: the fill now has a real step, and the person who
+     keeps looking at it can move it without waiting for a build. It is NOT
+     seeded from `raised`; see `seedCard`. */
+  { token: '--vam-in-bubble', label: 'in bubble' },
   { token: '--vam-ink', label: 'text' },
   { token: '--vam-running', label: 'running' },
   { token: '--vam-waiting', label: 'waiting' },
   { token: '--vam-cursor-ring', label: 'cursor ring' },
+  { token: '--vam-idle', label: 'idle' },
   { token: '--vam-done', label: 'done' },
   { token: '--vam-failed', label: 'failed' },
 ];
 
-const PALETTE_KEYS = new Set(PALETTE_TOKENS.map((entry) => entry.token));
+/**
+ * THE DEEPEST SURFACE, WHICH IS NOT A SWATCH AND IS NOT UNSETTABLE EITHER.
+ *
+ * One spelling, because three lists below need this token and three lists of
+ * one string is how two of them stop agreeing. What each of them means by it
+ * is deliberately different, and the difference is the whole point:
+ *
+ *  - `RETIRED_TOKENS`: not in the grid. The operator asked for the swatch to
+ *    go ("the ground setting is unnecessary") and it stays gone.
+ *  - `TEMPLATE_TOKENS`: a whole-palette preset MAY write it. Picking one
+ *    colour by hand and choosing a palette someone measured end to end are
+ *    two different acts, and the operator asked to stop doing the first, not
+ *    the second.
+ *  - `PALETTE_KEYS`: may appear in a stored bucket, because it always could.
+ *
+ * The constant was already here, declared beside `LEGACY_GROUND_TOKEN` for the
+ * rename migration, while the retired-token list 80 lines above it typed the
+ * string out again. Two spellings of one token in one file is the drift this
+ * repo keeps paying for, so the declaration moved up to the first place that
+ * needs it and every list below now derives from it.
+ */
+const GROUND_TOKEN = '--vam-ground';
+
+/**
+ * A COLOUR THE OPERATOR MAY STILL HAVE, AND MAY NO LONGER PICK BY HAND.
+ *
+ * `--vam-ground` left the swatch grid when the operator asked for it to; it
+ * did not leave the stylesheet. So a stored override for it is still read,
+ * still written back, and still put on the document -- anything else changes
+ * what somebody sees because of a refactor, which is the one thing a
+ * migration may not do (`LEGACY_GROUND_TOKEN` below argues the same case for
+ * the rename before this one, and that rename now lands here).
+ *
+ * "MAY NO LONGER SET" WAS TOO STRONG, and this comment used to say it. What
+ * left was the SWATCH -- a control for picking one colour on its own, which is
+ * the thing the operator called unnecessary and which is still gone. A
+ * template is not that control: it writes a whole palette that was measured as
+ * a whole, and `--vam-ground` is the token that decides whether a dark theme
+ * is dark. `TEMPLATE_TOKENS` below is that permission, held apart from this
+ * list so neither can quietly become the other.
+ *
+ * The cost, stated rather than discovered: with no swatch there is no
+ * per-token reset either, so "reset <theme> colours" is the only way back --
+ * or the `default` template, which clears the same bucket from the same row
+ * the palette was chosen in, and is the nearer of the two to hand.
+ */
+const RETIRED_TOKENS: readonly string[] = [GROUND_TOKEN];
+
+/**
+ * WHAT A WHOLE-PALETTE TEMPLATE MAY WRITE, which is the swatch grid plus the
+ * ground and nothing else.
+ *
+ * NOT `PALETTE_KEYS`, and the difference matters the next time something is
+ * retired: that set is "anything that may sit in a stored bucket", which will
+ * grow every time a swatch is withdrawn. A token leaving the grid must not
+ * thereby become something a preset may paint -- that would make every future
+ * retirement a silent widening of what a template can do. This list is a
+ * decision, so it is written as one.
+ */
+export const TEMPLATE_TOKENS: readonly string[] = [
+  ...PALETTE_TOKENS.map((entry) => entry.token),
+  GROUND_TOKEN,
+];
+
+/** Every token that may appear in a stored bucket: offered plus retired. */
+const PALETTE_KEYS = new Set([...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]);
+
+/**
+ * EVERY SPLIT A STORED COLOUR HAS TO SURVIVE, as `[the older token, the one
+ * carved out of it]`.
+ *
+ * A table rather than two hand-written functions, and the reason is the
+ * comment the first one carried: "a typo in either half is a seed that
+ * silently never happens". Two copies of that hazard is two chances to have
+ * it, and the second split arrived within one release of the first.
+ *
+ *  - `sidebar -> pane`: the detail pane wore `bg-sidebar` until the operator
+ *    asked for "the pane's colour setting split from the sidebar".
+ *  - `panel -> card`: every card on the pane and in the sidebar wore
+ *    `bg-panel` until the operator's second report of black patches, which
+ *    was that fill measuring 1.028:1 DARKER than the surfaces under it.
+ *
+ * `--vam-in-bubble` IS DELIBERATELY ABSENT from this table even though the
+ * bubble it fills used to wear `raised`. Seeding it would carry a colour the
+ * operator chose for session rows and hovers onto a surface they never picked
+ * it for -- and, specifically, would restore the 1.03:1 they came back to
+ * complain about. Preserving what somebody sees is the rule; preserving a
+ * defect they asked to have fixed is not the same thing.
+ */
+const SPLITS: readonly (readonly [string, string])[] = [
+  ['--vam-sidebar', '--vam-pane'],
+  ['--vam-panel', '--vam-card'],
+];
+
+/**
+ * What `--vam-ground` was called before the canvas it was named after was
+ * deleted, and the only place that spelling may still appear.
+ *
+ * A rename is free for a stylesheet and expensive for a stored file: the key
+ * is the CSS custom property itself, so an operator who had customised this
+ * colour would open the new build to find their pick gone -- dropped by
+ * `readBucket` for not being a known token, then erased for good by the next
+ * `writePrefs`, which stringifies whatever was parsed. Read on LOAD rather
+ * than written as a fallback at paint time, so the migration happens once and
+ * everything downstream sees exactly one name.
+ */
+const LEGACY_GROUND_TOKEN = '--vam-canvas';
 
 /**
  * What may be written into a custom property.
@@ -1864,13 +2131,46 @@ function readBucket(raw: unknown): PaletteOverrides {
   }
   const out = emptyMap<string>();
   for (const [token, value] of Object.entries(raw as Record<string, unknown>)) {
+    // The retired name is accepted and rewritten, never carried: a payload
+    // written by two versions can hold both, and the CURRENT name is the one
+    // the operator last picked with, so it wins.
+    const key = token === LEGACY_GROUND_TOKEN ? GROUND_TOKEN : token;
+    if (token === LEGACY_GROUND_TOKEN && out[GROUND_TOKEN] !== undefined) {
+      continue;
+    }
     // Per entry, like every other reader here: one hand-edited colour cannot
     // drag the others back to the stylesheet with it.
-    if (PALETTE_KEYS.has(token) && typeof value === 'string' && COLOUR.test(value)) {
-      out[token] = value;
+    if (PALETTE_KEYS.has(key) && typeof value === 'string' && COLOUR.test(value)) {
+      out[key] = value;
     }
   }
-  return out;
+  return seedSplits(out);
+}
+
+/**
+ * A SURFACE SPLIT OFF ANOTHER ONE WITHOUT MOVING A PIXEL.
+ *
+ * Each pair in `SPLITS` names a token that used to paint a surface and the
+ * token that paints it now. An operator who had customised the OLD one was
+ * therefore looking at a custom version of the NEW surface, and the repoint
+ * alone would have handed it back to the stylesheet's grey in front of them.
+ * So the old colour is copied onto the new token once, on load, and written
+ * back under it.
+ *
+ * ONLY WHEN THE OLD TOKEN IS ACTUALLY OVERRIDDEN. Seeding an unset token from
+ * the stylesheet's current value would freeze it: a theme change moves the
+ * original, and a copy pinned to the other theme's grey would follow nothing.
+ * And never over a value the operator has picked -- a payload holding both was
+ * written by a build that already had the new token.
+ */
+function seedSplits(bucket: Record<string, string>): PaletteOverrides {
+  for (const [from, to] of SPLITS) {
+    const source = bucket[from];
+    if (bucket[to] === undefined && source !== undefined) {
+      bucket[to] = source;
+    }
+  }
+  return bucket;
 }
 
 /**
@@ -1979,6 +2279,12 @@ export function setKeyBindings(prefs: Prefs, keyBindings: KeyBindings): Prefs {
  * cascade falls back to the `:root` / `html.light` pair in styles.css. Setting
  * a token to its current value instead would be indistinguishable on screen
  * and would quietly survive a theme change.
+ *
+ * RETIRED TOKENS ARE VISITED TOO. A colour the operator can no longer pick is
+ * still a colour they picked: leaving it out of this loop would keep it in
+ * the file and take it off the screen, which is the drop this whole layer is
+ * written to avoid -- and would leave a reset unable to remove a property it
+ * had set in an earlier build.
  */
 export function applyPalette(
   overrides: PaletteOverrides,
@@ -1987,7 +2293,7 @@ export function applyPalette(
   if (root === null) {
     return;
   }
-  for (const { token } of PALETTE_TOKENS) {
+  for (const token of [...PALETTE_TOKENS.map((entry) => entry.token), ...RETIRED_TOKENS]) {
     const value = overrides[token];
     if (value === undefined) {
       root.style.removeProperty(token);
@@ -2027,6 +2333,35 @@ export function activatePrefs(prefs: Prefs): Prefs {
   applyOutFontSize(prefs.outFontSize);
   setActiveBindings(prefs.keyBindings);
   setActiveProvider(prefs.defaultProvider);
+  setActiveFocusView(prefs.focusView);
+  setActivePromptSubmitKey(prefs.promptSubmitKey);
+  setActiveEditorSettings({ highlight: prefs.editorHighlight, indent: prefs.editorIndent });
+  setActiveTerminalFontSize(prefs.terminalFontSize);
+  // Resolved for the theme ON SCREEN, the same `effectiveTheme` read the
+  // palette line above takes: `system` is a source for the appearance, not
+  // an appearance, and there is no scheme chosen against it.
+  setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
+  setActiveNarrowViews(prefs.narrowViews);
+  /**
+   * AND ONE PREFERENCE CROSSES INTO MAIN, because the read it changes happens
+   * there: `gh` is spawned by `main/sources/claude-code/source.ts`, which has
+   * no access to this store.
+   *
+   * HERE RATHER THAN AT THE PICKER, for the reason every line above it is
+   * here: `activatePrefs` runs on every read AND every write, so a reload arms
+   * main as surely as a click does. A push wired to the control alone would
+   * leave main holding an empty map until the operator happened to open
+   * settings, and the pane would report the factory's pull requests until they
+   * did.
+   *
+   * FIRE AND FORGET, DELIBERATELY. `activatePrefs` is synchronous and every
+   * other side effect here is too; awaiting an IPC round-trip would make every
+   * prefs write async for a projection whose staleness costs one poll. A
+   * rejection is swallowed for the same reason it is in `createStreamSubscribe`
+   * -- the desktop bridge is absent in the browser build, where `window.api`
+   * has no `prefs` at all and this must simply not happen.
+   */
+  globalThis.window?.api?.prefs?.setPrRepos?.(prefs.prRepos)?.catch?.(() => {});
   return prefs;
 }
 
@@ -2050,6 +2385,45 @@ export function paletteValue(
   // as anything else is shown as empty rather than as a value the input would
   // silently rewrite.
   return COLOUR.test(current) ? current : '';
+}
+
+/**
+ * What the STYLESHEET gives a token, past whatever the operator has in force.
+ *
+ * `paletteValue` answers "what should the picker show for this token" and
+ * consults the cascade -- which, once `applyPalette` has run, is the operator's
+ * own palette: the overrides live on `document.documentElement`'s inline style
+ * and custom properties inherit, so no element on the page computes the
+ * stylesheet's value any more. That is the right answer for a swatch and the
+ * WRONG one for the `default` colour template, whose three preview discs
+ * promise the palette you get by pressing it. Left on `paletteValue`, the chip
+ * would preview `ember` while offering vam.
+ *
+ * LIFT, ASK, PUT BACK -- and the middle step is the only one that reads. The
+ * whole sequence is synchronous, so the browser never gets a frame in which
+ * the operator's colour is off the document, and the restore is in a `finally`
+ * because the alternative failure is not a wrong preview but a palette that
+ * falls off the screen when a settings row asks a question.
+ *
+ * A token with nothing overriding it is the common case and is not touched at
+ * all: a remove/restore pair on an unset property still invalidates style,
+ * once per disc, per render, for an answer that was already correct.
+ */
+export function stylesheetPaletteValue(
+  token: string,
+  root: HTMLElement | null = globalThis.document?.documentElement ?? null,
+  read: (token: string) => string = readComputedToken,
+): string {
+  const inline = root?.style.getPropertyValue(token) ?? '';
+  if (root === null || inline === '') {
+    return paletteValue({}, token, read);
+  }
+  try {
+    root.style.removeProperty(token);
+    return paletteValue({}, token, read);
+  } finally {
+    root.style.setProperty(token, inline);
+  }
 }
 
 function readComputedToken(token: string): string {

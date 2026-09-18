@@ -106,6 +106,9 @@ describe('starting a session in a directory the operator chose', () => {
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
       '-s',
       'vam-orchard-a1b2c3',
       '-c',

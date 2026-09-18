@@ -67,10 +67,14 @@ function stored(): Record<string, unknown> {
 
 /** Which session the keyboard is on, read off the detail pane's header -- the
  *  same hook `Canvas.keyboard.test.tsx` reads, for its reason. */
-const focused = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
+const focused = () =>
+  document
+    .querySelector('[data-row-cursor]')
+    ?.closest('[data-session-row]')
+    ?.querySelector('[data-row-title]')?.textContent ?? '';
 
 const currentTab = () =>
-  document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab') ?? null;
+  document.querySelector('[data-view][aria-pressed="true"]')?.getAttribute('data-view') ?? null;
 
 function press(key: string) {
   act(() => {
@@ -79,8 +83,9 @@ function press(key: string) {
 }
 
 // The same two shims the other Canvas tests install, for the same reason:
-// ReactFlow measures and this happy-dom has no layout engine. `localStorage`
-// itself is installed for every test file by test/support/storage.ts.
+// the rendered session panes measure and this happy-dom has no layout
+// engine. `localStorage` itself is installed for every test file by
+// test/support/storage.ts.
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}
@@ -154,17 +159,23 @@ describe('what a launch that touches nothing costs', () => {
     return seen;
   }
 
-  it('writes twice on the first launch — once per field — and then settles', () => {
+  it('writes ONCE on the first launch, and it is the focus landing', () => {
     const first = writes(() => render(<Canvas model={MODEL} />));
-    // Two, not one, and the count is asserted rather than bounded: the tab
-    // settles to its default and focus lands, each once, from two independent
-    // effects. Anything more than two would be an effect re-triggering itself.
-    expect(first).toHaveLength(2);
-    expect(JSON.parse(first[0] ?? '{}').detailTab).toBe('Response');
-    expect(JSON.parse(first[1] ?? '{}').lastFocus).toEqual({
+    // One, and it used to be two. A13.1 retired `openTabs` entirely -- the
+    // tab strip is a pure projection of the active project's `entries` -- and
+    // the second write, `detailTab` settling to its default, is gone with the
+    // effect that made it: a view is reported when the operator PICKS one now,
+    // so a launch nobody touched no longer records a choice nobody made. That
+    // is strictly less than this test used to allow. Focus landing is the one
+    // settling effect left; anything more would be an effect re-triggering
+    // itself.
+    expect(first).toHaveLength(1);
+    expect(JSON.parse(first[0] ?? '{}').lastFocus).toEqual({
       source: 'factory',
       session: 'a1',
     });
+    // And the launch did not invent a view preference on the way past.
+    expect(JSON.parse(first[0] ?? '{}').detailTab ?? null).toBeNull();
   });
 
   it('writes nothing at all on the next launch, having nothing new to say', () => {
@@ -174,6 +185,8 @@ describe('what a launch that touches nothing costs', () => {
   });
 
   it('keeps every key it does not model, because it never rewrites unprompted', () => {
+    // With nothing left unmodeled to say, both settling effects find their
+    // guard already satisfied and neither writes.
     seed({
       lastFocus: { source: 'factory', session: 'a1' },
       detailTab: 'Response',
@@ -189,7 +202,7 @@ describe('the detail tab, across a relaunch', () => {
     render(<Canvas model={MODEL} />);
     expect(currentTab()).toBe('response');
     act(() => {
-      fireEvent.click(document.querySelector('[data-tab="agents"]') as HTMLElement);
+      fireEvent.click(document.querySelector('[data-view="agents"]') as HTMLElement);
     });
     expect(currentTab()).toBe('agents');
     expect(stored().detailTab).toBe('Agents');

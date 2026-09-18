@@ -25,7 +25,7 @@ const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: 
 
 const ATLAS = 'claude-code:atlas-11111111';
 /** Two sessions vam started for ONE project: only the row can say which. */
-const TWO = `${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`;
+const TWO = `${ATLAS}\t\tvam-atlas-a1b2c3\n${ATLAS}\t\tvam-atlas-g7h8i9\n`;
 
 /**
  * The real preload API, talking to the real main handlers over a fake
@@ -79,7 +79,7 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
   });
 
   it('sends without a row too, where the project alone can answer', async () => {
-    const { api, argvs } = wire(`${ATLAS}\tvam-atlas-a1b2c3\n`, new Map());
+    const { api, argvs } = wire(`${ATLAS}\t\tvam-atlas-a1b2c3\n`, new Map());
     expect(await api.send(ATLAS, { kind: 'text', text: 'h' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', 'h']);
   });
@@ -87,13 +87,13 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
   it('does not reach a resize when it was asked to type', async () => {
     // The mutation this is aimed at: `send` invoking the resize channel. The
     // renderer would see a boolean either way.
-    const { api, argvs } = wire(`${ATLAS}\tvam-atlas-a1b2c3\n`, new Map());
+    const { api, argvs } = wire(`${ATLAS}\t\tvam-atlas-a1b2c3\n`, new Map());
     await api.send(ATLAS, { kind: 'text', text: 'h' });
     expect(argvs.map((argv) => argv[0])).toEqual(['list-sessions', 'send-keys']);
   });
 
   it('and the resize channel still resizes, in columns then rows', async () => {
-    const { api, argvs } = wire(`${ATLAS}\tvam-atlas-a1b2c3\n`, new Map());
+    const { api, argvs } = wire(`${ATLAS}\t\tvam-atlas-a1b2c3\n`, new Map());
     expect(await api.resize(ATLAS, 120, 40)).toBe(true);
     expect(argvs[1]).toEqual([
       'resize-window',
@@ -110,7 +110,26 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
     const { api, argvs } = wire(TWO, new Map([[ATLAS, 'vam-atlas-g7h8i9']]));
     const view = await api.read(ATLAS, ATLAS);
     expect(view.kind === 'ok' ? view.name : view.kind).toBe('vam-atlas-g7h8i9');
-    expect(argvs[1]).toEqual(['capture-pane', '-p', '-e', '-t', '=vam-atlas-g7h8i9:']);
+    // One invocation, two commands: where the cursor is -- and how deep the
+    // history is, which is what makes that row an index into the answer --
+    // then the screen WITH its scrollback (`tmux/argv.ts`). Both aimed at the
+    // same pane.
+    expect(argvs[1]).toEqual([
+      'display-message',
+      '-p',
+      '-t',
+      '=vam-atlas-g7h8i9:',
+      '-F',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      ';',
+      'capture-pane',
+      '-p',
+      '-e',
+      '-S',
+      '-500',
+      '-t',
+      '=vam-atlas-g7h8i9:',
+    ]);
   });
 
   it('answers `unaimed`, having sent nothing, when the renderer asks with rubbish', async () => {

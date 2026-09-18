@@ -1,52 +1,46 @@
 /**
- * Where Enter goes.
+ * Where Enter goes -- and it goes to exactly one place.
  *
- * THE BUG THIS MODULE EXISTS FOR. `recordPrompt` ran `claude --resume <id> -p`
- * and nothing else. That CLI declines while the target session is RUNNING --
- * `deliver.ts` says so in its own header and calls it the common case -- and a
- * session the operator wants to reply to is running by definition. So Enter
- * produced a refusal every time, which reads from the outside as Enter doing
- * nothing.
+ * THE RULE. vam is a projection of the terminal (the operator's own design
+ * call): the pane a session vam started is the base, and the Response view is
+ * a chat UI over the data that pane produces. So a reply is TYPED into that
+ * pane, and the turn appears in the view when the session's own transcript
+ * records it. There is one channel, and this module is it.
  *
- * WHAT CHANGED. vam now starts sessions itself, in tmux panes it owns
- * (`create-session.ts`), and typing into a pane vam owns is a real channel
- * into a running session. So the reply is routed: the pane when vam has one it
- * can prove belongs to this row, the CLI otherwise.
+ * WHY THERE IS NO SECOND CHANNEL, recorded so nobody restores it as an
+ * improvement. `recordPrompt` once ran `claude --resume <id> -p` when no pane
+ * could be proven. That path is retired (`deliver.ts` carries the full
+ * argument): it refused while the target session was running -- which is every
+ * session the operator wants to reply to -- and it could not resume a session
+ * that had never taken a turn at all, answering a fresh session's reply with
+ * the CLI's "No conversation found" rather than anything the operator could
+ * act on. A channel that fails precisely when it is wanted is not a fallback
+ * worth keeping alongside one that works.
  *
- * THE PROOF IS TWO CONDITIONS AND BOTH ARE NECESSARY. tmux records a PROJECT
- * on the session it created (`VAM_PROJECT_OPTION`), never a Claude session id
- * -- the session inside the pane is started by the pane and its id is not
- * known here. So a project match alone does not say this row is that pane:
- * a second `claude` in the same directory would be typed into by mistake, and
- * a reply delivered to the wrong session is the worst outcome available. The
- * pane is used only when
+ * SO A ROW WITH NO PANE IS REFUSED, NOT REROUTED. The refusal says what is true
+ * -- vam has no terminal it owns for this session -- and points at the remedy,
+ * opening it in a vam terminal. It never claims a delivery. This is the same
+ * answer for a session vam did not start (the operator's own `claude`, a child
+ * of their login shell, whose TTY no process may take over) as for one vam
+ * started but cannot yet pair to a pane.
  *
- *   1. exactly ONE tmux session vam started carries this project, and
- *   2. exactly ONE live session in the whole list sits in this project,
- *
- * which together leave no second candidate on either side. Anything else falls
- * back to the CLI, which addresses the session id exactly and refuses in
- * Claude Code's own words when it cannot.
- *
- * WHAT IS STILL NOT HERE, stated so nobody has to rediscover it: the
- * operator's own sessions cannot be typed into. They are children of their
- * login shell and no process may take over another's controlling TTY. There
- * IS a real channel for them -- each live session publishes a unix socket at
- * `messagingSocketPath` with a token beside it in `~/.claude/sessions` -- and
- * it is not spoken here; see the task report. Until it is, the CLI's refusal
- * is what the operator sees, and it says what happened rather than claiming a
- * delivery.
+ * THE PANE MUST BE PROVEN, and `paneForRow` below is the whole of that proof:
+ * the pane the session published about itself, else the pid vam recorded at
+ * creation, else -- only when a project holds exactly one live row and one
+ * tagged session -- the project tag. When none of those answers, there is no
+ * pane this row can be PROVEN to own, and typing into a guessed one would land
+ * the operator's words in another agent. That is the worst outcome available,
+ * so the answer is `null` and the refusal above.
  */
 
 import type { SourceError } from '../../ipc/channels.js';
-import { sendEnterArgv, sendTextArgv } from '../tmux/argv.js';
+import { promptKeystrokes, sendEnterArgv } from '../tmux/argv.js';
 import {
   classifyTmuxFailure,
   listVamSessions,
   type TmuxRun,
   type TmuxSession,
 } from '../tmux/spawn.js';
-import type { DeliverFn } from './deliver.js';
 import { sessionIdOf } from './deliver.js';
 import { projectIdOf } from './project-id.js';
 import { claimedPanes } from './session-pane.js';
@@ -56,39 +50,69 @@ export type ReplyRow = {
   readonly key: string;
   readonly sessionId: string;
   readonly cwd: string;
+  /**
+   * The OS pid `claude agents --json` reported for this row -- `LiveAgent`'s
+   * own field, satisfied structurally by every production caller. OPTIONAL,
+   * for the same reason `StoppableAgent.pid` is: a caller with nothing to
+   * give (most existing tests, and a row the CLI itself reported with no
+   * pid) keeps the pre-existing behaviour rather than being forced to
+   * fabricate a value -- `paneForRow` treats an absent pid exactly like a
+   * `null` one, and either just skips the pid tier below.
+   */
+  readonly pid?: number | null;
 };
 
 /**
  * The pane this row can be PROVEN to be running in, or `null`.
  *
- * TWO PROOFS, AND THE PUBLISHED ONE WINS. `panes` is what the sessions
- * themselves report -- Claude Code writes its own tmux pane into
- * `~/.claude/sessions/<pid>.json` beside its session id, so the pairing is per
- * SESSION and comes from the process that is in the pane (`session-pane.ts`).
- * It is preferred because the project tag below cannot answer the case the
- * operator actually hits: two sessions vam started in one project fail both of
- * its conditions, so neither row can be replied to, closed, or drawn.
+ * THREE PROOFS, TRIED IN ORDER, AND EACH BYPASSES THE COUNTS BELOW IT RATHER
+ * THAN MERELY OUTRANKING THEM. `panes` is what the sessions themselves report
+ * -- Claude Code writes its own tmux pane into `~/.claude/sessions/<pid>.json`
+ * beside its session id, so the pairing is per SESSION and comes from the
+ * process that is in the pane (`session-pane.ts`). It is tried first because
+ * neither of the other two can answer the case the operator actually hits:
+ * two sessions vam started in one project fail both of the project tag's
+ * conditions below, so neither row could be replied to, closed, or drawn.
+ *
+ * THE SECOND PROOF IS VAM'S OWN, sourced independently of anything Claude
+ * Code publishes: `createVamSession` (`tmux/spawn.ts`) records the pid of
+ * each pane's process on its tmux session AT CREATION, as `VAM_PID_OPTION`.
+ * `row.pid` is the same OS pid `claude agents --json` reports for this exact
+ * row (`agents.ts`), and a pid names at most one LIVE process at any moment,
+ * so a tagged session recorded with THIS row's pid is this row's pane
+ * regardless of how many other rows or tagged sessions share the project --
+ * see `VAM_PID_OPTION`'s own doc for why that holds for the tmux session's
+ * whole life, not merely at the instant it is written. It is tried second,
+ * after the published pane and before the project-tag count, because a row
+ * that published something said so ITSELF and a disagreement there is
+ * evidence of a corrupt pairing (see below) -- vam's own creation-time record
+ * must not override what the row says about itself, only stand in when the
+ * row said nothing.
  *
  * The published name is still checked against `sessions`, which is vam's own
  * prefix filtered (`listVamSessions`). So a session the operator started in
  * their own tmux publishes a pane here and is still never acted on, and a pane
  * that has ended since falls through to the tag rather than being typed into.
  *
- * THE PUBLISHED PANE BYPASSES THE COUNTS, it does not merely outrank them.
- * The fallback demands exactly one live row in the project, and measured on a
- * real machine that is UNSATISFIABLE for an operator who runs several sessions
- * per project: three live sessions share one cwd against one vam pane, so the
- * count vetoes every row and close refuses all three. Consulting it after a
- * pairing has been proven would keep that veto.
+ * THE PUBLISHED PANE AND THE PID TAG BOTH BYPASS THE COUNTS, neither merely
+ * outranks them. The fallback demands exactly one live row in the project,
+ * and measured on a real machine that is UNSATISFIABLE for an operator who
+ * runs several sessions per project: three live sessions share one cwd
+ * against one vam pane, so the count vetoes every row and close refuses all
+ * three. Consulting it after a pairing has been proven would keep that veto.
  *
- * THE TAG REMAINS -- vetoed by one rule -- for a session whose file carries no
- * `tmux` field: one not under tmux, or an older Claude Code that did not
- * publish it. Its two conditions are the whole of the safety argument in that
- * case: exactly one tagged tmux session for this project, and exactly one live
- * row in it -- and, per the paragraph above, it answers `null` for every row
- * in a cwd that holds more than one live session. That is correct (nothing in
- * the project scheme says which row is in the pane) and it is why this defect
- * stayed invisible: the pairing was not wrong, it was unanswerable.
+ * THE PROJECT TAG REMAINS -- vetoed by one rule -- for a session that neither
+ * of the two proofs above could place: one not under tmux, an older Claude
+ * Code that never publishes a `tmux` field, or a pid tag that was never
+ * recorded (`VAM_PID_OPTION` degrades silently rather than refusing when
+ * that happens). Its two conditions are the whole of the safety argument in
+ * that case: exactly one tagged tmux session for this project, and exactly
+ * one live row in it -- and it answers `null` for every row in a cwd that
+ * holds more than one live session and no other proof. That is correct
+ * (nothing in the project scheme alone says which row is in the pane) and it
+ * is why this defect stayed invisible for as long as it did: the pairing was
+ * not wrong, it was unanswerable without a proof one of the two tiers above
+ * now supplies for the common case.
  *
  * THE VETO: a tagged session that some row has PUBLISHED itself into belongs
  * to that row, and handing it to a silent neighbour -- which is what happened,
@@ -138,6 +162,23 @@ export function paneForRow(
       ? published
       : null;
   }
+  // VAM'S OWN CREATION-TIME PROOF -- see the header for why it is tried here,
+  // between the published pane and the project-tag count. `row.pid` skipped
+  // entirely (falls through to the count below) when it is `null` or absent:
+  // a row vam did not spawn, or one the CLI reported with no pid, has nothing
+  // for this tier to match against, which is the honest answer for it.
+  if (row.pid !== null && row.pid !== undefined) {
+    const pid = String(row.pid);
+    const own = sessions.find((session) => session.project === projectId && session.pid === pid);
+    if (own !== undefined) {
+      // Same claim veto as the tag path below, applied LAST so it can only
+      // veto -- see the header on `claimedPanes` there. Not reachable under
+      // normal operation (the session this pid names can only be the one
+      // process this row IS), kept for the same defence-in-depth reason the
+      // rest of this function never trusts a single proof unchecked.
+      return claimedPanes(panes).has(own.name) ? null : own.name;
+    }
+  }
   const here = agents.filter((agent) => projectIdOf(agent.cwd) === projectId);
   if (here.length !== 1) return null;
   // A PANE ANOTHER ROW PUBLISHED IS SPOKEN FOR, and withholding it here is the
@@ -158,27 +199,37 @@ export function paneForRow(
 }
 
 /**
- * Type the prompt into a pane and press Return.
+ * Type the whole prompt into a pane, then press Return once to submit.
  *
- * TWO CALLS, AND THE ORDER IS THE POINT. The text goes literally (`-l`), so
- * tmux cannot read `Escape` or a leading `-` as anything but characters; the
- * Return has to be interpreted, which `-l` forbids, so it is sent on its own.
- * When the text fails, the Return is NOT sent -- pressing Return into a pane
- * that never received the prompt would submit whatever the operator had
- * already typed there.
+ * TYPE, THEN SUBMIT, AND THE ORDER IS THE POINT. The prompt goes through
+ * `promptKeystrokes`, which types each line literally (`-l`, so tmux cannot
+ * read `Escape` or a leading `-` as anything but characters) and breaks every
+ * INTERNAL newline with the REPL's own `\`+Enter escape rather than a bare
+ * submit. The FINAL submit is a single interpreted Enter here, after the whole
+ * prompt has landed. When any keystroke fails, that final Return is NOT sent --
+ * pressing Return into a pane that only got half the prompt would submit half a
+ * message, and the operator would not know which half.
+ *
+ * WHAT VAM CAN HONESTLY CLAIM WHEN THIS RETURNS `null`: the text was typed into
+ * the pane vam owns and Return was pressed. Nothing more. There is no echo the
+ * old `--output-format json` gave (`deliver.ts`), so vam does not know the REPL
+ * accepted the submit or that an answer is coming -- that shows up when the
+ * transcript does, which is the projection the whole design rests on.
  */
 async function typeIntoPane(
   run: TmuxRun,
   name: string,
   prompt: string,
 ): Promise<SourceError | null> {
-  const typed = await run(sendTextArgv(name, prompt));
-  if (typed.failure !== null) {
-    return classifyTmuxFailure({
-      failure: typed.failure,
-      stderr: typed.stderr,
-      action: `typing a reply into session ${name}`,
-    });
+  for (const keystroke of promptKeystrokes(name, prompt)) {
+    const typed = await run(keystroke);
+    if (typed.failure !== null) {
+      return classifyTmuxFailure({
+        failure: typed.failure,
+        stderr: typed.stderr,
+        action: `typing a reply into session ${name}`,
+      });
+    }
   }
   const entered = await run(sendEnterArgv(name));
   if (entered.failure !== null) {
@@ -196,7 +247,9 @@ async function typeIntoPane(
 }
 
 /**
- * Deliver `prompt` to the session `rowId` names. `null` means it landed.
+ * Type `prompt` into the pane the session `rowId` names, or refuse. `null`
+ * means it landed in the pane; anything else is a `SourceError` that says why
+ * and never claims a delivery.
  *
  * Never throws, for the reason every write path here does not: main's IPC
  * handler turns a thrown error into a generic `unreachable/source-failed` and
@@ -208,11 +261,10 @@ export async function replyToSession(input: {
   rowId: string;
   prompt: string;
   run: TmuxRun;
-  deliver: DeliverFn;
   /** What the sessions published about themselves; see `paneForRow`. */
   panes?: ReadonlyMap<string, string>;
 }): Promise<SourceError | null> {
-  const { agents, rowId, prompt, run, deliver } = input;
+  const { agents, rowId, prompt, run } = input;
   const sessionId = sessionIdOf(rowId);
   const row =
     agents.find((agent) => agent.key === rowId) ??
@@ -221,16 +273,26 @@ export async function replyToSession(input: {
     return {
       kind: 'refused',
       code: 'unknown-session',
-      message: `vam has no live session ${rowId}; it may have exited since the canvas was drawn`,
+      message: `vam has no live session ${rowId}; it may have exited since the session list was drawn`,
     };
   }
 
   const listed = await listVamSessions(run);
-  // A tmux vam could not ask is not a reason to stop: the CLI path is still
-  // there and is the only one that was ever available before.
   const pane = listed.kind === 'ok' ? paneForRow(listed.sessions, agents, row, input.panes) : null;
   if (pane !== null) {
     return typeIntoPane(run, pane, prompt);
   }
-  return deliver({ sessionId: row.sessionId, prompt, cwd: row.cwd });
+  // NO PANE, NO DELIVERY, AND THE REFUSAL SAYS SO. There is no second channel
+  // to fall through to (see the header): a session vam did not start, or one it
+  // cannot yet pair to a pane, has no terminal vam owns to type into. When
+  // `listVamSessions` itself failed, that is why -- vam could not even ask
+  // tmux -- and the message carries the tmux reason after vam's own so the
+  // operator sees both. Either way, nothing was sent and nothing is claimed.
+  const because =
+    listed.kind === 'ok' ? '' : ` (vam could not reach tmux to check: ${listed.error.message})`;
+  return {
+    kind: 'refused',
+    code: 'no-terminal',
+    message: `vam has no terminal it owns for session ${sessionId}, so there is nothing to type into${because}. Open it in a vam terminal to reply here.`,
+  };
 }

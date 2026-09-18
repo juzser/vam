@@ -67,21 +67,21 @@ export function UpdateNotice({ update }: UpdateNoticeProps) {
       className="fixed top-3 right-3 z-40 flex w-[300px] flex-col gap-2 rounded-[9px] border border-line-strong bg-panel p-3 shadow-lg"
     >
       <div className="flex items-baseline gap-2">
-        <span className="font-semibold text-ink text-xs">vam {status.version} is available</span>
+        <span className="font-semibold text-ink text-body">vam {status.version} is available</span>
         <button
           type="button"
           aria-label="dismiss update notice"
           onClick={() => setDismissed(true)}
-          className="ml-auto cursor-pointer rounded px-1 text-ink-faint text-xs"
+          className="ml-auto cursor-pointer rounded px-1 text-ink-faint text-control"
         >
           ×
         </button>
       </div>
-      <p className="m-0 text-[11px] text-ink-dim leading-[1.45]">
+      <p className="m-0 text-control text-ink-dim">
         Opens the release page in your browser. vam does not download or install anything — the
         release is yours to read and to fetch.
       </p>
-      <span data-testid="update-url" className="select-text break-all text-[10px] text-ink-faint">
+      <span data-testid="update-url" className="select-text break-all text-meta text-ink-faint">
         {status.url}
       </span>
       <button
@@ -89,12 +89,12 @@ export function UpdateNotice({ update }: UpdateNoticeProps) {
         onClick={() => {
           void update?.open().then((opened) => setOpenFailed(!opened));
         }}
-        className="cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-xs"
+        className="cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-control"
       >
         Open the release page
       </button>
       {openFailed && (
-        <p data-testid="update-open-failed" className="m-0 text-[11px] text-ink-faint">
+        <p data-testid="update-open-failed" className="m-0 text-control text-ink-faint">
           Could not open a browser. The URL above is the release.
         </p>
       )}

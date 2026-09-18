@@ -15,7 +15,6 @@ import {
   OUT_FONT_SIZE_VAR,
   readPrefs,
   type StorageLike,
-  setFocusShare,
   setOutFontSize,
   setTheme,
   writePrefs,
@@ -51,18 +50,17 @@ describe('the out text size round-trips', () => {
 
   it('writes and reads back a chosen size, disturbing no neighbour', () => {
     const storage = fake();
-    writePrefs(storage, setOutFontSize(setFocusShare(setTheme(EMPTY_PREFS, 'system'), 0.9), 15));
+    writePrefs(storage, setOutFontSize(setTheme(EMPTY_PREFS, 'system'), 15));
     const back = readPrefs(storage);
     expect(back.outFontSize).toBe(15);
     expect(back.theme).toBe('system');
-    expect(back.focusViewportShare).toBe(0.9);
   });
 
   it('defaults when the payload predates the field — which every payload does', () => {
-    const back = stored({ theme: 'light', focusViewportShare: 0.9 });
+    const back = stored({ theme: 'light', panes: { sidebar: 300, detail: 400 } });
     expect(back.outFontSize).toBe(DEFAULT_OUT_FONT_SIZE);
     expect(back.theme).toBe('light');
-    expect(back.focusViewportShare).toBe(0.9);
+    expect(back.panes.sidebar).toBe(300);
   });
 
   it('clamps a hand-edited value on READ, not only on write', () => {

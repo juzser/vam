@@ -30,8 +30,8 @@ import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { baseProps, entriesOf, makeSession } from '../panels/session-list-props.js';
 
 beforeAll(() => {
-  // The canvas mounts ReactFlow, which measures with APIs happy-dom does not
-  // implement, and reads prefs from a store it does not provide either.
+  // The canvas renders session panes that measure with APIs happy-dom does
+  // not implement, and reads prefs from a store it does not provide either.
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
@@ -160,9 +160,19 @@ describe('the label and the shortcut read on one line', () => {
 describe('a mode-dependent binding is never flattened to one meaning', () => {
   it('states the meaning of the mode that applies, when the caller knows it', () => {
     renderTip({ label: 'move left', action: MOVE_LEFT, mode: 'insert' });
-    const text = openByFocus().textContent ?? '';
-    expect(text).toContain(MODE_TITLES.insert);
-    expect(text).not.toContain(MODE_TITLES.select);
+    const tip = openByFocus();
+    expect(tip.textContent ?? '').toContain(MODE_TITLES.insert);
+    // ONE LINE, not two — asserted structurally rather than by scanning the
+    // whole tip for the other mode's name. That scan was a proxy for this and
+    // stopped being one: `h` in Insert is the way BACK to Select, so its
+    // caption now says the word (audit F1 — it used to claim `h` walked a
+    // question's options, which is the one thing it never does). Counting the
+    // caption lines is what "did not flatten both modes into one" always meant.
+    expect(tip.querySelectorAll('[data-tip-keys]')).toHaveLength(1);
+    const lines = shortcutLines(MOVE_LEFT, 'insert', NO_BINDINGS);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.caption).toContain(`${MODE_TITLES.insert} · `);
+    expect(lines[0]?.caption).not.toContain(`${MODE_TITLES.select} · `);
   });
 
   it('states both, distinctly, when the button is reachable in either mode', () => {
@@ -278,5 +288,121 @@ describe('the status bar prints the key that opens the sheet, not a default', ()
     expect(document.querySelector('[data-keysheet-hint]')).toBeNull();
     // The caption stays: it is what makes the sheet discoverable at all.
     expect(document.body.textContent).toContain('Keyboard shortcut');
+  });
+});
+
+/**
+ * Audit item 2 (S2). The chip's separation from the label is purely visual — a
+ * gap and a border — and the tip content is the target of `aria-describedby`,
+ * so a screen reader flattens the two into one string. Measured live, the
+ * Settings tip announced as `"Settings,"`: a label with a comma stuck to it,
+ * where the comma is the whole shortcut. `"Search sessions/"`, `"Filter
+ * sessionsF"` and `"Close this sessionx or Mod-w"` were the same defect.
+ *
+ * The border cannot be read, so the word has to be said.
+ */
+describe('the chord is announced as a shortcut, not as punctuation', () => {
+  it('names it in text for a screen reader and hides the visual chip', () => {
+    renderTip();
+    const tip = openByFocus();
+    const keys = bindingChords(NO_BINDINGS, actionId(SETTINGS)).join(' or ');
+    expect(keys).not.toBe('');
+    // The visual chip is decoration once the text alternative exists; left
+    // readable it would say the chord twice.
+    const chip = tip.querySelector('[data-tip-keys]');
+    expect(chip?.getAttribute('aria-hidden')).toBe('true');
+    // What a screen reader actually flattens to.
+    expect(tip.textContent ?? '').toContain(`shortcut: ${keys}`);
+    // The defect itself: the label must no longer be welded to a bare chord.
+    expect(tip.textContent ?? '').not.toBe(`Settings${keys}`);
+  });
+
+  it('says it for a mode-qualified action too, where each row carries its own chip', () => {
+    render(
+      <ShortcutTip label="Move left" action={MOVE_LEFT}>
+        <button type="button">M</button>
+      </ShortcutTip>,
+    );
+    const tip = openByFocus();
+    const keys = bindingChords(NO_BINDINGS, actionId(MOVE_LEFT)).join(' or ');
+    for (const chip of tip.querySelectorAll('[data-tip-keys]')) {
+      expect(chip.getAttribute('aria-hidden')).toBe('true');
+    }
+    expect(tip.textContent ?? '').toContain(`shortcut: ${keys}`);
+  });
+});
+
+/**
+ * The four view icons — the operator's own request ("add tooltips for the 4
+ * functions in the tab, with the shortcut key"), and the reason
+ * `Alt+<digit>` had to become a real binding first.
+ *
+ * These icons carried their chord as a LITERAL in two places at once, an
+ * `aria-label` and a byte-identical `title`: `Response view — Alt+1`. A
+ * tooltip built on that literal would be the third copy of a string nothing
+ * keeps true — and `pickView` is rebindable now, so "nothing keeps it true"
+ * stopped being hypothetical. Everything below asks the binding table what is
+ * in force; not one assertion spells a shipped chord of its own.
+ */
+describe('the view icons derive their shortcut, and do not repeat it in their name', () => {
+  const icon = (view: string) =>
+    document.querySelector<HTMLButtonElement>(`[data-view="${view}"]`) as HTMLButtonElement;
+
+  /**
+   * IT PRINTS EVERY CHORD, AND NO LONGER AS ONE JOINED STRING — a correction
+   * to this case rather than a loosening of it.
+   *
+   * `pickView` holds two spellings now (`SELECT_DIGITS`, `keyboard/chords.ts`)
+   * and they are not alike: `Ctrl-Alt-2` opens PRs from anywhere, and a bare
+   * `2` is text wherever there is a caret. `Ctrl-Alt-2 or 2` said they were
+   * interchangeable, which is exactly the sentence this file exists to keep
+   * out of the chrome — so the Select-only spelling gets a line of its own,
+   * captioned with the mode it is true in.
+   *
+   * The property is unchanged: every chord the TABLE holds is on screen,
+   * derived, with no shipped chord spelled in this test.
+   */
+  it('names the view and prints every chord the table holds for its digit', () => {
+    render(<Canvas model={DEMO_MODEL} />);
+    const action: KeyAction = { kind: 'pickView', digit: 2 };
+    const keys = bindingChords(NO_BINDINGS, actionId(action));
+    expect(keys, 'the fixture must have the digit bound, or this asserts nothing').not.toEqual([]);
+    expect(keys.length, 'the digit must hold both spellings, or the split asserts nothing').toBe(2);
+    const text = openByFocus(icon('prs')).textContent ?? '';
+    expect(text).toContain('PRs view');
+    for (const chord of keys) {
+      expect(text, `the tip does not name ${chord}`).toContain(chord);
+    }
+    // And the one that works only in Select says so, rather than standing
+    // beside the chord as though they were the same key.
+    expect(text).toContain(MODE_TITLES.select);
+  });
+
+  it('follows the operator to a rebound key rather than to the shipped one', () => {
+    // Through STORED prefs, the operator's own route: the canvas activates
+    // them on mount, so a direct `setActiveBindings` would be overwritten.
+    localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { 'pickView:2': ['F2'] } }));
+    render(<Canvas model={DEMO_MODEL} />);
+    const text = openByFocus(icon('prs')).textContent ?? '';
+    expect(text).toContain('F2');
+    // And the shipped chord is not ALSO printed — the tip reads what is in
+    // force, it does not accumulate.
+    expect(text).not.toContain('Alt-2');
+  });
+
+  it('prints no shortcut at all for a view the operator unbound', () => {
+    localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { 'pickView:2': [] } }));
+    render(<Canvas model={DEMO_MODEL} />);
+    const tip = openByFocus(icon('prs'));
+    expect(tip.textContent?.trim()).toBe('PRs view');
+    // Not an empty bracket, not the word "unbound": no chip element at all.
+    expect(tip.querySelector('[data-tip-keys]')).toBeNull();
+  });
+
+  it('carries no `title`, so the tooltip is the only hover surface', () => {
+    render(<Canvas model={DEMO_MODEL} />);
+    for (const button of document.querySelectorAll('[data-view]')) {
+      expect(button.getAttribute('title'), `${button.getAttribute('data-view')}`).toBeNull();
+    }
   });
 });

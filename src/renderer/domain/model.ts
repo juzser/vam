@@ -1,8 +1,8 @@
 /**
  * The one shape the canvas draws.
  *
- * docs/design/canvas-layout.md §2 established that this is not an invention:
- * the factory and orca each already treat "a decision waiting for a person" as
+ * This is not an invention: the factory and orca each already treat "a
+ * decision waiting for a person" as
  * first-class, and each already has a project layer, a session layer and a
  * notion of how many agents are running. What differs is only the vocabulary.
  * So the adapters translate into these types and the canvas never learns which
@@ -24,8 +24,7 @@
 export type SourceId = string;
 
 /**
- * The four states worth a colour on a canvas you read at a glance (§3). A fifth
- * would make the first four mean less.
+ * The states worth a colour on a canvas you read at a glance.
  *
  * `waiting` is the one that earns the canvas its keep, and it means one precise
  * thing: **the session has finished its turn and the ball is with you.** It
@@ -33,13 +32,38 @@ export type SourceId = string;
  * run — and nothing has been sent since. It does NOT mean "an agent inside it
  * is blocked": a session working through its own subagents is `running`, and
  * you are not meant to do anything about it.
+ *
+ * THE FIFTH, AND WHY THIS LIST GREW. This comment said for a long time that a
+ * fifth status "would make the first four mean less". It was four statuses
+ * that were making `waiting` mean less: the Claude Code source read every
+ * interactive row the CLI did not call `busy` as `waiting`, and the CLI's own
+ * word for a live session doing nothing is `idle` — measured, three of five
+ * interactive rows on a working machine. So after a day's work every finished
+ * session was amber, the sidebar's loud count was a count of nothing, and the
+ * one colour that must be believed was the one an operator learns to ignore.
+ *
+ * `idle` is therefore a status of its own and NOT a synonym for `done`. `done`
+ * is a job that ENDED — the only rows that can honestly report it are the
+ * background ones (`main/sources/claude-code/agents.ts`), and `stop.ts`
+ * refuses to stop such a row because there is nothing left running. An idle
+ * session is the opposite: alive, attached, stoppable, and simply between
+ * turns. Folding the two would trade an amber lie for a grey one and lose
+ * "this agent is sitting there ready" from the canvas entirely.
+ *
+ * Its colour is a neutral, deliberately: `idle` is the absence of news, and
+ * the four hues stay spent on states that are news.
+ *
+ * Every surface that paints a status keys a `Record<SessionStatus, …>` off
+ * this union — the tab ink and dot, the sidebar dot, the phone dot, the rank
+ * order, the filter tally. That is the guard against this list growing again
+ * behind someone's back: add a member and the four maps stop compiling.
  */
-export type SessionStatus = 'running' | 'waiting' | 'done' | 'failed';
+export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed';
 
 /**
  * One round trip between you and a session: your words in, its answer out.
  *
- * NOT one agent turn and NOT one phase (§3, "Node session"). A session runs its
+ * NOT one agent turn and NOT one phase. A session runs its
  * own agents — reviewer, verifier, coder — by itself, and none of those becomes
  * a row or a step here. They surface only as the `●N` count and the activity
  * line on the session that owns them. What is a step is the thing you would
@@ -59,7 +83,7 @@ export type SessionStatus = 'running' | 'waiting' | 'done' | 'failed';
  *  - `output` — **the session's final response**, not its working. A reviewer's
  *    verdict, not the diff it read to reach one.
  *
- * Both render clamped to two lines (§3). Two, not one: a prompt worth
+ * Both render clamped to two lines. Two, not one: a prompt worth
  * distinguishing from the one above it rarely fits in a single line, and a
  * response truncated to one line is usually the same first clause for every
  * session. Two lines is where these become telling rather than decorative.
@@ -84,6 +108,161 @@ export type Decision = {
   readonly output: string | null;
   /** Commands this decision is asking you to run by hand — see `yy` in §4. */
   readonly commands: readonly Command[];
+  /**
+   * WHEN THE OPERATOR ASKED, ISO-8601, and when this turn last did anything.
+   *
+   * The In bubble pins a turn's prompt while the activity line under it stays
+   * live, so on a long turn the two are hours apart and the pin reads as the
+   * current question. These are what let the pane say otherwise.
+   *
+   * OPTIONAL, AND NULL IS ORDINARY, on the rule this file already keeps for
+   * `errorCount`: absent means the SOURCE cannot say. Claude Code's
+   * `last-prompt` marker carries no timestamp at all (0 of 25,259 measured),
+   * so a turn whose prompt line is above the top of the read window has no
+   * honest time to report -- and the first thing that happened afterwards is
+   * the answer's time, not the question's.
+   */
+  readonly promptedAt?: string | null;
+  readonly latestAt?: string | null;
+  /**
+   * How many tool calls FAILED inside this turn, of the ones vam read.
+   *
+   * WHY IT EXISTS. A turn's mark on the progress line was binary — working or
+   * answered — so a turn whose tools blew up three times still read `✓`, and
+   * the collapsed line said "12 turns read" over a run that was on fire.
+   * Collapsing intermediate work may cost the operator DETAIL; it must never
+   * cost them ALARM.
+   *
+   * READ, NOT INFERRED. A failed tool call is recorded explicitly: an
+   * `is_error: true` on the `tool_result` part, the same field `deliver.ts`
+   * already reads to tell a refusal from a delivery. Nothing here is derived
+   * from a message that merely correlates with failure — a false badge would
+   * be worse than none, because it teaches the operator to distrust the one
+   * signal that has to be trusted.
+   *
+   * A COUNT OF WHAT WAS READ, like `decisions` itself. The window is the
+   * newest `TAIL_BYTES` of the transcript, so a failure older than that
+   * window was never seen and is not in this number. It sits BESIDE the
+   * "turns read" qualifier and does not weaken it.
+   *
+   * OPTIONAL, and the two states differ: ABSENT is "this source cannot report
+   * tool failures", which must draw nothing. ZERO is a reading — vam looked
+   * and found none.
+   */
+  readonly errorCount?: number;
+  /**
+   * The tool calls vam read inside this turn, oldest first — the turn's
+   * working, which the column draws when focus view is off.
+   *
+   * WHY IT EXISTS. Focus view's whole promise is "hide tool calls and other
+   * in-progress activity"; turned off it drew one line per turn carrying the
+   * turn's mark and the agent's name, because that is all a turn held. The
+   * calls were in the transcript all along and the reader discarded them: it
+   * read every `tool_use` part and kept only the newest one in the whole
+   * window, as `Session.activity`. A mode that hides working has to have
+   * working to hide.
+   *
+   * IT DOES NOT REPLACE `errorCount`, and the two answer different questions.
+   * This is a LIST, which a folded line cannot draw; that is a COUNT, which
+   * says "something blew up in here" in one glyph and also counts failures vam
+   * could not attribute to any call it read — a window that opened between a
+   * call and its result. Neither is derived from the other.
+   *
+   * A LIST OF WHAT WAS READ, like `decisions` and like `errorCount`: the window
+   * is the newest `TAIL_BYTES` of the transcript, so a call older than that
+   * window is not in here, and this is never a claim about the run.
+   *
+   * OPTIONAL, on the same rule as `errorCount`: ABSENT is "this source cannot
+   * report tool calls" and EMPTY is a reading — vam looked, and the turn called
+   * nothing.
+   */
+  readonly steps?: readonly TurnStep[];
+  /**
+   * THE ONE FIELD NO SOURCE MAY SET. True on a turn VAM ITSELF painted: the
+   * prompt the operator just sent, drawn as the newest turn from the moment it
+   * left, before any source has reported it back (`optimistic.ts`).
+   *
+   * WHY IT IS ON THE MODEL AT ALL. Every other reader goes on treating a paint
+   * exactly as it treats a real turn, which is the whole point of painting into
+   * the model rather than beside it. The exception is a reader that draws a
+   * turn's ABSENCES -- "this turn ended without an answer" and its three
+   * siblings in `DetailPanel.tsx` -- because every one of those sentences is a
+   * claim about what the SOURCE reported, and on a paint no source has
+   * reported anything at all. Nothing ended; vam has not heard back.
+   *
+   * ABSENT IS THE ORDINARY CASE and means "this turn came from outside". It is
+   * not a source reading and has no `null` state, so unlike `errorCount` there
+   * is no third thing to distinguish: a source adapter that sets it is stating
+   * something untrue about its own data.
+   *
+   * NOT AN ID PREFIX. `optimistic.ts` does mint its ids as `vam-pending-N` and
+   * the panel could have matched on that, but an id's SHAPE is not a promise
+   * -- ids arrive from outside vam, and a display that keys on one is a
+   * display a source can spoof by accident.
+   */
+  readonly unconfirmed?: boolean;
+  /**
+   * True on a turn vam minted from a window in which it could read NO
+   * conversation at all -- and therefore a turn whose answer vam has no
+   * evidence about, either way.
+   *
+   * WHY THIS IS A SEPARATE STATE AND NOT `output: null`. `null` is a reading:
+   * the source looked at this turn and collected no answer event, which is
+   * what a turn still in flight looks like. This is the ABSENCE of a reading,
+   * and the two were conflated for exactly as long as it took an operator to
+   * notice -- the Response view said "this turn ended without an answer" while
+   * the Terminal tab beside it held the agent's full reply.
+   *
+   * WHAT PRODUCES IT, measured rather than imagined. A transcript is read as a
+   * byte window from the end, and a single LINE can be larger than the whole
+   * window: 670 of them across 23 of the 85 session transcripts on the machine
+   * this was written for, the largest 1,356,930 bytes. One such line sitting in
+   * the window leaves it holding no `user` and no `assistant` line at all, and
+   * then the only thing able to open a turn is the `last-prompt` marker --
+   * whose branch has no answer to give, because the answer was never read.
+   * `tail.ts` now widens past such a line; this is what is reported when even
+   * the widened read found nothing, and a bounded read must be allowed to give
+   * up somewhere.
+   *
+   * ABSENT IS THE ORDINARY CASE, on the same rule as `errorCount` and
+   * `unconfirmed`: absent means this turn came out of a window vam really
+   * read. It is NOT a second `unconfirmed` -- that one is vam's own paint,
+   * about which no source has said anything yet; this is a source that said
+   * something vam could not reach.
+   */
+  readonly unread?: boolean;
+};
+
+/**
+ * One tool call, as a row of a turn's working.
+ *
+ * A NAME, NOT A TRANSCRIPT. The call's input is not carried — a file's whole
+ * contents rides in there — nor its result, nor any timing. What a progress row
+ * answers is "what did it do next", and the answer is the tool's name plus the
+ * description the tool itself wrote, where it wrote one.
+ */
+export type TurnStep = {
+  /**
+   * Vam's own, minted from the turn's id and the call's position in it.
+   *
+   * NOT THE PROVIDER'S `tool_use.id`, though all 63,622 calls in the measured
+   * corpus carried one: a list keyed on a value vam does not mint collapses two
+   * rows the day one repeats, and nothing here needs the id to mean anything
+   * outside its own turn.
+   */
+  readonly id: string;
+  /** `Bash`, or `Bash: run the tests` — cut at the activity line's own limit. */
+  readonly label: string;
+  /**
+   * Did the call's result come back `is_error: true`?
+   *
+   * READ, NOT INFERRED, and `=== true` rather than truthy — the same rule
+   * `errorCount` keeps, for the same reason: a false failure badge is worse
+   * than none. FALSE therefore also covers "no result was read", which is the
+   * state of every call still running and of one whose result fell outside the
+   * window. A row is marked only on the evidence of a failure.
+   */
+  readonly failed: boolean;
 };
 
 /**
@@ -98,6 +277,19 @@ export type Command = {
   readonly id: string;
   readonly label: string;
   readonly command: string;
+};
+
+/**
+ * A tier of the `/` list vam could not read, in the source's own words.
+ *
+ * `code` is for a reader that wants to branch (`cli-missing`, `timed-out`,
+ * `refused`, ...); `message` is the sentence a person reads. Both, for
+ * `PullRequestList`'s reason: a code alone cannot be shown and a message alone
+ * cannot be matched on.
+ */
+type SlashCommandGap = {
+  readonly code: string;
+  readonly message: string;
 };
 
 /** One command the PROVIDER configures -- `Command` above is agent-proposed. */
@@ -254,7 +446,7 @@ export type AgentQuestion = {
 
 export type Session = {
   readonly id: string;
-  /** Short name on the node header — an epic id, a task id, a run name. */
+  /** Short name shown on the tab and the sidebar row — an epic id, a task id, a run name. */
   readonly title: string;
   /**
    * A single glyph the operator picked, or `null` for none.
@@ -270,8 +462,8 @@ export type Session = {
   readonly epic: string | null;
   readonly status: SessionStatus;
   /**
-   * How many agents this session is running right now — the `●N` on the header
-   * (§3). This is the ONLY place a subagent appears: it is work happening under
+   * How many agents this session is running right now — the `●N` on the header.
+   * This is the ONLY place a subagent appears: it is work happening under
    * a session you started, not a session of its own, and giving it a row would
    * turn a list of four things you own into a list of forty you do not.
    */
@@ -305,7 +497,7 @@ export type Session = {
    * concept of.
    */
   readonly branch: string | null;
-  /** Newest first. The canvas shows the first three; §3. */
+  /** Newest first. The canvas shows the first three. */
   readonly decisions: readonly Decision[];
   /**
    * Which system this session came from. Optional because merging several
@@ -319,6 +511,28 @@ export type Session = {
    * the source looked and found none, the common case for `claude-code`.
    */
   readonly slashCommands?: readonly SlashCommand[];
+  /**
+   * WHY THE `/` LIST IS SHORT OF WHAT THE PROVIDER ITSELF WOULD OFFER, when
+   * vam knows that it is. Absent is the ordinary state: every tier vam has was
+   * read.
+   *
+   * IT EXISTS BECAUSE THE LIST HAS TIERS THAT FAIL DIFFERENTLY. Command FILES
+   * (`~/.claude/commands`, `<cwd>/.claude/commands`) are silent by design --
+   * a directory that is not there means the operator wrote no commands, which
+   * is a reading and not a failure. The provider's BUILT-INS are not files:
+   * vam has to ask the installed CLI for them (`builtin-commands.ts`), and
+   * that question can genuinely fail -- no CLI on `PATH`, a version that does
+   * not answer, a timeout. `pull-requests.ts` states the rule this serves:
+   * "no commands match" and "vam could not read the commands" must never look
+   * the same, and a list quietly missing fifty entries is the second wearing
+   * the first's clothes.
+   *
+   * A `PullRequestList`-style union will not do here, because the failure is
+   * PARTIAL: the file tiers can be read while the built-ins are not, and the
+   * operator should still get the commands vam does have. So the list stays
+   * the list, and this sits beside it naming what is missing from it.
+   */
+  readonly slashCommandGap?: SlashCommandGap;
   /**
    * The subagents this session spawned, newest first, or absent when the
    * source has no such surface.

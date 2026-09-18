@@ -4,30 +4,26 @@
  * The end-to-end keyboard test.
  *
  * Everything under it is unit-tested in isolation — the chord grammar, the
- * geometry, the coordinate maths, the layout. This is the one that proves they
- * are wired to each other and to a real keydown. docs/design/canvas-layout.md
- * calls keyboard control vam's single most important condition, and a condition
- * nothing exercises end to end is a condition nobody is checking.
+ * prefs it writes through. This is the one that proves they are wired to each
+ * other and to a real keydown. docs/design/canvas-layout.md calls keyboard
+ * control vam's single most important condition, and a condition nothing
+ * exercises end to end is a condition nobody is checking.
  *
  * The shape it asserts is the three-column one: `j`/`k` walk sessions (rows),
- * `h`/`l` walk a session's chain (its steps), and the sidebar, canvas and detail
- * panel all follow the same single focus.
+ * `h`/`l` walk the open tab strip (0.2 migration step 2 — see
+ * `Canvas.tab-cycle.test.tsx` for that binding pinned in isolation), and the
+ * sidebar, tab strip and detail panel all follow the same single focus.
  */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import { layoutCanvas } from '../../src/renderer/canvas/layout.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
-import {
-  DEFAULT_PANES,
-  DETAIL_MIN,
-  SIDEBAR_MAX,
-  SIDEBAR_MIN,
-} from '../../src/renderer/prefs/panes.js';
+import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
+import { DEFAULT_PANES, SIDEBAR_MAX, SIDEBAR_MIN } from '../../src/renderer/prefs/panes.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 function decision(id: string, over: Partial<Decision> = {}): Decision {
   return { id, label: id, input: `in-${id}`, output: `out-${id}`, commands: [], ...over };
@@ -101,19 +97,43 @@ const EMPTY: CanvasModel = { projects: [] };
  * `h`/`l` walk that session's chain. What these tests assert — where focus
  * moved — is unchanged.
  */
+/**
+ * A12.2 removed `[data-prompt-target]`/`[data-prompt-project]` along with
+ * the rest of `DetailPanel`'s header — the tab now carries the session's
+ * name, and nothing in this pane carries the project's. Both halves of
+ * "which session has the keyboard" are read off the SIDEBAR instead, which
+ * this change does not touch: `[data-row-cursor]` marks the focused row
+ * (unconditionally, own hook, unrelated to the detail pane), and its
+ * project is found by walking up to the `[data-project-rows]` container
+ * that groups it and reading the matching heading's own name span (the
+ * heading also carries a bare session count with no separator, hence
+ * `span.truncate` rather than the heading's whole `textContent`).
+ */
+const focusedRow = () =>
+  document.querySelector('[data-row-cursor]')?.closest('[data-session-row]') ?? null;
 const focused = () => {
-  const title = document.querySelector('[data-prompt-target]')?.textContent ?? '';
+  const row = focusedRow();
+  const title = row?.querySelector('[data-row-title]')?.textContent ?? '';
   if (title === '' || title === 'No session selected') return '';
-  const project = document.querySelector('[data-prompt-project]')?.textContent ?? '';
+  const projectId = row?.closest('[data-project-rows]')?.getAttribute('data-project-rows') ?? '';
+  const heading = document.querySelector(`[data-project-heading][data-project-id="${projectId}"]`);
+  const project = heading?.querySelector('span.truncate')?.textContent ?? '';
   return `${project}/${title}`;
 };
 const mode = () => document.querySelector('[data-mode]')?.textContent ?? '';
-/** Which step the detail panel is expanding. */
-const detailStep = () => document.querySelector('[data-detail-step]')?.textContent ?? '';
-const promptTarget = () => document.querySelector('[data-prompt-target]')?.textContent ?? '';
-/** The full `in` or `out` text as the detail panel renders it. */
+const promptTarget = () => focusedRow()?.querySelector('[data-row-title]')?.textContent ?? '';
+/**
+ * The full `in` or `out` text of the turn THE PANE IS MARKING.
+ *
+ * The pane draws the whole session as a column now, oldest first, so an
+ * unqualified `[data-detail-block="in"]` is the OLDEST turn's prompt whatever
+ * the panel is reading -- which is exactly the substitution the cases below
+ * exist to catch, arriving in the assertion instead of in the code.
+ */
 const detailBlock = (which: 'in' | 'out') =>
-  document.querySelector(`[data-detail-block="${which}"]`)?.textContent ?? '';
+  document.querySelector(
+    `[data-column-turn][data-turn-current="true"] [data-detail-block="${which}"]`,
+  )?.textContent ?? '';
 // Named hooks, not positional ones: a row carries a close button of its own and
 // an icon picker, so `li button` stopped meaning "a session" the moment the row
 // grew controls.
@@ -122,7 +142,7 @@ const headings = () =>
   [...document.querySelectorAll('[data-project-heading]')].map((el) => el.textContent ?? '');
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
-/** What the canvas root node draws for a session -- the one icon display left. */
+/** What the session row draws for its icon -- the one icon display left. */
 const nodeIcon = (id: string) =>
   document.querySelector(`[data-session-icon="${id}"]`)?.textContent ?? null;
 // A <textarea>, not an <input>: the composer is multiline, so a prompt is
@@ -143,13 +163,25 @@ const statusBar = () => document.querySelector('[data-status-bar]')?.textContent
  *  bar's visible text. See `StatusCell` in `Canvas.tsx`. */
 const statusFull = () =>
   document.querySelector('[data-status-bar] [data-status]')?.getAttribute('data-note') ?? '';
+/**
+ * The message cell's OWN drawn text — the bar around it holds the mode, the
+ * route badge and the shortcut tag, so `statusBar()` contains words no refusal
+ * put there. Read beside `statusFull` it is also the 72-character limit stated
+ * as behaviour: a refusal the cell had to shorten is one whose explanation
+ * only a hover can reach, so the two must come back equal.
+ */
+const statusText = () =>
+  document.querySelector('[data-status-bar] [data-status]')?.textContent ?? '';
 
 const actionPane = () =>
   document.querySelector('[data-action-pane]')?.getAttribute('data-action-pane') ?? '';
-// The sidebar renders first among the two resizable `<aside>`s; the detail
-// pane is the one that also carries `data-action-pane`.
+// The sidebar renders first among the two resizable `<aside>`s.
 const sidebarAside = () => document.querySelectorAll('aside')[0] as HTMLElement | undefined;
-const detailAside = () => document.querySelector<HTMLElement>('[data-action-pane]') ?? undefined;
+// A12.1: the width now lives on `[data-detail-pane]`, the wrapper that also
+// holds the tab strip — `DetailPanel`'s own root (`[data-action-pane]`) is
+// handed `width={undefined}` and fills it via `w-full`, so it carries no
+// inline width of its own any more.
+const detailAside = () => document.querySelector<HTMLElement>('[data-detail-pane]') ?? undefined;
 const width = (el: HTMLElement | undefined) => Number.parseFloat(el?.style.width ?? 'NaN');
 
 /**
@@ -159,8 +191,15 @@ const width = (el: HTMLElement | undefined) => Number.parseFloat(el?.style.width
  * idea a render is coming and the assertion would read the previous frame.
  */
 function press(key: string, modifiers: KeyboardEventInit = {}) {
+  // A bare single UPPERCASE letter models a real Shift press: since the
+  // CapsLock fix, `normalizeKey` (`keyboard/chords.ts`) decides a letter's
+  // case from `shiftKey` alone, not from `event.key`, so a synthetic event
+  // has to carry the modifier explicitly to mean what it used to mean.
+  const shiftKey = /^[A-Z]$/.test(key) ? true : undefined;
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...modifiers }));
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, shiftKey, ...modifiers }),
+    );
   });
 }
 
@@ -211,9 +250,9 @@ function keyOn(element: Element, key: string, modifiers: KeyboardEventInit = {})
 }
 
 beforeAll(() => {
-  // ReactFlow measures with APIs happy-dom does not implement. The nodes carry
-  // explicit width/height, so navigation does not depend on what these return —
-  // they only need to exist so the renderer does not throw.
+  // The rendered session panes read layout APIs happy-dom does not implement.
+  // The panes carry explicit width/height, so navigation does not depend on
+  // what these return — they only need to exist so the renderer does not throw.
   globalThis.ResizeObserver ??= class {
     observe() {}
     unobserve() {}
@@ -229,149 +268,61 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-  // Canvas now reads localStorage on mount. A pin or an icon left by one test
-  // would silently place a node — or draw an emoji — in the next.
+  // Canvas now reads localStorage on mount. An icon (or another
+  // `vam.prefs.v1` field) left by one test would leak into the next via
+  // `readPrefs`, undetected unless this suite clears it every time.
   localStorage.clear();
 });
 
-describe('in and out are labelled differently in the node and in the pane', () => {
-  it('gives the right pane an icon AND the word, and its own scroll per region', () => {
+/**
+ * RETIRED: `'gives the right pane an icon AND the word, and its own scroll
+ * per region'` pinned the OLD three-fixed-height-pane layout — `in`,
+ * `progress` and `out` each with their own `flex-none`/`flex-1` share of
+ * the pane and, once `progress` was toggled open, their own
+ * `overflow-y-auto` scroller. A12.2 removes that layout outright: the three
+ * are one merged, continuously scrolling column now
+ * (`[data-detail-column]`), with no per-region scroller and no toggle to
+ * open. That shape is covered at length in `test/panels/DetailPanel.test.tsx`
+ * (`describe('`in` still caps its own text, inside one merged scrolling
+ * column (A12.2)', ...)` and `describe('the progress region is a single
+ * step, not a list of rows (A12.2)', ...)`) — unit-level, not through a full
+ * `<Canvas>` render, which is the right place for CSS-class-shaped
+ * assertions like these. What is still worth pinning HERE, through the real
+ * mount, is that the labelled glyphs survive the trip through `Canvas.tsx`'s
+ * own props at all — kept below.
+ */
+describe('in, progress and out are labelled through the real Canvas mount', () => {
+  it('gives the pane an icon AND the word for all three regions', () => {
     render(<Canvas model={MODEL} />);
-    press('l'); // into the chain, so a step is expanded
-
-    // The pane has room for words and the operator asked for them back: an
-    // icon alone is ambiguous in the one place a decision gets made.
     const inBlock = document.querySelector('[data-detail-block="in"]');
     const outBlock = document.querySelector('[data-detail-block="out"]');
     const progress = document.querySelector('[data-detail-block="progress"]');
     expect(inBlock?.textContent).toContain('in');
     expect(outBlock?.textContent).toContain('out');
     expect(progress?.textContent).toContain('progress');
-
-    // Three regions, three scrollers. Before this the pane scrolled as one
-    // column, so reading a long answer pushed the request that prompted it off
-    // the top — the two things you compare were never on screen together.
-    // `progress` renders no list until it is opened, so its scroller is behind
-    // its own toggle; the other two are always there.
-    for (const block of [inBlock, outBlock]) {
-      expect(block?.querySelector('.vam-no-scrollbar')).not.toBeNull();
-    }
-    act(() => progress?.querySelector<HTMLButtonElement>('[data-progress-toggle]')?.click());
-    expect(progress?.querySelector('.vam-no-scrollbar')).not.toBeNull();
-    // And `out` is the one that grows: context stays short, the answer gets
-    // the height.
-    expect(outBlock?.className).toContain('flex-1');
-    expect(inBlock?.className).toContain('flex-none');
-    expect(progress?.className).toContain('flex-none');
-  });
-
-  it('gives the step node icons only, with the word kept for screen readers', () => {
-    render(<Canvas model={MODEL} />);
-    // A step card is too narrow for a label, so there the icon stands alone —
-    // and `role="img"` is what makes its aria-label announced at all. On a
-    // bare <span> the label is silently dropped, which this codebase shipped
-    // once already.
-    // Scoped to the step card, and the card is asserted FIRST. The initial
-    // draft of this test fell back to `document.body` when the selector missed,
-    // which made it pass against the old code by finding the DETAIL PANEL's
-    // icons instead — a test that could not fail, caught by reverting both
-    // files and watching only its sibling go red.
-    const steps = [...document.querySelectorAll('[data-step-kind]')];
-    expect(steps.length, 'no step cards rendered — the test proves nothing').toBeGreaterThan(0);
-    // The labels name the SPEAKER, not the direction, because the icons do:
-    // the mockup draws a person and a robot here, and "from you"/"from the
-    // agent" is what those glyphs mean. `in`/`out` would describe an arrow
-    // that is no longer on screen.
-    for (const name of ['from you', 'from the agent']) {
-      const marked = steps.some(
-        (step) => step.querySelector(`[role="img"][aria-label="${name}"]`) !== null,
-      );
-      expect(marked, `no step card has an accessible "${name}"`).toBe(true);
-    }
-    // And the words themselves are gone from the card, which is the change.
-    expect(steps[0]?.textContent).not.toContain('IN');
-    expect(steps[0]?.textContent).not.toContain('OUT');
-    // Distinct labels, not one reused: a card whose two rows announced the
-    // same thing would pass the loop above and tell a screen-reader user
-    // nothing about who spoke.
-    const labels = [...steps[0]!.querySelectorAll('[role="img"][aria-label]')].map((el) =>
-      el.getAttribute('aria-label'),
-    );
-    expect(new Set(labels).size).toBe(labels.length);
+    // The one shared scroll column, mounted and reachable through Canvas.
+    expect(document.querySelector('[data-detail-column]')).not.toBeNull();
   });
 });
 
 /**
- * Clicking a card moves the cursor to it.
+ * 0.2 migration, step 2: three describe blocks died here —
+ * `'gives the step node icons only, with the word kept for screen readers'`
+ * (a step card's own `role="img"` labels — `StepNode` is deleted),
+ * `'a canvas card is clickable, and a click focuses that session'`, and
+ * `'the focused node says so with an indicator, not a word'`
+ * (`[data-focus-indicator]`/`.vam-focus-glow` were `SessionInfoNode`'s own
+ * decoration, also deleted).
  *
- * The keyboard was the only way to move focus on the canvas: `j`/`k`, jump
- * labels, or a sidebar row. A card you can see and point at but cannot select
- * by pointing is the kind of gap that reads as the app being broken rather
- * than as a design.
+ * The click-to-focus property is re-pointed, not lost — every session used to
+ * be a clickable graph card whether or not it had a tab open, so the
+ * narrower thing a tab click can still prove (focus moves among ALREADY-OPEN
+ * tabs the same way) is pinned in `Canvas.tab-strip.test.tsx`'s "clicking a
+ * tab moves focus to it". The other two have no shell analogue: the sidebar
+ * row's own focused styling is a pre-existing, unrelated mechanism this
+ * migration did not touch, and there is no shell surface left that shows a
+ * step's own speaker (`in`/`out` remain, on the pane, pinned above).
  */
-describe('a canvas card is clickable, and a click focuses that session', () => {
-  const cards = () => [...document.querySelectorAll('[data-session-card]')];
-
-  it('moves focus to the session whose card was clicked', () => {
-    render(<Canvas model={MODEL} />);
-    const start = focused();
-    // Pick a card that is NOT already focused, or the assertion proves nothing
-    // whether or not the click handler exists at all.
-    const target = cards().find((c) => !c.className.includes('vam-cursor-glow'));
-    expect(target, 'every card was already focused — the fixture cannot test this').toBeDefined();
-    act(() => {
-      (target as HTMLElement).click();
-    });
-    expect(focused()).not.toBe(start);
-  });
-
-  it('leaves exactly one card focused after a click, not two', () => {
-    render(<Canvas model={MODEL} />);
-    const target = cards().find((c) => !c.className.includes('vam-cursor-glow'));
-    act(() => {
-      (target as HTMLElement).click();
-    });
-    expect(document.querySelectorAll('[data-focus-indicator]')).toHaveLength(1);
-  });
-
-  it('keeps the keyboard working after a click, from the clicked card', () => {
-    // A click that set focus through a second, parallel mechanism would leave
-    // j/k navigating from wherever the KEYBOARD thought it was, not from the
-    // card you clicked. Targeted at b1 deliberately: b1 sits directly below a1
-    // in the grid, so `k` from it has a known destination. An earlier draft
-    // clicked "the first unfocused card", which is a2 — in the other column
-    // with nothing above it. Under list-order `j`/`k` the premise changed
-    // again: vertical now walks the SIDEBAR, so `k` from b1 lands on a2, the
-    // row above it in the list, not on a1.
-    render(<Canvas model={MODEL} />);
-    const b1 = document.querySelector('[data-session-card="b1"]');
-    expect(b1, 'fixture has no b1 card to click').not.toBeNull();
-    act(() => {
-      (b1 as HTMLElement).click();
-    });
-    expect(focused()).toBe('beta/b1');
-    press('k');
-    expect(focused()).toBe('alpha/a2');
-  });
-});
-
-describe('the focused node says so with an indicator, not a word', () => {
-  it('marks exactly one node focused, and moves the mark with j', () => {
-    render(<Canvas model={MODEL} />);
-    const marks = () => [...document.querySelectorAll('[data-focus-indicator]')];
-
-    expect(marks()).toHaveLength(1);
-    // The word it replaced cost a tag's width in a card that is mostly title,
-    // and stopped being legible at the 80% the canvas now opens at.
-    expect(document.body.textContent).not.toContain('FOCUSED');
-    // It is an indicator, so the word has to survive for a screen reader.
-    expect(marks()[0]?.getAttribute('aria-label')).toBe('focused');
-    expect(marks()[0]?.className).toContain('vam-focus-glow');
-
-    press('j');
-    expect(marks()).toHaveLength(1);
-  });
-});
 
 describe('walking sessions with j and k', () => {
   it('starts on the first session in the list', () => {
@@ -410,88 +361,42 @@ describe('walking sessions with j and k', () => {
   });
 });
 
-describe('walking a session’s chain with h and l', () => {
-  it('l moves along the steps and the detail panel follows', () => {
-    render(<Canvas model={MODEL} />);
-    // The head of the row shows the newest step by default — an empty panel
-    // beside a selected session would read as broken.
-    expect(detailStep()).toBe('d-new');
-    press('l');
-    // Steps stack vertically now: a1's newest step sits level with the info
-    // node (offCentre 0) and its oldest sits directly above it, reachable
-    // only by `k`/`j`, not `l`. So the nearest step to the right is d-new.
-    expect(detailStep()).toBe('d-new');
-    press('l');
-    // a1 has only that one step reachable by `l`; a2's info node is the next
-    // thing to the right, so the second `l` crosses into it.
-    expect(detailStep()).toBe('e1');
-    expect(focused()).toBe('alpha/a2');
-  });
-
-  it('stays on the same session for a single step, then runs into the next cell', () => {
-    render(<Canvas model={MODEL} />);
-    press('l');
-    expect(focused()).toBe('alpha/a1');
-    press('l');
-    // a1's chain does not fill the column, so a second `l` reaches a2 rather
-    // than looping back — the same nearest-in-band rule that lets `j` cross
-    // project boundaries.
-    expect(focused()).toBe('alpha/a2');
-  });
-
-  it('h walks back towards the session head', () => {
-    render(<Canvas model={MODEL} />);
-    press('l');
-    press('l');
-    press('h');
-    // Back from a2's info node, `h` lands on a1's nearest step (d-new), not
-    // a1's info node — the mirror of the `l` that reached a2 in the first
-    // place.
-    expect(detailStep()).toBe('d-new');
-    expect(focused()).toBe('alpha/a1');
-  });
-
-  it('l stops at the end of the chain rather than reaching another row', () => {
-    render(<Canvas model={MODEL} />);
-    press('j');
-    press('j'); // beta/b1 — one step only
-    press('l');
-    press('l');
-    expect(focused()).toBe('beta/b1');
-    expect(screen.getByText(/nothing lies/)).toBeTruthy();
-  });
-});
+/**
+ * 0.2 migration, step 2: `describe('walking a session's chain with h and l',
+ * ...)` died here — all four tests read `detailStep()`/`focused()` against a
+ * per-session chain of graph step cards (`nextNode`, deleted with the
+ * geometry it walked). `h`/`l` are re-homed to previous/next open tab in the
+ * SAME commit as this deletion — see `Canvas.tab-cycle.test.tsx` for that
+ * binding pinned on its own terms, including the wrap these four tests never
+ * exercised (the graph's chain did not wrap).
+ */
 
 /**
- * THE CANVAS'S OWN VERSION OF THE FOLLOW-UP DEFECT `transcript.ts` fixes.
+ * THE PANE'S OWN VERSION OF THE FOLLOW-UP DEFECT `transcript.ts` fixes.
  *
- * The focused NODE id for a step is `stepNodeId(sessionId, decision.id)`
- * (`layout.ts`) -- built from the decision's own id, not from which slot it
- * happens to sit in. `focusedId` (React state) is a raw string that survives
- * a model refresh untouched, so this was already exposed to exactly the same
- * swap `DetailPanel`'s own `selectedId` was: if `decision.id` were still
- * positional, a poll that added a new turn would leave `focusedId` pointing
- * at a string that now named a DIFFERENT decision, and the canvas would draw
- * a different turn's content under an operator's unmoved cursor without
- * either of them noticing. Now that turn ids are content-derived
- * (`transcript.ts`'s `turnFingerprint`), the same node id keeps naming the
- * same turn across a refresh -- this is what proves that end to end, through
- * the real `<Canvas>` render and the real detail panel it drives, not just
- * through `layout.ts`'s own unit tests.
+ * 0.2 migration, step 2: re-pointed, not deleted. It used to click a graph
+ * step card (`[data-step-input]`, `stepNodeId(sessionId, decision.id)` in
+ * the deleted `layout.ts`), then the pane's own turn picker
+ * (`[data-progress-jump]`, a single `<select>` since A12.2).
+ *
+ * RE-POINTED A SECOND TIME, and this time to no control at all -- the picker
+ * went with the column's bar, because the column draws every turn and a
+ * jump-to-turn control was a second way to reach what is on screen. The state
+ * it produced is still exactly where the app puts an operator every day, and
+ * with no clicking: `Canvas.tsx` hands the pane `decisions[0]` and the pane's
+ * SESSION as `focusNodeId`, so the turn a pane considers itself to be reading
+ * is whichever was newest when it arrived, and it stays there while newer
+ * turns land. So the fixture arrives on `turnB` and lets `turnC`/`turnD`
+ * arrive under it.
+ *
+ * The defect class is unchanged and so is the reason this runs through the
+ * real `<Canvas>`: turn ids are content-derived (`transcript.ts`'s
+ * `turnFingerprint`), and a poll that adds a turn must not swap the content
+ * under a cursor an operator left on an OLDER one just because that turn's
+ * position in the list moved.
  */
-describe('a focused step keeps its own content across a model refresh', () => {
-  const findStepByInput = (input: string): HTMLElement | null =>
-    [...document.querySelectorAll('[data-step-input]')].find(
-      (el) => el.textContent === input,
-    ) as HTMLElement | null;
-
-  it('does not let a newly arrived turn swap the content under a focused older step', () => {
-    // THREE turns, all visible (`VISIBLE_DECISION_COUNT`) -- the fourth
-    // below is what pushes `turnB` from slot 1 to slot 0 while it stays on
-    // screen the whole time. A fixture with only two or three turns total
-    // never moves anything between slots, so it would pass even against a
-    // canvas that focused by SLOT rather than by turn -- this shape is the
-    // one that actually exercises the difference.
+describe('a focused turn keeps its own content across a model refresh', () => {
+  it('does not let a newly arrived turn swap the content under a focused older one', () => {
     const turnA = decision('sess:fp-aaa:0', {
       label: 'oldest',
       input: 'ask 0',
@@ -503,28 +408,26 @@ describe('a focused step keeps its own content across a model refresh', () => {
       output: 'answer 1',
     });
     const turnC = decision('sess:fp-ccc:0', { label: 'newer', input: 'ask 2', output: 'answer 2' });
+    // ARRIVED WHEN `turnB` WAS THE NEWEST: that is what makes the pane
+    // consider itself to be reading it, and it is the only way in now.
     const before: CanvasModel = {
       projects: [
         {
           id: 'p1',
           name: 'alpha',
           source: 'factory',
-          sessions: [session('a1', { decisions: [turnC, turnB, turnA] })], // newest-first
+          sessions: [session('a1', { decisions: [turnB, turnA] })], // newest-first
         },
       ],
     };
     const { rerender } = render(<Canvas model={before} />);
-
-    // The MIDDLE step -- slot 1 of 3 today, about to become slot 0.
-    const middleNode = findStepByInput('ask 1');
-    expect(middleNode, 'fixture has no step showing "ask 1" to click').not.toBeNull();
-    act(() => middleNode?.click());
-    expect(detailStep()).toBe('middle');
     expect(detailBlock('in')).toContain('ask 1');
 
-    // The poll: a fourth turn arrives with its OWN id. `turnA` (the old
-    // slot-0 occupant) falls out of the visible three; `turnB` -- still
-    // focused -- slides from slot 1 into slot 0.
+    // The poll: TWO more turns arrive, each with its OWN id, pushing `turnB`
+    // from index 0 to index 2 while it stays on screen the whole time. A
+    // fixture that added only one turn would move it a single slot; this shape
+    // is the one that would catch a pane holding a POSITION rather than a
+    // turn.
     const turnD = decision('sess:fp-ddd:0', {
       label: 'newest',
       input: 'ask 3',
@@ -542,8 +445,7 @@ describe('a focused step keeps its own content across a model refresh', () => {
     };
     act(() => rerender(<Canvas model={after} />));
 
-    // Still the turn that was focused, not whatever now sits in slot 1.
-    expect(detailStep()).toBe('middle');
+    // Still the turn that was being read, not whatever now sits at its index.
     expect(detailBlock('in')).toContain('ask 1');
   });
 });
@@ -558,25 +460,112 @@ describe('jumps', () => {
     expect(focused()).toBe('alpha/a1');
   });
 
-  it('gt steps to the next session and stops at the end', () => {
+  /**
+   * `gg`/`G` WITH NOTHING TO GO TO.
+   *
+   * Both read `entries[0]` / `entries.at(-1)` and moved focus only if the row
+   * came back defined, which on an empty list is a keypress that does nothing
+   * and says nothing. Their neighbours in the same switch — `hjkl` and
+   * `gt`/`gT` — already answer this exact state with this exact sentence; the
+   * two ends of the list were the pair that never learnt it.
+   */
+  it('gg and G answer an empty list rather than doing nothing', () => {
+    render(<Canvas model={EMPTY} />);
+    press('G');
+    expect(statusText()).toContain('no session matches');
+    press('Escape');
+    press('g');
+    press('g');
+    expect(statusText()).toContain('no session matches');
+  });
+
+  /**
+   * A LABEL NOTHING CARRIES.
+   *
+   * Jump mode eats the very next key — that is what lets a label reuse a
+   * letter bound elsewhere — so a key that labels nothing was swallowed, the
+   * mode closed, and the operator was left looking at an unchanged screen
+   * with no way to tell whether they had mistyped the label or the feature
+   * had broken. The dismissal stays (the labels are gone, so waiting for a
+   * second guess would be waiting with nothing on screen to read); the
+   * silence goes.
+   */
+  it('says so when the jump label names nothing', () => {
+    render(<Canvas model={MODEL} />);
+    press('f');
+    press('q'); // three sessions, so the labels are a, s and d
+    expect(focused()).toBe('alpha/a1');
+    expect(statusText()).toContain('nothing is labelled "q"');
+    // Whole, not shortened: the clause that says WHY has to survive the cell.
+    expect(statusText()).toBe(statusFull());
+    // And the mode really did close — the next key is the grammar's again.
+    press('j');
+    expect(focused()).toBe('alpha/a2');
+  });
+
+  /**
+   * `gt`/`gT` STEP OVER A PROJECT, not over a session.
+   *
+   * The sheet has captioned this pair `next project` / `previous project`
+   * since it was written, and the handler stepped one row of the flat session
+   * list — so with two sessions in one project `gt` did not leave the project
+   * at all, and where it did, it arrived by counting sessions rather than by
+   * looking for another project. `alpha` holds two sessions and `beta` one
+   * precisely so the two readings disagree: a session step from `a1` lands on
+   * `a2`, a project step lands on `b1`.
+   */
+  it('gt leaves the project rather than stepping one session', () => {
     render(<Canvas model={MODEL} />);
     press('g');
     press('t');
-    expect(focused()).toBe('alpha/a2');
-    press('g');
-    press('t');
+    expect(focused()).toBe('beta/b1');
     press('g');
     press('t'); // would wrap
     expect(focused()).toBe('beta/b1');
-    expect(screen.getByText('last session already')).toBeTruthy();
+    expect(screen.getByText('last project already')).toBeTruthy();
   });
 
-  it('gT stops at the first', () => {
+  /**
+   * And BACKWARDS it lands on the project's FIRST session, not on the last
+   * one it happens to meet walking up. `alpha` has two sessions, so the two
+   * are different rows: the entry point of a project is its top row — the
+   * most urgent session — whichever direction you arrive from.
+   */
+  it('gT lands on the first session of the previous project', () => {
     render(<Canvas model={MODEL} />);
+    press('G');
+    expect(focused()).toBe('beta/b1');
     press('g');
     press('T');
     expect(focused()).toBe('alpha/a1');
-    expect(screen.getByText('first session already')).toBeTruthy();
+    press('g');
+    press('T');
+    expect(focused()).toBe('alpha/a1');
+    expect(screen.getByText('first project already')).toBeTruthy();
+  });
+
+  /**
+   * THE CAPTION AND THE DISPATCH, HELD TO EACH OTHER.
+   *
+   * Read the chord out of the generated sheet by the sentence it prints, then
+   * press it and assert the PROJECT changed. A test that asserted the table
+   * holds `gt` would pass for any behaviour at all; this one fails if the
+   * caption promises a project and the key steps a session, which is exactly
+   * the state that shipped.
+   */
+  it('the row captioned "next project" moves to another project', () => {
+    const row = buildKeySheet()
+      .flatMap((group) => group.rows)
+      .find((one) => one.label.startsWith('next project'));
+    expect(row).toBeDefined();
+    render(<Canvas model={MODEL} />);
+    const before = focused().split('/')[0];
+    for (const key of [...(row?.keys ?? '')]) {
+      press(key);
+    }
+    const after = focused().split('/')[0];
+    expect(after).not.toBe('');
+    expect(after).not.toBe(before);
   });
 
   it('an abandoned chord moves nothing', () => {
@@ -586,16 +575,55 @@ describe('jumps', () => {
     expect(focused()).toBe('alpha/a1');
   });
 
+  /**
+   * AND SAYS WHICH PAIR WAS NOT BOUND.
+   *
+   * Abandoning the chord rather than falling through to `x`'s own meaning is
+   * the right call and stays — `gx` closing the focused session would be the
+   * expensive mistake. But not acting is not a reason to say nothing: the
+   * operator has typed two keys, watched a whole session stay where it was,
+   * and cannot tell an unbound pair from a dead application. The prefix is
+   * named too, because the state the message is about is the one that just
+   * ended: the `g` is gone, so the next key starts fresh.
+   */
+  it('an abandoned chord says which pair was not bound', () => {
+    render(<Canvas model={MODEL} />);
+    press('g');
+    press('x');
+    expect(statusText()).toContain('"gx" is not a chord');
+    expect(statusText()).toBe(statusFull());
+    // `x` did not also do what a bare `x` does — the session is still there.
+    expect(rows()).toHaveLength(3);
+  });
+
+  /**
+   * The other half of that rule, and the one that keeps the bar readable: a
+   * key bound to NOTHING AT ALL is not a refusal, it is a stray keystroke.
+   * `q` reaches the same `action === null` branch as `gx`, and every unbound
+   * letter, function key and media key on the board reaches it too. A bar
+   * that answered all of them would be a bar nobody reads by the time a real
+   * refusal arrives.
+   */
+  it('stays silent for a key that opens no chord and means nothing', () => {
+    render(<Canvas model={MODEL} />);
+    press('q');
+    expect(statusFull()).toBe('');
+    press('F5');
+    expect(statusFull()).toBe('');
+  });
+
   it('a bare modifier keydown does not abandon a half-typed chord', () => {
     // Reaching for Cmd and thinking better of it must not eat the `g`.
     render(<Canvas model={MODEL} />);
     press('g');
     press('Meta', { metaKey: true });
     press('t');
-    expect(focused()).toBe('alpha/a2');
+    // `gt` completing at all is the assertion; where it lands is
+    // `stepProject`'s business, pinned by the two cases above.
+    expect(focused()).toBe('beta/b1');
   });
 
-  it('f arms jump mode, and its first label lands on the first node', () => {
+  it('f arms jump mode, and its first label lands on the first sidebar row', () => {
     render(<Canvas model={MODEL} />);
     press('j'); // move away so the jump has somewhere to come back from
     press('f');
@@ -696,11 +724,19 @@ describe('the prompt box', () => {
     expect(statusBar()).toContain('read-only');
   });
 
-  it('Escape leaves it and drops the draft', () => {
+  it('Mod-[ leaves it and drops the draft', () => {
+    // THE KEY MOVED, THE BEHAVIOUR DID NOT. Escape in the composer is the
+    // agent's interrupt now (the operator's request, Claude Code's default),
+    // so the way out took `Mod-[` -- vim's `Ctrl-[`, which IS Escape, and
+    // `Mod` folds Ctrl and Cmd. What it does is byte-for-byte what Escape did.
     render(<Canvas model={MODEL} />);
     press('i');
     typeInto(promptInput() as HTMLTextAreaElement, 'halfway typed');
-    keyOn(promptInput() as HTMLTextAreaElement, 'Escape');
+    keyOn(promptInput() as HTMLTextAreaElement, '[', {
+      code: 'BracketLeft',
+      metaKey: true,
+      cancelable: true,
+    });
     expect(mode()).toBe('Select');
     expect(promptInput()?.value).toBe('');
   });
@@ -716,20 +752,15 @@ describe('filtering the sidebar with /', () => {
     expect(focused()).toBe('beta/b1');
   });
 
-  it('narrows the canvas with it, so nothing is drawn that cannot be reached', () => {
-    // This test used to assert the opposite — that the canvas kept drawing
-    // every session while the filter narrowed only the sidebar, "because an
-    // overview that hides things is not one". That left cards on screen with
-    // no sidebar row and no key that could reach them, which is the defect the
-    // operator reported. The set is narrowed once, and all three views use it.
-    render(<Canvas model={MODEL} />);
-    press('/');
-    typeInto(filterInput() as HTMLInputElement, 'beta');
-    const drawn = [...document.querySelectorAll('.react-flow__node')]
-      .map((el) => el.getAttribute('data-id') ?? '')
-      .filter((id) => id.startsWith('info:'));
-    expect(drawn).toEqual(['info:b1']);
-  });
+  // 0.2 migration, step 2: `'narrows the canvas with it, so nothing is drawn
+  // that cannot be reached'` died here, not merely lost its selector. It
+  // pinned the graph drawing exactly the filtered set — a SECOND,
+  // independently-computed rendering of "everything the filter left" that
+  // could (and once did) disagree with the sidebar's own list. The tab strip
+  // that replaced that column draws `openTabEntries` — the open-tab set,
+  // curated by the operator — never a re-derivation of the filtered model, so
+  // there is no second view left for the filter to fail to reach. See
+  // `Canvas.filter-reach.test.tsx`'s header for the general form of this.
 
   it('gt and gT say no session matches on an empty list, not "last session already"', () => {
     // `entries.findIndex` returns -1 for an empty list exactly as it does for
@@ -794,8 +825,7 @@ describe('filtering the sidebar with /', () => {
 
   it('Escape drops the filter and puts focus back where it started', () => {
     render(<Canvas model={MODEL} />);
-    press('l');
-    press('l'); // alpha/a2 — a1's short chain runs `l` straight into it
+    press('j'); // alpha/a2
     press('/');
     typeInto(filterInput() as HTMLInputElement, 'beta');
     expect(focused()).toBe('beta/b1');
@@ -815,7 +845,11 @@ describe('filtering the sidebar with /', () => {
 describe('the command palette', () => {
   it('Ctrl-K and Cmd-K both open it', () => {
     const { unmount } = render(<Canvas model={MODEL} />);
-    press('k', { ctrlKey: true });
+    // CMD, NOT CTRL. `Mod-k` is the platform's command modifier for a letter
+    // since the operator gave Ctrl+letter to the terminal (PR 361,
+    // `CTRL_GESTURES` in `chords.ts`), so a Ctrl+K here would open nothing on
+    // macOS while still passing under happy-dom's non-Apple platform string.
+    press('k', { metaKey: true });
     expect(screen.getByPlaceholderText('go to session…')).toBeTruthy();
     unmount();
 
@@ -834,7 +868,11 @@ describe('the command palette', () => {
 
   it('Escape closes it from inside, where the window listener cannot hear', () => {
     render(<Canvas model={MODEL} />);
-    press('k', { ctrlKey: true });
+    // CMD, NOT CTRL. `Mod-k` is the platform's command modifier for a letter
+    // since the operator gave Ctrl+letter to the terminal (PR 361,
+    // `CTRL_GESTURES` in `chords.ts`), so a Ctrl+K here would open nothing on
+    // macOS while still passing under happy-dom's non-Apple platform string.
+    press('k', { metaKey: true });
     keyOn(screen.getByPlaceholderText('go to session…'), 'Escape');
     expect(screen.queryByPlaceholderText('go to session…')).toBeNull();
   });
@@ -960,7 +998,7 @@ describe('renaming, icons and closing', () => {
 
   it('shows an icon you chose on a previous visit', () => {
     // The read half of the store, end to end: what localStorage holds reaches
-    // the canvas root node without the canvas knowing an icon is a local
+    // the icon slot without the canvas knowing an icon is a local
     // preference. This used to read the SIDEBAR row (`rowText('a1')` contains
     // the glyph, `rowText('a2')` does not); the sidebar no longer draws a
     // session icon, so the same end-to-end path is asserted on the surface
@@ -988,12 +1026,12 @@ describe('renaming, icons and closing', () => {
       screen.getByText('clear icon').click();
     });
     // It says "on this machine", not "not saved": factory having no icon route
-    // was never the point — §3 says this is per-user state that must NOT reach
+    // was never the point — this is per-user state that must NOT reach
     // the event log.
     expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
     // Also moved off the sidebar row: it asserted `rowText('a1')` no longer
-    // contained the cleared glyph, and now asserts the canvas node does not.
+    // contained the cleared glyph, and now asserts the icon slot does not.
     expect(nodeIcon('a1')).not.toBe('🛠');
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
@@ -1012,10 +1050,9 @@ describe('renaming, icons and closing', () => {
    * all.
    *
    * This is deliberately NOT written as "two sources share a session id, focus
-   * the second one". That test cannot be written today: `layout.ts` keys every
-   * canvas node on `session.id` alone (`infoNodeId(session.id)`, :237) and
-   * `focusedEntry` is `layout.nodes.find(n => n.id === focusedId)` (Canvas.tsx
-   * :243), so of two sessions sharing an id the second has no reachable node —
+   * the second one". That test cannot be written today: `focusedEntry` is
+   * `entries.find((e) => e.session.id === focusedSessionId)`, so of two
+   * sessions sharing an id the second is never the entry `.find` returns —
    * it cannot be focused, so it cannot be picked for. That collision is one
    * layer above the storage keys AC-1 re-keyed, and it is filed rather than
    * quietly fixed here.
@@ -1074,9 +1111,12 @@ describe('renaming, icons and closing', () => {
     expect(iconPicker()?.textContent).toContain('beta work');
   });
 
-  it('gr does nothing — the chord grammar drops an unrecognised second key silently', () => {
+  it('gr does not rename — the chord grammar drops an unrecognised second key', () => {
     // `g` alone opens a chord; an unbound follower must abandon it without
-    // touching storage or announcing anything on the status bar.
+    // touching storage. It used to also say nothing, which this case pinned;
+    // the drop is the part worth pinning — `r` alone renames, and `gr`
+    // reaching that would be the cursor acting on a chord nobody typed — and
+    // it is asserted below over the whole store rather than over the bar.
     localStorage.setItem(
       'vam.prefs.v1',
       JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
@@ -1094,8 +1134,12 @@ describe('renaming, icons and closing', () => {
     const storedBefore = localStorage.getItem('vam.prefs.v1');
     press('g');
     press('r');
-    expect(statusBar()).toBe(before);
+    // The rename box did not open and nothing was written; what changed is the
+    // refusal cell, which now names the pair it dropped.
+    expect(renameInput()).toBeNull();
     expect(localStorage.getItem('vam.prefs.v1')).toBe(storedBefore);
+    expect(statusText()).toContain('"gr" is not a chord');
+    expect(before).not.toContain('"gr" is not a chord');
   });
 
   it('x names the session it did not close', () => {
@@ -1123,9 +1167,32 @@ describe('handing the keyboard to the right pane', () => {
     press('I');
     expect(actionPane()).toBe('active');
     expect(mode()).toBe('Insert');
-    press('H');
+    press('H', { metaKey: true, shiftKey: true });
     expect(actionPane()).toBe('idle');
     expect(mode()).toBe('Select');
+  });
+
+  it('says so when pressed already in Select, rather than doing nothing', () => {
+    // Every other navigation key in this grammar refuses aloud when it
+    // cannot act — `gt` at the last project, `hjkl` at the end of a list.
+    // `Mod-Shift-h` / `Mod-0` were the one exception: `releaseInsert` returns
+    // `false` when there is no insert scope to blur and `setComposing(false)`
+    // is a no-op when nothing was composing, so pressing either with the
+    // keyboard already on the session list did both of those nothings and
+    // said nothing about it.
+    render(<Canvas model={MODEL} />);
+    expect(mode()).toBe('Select');
+    expect(statusText()).toBe('');
+    press('H', { metaKey: true, shiftKey: true });
+    expect(mode()).toBe('Select');
+    expect(statusText()).not.toBe('');
+    expect(statusText()).toContain('already');
+  });
+
+  it('Mod-0 says the same thing in Select — both chords answer one act', () => {
+    render(<Canvas model={MODEL} />);
+    press('0', { metaKey: true });
+    expect(statusText()).not.toBe('');
   });
 
   it('Escape also hands it back, from wherever you were', () => {
@@ -1193,18 +1260,31 @@ describe('waiting on you', () => {
     expect(focused()).toBe('alpha/urgent');
   });
 
-  it('says so with the pane\u2019s status dot, not with a line of prose', () => {
+  it('says so with the sidebar row, not with a line of prose in the pane', () => {
     render(<Canvas model={WAITING} />);
-    // The operator asked for the sentence under the tab bar to go. The state
-    // it carried is still on screen: the header dot is amber and breathing,
-    // and nothing else in the pane turns that class on.
+    // The operator asked for the sentence under the tab bar to go. RETIRED
+    // half: "the header dot is amber and breathing" \u2014 A12.2 removed that
+    // dot along with the rest of the header; the same `waiting` status is
+    // still on screen, on the sidebar row itself.
+    // RETIRED AGAIN, one layer down: the row's amber breathing DOT is a
+    // ringing bell now (`status-mark.tsx`) -- five statuses drawn as five
+    // circles differing only in hue was the reading the operator called
+    // samey, and hue is the channel that is missing for somebody. The claim
+    // is unchanged: the waiting status is on the row, and nowhere in the pane.
     expect(screen.queryByText('session stopped, waiting on you')).toBeNull();
-    expect(document.querySelector('[data-action-pane] .vam-breathe.bg-waiting')).not.toBeNull();
+    expect(document.querySelector('[data-action-pane] [data-status-mark]')).toBeNull();
+    expect(
+      document.querySelector('[data-session-row="urgent"] [data-status-mark="waiting"]'),
+    ).not.toBeNull();
   });
 
   it('groups it apart in the palette', () => {
     render(<Canvas model={WAITING} />);
-    press('k', { ctrlKey: true });
+    // CMD, NOT CTRL. `Mod-k` is the platform's command modifier for a letter
+    // since the operator gave Ctrl+letter to the terminal (PR 361,
+    // `CTRL_GESTURES` in `chords.ts`), so a Ctrl+K here would open nothing on
+    // macOS while still passing under happy-dom's non-Apple platform string.
+    press('k', { metaKey: true });
     // Scoped to the palette's own group headings: "needs you" also appears in
     // the sidebar row, and a bare text query would pass on that while the
     // grouping was missing.
@@ -1413,15 +1493,21 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(control()?.getAttribute('aria-busy')).toBe('false');
   });
 
-  it('says SENT, not recorded, once the source delivers into the running session', async () => {
+  it('says the prompt was TYPED INTO THE TERMINAL when the source delivers, not that it was answered', async () => {
     const calls: { sessionId: string; prompt: string }[] = [];
     const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
       calls.push({ sessionId, prompt });
     });
     await submit(source, 'run task-4 again');
     expect(calls).toEqual([{ sessionId: 'a1', prompt: 'run task-4 again' }]);
-    expect(statusBar()).toContain('sent into the running session');
+    // After a keystroke-into-the-pane there is no echo that the turn landed, so
+    // the sentence claims only what is true: the text was typed into the
+    // terminal, and it will appear when the session records it.
+    expect(statusBar()).toContain('typed into the terminal');
     expect(statusBar()).not.toContain('recorded');
+    // It must not claim a delivery that was confirmed, nor that an answer is
+    // already coming -- the words the retired `--resume` echo used to earn.
+    expect(statusBar()).not.toMatch(/delivered|it will answer there/i);
   });
 
   it('says RECORDED when the source only records, not delivers', async () => {
@@ -1437,9 +1523,121 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(statusBar()).toContain('recorded, not sent to the agent');
     // Both directions, so the two outcomes cannot collapse into one wording
     // that happens to contain the word the assertion looked for.
-    expect(statusBar()).not.toContain('sent into the running session');
-    expect(statusBar()).not.toContain('sent into the running session');
+    expect(statusBar()).not.toContain('typed into the terminal');
     expect(wrote.count).toBe(1);
+  });
+
+  /**
+   * ONE PROMPT, SENT ONCE.
+   *
+   * `writingBySession` already refuses a second Return that lands while the
+   * first send is still in flight -- and that send is two tmux spawns, about
+   * ten milliseconds, so two Returns a tenth of a second apart both cleared
+   * it and the agent received the same words twice. The operator reported
+   * exactly that, with a screenshot of a brand-new session holding one prompt
+   * in two turns.
+   *
+   * The rule is SAME TEXT, SAME SESSION, INSIDE THE WINDOW -- not a delay.
+   */
+  async function submitAgain(text: string) {
+    const input = promptInput() as HTMLTextAreaElement;
+    press('i');
+    typeInto(input, text);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+  }
+
+  it('refuses an identical prompt sent straight after the first, and says so', async () => {
+    const calls: string[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+      calls.push(prompt);
+    });
+    await submit(source, 'hello, who are you?');
+    await submitAgain('hello, who are you?');
+    expect(calls).toEqual(['hello, who are you?']);
+    // Said aloud, never swallowed: a prompt that vanishes without a word
+    // reads exactly like one that was sent, which is the confusion this ends.
+    expect(statusBar()).toContain('the same prompt was just sent');
+  });
+
+  it('lets a DIFFERENT prompt straight after through untouched', async () => {
+    const calls: string[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+      calls.push(prompt);
+    });
+    await submit(source, 'hello, who are you?');
+    await submitAgain('and what can you do?');
+    // The failure a blanket debounce would have had: a person typing fast is
+    // not a double-fire, and the second prompt is not the first one twice.
+    expect(calls).toEqual(['hello, who are you?', 'and what can you do?']);
+  });
+
+  it('lets the same words through again once the window has passed', async () => {
+    const calls: string[] = [];
+    const clock = vi.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(1_000);
+      const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+        calls.push(prompt);
+      });
+      await submit(source, 'ping');
+      // A deliberate re-send -- "it did not answer, try again" -- takes a beat
+      // of reading first, and must never be refused for longer than that.
+      clock.mockReturnValue(1_000 + 1_600);
+      await submitAgain('ping');
+      expect(calls).toEqual(['ping', 'ping']);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('lets the same words through to a DIFFERENT session, immediately', async () => {
+    // KEYED BY SESSION. "continue" typed into one pane and then into the next
+    // is two agents being told to continue, not one being told twice -- and
+    // that is the ordinary way an operator drives several sessions at once.
+    // A single global key passes every other case here and silently eats the
+    // second pane's prompt.
+    const calls: { sessionId: string; prompt: string }[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
+      calls.push({ sessionId, prompt });
+    });
+    await submit(source, 'continue');
+    // Sending leaves the composer in insert mode -- the operator keeps
+    // typing into the same pane by default -- so `j` only reaches the sidebar
+    // after Escape, exactly as it does by hand.
+    press('Escape');
+    press('j');
+    expect(focused()).toBe('alpha/a2');
+    await submitAgain('continue');
+    expect(calls).toEqual([
+      { sessionId: 'a1', prompt: 'continue' },
+      { sessionId: 'a2', prompt: 'continue' },
+    ]);
+    expect(statusBar()).not.toContain('the same prompt was just sent');
+  });
+
+  it('lets the same words straight through again when the first send FAILED', async () => {
+    // A refused send never reached the agent, so pressing Return on the same
+    // words is a FIRST delivery, not a second -- and it arrives immediately,
+    // because the operator is answering a red status bar, not re-reading a
+    // reply. Recording the repeat at the attempt rather than at the landing
+    // would lock a failure out of its own retry for the whole window.
+    const calls: string[] = [];
+    const { source } = fakeSessionSource({ deliverPrompt: true }, async (_id, prompt) => {
+      if (calls.length === 0) {
+        calls.push(prompt);
+        throw { code: 'tmux-failed', message: 'no server running' };
+      }
+      calls.push(prompt);
+    });
+    await submit(source, 'ship it');
+    expect(statusBar()).toContain('no server running');
+    // The words are handed back, so `submitAgain` retypes what is already
+    // there -- exactly what the operator does after reading the failure.
+    await submitAgain('ship it');
+    expect(calls).toEqual(['ship it', 'ship it']);
+    expect(statusBar()).not.toContain('the same prompt was just sent');
   });
 
   it('refuses without calling anything when recordPrompt is false — the guard is real', async () => {
@@ -1526,242 +1724,23 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
  * the action list and the pane are the same list.
  */
 
-/**
- * AC-10(d) — the only criterion in this task that grades behaviour rather than
- * the absence of a string.
+/*
+ * Five graph-only describe blocks stood here, all reading
+ * `.react-flow__node` directly: `AC-10(d): the canvas re-derives from a
+ * fresh layout on every render` (node position after a re-rank), `undrag: a
+ * rendered node carries no pointer-interaction class`, `scenery nodes: no
+ * tab stop, no drag, no select` (fan/slot node attributes off `layoutCanvas`,
+ * deleted with it), `the focused cell renders at full opacity, and the
+ * override moves with the cursor` (a node's own `style.opacity`), and `the
+ * fan and its slots, rendered end to end through <Canvas>` (the fan SVG and
+ * its dashed step-slot placeholders).
  *
- * `useNodesState` takes `initialNodes` as INITIAL state and never re-reads it,
- * so the merge effect at Canvas.tsx that re-runs `setNodes(initialNodes)` on
- * every render is the only thing keeping the drawn canvas in step with the
- * model. It survived this task's removal of drag and pinning, stripped to a
- * plain re-derivation — this guards that it keeps working, not that a pin
- * effect was removed (that is criteria 1 and 2's job).
- *
- * `@xyflow/react` 12.11.5 draws each node as `.react-flow__node[data-id=...]`
- * (verified against node_modules: the library's own `updateNode` lookup uses
- * that selector), not `data-testid="rf__node-<id>"`.
+ * None had a shell-side property to re-point to: dragging, per-node opacity
+ * override, node tab-stop/role/select attributes, and the fan-and-slots
+ * visualisation itself were all geometry, deleted with `layoutCanvas`,
+ * `SessionFanNode` and `StepSlotNode` in this same commit. 0.2 migration,
+ * step 2.
  */
-function drawnPositions(container: Element): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const el of [...container.querySelectorAll('.react-flow__node')]) {
-    const id = el.getAttribute('data-id');
-    if (id) map.set(id, (el as HTMLElement).style.transform);
-  }
-  return map;
-}
-
-describe('AC-10(d): the canvas re-derives from a fresh layout on every render', () => {
-  it('moves the nodes a status change re-ranks, matching a fresh mount, and stales none', () => {
-    const { container: firstContainer, rerender } = render(<Canvas model={MODEL} />);
-    const first = drawnPositions(firstContainer);
-
-    // MODEL's own comment says every session is `done` precisely so nothing
-    // reorders — this fixture needs its own second one. `waiting` is a real
-    // member of SessionStatus (src/domain/model.ts) and STATUS_RANK
-    // (src/canvas/layout.ts) ranks it ahead of `done`, so a2 swaps ahead of a1
-    // inside project p1.
-    const REORDERED: CanvasModel = {
-      ...MODEL,
-      projects: MODEL.projects.map((project) =>
-        project.id === 'p1'
-          ? {
-              ...project,
-              sessions: project.sessions.map((s) =>
-                s.id === 'a2' ? { ...s, status: 'waiting' as const } : s,
-              ),
-            }
-          : project,
-      ),
-    };
-
-    rerender(<Canvas model={REORDERED} />);
-    const second = drawnPositions(firstContainer);
-
-    cleanup();
-
-    const { container: freshContainer } = render(<Canvas model={REORDERED} />);
-    const fresh = drawnPositions(freshContainer);
-
-    const moved = [...fresh].filter(([id, t]) => first.get(id) !== t).map(([id]) => `moves:${id}`);
-    expect(moved.length).toBeGreaterThanOrEqual(1);
-
-    const stale = [...second]
-      .filter(([id, t]) => t === first.get(id) && fresh.get(id) !== t)
-      .map(([id]) => `stale:${id}`);
-    expect(stale).toEqual([]);
-
-    const notFresh = [...second]
-      .filter(([id, t]) => fresh.get(id) !== t)
-      .map(([id]) => `not-fresh:${id}`);
-    expect(notFresh).toEqual([]);
-  });
-});
-
-describe('undrag: a rendered node carries no pointer-interaction class', () => {
-  it('excludes the class xyflow adds only when its internal isDraggable is true', () => {
-    // Built via concatenation, not a literal, so this file's own text stays
-    // outside AC-10(a)'s grep scope for the word it names.
-    const dragClass = ['drag', 'gable'].join('');
-    const { container } = render(<Canvas model={MODEL} />);
-    const nodeEls = [...container.querySelectorAll('.react-flow__node')];
-    expect(nodeEls.length).toBeGreaterThan(0);
-    for (const el of nodeEls) {
-      expect(el.classList.contains(dragClass)).toBe(false);
-      expect(el.classList.contains('nopan')).toBe(false);
-    }
-  });
-});
-
-// AC-9: reads the DRAWN state — the one thing a grep over vam's own source
-// cannot see when a prop was simply omitted and a library default won.
-describe('scenery nodes: no tab stop, no drag, no select', () => {
-  it('every fan and every slot renders tabindex=none role=none draggable=false selectable=false', () => {
-    const layout = layoutCanvas(MODEL);
-    const scenery = new Set([...layout.fans, ...layout.slots].map((s) => s.id));
-    expect(scenery.size).toBeGreaterThanOrEqual(4);
-
-    const { container } = render(<Canvas model={MODEL} />);
-    const report = [...container.querySelectorAll('.react-flow__node')]
-      .filter((el) => scenery.has(el.getAttribute('data-id') ?? ''))
-      .map((el) => {
-        const id = el.getAttribute('data-id');
-        const tabindex = el.getAttribute('tabindex') ?? 'none';
-        const role = el.getAttribute('role') ?? 'none';
-        const draggable = el.classList.contains('draggable');
-        const selectable = el.classList.contains('selectable');
-        return `${id} tabindex=${tabindex} role=${role} draggable=${draggable} selectable=${selectable}`;
-      });
-
-    expect(report.length).toBe(scenery.size);
-    expect(report.sort()).toEqual(
-      [...scenery]
-        .sort()
-        .map((id) => `${id} tabindex=none role=none draggable=false selectable=false`),
-    );
-  });
-});
-
-// AC-8: the focused-cell opacity override, applied in Canvas.tsx's focus
-// effect — never by re-running layoutCanvas, which cannot see focus.
-describe('the focused cell renders at full opacity, and the override moves with the cursor', () => {
-  const THREE: CanvasModel = {
-    projects: [
-      {
-        id: 'p1',
-        name: 'alpha',
-        source: 'factory',
-        sessions: [
-          session('s1', { status: 'waiting' }),
-          session('s2', { status: 'done' }),
-          session('s3', { status: 'running' }),
-        ],
-      },
-    ],
-  };
-  const cellOpacity = (sessionId: string) =>
-    (document.querySelector(`.react-flow__node[data-id^="info:${sessionId}"]`) as HTMLElement)
-      ?.style.opacity;
-
-  it('overrides the focused cell to 1 and clears the one it left', () => {
-    render(<Canvas model={THREE} />);
-    expect(cellOpacity('s1')).toBe('1'); // waiting sorts first, so s1 starts focused
-    expect(cellOpacity('s2')).toBe('0.45');
-    expect(cellOpacity('s3')).toBe('0.6');
-
-    // `j` walks the sidebar's order — waiting, running, done — so it steps
-    // from s1 to s3, not to the s2 the fixture happens to list second.
-    press('j');
-    expect(cellOpacity('s1')).toBe('0.72');
-    expect(cellOpacity('s3')).toBe('1');
-    expect(cellOpacity('s2')).toBe('0.45');
-  });
-});
-
-/**
- * C4 — the join, end to end: model -> layoutCanvas -> NODE_TYPES -> rendered
- * DOM. Everything below this point is unit-tested elsewhere in isolation
- * (SessionFanNode/StepSlotNode with fabricated props in task-2's
- * test/canvas/fan-and-slot.test.tsx; layoutCanvas's own shape in
- * test/canvas/layout.test.ts) — this is the one file, and the one test, that
- * proves those pieces are actually WIRED to each other through `<Canvas>`.
- *
- * C4's literal fixture ("7 decisions of which 1 is visible") cannot be built:
- * `VISIBLE_DECISION_COUNT` (src/domain/selectors.ts, a keep-out this task may
- * not edit) is a fixed 3, and `visibleDecisions` never filters by content —
- * `slice(0, 3)` always returns exactly `min(3, decisions.length)` items. So a
- * 7-decision session always draws 3 real step cards, never 1, and totalSteps
- * only reads 7 when decisions.length is actually 7. The two halves of C4's
- * own fixture are mutually exclusive under the code this task is allowed to
- * touch; see this task's open_questions for the reasoning. What follows
- * proves both of C4's underlying claims with fixtures that are each
- * internally consistent, rather than silently dropping either one:
- *
- *  (a) the 1-real/2-dashed placeholder shape, wired end to end (a 1-decision
- *      session — the same shape as this task's own layout.test.ts case), and
- *  (b) totalSteps reporting the full decision count rather than the number
- *      drawn (a 7-decision session, where 3 of the 7 are actually drawn).
- */
-describe('the fan and its slots, rendered end to end through <Canvas>', () => {
-  function fanSvg(container: Element): SVGSVGElement | null {
-    return container.querySelector('svg[viewBox="0 0 110 290"]');
-  }
-
-  function realStepCardCount(container: Element): number {
-    return container.querySelectorAll('.react-flow__node[data-id^="step:"]').length;
-  }
-
-  it('(a) a one-decision session draws the fan, one real card and two dashed slots', () => {
-    const ONE_DECISION: CanvasModel = {
-      projects: [
-        {
-          id: 'p1',
-          name: 'alpha',
-          source: 'factory',
-          sessions: [session('lone', { status: 'waiting', decisions: [decision('only')] })],
-        },
-      ],
-    };
-    const { container } = render(<Canvas model={ONE_DECISION} />);
-
-    const svgs = container.querySelectorAll('svg[viewBox="0 0 110 290"]');
-    expect(svgs.length).toBe(1);
-    expect(fanSvg(container)?.querySelectorAll('path').length).toBe(5);
-
-    const pills = container.querySelectorAll('[data-fan-pill]');
-    expect(pills.length).toBe(1);
-    expect(pills[0]?.textContent).toBe('1 steps');
-
-    expect(realStepCardCount(container)).toBe(1);
-    expect(screen.getAllByText('no step yet')).toHaveLength(2);
-  });
-
-  it('(b) a seven-decision session reports totalSteps 7 while drawing only the 3 visible', () => {
-    const SEVEN_DECISIONS: CanvasModel = {
-      projects: [
-        {
-          id: 'p1',
-          name: 'alpha',
-          source: 'factory',
-          sessions: [
-            session('busy', {
-              status: 'waiting',
-              decisions: Array.from({ length: 7 }, (_, i) => decision(`d${i}`)),
-            }),
-          ],
-        },
-      ],
-    };
-    const { container } = render(<Canvas model={SEVEN_DECISIONS} />);
-
-    expect(fanSvg(container)?.querySelectorAll('path').length).toBe(5);
-
-    const pill = container.querySelector('[data-fan-pill]');
-    expect(pill?.textContent).toBe('7 steps'); // decisions.length, not the 3 drawn
-
-    expect(realStepCardCount(container)).toBe(3); // VISIBLE_DECISION_COUNT caps the draw
-    expect(screen.queryByText('no step yet')).toBeNull(); // no slot left empty
-  });
-});
 
 describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
   // A wide viewport, so both DEFAULT_PANES fit under dragCeiling without the
@@ -1804,25 +1783,38 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     expect(width(sidebarAside())).toBe(SIDEBAR_MAX);
   });
 
-  it('routes to the detail pane once I has focused it, leaving the sidebar untouched', () => {
+  /**
+   * A12.1: the detail pane has no stored width of its own any more — it
+   * fills everything to the sidebar's right (`panes.ts`) — so once `I` has
+   * moved the keyboard there, `<`/`>` still move the ONE real seam, the
+   * sidebar's, approached from the other side: "narrow the pane I am in"
+   * (`<`, meaning the detail pane) is "grow the sidebar", and the sign
+   * flips relative to Select. This replaces the old
+   * "leaving the sidebar untouched" claim, which described a detail pane
+   * that no longer exists.
+   */
+  it('resizes the sidebar from Insert too, with the sign flipped', () => {
     render(<Canvas model={MODEL} />);
     press('I'); // focuses the action pane — pane === 'action'
     expect(actionPane()).toBe('active');
 
     press('<');
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail - 24);
-    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar); // untouched
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar + 24);
+    // The detail pane is exactly what the sidebar leaves — it shrinks in
+    // lock-step, never independently.
+    expect(width(detailAside())).toBe(1600 - (DEFAULT_PANES.sidebar + 24));
 
     press('>');
     press('>');
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail + 24);
-    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar); // still untouched
+    expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
+    expect(width(detailAside())).toBe(1600 - (DEFAULT_PANES.sidebar - 24));
 
-    // Also prove the detail pane clamps at its own MIN.
+    // Also prove the sidebar still clamps at its own MAX, reached from
+    // Insert's `<` (which grows it).
     for (let i = 0; i < 20; i++) {
       press('<');
     }
-    expect(width(detailAside())).toBe(DETAIL_MIN);
+    expect(width(sidebarAside())).toBe(SIDEBAR_MAX);
   });
 
   /**
@@ -1847,7 +1839,7 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
    * exactly "the keyboard went back to the sidebar" without reaching into
    * component state.
    */
-  it('Escape from a composer opened via I routes the keyboard back to the sidebar', () => {
+  it('Mod-[ from a composer opened via I routes the keyboard back to the sidebar', () => {
     render(<Canvas model={MODEL} />);
     press('I');
     expect(actionPane()).toBe('active');
@@ -1856,11 +1848,14 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     expect(box).not.toBeNull();
     expect(document.activeElement).toBe(box);
 
-    keyOn(box as Element, 'Escape');
+    // `Mod-[` rather than Escape since Escape became the agent's interrupt.
+    keyOn(box as Element, '[', { code: 'BracketLeft', metaKey: true, cancelable: true });
 
+    // The proof is the DIRECTION: Select's `<` shrinks the sidebar; Insert's
+    // grows it (the test just above this one). Had the way out failed to route
+    // the keyboard back, this same `<` would have GROWN the sidebar instead.
     press('<');
     expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar - 24);
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail);
   });
 
   it('z0 resets both panes to their defaults in one keystroke sequence', () => {
@@ -1868,14 +1863,17 @@ describe('resizing the panes from the keyboard (AC-5d, AC-5e)', () => {
     press('<');
     press('<');
     press('I');
-    press('>');
+    press('>'); // Insert's `>` shrinks the sidebar further (sign flipped)
     expect(width(sidebarAside())).not.toBe(DEFAULT_PANES.sidebar);
-    expect(width(detailAside())).not.toBe(DEFAULT_PANES.detail);
+    // The detail pane is always `viewport - sidebar` now (A12.1) — this
+    // still differs from its OLD stored default whenever the sidebar does,
+    // which the line above already pins.
+    expect(width(detailAside())).not.toBe(1600 - DEFAULT_PANES.sidebar);
 
     press('z');
     press('0');
     expect(width(sidebarAside())).toBe(DEFAULT_PANES.sidebar);
-    expect(width(detailAside())).toBe(DEFAULT_PANES.detail);
+    expect(width(detailAside())).toBe(1600 - DEFAULT_PANES.sidebar);
   });
 
   it('writes prefs at most once per press, even one that lands exactly on a bound', () => {
@@ -1926,65 +1924,106 @@ const MANY: CanvasModel = {
 };
 
 /**
- * `Cmd+<n>` — the sidebar's positions, while the sidebar has the keyboard.
+ * `Cmd+<n>` — the FOCUSED PANE's own tab strip.
  *
- * The pane fork itself lives in `Canvas.tab-chord.test.tsx`; what these pin is
- * the sidebar half, which is the half that counts rows. Pressed with a
- * `code`, because that is what a real keydown carries and what
+ * The pane/view fork lives in `Canvas.tab-chord.test.tsx` and the split-pane
+ * rule in `Canvas.session-keys.test.tsx`; what these pin is the counting —
+ * which list a digit indexes, what nine means, and what an out-of-range one
+ * says. It used to count the sidebar's rows: the fourth arrangement of the
+ * digit row gave that up at the operator's request ("Cmd+number switches
+ * tab"), so the list being counted is the strip, and `j`/`k`, `gg`/`G`, `f`
+ * and `/` are what reach a sidebar row now.
+ *
+ * Pressed with a `code`, because that is what a real keydown carries and what
  * `normalizeKey` reads.
  */
-const sessionAt = (n: number, extra: KeyboardEventInit = {}) =>
+const tabAt = (n: number, extra: KeyboardEventInit = {}) =>
   press(String(n), { metaKey: true, code: `Digit${n}`, ...extra });
 
-describe('Cmd-number jumps to a session while the sidebar has the keyboard', () => {
-  it('lands on the first row from wherever the cursor was', () => {
+/** Which tab of the focused pane wears the active mark. */
+const activeTab = () =>
+  document.querySelector(
+    '[data-split-pane][data-split-focused="true"] [data-session-tab][data-active="true"] [data-tab-select]',
+  )?.textContent ?? null;
+
+describe('Cmd-number selects a tab in the pane the operator is looking at', () => {
+  it('lands on the first tab from wherever the cursor was', () => {
     render(<Canvas model={MODEL} />);
     press('j');
     expect(focused()).toBe('alpha/a2');
-    sessionAt(1);
+    tabAt(1);
+    expect(activeTab()).toBe('a1');
     expect(focused()).toBe('alpha/a1');
   });
 
-  it('counts across project headings, which are captions and not rows', () => {
+  /**
+   * The strip is scoped to the ACTIVE PROJECT (A13.1), so `beta/b1` is not on
+   * it while alpha has the keyboard. A digit that reached it would be counting
+   * the sidebar again — the thing this arrangement gave up — so a third digit
+   * over a two-tab strip must refuse rather than cross into another project.
+   */
+  it('does not count sessions of another project, which the strip never draws', () => {
     render(<Canvas model={MODEL} />);
-    // a1, a2 sit under alpha and b1 under beta; the third digit is the third
-    // SESSION, not the third row of a list that counted its own headings.
-    press('3', { ctrlKey: true, code: 'Digit3' });
-    expect(focused()).toBe('beta/b1');
+    // CMD, NOT CTRL, AND THE DIFFERENCE IS THE OPERATOR'S OWN. The digit row
+    // is the platform's COMMAND modifier now (`digitChord`, `chords.ts`), so
+    // a Ctrl+3 here is bound to nothing on the machine vam is used on -- and
+    // this line passed with Ctrl only because happy-dom reports a non-Apple
+    // `navigator.platform`, where Ctrl IS the command modifier. Cmd spells
+    // `Mod-3` on every platform, so the assertion means the same thing
+    // wherever it runs.
+    press('3', { metaKey: true, code: 'Digit3' });
+    expect(focused()).toBe('alpha/a1');
+    expect(statusBar()).toContain('only 2 tabs');
   });
 
-  it('the ninth is the last session, past nine and short of it alike', () => {
+  it('the ninth is the last tab, past nine and short of it alike', () => {
     const { unmount } = render(<Canvas model={MANY} />);
-    sessionAt(9);
-    expect(focused()).toBe('gamma/s10'); // the LAST, not the ninth
+    tabAt(9);
+    expect(activeTab()).toBe('s10'); // the LAST, not the ninth
     unmount();
 
     render(<Canvas model={MODEL} />);
-    sessionAt(9);
-    expect(focused()).toBe('beta/b1'); // three sessions, and it still lands
+    tabAt(9);
+    expect(activeTab()).toBe('a2'); // two tabs, and it still lands
   });
 
-  it('an out-of-range digit says so instead of clamping to the last row', () => {
+  it('an out-of-range digit says so instead of clamping to the last tab', () => {
     render(<Canvas model={MODEL} />);
-    sessionAt(7);
-    expect(focused()).toBe('alpha/a1'); // unmoved
-    expect(statusBar()).toContain('only 3 sessions');
+    tabAt(7);
+    expect(activeTab()).toBe('a1'); // unmoved
+    expect(statusBar()).toContain('only 2 tabs');
   });
 
-  it('counts what the filter left visible, not what the model holds', () => {
+  /**
+   * A FILTER NARROWS THE SIDEBAR AND MUST NOT NARROW THE COUNT. The old
+   * sidebar digit counted `entries` — the filtered list — because that is
+   * what it indexed, and refused "only 1 session in view". A pane's strip is
+   * built from `allEntries` on purpose (the prune effect's own rule: a filter
+   * must not decide which sessions a pane holds, or turning one on would
+   * silently drop tabs), so with the sidebar down to one row the digit still
+   * counts the two tabs that are DRAWN and refuses neither of them.
+   *
+   * WHAT IT DOES NOT PROMISE, and this is a limit rather than a bug of this
+   * binding: while a sidebar filter is on, focus cannot rest on a session the
+   * filter hides — the "land focus on something real" effect pulls it back to
+   * the filtered set. Clicking that same tab with the mouse bounces
+   * identically (verified), so the key and the pointer agree; the tab strip
+   * drawing a tab the filter will not let you sit on is a shell-level
+   * question, not a digit-row one.
+   */
+  it('counts the tabs the pane draws, which a sidebar filter does not narrow', () => {
     render(<Canvas model={MODEL} />);
     press('/');
-    typeInto(filterInput() as HTMLInputElement, 'alpha');
+    typeInto(filterInput() as HTMLInputElement, 'a1');
     keyOn(filterInput() as HTMLInputElement, 'Enter');
-    expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1', 'a2']);
+    expect(rows().map((el) => el.getAttribute('data-session-row'))).toEqual(['a1']);
 
-    sessionAt(2);
-    expect(focused()).toBe('alpha/a2');
-    // b1 is still in the model and still the third session there. Counting it
-    // would land the cursor on a row the operator cannot see.
-    sessionAt(3);
-    expect(focused()).toBe('alpha/a2');
-    expect(statusBar()).toContain('only 2 sessions');
+    tabAt(2);
+    // Not "only 1 tab": the strip still draws two, and a refusal counting the
+    // filtered sidebar would be the handler inventing a list of its own.
+    expect(statusBar()).not.toContain('only 1 tab');
+    tabAt(3);
+    expect(statusBar()).toContain('only 2 tabs');
   });
 
   it('still fires a Mod-chord while a text box has the keyboard, and keeps the draft', () => {
@@ -1994,22 +2033,22 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
     // entry on any layout, so the box has no claim on it. What the box does
     // keep is everything unmodified, including the draft already typed.
     //
-    // WHAT THE DIGIT COUNTS HERE CHANGED WITH THE MODE NAMING, and the change
-    // is the operator's own mapping: they named Insert after the PROMPT state,
-    // so `i` enters Insert exactly as `I` does. The digit therefore switches a
-    // TAB, which is what Insert binds it to — the cell no longer says one mode
-    // while the digit obeys another. The property under test is unchanged: the
-    // chord fired from inside the box, and the draft survived it.
+    // THE DRAFT IS PER SESSION, so switching tab swaps which draft is on
+    // screen — a1's, which is empty. That is the composer's contract, not a
+    // loss: the assertion is that a2's half-written prompt is still there when
+    // the operator comes back, which is the property "keeps the draft" was
+    // always about. (It used to be readable without moving, because the digit
+    // then switched a VIEW rather than a session.)
     render(<Canvas model={MODEL} />);
     press('j');
     press('i'); // the composer, aimed at alpha/a2
     const box = promptInput() as HTMLTextAreaElement;
     typeInto(box, 'half a prompt');
     keyOn(box, '1', { metaKey: true, code: 'Digit1' });
-    expect(
-      document.querySelector('[data-tab][aria-pressed="true"]')?.getAttribute('data-tab'),
-    ).toBe('response');
-    expect(focused()).toBe('alpha/a2');
+    expect(activeTab()).toBe('a1');
+    expect(promptInput()?.value).toBe('');
+    tabAt(2);
+    expect(activeTab()).toBe('a2');
     expect(promptInput()?.value).toBe('half a prompt');
   });
 
@@ -2026,7 +2065,7 @@ describe('Cmd-number jumps to a session while the sidebar has the keyboard', () 
       window.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(true);
-    expect(focused()).toBe('alpha/a2');
+    expect(activeTab()).toBe('a2');
   });
 });
 

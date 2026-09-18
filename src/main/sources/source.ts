@@ -11,6 +11,8 @@
  */
 
 import type { Project } from '../../renderer/domain/model.js';
+import type { AgentWork } from '../../shared/agent-work.js';
+import type { HistoryCursor, TranscriptPage } from '../../shared/history.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 
@@ -55,4 +57,39 @@ export type MainSource = {
     title: string,
     provider?: string,
   ): Promise<SourceError | null>;
+  /**
+   * The turns BEFORE a point in a session -- scrolling back, which `load()`
+   * deliberately cannot do: it reads a fixed tail per session so the poll stays
+   * cheap, and the median session is three times that tail.
+   *
+   * NOT GATED BY A CAPABILITY BOOLEAN, and that is deliberate. `TranscriptPage`
+   * already carries its own `unavailable` arm with the source's own words, so a
+   * source without a surface says so in the answer -- the same shape `PaneView`
+   * and `AgentsResult` use. Adding a thirteenth flag to `SourceCapabilities`
+   * would gate an affordance the canvas does not yet draw, which that type's
+   * own doc forbids.
+   *
+   * RESOLVES, never throws, like every member above: the reason a page could
+   * not be read is the whole content of the failure, and a thrown error would
+   * arrive as `unreachable/source-failed` with that reason rewritten.
+   */
+  readHistory?(sessionId: string, cursor: HistoryCursor | null): Promise<TranscriptPage>;
+
+  /**
+   * What ONE of a session's subagents was asked and what it has done -- the
+   * Agents pane's detail side.
+   *
+   * ON DEMAND FOR THE SAME REASON `readHistory` IS, said in the other
+   * direction: `load()` reads a fixed tail per SESSION, and a session on this
+   * machine has up to 460 subagent transcripts beside it. Reading them on the
+   * poll is the exact cost that budget exists to refuse, so nobody pays it
+   * until a person opens the tab and picks a row.
+   *
+   * NOT GATED BY A CAPABILITY BOOLEAN, on the rule above: `AgentWork` carries
+   * its own `unavailable` arm, so a source with no agent surface answers with
+   * it rather than with a flag the canvas would have to consult first.
+   *
+   * RESOLVES, never throws.
+   */
+  readAgentWork?(sessionId: string, agentId: string): Promise<AgentWork>;
 };

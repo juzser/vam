@@ -98,10 +98,10 @@ describe('the detail pane’s two segmented strips', () => {
 
   it('says which one is on with aria-pressed, which needs no panel', () => {
     draw();
-    const tabs = [...document.querySelectorAll('[data-tab]')];
+    const tabs = [...document.querySelectorAll('[data-view]')];
     expect(tabs.length).toBeGreaterThan(1);
     expect(tabs.map((t) => t.getAttribute('aria-pressed'))).toEqual(
-      tabs.map((t) => (t.getAttribute('data-tab') === 'response' ? 'true' : 'false')),
+      tabs.map((t) => (t.getAttribute('data-view') === 'response' ? 'true' : 'false')),
     );
     for (const tab of tabs) expect(tab.getAttribute('aria-selected'), 'a stale claim').toBeNull();
 

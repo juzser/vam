@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { orderedSessions } from '../../src/renderer/canvas/layout.js';
 import { composeGroups, groupSource } from '../../src/renderer/domain/grouping.js';
 import type { CanvasModel, Project, Session } from '../../src/renderer/domain/model.js';
-import { allSessions } from '../../src/renderer/domain/selectors.js';
+import { allSessions, orderedSessions } from '../../src/renderer/domain/selectors.js';
 import type { StoredGroup } from '../../src/renderer/prefs/prefs.js';
 
 function session(id: string, status: Session['status'] = 'running'): Session {

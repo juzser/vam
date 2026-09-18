@@ -145,12 +145,28 @@ describe('Submit is offered only where delivery is real', () => {
 });
 
 describe('what Submit sends, and what it says afterwards', () => {
-  it('will not send with nothing picked', () => {
+  it('will not send with nothing picked -- and says so, rather than going quiet', () => {
     const answer = answering({ kind: 'sent', answer: 'Crimson' });
     draw(QUESTION, { answer });
-    expect(submit()?.disabled).toBe(true);
+    // OPERABLE, not dimmed. A `disabled` control takes no click and no focus
+    // and gives no reason; on a SINGLE question the marked-count hint was not
+    // drawn either, so there was nothing on screen at all.
+    expect(submit()?.disabled).toBe(false);
     fireEvent.click(submit() as HTMLElement);
     expect(answer).not.toHaveBeenCalled();
+    const refusal = q('[data-question-refusal]');
+    expect(refusal).not.toBeNull();
+    expect(refusal?.textContent).toContain('Which colour do you prefer?');
+    // And the one question a single-question call has is what the cursor is
+    // put back on.
+    expect(document.activeElement).toBe(all('[data-question-option]')[0]);
+  });
+
+  it('says what is still missing on a single question, where no count is drawn', () => {
+    // The marked-count hint only ever rendered for more than one question, so
+    // a lone unanswered one explained nothing at all.
+    draw(QUESTION, { answer: answering({ kind: 'sent', answer: 'Crimson' }) });
+    expect(q('[data-question-progress]')?.textContent ?? '').toMatch(/mark/i);
   });
 
   it('sends the picked LABELS, the tool multiSelect flag, and the row it is about', async () => {

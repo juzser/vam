@@ -559,3 +559,102 @@ and inside the expression the assertion reads — because a filter over an empty
 list is empty, and a guard written the obvious way passes loudest at the moment
 the hook is renamed away. Falsified both ways: re-inflating the skin to 44
 names all three controls; renaming the hook fails on the count.
+
+## The web guards now run in CI — `pnpm run test:e2e:web`
+
+Four scripts here assert against a real browser and throw when what they
+expect is not on screen: `split-panes-shots.mjs` (22 assertions),
+`prompt-suggest-shots.mjs` (20), `transcript-flow-shots.mjs` (11) and
+`prompt-mode-icon-shots.mjs` (6). Until now nothing ran them, which for 59
+assertions covering exactly what jsdom cannot see — split ordering,
+per-project layout restore, the per-pane `+`, drag-to-move, which pane is
+focused at the instant of an event, `position: sticky` against real layout —
+means they mostly did not run.
+
+`e2e/run-web-guards.mjs` builds `dist-web`, serves it with `vite preview
+--strictPort` on port 5520, drives the four scripts against it in sequence and
+exits non-zero the moment one throws, with the script's own message intact.
+The `web-guards` job in `.github/workflows/ci.yml` runs the same command;
+because `playwright-core` is in no manifest here and the root install is
+`--frozen-lockfile`, that job installs `playwright-core@1.62.1` into the
+runner's temp directory and links it into `e2e/node_modules`, which is
+gitignored. Screenshots go to `VAM_E2E_OUT` (default
+`e2e/test-results/web-guards`, also gitignored) and are uploaded as a workflow
+artifact — never into `docs/ui`, so CI produces no repo diff.
+
+The other four `*.mjs` scripts here (`issue-188-shots`,
+`pane-refinements-shots`, `phone-list-shots`, `phone-prompt-shots`) are **shot-takers, not guards**: they assert nothing, so
+they are deliberately not in that list and adding them would widen what a
+green tick claims without adding a single check.
+
+Falsified 2026-09-08: making `zv` a no-op in the served bundle (with
+`VAM_E2E_SKIP_BUILD=1`) reddens the job in 12s, naming both
+`split-panes-shots.mjs` — *"zv (split vertical) left 1 pane(s), expected 2"* —
+and `prompt-suggest-shots.mjs`, and exits 1.
+
+## `e2e/readme-shots.mjs` — the four screenshots `README.md` embeds
+
+Another shot-taker, not a guard (same reason as the four above; not in
+`run-web-guards.mjs`'s list). It retakes the images `README.md`'s own
+"Screenshots" section links to — `hero-dark.png`, `palette.png`,
+`agents-tab.png`, `composer-attach.png` — against the CURRENT build, `?demo=1`
+only, same rule `phone-list-shots.mjs` states ("live mode would put a real
+workspace, with real paths and real session ids, into a public repo").
+
+The previous four (`canvas-dark.png`, `palette.png`, `terminal.png`,
+`image-attach.png`) all predated PR #260 (the 0.2 tab-shell migration,
+"collapse vam to two panes and drop the canvas layout presets") and showed a
+node-graph canvas that no longer exists, rendered against the pre-lift dark
+palette besides. Two of the four could not be retaken like-for-like: the
+Terminal tab is withdrawn from the bar entirely in demo mode
+(`visibleTabs()` in `panels/tabs.ts`, since `terminalTab` is
+`source.kind === 'session' && …` and `?demo=1` is never `'session'`), and the
+image-attach button is drawn only when `pickImageAttachment !== undefined`,
+which `Canvas.tsx` likewise sets `undefined` for demo — both gate on a real
+Electron dialog / a real tmux pane, neither of which a fictional fixture has
+to show. `readme-shots.mjs`'s own header comment has the full reasoning.
+`agents-tab.png` and `composer-attach.png` take their two slots instead, with
+two real, current, demo-safe capabilities.
+
+Run against a running preview server, same pattern as the scripts above:
+
+```bash
+node_modules/.bin/vite build --config vite.web.config.ts
+node_modules/.bin/vite preview --config vite.web.config.ts --port 5529
+node e2e/readme-shots.mjs http://localhost:5529 docs/images
+```
+
+## `e2e/dark-ladder-shots.mjs` — the palette change, judged by eye as well as by number
+
+The third pass at the dark theme widened the elevation ladder so every
+adjacent rung clears the ~2.3 L\* just-noticeable difference. Numbers alone
+could not settle whether that reads as *separation* or merely as *lighter*,
+so this script photographs one build twice — the second time with the old
+values overridden as inline custom properties, so nothing but the palette
+moves between the two frames — and reads each surface back out of
+`getComputedStyle` so the caption states what was actually painted rather
+than what a token claims.
+
+```bash
+node e2e/dark-ladder-shots.mjs
+```
+
+Its output is gitignored like every other shot. The one comparison worth
+keeping is committed at `docs/images/dark-ladder-before-after.png`: pane
+15.64 → 22.62, card 18.94 → 27.97, ground unchanged at 10.27 — the frame
+where the question card stops merging into the surface behind it.
+
+**The "after" half is never hardcoded** — it is simply the live build with
+`BEFORE_THE_WIDEN`'s overrides removed, so it always paints whatever
+`styles.css` currently ships. That is what makes the committed PNG able to go
+stale without the script itself being wrong: `--vam-in-bubble` moved twice
+after this script was written (`#354646` at authoring time → `#425453` on
+`main` briefly → `#505050`, #347), and the committed frame kept whichever of
+those the build wore on the day someone last ran the script by hand. Found
+2026-09 by re-running it: the checked-in image's "after" bubble was still the
+pre-#347 teal, `main`'s own stylesheet had carried grey for a while by then.
+Regenerated against the current build — `getComputedStyle` now reads
+`rgb(80, 80, 80)` for both panels' "after" In bubble, matching `--vam-in-bubble:
+#505050` in `styles.css` and the live page. There is no fix to the script
+itself: re-run it after any palette change that reaches a token this file
+reads, the same discipline `pane-colour-shots.mjs` already asks for.

@@ -1,0 +1,808 @@
+/**
+ * The split-pane layout tree, in isolation from React and from Canvas.
+ *
+ * A15.1: a tab can be split horizontally or vertically, only within one
+ * project, by dragging. `DetailPanel` is fenced (owned by a concurrent
+ * agent), so the isolation every split pane needs — `outIsLive`, the
+ * auto-follow `stuckRef`, the sticky IN, the per-session composer draft, the
+ * view icons — has to come from mounting a SEPARATE `DetailPanel` instance
+ * per pane, never from sharing one. This module is the pure data structure
+ * that makes that possible: a tree of leaves (one session each) and splits
+ * (an orientation and two-or-more children), with no React and no DOM, so
+ * every rule about how a split is built, closed or walked can be proven
+ * directly rather than through a rendered tree.
+ *
+ * `row` = a vertical divider, panes side by side (vim `:vsplit`). `column` =
+ * a horizontal divider, panes stacked (vim `:split`). Named after the CSS
+ * flex-direction each one renders with, since that is what `Canvas.tsx`
+ * actually reads.
+ */
+
+import { describe, expect, it } from 'vitest';
+import {
+  adoptOrphans,
+  closePane,
+  detachTab,
+  dropZone,
+  findLeaf,
+  joinPane,
+  leaves,
+  MIN_PANE_PX,
+  nearestEdge,
+  paneHolding,
+  pruneClosedTabs,
+  removeTab,
+  restoreLayout,
+  type Split,
+  type SplitTree,
+  setPaneSession,
+  singlePane,
+  splitPane,
+  splitSizes,
+  stepPane,
+} from '../../src/renderer/canvas/split.js';
+
+describe('singlePane', () => {
+  it('is one leaf holding the given session', () => {
+    const tree = singlePane('s1', 'pane-1');
+    expect(tree).toEqual({ kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] });
+  });
+
+  it('tolerates no session at all — the pre-load state', () => {
+    const tree = singlePane(null, 'pane-1');
+    expect(tree).toEqual({ kind: 'leaf', id: 'pane-1', sessionId: null, sessionIds: [] });
+  });
+});
+
+describe('leaves — walks the tree left to right, top to bottom', () => {
+  it('is just itself for a single leaf', () => {
+    expect(leaves(singlePane('s1', 'pane-1'))).toEqual([
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+    ]);
+  });
+
+  it('flattens a split in child order', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2']);
+  });
+
+  it('flattens nested splits depth-first', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'bottom', 's3', 'p3');
+    // p1 | (p2 above p3)
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+});
+
+describe('findLeaf', () => {
+  it('finds a leaf by id anywhere in the tree', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'bottom', 's3', 'p3');
+    expect(findLeaf(tree, 'p3')).toEqual({
+      kind: 'leaf',
+      id: 'p3',
+      sessionId: 's3',
+      sessionIds: ['s3'],
+    });
+  });
+
+  it('is null for an id nothing holds', () => {
+    expect(findLeaf(singlePane('s1', 'p1'), 'nope')).toBeNull();
+  });
+});
+
+describe('setPaneSession', () => {
+  it('replaces only the matching leaf’s session', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = setPaneSession(tree, 'p2', 's9');
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s9');
+  });
+
+  it('reaches a leaf nested under two levels of split', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'bottom', 's3', 'p3');
+    tree = setPaneSession(tree, 'p3', 's9');
+    expect(findLeaf(tree, 'p3')?.sessionId).toBe('s9');
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('is a no-op, not a crash, when the id is not in the tree', () => {
+    const tree = singlePane('s1', 'p1');
+    expect(setPaneSession(tree, 'ghost', 's9')).toEqual(tree);
+  });
+
+  it('accepts null — pointing a pane at nothing, not only the pre-load state', () => {
+    const tree = setPaneSession(singlePane('s1', 'p1'), 'p1', null);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBeNull();
+  });
+});
+
+describe('splitPane — orientation and side', () => {
+  it('left puts the new pane BEFORE the target, in a row (side-by-side)', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'left', 's2', 'p2');
+    expect(tree).toMatchObject({
+      kind: 'split',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'p2', sessionId: 's2' },
+        { kind: 'leaf', id: 'p1', sessionId: 's1' },
+      ],
+    });
+  });
+
+  it('right puts the new pane AFTER the target, in a row', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(tree).toMatchObject({
+      kind: 'split',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'p1' },
+        { kind: 'leaf', id: 'p2' },
+      ],
+    });
+  });
+
+  it('top puts the new pane BEFORE the target, in a column (stacked)', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'top', 's2', 'p2');
+    expect(tree).toMatchObject({
+      kind: 'split',
+      orientation: 'column',
+      children: [{ id: 'p2' }, { id: 'p1' }],
+    });
+  });
+
+  it('bottom puts the new pane AFTER the target, in a column', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'bottom', 's2', 'p2');
+    expect(tree).toMatchObject({
+      kind: 'split',
+      orientation: 'column',
+      children: [{ id: 'p1' }, { id: 'p2' }],
+    });
+  });
+});
+
+describe('splitPane — a third pane joins an existing split as a sibling', () => {
+  it('does not nest when the new edge matches the parent’s own orientation', () => {
+    // p1 | p2, then split p2 to its right — same axis, so p3 joins the row.
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'right', 's3', 'p3');
+    expect(tree.kind).toBe('split');
+    expect(tree).toMatchObject({ orientation: 'row' });
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2', 'p3']);
+    // Exactly one split node, not split-of-a-split.
+    if (tree.kind === 'split') {
+      expect(tree.children).toHaveLength(3);
+    }
+  });
+
+  it('nests when the new edge crosses the parent’s own orientation', () => {
+    // p1 | p2 (row), then split p2 downward — a different axis, so p2 alone
+    // becomes a nested column, and the row still has exactly two slots.
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'bottom', 's3', 'p3');
+    expect(tree).toMatchObject({ kind: 'split', orientation: 'row' });
+    if (tree.kind === 'split') {
+      expect(tree.children).toHaveLength(2);
+      expect(tree.children[0]).toMatchObject({ kind: 'leaf', id: 'p1' });
+      expect(tree.children[1]).toMatchObject({ kind: 'split', orientation: 'column' });
+    }
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2', 'p3']);
+  });
+});
+
+describe('splitPane — total over a missing target', () => {
+  it('returns the tree unchanged rather than crashing', () => {
+    const tree = singlePane('s1', 'p1');
+    expect(splitPane(tree, 'ghost', 'right', 's2', 'p2')).toEqual(tree);
+  });
+});
+
+describe('closePane', () => {
+  it('refuses to close the only pane — null means "cannot"', () => {
+    expect(closePane(singlePane('s1', 'p1'), 'p1')).toBeNull();
+  });
+
+  it('collapses a two-pane split back to a single leaf', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    const closed = closePane(tree, 'p2');
+    expect(closed).toEqual({ kind: 'leaf', id: 'p1', sessionId: 's1', sessionIds: ['s1'] });
+  });
+
+  it('collapses a three-pane row down to two, not down to one', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'right', 's3', 'p3');
+    const closed = closePane(tree, 'p2') as SplitTree;
+    expect(leaves(closed).map((l) => l.id)).toEqual(['p1', 'p3']);
+    expect(closed.kind).toBe('split');
+  });
+
+  it('collapses a nested split when closing leaves it with one child', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'bottom', 's3', 'p3');
+    // p1 | (p2 / p3) -- close p3, the nested column collapses to p2 alone,
+    // and the outer row is left with exactly p1 | p2.
+    const closed = closePane(tree, 'p3') as SplitTree;
+    expect(leaves(closed).map((l) => l.id)).toEqual(['p1', 'p2']);
+    expect(closed).toMatchObject({
+      kind: 'split',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'p1' },
+        { kind: 'leaf', id: 'p2' },
+      ],
+    });
+  });
+
+  it('is a no-op when the id is not in the tree', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(closePane(tree, 'ghost')).toEqual(tree);
+  });
+});
+
+describe('stepPane — cycling focus among leaves, wrapping at both ends', () => {
+  it('steps forward and wraps past the last pane', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    tree = splitPane(tree, 'p2', 'right', 's3', 'p3');
+    expect(stepPane(tree, 'p1', 1)).toBe('p2');
+    expect(stepPane(tree, 'p3', 1)).toBe('p1');
+  });
+
+  it('steps backward and wraps past the first pane', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(stepPane(tree, 'p1', -1)).toBe('p2');
+    expect(stepPane(tree, 'p2', -1)).toBe('p1');
+  });
+
+  it('is a no-op with only one pane', () => {
+    expect(stepPane(singlePane('s1', 'p1'), 'p1', 1)).toBe('p1');
+  });
+
+  it('is a no-op when the current id is not in the tree', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(stepPane(tree, 'ghost', 1)).toBe('ghost');
+  });
+});
+
+describe('nearestEdge — pure hit-testing for a drop, no DOM required', () => {
+  it('picks the edge the point is closest to', () => {
+    expect(nearestEdge(2, 50, 100, 100)).toBe('left');
+    expect(nearestEdge(98, 50, 100, 100)).toBe('right');
+    expect(nearestEdge(50, 2, 100, 100)).toBe('top');
+    expect(nearestEdge(50, 98, 100, 100)).toBe('bottom');
+  });
+
+  it('is total over a degenerate zero-size rect', () => {
+    expect(['left', 'right', 'top', 'bottom']).toContain(nearestEdge(0, 0, 0, 0));
+  });
+});
+
+describe('a pane holds a LIST of tabs, not one session', () => {
+  it('opens a second session in the pane as a new tab, in front', () => {
+    const tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s2');
+  });
+
+  it('re-selecting a tab it already holds does not duplicate it', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = setPaneSession(tree, 'p1', 's1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('opens tabs only in the named pane — a split neighbour is untouched', () => {
+    let tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's1', 'p2');
+    tree = setPaneSession(tree, 'p2', 's2');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s1', 's2']);
+  });
+
+  it('a split gives the new pane exactly the one session it was made with', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = splitPane(tree, 'p1', 'right', 's2', 'p2');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's2']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2']);
+    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s2');
+  });
+});
+
+describe('removeTab — one tab out of one pane', () => {
+  it('drops the tab and activates its right-hand neighbour', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = setPaneSession(tree, 'p1', 's3');
+    tree = setPaneSession(tree, 'p1', 's2');
+    const next = removeTab(tree, 'p1', 's2') as SplitTree;
+    expect(findLeaf(next, 'p1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(next, 'p1')?.sessionId).toBe('s3');
+  });
+
+  it('falls back to the LEFT neighbour when the last tab is removed', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = removeTab(tree, 'p1', 's2') as SplitTree;
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('leaves the active tab alone when some OTHER tab goes', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = setPaneSession(tree, 'p1', 's1');
+    const next = removeTab(tree, 'p1', 's2') as SplitTree;
+    expect(findLeaf(next, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('closes the PANE when its last tab is removed', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    const next = removeTab(tree, 'p2', 's2') as SplitTree;
+    expect(leaves(next).map((l) => l.id)).toEqual(['p1']);
+  });
+
+  it('returns null when the last tab of the last pane goes — "cannot"', () => {
+    expect(removeTab(singlePane('s1', 'p1'), 'p1', 's1')).toBeNull();
+  });
+
+  it('is a no-op for a pane id nothing holds', () => {
+    const tree = singlePane('s1', 'p1');
+    expect(removeTab(tree, 'ghost', 's1')).toEqual(tree);
+  });
+
+  it('is a no-op for a session that pane does not hold', () => {
+    const tree = singlePane('s1', 'p1');
+    expect(removeTab(tree, 'p1', 's9')).toEqual(tree);
+  });
+});
+
+describe('pruneClosedTabs — a closed session leaves no ghost tab behind', () => {
+  it('drops tabs for sessions that are gone', () => {
+    let tree = setPaneSession(singlePane('s1', 'p1'), 'p1', 's2');
+    tree = pruneClosedTabs(tree, (id) => id === 's1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+
+  it('closes a pane whose every tab is gone', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    const next = pruneClosedTabs(tree, (id) => id === 's1');
+    expect(leaves(next).map((l) => l.id)).toEqual(['p1']);
+  });
+
+  it('never closes the LAST pane — it is left empty instead', () => {
+    const next = pruneClosedTabs(singlePane('s1', 'p1'), () => false);
+    expect(leaves(next)).toHaveLength(1);
+    expect(leaves(next)[0]?.sessionIds).toEqual([]);
+    expect(leaves(next)[0]?.sessionId).toBeNull();
+  });
+
+  it('returns the SAME tree when every tab is still open — no render churn', () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    expect(pruneClosedTabs(tree, () => true)).toBe(tree);
+  });
+});
+
+/**
+ * A15.7 — what a project's remembered layout is worth when it comes back.
+ *
+ * The reason A15.5 deferred per-project layouts: a stored tree can name
+ * sessions that ended while their project was off screen. So a restore is a
+ * reconciliation, never a replay — and it lives here, pure, rather than only
+ * inside the component where it could be asserted only through the DOM.
+ */
+describe('restoreLayout — a remembered layout, reconciled against what is still open', () => {
+  /**
+   * A LEGAL layout to be remembered: p1 holds s1 and s3, p2 holds s2, and no
+   * session is in two panes. The fixture this replaces put s2 in BOTH panes,
+   * which PR 268 made unrepresentable — `zv`/`zs`, the drag and the sidebar all
+   * MOVE a session now — so it could only be reached through the very bug the
+   * duplication case below pins.
+   */
+  const stored = () => {
+    const tree = splitPane(singlePane('s1', 'p1'), 'p1', 'right', 's2', 'p2');
+    return setPaneSession(tree, 'p1', 's3');
+  };
+
+  it('brings the split back, and opens the picked session in the pane that had focus', () => {
+    // s9 is a session of this project that no remembered pane holds — its tab
+    // was closed while the project was off screen — so the pane that had
+    // focus is where it opens.
+    const { tree, paneId } = restoreLayout(stored(), () => true, 's9', 'p2', 'fresh');
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1', 'p2']);
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2', 's9']);
+    expect(findLeaf(tree, 'p2')?.sessionId).toBe('s9');
+    expect(paneId).toBe('p2');
+  });
+
+  /**
+   * A SESSION LIVES IN EXACTLY ONE PANE — PR 268's rule, which every other
+   * route already keeps (`splitFocused` and the drag MOVE the tab,
+   * `paneHolding` sends a sidebar pick to the pane that already holds it).
+   * This one did not: coming back to a project by clicking a session ANOTHER
+   * remembered pane holds opened a second copy of it in the pane that had
+   * focus. Two `TerminalTab`s then poll one tmux session, each sending its
+   * own `resize`, so each renders a screen composed for the other's width.
+   * The keyboard goes to the holder instead — the sidebar's own answer.
+   */
+  it('never opens a second copy: the keyboard goes to the pane already holding it', () => {
+    const { tree, paneId } = restoreLayout(stored(), () => true, 's1', 'p2', 'fresh');
+    expect(paneId).toBe('p1');
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+    expect(findLeaf(tree, 'p2')?.sessionIds).toEqual(['s2']);
+    const everywhere = leaves(tree).flatMap((leaf) => leaf.sessionIds);
+    expect(everywhere).toHaveLength(new Set(everywhere).size);
+  });
+
+  it('drops a session that ended off screen, closing the pane it emptied', () => {
+    const { tree, paneId } = restoreLayout(stored(), (id) => id === 's1', 's1', 'p2', 'fresh');
+    expect(leaves(tree).map((l) => l.id)).toEqual(['p1']);
+    expect(findLeaf(tree, 'p1')?.sessionIds).toEqual(['s1']);
+    expect(paneId).toBe('p1');
+  });
+
+  it('falls back to ONE pane holding the picked session when nothing survived', () => {
+    const { tree, paneId } = restoreLayout(stored(), () => false, 's9', 'p2', 'fresh');
+    expect(leaves(tree)).toHaveLength(1);
+    expect(leaves(tree)[0]?.id).toBe('fresh');
+    expect(leaves(tree)[0]?.sessionIds).toEqual(['s9']);
+    expect(paneId).toBe('fresh');
+  });
+
+  it('falls back too when the pane that had focus is the one that went', () => {
+    const { tree, paneId } = restoreLayout(stored(), (id) => id === 's1', 's1', 'ghost', 'fresh');
+    // `ghost` holds nothing, so the leftmost surviving pane takes the session
+    // rather than the restore doing nothing visible.
+    expect(paneId).toBe('p1');
+    expect(findLeaf(tree, 'p1')?.sessionId).toBe('s1');
+  });
+});
+
+/**
+ * `detachTab` is `removeTab`'s other half: take the tab out and LEAVE THE
+ * PANE, even with nothing in it.
+ *
+ * The two differ on exactly one question and it is a policy question, which
+ * is why they are two functions rather than one with a flag. Closing a tab
+ * means the operator is done with that pane's last piece of work, so the pane
+ * goes. Splitting means the operator asked for a second pane and the tab went
+ * into it: closing the one they were looking at would answer a request for
+ * two panes with one.
+ */
+describe('detachTab', () => {
+  const pane = (id: string, ids: string[], front: string | null): SplitTree => ({
+    kind: 'leaf',
+    id,
+    sessionId: front,
+    sessionIds: ids,
+  });
+
+  it('takes the tab out and activates the neighbour to its right', () => {
+    const tree = pane('pane-1', ['s1', 's2', 's3'], 's2');
+    expect(detachTab(tree, 'pane-1', 's2')).toEqual(pane('pane-1', ['s1', 's3'], 's3'));
+  });
+
+  it('falls back to the neighbour on the left when the last tab goes', () => {
+    const tree = pane('pane-1', ['s1', 's2'], 's2');
+    expect(detachTab(tree, 'pane-1', 's2')).toEqual(pane('pane-1', ['s1'], 's1'));
+  });
+
+  it('leaves the pane standing, holding nothing, when it was the only tab', () => {
+    const tree = pane('pane-1', ['s1'], 's1');
+    // `removeTab` would have closed it -- that is the whole difference.
+    expect(detachTab(tree, 'pane-1', 's1')).toEqual(pane('pane-1', [], null));
+    expect(removeTab(tree, 'pane-1', 's1')).toBeNull();
+  });
+
+  it('leaves a tab that was not in front in front', () => {
+    const tree = pane('pane-1', ['s1', 's2'], 's1');
+    expect(detachTab(tree, 'pane-1', 's2')).toEqual(pane('pane-1', ['s1'], 's1'));
+  });
+
+  it('is a no-op for a pane, or a session, it cannot find', () => {
+    const tree = pane('pane-1', ['s1'], 's1');
+    expect(detachTab(tree, 'pane-9', 's1')).toBe(tree);
+    expect(detachTab(tree, 'pane-1', 's9')).toBe(tree);
+  });
+});
+
+/**
+ * `paneHolding` is what makes "a session lives in exactly one pane" checkable
+ * from the outside: the sidebar asks it before opening anything, so a pick
+ * lands on the pane that already has the session rather than making a second
+ * copy of it.
+ */
+describe('paneHolding', () => {
+  const tree: SplitTree = {
+    kind: 'split',
+    id: 'split-1',
+    orientation: 'row',
+    children: [
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1', 's2'] },
+      { kind: 'leaf', id: 'pane-2', sessionId: 's3', sessionIds: ['s3'] },
+    ],
+  };
+
+  it('names the pane holding a session, whether or not it is in front', () => {
+    expect(paneHolding(tree, 's1')).toBe('pane-1');
+    expect(paneHolding(tree, 's2')).toBe('pane-1');
+    expect(paneHolding(tree, 's3')).toBe('pane-2');
+  });
+
+  it('is null for a session no pane holds', () => {
+    expect(paneHolding(tree, 's9')).toBeNull();
+  });
+});
+
+/**
+ * A11.1, restored — EVERY SESSION OF A PROJECT IS A TAB OF EXACTLY ONE PANE.
+ *
+ * The operator, asked how many of a project's sessions should be tabs,
+ * answered "all of them, always". PR 263 narrowed that to "every session the
+ * pane opened", which is what made a project with two sessions open showing
+ * one tab. This is the membership half of the answer: a session no pane holds
+ * is ADOPTED, and one some pane already holds is left exactly where it is, so
+ * "always" and PR 268's "exactly one pane" hold at the same time.
+ *
+ * Order is deliberately not asserted beyond appending: the strip reads
+ * `orderedPaneTabs`, and nothing in `split.ts` may sort (see `Leaf`).
+ */
+describe('adoptOrphans', () => {
+  const split: SplitTree = {
+    kind: 'split',
+    id: 'split-1',
+    orientation: 'row',
+    children: [
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+      { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+    ],
+  };
+
+  it('gives the pre-load pane every session of the project at once', () => {
+    const grown = adoptOrphans(singlePane(null, 'pane-1'), ['s1', 's2', 's3'], 'pane-1');
+    expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's2', 's3']);
+  });
+
+  it('leaves a session another pane already holds exactly where it is', () => {
+    const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-1');
+    expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's3']);
+    expect(findLeaf(grown, 'pane-2')?.sessionIds).toEqual(['s2']);
+  });
+
+  it('does not move the tab that is in front', () => {
+    const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-1');
+    expect(findLeaf(grown, 'pane-1')?.sessionId).toBe('s1');
+  });
+
+  it('returns the SAME tree when every session already has a pane', () => {
+    expect(adoptOrphans(split, ['s1', 's2'], 'pane-1')).toBe(split);
+  });
+
+  // The pane `zv` emptied is a legitimate state (PR 268/271), and nothing
+  // is orphaned by a MOVE — so the invariant has nothing to put back and the
+  // split it was made by survives.
+  it('leaves a pane a split deliberately emptied empty', () => {
+    const emptied: SplitTree = {
+      kind: 'split',
+      id: 'split-1',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'pane-1', sessionId: null, sessionIds: [] },
+        { kind: 'leaf', id: 'pane-2', sessionId: 's1', sessionIds: ['s1'] },
+      ],
+    };
+    expect(adoptOrphans(emptied, ['s1'], 'pane-2')).toBe(emptied);
+  });
+
+  // Totality here must not mean silence: `setPaneSession` and friends return
+  // the input unchanged when the pane id misses, which for an adoption would
+  // mean a session with no tab anywhere — the exact bug this exists to stop.
+  it('falls back to the first pane rather than dropping a session on a stale id', () => {
+    const grown = adoptOrphans(split, ['s1', 's2', 's3'], 'pane-gone');
+    expect(findLeaf(grown, 'pane-1')?.sessionIds).toEqual(['s1', 's3']);
+  });
+});
+
+/**
+ * THE CENTRE OF A PANE JOINS IT; ONLY THE EDGES SPLIT IT.
+ *
+ * The operator's report: "when the layout is split, if you want to drag a tab
+ * back into a pane so it stops being split, you can't." `nearestEdge` above is
+ * total over the WHOLE rectangle — every point in a pane names an edge — so a
+ * drop dead in the middle split the pane it landed on and the layout could
+ * only ever grow. `dropZone` is the model VSCode actually uses: a band around
+ * the rim splits, everything inside it joins.
+ */
+describe('dropZone — the centre joins, the rim splits', () => {
+  it('answers centre for a drop in the middle of a pane', () => {
+    expect(dropZone(500, 400, 1000, 800)).toBe('centre');
+  });
+
+  it('still names the edge the point is deepest into, near the rim', () => {
+    expect(dropZone(10, 400, 1000, 800)).toBe('left');
+    expect(dropZone(990, 400, 1000, 800)).toBe('right');
+    expect(dropZone(500, 10, 1000, 800)).toBe('top');
+    expect(dropZone(500, 790, 1000, 800)).toBe('bottom');
+  });
+
+  it('measures the band as a PROPORTION, so the same gesture works at any size', () => {
+    // The same relative point in a pane sixteen times the area is the same
+    // zone — a tenth of the way in splits at both sizes, the middle joins at
+    // both, and no pixel count says otherwise.
+    expect(dropZone(100, 400, 1000, 800)).toBe('left');
+    expect(dropZone(25, 100, 250, 200)).toBe('left');
+    expect(dropZone(500, 400, 1000, 800)).toBe('centre');
+    expect(dropZone(125, 100, 250, 200)).toBe('centre');
+  });
+
+  it('leaves a pane at the 320px floor a reachable centre', () => {
+    // PR 289's minimum pane. A fixed pixel margin large enough to aim at on a
+    // wide pane would swallow this one whole, and consolidating a layout back
+    // to one pane is exactly what you want most when panes are this narrow.
+    expect(dropZone(160, 160, MIN_PANE_PX, MIN_PANE_PX)).toBe('centre');
+  });
+
+  it('leaves that pane an edge band wider than the 44px touch floor', () => {
+    // A point 43px in from the left of the narrowest legal pane is still a
+    // SPLIT — so the band an operator has to hit is at least 44px across, the
+    // minimum target this codebase holds itself to everywhere else.
+    expect(dropZone(43, 160, MIN_PANE_PX, MIN_PANE_PX)).toBe('left');
+    expect(dropZone(43, 320, MIN_PANE_PX, MIN_PANE_PX * 2)).toBe('left');
+  });
+
+  it('measures depth against the span it crosses, not in raw pixels', () => {
+    // A wide, short pane — a `column` split's own shape. 150px in from the
+    // left of a 1000px pane is a SEVENTH of the way across; 60px down a 200px
+    // one is nearly a third. `nearestEdge`'s absolute reading calls this
+    // point `top`, which would split a wide pane horizontally because it is
+    // short. The zone the pointer is actually inside is the left band.
+    expect(dropZone(150, 60, 1000, 200)).toBe('left');
+    expect(nearestEdge(150, 60, 1000, 200)).toBe('top');
+  });
+
+  it('resolves a corner to the edge it is deepest into, never to two', () => {
+    // 5% in from the top, 15% in from the left: both bands, and the top one
+    // is the one the pointer is furthest inside.
+    expect(dropZone(150, 40, 1000, 800)).toBe('top');
+    expect(dropZone(40, 150, 1000, 800)).toBe('left');
+  });
+
+  it('is total over a degenerate rect, a non-finite point and a point outside', () => {
+    expect(dropZone(0, 0, 0, 0)).toBe('centre');
+    expect(dropZone(Number.NaN, 5, 100, 100)).toBe('centre');
+    expect(dropZone(5, Number.POSITIVE_INFINITY, 100, 100)).toBe('centre');
+    expect(dropZone(50, 50, Number.NaN, 100)).toBe('centre');
+    expect(['left', 'right', 'top', 'bottom', 'centre']).toContain(dropZone(-40, 50, 100, 100));
+  });
+});
+
+/**
+ * JOINING — the other half of the drop model, and the operation the layout had
+ * no way to reach: a tab moves INTO an existing pane's strip, and the pane it
+ * came from collapses when that was its last tab. `splitPane` grows the
+ * layout; this is the only thing that shrinks it by dragging.
+ */
+describe('joinPane — a tab moves into an existing pane, and the layout shrinks', () => {
+  /** pane-1 holds s1 and s3; pane-2 holds s2 alone. */
+  const twoPanes = (): SplitTree => ({
+    kind: 'split',
+    id: 'split-1',
+    orientation: 'row',
+    children: [
+      { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1', 's3'] },
+      { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+    ],
+    sizes: [0.5, 0.5],
+  });
+
+  it('moves the tab into the target pane and takes it out of the source', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    expect(leaves(joined)).toHaveLength(1);
+    expect(findLeaf(joined, 'pane-1')?.sessionIds).toEqual(['s1', 's3', 's2']);
+    expect(findLeaf(joined, 'pane-2')).toBeNull();
+  });
+
+  it('brings the joined tab to the FRONT of the pane it landed in', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    expect(findLeaf(joined, 'pane-1')?.sessionId).toBe('s2');
+  });
+
+  it('COLLAPSES the split when the source pane held only that tab', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    expect(joined.kind).toBe('leaf');
+    expect(joined.id).toBe('pane-1');
+  });
+
+  it('leaves the source pane standing when it still holds other tabs', () => {
+    const joined = joinPane(twoPanes(), 'pane-2', 'pane-1', 's1');
+    expect(leaves(joined)).toHaveLength(2);
+    expect(findLeaf(joined, 'pane-1')?.sessionIds).toEqual(['s3']);
+    expect(findLeaf(joined, 'pane-1')?.sessionId).toBe('s3');
+    expect(findLeaf(joined, 'pane-2')?.sessionIds).toEqual(['s2', 's1']);
+  });
+
+  it('hands the freed room to the survivors in proportion', () => {
+    const three: SplitTree = {
+      kind: 'split',
+      id: 'split-1',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+        { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+        { kind: 'leaf', id: 'pane-3', sessionId: 's3', sessionIds: ['s3'] },
+      ],
+      sizes: [0.5, 0.25, 0.25],
+    };
+    const joined = joinPane(three, 'pane-1', 'pane-3', 's3');
+    expect(joined.kind).toBe('split');
+    const sizes = splitSizes(joined as Split);
+    expect(sizes[0]).toBeCloseTo(2 / 3, 5);
+    expect(sizes[1]).toBeCloseTo(1 / 3, 5);
+  });
+
+  it('gives a collapsing split its whole slot back, leaving the layout around it still', () => {
+    const nested: SplitTree = {
+      kind: 'split',
+      id: 'outer',
+      orientation: 'row',
+      children: [
+        { kind: 'leaf', id: 'pane-1', sessionId: 's1', sessionIds: ['s1'] },
+        {
+          kind: 'split',
+          id: 'inner',
+          orientation: 'column',
+          children: [
+            { kind: 'leaf', id: 'pane-2', sessionId: 's2', sessionIds: ['s2'] },
+            { kind: 'leaf', id: 'pane-3', sessionId: 's3', sessionIds: ['s3'] },
+          ],
+          sizes: [0.5, 0.5],
+        },
+      ],
+      sizes: [0.7, 0.3],
+    };
+    const joined = joinPane(nested, 'pane-2', 'pane-3', 's3');
+    expect(joined.kind).toBe('split');
+    const outer = joined as Split;
+    expect(outer.children).toHaveLength(2);
+    expect(outer.children[1]?.kind).toBe('leaf');
+    const sizes = splitSizes(outer);
+    expect(sizes[0]).toBeCloseTo(0.7, 5);
+    expect(sizes[1]).toBeCloseTo(0.3, 5);
+  });
+
+  it('collapses a whole layout back to one pane, which can be split again', () => {
+    let tree: SplitTree = singlePane('s1', 'pane-1');
+    tree = setPaneSession(tree, 'pane-1', 's2');
+    tree = setPaneSession(tree, 'pane-1', 's3');
+    tree = splitPane(tree, 'pane-1', 'right', 's2', 'pane-2');
+    tree = detachTab(tree, 'pane-1', 's2');
+    tree = splitPane(tree, 'pane-2', 'bottom', 's3', 'pane-3');
+    tree = detachTab(tree, 'pane-1', 's3');
+    expect(leaves(tree)).toHaveLength(3);
+    tree = joinPane(tree, 'pane-1', 'pane-3', 's3');
+    expect(leaves(tree)).toHaveLength(2);
+    tree = joinPane(tree, 'pane-1', 'pane-2', 's2');
+    expect(leaves(tree)).toHaveLength(1);
+    expect(tree.kind).toBe('leaf');
+    expect(findLeaf(tree, 'pane-1')?.sessionIds.slice().sort()).toEqual(['s1', 's2', 's3']);
+    // And the un-split layout is a layout, not a dead end.
+    const again = splitPane(tree, 'pane-1', 'right', 's2', 'pane-4');
+    expect(leaves(again)).toHaveLength(2);
+  });
+
+  it('is a no-op on the pane the tab is already in', () => {
+    const tree = twoPanes();
+    expect(joinPane(tree, 'pane-1', 'pane-1', 's1')).toBe(tree);
+  });
+
+  it('is a no-op — the SAME tree — for a stale target, source or session', () => {
+    const tree = twoPanes();
+    expect(joinPane(tree, 'pane-gone', 'pane-2', 's2')).toBe(tree);
+    expect(joinPane(tree, 'pane-1', 'pane-gone', 's2')).toBe(tree);
+    expect(joinPane(tree, 'pane-1', 'pane-2', 's-gone')).toBe(tree);
+  });
+
+  it('never leaves a session in two panes at once', () => {
+    const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
+    const held = leaves(joined).flatMap((leaf) => leaf.sessionIds);
+    expect(new Set(held).size).toBe(held.length);
+  });
+});

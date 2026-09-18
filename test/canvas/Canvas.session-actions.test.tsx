@@ -13,9 +13,9 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 function session(id: string, over: Partial<Session> = {}): Session {
   return {
@@ -121,8 +121,8 @@ function sessionSourceWith(closeSession?: (sessionId: string, force?: boolean) =
   };
 }
 
-// The same three globals every rendering Canvas test installs: ReactFlow
-// needs the first two, prefs the third.
+// The same three globals every rendering Canvas test installs: the rendered
+// session panes need the first two, prefs the third.
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
     observe() {}

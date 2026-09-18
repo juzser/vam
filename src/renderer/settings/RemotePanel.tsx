@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { RemoteApi, RemoteState } from '../../preload/api.js';
+import { PairedDeviceList } from './PairedDeviceList.js';
 import { PairingPanel } from './PairingPanel.js';
 
 /** Matches main's `ADDRESS_CACHE_MS` floor: the poll is cheap by construction. */
@@ -32,10 +33,9 @@ const POLL_MS = 1_000;
  * trying whether `tailscale serve` itself would still succeed.
  */
 const NO_ADDRESS: Record<string, string> = {
-  'no-cli': 'vam could not ask this machine for its address: there is no tailscale command here.',
-  'not-running':
-    'Tailscale is not running on this machine, so there is no address for the phone to reach yet.',
-  'no-name': 'Tailscale is running but reported no MagicDNS name, and vam will not guess one.',
+  'no-cli': 'No tailscale command on this machine, so vam cannot ask for an address.',
+  'not-running': 'Tailscale is not running here, so there is no address for the phone yet.',
+  'no-name': 'Tailscale reported no MagicDNS name, and vam will not guess one.',
 };
 
 /**
@@ -88,14 +88,14 @@ const ACT_FAILED: Record<ActName, string> = {
 /** The registry's own trouble, which no surface said before. */
 const REGISTRY_TROUBLE: Record<'unreadable' | 'write-failed', string> = {
   unreadable:
-    'vam could not read its device registry, so it is admitting no phone at all. It has NOT overwritten the file -- pairing a device would, so vam refuses until the file is readable again.',
+    'vam could not read its device registry, so it is admitting no phone. The file is NOT overwritten -- pairing a device would overwrite it, so vam refuses until it reads again.',
   'write-failed':
-    'The last pairing change could not be written to disk, so it did not take effect: a device you allowed is not paired, and one you removed may still be.',
+    'The last pairing change was not written to disk, so it did not take effect: an allowed device is not paired, and a removed one may still be.',
 };
 
 /** The same tail on every one: the endpoint answered, so it is not the cause. */
 const ACT_TAIL =
-  ' The remote endpoint is running -- this failed inside vam, most often a device registry it could not write. The list below is the last state vam read.';
+  ' The remote endpoint is running, so this failed inside vam -- most often a registry it could not write. The list below is the last state vam read.';
 
 export function desktopRemoteApi(): RemoteApi | undefined {
   return (globalThis.window?.api as unknown as BridgeWithRemote | undefined)?.remote;
@@ -190,12 +190,38 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
     [act],
   );
 
-  if (api === undefined || off) {
+  /**
+   * NO BRIDGE MEANS THE PHONE, AND THE PHONE GETS THE LIST.
+   *
+   * This branch used to print one sentence -- "Remote access is part of the
+   * desktop app: this page has no bridge to a pairing screen" -- which is true
+   * about the ACTS and was the whole of what a phone could see. At the
+   * operator's request Remote is now the only settings section a phone draws
+   * (`sections.ts`, `PHONE_SECTIONS`), so that sentence had become the entire
+   * destination of the entire overlay. The list comes over HTTP instead, from
+   * a route that can only read (`sources/devices.ts`). The sentence about
+   * where the controls are survives inside `PairedDeviceList`, which is the
+   * part of it that was worth keeping.
+   *
+   * `off` is a DIFFERENT absence and keeps its own words: a desktop whose
+   * remote endpoint is not running has a bridge and nothing behind it, and
+   * there is no server to ask for a list either.
+   */
+  if (api === undefined) {
+    /**
+     * GATED ON `active` FOR THE SAME REASON THE POLL ABOVE IS: every panel in
+     * this overlay is MOUNTED, only the inactive ones are `hidden`
+     * (`SettingsOverlay`'s `Panel`) -- so an ungated read here fires a request
+     * every time the overlay opens on any section at all. Measured as a real
+     * connection attempt out of thirteen unit test files that had never
+     * touched the network.
+     */
+    return active ? <PairedDeviceList /> : null;
+  }
+  if (off) {
     return (
       <p data-testid="remote-off">
-        {api === undefined
-          ? 'Remote access is part of the desktop app: this page has no bridge to a pairing screen.'
-          : "vam's remote endpoint is not running, so there is nothing for a phone to pair with."}
+        vam's remote endpoint is not running, so there is nothing for a phone to pair with.
       </p>
     );
   }
@@ -211,7 +237,7 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
   return (
     <>
       {state.serverError !== null ? (
-        <p data-testid="remote-server-error" role="alert" className="text-[12px] text-ink-dim">
+        <p data-testid="remote-server-error" role="alert" className="text-control text-ink-dim">
           {state.serverError}
         </p>
       ) : null}
@@ -241,6 +267,12 @@ export function RemotePanel({ api, copyText, active }: RemotePanelProps) {
         onEnableServe={() => actServe('serveEnable', () => api.enableServe())}
         onDisableServe={() => actServe('serveDisable', () => api.disableServe())}
         onSetWritesPreference={(next) => void act('setWrites', () => api.setWrites(next))}
+        onOpenLink={(key) => {
+          // Not through `act`: that records a REFUSAL against a named action
+          // and re-reads the whole remote state, and neither belongs to a
+          // link. A browser that did not open is not a failure of pairing.
+          void api.openLink(key).catch(() => false);
+        }}
       />
       {state.registry !== null ? (
         <p data-testid="remote-registry" role="alert">

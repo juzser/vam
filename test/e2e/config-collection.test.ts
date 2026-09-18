@@ -73,11 +73,24 @@ function collectedFiles(configName: string): string[] {
 describe.skipIf(!harnessInstalled)(
   'e2e Playwright config collection (real --list, not a testMatch string read)',
   () => {
-    it('the default config collects exactly the three .spec.ts specs', () => {
+    it('the default config collects exactly the .spec.ts specs', () => {
+      // `error-log-select.spec.ts` joined this list rather than getting a
+      // config of its own: it is an ordinary page test against `?demo=1` on
+      // vam's own dev server, which is exactly what this config already
+      // spawns. Adding the name here is the registration -- the collection is
+      // a real `--list`, so a spec that is not named is a spec that either
+      // does not run or runs somewhere nobody looks.
       expect(collectedFiles('playwright.config.ts')).toEqual([
         'branch-overlap.spec.ts',
+        'error-log-select.spec.ts',
         'pane-resize.spec.ts',
         'sse-drop.spec.ts',
+        // `stream-cookie.spec.ts` spawns its own node server on an ephemeral
+        // port and never touches this config's `baseURL`, so it needs no
+        // config of its own either -- and a config of its own would be a
+        // fourth thing nobody runs. It is named here for the same reason
+        // every other one is: the collection is a real `--list`.
+        'stream-cookie.spec.ts',
       ]);
     });
 

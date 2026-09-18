@@ -32,16 +32,25 @@ function runner(answers: Record<string, TmuxRunResult>) {
   const argvs: (readonly string[])[] = [];
   const run: TmuxRun = async (argv) => {
     argvs.push(argv);
-    return answers[argv[0] ?? ''] ?? failed(`no stub for ${argv[0] ?? ''}`);
+    // THE PANE READ IS ONE TMUX INVOCATION OF TWO COMMANDS since it began
+    // asking where the cursor is (`tmux/argv.ts`), so its first word is
+    // `display-message` and not `capture-pane`. Every stub here names the
+    // read by WHAT IT READS rather than by the verb that happens to lead.
+    const verb = argv.includes('capture-pane') ? 'capture-pane' : (argv[0] ?? '');
+    return answers[verb] ?? failed(`no stub for ${verb}`);
   };
-  return { run, argvs, verbs: () => argvs.map((argv) => argv[0]) };
+  return {
+    run,
+    argvs,
+    verbs: () => argvs.map((argv) => (argv.includes('capture-pane') ? 'capture-pane' : argv[0])),
+  };
 }
 
 const listing = (rows: string) => ({ 'list-sessions': ok(rows), 'send-keys': ok('') });
 
 describe('typing into the session vam started for a project', () => {
   it('sends one literal send-keys for a character, and no Return', async () => {
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('sent');
     // `-l` is the whole correctness: without it tmux looks the argument up as
     // a KEY NAME, so a pane would be sent `^[` for the letters of `Escape`.
@@ -52,27 +61,27 @@ describe('typing into the session vam started for a project', () => {
   });
 
   it('sends the interpreted Return for Enter, and nothing literal', async () => {
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'enter' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
     expect(argvs[1]).not.toContain('-l');
   });
 
   it('sends Backspace as the interpreted key, so a typo can be corrected', async () => {
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
     expect(argvs[1]).not.toContain('-l');
   });
 
   it('refuses a Backspace it cannot aim, exactly like every other key', async () => {
-    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const { run, verbs } = runner(listing(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'backspace' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
   it('cycles the mode with the interpreted BTab, never a plain tab', async () => {
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' })).toBe('sent');
     // BY VALUE, because the wrong spelling of this one is SILENT. Measured on
     // tmux 3.7b over a private `-L` socket: `send-keys BTab` delivered `^[[Z`,
@@ -90,14 +99,14 @@ describe('typing into the session vam started for a project', () => {
     // Aimed by the same guard as every other key: the pane vam started for
     // THIS project. Cycling somebody else's agent is not a smaller mistake
     // than typing into it.
-    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const { run, verbs } = runner(listing(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
   it('sends NO BTab through a published pane of another project', async () => {
     const { run, verbs } = runner(
-      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
+      listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n${BEACON}\t\tvam-beacon-d4e5f6\n`),
     );
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
     expect(await sendSessionKey(run, ATLAS, { kind: 'back-tab' }, ATLAS, panes)).toBe('mispaired');
@@ -105,26 +114,26 @@ describe('typing into the session vam started for a project', () => {
   });
 
   it('sends Escape as the interpreted key, because a TUI cancels on it', async () => {
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'escape' })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Escape']);
     expect(argvs[1]).not.toContain('-l');
   });
 
   it('refuses an Escape it cannot aim, exactly like every other key', async () => {
-    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const { run, verbs } = runner(listing(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'escape' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
 
   it('sends text that reads as a key name as the characters it is', async () => {
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     await sendSessionKey(run, ATLAS, { kind: 'text', text: 'Escape' });
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', 'Escape']);
   });
 
   it('sends NOTHING when no session vam started carries this project', async () => {
-    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const { run, verbs } = runner(listing(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
@@ -132,7 +141,7 @@ describe('typing into the session vam started for a project', () => {
   it('sends NOTHING to a session vam does not control', async () => {
     // An unset `@vam-project` reads back as the empty string: the operator's
     // own session, listed beside vam's. It is not vam's to type into.
-    const { run, verbs } = runner(listing('\tsome-session\n'));
+    const { run, verbs } = runner(listing('\t\tsome-session\n'));
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
   });
@@ -141,7 +150,7 @@ describe('typing into the session vam started for a project', () => {
     // The tab draws no screen for `ambiguous`, and picking one of the two
     // would be a coin toss landing in a real agent's terminal.
     const { run, verbs } = runner(
-      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
+      listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n${ATLAS}\t\tvam-atlas-g7h8i9\n`),
     );
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('unaimed');
     expect(verbs()).toEqual(['list-sessions']);
@@ -166,7 +175,7 @@ describe('typing into the session vam started for a project', () => {
     // `unaimed` sent the operator looking for a pairing problem that is not
     // there; the tab draws a different sentence for each.
     const { run } = runner({
-      'list-sessions': ok(`${ATLAS}\tvam-atlas-a1b2c3\n`),
+      'list-sessions': ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
       'send-keys': failed("can't find pane"),
     });
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' })).toBe('refused');
@@ -174,7 +183,7 @@ describe('typing into the session vam started for a project', () => {
 
   it('aims at the pane the session published, not at the project', async () => {
     const { run, argvs } = runner(
-      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${ATLAS}\tvam-atlas-g7h8i9\n`),
+      listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n${ATLAS}\t\tvam-atlas-g7h8i9\n`),
     );
     const panes = new Map([[ATLAS, 'vam-atlas-g7h8i9']]);
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
@@ -188,7 +197,7 @@ describe('typing into the session vam started for a project', () => {
     // the fallback filtered on the project: a stale published value naming a
     // session of Beacon's resolved as a confident single Atlas match, and the
     // keystroke was typed into Beacon's running agent.
-    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const { run, verbs } = runner(listing(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
     // vam DID name a session and rejected the one it named. That is not "no
     // session of mine answers for this project", which is what `unaimed`
@@ -207,7 +216,7 @@ describe('typing into the session vam started for a project', () => {
     // the key at a session chosen by a rule that never looked at this row --
     // healthy, live, and not the one the operator is typing in.
     const { run, verbs } = runner(
-      listing(`${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`),
+      listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n${BEACON}\t\tvam-beacon-d4e5f6\n`),
     );
     const panes = new Map([[ATLAS, 'vam-beacon-d4e5f6']]);
     // vam DID name a session and rejected the one it named. That is not "no
@@ -221,7 +230,7 @@ describe('typing into the session vam started for a project', () => {
   });
 
   it('types where the three cases say it may, and nowhere else', async () => {
-    const stdout = `${ATLAS}\tvam-atlas-a1b2c3\n${BEACON}\tvam-beacon-d4e5f6\n`;
+    const stdout = `${ATLAS}\t\tvam-atlas-a1b2c3\n${BEACON}\t\tvam-beacon-d4e5f6\n`;
     // 1. NOBODY SAID: no published value, and the project names exactly one.
     const nobody = runner(listing(stdout));
     await sendSessionKey(nobody.run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, new Map());
@@ -252,7 +261,7 @@ describe('typing into the session vam started for a project', () => {
     // A pane the OPERATOR started publishes into the same directory. It is
     // never acted on -- and it is `mispaired` rather than `unaimed`, because
     // the row did name where it is and vam refused that name.
-    const { run, verbs } = runner(listing(`${BEACON}\tvam-beacon-d4e5f6\n`));
+    const { run, verbs } = runner(listing(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
     const panes = new Map([[ATLAS, 'their-own-session']]);
     expect(await sendSessionKey(run, ATLAS, { kind: 'text', text: 'h' }, ATLAS, panes)).toBe(
       'mispaired',
@@ -264,7 +273,7 @@ describe('typing into the session vam started for a project', () => {
 describe('the send channel refuses what the renderer may not ask', () => {
   function handler() {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    const { run, argvs } = runner(listing(`${ATLAS}\tvam-atlas-a1b2c3\n`));
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
     registerTerminalIpc(
       { handle: (channel, listener) => void handlers.set(channel, listener) },
       run,
@@ -335,7 +344,7 @@ describe('the send channel refuses what the renderer may not ask', () => {
  * reusing an aim is asserted beside it, in the same tests: what drops it.
  */
 describe('a typing run proves its pane once, and re-proves it when it must', () => {
-  function typing(stdout = `${ATLAS}\tvam-atlas-a1b2c3\n`) {
+  function typing(stdout = `${ATLAS}\t\tvam-atlas-a1b2c3\n`) {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
     const { run, argvs, verbs } = runner({
       'list-sessions': ok(stdout),
@@ -401,7 +410,7 @@ describe('a typing run proves its pane once, and re-proves it when it must', () 
     const argvs: (readonly string[])[] = [];
     const run: TmuxRun = async (argv) => {
       argvs.push(argv);
-      return argv[0] === 'list-sessions' ? ok(`${ATLAS}\tvam-atlas-a1b2c3\n`) : answer;
+      return argv[0] === 'list-sessions' ? ok(`${ATLAS}\t\tvam-atlas-a1b2c3\n`) : answer;
     };
     registerTerminalIpc(
       { handle: (channel, listener) => void handlers.set(channel, listener) },
@@ -443,7 +452,7 @@ describe('a typing run proves its pane once, and re-proves it when it must', () 
 
   it('destroys the aim when the read stops resolving the pane', async () => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    let sessions = `${ATLAS}\tvam-atlas-a1b2c3\n`;
+    let sessions = `${ATLAS}\t\tvam-atlas-a1b2c3\n`;
     const argvs: (readonly string[])[] = [];
     const run: TmuxRun = async (argv) => {
       argvs.push(argv);
@@ -468,7 +477,7 @@ describe('a typing run proves its pane once, and re-proves it when it must', () 
   });
 
   it('keeps one aim per row, so a second session in the project proves its own', async () => {
-    const t = typing(`${ATLAS}\tvam-atlas-a1b2c3\n`);
+    const t = typing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`);
     await t.send({}, ATLAS, { kind: 'text', text: 'a' }, 'row-one');
     await t.send({}, ATLAS, { kind: 'text', text: 'b' }, 'row-two');
     expect(t.verbs().filter((verb) => verb === 'list-sessions')).toHaveLength(2);

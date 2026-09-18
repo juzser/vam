@@ -16,8 +16,8 @@
  * And a project belongs to AT MOST ONE group, enforced on the way in: adding
  * one that is already grouped MOVES it. Membership is expressed by array
  * position, so a project in two groups would have its sessions drawn twice,
- * minting duplicate node ids that break both the canvas and the keys `j`/`k`
- * navigate by.
+ * and the session id the sidebar keys its rows on -- the same id the keys
+ * `j`/`k` navigate by -- would stop being unique.
  */
 
 import { describe, expect, it } from 'vitest';

@@ -131,11 +131,15 @@ describe('a prompt read off the pane', () => {
     expect(reads).not.toHaveBeenCalled();
   });
 
-  it('keeps the waiting note and draws no card when the pane holds no prompt', async () => {
+  it('draws no card at all when the pane holds no prompt', async () => {
+    // It used to also assert the waiting NOTICE was still there beneath the
+    // absent card. The operator asked for that notice to go and it is gone
+    // (`WaitingNote`, deleted); what is still this test's own is that a
+    // `kind: 'none'` read invents no options.
     draw({ ...waiting, vamControlled: true }, { prompt: async () => ({ kind: 'none' }) });
     await act(async () => {});
     expect(options()).toEqual([]);
-    expect(document.querySelector('[data-session-waiting]')).not.toBeNull();
+    expect(document.querySelector('[data-question]')).toBeNull();
   });
 
   it('lets a real tool question win over anything on the pane', async () => {

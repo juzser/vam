@@ -21,9 +21,10 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { whyNotARepository } from '../../src/main/sources/repo.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { clearEvents, loggedEvents } from '../../src/renderer/errors/log.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 const session = (id: string): Session => ({
   id,
@@ -44,6 +45,22 @@ const MODEL: CanvasModel = {
 
 /** A directory that is nobody's home: this repo is public. */
 const CHOSEN = '/srv/work/orchard';
+
+/** Start a session in a named project: the first item of that project's own
+ *  menu, which is where the heading's `+` went (one icon less per heading, at
+ *  the operator's request). */
+async function addInProject(projectId: string) {
+  await act(async () => {
+    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
+  });
+  await act(async () => {
+    (
+      document.querySelector(
+        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
+      ) as HTMLElement
+    ).click();
+  });
+}
 
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 
@@ -134,7 +151,13 @@ beforeAll(() => {
   } as unknown as typeof DOMMatrixReadOnly;
 });
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  // The refusal channel is a module-level buffer, so one test's "no" is the
+  // next one's history -- and `push` drops a CONSECUTIVE repeat, which would
+  // make a second identical refusal invisible rather than merely stale.
+  clearEvents();
+});
 afterEach(() => {
   cleanup();
   localStorage.clear();
@@ -328,9 +351,7 @@ describe('new project — feedback and the in-flight guard', () => {
       inner.write.createSession = () => gate.promise;
       const picker = withDialog(async () => CHOSEN);
       render(<Canvas model={MODEL} source={source} />);
-      await act(async () => {
-        screen.getByLabelText('new session in alpha').click();
-      });
+      await addInProject('p1');
       // The Projects `+` is not the pending control, so it is still live.
       expect(control().disabled).toBe(false);
 
@@ -382,5 +403,351 @@ describe('new project — feedback and the in-flight guard', () => {
     await clickNewProject();
     expect(control().getAttribute('data-pending')).toBeNull();
     expect(control().disabled).toBe(false);
+  });
+});
+
+/**
+ * AND THE SAME ACT FROM THE KEYBOARD — `Cmd+Shift+P`, which the operator
+ * asked for.
+ *
+ * It is the SAME `newProject`, reached through the chord table instead of
+ * through the button, and these cases assert it at the same seams the
+ * button's do: `spawned` is how many sessions were really started and
+ * `picker.count` is how many dialogs were really opened. A keyboard test that
+ * only read the status bar would pass against a dispatch that says the right
+ * sentence and calls nothing.
+ *
+ * `cancelable: true` is not decoration here. `Canvas.tsx` stands down on
+ * `event.defaultPrevented`, and `preventDefault()` on an event built without
+ * `cancelable` is a specified no-op — the header of
+ * `test/canvas/Canvas.cursor-mode.test.tsx` records how that once made a whole
+ * suite green BECAUSE OF the defect it was later sent to fix. A real keydown
+ * is cancelable; these are too.
+ *
+ * WHICH ARM EACH GATE COVERS. The success path and the desktop-only refusal
+ * ("the browser build has no picker") are UNIT-ONLY, and by construction:
+ * `window.api` does not exist in the web bundle the e2e guards drive, and the
+ * demo source they run against declines at `newSessionRoute` before any
+ * picker is reached. `e2e/key-truth-shots.mjs` covers the ROUTE refusal in a
+ * real browser — that the chord reaches this flow at all, and that the "no"
+ * is recorded under `new project` rather than counted as a failure.
+ */
+describe('new project — the chord', () => {
+  /**
+   * `Cmd+Shift+P` as a real macOS keydown carries it: Shift has already
+   * upper-cased the letter, and `normalizeKey` folds both away to `Mod-p`
+   * (`test/keyboard/chords.new-project.test.ts` argues that spelling).
+   */
+  async function pressNewProject(target: EventTarget = window) {
+    await act(async () => {
+      target.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'P',
+          code: 'KeyP',
+          metaKey: true,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+  }
+
+  const composer = () =>
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+
+  it('starts a session in the chosen directory, by (cwd, name) in that order', async () => {
+    const { source, spawned, wrote } = sourceWith(true);
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await pressNewProject();
+    // The same seam the click test asserts, in the same order — a swapped
+    // pair would sail through every refusal case in this file.
+    expect(spawned).toEqual([[CHOSEN, 'orchard']]);
+    expect(statusBar()).toContain('orchard');
+    expect(wrote.count).toBe(1);
+  });
+
+  /**
+   * FROM INSIDE THE PROMPT BOX, which is the state a `Mod-` chord exists for.
+   *
+   * The window listener's typing guard lets a Cmd/Ctrl chord past a focused
+   * INPUT|TEXTAREA — no layout produces a character from one, so a box
+   * capturing letters has no claim on it — and that concession is the only
+   * reason this key works where the operator's hands actually are. Asserted
+   * with the caret really in the box and the keydown dispatched AT it, so the
+   * guard reads the same `event.target` a real press would give it.
+   */
+  it('fires from inside the composer, where an unmodified key would not', async () => {
+    const { source, spawned } = sourceWith(true);
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    const box = composer();
+    expect(box, 'the model draws no prompt box to type into').not.toBeNull();
+    await act(async () => {
+      box?.focus();
+    });
+    expect(document.activeElement?.tagName).toBe('TEXTAREA');
+    await pressNewProject(box as EventTarget);
+    expect(spawned).toEqual([[CHOSEN, 'orchard']]);
+  });
+
+  /**
+   * THE REFUSAL, IN THE SOURCE'S OWN WORDS — and recorded as the "no" vam
+   * meant to say rather than as a failure. This is the arm the browser guard
+   * covers from the other side.
+   */
+  it('a source that cannot create refuses in its own words, and never opens the picker', async () => {
+    const { source, spawned } = sourceWith(false);
+    const picker = withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await pressNewProject();
+    expect(spawned).toEqual([]);
+    expect(picker.count).toBe(0);
+    expect(statusBar()).toContain('this source has no way to start one');
+  });
+
+  it('and records that refusal under `new project`, as a refusal and not a failure', async () => {
+    const { source } = sourceWith(false);
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await pressNewProject();
+    const refusals = loggedEvents().filter((event) => event.action === 'new project');
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]?.kind).toBe('refusal');
+    expect(refusals[0]?.message).toContain('this source has no way to start one');
+  });
+
+  it('with no Electron bridge it says so, opens nothing and starts nothing', async () => {
+    const { source, spawned } = sourceWith(true);
+    withDialog();
+    render(<Canvas model={MODEL} source={source} />);
+    await pressNewProject();
+    expect(spawned).toEqual([]);
+    expect(statusBar()).toMatch(/desktop app|browser/i);
+    expect(statusBar()).not.toMatch(/started/i);
+  });
+
+  /**
+   * The key does not become a SECOND way to start one while the first is
+   * running. `newProject`'s in-flight guard is shared by both entry points,
+   * and this is the reachable second press: the Projects `+` is not the
+   * pending control while a session is being created in a project, so nothing
+   * on screen stops the keystroke — only the guard inside the handler does.
+   */
+  it('is refused, out loud, while another action is in flight', async () => {
+    const { source, spawned } = sourceWith(true);
+    let settle!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSession: () => Promise<void> };
+    };
+    inner.write.createSession = () => gate;
+    const picker = withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await addInProject('p1');
+    await pressNewProject();
+    expect(picker.count).toBe(0);
+    expect(spawned).toEqual([]);
+    expect(statusBar()).toMatch(/still running/i);
+    await act(async () => {
+      settle();
+    });
+  });
+});
+
+/**
+ * WHILE A NEW PROJECT IS STARTING, AND IT IS NOT INSTANT -- the gap the
+ * operator reported: "nhưng tạo project thì không có" (but creating a
+ * project has none). `createSession`'s own wait, asserted in the sibling
+ * suite `describe('the wait while a session is starting', ...)` in
+ * `Canvas.new-session.test.tsx`, never applied here: `newProject` never
+ * called `setStarting`, and the sidebar only ever matched an EXISTING
+ * project's section -- which a new project does not have, by definition,
+ * until the session it starts is actually running there.
+ *
+ * Same mechanism as that sibling suite, not a second one: `newProject` arms
+ * the identical `starting` state `createSession` does, with `projectId: null`
+ * standing for "no section exists yet, draw a provisional one instead." This
+ * suite deliberately mirrors that one's cases, case for case, to prove the
+ * same guarantees hold on the path that was missing them.
+ */
+describe('the wait while a new project is starting', () => {
+  /** A promise the test resolves by hand -- the same idea as the sibling
+   *  suite's `deferred` above, redeclared locally because that one is
+   *  function-scoped to `describe('new project — feedback…')`, not exported. */
+  function deferred<T>() {
+    let settle!: (value: T) => void;
+    const promise = new Promise<T>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+
+  /** A source whose `createSessionIn` hangs until the test releases it, so
+   *  "the write is accepted, the row has not arrived" is a real moment. */
+  function gatedSpawn() {
+    const { source } = sourceWith(true);
+    const gate = deferred<void>();
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: () => Promise<void> };
+    };
+    inner.write.createSessionIn = () => gate.promise;
+    return { source, release: () => gate.settle(undefined) };
+  }
+
+  const starting = () => document.querySelector('[data-session-starting]');
+  const startingPane = () => document.querySelector('[data-pane-starting]');
+  const provisionalSection = () => document.querySelector('[data-project-section-provisional]');
+
+  it('shows nothing before anything is being started', () => {
+    const { source } = sourceWith(true);
+    render(<Canvas model={MODEL} source={source} />);
+    expect(starting()).toBeNull();
+    expect(startingPane()).toBeNull();
+    expect(provisionalSection()).toBeNull();
+  });
+
+  it('marks the sidebar with a provisional section the moment the directory is chosen', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).not.toBeNull();
+    expect(starting()).not.toBeNull();
+  });
+
+  it('names it from the chosen directory', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()?.textContent).toContain('orchard');
+    expect(starting()?.textContent).toContain('orchard');
+  });
+
+  it('opens the pane on it immediately, without waiting for the write', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(startingPane()).not.toBeNull();
+    expect(startingPane()?.textContent).toContain('orchard');
+  });
+
+  /**
+   * AND IT KEEPS SAYING SO AFTER THE WRITE RESOLVES -- the half the status bar
+   * only ever hinted at: `tmux new-session -d` returns before the agent
+   * inside has registered anywhere vam can read, so the write finishing is not
+   * the row arriving.
+   */
+  it('stays up after the write resolves, while the row is still missing', async () => {
+    const { source, release } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    await act(async () => {
+      release();
+    });
+    expect(provisionalSection()).not.toBeNull();
+    expect(startingPane()).not.toBeNull();
+  });
+
+  it('clears once the session it was waiting for arrives, and does not linger', async () => {
+    const { source, release } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    const view = render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    await act(async () => {
+      release();
+    });
+    const grown: CanvasModel = {
+      projects: [
+        ...MODEL.projects,
+        { id: 'p2', name: 'orchard', source: 'claude-code', sessions: [session('o1')] },
+      ],
+    };
+    await act(async () => {
+      view.rerender(<Canvas model={grown} source={source} />);
+    });
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+    expect(document.querySelectorAll('[data-session-starting]')).toHaveLength(0);
+  });
+
+  it('clears when the picker is cancelled', async () => {
+    const { source } = sourceWith(true);
+    withDialog(async () => null);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  it('clears when the picker itself fails', async () => {
+    const { source } = sourceWith(true);
+    withDialog(() => Promise.reject(new Error('dialog crashed')));
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+  });
+
+  /**
+   * A FAILED SPAWN LEAVES NOTHING SPINNING. An indicator that outlived its own
+   * failure is worse than none: it says vam is still trying when vam has
+   * stopped.
+   */
+  it('clears when the spawn fails, and nothing is left spinning', async () => {
+    const { source } = sourceWith(true);
+    const inner = (source as { source: SessionSource }).source as unknown as {
+      write: { createSessionIn: unknown };
+    };
+    inner.write.createSessionIn = async () => {
+      throw new Error('tmux said no');
+    };
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    expect(provisionalSection()).toBeNull();
+    expect(startingPane()).toBeNull();
+    expect(statusBar()).toContain('tmux said no');
+  });
+
+  /**
+   * NOT MERGED INTO AN EXISTING PROJECT'S SECTION. `Canvas.new-session.test.
+   * tsx` records finding its own equivalent check weakenable to `starting !==
+   * null` against a one-project fixture; this model carries an existing
+   * project (`alpha`) for the same reason -- so a provisional section landing
+   * inside IT, rather than beside it, has somewhere to land wrong.
+   */
+  it('draws its own section, separate from an existing project', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    await clickNewProject();
+    const marks = [...document.querySelectorAll('[data-session-starting]')];
+    expect(marks).toHaveLength(1);
+    expect(marks[0]?.closest('[data-project-rows]')).toBeNull();
+    expect(marks[0]?.closest('[data-project-section-provisional]')).not.toBeNull();
+  });
+
+  /**
+   * AND IT IS NOT A SESSION, exactly as the sibling wait is not: no row the
+   * keyboard can reach, nothing `Close` or `Stop` could act on. The
+   * provisional heading offers no control at all -- no icon picker, no
+   * collapse, no menu, no per-project `+` -- because every one of those would
+   * act on a `Project` this directory does not have yet.
+   */
+  it('is not one of the sidebar’s session rows, and offers no control to act on it', async () => {
+    const { source } = gatedSpawn();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={MODEL} source={source} />);
+    const before = document.querySelectorAll('[data-session-row]').length;
+    await clickNewProject();
+    expect(document.querySelectorAll('[data-session-row]').length).toBe(before);
+    expect(provisionalSection()?.querySelector('button')).toBeNull();
   });
 });

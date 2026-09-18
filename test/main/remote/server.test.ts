@@ -28,9 +28,18 @@ import {
 } from '../../../src/main/remote/server.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
+import type { TranscriptPage } from '../../../src/shared/history.js';
 
 const PAIRED: Identity = { deviceId: 'device-1', name: 'the paired phone' };
 const TOKEN = 'a-token-this-server-minted';
+
+/** One backward page, invented here: no transcript on this machine is read. */
+const PAGE: TranscriptPage = {
+  kind: 'page',
+  turns: [],
+  cursor: 's1:@1024',
+  reachedStart: false,
+};
 
 const PROJECTS: readonly Project[] = [
   { id: 'p1', name: 'demo', sessions: [] } as unknown as Project,
@@ -223,6 +232,110 @@ describe('read-only mode', () => {
 
   it('still serves the read routes', async () => {
     expect((await get(await start({ allowWrites: false }), '/api/load')).status).toBe(200);
+  });
+
+  /**
+   * Scrolling back is a READ -- it opens a transcript and reads a window of it
+   * -- so it belongs with `/api/load` and not with the writes. It is a POST
+   * only because it carries a cursor in a body. A phone is the surface this
+   * whole feature is for, and a read-only server is the safe way to expose
+   * one, so gating it on `allowWrites` would have hidden it exactly there.
+   */
+  it('still serves the history route, which is a read that happens to POST', async () => {
+    const readHistory = vi.fn(async () => PAGE);
+    const base = await start({ allowWrites: false, source: makeSource({ readHistory }) });
+    const response = await post(base, '/api/history', { sessionId: 's1', cursor: null });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, value: PAGE });
+    expect(readHistory).toHaveBeenCalledWith('s1', null);
+  });
+});
+
+/**
+ * ONE AGENT'S WORK, over the wire the phone actually uses. Registered beside
+ * the history route and, like it, a READ that happens to POST -- so a
+ * read-only server still serves it: looking at what a subagent is doing
+ * changes nothing, and the phone is where an operator most often wants to.
+ */
+describe('the agent-work route', () => {
+  const WORK = { kind: 'work' as const, turns: [], brief: null, whole: true };
+
+  it('forwards the row and the agent, and answers the work whole', async () => {
+    const readAgentWork = vi.fn(async () => WORK);
+    const base = await start({ source: makeSource({ readAgentWork }) });
+    const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'agent-a' });
+    expect(await response.json()).toEqual({ ok: true, value: WORK });
+    expect(readAgentWork).toHaveBeenCalledWith('s1', 'agent-a');
+  });
+
+  it('refuses a body it does not trust without reaching the source', async () => {
+    const readAgentWork = vi.fn(async () => WORK);
+    const base = await start({ source: makeSource({ readAgentWork }) });
+    for (const body of [{ sessionId: 42, agentId: 'a' }, { sessionId: 's1' }, { agentId: 'a' }]) {
+      const response = await post(base, '/api/agent-work', body);
+      expect(response.status).toBe(400);
+    }
+    expect(readAgentWork).not.toHaveBeenCalled();
+  });
+
+  it('answers the type’s own unavailable arm when the source has no agents', async () => {
+    const base = await start({ source: makeSource() });
+    const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'a' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      value: {
+        kind: 'unavailable',
+        error: {
+          kind: 'refused',
+          code: 'unsupported:agent-work',
+          message: expect.stringContaining('agents'),
+        },
+      },
+    });
+  });
+
+  it('is served by a read-only server, like the history route beside it', async () => {
+    const readAgentWork = vi.fn(async () => WORK);
+    const base = await start({ allowWrites: false, source: makeSource({ readAgentWork }) });
+    const response = await post(base, '/api/agent-work', { sessionId: 's1', agentId: 'agent-a' });
+    expect(response.status).toBe(200);
+    expect(readAgentWork).toHaveBeenCalledWith('s1', 'agent-a');
+  });
+});
+
+describe('the history route', () => {
+  it('forwards a cursor and answers the page whole', async () => {
+    const readHistory = vi.fn(async () => PAGE);
+    const base = await start({ source: makeSource({ readHistory }) });
+    const response = await post(base, '/api/history', { sessionId: 's1', cursor: 's1:@4096' });
+    expect(await response.json()).toEqual({ ok: true, value: PAGE });
+    expect(readHistory).toHaveBeenCalledWith('s1', 's1:@4096');
+  });
+
+  it('refuses a body it does not trust without reaching the source', async () => {
+    const readHistory = vi.fn(async () => PAGE);
+    const base = await start({ source: makeSource({ readHistory }) });
+    const response = await post(base, '/api/history', { sessionId: 42 });
+    expect(response.status).toBe(400);
+    expect(readHistory).not.toHaveBeenCalled();
+  });
+
+  it('answers the page type’s own unavailable arm when the source cannot page', async () => {
+    const base = await start({ source: makeSource() });
+    const response = await post(base, '/api/history', { sessionId: 's1', cursor: null });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      value: {
+        kind: 'unavailable',
+        error: {
+          kind: 'refused',
+          code: 'unsupported:history',
+          message: expect.stringContaining('earlier parts'),
+        },
+      },
+    });
   });
 });
 
@@ -561,9 +674,21 @@ describe('the descriptor the server serves', () => {
 });
 
 /**
- * The page itself. An asset is served by the SAME request path as the API, so
- * identity is verified before the file is opened -- a static file that could be
- * fetched by someone `/api/load` would refuse is a way around the door.
+ * The page itself.
+ *
+ * THIS BLOCK USED TO ASSERT THE OPPOSITE, and the assertion was correct about
+ * the piece it named while the whole was broken. It read: identity is verified
+ * before the file is opened, because a static file fetchable by someone
+ * `/api/load` would refuse is a way around the door. True of a file holding
+ * DATA -- and the app shell holds none. What it cost was the only route a new
+ * phone had: `/api/pair` is a POST, a scanned QR is a GET, and the page that
+ * makes that POST was itself behind the token it exists to obtain. The
+ * operator scanned the code and got this server's own 401 read back.
+ *
+ * So the shell -- `/`, `/index.html`, `/assets/<one segment>` -- is served
+ * without a token, and everything else still is not. The cases below hold the
+ * new boundary from both sides; `phone-shell.test.ts` walks the journey end to
+ * end and states the security argument in full.
  */
 describe('static assets', () => {
   let root: string;
@@ -576,15 +701,22 @@ describe('static assets', () => {
     await writeFile(join(root, '..', 'outside.txt'), 'not yours');
   });
 
-  it('refuses an asset to a caller with no verified identity', async () => {
+  it('serves the shell to a caller with no verified identity', async () => {
     const response = await get(await start({ webRoot: root }), '/', null);
-    expect(response.status).toBe(401);
-    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
   });
 
-  it('refuses an asset to a forged assertion', async () => {
+  it('serves the shell, and only the shell, to a forged assertion', async () => {
     const base = await start({ webRoot: root });
-    expect((await get(base, '/assets/app.js', 'not-a-token-we-minted')).status).toBe(401);
+    const forged = 'not-a-token-we-minted';
+    // The bundle: public build output, and reachable by anyone on the tailnet
+    // whether they forge a header or send none at all.
+    expect((await get(base, '/assets/app.js', forged)).status).toBe(200);
+    // The model: unchanged. A forged assertion buys exactly the page, which
+    // can do nothing without a token this server minted.
+    expect((await get(base, '/api/load', forged)).status).toBe(401);
+    expect((await get(base, '/api/describe', forged)).status).toBe(401);
   });
 
   it('serves the page at the root to a verified identity', async () => {

@@ -15,7 +15,7 @@ afterEach(cleanup);
 
 const MD = `# head one\n\n## head two\n\n### head three\n\npara with \`code\` in it.\n
 - a bullet\n\n> a quote\n\n| a | b |\n| - | - |\n| 1 | 2 |\n
-\`\`\`ts\nconst x = 1;\n\`\`\`\n\n[a link](https://example.test)`;
+\`\`\`ts\nconst x = 1;\n\`\`\`\n\n[a link](https://example.test) and ![a diagram](d.png)`;
 
 const out = (): HTMLElement =>
   render(
@@ -47,7 +47,17 @@ const find = (root: HTMLElement, sel: string): Element =>
     throw new Error(`no ${sel}`);
   })();
 
-const HINT = 'p span span'; // the `(href)` hint, the smallest thing `out` draws
+// THE SMALLEST THING `out` DRAWS, found by its own attribute rather than by a
+// structural selector -- and the element under that description has moved
+// twice without the claim moving at all. It was the address printed beside a
+// link; then the link became a BUTTON and the address a pill with the HOST
+// inside it; now the operator has asked for a pill of just a name and a glyph
+// (`OutLink`), so the host caption is gone and the quietest element in `out`
+// is the alt text of a picture vam does not draw. Same claim throughout: the
+// quietest element here is 0.875em and not the flat 11px `text-meta` the
+// sidebar's pills wear, because a pixel here is an element the reading-size
+// setting can never reach.
+const HINT = 'p [data-out-alt]';
 
 describe('every size inside out is relative, so one setting moves them all', () => {
   it('leaves no element behind in pixels', () => {

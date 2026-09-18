@@ -8,7 +8,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,11 +18,19 @@ import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
 import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
+import { applyUtf8Ctype } from './env/utf8-ctype.js';
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
+import { registerFilesIpc } from './files/ipc.js';
+import { registerFilesListIpc } from './files/list-ipc.js';
+import { registerFilesResolveIpc } from './files/resolve-ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
-import { releaseCloseAccelerator } from './menu.js';
+import { registerIssueIpc } from './issue/ipc.js';
+import { registerLinkIpc } from './link/ipc.js';
+import { applyApplicationMenu } from './menu.js';
 import { isSameOrigin } from './origin.js';
+import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
+import { unsavedQuitPrompt } from './quit/unsaved.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
 import { bindFailureEvent, setupFailureEvent } from './remote/failure-messages.js';
 import { readServeAddress } from './remote/hostname.js';
@@ -43,6 +51,7 @@ import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
 import { registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
+import { lockZoom } from './zoom.js';
 
 /**
  * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`
@@ -138,6 +147,11 @@ app.on('web-contents-created', (_event, contents) => {
   // a static presence scan cannot see, so the harness opens a window instead.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
+  // No page zoom, on this contents and on every later one. Bound here rather
+  // than in `createWindow` for the same reason the navigation policy is: a
+  // second `webContents` created after startup must obey the same rule.
+  lockZoom(contents);
+
   // Nothing navigates this window away from its own origin. A renderer that is
   // talked into setting `location.href` must not take the app with it.
   contents.on('will-navigate', (event, url) => {
@@ -159,8 +173,36 @@ app.on('web-contents-created', (_event, contents) => {
 /**
  * Deny by default: with no permission handler registered at all, Electron's
  * own default is to APPROVE every request (microphone, camera,
- * notifications, ...), silently, regardless of `sandbox: true`. Nothing this
- * app renders needs any of these, so nothing is allowlisted back in.
+ * notifications, ...), silently, regardless of `sandbox: true`. Nothing is
+ * allowlisted back in, and nothing ever has been.
+ *
+ * ── WHAT THAT COSTS, NAMED, BECAUSE IT IS NO LONGER NOTHING ───────────────
+ * This comment used to say "nothing this app renders needs any of these". It
+ * was true when it was written and it stopped being true twice, while staying
+ * on screen directly above the policy a later reader would consult before
+ * widening it. Both capabilities are listed here now, and
+ * `test/main/permission-census.test.ts` scans the renderer so a third cannot
+ * arrive in silence.
+ *
+ *  1. THE CLIPBOARD. `navigator.clipboard.writeText` rejects with
+ *     `NotAllowedError` under this policy -- measured, not assumed -- so the
+ *     write goes over the bridge to main's own `clipboard` module instead
+ *     (`src/renderer/panels/clipboard.ts`). Allowlisting
+ *     `clipboard-sanitized-write` was tried and does NOT fix it. A PASTE is a
+ *     different thing and needs no permission: the event carries its own
+ *     `DataTransfer` because the operator pressed the keys.
+ *
+ *  2. DICTATION. Speaking a prompt needs the microphone, and this policy
+ *     refuses it -- before Chromium's own missing speech-service key is ever
+ *     reached, so the refusal is vam's and not the platform's. The answer is
+ *     NOT to widen the policy for it: the control is withheld in this build
+ *     instead, on the rule that a control which cannot act is not drawn
+ *     (`dictationAvailable` in `src/renderer/panels/dictation.ts` answers
+ *     false wherever the preload bridge exists). Dictation stays on the paired
+ *     phone and in a browser tab, which is where it works.
+ *
+ * The rule for the next one is in that census file: route it through main,
+ * withhold the control, or argue the policy -- in that order.
  */
 function registerPermissionPolicy(): void {
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => {
@@ -190,6 +232,59 @@ function registerContentSecurityPolicy(): void {
   });
 }
 
+/**
+ * THE GUARD ON CMD-Q, and the one piece of renderer state main keeps a copy of.
+ *
+ * The Files tab holds unsaved edits in renderer memory and nowhere else, and
+ * guards them with `beforeunload` -- a PAGE hook, which covers the window
+ * closing and does not cover quitting: Cmd-Q reaches `app.on('before-quit')`
+ * here, where a page hook has no standing, and the window is torn down after.
+ * So the renderer pushes what it is holding (`CHANNELS.filesUnsaved`), main
+ * keeps the last report, and the handler below reads a local variable.
+ *
+ * IT NEVER WAITS ON THE RENDERER. That is the whole reason the fact is pushed
+ * rather than asked for: a quit handler that waits is a quit handler a wedged
+ * renderer can hang, and an app that cannot be quit is worse than the bug this
+ * closes -- it has to be force-killed, which loses the same text and every
+ * other session's state with it. `src/main/quit/guard.ts` holds the four ways
+ * that could still have happened and the guard on each.
+ *
+ * `showMessageBoxSync`, NOT the async form: `before-quit` is a veto and the
+ * veto has to be decided before the handler returns. See that same header.
+ */
+const quitGuard = createQuitGuard({
+  ask: (report) => {
+    const prompt = unsavedQuitPrompt(report);
+    // Attached to the window where there is one, so it is a sheet on vam
+    // rather than a free-floating alert; modeless when the window has already
+    // gone, which `dialog` accepts and which must not throw here (a prompt
+    // that cannot be drawn is not a veto -- the guard would let the quit
+    // through anyway, but there is no reason to take that path when electron
+    // offers this overload).
+    const [window] = BrowserWindow.getAllWindows();
+    const chosen =
+      window === undefined
+        ? dialog.showMessageBoxSync(prompt)
+        : dialog.showMessageBoxSync(window, prompt);
+    return chosen === prompt.cancelId ? 'cancel' : 'quit';
+  },
+  // `destroy()`, NOT `close()`. The operator has just been told this text will
+  // be discarded and pressed the button that discards it -- and `close()`
+  // would run the renderer's `beforeunload`, which the Files tab arms whenever
+  // anything is dirty, i.e. exactly now. Electron documents that handler as
+  // able to cancel a quit, and to do so WITHOUT a prompt of its own, so
+  // `close()` here risks an application that silently declines to quit right
+  // after saying it would. `destroy()` skips `beforeunload` and `unload`
+  // entirely, and nothing in this renderer persists anything at unload time
+  // (prefs are written to `localStorage` as they change), so nothing else is
+  // lost by taking that route. See `QuitGuardDeps.release`.
+  release: () => {
+    for (const open of BrowserWindow.getAllWindows()) {
+      open.destroy();
+    }
+  },
+});
+
 function createWindow(): void {
   const window = new BrowserWindow({
     width: 1280,
@@ -209,6 +304,17 @@ function createWindow(): void {
 
   window.once('ready-to-show', () => {
     window.show();
+  });
+
+  // The window is gone, so the unsaved text it was holding is gone with it --
+  // `beforeunload` owns that exit, and by the time this fires it has either
+  // had its say or been bypassed. What must not happen next is main asking
+  // about buffers that no longer exist: `window-all-closed` calls `app.quit()`
+  // below, and a stale report would put a dialog in front of a quit nobody can
+  // answer usefully. A reload needs no equivalent hook -- the fresh renderer
+  // reports on mount, including zero.
+  window.on('closed', () => {
+    quitGuard.clear();
   });
 
   // Registered here, not at `app.whenReady`, because it needs THIS window's
@@ -322,11 +428,23 @@ function startRemoteTransport(): void {
       enableServe: () => enableServe(spawnTailscaleServe, config.port),
       disableServe: () => disableServe(spawnTailscaleServe),
       writesPreference,
+      // The panel's two links. `shell.openExternal` is the operating system's
+      // browser, not this window -- which would refuse the navigation anyway.
+      // The renderer hands over a KEY; `remote/ipc.ts` owns both destinations.
+      openExternal: async (url) => {
+        await shell.openExternal(url);
+      },
     });
     try {
       await startRemoteServer({
         ...config,
         devices,
+        // READ-ONLY, ON PURPOSE. The phone has no `window.api` at all, so
+        // `/api/devices` is its only way to see what is paired -- and it is a
+        // LIST function rather than the registry itself, so nothing on the
+        // other end of that route can grant or revoke anything. See
+        // `RemoteServerOptions.pairedDevices`.
+        pairedDevices: () => devices.list(),
         pairing,
         streams,
         webRoot,
@@ -418,6 +536,26 @@ function spawnTailscaleServe(
   return { exit, kill: () => child.kill() };
 }
 
+/**
+ * A live session's own working directory, off the SAME live agent roster
+ * `registerFilesIpc`'s own root list is built from -- asked fresh per call,
+ * never cached, so a session that closed between two requests stops
+ * authorising anything the moment it drops off the roster. Shared between
+ * `registerAttachImageIpc` and `registerFilesListIpc` so the image picker and
+ * the file-editor tab's listing cannot drift on how a session id becomes a
+ * directory -- they used to be two copies of the same four lines.
+ */
+async function resolveSessionCwd(sessionId: string): Promise<string | null> {
+  const agentsResult = await listLiveAgents();
+  // `unavailable` becomes `null`, same as an unmatched row: vam could not
+  // ask, so it has no cwd to answer with -- never "no sessions are running".
+  if (agentsResult.kind === 'unavailable') return null;
+  const row =
+    agentsResult.agents.find((agent) => agent.key === sessionId) ??
+    agentsResult.agents.find((agent) => agent.sessionId === sessionId);
+  return row?.cwd ?? null;
+}
+
 void app.whenReady().then(async () => {
   // FIRST, BEFORE ANYTHING ELSE SPAWNS A CHILD PROCESS. A GUI launch (Finder,
   // Dock, Spotlight) does not inherit the operator's shell PATH -- only
@@ -430,13 +568,18 @@ void app.whenReady().then(async () => {
     home: homedir(),
     probe: probeLoginShellPath,
   });
+  // AND THE LOCALE, FOR THE SAME REASON AND AT THE SAME MOMENT: a GUI launch
+  // has no LANG or LC_* either, and a tmux client without a UTF-8 LC_CTYPE
+  // rewrites the separators in every listing vam reads -- which made every
+  // session vam started invisible to it. See `./env/utf8-ctype.ts`.
+  applyUtf8Ctype(process.env, process.platform);
   registerPermissionPolicy();
   registerContentSecurityPolicy();
-  // Cmd+W belongs to the canvas here: it closes the focused SESSION, not the
-  // window. Electron's default macOS menu claims that key for `role: 'close'`
-  // and a native menu is matched before the page sees the keydown, so the
-  // renderer's binding is only real once this runs. See `./menu.js`.
-  releaseCloseAccelerator();
+  // vam's own menu, replacing Electron's default one. The default claims
+  // Cmd+0/Cmd+Plus/Cmd+- for page zoom and Cmd+W for Close Window, and a
+  // native menu is matched before the page sees the keydown -- so those keys
+  // are the renderer's only once this runs. See `./menu.js`.
+  applyApplicationMenu();
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
   registerSourceIpc(ipcMain, DESKTOP_SOURCE);
@@ -463,6 +606,25 @@ void app.whenReady().then(async () => {
   // `clipboard-sanitized-write`, so a renderer-side write is refused in the
   // packaged app. See `./clipboard/ipc.ts`.
   registerClipboardIpc(ipcMain, clipboard);
+  // The route to github.com the error log never had. It takes a TITLE and a
+  // BODY and builds the address itself (`src/shared/issue.ts`), so the
+  // renderer names no destination -- the same bargain `remoteOpenLink` makes.
+  // It opens the prefilled form and posts nothing; submitting stays the
+  // operator's own act. See `./issue/ipc.ts`.
+  registerIssueIpc(ipcMain, async (url) => {
+    await shell.openExternal(url);
+  });
+  // THE ONE CHANNEL THAT TAKES A DESTINATION FROM THE RENDERER, and the
+  // allowlist in `./link/ipc.ts` is what pays for it: `http:`/`https:` only,
+  // parsed by `new URL` on THIS side of the boundary, whatever the page
+  // believed. The addresses are an agent's own, written into its answer --
+  // there is no key for main to map onto a constant the way `remoteOpenLink`
+  // and `issueOpen` above both can. The window's deny-by-default navigation
+  // policy (`registerNavigationPolicy`) is untouched: nothing here navigates
+  // this window anywhere, it hands a URL to the operating system's browser.
+  registerLinkIpc(ipcMain, async (url) => {
+    await shell.openExternal(url);
+  });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.
@@ -480,17 +642,7 @@ void app.whenReady().then(async () => {
   registerAttachImageIpc(
     ipcMain,
     { showOpenDialog: (options) => dialog.showOpenDialog(options) },
-    async (sessionId) => {
-      const agentsResult = await listLiveAgents();
-      // `unavailable` becomes `null`, same as an unmatched row: vam could not
-      // ask, so it has no cwd to attach an image relative to -- not "no
-      // sessions are running".
-      if (agentsResult.kind === 'unavailable') return null;
-      const row =
-        agentsResult.agents.find((agent) => agent.key === sessionId) ??
-        agentsResult.agents.find((agent) => agent.sessionId === sessionId);
-      return row?.cwd ?? null;
-    },
+    resolveSessionCwd,
     async (path) => {
       const { open } = await import('node:fs/promises');
       const handle = await open(path, 'r');
@@ -508,8 +660,70 @@ void app.whenReady().then(async () => {
     // for the finding this closes and the TOCTOU window it does not.
     (path) => realpath(path),
   );
+  // The file-editor tab's read and write. The root set is every LIVE
+  // session's own cwd, asked fresh per request -- the same reasoning as
+  // `registerAttachImageIpc`'s own cwd lookup just above, generalised from
+  // one session to all of them because this channel is not asked with a
+  // session id at all: a path is authorised by being inside SOME session's
+  // directory, not one particular caller's. See `./files/authorize.ts`.
+  registerFilesIpc(
+    ipcMain,
+    async () => {
+      const agentsResult = await listLiveAgents();
+      // `unavailable` becomes no roots at all, same reading as the image
+      // picker's own `null`: vam could not ask, so nothing is authorised --
+      // never "every path is", which is the direction a bug here must fail.
+      if (agentsResult.kind === 'unavailable') return [];
+      return [...new Set(agentsResult.agents.map((agent) => agent.cwd))];
+    },
+    // The real `fs.realpath`, the same seam `registerAttachImageIpc` wires
+    // just above and for the same reason: a symlink inside a session's
+    // directory that points outside it must be caught before its content is
+    // ever read or its target ever written to.
+    (path) => realpath(path),
+    { stat, readFile, writeFile, rename },
+  );
+  // The file-editor tab's directory listing -- the piece `filesRead`/
+  // `filesWrite` never carried: a way for the renderer to DISCOVER a path
+  // before it has one to hand either of them. Keyed by session id and
+  // resolved through `resolveSessionCwd` exactly as the image picker is
+  // above; see `./files/list-ipc.ts` and `CHANNELS.filesList`'s own header.
+  registerFilesListIpc(
+    ipcMain,
+    resolveSessionCwd,
+    (path) => realpath(path),
+    (dir) => readdir(dir, { withFileTypes: true }),
+  );
+  // `src/foo/bar.ts:42`, as an AGENT wrote it, turned into an absolute path --
+  // authorised against THAT session's own directory alone rather than against
+  // every live root the way `registerFilesIpc` is, because nobody typed this
+  // path. Same `resolveSessionCwd` and the same real `realpath` as the listing
+  // above, so a `..`, a look-alike sibling directory and a symlink out of the
+  // project are all caught against the real disk. See `./files/resolve-ipc.ts`.
+  registerFilesResolveIpc(ipcMain, resolveSessionCwd, (path) => realpath(path));
+  // The file-editor tab's LAST channel, and the only one that carries no path
+  // at all: how many of its buffers are unsaved, and what they are called.
+  // Registered here rather than in `createWindow` because the guard it feeds
+  // is bound to `app`, not to a window -- and registered BEFORE the window
+  // exists, like every channel above, so the renderer's first report cannot
+  // race an unregistered channel. See `quitGuard` above.
+  registerUnsavedIpc(ipcMain, quitGuard);
   startRemoteTransport();
   createWindow();
+});
+
+/**
+ * THE VETO. Emitted before the application starts closing its windows, which
+ * is the one moment a renderer's `beforeunload` cannot speak for itself --
+ * see `quitGuard` above for the whole argument and `src/main/quit/guard.ts`
+ * for why this can never leave the app unquittable.
+ *
+ * Registered beside `window-all-closed` below because they are the two halves
+ * of one lifecycle: that one turns the last window closing into a quit, and
+ * this one is what that quit then has to get past.
+ */
+app.on('before-quit', (event) => {
+  quitGuard.beforeQuit(event);
 });
 
 app.on('window-all-closed', () => {

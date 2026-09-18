@@ -18,30 +18,53 @@
  * it is only walked, to find which file a session id lives in. `cwd` comes
  * from the CLI, which reports the real path.
  *
- * SUBAGENTS ARE NOT SESSIONS. `<sessionId>/subagents/agent-*.jsonl` (486 files
- * here, against 54 transcripts) is work happening *under* a session, and the
+ * SUBAGENTS ARE NOT SESSIONS. `<sessionId>/subagents/agent-*.jsonl` (869 files
+ * here, against 80 transcripts) is work happening *under* a session, and the
  * model is explicit that it surfaces as `runningAgents` and never as a row --
  * rows are things the operator owns. The other half of that decision: inline
  * `isSidechain: true` lines, which older transcripts used for the same
  * purpose, measure zero in every current session file.
+ *
+ * ── WHAT CHANGED UNDERNEATH THAT, AND WHY IT STILL STANDS ────────────────
+ * The paragraph above is kept because its conclusion is still the rule: a
+ * subagent is not a row, and nothing below adds one. What it got wrong was a
+ * premise it never stated -- that a subagent is work nobody TALKS to. An
+ * operator can send a message mid-turn while a subagent is running, and
+ * Claude Code delivers it into the agent's transcript and not into the
+ * session's. Reported from use, then measured on the real file: the session's
+ * own transcript had gone quiet nine minutes earlier, ZERO of the 43
+ * text-bearing `user` lines in its last 4 MB were operator prompts, and all
+ * four of the operator's most recent messages were in the agent's file. vam
+ * was faithful to a file that had stopped being where the conversation was.
+ *
+ * So the row stays a session and its turns stay the session's -- but its
+ * NEWEST turn is the newest of the session transcript and the session's LIVE
+ * subagents, chosen by when the OPERATOR spoke and never by which file was
+ * written last. `subagent.ts` holds that rule, what it costs, and why an
+ * agent's own words can never take the row.
  *
  * THIS MODULE IS MAIN-PROCESS ONLY. It reads the filesystem and spawns a
  * subprocess, so the browser build cannot use it and does not import it; the
  * web target is unaffected.
  */
 
-import { open, readdir, stat } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { Project, Session, SlashCommand } from '../../../renderer/domain/model.js';
+import type { AgentWork } from '../../../shared/agent-work.js';
+import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
 import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
-import { type AgentRoster, readAgentRoster } from './agent-roster.js';
+import { type AgentRoster, readAgentRoster, subagentsDirOf } from './agent-roster.js';
+import { readAgentWork } from './agent-work.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
+import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
-import { deliverPromptViaCli } from './deliver.js';
+import { readTranscriptHistory } from './history.js';
+import { prRepoOverride } from './pr-repos.js';
 import { projectIdOf } from './project-id.js';
 import {
   createPullRequestReader,
@@ -52,26 +75,55 @@ import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
-import { readUserSlashCommands } from './slash-commands.js';
+import {
+  createProjectCommandLookup,
+  mergeSlashCommands,
+  readUserSlashCommands,
+} from './slash-commands.js';
 import {
   killPidViaSignal,
   pidHasClaudeSessionFile,
   stopSession,
   stopSessionViaCli,
 } from './stop.js';
-import {
-  compactAge,
-  EMPTY_FACTS,
-  summarizeTranscript,
-  type TranscriptFacts,
-} from './transcript.js';
+import { withLiveAgentTurn } from './subagent.js';
+import { MAX_TAIL_READ_BYTES, readLiveTail, TAIL_WINDOW_BYTES } from './tail.js';
+import { compactAge, EMPTY_FACTS, type TranscriptFacts } from './transcript.js';
+import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
 /**
  * The read budget. Only sessions the CLI reported are opened -- single digits
- * in practice -- and each is read for its last `TAIL_BYTES` and no more, so
- * `load()` costs kilobytes against the 814 MB of transcripts on this disk,
- * independent of how large any one of them is. A transcript shared by two
- * resumed processes is read once.
+ * in practice -- and each is read backwards from the end until the window holds
+ * the raw material of a turn, a step of `TAIL_WINDOW_BYTES` at a time and never
+ * past `MAX_TAIL_READ_BYTES` in total (`tail.ts`, which states the whole rule
+ * and what it costs). So `load()` costs kilobytes against the 0.94 GB of
+ * session transcripts on this disk, independent of how large any one of them
+ * is. A transcript shared by two resumed processes is read once.
+ *
+ * ONE STEP IS THE COMMON CASE, and that is the point of stating the budget as a
+ * rule rather than as a constant: measured over the 85 session transcripts
+ * here, 83 satisfy the stop rule on the first step and pay exactly what the old
+ * single fixed read paid. The other two exist because a single LINE can be
+ * larger than the whole window -- 670 of them here -- and a window holding one
+ * of those holds no conversation at all.
+ *
+ * THIS IS THE LIVE VIEW'S BUDGET AND NOTHING ELSE'S. Scrolling back through a
+ * session is a separate, on-demand read (`history.ts`), asked for by a person
+ * and never by the poll; it does not widen this and this does not bound it.
+ *
+ * WHAT THE OPERATOR SEES FOR IT, said here because it is this budget that
+ * decides it: 34 of the 77 sessions measured for the original window fit inside
+ * one step entirely and show every turn they have. The rest open MID-TURN, and
+ * the oldest turn on the canvas is then one whose beginning vam never read --
+ * its prompt is whole (`last-prompt` re-emits the text in full) and its answer
+ * is the real one, but the tool failures counted against it are only those
+ * inside the window. That turn is not dropped: on five of the six largest
+ * transcripts here the tail holds exactly one turn, so dropping it would leave
+ * the canvas empty. `history.ts` is what reaches everything before it, and its
+ * cursor rules are written so that turn is never handed over a second time.
+ *
+ * AND WHEN EVEN THE WIDENED READ FINDS NO CONVERSATION, the turns it minted say
+ * so rather than claiming the session answered nothing (`Decision.unread`).
  *
  * The per-process status files are the one read that is per ROW rather than
  * per session -- there is no sharing them, since telling two rows apart is
@@ -79,23 +131,9 @@ import {
  * hundred bytes, read whole), so a canvas of single-digit rows costs
  * single-digit kilobytes on top of the tails.
  */
-const TAIL_BYTES = 128 * 1024;
 
 /** Where Claude Code keeps transcripts. Derived, never a literal home path. */
 export const defaultTranscriptRoot = (): string => join(homedir(), '.claude', 'projects');
-
-/** The last `bytes` of a file, decoded loosely -- a cut token is the parser's problem. */
-async function readTail(path: string, size: number, bytes: number): Promise<string> {
-  const length = Math.min(size, bytes);
-  const handle = await open(path, 'r');
-  try {
-    const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, Math.max(0, size - length));
-    return buffer.toString('utf8');
-  } finally {
-    await handle.close();
-  }
-}
 
 /**
  * Where each session id's transcript lives, by walking the slug directories
@@ -155,10 +193,29 @@ async function readTranscript(
 ): Promise<TranscriptRead> {
   try {
     const info = await stat(path);
-    const tail = await readTail(path, info.size, TAIL_BYTES);
+    // The SAME window primitive `history.ts` pages with, so the ids the canvas
+    // holds and the ids a page hands back are minted from the same offsets --
+    // which is the whole reason a page can be merged into the tail at all.
+    //
+    // The size is the one this `stat` already answered rather than a second
+    // one of its own: the file cannot be stat'd twice per poll just to learn a
+    // number that is sitting here.
+    const { facts } = await readLiveTail(
+      {
+        size: async () => info.size,
+        read: (from, to) => readTranscriptWindow(path, from, to),
+      },
+      sessionId,
+      TAIL_WINDOW_BYTES,
+      MAX_TAIL_READ_BYTES,
+    );
+    // The roster's walk is what names the live agents, and it has already been
+    // paid for the `●N` badge -- so a session with none costs nothing new here
+    // and reads no file it did not read before (`subagent.ts`).
+    const roster = await readAgentRoster(path, nowMs);
     return {
-      facts: summarizeTranscript(tail, sessionId),
-      roster: await readAgentRoster(path, nowMs),
+      facts: await withLiveAgentTurn(facts, roster, subagentsDirOf(path), sessionId),
+      roster,
       mtimeMs: info.mtimeMs,
     };
   } catch {
@@ -166,6 +223,91 @@ async function readTranscript(
     // session is live and the operator should still see it.
     return NO_TRANSCRIPT;
   }
+}
+
+/**
+ * The turns BEFORE a cursor, for one session -- the on-demand read `load()`
+ * deliberately is not (`history.ts` says why, and what it costs).
+ *
+ * `rowId` is what the renderer holds: `<sessionId>#<pid>`, one per PROCESS,
+ * because two processes can resume the same session (`agents.ts`'s `key`). A
+ * transcript is per SESSION, so the id is tried whole first and then at its
+ * last `#`. That is the one place this string is re-split, and it is defensible
+ * here for the reason `LiveAgent.pid` says it is not elsewhere: nothing is
+ * being addressed -- no process, no pane, no signal -- only a file is being
+ * named, and the session id is what names it. Asking the CLI instead would
+ * spawn a subprocess per scroll step.
+ */
+/**
+ * Which FILE a row's turns live in, and which session that row is.
+ *
+ * Extracted because two on-demand reads need the same answer -- scrolling back
+ * (`readClaudeCodeHistory`) and opening one of a session's agents
+ * (`readClaudeCodeAgentWork`) -- and the `#` rule above is subtle enough that
+ * a second copy of it would be a second thing to get wrong.
+ */
+async function locateTranscript(
+  root: string,
+  rowId: string,
+): Promise<{ readonly sessionId: string; readonly path: string | undefined }> {
+  const index = await indexTranscripts(root);
+  const hash = rowId.lastIndexOf('#');
+  const sessionId = index.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
+  return { sessionId, path: index.get(sessionId) };
+}
+
+export async function readClaudeCodeHistory(
+  root: string,
+  rowId: string,
+  cursor: HistoryCursor | null,
+  // Injectable for the reason every read here is: a test names an invented
+  // transcript under a temp directory, never the operator's own.
+  sourceOf: (path: string) => TranscriptSource = fileTranscriptSource,
+): Promise<TranscriptPage> {
+  const { sessionId, path } = await locateTranscript(root, rowId);
+  if (path === undefined) {
+    // vam looked and this session has no transcript -- a refusal naming what
+    // it could not find, never an empty page claiming the session is empty.
+    return {
+      kind: 'unavailable',
+      error: {
+        kind: 'refused',
+        code: 'unknown-session',
+        message: `vam found no transcript for ${sessionId}; it may have been removed`,
+      },
+    };
+  }
+  return await readTranscriptHistory(sourceOf(path), sessionId, cursor);
+}
+
+/**
+ * What ONE of a session's subagents was asked and what it has done.
+ *
+ * ON DEMAND, like the history above and for the same reason said differently:
+ * a session here has up to 460 agent transcripts beside it, and the poll's
+ * 128 KiB-per-session budget exists to refuse exactly that. Nobody pays this
+ * until a person opens the Agents tab and picks a row.
+ *
+ * The agent id is NOT trusted to be a file name -- `agent-work.ts` checks it
+ * before it becomes a path, because it arrives over IPC from a renderer.
+ */
+export async function readClaudeCodeAgentWork(
+  root: string,
+  rowId: string,
+  agentId: string,
+): Promise<AgentWork> {
+  const { sessionId, path } = await locateTranscript(root, rowId);
+  if (path === undefined) {
+    return {
+      kind: 'unavailable',
+      error: {
+        kind: 'refused',
+        code: 'unknown-session',
+        message: `vam found no transcript for ${sessionId}; it may have been removed`,
+      },
+    };
+  }
+  return await readAgentWork(path, agentId);
 }
 
 export async function loadClaudeCodeProjects(
@@ -191,11 +333,23 @@ export async function loadClaudeCodeProjects(
   // vam checked. `CLAUDE_CODE_SOURCE` passes the real listing; a listing vam
   // failed to obtain arrives here as null too, not as an empty array.
   tmuxSessions: readonly TmuxSession[] | null = null,
-  // The `/` typeahead's list, read once per `load()` and stamped onto every
-  // session -- USER-level configuration (`slash-commands.ts`), the same
-  // regardless of the row. Injectable like `branchOf`: tests read invented
-  // commands, never the operator's real `~/.claude/commands`.
+  // The `/` typeahead's USER tier, read once per `load()` and stamped onto
+  // every session -- `~/.claude/commands`, the same regardless of the row.
+  // Injectable like `branchOf`: tests read invented commands, never the
+  // operator's real directory.
   slashCommands: readonly SlashCommand[] = [],
+  // The `/` typeahead's PROJECT tier, per session's own `cwd`. A LOOKUP rather
+  // than a list, because this one is NOT the same regardless of the row --
+  // and cached inside itself, so the sessions of one project cost one read
+  // between them (`createProjectCommandLookup`). The default reads nothing:
+  // like `readPrs` and `tmuxSessions`, a caller that has not asked for a
+  // filesystem read does not get a surprise one.
+  projectCommandsFor: (cwd: string) => Promise<readonly SlashCommand[]> = async () => [],
+  // The `/` typeahead's BUILT-IN tier, or the reason there is none. NULL means
+  // nobody asked -- which is not a failure and draws nothing; an `unavailable`
+  // means vam asked the CLI and could not be told, which the session carries
+  // as `slashCommandGap` so the short list says why it is short.
+  builtinCommands: BuiltinCommandList | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -236,9 +390,35 @@ export async function loadClaudeCodeProjects(
     // is already read. `.git/HEAD` only stands in when there is no transcript
     // yet, or an older one that never wrote `gitBranch`.
     const branch = read.facts.branch ?? (await branchOf(agent.cwd));
-    // One question per session, asked in the session's own directory, and
-    // throttled by the reader rather than by this loop.
-    const prs = readPrs === null ? null : await readPrs({ cwd: agent.cwd, branch });
+    /**
+     * One question per session, and the directory it is asked in is the
+     * session's own UNLESS the operator pointed this project somewhere else.
+     *
+     * WHY THE OVERRIDE EXISTS: a session started from an orchestrator or a
+     * factory runs in that factory's directory, so asking there reports the
+     * factory's pull requests while the work is in another repository. Keyed
+     * by PROJECT because a project already is a cwd grouping -- see
+     * `Prefs.prRepos`.
+     *
+     * STILL NO `--repo`. The override moves where vam STANDS; `gh` resolves
+     * the remote itself from there, so this file's own invariant holds: the
+     * pane describes the repository vam is actually in, never one it was told
+     * to claim. `overridden` travels with it so a failure can name the
+     * directory rather than saying "this session's", which would be false.
+     *
+     * Throttled by the reader rather than by this loop, and the reader keys
+     * its cache on the cwd -- so pointing a project elsewhere invalidates
+     * nothing and re-asks once, in the new place.
+     */
+    const override = prRepoOverride('claude-code', projectIdOf(agent.cwd));
+    const prs =
+      readPrs === null
+        ? null
+        : await readPrs({
+            cwd: override ?? agent.cwd,
+            branch,
+            overridden: override !== null,
+          });
     const session: Session = {
       id: agent.key,
       // The CLI's name is the operator's own; the generated title is only a
@@ -273,7 +453,7 @@ export async function loadClaudeCodeProjects(
       // same tail. Always present for this source -- empty means vam READ the
       // window and found none, which is the common case (model.ts).
       //
-      // WHAT THE WINDOW COSTS. Only the last `TAIL_BYTES` are read, so a
+      // WHAT THE WINDOW COSTS. Only the end of the transcript is read, so a
       // question asked far enough back has scrolled out and is simply not
       // here. That is the correct behaviour -- vam reports what it read, not
       // what it supposes -- but it means an empty list is never evidence that
@@ -283,7 +463,24 @@ export async function loadClaudeCodeProjects(
       // asked and then produced 128 KB of output while still waiting) is the
       // one where the question is stale anyway.
       questions: read.facts.questions,
-      slashCommands,
+      // THREE TIERS, MOST SPECIFIC FIRST, as one list (`mergeSlashCommands`).
+      // The project tier is the only per-row read, and it is shared across the
+      // rows of a project by the lookup's own cache.
+      slashCommands: mergeSlashCommands(
+        await projectCommandsFor(agent.cwd),
+        slashCommands,
+        builtinCommands?.kind === 'ok' ? builtinCommands.commands : [],
+      ),
+      // Spread, so a load with nothing missing carries no key at all -- see
+      // `slashCommandGap` in `model.ts`.
+      ...(builtinCommands !== null && builtinCommands.kind === 'unavailable'
+        ? {
+            slashCommandGap: {
+              code: builtinCommands.code,
+              message: builtinCommands.message,
+            },
+          }
+        : {}),
       // WHAT THE SESSION SAYS IT IS BLOCKED ON, out of the same per-process
       // file the age came from. A tool-approval prompt is a TUI state and
       // writes no transcript record, so `questions` above is empty for it and
@@ -343,25 +540,32 @@ const DESCRIPTOR: SourceDescriptor = {
   capabilities: {
     liveUpdates: false,
     // Both true, and they mean different things. `deliverPrompt` is the real
-    // claim: `claude --resume <id> -p` appends the turn to the running
-    // session's own history, so what vam sends is ANSWERED, not filed. The
-    // port makes `recordPrompt` the only required member of a write surface,
-    // so delivering is only reachable through it -- which is why it is true
-    // as well. See the note on `recordPrompt` below: for this source the two
-    // are one operation, and the weaker word is the one that is misleading.
+    // claim: vam TYPES the prompt into the tmux pane of a session it started
+    // (`reply.ts`), so what vam sends reaches a running agent rather than being
+    // filed in a log -- but only for a session vam owns a pane for, and a row
+    // with no such pane is refused, not recorded (there is no log to fall back
+    // to on this source). The port makes `recordPrompt` the only required
+    // member of a write surface, so the pane channel is only reachable through
+    // it -- which is why it is true as well. What vam can honestly claim after
+    // a send is that the text was typed into the pane; the turn shows in the
+    // Response view when the transcript does. See `recordPrompt` below.
     recordPrompt: true,
     deliverPrompt: true,
-    // `deliverPromptViaCli` already carries the arbitrary text of a prompt
-    // (`deliver.ts`); a path reference is just another line of that same
-    // string, and Claude Code reads the bytes itself on the other end
+    // A pasted image is a path in the typed prompt, which `reply.ts` types into
+    // the pane like any other text, and Claude Code reads the bytes itself on
+    // the other end
     // (`state/artifacts/vam-image-attach/findings.md`). The picking and the
     // two checks that matter -- inside the session's own directory, really an
     // image by content -- happen in main before the draft ever changes
     // (`main/dialog/attach-image.ts`).
     promptAttachments: true,
-    // `readUserSlashCommands` reads `~/.claude/commands/*.md` -- see
-    // `slash-commands.ts` for why that is user-level only, and for why no
-    // built-in is ever listed alongside them.
+    // THREE TIERS, and each is really read. `slash-commands.ts` reads the two
+    // made of files -- `~/.claude/commands/*.md` and the session's own
+    // `<cwd>/.claude/commands/*.md` -- and `builtin-commands.ts` asks the
+    // installed CLI to name its BUILT-INS, which are not files and used to be
+    // left out for a reason that turned out to be a stopping point rather
+    // than a fact. A built-in list vam could not obtain travels as
+    // `Session.slashCommandGap`, never as a shorter list.
     slashCommands: true,
     renameSession: false,
     // `claude stop <id>` is real. It stops BACKGROUND sessions only, and an
@@ -429,6 +633,13 @@ const DESCRIPTOR: SourceDescriptor = {
 const PR_READER = createPullRequestReader(readPullRequestsViaCli());
 
 /**
+ * The process-wide built-in command reader, for the same reason as
+ * `PR_READER`: one spawn for the life of the app, not one per poll. See
+ * `builtin-commands.ts` for what that spawn is and what it costs.
+ */
+const BUILTIN_COMMANDS = createBuiltinCommandReader();
+
+/**
  * `AgentsResult`'s `unavailable` arm, turned into the same `SourceError`
  * shape `recordPrompt`, `closeSession` and `createSession` already resolve
  * to. `kind: 'unreachable'` because this is never a refusal of a request vam
@@ -473,14 +684,21 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
         return listed.kind === 'ok' ? listed.sessions : null;
       })(),
       await readUserSlashCommands(),
+      // One lookup per `load()`, so the sessions of one project read their
+      // `.claude/commands` once between them.
+      createProjectCommandLookup(),
+      // ONE READER FOR THE LIFE OF THE PROCESS, for `PR_READER`'s reason: the
+      // installed CLI does not change under a running app, so this spawn
+      // happens once rather than on every ten-second poll.
+      await BUILTIN_COMMANDS(),
     );
   },
   /**
    * The live list is re-asked here rather than cached from `load()`: it is
-   * where the session's working directory comes from, and a canvas drawn
-   * minutes ago may name a session that has since exited. Asking again costs
-   * one subprocess and is the difference between refusing a dead session and
-   * delivering into the wrong directory.
+   * where the pane pairing is resolved from, and a canvas drawn minutes ago may
+   * name a session that has since exited. Asking again costs one subprocess and
+   * is the difference between typing into the pane that exists now and refusing
+   * a session that is already gone.
    */
   recordPrompt: async (sessionId, prompt) => {
     const agentsResult = await listLiveAgents();
@@ -490,7 +708,6 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       rowId: sessionId,
       prompt,
       run: createTmuxRunner(),
-      deliver: deliverPromptViaCli,
       // Read fresh, for the same reason the agent list is: a canvas drawn
       // minutes ago is not evidence about which pane a session is in now.
       panes: await readPublishedPanes(defaultSessionsRoot()),
@@ -547,4 +764,15 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
   /** No agent list to consult: the operator named the directory themselves. */
   createSessionInDirectory: async (cwd, title, provider) =>
     createSessionInDirectory({ cwd, title, provider, run: createTmuxRunner() }),
+  /**
+   * NO agent list is asked for here, unlike every write above, and that is the
+   * point of the difference: this reads a FILE, and a transcript outlives the
+   * process that wrote it. Re-asking the CLI would spawn a subprocess on every
+   * scroll step and would refuse to show the history of a session that has
+   * since exited -- which is exactly a session worth scrolling back through.
+   */
+  readHistory: async (sessionId, cursor) =>
+    readClaudeCodeHistory(defaultTranscriptRoot(), sessionId, cursor),
+  readAgentWork: async (sessionId, agentId) =>
+    readClaudeCodeAgentWork(defaultTranscriptRoot(), sessionId, agentId),
 };

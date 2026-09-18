@@ -12,13 +12,21 @@
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import { installPhoneGlobals, MODEL, phoneSource, rows } from './harness.js';
 
 beforeAll(installPhoneGlobals);
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  // Remote is the phone's one settings section and it reads the paired
+  // devices over HTTP. Un-stubbed, this environment resolves `/api/devices`
+  // against a default origin and really opens a socket -- an `ECONNREFUSED`
+  // printed beside a green run, which is the shape nobody reads.
+  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+});
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   localStorage.clear();
 });
@@ -35,10 +43,20 @@ describe('the overlays at phone width', () => {
     expect(document.querySelector('[data-phone-shell] [data-settings-overlay]')).toBeNull();
   });
 
+  /**
+   * THROUGH `remote access`, WHICH IS THE PHONE'S DOOR. It used to press
+   * `settings`, and that gear is gone from the phone at the operator's request
+   * -- four of the five sections behind it configure `localStorage` on the
+   * device holding it rather than the machine the sessions run on
+   * (`settings/sections.ts`, `PHONE_SECTIONS`). The subject here is unchanged:
+   * that the overlay this opens is a marked SHEET HOST, not which control
+   * opens it.
+   */
   it('opens settings as a marked host, reachable from the list', () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
+    expect(document.querySelector('button[aria-label="settings"]')).toBeNull();
     act(() => {
-      fireEvent.click(document.querySelector('button[aria-label="settings"]') as Element);
+      fireEvent.click(document.querySelector('button[aria-label="remote access"]') as Element);
     });
     const host = document.querySelector('[data-settings-overlay]');
     expect(host).not.toBeNull();

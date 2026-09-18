@@ -14,6 +14,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../../src/renderer/prefs/editor.js';
 import {
   type EffectiveTheme,
   EMPTY_PREFS,
@@ -22,6 +23,10 @@ import {
   PALETTE_TOKENS,
   type Prefs,
 } from '../../src/renderer/prefs/prefs.js';
+import {
+  DEFAULT_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_SIZES,
+} from '../../src/renderer/prefs/terminal-font.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 
 function session(id: string): Session {
@@ -111,8 +116,16 @@ const message = () => document.querySelector('[data-binding-message]')?.textCont
 describe('the appearance section adjusts colours', () => {
   it('groups the visual settings under one heading', () => {
     open();
-    const heading = screen.getByText('appearance');
-    const section = heading.closest('section');
+    // "Appearance", not "appearance": the panel heading draws the SECTION'S
+    // LABEL now -- the same string the nav tab beside it draws -- where it
+    // used to draw the raw `id`. One destination, one spelling, which is why
+    // this can no longer be `getByText`: the tab and the heading say the same
+    // thing, and that agreement is the point. The capitals on screen are a CSS
+    // transform and do not reach `textContent`.
+    const heading = document.querySelector('[data-settings-panel="appearance"] h3');
+    expect(heading, 'the appearance panel drew no heading at all').not.toBeNull();
+    expect(heading?.textContent).toBe('Appearance');
+    const section = heading?.closest('section');
     expect(section?.textContent).toContain('dark');
     expect(section?.querySelectorAll('input[type="color"]').length).toBeGreaterThan(3);
   });
@@ -373,8 +386,8 @@ describe('the captured key is really in force', () => {
 
 /**
  * Where an `out` text size belongs: with the paint, alongside the theme and the
- * palette. It is not a canvas setting — `out` is the right pane, and layouts
- * that hide the canvas still draw it.
+ * palette. It is not a canvas setting — `out` is the answer block, and layouts
+ * that hid the canvas still drew it.
  *
  * This used to be asserted twice, the second time as "not in the same section
  * as focus zoom". Both that control and the Canvas section it lived in are
@@ -386,7 +399,7 @@ describe('the out text size is an appearance setting', () => {
 
   it('lives in Appearance, beside the theme and the colours', () => {
     open();
-    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('appearance');
+    expect(control().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
   });
 
   it('shows the size in force and writes the one you pick', () => {
@@ -397,5 +410,154 @@ describe('the out text size is an appearance setting', () => {
     // And offers only sizes inside the readable bounds.
     expect(Number((control() as HTMLInputElement).min)).toBe(OUT_FONT_SIZE_MIN);
     expect(Number((control() as HTMLInputElement).max)).toBe(OUT_FONT_SIZE_MAX);
+  });
+
+  /**
+   * THE HINT MAY NOT NAME A PANE, because the setting does not belong to one.
+   *
+   * It read "how large the agent's answer is drawn in the right pane", which
+   * was true of the two-column shell it was written for. Since the split work
+   * (`leaves(panes)` in `Canvas.tsx`, PRs 289 and 294) the shell can hold
+   * several response panes side by side or stacked, and the pref is applied as
+   * `--vam-out-font-size` on `document.documentElement` -- so it reaches every
+   * one of them, and there is no "the right pane" left to point at.
+   *
+   * The assertion is the PROPERTY rather than the sentence: an exact-string
+   * check would pass for whatever prose happened to be there, which is the one
+   * thing a guard over copy must not do. Reverting the wording reddens this;
+   * rewriting the wording some other honest way does not.
+   */
+  it('promises no particular pane, because the size reaches all of them', () => {
+    open();
+    const NAMES_A_PANE = /\b(right|left|first|second|other)\s+pane\b/i;
+    const row = control().closest('[data-settings-rows] > div');
+    const hint = row?.querySelector('p')?.textContent ?? '';
+    // The row was found and it really does carry a sentence, or the two
+    // negative assertions below are being made about an empty string.
+    expect(hint.length).toBeGreaterThan(20);
+    expect(hint).not.toMatch(NAMES_A_PANE);
+    // And the section's own caption, one level up, must not either.
+    const caption =
+      document.querySelector('[data-settings-panel="appearance"] [data-settings-panel-hint]')
+        ?.textContent ?? '';
+    expect(caption.length).toBeGreaterThan(20);
+    expect(caption).not.toMatch(NAMES_A_PANE);
+  });
+});
+
+/**
+ * THE TERMINAL SCREEN'S SIZE, and why it is a row of choices where `out text`
+ * is a stepper.
+ *
+ * `out` is prose, and every integer between 10 and 20 is a legible paragraph.
+ * The terminal is a monospace GRID whose width is quantised into columns, so
+ * most single-pixel steps change nothing anyone can see and the useful range
+ * is a handful of sizes. The list lives in `prefs/terminal-font.ts` and this
+ * block derives from it rather than spelling it again: a second list of sizes
+ * is how a fifth size comes to exist in one of them.
+ */
+describe('the terminal text size is an appearance setting', () => {
+  const option = (size: number) => screen.getByLabelText(`terminal text ${size}px`);
+
+  it('lives in Appearance, beside the theme and the colours', () => {
+    open();
+    expect(
+      option(DEFAULT_TERMINAL_FONT_SIZE).closest('section')?.querySelector('h2, h3')?.textContent,
+    ).toBe('Appearance');
+  });
+
+  it('offers every size the pane can be drawn at, and no other', () => {
+    open();
+    for (const size of TERMINAL_FONT_SIZES) {
+      expect(option(size), `${size}`).not.toBeNull();
+    }
+    const offered = [...document.querySelectorAll('[data-terminal-size-option]')].map((el) =>
+      Number(el.getAttribute('data-terminal-size-option')),
+    );
+    expect(offered).toEqual([...TERMINAL_FONT_SIZES]);
+  });
+
+  it('shows the size in force and writes the one you press', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, terminalFontSize: 10.5 });
+    expect(option(10.5).getAttribute('aria-pressed')).toBe('true');
+    expect(option(14).getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(option(14));
+    expect(changed(onChange, 0).terminalFontSize).toBe(14);
+  });
+
+  it('disturbs no neighbouring preference', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, outFontSize: 15, theme: 'light' });
+    fireEvent.click(option(14));
+    const next = changed(onChange, 0);
+    expect(next.outFontSize).toBe(15);
+    expect(next.theme).toBe('light');
+  });
+});
+
+/**
+ * THE FILE EDITOR'S OWN TWO SETTINGS, in the section the operator asked for
+ * them in ("thêm setting riêng cho tab đó trong phần appearance").
+ *
+ * The pair is proven three ways across this repo and each way is needed: the
+ * STORE round-trips them (`test/prefs/prefs.editor.test.ts`), the EDITOR
+ * honours them without a remount (`test/panels/DetailPanel.files-tab.test.tsx`),
+ * and this file proves the two controls exist, sit in Appearance, and write
+ * the pref the other two read. A setting nobody can reach is the storage-shaped
+ * version of a control that changes nothing.
+ */
+describe('the file editor has its own settings in Appearance', () => {
+  const highlight = () => document.querySelector<HTMLElement>('[data-switch="editor-highlight"]');
+  const indent = () => screen.getByLabelText('editor indent') as HTMLInputElement;
+
+  it('puts both of them under Appearance, beside the theme and the colours', () => {
+    open();
+    expect(highlight()).not.toBeNull();
+    expect(highlight()?.closest('section')?.querySelector('h2, h3')?.textContent).toBe(
+      'Appearance',
+    );
+    expect(indent().closest('section')?.querySelector('h2, h3')?.textContent).toBe('Appearance');
+  });
+
+  it('shows the colour setting in force and writes the one you pick', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, editorHighlight: true });
+    expect(highlight()?.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(highlight() as HTMLElement);
+    expect(changed(onChange, 0).editorHighlight).toBe(false);
+  });
+
+  it('shows the indent in force, writes the one you pick, and offers no illegal width', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, editorIndent: 2 });
+    expect(indent().value).toBe('2');
+    fireEvent.change(indent(), { target: { value: '4' } });
+    expect(changed(onChange, 0).editorIndent).toBe(4);
+    expect(Number(indent().min)).toBe(EDITOR_INDENT_MIN);
+    expect(Number(indent().max)).toBe(EDITOR_INDENT_MAX);
+  });
+
+  /**
+   * THE CAPTION IS THE WHOLE DOCUMENTATION for a setting whose "off" position
+   * is the one an operator reaches for when a file looks wrong. Two facts have
+   * to be in it: that the colours are only drawn for formats vam can read, and
+   * WHICH those are — otherwise "no colours in my .ts file" reads as a broken
+   * setting rather than as the deliberate refusal it is.
+   *
+   * Asserted as the PROPERTY, never as the sentence: an exact-string check
+   * would fail on a typo fix and would still pass if the note stopped naming
+   * anything.
+   */
+  it('says which formats are coloured, so an uncoloured file is not read as a fault', () => {
+    open();
+    const note = document.querySelector('[data-editor-highlight-note]')?.textContent ?? '';
+    expect(note).toMatch(/json/i);
+    expect(note).toContain('.env');
+    expect(note).toMatch(/plain text/i);
+  });
+
+  /** And the indent's own caption has to say SPACES — "indent: 4" reads as a
+   *  tab width, and a tab byte is the one thing that breaks the gutter. */
+  it('says the indent is spaces', () => {
+    open();
+    const hint = indent().closest('div')?.parentElement?.textContent ?? '';
+    expect(hint).toMatch(/space/i);
   });
 });

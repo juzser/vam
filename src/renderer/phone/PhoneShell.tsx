@@ -8,8 +8,8 @@
  * the screen. Every `data-` hook they carry is therefore still where the
  * desktop's tests expect it.
  *
- * One cell of one 580x290 canvas card does not fit in 390px, so the graph is
- * not drawn at all.
+ * One cell of one 580x290 canvas card does not fit in 390px, so the canvas is
+ * not drawn on this screen at all.
  *
  * WHAT SCREEN TWO IS FOR, AND WHAT THAT COST. It is the prompt screen: read
  * the newest output, reply. It is NOT for browsing a session. Two strips of
@@ -48,10 +48,17 @@
  * `ShortcutTip.tsx` — a subscription — not in a note here.
  */
 
-import { Bot, GitPullRequest, type LucideIcon, MessageSquare, SquareTerminal } from 'lucide-react';
+import {
+  Bot,
+  FileText,
+  GitPullRequest,
+  type LucideIcon,
+  MessageSquare,
+  SquareTerminal,
+} from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
-import { orderedInProject } from '../canvas/layout.js';
 import type { Project, Session } from '../domain/model.js';
+import { orderedInProject } from '../domain/selectors.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
@@ -112,6 +119,12 @@ const VIEW_ICON: Record<Tab, LucideIcon> = {
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
   Agents: Bot,
+  // Never actually drawn on a phone -- `detail.files` is only ever true
+  // behind a desktop bridge no browser build has, so `visibleTabs` withdraws
+  // it here the same way it would withdraw Terminal for a source with none.
+  // Present anyway because `VIEW_ICON` is a `Record<Tab, _>`, and `Tab` now
+  // includes `Files` everywhere -- see `tabs.ts`.
+  Files: FileText,
 };
 
 /**
@@ -188,7 +201,7 @@ function ViewIcons({
               <Icon size={16} aria-hidden="true" />
             </span>
             {count !== null && (
-              <span className="absolute top-[7px] right-[4px] font-mono text-[9.5px] text-ink-dim">
+              <span className="absolute top-[7px] right-[4px] font-mono text-meta text-ink-dim">
                 {count}
               </span>
             )}
@@ -205,10 +218,11 @@ function ViewIcons({
   );
 }
 
-/** The four status tokens, on a 6px dot -- never borrowed for decoration. */
+/** The status tokens, on a 6px dot -- never borrowed for decoration. */
 const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
+  idle: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };
@@ -285,12 +299,12 @@ function SessionTabStrip({
                   <span
                     aria-hidden="true"
                     data-phone-session-waiting-badge
-                    className="flex-none font-mono text-[9px] text-waiting"
+                    className="flex-none font-mono text-meta text-waiting"
                   >
                     !
                   </span>
                 )}
-                <span className="truncate text-[11px]">{session.title}</span>
+                <span className="truncate text-control">{session.title}</span>
               </span>
               {on && (
                 <span
@@ -316,10 +330,19 @@ function SessionTabStrip({
           +
         </span>
       </button>
+      {/* THE WAY OUT, named for where it goes.
+          It said `sessions in <project>` -- byte-identical to the `<nav>`'s own
+          label above, so a screen reader read the same phrase twice: once as
+          the region it had just entered, once as a button, with nothing to say
+          the second one LEAVES. And `›` at the end of a strip that scrolls
+          horizontally is the universal promise of MORE TABS, which is not what
+          this does: it unwinds to the list, pre-scrolled to this project. The
+          glyph is the `‹` the header's back control already uses, because this
+          is the same journey with a better landing. */}
       <button
         type="button"
         data-phone-session-expand
-        aria-label={`sessions in ${project.name}`}
+        aria-label={`all sessions in ${project.name}`}
         onClick={onExpand}
         className={`${TOUCH} ${FOCUS_RING} flex-none`}
       >
@@ -327,7 +350,7 @@ function SessionTabStrip({
           data-tap-skin
           className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
         >
-          ›
+          ‹
         </span>
       </button>
     </nav>
@@ -347,12 +370,12 @@ function RemoteLimits({ declines }: { readonly declines: SourceDeclines }) {
   if (entries.length === 0) return null;
   return (
     <details data-remote-limits className="flex-none border-line border-b bg-panel px-3">
-      <summary className="flex min-h-[44px] cursor-pointer items-center text-[12px] text-ink-dim">
+      <summary className="flex min-h-[44px] cursor-pointer items-center text-control text-ink-dim">
         What this connection cannot do
       </summary>
       <ul className="pb-2">
         {entries.map(([name, why]) => (
-          <li key={name} data-remote-limit={name} className="py-1 text-[12px] text-ink-dim">
+          <li key={name} data-remote-limit={name} className="py-1 text-control text-ink-dim">
             {why}
           </li>
         ))}
@@ -418,7 +441,10 @@ export function PhoneShell({
    * session left ten minutes ago.
    */
   const newest = session?.decisions[0] ?? null;
-  const views = visibleTabs(detail.terminal !== false);
+  // `detail.files` reads `false`/`undefined` on every real phone -- there is
+  // no desktop bridge behind a browser build, ever -- so this withdraws
+  // `Files` the same way `detail.terminal !== false` withdraws Terminal.
+  const views = visibleTabs(detail.terminal !== false, detail.files === true);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -448,6 +474,19 @@ export function PhoneShell({
     // Every push opens on the newest step, because that is the only step this
     // screen has: arriving at a session is arriving at what it just did.
     setOpen(true);
+    // AND ON THE NEWEST OUTPUT, for the same reason. `view` is state that
+    // outlives the session it was chosen in, so Agents tapped on one session
+    // used to greet the NEXT one -- "this source does not report which agents
+    // a session is running", about a session that was waiting for an answer.
+    // A remembered tab is cheap on a desktop, where every view is one click
+    // away in a labelled strip; here they are four unlabelled glyphs and the
+    // recovery costs a tap on the screen whose whole budget is taps.
+    //
+    // Both halves, because they say different things (see `view` above): the
+    // row draws its own selection, and the pane is ASKED to move -- a fresh
+    // object per open, so a second ask stays an ask.
+    setView('Response');
+    setViewRequest({ tab: 'Response' });
   };
   const back = () => {
     // The chevron unwinds the entry it pushed rather than setting state
@@ -470,7 +509,7 @@ export function PhoneShell({
 
   if (!open || entry === null) {
     return (
-      <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-canvas">
+      <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-ground">
         <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-3">
           {sourceReadout}
         </header>
@@ -479,7 +518,6 @@ export function PhoneShell({
             {...sidebar}
             width={undefined}
             resizeHandle={null}
-            keyboardHere={false}
             // This list IS the screen here: no canvas repeats a status beside
             // it, no detail pane answers a question, and no cursor has
             // anywhere to be. The row says so itself (UI spec D1).
@@ -492,7 +530,7 @@ export function PhoneShell({
         </div>
         <footer
           data-phone-status-bar
-          className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-[12px] text-ink-dim"
+          className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim"
         >
           <span className="flex-none">
             {tally.running} running · {tally.waiting} waiting · {tally.done} done
@@ -533,7 +571,7 @@ export function PhoneShell({
     <div
       data-phone-shell="session"
       data-phone-keyboard={typing ? 'open' : 'closed'}
-      className={`flex h-[100dvh] min-h-0 flex-col bg-canvas ${typing ? 'vam-phone-typing' : ''}`}
+      className={`flex h-[100dvh] min-h-0 flex-col bg-ground ${typing ? 'vam-phone-typing' : ''}`}
     >
       <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-2">
         <button
@@ -541,6 +579,14 @@ export function PhoneShell({
           aria-label="back to sessions"
           data-phone-back
           onClick={back}
+          /* OFF THE TYPE SCALE, named as such in `test/renderer/type-scale.test.ts`:
+             `‹` is a GLYPH used as an icon, not text, and it is sized against
+             the 16px lucide icons in this same bar rather than against a text
+             step. A chevron paints far smaller than its em box -- at the
+             scale's 15px `heading` it would be the smallest mark in a 44px
+             target. The `×` below is 16 for the same reason in the other
+             direction: a multiplication sign fills its box where this does
+             not. Two glyphs, two optical sizes, and neither is prose. */
           className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[18px] text-ink-dim`}
         >
           ‹
@@ -553,7 +599,7 @@ export function PhoneShell({
             session about to be written to, and one composer serving many
             sessions is the easiest way to send the right words to the wrong
             agent. The agent count is on the Agents icon beside it. */}
-        <span data-prompt-target className="min-w-0 flex-1 truncate text-[15px] text-ink">
+        <span data-prompt-target className="min-w-0 flex-1 truncate text-heading text-ink">
           {session?.title}
         </span>
         <ViewIcons
@@ -589,7 +635,7 @@ export function PhoneShell({
       <div
         data-phone-status
         style={statusCell === null ? { display: 'none' } : undefined}
-        className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-[12px] text-ink-dim"
+        className="flex min-h-[24px] flex-none items-center border-line border-b bg-panel px-3 font-mono text-meta text-ink-dim"
       >
         {statusCell}
       </div>
@@ -643,9 +689,14 @@ export function PhoneShell({
           // There is nothing else on screen to be active.
           active={true}
           decision={newest ?? detail.decision}
-          // Fixed, so the icon row and the pane cannot start on different
-          // views: `detail.initialTab` is a remembered DESKTOP choice, and the
-          // row has no way to learn it.
+          // NAMED, so the icon row and the pane cannot disagree at all --
+          // not merely start together. `detail.tab` is the DESKTOP's
+          // per-session view and `detail.initialTab` its remembered opener;
+          // neither is a fact this row can learn, and both would arrive in
+          // the pane without arriving here. `viewRequest` is kept beside it
+          // because the two say different things (see `view` above): the row
+          // draws its own selection, the pane is ASKED to move.
+          tab={view}
           initialTab="Response"
           tabRequest={viewRequest}
           records={records}

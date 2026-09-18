@@ -17,11 +17,14 @@
  * politeness, on top of a refusal that does not depend on it.
  */
 
+import type { AgentWork } from '../../shared/agent-work.js';
+import type { TranscriptPage } from '../../shared/history.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../../shared/preload-api.js';
 import type { Project } from '../domain/model.js';
 import type { SessionSource, SourceError } from './port.js';
 import { createSourceFromPreload } from './preload-factory.js';
 import { activeProviderId } from './provider.js';
+import { readRemoteToken } from './remote-token.js';
 
 /** The server's envelope, the same one the IPC layer sends. */
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
@@ -35,7 +38,9 @@ type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError }
 export type HttpTransport = {
   fetch: (
     url: string,
-    init?: { method: string; headers: Record<string, string>; body: string },
+    // `method` and `body` are optional because a READ now carries an init too:
+    // it has headers to send (the pairing token) and nothing else.
+    init?: { method?: string; headers: Record<string, string>; body?: string },
   ) => Promise<{ status: number; statusText: string; json(): Promise<unknown> }>;
   openStream: (url: string) => {
     addEventListener(type: 'change', listener: () => void): void;
@@ -77,13 +82,28 @@ async function call<T>(
   body?: Record<string, unknown>,
 ): Promise<T> {
   let answer: Awaited<ReturnType<HttpTransport['fetch']>>;
+  /**
+   * THE PAIRING TOKEN, READ PER REQUEST RATHER THAN CAPTURED ONCE.
+   *
+   * A device can be revoked from the desktop mid-session, and a token read at
+   * construction would go on being sent after the operator had withdrawn it.
+   * Reading it here also means the pairing screen does not have to rebuild the
+   * api to make its next request carry what it has just obtained.
+   *
+   * ABSENT IS ABSENT. No header at all before pairing, rather than an empty
+   * `Bearer `: the server counts a malformed credential as a failed attempt,
+   * and an unpaired phone polling a read would spend the lockout budget of a
+   * device that has not even tried yet.
+   */
+  const token = readRemoteToken();
+  const auth: Record<string, string> = token === null ? {} : { authorization: `Bearer ${token}` };
   try {
     answer =
       body === undefined
-        ? await transport.fetch(url)
+        ? await transport.fetch(url, { headers: auth })
         : await transport.fetch(url, {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: { ...auth, 'content-type': 'application/json' },
             body: JSON.stringify(body),
           });
   } catch (cause) {
@@ -112,12 +132,19 @@ async function call<T>(
 }
 
 /**
- * The ten-member api, over HTTP. Every member is present unconditionally, for
- * the same reason the preload's are: what a source can do is answered by the
- * descriptor, not by the shape of this object. Three of them
- * (`renameSession`, `applyWaivers`, `transitionLesson`) address routes the
- * remote server does not register -- calling one gets `no-such-route`, and the
- * descriptor's `false` is what keeps anything from calling it.
+ * The api over HTTP. Every member is present unconditionally, for the same
+ * reason the preload's are: what a source can do is answered by the descriptor,
+ * not by the shape of this object. Three of them (`renameSession`,
+ * `applyWaivers`, `transitionLesson`) address routes the remote server does not
+ * register -- calling one gets `no-such-route`, and the descriptor's `false` is
+ * what keeps anything from calling it.
+ *
+ * `history` is deliberately NOT one of those three. Scrolling back through a
+ * session is most of what a phone is for, and the phone is exactly what this
+ * module serves, so `remote/server.ts` registers `/api/history` beside
+ * `/api/load` -- as a READ, available even to a server started read-only.
+ * `agentWork` joins it on the same reasoning: an Agents tab that worked only
+ * when the operator was at the machine would be one they mostly cannot use.
  */
 export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSourceApi {
   const base = options.baseUrl ?? '';
@@ -157,6 +184,41 @@ export function createHttpSourceApi(options: HttpSourceOptions = {}): PreloadSou
     // this -- present only because the api is unconditional.
     pickImageAttachment: () =>
       Promise.reject(unreachable('no-such-route', 'vam serves no image picker over HTTP')),
+    // The one member that resolves rather than rejects, exactly as the
+    // preload's does and for the same reason: `TranscriptPage` already carries
+    // the failure, and a caller with two ways to be told one thing eventually
+    // draws neither. `no-such-route` and a dead tunnel both land in that arm.
+    history: async (sessionId, cursor) => {
+      try {
+        return await call<TranscriptPage>(transport, `${base}/api/history`, {
+          sessionId,
+          cursor,
+        });
+      } catch (reason) {
+        return {
+          kind: 'unavailable',
+          error:
+            typeof reason === 'object' && reason !== null && 'code' in reason
+              ? (reason as SourceError)
+              : unreachable('transport-failed', 'the remote endpoint did not answer'),
+        };
+      }
+    },
+    // Resolves rather than rejects, like `history` directly above and for the
+    // same reason: `AgentWork` carries the failure in its own arm.
+    agentWork: async (sessionId, agentId) => {
+      try {
+        return await call<AgentWork>(transport, `${base}/api/agent-work`, { sessionId, agentId });
+      } catch (reason) {
+        return {
+          kind: 'unavailable',
+          error:
+            typeof reason === 'object' && reason !== null && 'code' in reason
+              ? (reason as SourceError)
+              : unreachable('transport-failed', 'the remote endpoint did not answer'),
+        };
+      }
+    },
     applyWaivers: (sessionId, findingIds) => post('/api/apply-waivers', { sessionId, findingIds }),
     transitionLesson: (sessionId, lessonId, status) =>
       post('/api/transition-lesson', { sessionId, lessonId, status }),

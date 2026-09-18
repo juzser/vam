@@ -19,10 +19,31 @@
  */
 
 import type { MainFailureEvent } from '../main/errors/log.js';
+// `./types.js` ONLY -- never `./content.js` or `./ipc.js`, which need
+// `node:crypto`/`node:path`/`Buffer` and would drag this whole preload
+// module (imported for types by `src/renderer/App.tsx`) into a typecheck
+// (`tsconfig.web.json`) that carries no `node` types at all. See
+// `src/main/files/types.ts`'s own header.
+import type {
+  FileListResult,
+  FileReadResult,
+  FileRefTarget,
+  FileSignature,
+  FileWriteResult,
+} from '../main/files/types.js';
 import { CHANNELS, type IpcResult } from '../main/ipc/channels.js';
+// Type only, and the module it comes from imports NOTHING -- same trap as
+// `./files/types.js` above: this file is imported for types by
+// `src/renderer/App.tsx`, so anything it reaches is typechecked under
+// `tsconfig.web.json`, which carries no `node` types.
+import type { UnsavedReport } from '../main/quit/unsaved.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
+import type { SourceError } from '../renderer/sources/port.js';
+import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
+import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
+import type { LinkOutcome } from '../shared/link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
@@ -51,6 +72,83 @@ async function unwrap<T>(pending: Promise<unknown>): Promise<T> {
     return result.value;
   }
   throw result.error;
+}
+
+/**
+ * `unwrap`, for the members that must not reject.
+ *
+ * An on-demand read has to tell "vam could not read" apart from the ordinary
+ * empty answer -- "there is nothing older", "this agent has done nothing yet"
+ * -- and both `TranscriptPage` and `AgentWork` already carry the distinction
+ * in their own `unavailable` arm. Rejecting for the first would put that state
+ * somewhere a caller has to remember to look, and the caller that forgot would
+ * draw the second. So every failure -- a refusal main returned, a channel that
+ * is not registered, a bridge that is gone -- lands in the arm the type has.
+ *
+ * ONE COPY FOR BOTH READS. The mapping below decides whether a thrown value is
+ * already a `SourceError`, and a second copy of that decision is a second
+ * place for it to drift from `port.ts`'s `describeFailure`.
+ */
+async function unwrapIntoArm(pending: Promise<unknown>): Promise<UnavailableArm | unknown> {
+  try {
+    return await unwrap<unknown>(pending);
+  } catch (reason) {
+    // A refusal main RETURNED keeps its own `kind`, `code` and message -- the
+    // same shape `port.ts`'s `describeFailure` renders. Only something that is
+    // not one of those gets a code minted here.
+    if (
+      typeof reason === 'object' &&
+      reason !== null &&
+      'kind' in reason &&
+      'code' in reason &&
+      'message' in reason
+    ) {
+      return { kind: 'unavailable', error: reason as SourceError } satisfies UnavailableArm;
+    }
+    return {
+      kind: 'unavailable',
+      error: {
+        kind: 'unreachable',
+        code: 'bridge-failed',
+        message: reason instanceof Error ? reason.message : String(reason),
+      },
+    } satisfies UnavailableArm;
+  }
+}
+
+/** The arm both on-demand reads carry, and the only shape this file adds. */
+type UnavailableArm = { readonly kind: 'unavailable'; readonly error: SourceError };
+
+/**
+ * The assertion here is the one thing worth reading twice: `unwrapIntoArm`
+ * returns either what main sent -- which IS a `TranscriptPage`, because that is
+ * what the channel resolves -- or the `unavailable` arm, which every one of
+ * these types contains. Both are the return type; TypeScript cannot see the
+ * first half of that sentence, so it is stated here rather than duplicated as
+ * two identical catch blocks.
+ */
+export const unwrapPage = (pending: Promise<unknown>): Promise<TranscriptPage> =>
+  unwrapIntoArm(pending) as Promise<TranscriptPage>;
+
+/** The same, for one agent's work. See `unwrapPage`. */
+export const unwrapAgentWork = (pending: Promise<unknown>): Promise<AgentWork> =>
+  unwrapIntoArm(pending) as Promise<AgentWork>;
+
+/**
+ * The per-project pull-request directories, pushed into main.
+ *
+ * ITS OWN FACTORY, AND NOT PART OF `DesktopSourceApi`, which is the whole
+ * point. `DesktopSourceApi` is `PreloadSourceApi` minus one member -- the
+ * shape a paired phone also implements over HTTP -- and adding this there
+ * would put "a directory this machine spawns a process in" on the remote
+ * routes. It is a preference main happens to need, not a thing the source can
+ * do, so it sits beside `clipboard` and `dialog` as its own desktop-only
+ * member. See `main/sources/claude-code/pr-repos.ts` for the argument.
+ */
+export function createPrefsBridge(ipc: InvokerLike) {
+  return {
+    setPrRepos: (map: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setPrRepos, map)),
+  };
 }
 
 export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
@@ -98,6 +196,17 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     | 'pickImageAttachment'
   >;
 
+  const history = {
+    // Cursor-in, page-out, and NEVER a rejection: see `unwrapPage`. The cursor
+    // is forwarded as-is, `null` included -- main takes null as "from the
+    // newest end", which is the first thing any caller asks for.
+    history: (sessionId: string, cursor: HistoryCursor | null) =>
+      unwrapPage(ipc.invoke(CHANNELS.sessionHistory, sessionId, cursor)),
+    // Same envelope, same never-rejects rule: the Agents pane draws one shape.
+    agentWork: (sessionId: string, agentId: string) =>
+      unwrapAgentWork(ipc.invoke(CHANNELS.sessionAgentWork, sessionId, agentId)),
+  } satisfies Pick<PreloadSourceApi, 'history' | 'agentWork'>;
+
   const governance = {
     applyWaivers: (sessionId, findingIds) =>
       unwrap<void>(ipc.invoke(CHANNELS.applyWaivers, sessionId, findingIds)),
@@ -105,7 +214,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
       unwrap<void>(ipc.invoke(CHANNELS.transitionLesson, sessionId, lessonId, status)),
   } satisfies Pick<PreloadSourceApi, 'applyWaivers' | 'transitionLesson'>;
 
-  return { ...reads, ...writes, ...governance };
+  return { ...reads, ...writes, ...history, ...governance };
 }
 
 /** The bridge's usage member: one read, no write, no argument. */
@@ -135,6 +244,12 @@ export function createUsageApi(ipc: InvokerLike): UsageApi {
  */
 export type UpdateApi = {
   check(): Promise<UpdateStatus>;
+  /**
+   * The same question, asked again because the operator pressed a button.
+   * Unlike `check`, this really goes out -- and its answer replaces the one
+   * `check` and `open` read.
+   */
+  recheck(): Promise<UpdateStatus>;
   /** True when the operator's own browser was opened on the release page. */
   open(): Promise<boolean>;
 };
@@ -144,12 +259,15 @@ export type UpdateApi = {
  * bare values rather than an `IpcResult` (see `src/main/update/ipc.ts`).
  * `check` READS an answer main already has: the request went out once, at
  * launch, so calling this more often does not make vam contact GitHub more
- * often. `open` asks for the release page in the operator's browser; it
+ * often. `recheck` is the opposite and is the Settings button's own channel:
+ * it really asks, and what it gets back becomes the answer `check` and `open`
+ * give from then on. `open` asks for the release page in the operator's browser; it
  * downloads nothing.
  */
 export function createUpdateApi(ipc: InvokerLike): UpdateApi {
   return {
     check: () => ipc.invoke(CHANNELS.updateCheck) as Promise<UpdateStatus>,
+    recheck: () => ipc.invoke(CHANNELS.updateRecheck) as Promise<UpdateStatus>,
     open: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
   };
 }
@@ -168,6 +286,50 @@ export type ClipboardApi = {
 export function createClipboardApi(ipc: InvokerLike): ClipboardApi {
   return {
     writeText: (text) => ipc.invoke(CHANNELS.clipboardWrite, text) as Promise<boolean>,
+  };
+}
+
+/** The bridge's issue member: one prefilled form, answered by whether it opened. */
+export type IssueApi = {
+  open(title: string, body: string): Promise<boolean>;
+};
+
+/**
+ * TEXT, NOT A DESTINATION -- `openLink`'s rule kept through a different door.
+ * The renderer hands over the title and body `errors/report.ts` composed and
+ * main decides where they go (`src/main/issue/ipc.ts`), so this bridge cannot
+ * be asked to navigate anywhere. Forwards straight through: the channel
+ * answers a bare boolean, not an `IpcResult`, like `clipboard.writeText`
+ * above.
+ */
+export function createIssueApi(ipc: InvokerLike): IssueApi {
+  return {
+    open: (title, body) => ipc.invoke(CHANNELS.issueOpen, title, body) as Promise<boolean>,
+  };
+}
+
+/**
+ * The bridge's link member: the address an agent wrote, and what became of it.
+ *
+ * THE ONE MEMBER THAT NAMES A DESTINATION, against the rule `issue.open`
+ * directly above exists to keep. `CHANNELS.linkOpen` carries the whole
+ * argument; what matters at this seam is that this forwarder decides NOTHING.
+ * It does not check the scheme, it does not normalise the address and it does
+ * not know which schemes are allowed -- main runs `checkLink` itself on the
+ * far side, so a renderer that skipped its own check, or a preload rewritten
+ * to skip this comment, cannot widen what opens.
+ *
+ * Forwards straight through: the channel answers a bare `LinkOutcome`, not an
+ * `IpcResult`, because a refusal here is a SENTENCE the control draws beside
+ * itself rather than an error to reject with.
+ */
+export type LinkApi = {
+  open(url: string): Promise<LinkOutcome>;
+};
+
+export function createLinkApi(ipc: InvokerLike): LinkApi {
+  return {
+    open: (url) => ipc.invoke(CHANNELS.linkOpen, url) as Promise<LinkOutcome>,
   };
 }
 
@@ -270,6 +432,90 @@ export type DialogApi = {
 export function createDialogApi(ipc: InvokerLike): DialogApi {
   return {
     chooseDirectory: () => ipc.invoke(CHANNELS.chooseDirectory) as Promise<string | null>,
+  };
+}
+
+/**
+ * The bridge's files member: the file-editor tab's read and write, both
+ * answering through the `IpcResult` envelope -- there IS a refusal behind
+ * each in a source's own words (outside every session's directory, too
+ * large, changed on disk since the edit began), so `unwrap` is used here
+ * exactly as it is for `pickImageAttachment`. See `src/main/files/ipc.ts`
+ * for the full refusal vocabulary and `src/main/files/authorize.ts` for what
+ * "outside every session's directory" means and why it is checked the way
+ * it is.
+ */
+export type FilesApi = {
+  read(path: string): Promise<FileReadResult>;
+  /**
+   * `baseSignature` is the signature the edit was based on -- `null` means
+   * "this is a new file, nothing should be there yet". A mismatch against
+   * what is actually on disk right now is refused as `changed-on-disk`,
+   * never silently overwritten or merged.
+   */
+  write(
+    path: string,
+    content: string,
+    baseSignature: FileSignature | null,
+  ): Promise<FileWriteResult>;
+  /**
+   * Every regular file under a live SESSION's own working directory --
+   * `sessionId`, not a path, for the same reason `pickImageAttachment` takes
+   * one: the renderer never learns a session's `cwd` (`renderer/domain/
+   * model.ts` carries no field for it), so this is the one way it can ever
+   * discover a path to hand `read`/`write` above. Rejects with the port's
+   * `SourceError`, same as both. See `src/main/files/list-ipc.ts`.
+   */
+  list(sessionId: string): Promise<FileListResult>;
+  /**
+   * `src/foo/bar.ts:42` -- an AGENT's own reference -- turned into an absolute
+   * path and a line. Takes the session id for `list`'s reason, and authorises
+   * against that session's directory ALONE: nobody typed this path, so it may
+   * not reach the wider root set `read`/`write` are checked against. Rejects
+   * with the port's `SourceError`, whose message is the sentence the control
+   * shows when a reference points outside the project or at nothing at all.
+   * See `src/main/files/resolve-ipc.ts`.
+   */
+  resolve(sessionId: string, reference: string): Promise<FileRefTarget>;
+  /**
+   * HOW MUCH UNSAVED TEXT THE FILE EDITOR IS HOLDING, pushed whenever that
+   * changes so `app.on('before-quit')` has something true to say before Cmd-Q
+   * throws it away -- the one exit `beforeunload` cannot reach, because it is
+   * a page hook and a quit is a main-process veto.
+   *
+   * THE ONLY MEMBER HERE THAT ANSWERS `void` RATHER THAN A PROMISE, and that
+   * is the honest signature rather than a shortcut: this is a state push, not
+   * a request. There is no answer the renderer could act on and nothing for it
+   * to draw if the push failed, so returning a promise would only manufacture
+   * an unhandled rejection in a page with no use for it. The same
+   * fire-and-forget bargain `createStreamSubscribe`'s own `invoke` makes.
+   */
+  reportUnsaved(report: UnsavedReport): void;
+};
+
+/**
+ * Forwards straight through `unwrap`, like `pickImageAttachment` -- neither
+ * channel answers bare, because both have a refusal worth the caller's own
+ * words rather than a rejected promise electron has rewritten.
+ *
+ * `reportUnsaved` IS THE EXCEPTION, deliberately. See its own comment above:
+ * it is a push, its rejection is logged here and goes no further, and a
+ * failure to deliver it costs main one stale copy rather than anything the
+ * page could repair.
+ */
+export function createFilesApi(ipc: InvokerLike): FilesApi {
+  return {
+    read: (path) => unwrap<FileReadResult>(ipc.invoke(CHANNELS.filesRead, path)),
+    list: (sessionId) => unwrap<FileListResult>(ipc.invoke(CHANNELS.filesList, sessionId)),
+    resolve: (sessionId, reference) =>
+      unwrap<FileRefTarget>(ipc.invoke(CHANNELS.filesResolve, sessionId, reference)),
+    write: (path, content, baseSignature) =>
+      unwrap<FileWriteResult>(ipc.invoke(CHANNELS.filesWrite, path, content, baseSignature)),
+    reportUnsaved: (report) => {
+      ipc.invoke(CHANNELS.filesUnsaved, report).catch((error: unknown) => {
+        console.error('vam: unsaved report failed:', error);
+      });
+    },
   };
 }
 
@@ -386,12 +632,26 @@ export type RemoteApi = {
    * every other part of `RemoteConfig`. See `remote/writes-preference.ts`.
    */
   setWrites(next: boolean): Promise<RemoteState>;
+  /**
+   * Opens one of the panel's two links in the operating system's browser.
+   *
+   * A KEY, NOT A URL: every `window.open` in this app is denied, so an
+   * ordinary link in the panel did nothing -- and a channel that took a
+   * destination from the renderer would be the navigate-anywhere capability
+   * that policy exists to refuse. Main owns both destinations. Answers whether
+   * a browser opened.
+   */
+  openLink(key: RemoteLinkKey): Promise<boolean>;
 };
+
+/** The two links the Remote panel draws. Main maps each to a destination. */
+export type RemoteLinkKey = 'download' | 'serve-admin';
 
 export function createRemoteApi(ipc: InvokerLike): RemoteApi {
   const ask = (channel: string, ...args: unknown[]) =>
     ipc.invoke(channel, ...args) as Promise<RemoteState>;
   return {
+    openLink: (key: RemoteLinkKey) => ipc.invoke(CHANNELS.remoteOpenLink, key) as Promise<boolean>,
     state: () => ask(CHANNELS.remoteState),
     open: () => ask(CHANNELS.pairingOpen),
     approve: () => ask(CHANNELS.pairingApprove),

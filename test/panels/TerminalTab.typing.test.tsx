@@ -13,9 +13,13 @@
  * regression nobody notices.
  *
  * WHO OWNS A KEY: an unmodified key belongs to the pane and stops there, so
- * `j` does not also move vam's cursor. A Cmd/Ctrl chord belongs to vam and is
- * never typed -- the canvas already exempts chords from its typing guard, and
- * a chord is not text on any layout.
+ * `j` does not also move vam's cursor. A CMD chord belongs to vam and is never
+ * typed -- the canvas already exempts chords from its typing guard, and a
+ * chord is not text on any layout. CTRL AND A LETTER belongs to the pane, and
+ * that split has a file of its own (`TerminalTab.control-chords.test.tsx`):
+ * every `C-a`..`C-z` is a real control character and the program in the pane
+ * is what gives it meaning, while `Ctrl+1` is no control character at all and
+ * stays vam's, which is what keeps the tab switch working from in here.
  *
  * THE WAY OUT: Escape leaves. A focus stop that eats every key and cannot be
  * left from the keyboard is the trap the old comment promised this was not.
@@ -23,7 +27,8 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import { cursorModeAt } from '../../src/renderer/keyboard/focus-scope.js';
+import { ECHO_MS, REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 afterEach(cleanup);
@@ -31,9 +36,27 @@ afterEach(cleanup);
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
 const pane = () => q<HTMLElement>('[data-terminal-pane]');
 
+/**
+ * WHETHER THE PANE HAS THE KEYBOARD -- and it is `contains` rather than an
+ * identity test for a reason worth stating, because the identity test is still
+ * spelled correctly and is now VACUOUS. Since the pane grew a hidden box for
+ * an input method to compose into (`TerminalTab.ime.test.tsx`), focus lands
+ * one element deeper: `document.activeElement !== pane()` is true whether the
+ * pane has the keyboard or not, so every "it did not grab focus back" case
+ * below would pass with the latch deleted.
+ */
+const holdsKeyboard = () => pane()?.contains(document.activeElement) === true;
+
 const ATLAS = 'claude-code:atlas-11111111';
 const BEACON = 'claude-code:beacon-22222222';
-const ok = (text = 'the screen'): PaneView => ({ kind: 'ok', name: 'vam-atlas-a1b2c3', text });
+/** A screen with no cursor answer -- what a stub that never asked tmux knows. */
+const NO_CURSOR = { kind: 'unreadable' } as const;
+const ok = (text = 'the screen'): PaneView => ({
+  kind: 'ok',
+  name: 'vam-atlas-a1b2c3',
+  text,
+  cursor: NO_CURSOR,
+});
 
 const settle = async () => {
   await act(async () => {
@@ -64,7 +87,12 @@ const keys = (send: { mock: { calls: unknown[][] } }): PaneKey[] =>
 describe('the Terminal tab takes focus when it is opened', () => {
   it('focuses the pane as soon as there is a pane to focus', async () => {
     await open();
-    expect(document.activeElement).toBe(pane());
+    // IN THE PANE, on the hidden box that an input method can compose into --
+    // `TerminalTab.ime.test.tsx` owns why that box exists. What this asserts
+    // is unchanged: the tab the operator opened to type in is ready to type
+    // in, and the keyboard is inside this pane and not on the body.
+    expect(pane()?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it('does not take focus while the window is hidden', async () => {
@@ -73,7 +101,7 @@ describe('the Terminal tab takes focus when it is opened', () => {
       await open();
       // Nothing is being read either, so there is no pane to focus and no
       // reason to pull focus out of whatever the operator last touched.
-      expect(document.activeElement).not.toBe(pane());
+      expect(document.activeElement).toBe(document.body);
     } finally {
       spy.mockRestore();
     }
@@ -124,6 +152,50 @@ describe('a keystroke in the pane reaches tmux, exactly once', () => {
       window.removeEventListener('keydown', onKey);
     }
   });
+
+  /**
+   * AND A DIGIT IS A DIGIT HERE, WHICH IS NEWLY WORTH ASSERTING. A bare
+   * `1`..`9` picks a VIEW in Select now (`SELECT_DIGITS`, `keyboard/
+   * chords.ts`) — the operator asked for a one-key view switch — and this pane
+   * is the surface where that could have gone worst: it is a `section`, so
+   * `Canvas.tsx`'s INPUT|TEXTAREA typing guard cannot see it, and what it
+   * consumes goes into somebody's running agent.
+   *
+   * TWO THINGS, AND THE SECOND IS THE ONE A VIEW BAR COULD NOT TELL YOU: the
+   * digit is SENT, and vam's own window listener never hears it. A test that
+   * only checked the view had not changed would pass on a keystroke that was
+   * silently eaten and never typed.
+   *
+   * `isSelectOnlyChord` is the belt behind this brace, for the build where
+   * `send` is undefined and the pane hands its keys back — driven in
+   * `test/canvas/Canvas.select-digit-view.test.tsx`.
+   */
+  it('types a bare digit rather than letting it pick a view', async () => {
+    const heard: string[] = [];
+    const onKey = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', onKey);
+    try {
+      const send = await open();
+      fireEvent.keyDown(pane() as HTMLElement, { key: '3', code: 'Digit3' });
+      await settle();
+      expect(keys(send)).toEqual([{ kind: 'text', text: '3' }]);
+      expect(heard).toEqual([]);
+      // The two facts the stand-down is derived from, asserted where they are
+      // true rather than assumed: this is no text box, and it is Insert.
+      //
+      // "No text box" was spelled `tagName === 'SECTION'`, which stopped being
+      // true when the pane became the scroller that also takes the keyboard --
+      // a `div` with `role="region"`, which is what a named `<section>` already
+      // was. The tag was a PROXY for the property; the property is the one
+      // `Canvas.tsx`'s `typing` guard actually reads, so it is asserted
+      // directly here and survives the next change of element.
+      expect(pane()?.getAttribute('role')).toBe('region');
+      expect(/^(INPUT|TEXTAREA)$/.test(pane()?.tagName ?? '')).toBe(false);
+      expect(cursorModeAt(pane())).toBe('insert');
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
 });
 
 describe('the pane declines the keys that are not its own', () => {
@@ -134,12 +206,60 @@ describe('the pane declines the keys that are not its own', () => {
     try {
       const send = await open();
       fireEvent.keyDown(pane() as HTMLElement, { key: '1', metaKey: true });
-      fireEvent.keyDown(pane() as HTMLElement, { key: 'k', ctrlKey: true });
+      // A LETTER UNDER CMD, WHICH IS THE CASE THAT CHANGED MEANING. `Ctrl+K`
+      // stood here and is the pane's now (`TerminalTab.control-chords
+      // .test.tsx`); `Cmd+K` is still vam's, and it is the spelling a macOS
+      // operator reaches for. Cmd is where the whole grammar stays reachable
+      // from inside a pane that has taken Ctrl.
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'k', metaKey: true });
       await settle();
       expect(send).not.toHaveBeenCalled();
       // Reaching vam is the point: `Cmd+1` picks a tab from anywhere,
       // including from inside a box that is capturing letters.
       expect(heard).toEqual(['1', 'k']);
+    } finally {
+      window.removeEventListener('keydown', onKey);
+    }
+  });
+
+  /**
+   * `Ctrl-D` AND `Ctrl-U` ARE THE PANE'S NOW, AND THIS TEST USED TO SAY THE
+   * OPPOSITE. It is kept, inverted, rather than deleted, because the fact it
+   * was written about has not gone away and is the sharpest reason the split
+   * had to move.
+   *
+   * WHAT IT SAID. The pane handed every Ctrl chord back, and `Mod-d`/`Mod-u`
+   * are bound in the grammar those keys reach — so "handed back" would have
+   * meant "scrolled a transcript that is not on screen", except that this
+   * element carries `data-insert-scope` and `isSelectOnly` stood the grammar
+   * down. Both halves were true, and together they meant `Ctrl+U` in a
+   * terminal did NOTHING AT ALL: not the kill-line the operator pressed it
+   * for, and not the scroll vam binds it to either.
+   *
+   * WHAT IS TRUE NOW. The chord reaches the pane, and vam's own listener never
+   * hears it — which is what stops one keystroke doing two things. The insert
+   * scope is still asserted here because it is still load-bearing for every
+   * OTHER modified key: `cursorModeAt` is asked of the REAL element, and its
+   * role beside it, because a named region is invisible to any
+   * `INPUT|TEXTAREA` test and a scope-based rule is the only kind that can see
+   * this surface.
+   */
+  it('sends Ctrl-D and Ctrl-U to the pane, and lets vam hear neither', async () => {
+    const heard: string[] = [];
+    const onKey = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', onKey);
+    try {
+      const send = await open();
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'd', ctrlKey: true });
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'u', ctrlKey: true });
+      await settle();
+      expect(keys(send)).toEqual([
+        { kind: 'control', letter: 'd' },
+        { kind: 'control', letter: 'u' },
+      ]);
+      expect(heard).toEqual([]);
+      expect(pane()?.getAttribute('role')).toBe('region');
+      expect(cursorModeAt(pane())).toBe('insert');
     } finally {
       window.removeEventListener('keydown', onKey);
     }
@@ -177,18 +297,58 @@ describe('the pane declines the keys that are not its own', () => {
     ]);
   });
 
-  it('leaves the scrolling keys to the browser, which is why the focus stop exists', async () => {
+  /**
+   * THE SCROLLING KEYS STILL SCROLL, AND THE PANE IS NOW WHAT DOES IT.
+   *
+   * This test used to assert that these six were NOT cancelled, on the
+   * reasoning that the browser's scrolling of a focused overflow element is
+   * the default and vam must not take it. That reasoning died with the hidden
+   * box: the keyboard is on a text control now, and a text control takes these
+   * keys for its own caret before any scroll container sees them. Measured in
+   * Chromium with an empty one-by-one `<textarea>` focused inside a scrolling
+   * `<section>`: `PageDown`, `PageUp`, `Home` and `End` moved the pane not at
+   * all, and the arrows only sometimes.
+   *
+   * So the assertion moved from the MECHANISM to the OUTCOME, which is the
+   * stronger of the two and the one the operator has: the pane moves. A test
+   * that only checked `defaultPrevented` would have gone green through exactly
+   * the regression that made this rewrite necessary.
+   */
+  it('scrolls the pane itself, because a focused text control eats those keys', async () => {
     const send = await open();
-    for (const key of ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End']) {
-      // NOT PREVENTED, and asserting that is the whole test. `fireEvent`
-      // answers false when the default was prevented, and the browser's
-      // scrolling of a focused overflow element IS that default: checking
-      // only that nothing was sent to tmux would stay green while a stray
-      // `preventDefault()` killed keyboard scrolling outright -- which is the
-      // one thing this focus stop was created to provide.
-      expect(fireEvent.keyDown(pane() as HTMLElement, { key })).toBe(true);
+    const box = pane() as HTMLElement;
+    // happy-dom lays nothing out, so the geometry the scroll is computed from
+    // is written here: a screenful of 200px over 1000px of content, and a
+    // 16px row measured off the ruler.
+    Object.defineProperty(box, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(box, 'scrollHeight', { value: 1_000, configurable: true });
+    const ruler = q<HTMLElement>('[data-terminal-ruler]');
+    if (ruler !== null) {
+      ruler.getBoundingClientRect = () => ({ width: 66, height: 16 }) as DOMRect;
     }
+
+    const moved = (key: string, from: number): number => {
+      box.scrollTop = from;
+      // CANCELLED, and that is now the correct answer: the pane performed the
+      // scroll, so leaving the default on would be a second one.
+      expect(fireEvent.keyDown(box, { key })).toBe(false);
+      return box.scrollTop;
+    };
+    expect(moved('ArrowDown', 0)).toBe(16);
+    expect(moved('ArrowUp', 100)).toBe(84);
+    // A page overlaps by one row, the way every pager does: the line at the
+    // fold is the line the next screen starts on.
+    expect(moved('PageDown', 0)).toBe(184);
+    expect(moved('PageUp', 500)).toBe(316);
+    expect(moved('Home', 500)).toBe(0);
+    expect(moved('End', 0)).toBe(1_000);
+    // Never below the top: a negative scroll offset is not a position.
+    expect(moved('ArrowUp', 0)).toBe(0);
+    expect(moved('PageUp', 10)).toBe(0);
+
     await settle();
+    // And none of them is typed into the agent, which was always the other
+    // half: scrolling the transcript is scrolling, not a keypress in the shell.
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -345,13 +505,13 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
     // mode, dismisses the prompt. Keeping it as an exit made the pane the one
     // place in their tools where Escape did not mean escape.
     const send = await open();
-    expect(document.activeElement).toBe(pane());
+    expect(holdsKeyboard()).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Escape' })).toBe(false);
     await settle();
     expect(keys(send)).toEqual([{ kind: 'escape' }]);
     // And it did NOT let go: the pane still has focus, so the next key is
     // still the pane's.
-    expect(document.activeElement).toBe(pane());
+    expect(holdsKeyboard()).toBe(true);
   });
 
   it('still lets go on Tab, which is now the only key that does', async () => {
@@ -365,12 +525,12 @@ describe('Escape belongs to the pane, and the way out is Tab', () => {
   });
 
   it('says where the exit is, but only while the pane has focus', async () => {
-    // An exit nobody can find is not an exit, and it may not cost a row: it
-    // rides the badge in the pane's corner and is appended only while the
-    // pane has focus, which is the only moment the question is asked.
+    // An exit nobody can find is not an exit. It rides the session name on the
+    // rule under the screen and is appended only while the pane has focus,
+    // which is the only moment the question is asked.
     await open();
     expect(q('[data-terminal-exit-hint]')?.textContent).toContain('Tab');
-    expect(q('[data-terminal-badge]')?.getAttribute('class')).toContain('absolute');
+    expect(q('[data-terminal-exit-hint]')?.closest('[data-terminal-status]')).not.toBeNull();
 
     fireEvent.blur(pane() as HTMLElement);
     await settle();
@@ -398,13 +558,14 @@ describe('the way out stays out', () => {
       />,
     );
     await settle();
-    expect(document.activeElement).toBe(pane());
+    expect(holdsKeyboard()).toBe(true);
 
     // Leaving is Tab now, and happy-dom does not move focus for a synthetic
-    // Tab, so the blur it would cause is what is simulated.
-    (pane() as HTMLElement).blur();
+    // Tab, so the blur it would cause is what is simulated. It is the BOX
+    // that holds the keyboard, so it is the box that has to let go.
+    (document.activeElement as HTMLElement).blur();
     await settle();
-    expect(document.activeElement).not.toBe(pane());
+    expect(holdsKeyboard()).toBe(false);
 
     // `j` in the canvas moves to the next session, which changes the project
     // this tab is about: `view` is cleared during render, so the pane goes
@@ -422,7 +583,7 @@ describe('the way out stays out', () => {
     );
     await settle();
     expect(pane()).not.toBeNull();
-    expect(document.activeElement).not.toBe(pane());
+    expect(holdsKeyboard()).toBe(false);
   });
 
   it('does not grab focus back after a transient unavailable read', async () => {
@@ -458,7 +619,7 @@ describe('the way out stays out', () => {
         });
       }
       expect(q('[data-terminal-pane]')).not.toBeNull();
-      expect(document.activeElement).not.toBe(pane());
+      expect(holdsKeyboard()).toBe(false);
     } finally {
       vi.useRealTimers();
     }
@@ -506,18 +667,30 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(q<HTMLElement>('[data-terminal]')?.textContent).toContain('vam-atlas-a1b2c3');
   });
 
-  it('costs no row to say it: the badge is out of the flow, not a header', async () => {
+  it('costs ONE row to say it, under the screen rather than over it', async () => {
     await open();
     const badge = q<HTMLElement>('[data-terminal-badge]');
-    // Absolutely positioned against the wrapper, so it takes no vertical
-    // space -- the two lines the operator removed were flow content.
-    expect(badge?.getAttribute('class')).toContain('absolute');
-    // And OUTSIDE the scrolling box: inside, it would be laid out against the
-    // content and scroll out of sight with the first screenful.
+    // THE BARGAIN CHANGED, AND THIS IS WHERE IT IS RECORDED. It used to be
+    // absolutely positioned over the pane's bottom-right corner and was
+    // defended as costing no row. It cost no row and it covered the corner a
+    // terminal prints its last line into, in the faintest ink vam has. It is
+    // now a segment of the rule under the screen: one row, spent once, for a
+    // name that can actually be read -- and the row was being spent anyway,
+    // because the branch is on it.
+    expect(badge?.closest('[data-terminal-status]')).not.toBeNull();
+    expect(badge?.getAttribute('class')).not.toContain('absolute');
+    // And still OUTSIDE the scrolling box: inside, it would be laid out
+    // against the content and scroll out of sight with the first screenful.
     expect(badge?.closest('[data-terminal-pane]')).toBeNull();
-    // Still no flow chrome above the pane.
+    // Still no flow chrome ABOVE the pane -- the rule is under it, which is
+    // the half of the operator's request that has not changed.
     expect(q('[data-terminal-name]')).toBeNull();
     expect(q('[data-terminal-typing]')).toBeNull();
+    const tab = q<HTMLElement>('[data-terminal]') as HTMLElement;
+    const kids = [...tab.children];
+    expect(kids.indexOf(q<HTMLElement>('[data-terminal-status]') as HTMLElement)).toBe(
+      kids.length - 1,
+    );
   });
 
   it('draws no chrome above the pane at all, which is the space the operator asked for', async () => {
@@ -596,5 +769,83 @@ describe('the pane says whether what is typed is going anywhere', () => {
     // No caption says so any more -- the honesty is in the behaviour above:
     // nothing was consumed, so every one of those keys is still vam's.
     expect(q('[data-terminal-typing]')).toBeNull();
+  });
+});
+
+describe('a keystroke is read back without waiting for the next tick', () => {
+  /**
+   * THE DELAY THE OPERATOR REPORTED. The send itself is ~5ms; what was slow
+   * was that nothing asked for the screen again until the interval came
+   * round, so a typed character took up to `REFRESH_MS` to appear. These
+   * measure the ASKING -- that a landed key causes a read, that a burst is
+   * bounded, and that a key which did NOT land causes none -- not the pixels,
+   * which only a real tmux pane can show.
+   */
+  const openWithRead = async (sent: PaneSendResult = 'sent') => {
+    const read = vi.fn(async () => ok());
+    const send = vi.fn(async (_p: string, _k: PaneKey, _r?: string) => sent);
+    render(
+      <TerminalTab projectId={ATLAS} rowId={ATLAS} read={read} resize={undefined} send={send} />,
+    );
+    await settle();
+    return { read, send };
+  };
+
+  it('reads the pane as soon as the key lands, long before the interval', async () => {
+    const { read } = await openWithRead();
+    const before = read.mock.calls.length;
+    await act(async () => {
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'x' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(read.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('asks once per window while typing continues, not once per key', async () => {
+    vi.useFakeTimers();
+    try {
+      const read = vi.fn(async () => ok());
+      const send = vi.fn(async () => 'sent' as PaneSendResult);
+      render(
+        <TerminalTab projectId={ATLAS} rowId={ATLAS} read={read} resize={undefined} send={send} />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const before = read.mock.calls.length;
+      // Eight keys inside one window: the first is read immediately, the rest
+      // collapse into a single trailing read. Ten reads a second while a
+      // person types is the bound; ten per keystroke is not.
+      for (let i = 0; i < 8; i += 1) {
+        await act(async () => {
+          fireEvent.keyDown(pane() as HTMLElement, { key: 'a' });
+          await Promise.resolve();
+          await Promise.resolve();
+        });
+      }
+      await act(async () => {
+        vi.advanceTimersByTime(ECHO_MS);
+        await Promise.resolve();
+      });
+      const added = read.mock.calls.length - before;
+      expect(added).toBeGreaterThan(0);
+      expect(added).toBeLessThanOrEqual(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('asks for nothing when the key did not land', async () => {
+    const { read } = await openWithRead('refused');
+    const before = read.mock.calls.length;
+    await act(async () => {
+      fireEvent.keyDown(pane() as HTMLElement, { key: 'x' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // A refused send already stops the run and says so; re-reading the screen
+    // would only confirm that nothing happened.
+    expect(read.mock.calls.length).toBe(before);
   });
 });

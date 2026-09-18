@@ -16,8 +16,8 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasSource } from '../../src/renderer/canvas/source.js';
 import type { CanvasModel } from '../../src/renderer/domain/model.js';
+import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
 const MODEL: CanvasModel = {
   projects: [
@@ -59,8 +59,13 @@ const promptInput = () =>
   document.querySelector<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
 
 function press(key: string) {
+  // A bare single UPPERCASE letter models a real Shift press: since the
+  // CapsLock fix, `normalizeKey` (`keyboard/chords.ts`) decides a letter's
+  // case from `shiftKey` alone, not from `event.key`, so a synthetic event
+  // has to carry the modifier explicitly to mean what it used to mean.
+  const shiftKey = /^[A-Z]$/.test(key) ? true : undefined;
   act(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, shiftKey }));
   });
 }
 

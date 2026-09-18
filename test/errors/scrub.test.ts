@@ -174,4 +174,37 @@ describe('scrub', () => {
   it('names its placeholder once, so a caller can assert on it', () => {
     expect(scrub('tmux session "vam-x" gone')).toContain(REDACTED);
   });
+
+  /**
+   * THE EXEMPTION, FROM BOTH SIDES. Quoted runs that are vam's own vocabulary
+   * survive (`scrub.real-messages.test.ts` HOLE 1 is the case it was added
+   * for); these are the cases that must NOT, because an allowlist is only
+   * worth having if it is the narrow thing it claims to be. A shape test --
+   * "keep a quoted run that looks like a command" -- would pass HOLE 1 and
+   * fail every one of these.
+   */
+  describe('the own-vocabulary exemption is a closed list, not a shape', () => {
+    it('still redacts a session title that merely BEGINS with a command name', () => {
+      expect(scrub('renaming "claude fixes" failed')).not.toContain('fixes');
+    });
+
+    it('still redacts a branch that merely LOOKS like a subcommand', () => {
+      expect(scrub("on branch 'attach-the-thing'")).not.toContain('attach-the-thing');
+    });
+
+    it('redacts the whole run when one word in it is unknown', () => {
+      // `claude` is vam's word, `payroll` is the operator's. One unknown word
+      // redacts the run -- the safe direction.
+      expect(scrub("run 'claude payroll' first")).not.toContain('payroll');
+    });
+
+    it('does not exempt a long run built out of allowlisted words', () => {
+      expect(scrub("'git init git init git'")).toContain(REDACTED);
+    });
+
+    it('keeps the single binary name, which is the whole point', () => {
+      expect(scrub('the `tmux` command was not found')).toContain('`tmux`');
+      expect(scrub("Use 'claude attach' to attach to it")).toContain("'claude attach'");
+    });
+  });
 });

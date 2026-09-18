@@ -95,7 +95,25 @@ describe('the phone session screen’s identity', () => {
 });
 
 describe('the detail pane on a desktop, which shares this component', () => {
-  it('still draws its header card, title, project, epic and all', () => {
+  /**
+   * RETIRED: `'still draws its header card, title, project, epic and all'`.
+   * At the time this file was written, the phone had already dropped its
+   * copy of the identity block and the desktop had not — this test was the
+   * control proving the desktop side was untouched. A12.2 removes the
+   * desktop header too (`[data-prompt-target]`, `[data-prompt-project]` and
+   * `[data-pane-status]` are all gone from `DetailPanel.tsx`), so the two
+   * sides converge and this file's own premise — "one shares the component,
+   * one does not" — is no longer true for the header.
+   *
+   * REWRITTEN AGAIN: its replacement pinned project and epic onto the
+   * column's identity line, and the operator has now asked for both to go
+   * ("remove the branch and repo information above the In section") — the
+   * sidebar already files the session under its project heading and prints
+   * its branch on the row. So neither the header card NOR the identity line
+   * carries them, and that is what this asserts: the header stays gone, and
+   * the line that briefly inherited it does not quietly grow it back.
+   */
+  it('carries neither project nor epic once the header card is gone', () => {
     const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
@@ -116,12 +134,19 @@ describe('the detail pane on a desktop, which shares this component', () => {
         answer={async () => ({ kind: 'sent', answer: 'x' })}
       />,
     );
-    expect(document.querySelector('[data-prompt-target]')?.textContent).toBe('factory-sse-1');
-    expect(document.querySelector('[data-prompt-project]')?.textContent).toBe('factory');
-    expect(document.querySelector('[data-pane-status]')).not.toBeNull();
+    expect(document.querySelector('[data-prompt-target]')).toBeNull();
+    expect(document.querySelector('[data-pane-status]')).toBeNull();
+    // The line does not repeat the sidebar's facts because there is no line:
+    // the operator had the project and the epic removed from it, and then the
+    // `you · ...` remainder too. Asserted on the `in` block as a whole, which
+    // is the only place a session fact could reappear as a turn caption.
+    expect(document.querySelector('[data-detail-identity]')).toBeNull();
+    const block = document.querySelector('[data-detail-block="in"]')?.textContent ?? '';
+    expect(block).not.toContain('factory');
+    expect(block).not.toContain('ui-server-sse');
   });
 
-  it('keeps the view tab bar, which only the phone lost', () => {
+  it('keeps the view icon row, which only the phone lost', () => {
     const project: Project = { id: 'p1', name: 'factory', sessions: [SESSION] };
     const entry: SessionEntry = { project, session: SESSION };
     render(
@@ -143,10 +168,10 @@ describe('the detail pane on a desktop, which shares this component', () => {
       />,
     );
     // The removal is `phone`-gated, not a deletion: PRs and Agents are still
-    // one tap away wherever there is room for a canvas.
+    // one press away wherever there is room for it.
     expect(document.querySelector('[data-view-tabs]')).not.toBeNull();
     expect(
-      [...document.querySelectorAll('[data-tab]')].map((t) => t.getAttribute('data-tab')),
+      [...document.querySelectorAll('[data-view]')].map((t) => t.getAttribute('data-view')),
     ).toContain('prs');
   });
 });

@@ -4,7 +4,7 @@
  * `styles.css` is full of ratios written into comments — "6.01 on sidebar",
  * "clears 4.5:1 there" — and until this file existed not one of them was
  * checked by anything. That is how a cursor ring shipped at 2.15:1 on the
- * light canvas: the value was read off an artboard, the reading was accurate,
+ * light ground: the value was read off an artboard, the reading was accurate,
  * and nobody multiplied it out. So this guard recomputes the ratios from the
  * token text itself, ground by ground, and fails on the number rather than on
  * the prose.
@@ -14,7 +14,13 @@
  *
  *  - `--vam-raised`: the only `ink-faint`-on-`raised` sites pair
  *    `hover:bg-raised` with `hover:text-ink`, so the ground and the ink change
- *    together and the combination never renders.
+ *    together and the combination never renders. That sentence was FALSE for
+ *    one release: PR #288 left the question card's options and its fold row on
+ *    `bg-raised` while their number, preview and "marked, not sent" stayed
+ *    `ink-faint` -- the pairing rule held everywhere the comment had looked
+ *    and nowhere it had not. Those sites now paint `line-strong` and lift
+ *    their ink with it (`OPTION_QUIET_INK`), so the exclusion is true again;
+ *    `surface-elevation.test.ts` is what holds the new pair to its numbers.
  *  - `--vam-segment-on`: `ink-faint` reaches it only through a `disabled:`
  *    variant while the fill arrives on `hover:`, and a disabled button takes
  *    no hover fill.
@@ -23,63 +29,196 @@
  * thresholds wherever it carried text. That was the deferral; issue 201 is
  * the decision. The token was split: `--vam-ink-quiet` took over every site
  * that has to be read (text, a control border, an icon glyph), leaving
- * `ink-ghost` for marks that carry no meaning of their own. `ink-quiet` is
- * measured below like any other text token; `ink-ghost` carries no text
- * anymore, so there is nothing left here for it to fail.
+ * `ink-ghost` for marks that carry no meaning of their own.
+ *
+ * THIS FILE THEN SAID "`ink-ghost` CARRIES NO TEXT ANYMORE, SO THERE IS
+ * NOTHING LEFT HERE FOR IT TO FAIL", AND THAT SENTENCE WAS FALSE FOR THREE
+ * RELEASES. `DetailPanel.tsx` carried `marker:text-ink-ghost` on every list
+ * item an agent's answer renders, and a `::marker` is a PAINTED GLYPH: the
+ * "1." an operator counts steps by was drawn at 1.79:1 on the pane beside body
+ * text at 7.21:1. The exclusion was written as a fact about the palette when
+ * it was only ever a fact about where this guard had looked, and the operator
+ * reported the result -- "the bullets and numbers in the response lists are
+ * too faint".
+ *
+ * SO THE MARKERS ARE NOW UNDER MEASUREMENT, and not by adding their two tokens
+ * to a list -- they were both already on it, which is exactly why nothing
+ * failed. Two things were added instead. `carries each list marker at the
+ * floor its own kind of mark owes` records the decision and the two DIFFERENT
+ * floors a number and a bullet answer to; `never routes a list marker through
+ * an ink it does not measure` holds the rule, so a marker pointed back at
+ * `ink-ghost` reddens here whichever file does it.
+ *
+ * NEITHER OF THOSE PROVES A GLYPH IS PAINTED, and this file is not the place
+ * that can. `e2e/pane-colour-shots.mjs` reads
+ * `getComputedStyle(li, '::marker').color` off a real item of a real list in a
+ * browser; that is the load-bearing guard for the fix, and the comment on the
+ * second test below records the mutation that proved it has to be.
  *
  * A guard that asserts a ground nothing renders on is a guard that gets
  * deleted, so each ground below is one some component really paints.
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { FILE_ROW_INKS } from '../../src/renderer/panels/files-icons.js';
+import { ICON_TONE_INK, ICON_TONES } from '../../src/renderer/panels/icon-value.js';
+import { PALETTE_TEMPLATES, templatePalette } from '../../src/renderer/prefs/palette-templates.js';
 import { contrast } from '../support/contrast.js';
+import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
 const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
 
 /**
- * The text between the braces of the rule whose selector is `selector`. The
- * selector is matched at the start of a line, so the prose in the file's header
- * comment — which names both of these selectors — is not mistaken for the rule.
+ * Every `::marker` rule the renderer writes, and the ink token each points at.
+ *
+ * BOTH SPELLINGS, because the two that exist are written differently and a
+ * regex that knew only one would go quiet on the other: Tailwind's `marker:`
+ * variant, and the arbitrary `[&>li::marker]:` one `DetailPanel.tsx` uses so a
+ * list's own markers can be coloured without the rule reaching down into a
+ * nested list's.
+ *
+ * THIS IS NOT THE BANNED SHAPE, and the distinction is the one
+ * `ink-ghost-sites.test.ts` already draws. The standing lesson is that a
+ * content scan must not stand in for a rendered measurement. Here the scan
+ * answers "WHICH TOKEN does a marker name" -- a fact about the source text,
+ * which the source text is direct evidence of -- and then hands that token to
+ * the ratio maths below. What the glyph ACTUALLY PAINTS is measured in a real
+ * browser by `e2e/pane-colour-shots.mjs`, on a real `li::marker`, because a
+ * rule that matched nothing would pass this scan.
  */
-function ruleBody(css: string, selector: string): string {
-  const at = new RegExp(`^${selector.replace('.', '\\.')}\\s*\\{`, 'm').exec(css);
-  if (!at) throw new Error(`no rule for ${selector}`);
-  const open = css.indexOf('{', at.index);
-  let depth = 0;
-  for (let i = open; i < css.length; i += 1) {
-    if (css[i] === '{') depth += 1;
-    else if (css[i] === '}') {
-      depth -= 1;
-      if (depth === 0) return css.slice(open + 1, i);
-    }
-  }
-  throw new Error(`unbalanced braces after ${selector}`);
-}
+const MARKER_INK = /(?:\bmarker:|::marker\]:)text-([a-z0-9-]+)/g;
 
-/** Every `--vam-*: <value>;` declaration in a block, by name. */
-function tokens(block: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const m of block.matchAll(/(--vam-[a-z0-9-]+):\s*([^;]+);/g)) {
-    out.set(m[1] as string, (m[2] as string).trim());
+/**
+ * The file tree's glyph inks, as TOKENS, read from the module that paints them.
+ *
+ * `FILE_ROW_INKS` is Tailwind utilities (`text-syn-string`); this file measures
+ * CSS custom properties (`--vam-syn-string`). The two are the same name either
+ * side of one prefix, and turning one into the other here is what stops this
+ * guard from being a second, remembered copy of a list that lives elsewhere —
+ * which is precisely what it was, and what a mutation caught.
+ */
+const TREE_GLYPH_INKS = FILE_ROW_INKS.map((utility) => `--vam-${utility.replace(/^text-/, '')}`);
+
+/**
+ * The eight icon tones, as TOKENS, read from the module the picker paints with.
+ *
+ * Same bridge as `TREE_GLYPH_INKS` above, and for the same reason recorded
+ * there: the tree's inks were a typed second copy until a mutation showed that
+ * repointing a family in the module reddened nothing. `icon-value.tsx` is the
+ * only place the eight names exist; this turns each one's Tailwind utility
+ * into the custom property it resolves to.
+ */
+const ICON_TONE_TOKENS = ICON_TONES.map(
+  (tone) => `--vam-${ICON_TONE_INK[tone].replace(/^text-/, '')}`,
+);
+
+/**
+ * THE FOUR FILLS A CHOSEN ICON IS REALLY DRAWN ON.
+ *
+ * A glyph is not in one place. `SessionList` draws the group's and the
+ * project's on the sidebar column; the tab strip draws the session's on the
+ * pane behind an inactive tab and on `ground`, which the active tab fills
+ * itself; and the picker draws all twenty-four of them, plus the eight
+ * swatches, on the panel its shell is made of.
+ *
+ * `sidebar` and `pane` HOLD THE SAME VALUE TODAY and are both listed anyway,
+ * which is the argument `TEXT_GROUNDS` already makes about `--vam-pane`: the
+ * two were split so an operator could move one without the other, and a guard
+ * that measured only one would go quiet the day they did.
+ */
+const ICON_GROUNDS = ['--vam-sidebar', '--vam-pane', '--vam-ground', '--vam-panel'] as const;
+
+const RENDERER_DIR = resolve(process.cwd(), 'src/renderer');
+
+/**
+ * The renderer's own `.ts`/`.tsx` files. A local walk rather than a shared
+ * helper: `ink-ghost-sites.test.ts` sweeps all of `src/` asking who USES one
+ * token, this asks which inks the markers name, and the two corpora are
+ * different questions that happen to need the same three lines.
+ */
+function rendererSources(dir: string = RENDERER_DIR): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) out.push(...rendererSources(full));
+    else if (['.ts', '.tsx'].includes(extname(e.name))) out.push(full);
   }
   return out;
 }
 
-const THEMES = [
-  { name: 'dark', selector: ':root' },
-  { name: 'light', selector: 'html.light' },
-] as const;
-
 /** Text grounds: every surface fill a component paints `--vam-ink-*` text on. */
 const TEXT_GROUNDS = [
-  '--vam-canvas',
+  '--vam-ground',
   '--vam-sunken',
   '--vam-panel',
   '--vam-header',
   '--vam-sidebar',
+  // The detail pane's own fill, split off `sidebar` when the operator asked
+  // for the two settings to come apart. It starts on the same value, which is
+  // exactly why it belongs here rather than being taken on trust: the two are
+  // free to diverge now, and every line of prose in the right-hand pane is
+  // painted on this one.
+  '--vam-pane',
+  // The fill of a card sitting ON the pane or the sidebar, split off `panel`
+  // when the operator reported black patches a second time. It carries
+  // captions, key hints, provider names and every menu row in the sidebar's
+  // popovers, so it owes 1.4.3 like the rest -- and it is the ground that
+  // BOUNDS its own value whenever it climbs: at #2f2f2f `ink-quiet` measured
+  // 4.526:1 and one step further (#303030) 4.462:1, which fails — so while the
+  // card was climbing it stopped one rung under that ceiling rather than
+  // lifting further off the pane. The ceiling is a function of the INK and
+  // moves with it: it was #272727 while `ink-quiet` was #8d8d8d, and the
+  // second dark lift carried that ink to #969696, which is what bought the
+  // card a real step off the pane (2.95 -> 3.30 L*, `dark-lift.test.ts`).
+  //
+  // THE CARD IS NO LONGER NEAR THAT CEILING. The fourth dark pass took the
+  // whole ladder DOWN about 4 L* (`styles.css`'s own header), so at #393939
+  // the quiet inks read 5.325:1 here where they read 4.634:1 — what holds the
+  // card in place now is the ladder either side of it, not WCAG. The
+  // reasoning above is kept rather than deleted because it binds again the
+  // moment anything walks this fill back up.
+  '--vam-card',
 ] as const;
+
+/**
+ * `--vam-in-bubble` IS DELIBERATELY NOT A TEXT GROUND, and the omission is the
+ * interesting half.
+ *
+ * It carries exactly one ink -- `--vam-ink`, the prompt's own paragraph in
+ * `DetailPanel.tsx` (raised from `--vam-ink-dim` at the operator's own
+ * separate ask for a lighter prompt) -- which measures 6.887:1 on it in dark
+ * and 17.167:1 in light. Listing it above would demand all nine text tokens,
+ * and now most of them fail on the dark fill: dropping the bubble's hue this
+ * round moved every status colour's reading on it at once. Only `--vam-ink`
+ * and `--vam-ink-dim` (4.819:1) clear 4.5:1 there; `--vam-running` scrapes
+ * past at 4.627:1; `--vam-ink-faint`/`--vam-ink-quiet` (3.718:1),
+ * `--vam-waiting` (3.754:1), `--vam-idle` (3.801:1), `--vam-done` (3.830:1)
+ * and `--vam-failed` (3.827:1) do not. None of the five failing ones is ever
+ * painted there -- the bubble carries exactly `--vam-ink` and nothing else --
+ * so the omission still costs nothing, and is wider now only because the
+ * fill's own hue is gone, not because the bubble itself changed shape.
+ *
+ * So the one ink that exists is asserted, in `surface-elevation.test.ts`, and
+ * the ones that do not exist are PREVENTED rather than measured: the e2e
+ * guard reads the colour the bubble's paragraph is really painted with and
+ * holds it to 4.5:1, so an edit that reaches for a quieter grey fails there.
+ */
+
+/**
+ * The composer's three mode hues, and the two fills the chip behind one has.
+ *
+ * Hoisted out of the test that measures them because the template sweep at the
+ * bottom of this file asks the same question of the same list against fills a
+ * preset supplies, and two copies of one list is the drift this file has
+ * already been caught by twice (`TREE_GLYPH_INKS`, `ICON_TONE_TOKENS`).
+ */
+const MODE_TOKENS = ['--vam-mode-auto', '--vam-mode-manual', '--vam-mode-plan'] as const;
+const MODE_GROUNDS = ['--vam-card', '--vam-line-strong'] as const;
+
+/** The three fills a file-tree row can have under its glyph. */
+const TREE_GLYPH_FILLS = ['--vam-panel', '--vam-raised', '--vam-line-strong'] as const;
 
 /** Tokens that carry body text and therefore owe WCAG 1.4.3's 4.5:1. */
 const TEXT_TOKENS = [
@@ -89,6 +228,7 @@ const TEXT_TOKENS = [
   '--vam-ink-quiet',
   '--vam-running',
   '--vam-waiting',
+  '--vam-idle',
   '--vam-done',
   '--vam-failed',
 ] as const;
@@ -125,9 +265,9 @@ describe('token contrast, per theme', () => {
         const pairs = TEXT_TOKENS.flatMap((token) =>
           TEXT_GROUNDS.map((ground) => [token, ground] as const),
         );
-        // 8 tokens x 5 grounds. The literal is the point: it is what makes
+        // 9 tokens x 7 grounds. The literal is the point: it is what makes
         // deleting a row from either list a failure rather than a quieter pass.
-        expect(measure(pairs, 4.5)).toEqual({ pairs: 40, failing: [] });
+        expect(measure(pairs, 4.5)).toEqual({ pairs: 63, failing: [] });
       });
 
       it('reads the waiting amber against its own tint and wash', () => {
@@ -141,16 +281,14 @@ describe('token contrast, per theme', () => {
         expect(measure(pairs, 4.5)).toEqual({ pairs: 2, failing: [] });
       });
 
-      it('marks the cursor at 3:1 against the canvas and against a grid dot', () => {
+      it('marks the cursor at 3:1 against the ground', () => {
         // A non-text indicator owes 3:1 (WCAG 1.4.11), and the ring is the only
-        // thing that says which node the cursor is on — the card border does not
-        // vary with focus and the sidebar highlights the SESSION. The grid dot
-        // is in here because the ring is 1px and is drawn across the dots.
-        const pairs = [
-          ['--vam-cursor-ring', '--vam-canvas'],
-          ['--vam-cursor-ring', '--vam-dots'],
-        ] as const;
-        expect(measure(pairs, 3)).toEqual({ pairs: 2, failing: [] });
+        // thing that says which row the cursor is on — the card border does not
+        // vary with focus and the sidebar highlights the SESSION. `--vam-dots`
+        // (the grid-dot token this pair used to also check) is gone with the
+        // canvas it was drawn on — 0.2 migration, A12.1 (epic.md decision 5).
+        const pairs = [['--vam-cursor-ring', '--vam-ground']] as const;
+        expect(measure(pairs, 3)).toEqual({ pairs: 1, failing: [] });
       });
 
       it('draws the segmented control border at 3:1 against the fill it encloses', () => {
@@ -161,6 +299,34 @@ describe('token contrast, per theme', () => {
           pairs: 1,
           failing: [],
         });
+      });
+
+      /**
+       * THE THREE MODE HUES, at the floor a GLYPH owes.
+       *
+       * The composer's mode icon paints one hue per mode (`DetailPanel.tsx`),
+       * at the operator's ask -- "the icon needs to be filled with colour (for
+       * example auto is yellow)". It is a non-text mark that carries
+       * information, so it owes WCAG 1.4.11's 3:1 rather than 1.4.3's 4.5:1.
+       * All six values in fact clear 4.5 on the resting chip as well, since
+       * each is a value the palette had already measured as TEXT somewhere --
+       * but 3 is the floor this control is actually held to, and asserting the
+       * floor it owes is what keeps the number honest when a hue moves.
+       *
+       * TWO GROUNDS, because the chip behind the glyph has two states. At rest
+       * it is `bg-card`; under a pointer it is `bg-line-strong`, which is
+       * LIGHTER in dark and DARKER in light, so neither ground bounds the pair
+       * on its own and a guard that checked only the resting one would go
+       * quiet on the hover.
+       */
+      it('paints each mode glyph at 3:1 on the chip it sits in, at rest and on hover', () => {
+        const pairs = MODE_TOKENS.flatMap((token) =>
+          MODE_GROUNDS.map((ground) => [token, ground] as const),
+        );
+        // 3 hues x 2 chip states. The literal is the point, as above: dropping
+        // a mode or a state from either list has to redden this, not quieten
+        // it.
+        expect(measure(pairs, 3)).toEqual({ pairs: 6, failing: [] });
       });
 
       it('draws the "New session" control border at 3:1 against the sidebar it sits on', () => {
@@ -174,6 +340,349 @@ describe('token contrast, per theme', () => {
           pairs: 1,
           failing: [],
         });
+      });
+
+      /**
+       * THE TWO LIST MARKERS, AT TWO DIFFERENT FLOORS, because they are two
+       * different kinds of thing and the previous answer treated them as one.
+       *
+       * A NUMBER IS CONTENT. "1." "2." "3." is how a reader refers to an item
+       * -- an agent's numbered steps are precisely the thing an operator
+       * counts, and "step 3 failed" is a sentence about the numeral. So it
+       * owes 1.4.3's 4.5:1 like any other text, and it takes `ink-dim`, the
+       * SAME ink as the item's own words. That is also `::marker`'s own
+       * initial value (`currentColor`), so the change at the call site is to
+       * stop overriding it rather than to invent a colour: a numeral quieter
+       * than the words it numbers is one the reader has to hunt for.
+       *
+       * A BULLET IS NOT. A disc carries no meaning of its own -- the `<ul>`,
+       * the indent and the gap between items already say "list", and nobody
+       * refers to "the third bullet" by its glyph. So it does not owe 4.5:1.
+       * What it does owe is 1.4.11's 3:1: it is a non-text mark a reader uses
+       * to find where each item begins, and `ink-ghost` (1.79:1 on the pane)
+       * never met that. It takes `ink-quiet`, which is the QUIETEST ink in the
+       * palette that clears 3:1 -- `styles.css` says at `--vam-ink-quiet` that
+       * there is no rung between `ghost` and `quiet` and refuses to invent a
+       * third grey -- so the bullet stays one weight under the body text it
+       * belongs to instead of out-shouting it.
+       */
+      it('carries each list marker at the floor its own kind of mark owes', () => {
+        expect(measure([['--vam-ink-dim', '--vam-pane']], 4.5)).toEqual({
+          pairs: 1,
+          failing: [],
+        });
+        expect(measure([['--vam-ink-quiet', '--vam-pane']], 3)).toEqual({
+          pairs: 1,
+          failing: [],
+        });
+      });
+
+      /**
+       * THE FILE TREE'S OWN GLYPHS, AND THE THIRD FILL THAT IS THE HARD ONE.
+       *
+       * `files-icons.tsx` draws a 12px picture before every row's name and
+       * gives four of its seven families a hue of their own. A glyph is a
+       * non-text mark, so the floor is 1.4.11's 3:1 rather than 1.4.3's 4.5 —
+       * but a tree ROW has three fills, not one, and only the first is
+       * obvious: the panel it sits on, `raised` while a pointer is over it,
+       * and `line-strong` under the keyboard cursor. The cursor's is by far
+       * the lightest, and it is exactly where a hue picked against the panel
+       * alone comes apart. `--vam-syn-comment` was the first candidate for the
+       * config family: 4.79 on the panel, 2.54 on the cursor row. It would
+       * have passed a one-ground check and been under the floor on the row the
+       * keyboard is actually sitting on, which is the row an operator looks at
+       * hardest. It is not in the palette below, and the test after this one
+       * records why rather than leaving the reason to this comment.
+       *
+       * THE INK LIST IS READ FROM `files-icons.tsx`, NOT SPELLED HERE, and
+       * that was a mutation finding rather than a design choice. With the five
+       * tokens typed out below, pointing the markdown family at
+       * `--vam-syn-comment` in BOTH the module and its own `FILE_ROW_INKS`
+       * reddened nothing at all: this file went on measuring the list it
+       * remembered. Two lists of the same thing is exactly the drift the
+       * module's own header argues against for the tree's hue, and the guard
+       * had it. `TREE_GLYPH_INKS` maps the Tailwind utility the module really
+       * paints (`text-syn-string`) to the token it resolves to
+       * (`--vam-syn-string`), which is the one-line bridge between a class
+       * name and a measurable colour.
+       *
+       * The literal `15` is still the point, the same way the `63` above is:
+       * five inks times three fills. Drop a fill from this list, or an ink
+       * from the module, and this reddens rather than passing more quietly.
+       */
+      /**
+       * THE EIGHT ICON TONES, AT THE FLOOR A GLYPH OWES — and the argument for
+       * which floor that is, because the two are a factor of 1.5 apart.
+       *
+       * A tone is painted on a LUCIDE PATH, never on text: `IconMark` gives it
+       * to an `<svg>` and to nothing else, and the emoji kind takes no tone at
+       * all precisely because a colour cannot reach it. So what is being
+       * measured is a graphical object that carries meaning — WCAG 1.4.11's
+       * 3:1 — and not body text under 1.4.3's 4.5:1. The glyph is also never
+       * the only thing saying which row this is: the project's name, the
+       * group's name and the session's title sit next to it in an ink this
+       * file already holds to 4.5. An icon whose colour an operator chose is
+       * decoration ON a label, not a label.
+       *
+       * ASSERTING THE FLOOR IT OWES RATHER THAN THE ONE IT HAPPENS TO CLEAR is
+       * the same decision the mode glyphs record above. Measured, the worst
+       * ground is `sidebar`/`pane` in both themes: dark runs 5.33 (red) to
+       * 8.83 (yellow), light 4.25 (yellow) to 6.03 (purple). Five of the eight
+       * clear 4.5 in light as well and three do not — orange 4.47, green 4.33,
+       * yellow 4.25 — and pinning the test at 4.5 would be pinning a margin
+       * nobody designed for, so that a hue moved for a reason would fail here
+       * for none.
+       *
+       * 8 tones x 4 fills. The literal is the point, as everywhere else in
+       * this file: dropping a tone from the module or a fill from the list has
+       * to redden this rather than quieten it.
+       */
+      it('paints every icon tone at 3:1 on each fill a chosen glyph is drawn on', () => {
+        const pairs = ICON_TONE_TOKENS.flatMap((ink) =>
+          ICON_GROUNDS.map((fill) => [ink, fill] as const),
+        );
+        expect(measure(pairs, 3)).toEqual({ pairs: 32, failing: [] });
+      });
+
+      /**
+       * NEUTRAL IS NOT A NINTH HUE, and this is what holds it to that.
+       *
+       * The first tone in the row is "no colour": the value an unpainted glyph
+       * already has, so that picking it looks like clearing a choice rather
+       * than choosing grey. The placeholders it has to match — `Monitor` on a
+       * project heading, `Folder` on a group's — paint `text-ink-faint`, and
+       * nothing but this assertion stops the two drifting into two slightly
+       * different greys answering the same question.
+       *
+       * A LITERAL, NOT `var(--vam-ink-faint)`, for the reason `--color-pane`
+       * gives in `styles.css`: a token pointed at another token moves two
+       * things whenever one of them is set. The cost of the literal is exactly
+       * the drift this test removes.
+       */
+      it('keeps the neutral tone on the ink an unpainted glyph already wears', () => {
+        expect(hex('--vam-icon-neutral')).toBe(hex('--vam-ink-faint'));
+      });
+
+      it('draws every file-tree glyph at 3:1 on all three fills a row can have', () => {
+        const pairs = TREE_GLYPH_INKS.flatMap((ink) =>
+          TREE_GLYPH_FILLS.map((fill) => [ink, fill] as const),
+        );
+        expect(measure(pairs, 3)).toEqual({ pairs: 15, failing: [] });
+      });
+    });
+  }
+
+  /**
+   * THE ONE THAT WAS REJECTED, asserted as a rejection rather than deleted, so
+   * the next hand reaching for the quietest grey in the syntax palette for a
+   * tree glyph finds the measurement here instead of repeating the mistake.
+   *
+   * AND IT RUNS ONCE, ACROSS BOTH THEMES, because that is the shape of the
+   * finding. `--vam-syn-comment` on the cursor row reads 3.12 in light — over
+   * the floor, by a twentieth — and 2.54 in dark. Written inside the per-theme
+   * loop it failed in light and passed in dark, which is a true statement
+   * about one palette and a useless one about the token: an ink is only
+   * spendable if it clears in BOTH, and the number that decides that is the
+   * worse of the two.
+   */
+  it('records why syn-comment is not one of the file-tree glyph inks', () => {
+    const worst = Math.max(
+      ...THEMES.map((theme) => {
+        const t = tokens(ruleBody(CSS, theme.selector));
+        const comment = t.get('--vam-syn-comment');
+        const fill = t.get('--vam-line-strong');
+        expect(comment, `${theme.name} defines --vam-syn-comment`).toBeDefined();
+        expect(fill, `${theme.name} defines --vam-line-strong`).toBeDefined();
+        return -contrast(comment as string, fill as string);
+      }),
+    );
+    expect(THEMES.length).toBe(2);
+    expect(-worst).toBeLessThan(3);
+  });
+
+  /**
+   * A MARKER MAY NOT NAME AN INK THIS FILE DOES NOT MEASURE. Theme-independent,
+   * so it runs once: the question is about the renderer's class names, not
+   * about either palette.
+   *
+   * A NEGATIVE CLAIM ONLY, AND THAT SHAPE IS THE RESULT OF FALSIFYING IT. The
+   * first version also asserted that at least two marker rules EXIST -- "the
+   * renderer draws an ordered and an unordered list, so two rules is the
+   * floor". Falsified by moving both class strings out of the `ul`/`ol`
+   * attributes and into a comment on the same lines: nothing painted a marker
+   * rule at all, the bullet fell back to the body's own ink, and this file
+   * went GREEN on all thirteen tests. A regex cannot tell an attribute from
+   * prose, so an existence claim made this way is a claim about a sentence.
+   * That half is deleted rather than reworded.
+   *
+   * What is left cannot be satisfied by prose in the direction that matters: a
+   * marker naming an unmeasured ink reddens whether it is written as code or
+   * as a comment, so the only way to make this lie is to not write the thing
+   * that would fail. It is a cheap second line, and it is the line that fires
+   * on the exact regression that shipped -- a marker pointed at `ink-ghost`.
+   *
+   * EXISTENCE AND PAINT BELONG TO `e2e/pane-colour-shots.mjs`, which reads
+   * `getComputedStyle(li, '::marker').color` off a real item of a real list
+   * and holds each marker to its own floor. That guard caught the comment
+   * mutation this one missed.
+   */
+  it('never routes a list marker through an ink it does not measure', () => {
+    const files = rendererSources();
+    // A SWEEP THAT READ NO FILES PASSES THE FILTER BELOW. Four guards in this
+    // repo have gone green having examined zero of them.
+    expect(files.length).toBeGreaterThan(20);
+
+    const used: { file: string; ink: string }[] = [];
+    for (const file of files) {
+      for (const m of readFileSync(file, 'utf8').matchAll(MARKER_INK)) {
+        used.push({ file: file.slice(RENDERER_DIR.length + 1), ink: `--vam-${m[1]}` });
+      }
+    }
+    expect(
+      used.filter((u) => !TEXT_TOKENS.includes(u.ink as (typeof TEXT_TOKENS)[number])),
+    ).toEqual([]);
+  });
+});
+
+/**
+ * THE SAME FLOORS, AGAINST THE FILLS A COLOUR TEMPLATE PUTS THERE INSTEAD.
+ *
+ * Everything above reads `:root` and `html.light` and stops there, which was a
+ * complete account of vam's palette right up until the appearance settings
+ * grew a row of presets. A template REPLACES five of the fills this file calls
+ * grounds -- `panel`, `sidebar`, `pane`, `raised`, `card` -- and the tokens
+ * drawn ON them are mostly ones it does not set and cannot see: the eight icon
+ * tones, the three mode hues, the file tree's five glyph inks, the quiet ink a
+ * control's border is drawn in. "The ground a glyph is drawn on" is therefore
+ * not one value per theme but eight, and this file was measuring one of them.
+ *
+ * SO THE CORPUS IS THE PALETTE AN OPERATOR CAN ACTUALLY BE LOOKING AT. Each
+ * template's overrides are laid over the stylesheet's own map and the families
+ * re-measured on the result -- which also means a token a template does NOT
+ * set (`line-strong` under the keyboard cursor, `ground` behind a tab) keeps
+ * the stylesheet's value in the pair, because that is what would really be
+ * painted.
+ *
+ * WHY THE 4.5:1 TEXT SWEEP IS NOT ALSO HERE, and it is a split rather than a
+ * gap: `palette-templates.test.ts` owns it, 630 pairs of it, and states the
+ * claim in the form that file needs -- against a TYPED record of the inks each
+ * template was chosen under, so a stylesheet that moves one has to come and
+ * re-derive rather than silently agreeing. The floors in this file are the
+ * non-text ones (WCAG 1.4.11's 3:1), and nothing anywhere was asking them of a
+ * preset's surfaces.
+ *
+ * THE TEMPLATES ARE READ FROM THE MODULE, never listed here, for the reason
+ * `TREE_GLYPH_INKS` above records: a remembered list goes quiet exactly when
+ * somebody adds the thing it was supposed to cover.
+ */
+describe('non-text floors, on every colour template', () => {
+  const TINTED = PALETTE_TEMPLATES.filter((t) => t.kind === 'values');
+
+  it('has templates to measure at all', () => {
+    // A SWEEP OVER AN EMPTY ROW passes every assertion below by having nothing
+    // to compare. Four guards in this repo have gone green on an empty corpus.
+    expect(TINTED.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const theme of THEMES) {
+    const base = tokens(ruleBody(CSS, theme.selector));
+
+    describe(theme.name, () => {
+      it('holds every non-text mark to 3:1 on the fills each template paints under it', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const template of TINTED) {
+          const values = templatePalette(template.id, theme.name);
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${template.id} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          const marks = [
+            // A chosen icon's glyph, on all four fills one is drawn on.
+            ...ICON_TONE_TOKENS.flatMap((ink) => ICON_GROUNDS.map((fill) => [ink, fill] as const)),
+            // The composer's mode glyph, at rest and under a pointer.
+            ...MODE_TOKENS.flatMap((ink) => MODE_GROUNDS.map((fill) => [ink, fill] as const)),
+            // The file tree's glyphs, on all three fills a row can have.
+            ...TREE_GLYPH_INKS.flatMap((ink) =>
+              TREE_GLYPH_FILLS.map((fill) => [ink, fill] as const),
+            ),
+            // The "New session" border, on the sidebar a template repaints.
+            ['--vam-ink-quiet', '--vam-sidebar'] as const,
+            // The bullet a reader finds each list item by, on the pane.
+            ['--vam-ink-quiet', '--vam-pane'] as const,
+            // THE ONE PAIR WHERE THE GROUND IS THE MARK AND NOT THE SURFACE,
+            // and the reason it is here is that a template can now write it.
+            // `Switch` paints the knob of a checked switch `bg-ground` on a
+            // `bg-ink-faint` track -- the fill inverts with the state so that
+            // "the dot is the thing you can see" either way. Every other
+            // measurement in this file reads an ink ON the ground; this one
+            // reads the ground as an ink, so it is the pair that moves in the
+            // OPPOSITE direction when a palette darkens the room. It is also
+            // the one that would catch a preset going the other way: at
+            // #8a8a8a the knob reads 1.592:1 on its track and at #ffffff
+            // 2.169:1, both under 1.4.11's 3, where black reads 9.683:1.
+            ['--vam-ground', '--vam-ink-faint'] as const,
+          ];
+          for (const [ink, ground] of marks) {
+            pairs += 1;
+            const ratio = contrast(hex(ink), hex(ground));
+            if (ratio < 3) {
+              failing.push(`${template.id}: ${ink} on ${ground} = ${ratio.toFixed(3)}`);
+            }
+          }
+        }
+        // 7 templates x 56 marks each: 8 tones x 4 fills, 3 modes x 2,
+        // 5 glyphs x 3, the two borders, and the switch knob. A LITERAL, not
+        // `TINTED.length * 56`: a count derived from the corpus shrinks with
+        // the corpus, so a template that quietly stopped being tinted would
+        // leave this sweep measuring six palettes and reporting a full house.
+        expect({ pairs, failing }).toEqual({ pairs: 392, failing: [] });
+      });
+
+      /**
+       * THE 63 TEXT PAIRS, AGAINST THE GROUNDS A TEMPLATE SUPPLIES.
+       *
+       * The sweep at the top of this file asks WCAG 1.4.3 of nine inks on
+       * seven grounds and answers it for the stylesheet. A template replaces
+       * five of those grounds outright and -- since a palette may write
+       * `--vam-ground` -- can replace a sixth, which is the one this pair list
+       * has always been weakest about: `ground` carries the code fence, the
+       * page behind the panes and the phone list, and it is now the token a
+       * high-contrast preset moves furthest.
+       *
+       * `palette-templates.test.ts` also sweeps text over template surfaces,
+       * and the two are not the same claim. That one measures against a TYPED
+       * record of the inks each template was chosen under, so a stylesheet
+       * that moves an ink reddens there and has to be re-derived; it covers
+       * the five surfaces a template sets. This one measures against whatever
+       * the stylesheet says TODAY, over all seven grounds including the two a
+       * template does not set -- so it answers "is this palette readable as
+       * the app is now", which is a question about the present rather than
+       * about the decision.
+       */
+      it('carries all 63 text pairs at 4.5:1 on the grounds each template supplies', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const template of TINTED) {
+          const values = templatePalette(template.id, theme.name);
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${template.id} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          for (const token of TEXT_TOKENS) {
+            for (const ground of TEXT_GROUNDS) {
+              pairs += 1;
+              const ratio = contrast(hex(token), hex(ground));
+              if (ratio < 4.5) {
+                failing.push(`${template.id}: ${token} on ${ground} = ${ratio.toFixed(3)}`);
+              }
+            }
+          }
+        }
+        // 7 templates x 9 inks x 7 grounds, as a literal for the reason above.
+        expect({ pairs, failing }).toEqual({ pairs: 441, failing: [] });
       });
     });
   }

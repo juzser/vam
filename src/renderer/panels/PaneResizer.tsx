@@ -18,19 +18,36 @@
  * (`test/canvas/topology-constraints.test.ts`) even though it is a disabling
  * form, because that scan only allows two exact spellings and this is not
  * one of them.
+ *
+ * Both of those decisions now live in `usePointerDrag` (`pane-drag.ts`),
+ * shared with `SplitResizer`, the handle on a split's own dividers. They are
+ * shared as CODE and not as prose: two handles that had each written the
+ * gesture out would be two places for an overlay to reappear in. What is NOT
+ * shared is the arithmetic below, which is specific to a two-column layout
+ * whose second width is derived from the first.
+ *
+ * AND THE CLASS LIST IS NOW SHARED FOR THE SAME REASON, which this file is the
+ * cautionary tale for. It used to claim that "Tailwind's preflight zeroes its
+ * default margin/border, so nothing here overrides that visually" — the margin
+ * half is true, the border half is not, and preflight's own `hr` rule hands
+ * the element a 1px `currentColor` top border back. That is the near-white
+ * hairline the operator found at the sidebar's top corner. The repair is
+ * `RESIZE_HANDLE_RESET` in `pane-drag.ts`, which argues it in full, and it is
+ * a constant rather than a sentence here because the two other handles had the
+ * identical defect and a sentence is what let all three keep it.
  */
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import {
   DETAIL_MAX,
   DETAIL_MIN,
-  type Layout,
   layoutWidths,
   PANE_RESIZE_STEP,
   type Pane,
   SIDEBAR_MAX,
   SIDEBAR_MIN,
 } from '../prefs/panes.js';
+import { RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 
 /** A Shift-held arrow press moves further than a bare one — the standard
  *  slider pattern (WAI-ARIA APG "Slider"), sized against the same step the
@@ -41,17 +58,14 @@ export type PaneResizerProps = {
   readonly pane: Pane;
   readonly ariaLabel: string;
   /**
-   * The layout being dragged in, and both stored widths — not this pane's
-   * rendered width and its sibling's.
+   * Both stored widths — not this pane's rendered width and its sibling's.
    *
-   * A drag is not "clamp this pane against a fixed sibling": in every layout
-   * where the canvas is not the main column the sibling is DERIVED from this
-   * pane, so a sibling held fixed for the drag is a sidebar that cannot move.
-   * The resizer therefore proposes a stored width and asks `layoutWidths` what
-   * that layout would render — the same call the canvas itself makes, so the
-   * handle cannot disagree with the columns it is moving.
+   * A drag is not "clamp this pane against a fixed sibling": the detail pane
+   * is DERIVED from the sidebar, so a sibling held fixed for the drag is a
+   * sidebar that cannot move. The resizer therefore proposes a stored width
+   * and asks `layoutWidths` what would render — the same call the shell
+   * itself makes, so the handle cannot disagree with the columns it moves.
    */
-  readonly layout: Layout;
   readonly stored: { readonly sidebar: number; readonly detail: number };
   readonly viewportWidth: number;
   /** Fired on every pointermove while dragging, with the arithmetic result. */
@@ -71,11 +85,9 @@ const SIDE: Readonly<Record<Pane, string>> = {
 };
 
 export function PaneResizer(props: PaneResizerProps) {
-  const { pane, ariaLabel, layout, stored, viewportWidth, onChange, onCommit } = props;
-  const width = layoutWidths(layout, stored, viewportWidth)[pane];
+  const { pane, ariaLabel, stored, viewportWidth, onChange, onCommit } = props;
+  const width = layoutWidths(stored, viewportWidth)[pane];
   const bounds = BOUNDS[pane];
-  const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const proposedWidth = useCallback(
     (clientX: number, startX: number, startWidth: number) => {
@@ -84,37 +96,22 @@ export function PaneResizer(props: PaneResizerProps) {
       // it; the detail pane's handle sits on its left edge, so dragging left
       // (a negative delta) is what grows it.
       const raw = pane === 'sidebar' ? startWidth + delta : startWidth - delta;
-      return layoutWidths(layout, { ...stored, [pane]: raw }, viewportWidth)[pane];
+      return layoutWidths({ ...stored, [pane]: raw }, viewportWidth)[pane];
     },
-    [pane, layout, stored, viewportWidth],
+    [pane, stored, viewportWidth],
   );
 
-  function onPointerDown(event: React.PointerEvent<HTMLHRElement>) {
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { startX: event.clientX, startWidth: width };
-    setDragging(true);
-  }
-
-  function onPointerMove(event: React.PointerEvent<HTMLHRElement>) {
-    const drag = dragRef.current;
-    if (drag === null) {
-      return;
-    }
-    onChange(pane, proposedWidth(event.clientX, drag.startX, drag.startWidth));
-  }
-
-  function onPointerUp(event: React.PointerEvent<HTMLHRElement>) {
-    const drag = dragRef.current;
-    if (drag === null) {
-      return;
-    }
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    const next = proposedWidth(event.clientX, drag.startX, drag.startWidth);
-    dragRef.current = null;
-    setDragging(false);
-    onCommit(pane, next);
-  }
+  // The gesture is `usePointerDrag`'s; what it measures at pointerdown is this
+  // handle's own rendered width, and every callback is handed that width plus
+  // how far the pointer has travelled — the same two numbers `proposedWidth`
+  // has always taken, now supplied by one shared gesture rather than by three
+  // hand-written handlers.
+  const { dragging, handlers } = usePointerDrag<HTMLHRElement, number>({
+    axis: 'x',
+    onStart: () => width,
+    onMove: (startWidth, delta) => onChange(pane, proposedWidth(delta, 0, startWidth)),
+    onEnd: (startWidth, delta) => onCommit(pane, proposedWidth(delta, 0, startWidth)),
+  });
 
   /**
    * The keyboard half of the ARIA contract this element already claims —
@@ -137,8 +134,21 @@ export function PaneResizer(props: PaneResizerProps) {
    * A key press COMMITS immediately, with no drag-shaped `onChange` phase:
    * there is nothing transient to preview, so the width is persisted the way
    * `onPointerUp` persists a drag's final position.
+   *
+   * Meta/Ctrl/Alt leave before the switch, because none of them is this
+   * handle's key: its bindings are the bare arrows plus Home/End, with Shift
+   * as the magnitude modifier and nothing else. Matching a modified arrow
+   * against an unmodified case would not just resize by mistake — the
+   * `preventDefault()` below is exactly what the keyboard grammar's window
+   * handler tests (`Canvas.tsx`, `if (event.defaultPrevented) return`), which
+   * is the mechanism by which a widget declines what it does not own so the
+   * event still reaches whoever does. Claiming those keys would swallow them
+   * for as long as focus sits here.
    */
   function onKeyDown(event: React.KeyboardEvent<HTMLHRElement>) {
+    if (event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
     switch (event.key) {
       case 'ArrowLeft':
       case 'ArrowRight': {
@@ -150,17 +160,11 @@ export function PaneResizer(props: PaneResizerProps) {
       }
       case 'Home':
         event.preventDefault();
-        onCommit(
-          pane,
-          layoutWidths(layout, { ...stored, [pane]: bounds.min }, viewportWidth)[pane],
-        );
+        onCommit(pane, layoutWidths({ ...stored, [pane]: bounds.min }, viewportWidth)[pane]);
         return;
       case 'End':
         event.preventDefault();
-        onCommit(
-          pane,
-          layoutWidths(layout, { ...stored, [pane]: bounds.max }, viewportWidth)[pane],
-        );
+        onCommit(pane, layoutWidths({ ...stored, [pane]: bounds.max }, viewportWidth)[pane]);
         return;
       default:
         return;
@@ -170,8 +174,8 @@ export function PaneResizer(props: PaneResizerProps) {
   return (
     // A native <hr> already carries the `separator` role, which is what
     // biome's a11y/useSemanticElements rule asks for in place of a bare
-    // `role="separator"` div — Tailwind's preflight zeroes its default
-    // margin/border, so nothing here overrides that visually.
+    // `role="separator"` div. Preflight zeroes its margin and then hands it a
+    // 1px top border back; `RESIZE_HANDLE_RESET` is what takes that away.
     <hr
       aria-orientation="vertical"
       aria-label={ariaLabel}
@@ -181,15 +185,13 @@ export function PaneResizer(props: PaneResizerProps) {
       tabIndex={0}
       data-pane-resize-handle={pane}
       className={[
-        'absolute top-0 z-10 h-full w-1 select-none',
+        `absolute top-0 z-10 h-full w-1 ${RESIZE_HANDLE_RESET}`,
         SIDE[pane],
         'cursor-col-resize',
         dragging ? 'bg-line-loudest' : 'bg-transparent hover:bg-line-loudest',
       ].join(' ')}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
       onKeyDown={onKeyDown}
+      {...handlers}
     />
   );
 }

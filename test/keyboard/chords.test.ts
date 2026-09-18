@@ -76,7 +76,7 @@ describe('resolveChord — single keys', () => {
 });
 
 describe('resolveChord — two-key chords', () => {
-  it('gg goes to the first node', () => {
+  it('gg lands on the first session in the sidebar', () => {
     expect(type(['g', 'g']).actions).toEqual([{ kind: 'first' }]);
   });
 
@@ -192,7 +192,9 @@ describe('every old binding still resolves the same way (AC-5b)', () => {
     // single keys
     expect(type(['i']).actions).toEqual([{ kind: 'prompt' }]);
     expect(type(['I']).actions).toEqual([{ kind: 'focusAction' }]);
-    expect(type(['H']).actions).toEqual([{ kind: 'focusList' }]);
+    // `H` moved to `Mod-Shift-h` at the operator's request -- see the block
+    // further down. The rest of this sweep is unchanged.
+    expect(type(['Mod-Shift-h']).actions).toEqual([{ kind: 'focusList' }]);
     expect(type(['r']).actions).toEqual([{ kind: 'rename' }]);
     expect(type(['s']).actions).toEqual([{ kind: 'icon' }]);
     expect(type(['x']).actions).toEqual([{ kind: 'close' }]);
@@ -237,33 +239,76 @@ describe('the new resize chords (AC-5c continued)', () => {
 });
 
 /**
- * ONE digit family, whose meaning follows the keyboard.
+ * A15.1 — split panes, spelled under `z` the way vim spells its own window
+ * commands: `Ctrl-w s`/`v` split, `Ctrl-w c` closes, `Ctrl-w w`/`W` cycle
+ * focus. One keystroke shorter here because `z` is already the prefix.
+ */
+describe('split-pane chords (A15.1) — zs/zv/zc/zw/zW', () => {
+  it('zs splits horizontally (a column of stacked panes)', () => {
+    expect(type(['z', 's']).actions).toEqual([{ kind: 'splitPane', orientation: 'column' }]);
+  });
+
+  it('zv splits vertically (a row of side-by-side panes)', () => {
+    expect(type(['z', 'v']).actions).toEqual([{ kind: 'splitPane', orientation: 'row' }]);
+  });
+
+  it('zc closes the focused split', () => {
+    expect(type(['z', 'c']).actions).toEqual([{ kind: 'closeSplit' }]);
+  });
+
+  it('zw and zW cycle focus forward and backward between splits', () => {
+    expect(type(['z', 'w']).actions).toEqual([{ kind: 'stepSplit', delta: 1 }]);
+    expect(type(['z', 'W']).actions).toEqual([{ kind: 'stepSplit', delta: -1 }]);
+  });
+
+  it('does not disturb z0, and z alone still just opens the prefix', () => {
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+    const pending = type(['z']);
+    expect(pending.actions).toEqual([]);
+    expect(pending.state.pending).toBe('z');
+  });
+
+  it('the bare letters s, v, c, w and W stay unbound at the top level', () => {
+    // Splitting lives entirely under the `z` prefix — a bare `s` must keep
+    // meaning `icon` (SINGLE), and `v`/`c`/`w`/`W` must keep meaning nothing,
+    // exactly as before this change.
+    expect(type(['s']).actions).toEqual([{ kind: 'icon' }]);
+    expect(type(['v']).actions).toEqual([]);
+    expect(type(['c']).actions).toEqual([]);
+    expect(type(['w']).actions).toEqual([]);
+    expect(type(['W']).actions).toEqual([]);
+  });
+});
+
+/**
+ * ONE digit family, with ONE meaning: the session tab at that position.
  *
- * Three arrangements in three changes, so this one is written as a RULE
- * rather than as a table: `Mod-<digit>` is a POSITION, in whatever the
- * keyboard is pointed at. The sidebar has the keyboard, it is a session; the
- * response pane has it, it is a tab. The grammar therefore reports the
- * position and nothing else — which pane is looking is not something a pure
- * reducer over a one-key memory can know, and `Canvas` already owns that
- * state as `pane`.
+ * Four arrangements in four changes. The third made the digit follow the
+ * keyboard — a session in the sidebar, a view in the response pane — and the
+ * fourth took that back at the operator's request, because Cmd+number is
+ * "switch tab" in every browser and editor and a key that means two things is
+ * a key you have to think about. `chords.ts` argues it; what this file holds
+ * is the grammar's half: the action reports a POSITION and nothing else, and
+ * which strip that position counts in stays `Canvas`'s to know.
  *
- * What killed the previous arrangement is not taste: `Cmd+Shift+3`, `4` and
+ * What killed the FIRST two arrangements is not taste: `Cmd+Shift+3`, `4` and
  * `5` are macOS screenshot hotkeys, matched by the OS before any Electron
  * window sees the keydown (verified on this machine in
  * `com.apple.symbolichotkeys`, entries 28-31 and 184, all enabled, with
  * modifier mask 0x120000 = shift|command over keycodes for 3, 4 and 5). Any
- * binding placed there is unreachable, whichever family holds it.
+ * binding placed there is unreachable, whichever family holds it — so the row
+ * stays empty in this arrangement too.
  */
-describe('Mod-digit is a position, and the pane decides what it is a position in', () => {
+describe('Mod-digit selects a tab, and the grammar carries only the digit', () => {
   it('reports the position, 1-based, for every digit the row offers', () => {
-    expect(type(['Mod-1']).actions).toEqual([{ kind: 'position', digit: 1 }]);
-    expect(type(['Mod-4']).actions).toEqual([{ kind: 'position', digit: 4 }]);
-    expect(type(['Mod-9']).actions).toEqual([{ kind: 'position', digit: 9 }]);
+    expect(type(['Mod-1']).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
+    expect(type(['Mod-4']).actions).toEqual([{ kind: 'selectTab', digit: 4 }]);
+    expect(type(['Mod-9']).actions).toEqual([{ kind: 'selectTab', digit: 9 }]);
   });
 
   it('carries no pane of its own — the grammar stays a pure reducer', () => {
-    // The same keystroke yields the same action whatever is on screen; the
-    // fork lives in `Canvas`, which is the one place that knows `pane`.
+    // The same keystroke yields the same action whatever is on screen; WHICH
+    // strip it counts lives in `Canvas`, the one place that knows the panes.
     expect(type(['Mod-2']).actions).toEqual(type(['Mod-2']).actions);
     expect(Object.keys(type(['Mod-2']).actions[0] as object).sort()).toEqual(['digit', 'kind']);
   });
@@ -274,14 +319,43 @@ describe('Mod-digit is a position, and the pane decides what it is a position in
     }
   });
 
-  it('leaves Mod-0 unbound — z0 already owns the zero', () => {
-    expect(type(['Mod-0']).actions).toEqual([]);
+  /**
+   * `Mod-0` was held back twice: Electron's default View menu claimed
+   * `CommandOrControl+0` for Actual Size, and `z0` was said to "own the zero".
+   * The first is gone (vam builds its own menu and ships no `viewMenu`); the
+   * second was never true of the SPELLING — `z0` is a chord whose second key
+   * is a bare `0`, and `normalizeKey` writes a modified digit `Mod-0`. Both
+   * are asserted here, together, because the risk is that binding one breaks
+   * the other.
+   */
+  it('binds Mod-0 to the sidebar without disturbing z0', () => {
+    expect(type(['Mod-0']).actions).toEqual([{ kind: 'focusList' }]);
     expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+    // And in either order, so neither one leaves the chord machine armed.
+    expect(type(['Mod-0', 'z', '0']).actions).toEqual([
+      { kind: 'focusList' },
+      { kind: 'resetPanes' },
+    ]);
   });
 
-  it('a bare digit stays unbound, so a stray 7 does not move the cursor', () => {
-    expect(type(['1']).actions).toEqual([]);
-    expect(type(['9']).actions).toEqual([]);
+  /**
+   * A BARE DIGIT PICKS A VIEW NOW — the operator asked for a one-key spelling
+   * of `Ctrl-Alt-<digit>`, "only in Select mode". This case used to assert the
+   * row was empty; it is kept, inverted, because the neighbouring fact is what
+   * it was really protecting: whatever the bare row means, it must not disturb
+   * the zero, which `z0` and `Mod-0` already spell two other ways.
+   */
+  it('a bare digit picks a view, and the zero is still nobody but z0’s', () => {
+    expect(type(['1']).actions).toEqual([{ kind: 'pickView', digit: 1 }]);
+    expect(type(['9']).actions).toEqual([{ kind: 'pickView', digit: 9 }]);
+    expect(type(['0']).actions).toEqual([]);
+    expect(type(['z', '0']).actions).toEqual([{ kind: 'resetPanes' }]);
+    // And a digit does not arm the chord machine, so `1` then `g` then `g` is
+    // still a view and then a jump to the top.
+    expect(type(['1', 'g', 'g']).actions).toEqual([
+      { kind: 'pickView', digit: 1 },
+      { kind: 'first' },
+    ]);
   });
 
   /**
@@ -294,9 +368,89 @@ describe('Mod-digit is a position, and the pane decides what it is a position in
   it('resolves from a real keydown, spelled by position rather than by character', () => {
     const azerty = normalizeKey({ key: '&', code: 'Digit1', metaKey: true });
     expect(azerty).toBe('Mod-1');
-    expect(type([azerty as string]).actions).toEqual([{ kind: 'position', digit: 1 }]);
-    const us = normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true });
-    expect(type([us as string]).actions).toEqual([{ kind: 'position', digit: 1 }]);
+    expect(type([azerty as string]).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
+    // THE PLATFORM IS PASSED, NOT DETECTED. This used to press Ctrl+1 and
+    // expect the same action, back when `Mod-` folded Ctrl and Cmd together;
+    // Ctrl is the command modifier on Linux and Windows and is bound to
+    // nothing on macOS now (`digitChord`), so leaving the flag ambient would
+    // assert one grammar on the operator's Mac and a different one on the
+    // ubuntu runner while reading identically in both.
+    const us = normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true }, false);
+    expect(type([us as string]).actions).toEqual([{ kind: 'selectTab', digit: 1 }]);
+    expect(normalizeKey({ key: '1', code: 'Digit1', ctrlKey: true }, true)).toBe('Ctrl-1');
+    // And zero the same way: `à` sits at `Digit0` on AZERTY.
+    expect(normalizeKey({ key: 'à', code: 'Digit0', metaKey: true })).toBe('Mod-0');
+  });
+});
+
+/**
+ * `Mod-t` and `Mod-n` are two actions, and the grammar must keep them two.
+ * Folding them would make one key's refusal the other's, which is the whole
+ * distinction (`newTab` in `chords.ts`).
+ */
+describe('Mod-t is its own action, beside Mod-n', () => {
+  it('resolves to newTab, while o and Mod-n stay newSession', () => {
+    expect(type(['Mod-t']).actions).toEqual([{ kind: 'newTab' }]);
+    expect(type(['Mod-n']).actions).toEqual([{ kind: 'newSession' }]);
+    expect(type(['o']).actions).toEqual([{ kind: 'newSession' }]);
+  });
+
+  it('leaves the `g` door alone — bare `t` is still gt second key', () => {
+    expect(type(['t']).actions).toEqual([]);
+    expect(type(['g', 't']).actions).toEqual([{ kind: 'project', delta: 1 }]);
+  });
+});
+
+describe('the way back to the session list is a chord the OS does not own', () => {
+  /**
+   * Operator: "move `H` (back to the session list) to Cmd+Shift+H, so it does
+   * not collide with the OS shortcut."
+   *
+   * THE COLLISION IS REAL AND IT IS ON THE OTHER SIDE OF THE MODIFIER. Cmd+H
+   * is macOS's Hide, claimed by `role: 'appMenu'` in `src/main/menu.ts`, and a
+   * native accelerator matches BEFORE the page sees the keydown -- so a vam
+   * binding there would be dead rather than merely contested. Cmd+Shift+H is
+   * free: nothing in vam's menu carries it, and macOS's own Cmd+Shift+H is
+   * Finder's Home folder, which is Finder's and not the system's.
+   *
+   * `Mod-0` is untouched. It is the head of the digit row -- the digits pick a
+   * tab, zero is the way out of the tabs -- and it answers the same act.
+   */
+  it('answers Cmd+Shift+H, spelled the way a real keydown arrives', () => {
+    const key = normalizeKey({ key: 'H', code: 'KeyH', metaKey: true, shiftKey: true });
+    expect(key).toBe('Mod-Shift-h');
+    expect(type([key as string]).actions).toEqual([{ kind: 'focusList' }]);
+  });
+
+  it('does not answer Cmd+H, which is the keystroke the operator is avoiding', () => {
+    expect(type(['Mod-h']).actions).toEqual([]);
+  });
+
+  it('no longer answers a bare H, which is what "change it" means', () => {
+    // The operator said CHANGE, not ADD. A bare letter left behind would keep
+    // the chord sheet advertising two ways to do one thing, one of which was
+    // the thing being moved away from.
+    expect(type(['H']).actions).toEqual([]);
+  });
+
+  it('keeps Mod-0 on the same act', () => {
+    expect(type(['Mod-0']).actions).toEqual([{ kind: 'focusList' }]);
+  });
+});
+
+describe('a new project is the keystroke it was always documented as', () => {
+  it('answers Cmd+Shift+P, now that the grammar can say so', () => {
+    // It always WAS Cmd+Shift+P to the operator: the table said `Mod-p` and
+    // the README explained that a modified letter folded its Shift away, so
+    // the two gestures were one. With the fold gone the spelling has to say
+    // which one it means, and it means the one that was asked for.
+    const key = normalizeKey({ key: 'P', code: 'KeyP', metaKey: true, shiftKey: true });
+    expect(key).toBe('Mod-Shift-p');
+    expect(type([key as string]).actions).toEqual([{ kind: 'newProject' }]);
+  });
+
+  it('leaves Cmd+P alone, which the browser build wants for printing', () => {
+    expect(type(['Mod-p']).actions).toEqual([]);
   });
 });
 
@@ -365,22 +519,99 @@ describe('normalizeKey — the digit row is a position, not a character', () => 
     );
   });
 
-  it('leaves shifted LETTERS folded, as the table comment requires', () => {
-    // Cmd-K and Cmd-Shift-K stay one gesture: `palette` is bound once.
-    expect(normalizeKey({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true })).toBe('Mod-k');
+  it('spells a shifted LETTER apart from the unshifted one, since the operator asked for one', () => {
+    // THIS USED TO GO THE OTHER WAY, and the reason it changed is an operator
+    // request: "move `back to session list` to Cmd+Shift+H, so it does not
+    // collide with the OS shortcut". Cmd+H IS an OS shortcut -- macOS's Hide,
+    // which `role: 'appMenu'` claims before the page ever sees the keydown --
+    // so a grammar that folded Shift away for letters could not express the
+    // one keystroke that avoids it: Cmd+Shift+H arrived spelled `Mod-h`,
+    // indistinguishable from the gesture macOS had already eaten.
+    //
+    // WHY THE TOKEN AND NOT THE CASE. The browser hands back `H`, so the case
+    // is already there -- and `shiftKey` is the more honest source: CapsLock
+    // also upper-cases a letter, and nobody means Cmd+Shift+H by pressing
+    // CapsLock and Cmd+H. The base stays lower-cased so one gesture still has
+    // exactly one spelling.
+    expect(normalizeKey({ key: 'H', code: 'KeyH', metaKey: true, shiftKey: true })).toBe(
+      'Mod-Shift-h',
+    );
+    expect(normalizeKey({ key: 'h', code: 'KeyH', metaKey: true })).toBe('Mod-h');
+    expect(normalizeKey({ key: 'K', code: 'KeyK', metaKey: true, shiftKey: true })).toBe(
+      'Mod-Shift-k',
+    );
     expect(normalizeKey({ key: 'k', code: 'KeyK', metaKey: true })).toBe('Mod-k');
   });
 
-  it('is unchanged for a digit typed with no modifier at all', () => {
-    // The `!` typeahead in the sidebar filter must keep receiving `!`.
-    expect(normalizeKey({ key: '!', code: 'Digit1', shiftKey: true })).toBe('!');
-    expect(normalizeKey({ key: '1', code: 'Digit1' })).toBe('1');
+  it('still gives a shifted CHARACTER no token, because the browser already applied it', () => {
+    // The half that does NOT change, and the distinction the whole rule turns
+    // on: `?` arrives as `?` whether or not you hold Shift to make it, so a
+    // token there would give one keystroke two spellings and only one of them
+    // would ever match. A LETTER is the other case -- the browser folds Shift
+    // into the CASE, and lower-casing it (which this still does) throws that
+    // information away unless the token carries it.
+    expect(normalizeKey({ key: '?', metaKey: true, shiftKey: true })).toBe('Mod-?');
+    expect(normalizeKey({ key: '<', metaKey: true, shiftKey: true })).toBe('Mod-<');
   });
 
-  it('spells Alt and Mod-Alt over the position too', () => {
-    // macOS Alt+1 prints `\u00a1`; the position is still Digit1.
-    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true })).toBe('Alt-1');
-    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, metaKey: true })).toBe(
+  it("decides a bare letter's case from shiftKey, not from event.key", () => {
+    // `H`, `F` and the rest of the bare shifted letters are their own
+    // bindings, and they are matched by character -- but the character comes
+    // from `shiftKey`, not from `event.key` unchanged. A REAL Shift+H (`key:
+    // 'H', shiftKey: true`) answers `H`; a bare `h` with no Shift answers `h`.
+    // What is deliberately NOT tested here is `{ key: 'H', shiftKey: false }`
+    // -- that object is what CapsLock produces for a bare `h` press, and it
+    // must answer `h`, the opposite of leaving `event.key` untouched. See
+    // `capslock.test.ts` for that case, argued at length.
+    expect(normalizeKey({ key: 'H', code: 'KeyH', shiftKey: true })).toBe('H');
+    expect(normalizeKey({ key: 'h', code: 'KeyH' })).toBe('h');
+  });
+
+  /**
+   * THE UNMODIFIED DIGIT ROW IS A POSITION TOO NOW, and this case is kept
+   * inverted rather than deleted because its stated worry is still the right
+   * worry — it just has a different answer.
+   *
+   * WHAT IT SAID: a bare digit was unbound, so `normalizeKey` could hand back
+   * `event.key` untouched and the `!` typeahead would keep receiving `!`.
+   *
+   * WHAT CHANGED: a bare digit is `pickView`'s second spelling now
+   * (`SELECT_DIGITS`), so it has to be read off `event.code` for the reason
+   * every other digit binding is — AZERTY puts `&` on the unshifted `Digit1`.
+   * Shift therefore earns a token here, exactly as it does for the bracket
+   * pair: `Shift+1` is `!` on one layout and `1` on another, and only a
+   * positional `Shift-1` is one keystroke on both.
+   *
+   * WHAT DID NOT CHANGE IS THE PROPERTY THE COMMENT WAS ABOUT. `Shift-1` is
+   * bound to nothing, so the canvas neither answers nor cancels it and the
+   * character still reaches the box — asserted end to end, not as a string, in
+   * `test/canvas/Canvas.select-digit-view.test.tsx` ("leaves Shift+digit
+   * alone, and does not cancel it"). A shifted CHARACTER that is not on the
+   * number row is untouched: `?` is still `?`, `<` is still `<`.
+   */
+  it('spells an unmodified digit by position, and gives its shifted form a token', () => {
+    expect(normalizeKey({ key: '1', code: 'Digit1' })).toBe('1');
+    expect(normalizeKey({ key: '&', code: 'Digit1' })).toBe('1');
+    expect(normalizeKey({ key: '!', code: 'Digit1', shiftKey: true })).toBe('Shift-1');
+    // Nothing is bound there, which is what keeps `!` typeable.
+    expect(resolveChord(EMPTY_CHORD, 'Shift-1').action).toBeNull();
+    // And the rule stops at the number row: a bare bracket keeps its
+    // character, because nothing binds one and a second spelling would be
+    // churn with no behaviour behind it.
+    expect(normalizeKey({ key: '[', code: 'BracketLeft' })).toBe('[');
+    expect(normalizeKey({ key: '{', code: 'BracketLeft', shiftKey: true })).toBe('{');
+  });
+
+  it('spells Alt and the three-key chord over the position too', () => {
+    // macOS Alt+1 prints `\u00a1`; the position is still Digit1. `Alt-1` is
+    // bound to nothing now -- the view row it used to answer moved to
+    // `Ctrl-Alt-1` -- but the SPELLING is what this asserts, and it is the
+    // reason the moved chord is reachable from a composed character at all.
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true }, true)).toBe('Alt-1');
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, ctrlKey: true }, true)).toBe(
+      'Ctrl-Alt-1',
+    );
+    expect(normalizeKey({ key: '\u00a1', code: 'Digit1', altKey: true, metaKey: true }, true)).toBe(
       'Mod-Alt-1',
     );
   });

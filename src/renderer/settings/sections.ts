@@ -1,14 +1,21 @@
 /**
- * What the settings overlay is made of: its sections, and the geometry of the
- * little picture each layout choice draws.
+ * What the settings overlay is made of: its sections.
  *
  * One list, read by both the nav and the panels, so a section cannot exist in
- * one and not the other. The layout half lives here rather than in the picker
- * because it is arithmetic — weights into rectangles — and arithmetic that a
- * test can read is arithmetic that can be wrong loudly.
+ * one and not the other.
+ *
+ * 0.2 migration, A12.1: the layout-diagram machinery that used to live here
+ * (`diagramColumns`, `canvasDots`, `WEIGHTS`, `DISPLAY_RANK`,
+ * `LAYOUT_DESCRIPTION`, `LAYOUT_CHOICES`, `layoutOf`) went with its only
+ * caller, `LayoutPicker.tsx` — the three named layouts it drew a picture of
+ * were canvas presets, and the canvas is gone (epic.md decision 5). What
+ * replaced it, a show/hide toggle per pane, is gone too at the operator's
+ * request: with two panes and no canvas there was nothing worth hiding, and
+ * the toggles were the only way to reach a state `z0` then had to rescue
+ * people from. `PaneVisibility` went with them (`prefs/panes.ts`).
  */
 
-import { Bot, Columns3, Frame, Keyboard, type LucideIcon, Palette, Smartphone } from 'lucide-react';
+import { Bot, Keyboard, type LucideIcon, Palette, RefreshCw, Smartphone } from 'lucide-react';
 import {
   type BindingGroup,
   type BindingRow,
@@ -16,17 +23,30 @@ import {
   type CursorMode,
   MODE_TITLES,
 } from '../keyboard/keysheet.js';
-import {
-  ALL_VISIBLE,
-  type ColumnId,
-  canvasIsMain,
-  columnOrder,
-  LAYOUTS,
-  type Layout,
-  type LayoutName,
-} from '../prefs/panes.js';
 
-export type SectionId = 'appearance' | 'layout' | 'canvas' | 'sessions' | 'remote' | 'keyboard';
+export type SectionId = 'appearance' | 'sessions' | 'remote' | 'keyboard' | 'update';
+
+/**
+ * WHAT A PHONE MAY SEE OF THIS OVERLAY, and why it is almost none of it.
+ *
+ * Operator instruction: "on mobile the settings part can be removed; remote
+ * only needs to show the paired devices". The reason it is right is stronger
+ * than the screen being small. Appearance, Sessions and Keyboard read and
+ * write `prefs`, which is `localStorage` ON WHICHEVER DEVICE IS LOOKING -- so
+ * a theme chosen on the phone changes the phone, not the machine the sessions
+ * run on, and a shortcut edited there binds keys for a device with no
+ * keyboard. Update reaches `window.api.update`, which the browser build does
+ * not have at all. Four controls that look like they configure vam and
+ * configure a copy of vam nobody is watching.
+ *
+ * Remote is the one whose subject is the DESKTOP rather than the device
+ * holding it, which is exactly what a phone has a reason to look at.
+ *
+ * A LIST RATHER THAN A BOOLEAN, so the next section added has to answer the
+ * question "can this act from a phone?" by being put in or left out, instead
+ * of inheriting an answer from whatever `id !== 'remote'` happened to mean.
+ */
+export const PHONE_SECTIONS: readonly SectionId[] = ['remote'];
 
 /**
  * The order is hard-coded and never sorted: a nav that reorders under the
@@ -40,13 +60,6 @@ export const SECTIONS: readonly {
   readonly Icon: LucideIcon;
 }[] = [
   { id: 'appearance', label: 'Appearance', Icon: Palette },
-  { id: 'layout', label: 'Layout', Icon: Columns3 },
-  // Back after a release away. It was retired when the framing it configured
-  // was removed and it had nothing left to hold; the operator then asked for
-  // framing again, by an amount of their choosing, so the section holds
-  // something again. This list is the reason adding it back is one edit: the
-  // nav and the panels both read it, so a section cannot exist in one alone.
-  { id: 'canvas', label: 'Canvas', Icon: Frame },
   // Before Keyboard rather than after it: Keyboard is the reference section
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.
@@ -56,123 +69,12 @@ export const SECTIONS: readonly {
   // stays before Keyboard for the reason above.
   { id: 'remote', label: 'Remote', Icon: Smartphone },
   { id: 'keyboard', label: 'Keyboard', Icon: Keyboard },
+  // LAST, and it is the one section whose position is an argument rather than
+  // a shrug: it is opened rarely, on purpose, to read a version or ask a
+  // question -- and the note above about not ending on a reference is about
+  // the two rows a reader SKIMS past, not about a destination they came for.
+  { id: 'update', label: 'Update', Icon: RefreshCw },
 ];
-
-/** The shipped layout is not in `LAYOUTS` — it is the absence of one, and it is
- *  what `z0` restores. Named here so the picker can offer a way back. */
-export const FULL = 'full';
-export type LayoutChoice = typeof FULL | LayoutName;
-
-/**
- * Display order: most columns to fewest, so the row reads as a progressive
- * subtraction and the one layout that REORDERS sits beside the default it
- * reorders. Deliberately not `Object.keys(LAYOUTS)` order — that object's key
- * order is not a display concern and other code reads it — and deliberately a
- * rank per choice rather than a literal list, so a fifth layout fails to
- * compile here instead of quietly failing to appear.
- */
-const DISPLAY_RANK = {
-  full: 0,
-  focusResponse: 1,
-  noCanvas: 2,
-  responseOnly: 3,
-} satisfies Record<LayoutChoice, number>;
-
-const CHOICES: LayoutChoice[] = [FULL, ...(Object.keys(LAYOUTS) as LayoutName[])];
-
-export const LAYOUT_CHOICES: readonly LayoutChoice[] = CHOICES.sort(
-  (a, b) => DISPLAY_RANK[a] - DISPLAY_RANK[b],
-);
-
-/**
- * The half of a tile's accessible name the picture carries and the label does
- * not: the columns, in the order they are drawn. A screen reader gets the
- * diagram's only content this way.
- */
-export const LAYOUT_DESCRIPTION = {
-  full: 'sidebar, canvas, then response',
-  focusResponse: 'sidebar, response, then the canvas as a narrow strip on the right',
-  noCanvas: 'sidebar, then response',
-  responseOnly: 'the response fills the window',
-} satisfies Record<LayoutChoice, string>;
-
-/** The panes a choice means. `full` is `ALL_VISIBLE`, which is exactly what it
- *  means for no layout to be applied. */
-export function layoutOf(choice: LayoutChoice): Layout {
-  return choice === FULL ? ALL_VISIBLE : LAYOUTS[choice];
-}
-
-/** One rectangle of a diagram, in the 120x72 user space of its `viewBox`. */
-export type DiagramColumn = {
-  readonly id: ColumnId;
-  readonly x: number;
-  readonly width: number;
-  readonly main: boolean;
-};
-
-/** Columns live in `x: 6..114`, `y: 6..66` — the ground keeps a 6-unit margin. */
-export const DIAGRAM = { x: 6, y: 6, width: 108, height: 60, gap: 4 } as const;
-
-/**
- * How wide each column is drawn, as flex weights over the room the gaps leave.
- *
- * The real numbers rounded: a 264px sidebar between bounds of 200..480, a
- * 320px detail floor, a 360px canvas floor — and the demoted canvas at
- * `CANVAS_STRIP` 300, narrower than the response beside it, which is the whole
- * of what the third tile has to show.
- */
-const WEIGHTS = {
-  full: { sidebar: 3, canvas: 7, detail: 4 },
-  focusResponse: { sidebar: 3, detail: 7, canvas: 3 },
-  noCanvas: { sidebar: 3, detail: 11 },
-  responseOnly: { detail: 1 },
-} satisfies Record<LayoutChoice, Partial<Record<ColumnId, number>>>;
-
-/**
- * The blocks a choice draws, left to right, in the layout's REAL order.
- *
- * The main column is the canvas exactly while the canvas is the main column,
- * and the response otherwise. Note this is not "the last column in the order":
- * `focusResponse` draws the canvas last precisely BECAUSE it demoted it, and
- * `canvasIsMain` is the function that already knows so — see `panes.ts`, where
- * the same distinction decides the width arithmetic.
- */
-export function diagramColumns(choice: LayoutChoice): readonly DiagramColumn[] {
-  const layout = layoutOf(choice);
-  const order = columnOrder(layout).filter((id) => layout[id]);
-  const main: ColumnId = canvasIsMain(layout) ? 'canvas' : 'detail';
-  const weights = WEIGHTS[choice] as Partial<Record<ColumnId, number>>;
-  const total = order.reduce((sum, id) => sum + (weights[id] ?? 1), 0);
-  const room = DIAGRAM.width - DIAGRAM.gap * (order.length - 1);
-  let x = DIAGRAM.x;
-  return order.map((id) => {
-    const width = (room * (weights[id] ?? 1)) / total;
-    const column = { id, x: round(x), width: round(width), main: id === main };
-    x += width + DIAGRAM.gap;
-    return column;
-  });
-}
-
-/** Half a unit is invisible at 120 units wide and makes an assertion unreadable. */
-function round(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
-/**
- * The canvas's dot lattice, clipped to its column — vam's own dotted ground,
- * and the one glyph that identifies the canvas wherever it sits, which is what
- * makes `focusResponse` legible as a reordering rather than as a different set
- * of columns.
- */
-export function canvasDots(column: DiagramColumn): readonly { cx: number; cy: number }[] {
-  const dots: { cx: number; cy: number }[] = [];
-  for (let cy = 13; cy <= DIAGRAM.y + DIAGRAM.height - 4; cy += 9) {
-    for (let cx = column.x + 6; cx <= column.x + column.width - 4; cx += 9) {
-      dots.push({ cx: round(cx), cy });
-    }
-  }
-  return dots;
-}
 
 /**
  * The shortcut editor's own sections: the two cursor modes, then the groups.
@@ -209,11 +111,20 @@ export type ShortcutSection = {
   readonly rows: readonly BindingRow[];
 };
 
+/**
+ * WHAT EACH MODE IS, stated as the rule rather than as a description.
+ *
+ * The mode is not a setting and not a toggle: it is a report about where the
+ * keyboard is (`keyboard/focus-scope.ts`). Saying so is the difference between
+ * an operator who knows how to leave Insert and one hunting for the key that
+ * switches it — and the hint that stood here claimed the two key sets "never
+ * clash", which is precisely what an audit then found four leaks in.
+ */
 const MODE_HINTS: Readonly<Record<CursorMode, string>> = {
   select:
-    'the keyboard is on the session list. The same keys as Insert, doing different work — that is why they never clash.',
+    'nothing in a response pane holds the keyboard. This is the resting mode, and any key that takes the keyboard back out of a pane returns to it.',
   insert:
-    'the keyboard is in the response pane. These keys are the ones above, meaning something else while you are here.',
+    'something in a response pane holds the keyboard — an open question’s options, the prompt box, or a terminal. The mode is that fact rather than a switch: these keys are the ones above, meaning something else while you are there.',
 };
 
 export function shortcutSections(groups: readonly BindingGroup[]): readonly ShortcutSection[] {

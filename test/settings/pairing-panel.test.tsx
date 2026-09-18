@@ -78,6 +78,7 @@ function draw(
     onEnableServe: vi.fn(),
     onDisableServe: vi.fn(),
     onSetWritesPreference: vi.fn(),
+    onOpenLink: vi.fn(),
     ...rest,
     serve: { ...SERVE_DEFAULT, ...serveOver },
   };
@@ -85,12 +86,75 @@ function draw(
   return props;
 }
 
+/**
+ * THE QR, which is the address drawn for a camera.
+ *
+ * Operator: "put a QR on the desktop so the remote link opens straight from
+ * the phone." `test/settings/qr-address.test.tsx` holds the component and
+ * `e2e/qr-decode-check.mjs` proves a real barcode detector reads the symbol;
+ * this is about WHEN the panel draws one.
+ */
+describe('the address as a QR', () => {
+  const qr = () => screen.queryByTestId('pairing-qr');
+
+  it('draws one beside the address, for the address', () => {
+    draw();
+    expect(qr()).not.toBeNull();
+    expect(qr()?.getAttribute('aria-label')).toContain(
+      'https://example-machine.example-tailnet.ts.net',
+    );
+  });
+
+  it('draws none when there is no address to draw', () => {
+    // Reading the address needs the Tailscale CLI, and `null` is ordinary.
+    draw({ url: null });
+    expect(qr()).toBeNull();
+  });
+
+  it('draws none while phone access is off', () => {
+    // There is nothing to reach yet: a QR here would encode an address that
+    // answers nothing, which is worse than no QR at all.
+    draw({ serve: { enabled: false } });
+    expect(qr()).toBeNull();
+  });
+
+  it('draws none on a phone, which is the thing that would be scanning it', () => {
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (media: string) => ({
+        media,
+        // Every query matches: this is the phone width, and `usePhoneViewport`
+        // is the only reader in this component.
+        matches: true,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    });
+    try {
+      draw();
+      expect(qr(), 'a phone showing itself a QR of its own address').toBeNull();
+      // And the address is still there to read and copy.
+      expect(screen.getByTestId('pairing-url').textContent).toMatch(/^https:\/\//);
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(window, 'matchMedia');
+      else Object.defineProperty(window, 'matchMedia', original);
+    }
+  });
+});
+
 describe('the pairing screen', () => {
   it('says what being on the tailnet does and does not buy', () => {
+    // BOTH HALVES, and the second is the one that matters. The copy was
+    // shortened at the operator's ask ("make the remote access content shorter
+    // and simpler, it is a bit long-winded"), so the sentence that used to
+    // spell out "being on the tailnet does not authorise a device" is now the
+    // shorter "only a device paired here can drive your agents". The claim is
+    // the same and this test still refuses a panel that states only the reach.
     draw();
     const said = document.body.textContent ?? '';
     expect(said).toMatch(/everyone on your tailnet/i);
-    expect(said).toMatch(/does not|not authoris/i);
+    expect(said).toMatch(/only a device paired here|does not|not authoris/i);
   });
 
   it('never mentions funnel, which would put this on the public internet', () => {
@@ -124,18 +188,45 @@ describe('the pairing screen', () => {
     expect(screen.getByTestId('pairing-writes').textContent).toMatch(/close sessions|write/i);
   });
 
-  it('offers a writes-preference toggle, off by default, for the next launch', () => {
+  it('offers a writes-preference switch, off by default, for the next launch', () => {
+    // A SWITCH, NOT A VERB. Operator: "turn some of the settings buttons into
+    // a toggle UI." This one is a stored boolean and nothing else -- it runs
+    // nothing, reaches nothing outside vam, and the sentence above it already
+    // says what each state means -- so a control whose own name changed with
+    // its value ("turn writes on" / "turn writes off") was saying the state
+    // twice and the purpose never.
     const props = draw({ writesPreference: false });
-    const toggle = screen.getByRole('button', { name: /turn writes on/i });
+    const toggle = screen.getByRole('switch', { name: /writes/i });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(toggle);
     expect(props.onSetWritesPreference).toHaveBeenCalledWith(true);
   });
 
   it('offers to turn a persisted writes preference back off', () => {
     const props = draw({ writesPreference: true });
-    const toggle = screen.getByRole('button', { name: /turn writes off/i });
+    const toggle = screen.getByRole('switch', { name: /writes/i });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
     fireEvent.click(toggle);
     expect(props.onSetWritesPreference).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps the switch named for what it controls in both states', () => {
+    draw({ writesPreference: false });
+    const off = screen.getByRole('switch', { name: /writes/i }).getAttribute('aria-label');
+    cleanup();
+    draw({ writesPreference: true });
+    expect(screen.getByRole('switch', { name: /writes/i }).getAttribute('aria-label')).toBe(off);
+  });
+
+  it('leaves the act that reaches outside vam as a button, deliberately', () => {
+    // PHONE ACCESS IS NOT A PREFERENCE. It runs `tailscale serve`, a standing
+    // configuration change on this machine that outlives vam, takes time, and
+    // can fail -- and the panel's own prose treats it as an act. A switch says
+    // "this is a setting, flick it"; the difference is the whole argument for
+    // not converting this one alongside the two that are settings.
+    draw({ serve: { enabled: false } });
+    expect(screen.queryByRole('switch', { name: /phone access/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /phone access/i })).not.toBeNull();
   });
 
   it('says a changed writes preference applies on the next launch, not this one', () => {
@@ -404,6 +495,174 @@ describe('the paired devices', () => {
  * that it matches anything, which is exactly how the gap above shipped
  * unnoticed. This suite fails the moment these controls go bare again.
  */
+/**
+ * HOW TO CONNECT A PHONE, IN THE PLACE WHERE YOU CONNECT A PHONE.
+ *
+ * Operator: "I will test mobile in the next build. Put detailed instructions
+ * into the Remote settings." The README already carries the explanation; what
+ * it cannot do is be on screen while somebody stands there with a phone in one
+ * hand. So the steps are in the panel, in order, and each one that vam can
+ * SEE the state of says whether it is done.
+ *
+ * THE MARKS ARE READINGS, NOT A WIZARD. Three of the five steps have an
+ * observable answer -- is Tailscale on this machine, is phone access on, has a
+ * device been paired -- and two do not: vam cannot know that a camera was
+ * pointed at the QR or that eight characters were typed into a phone. Those
+ * are drawn plainly rather than guessed at, and the list says what a tick
+ * means, because a checklist that invents its own ticks is worse than one with
+ * none.
+ */
+/**
+ * THE TWO LINKS, AND THE POLICY THAT ATE THEM.
+ *
+ * Operator: "in settings the tailscale link is not clickable." True, and the
+ * cause is vam's own: `setWindowOpenHandler(() => ({ action: 'deny' }))` in
+ * `src/main/index.ts` refuses every `window.open`, which is what a
+ * `target="_blank"` anchor becomes. The link was not broken, it was refused --
+ * the same shape as the microphone, one screen over.
+ *
+ * The policy stays. The click goes through main, which owns both destinations
+ * and is handed a KEY rather than a URL, so this cannot become a
+ * navigate-anywhere capability through a different door.
+ *
+ * IT IS STILL AN ANCHOR. A `<button>` styled as a link would lose what a link
+ * announces and what a pointer expects, and the destination IS reached -- in
+ * the operating system's browser, which is where an external page belongs. The
+ * `href` stays real so the browser build, which has no bridge and no policy to
+ * be refused by, keeps working with no branch of its own.
+ */
+describe('the panel’s external links, under a policy that denies window.open', () => {
+  const link = (name: RegExp) => screen.getByRole('link', { name });
+
+  it('asks main to open the download page, naming a key and not a URL', () => {
+    const props = draw({ serve: { cliMissing: true } });
+    const anchor = link(/install tailscale/i);
+    expect(anchor.getAttribute('href')).toBe('https://tailscale.com/download');
+    fireEvent.click(anchor);
+    expect(props.onOpenLink).toHaveBeenCalledWith('download');
+  });
+
+  it('asks main to open the tailnet admin page the same way', () => {
+    const url = 'https://login.tailscale.com/f/serve?node=abc';
+    const props = draw({ serve: { tailnetServeDisabledUrl: url, enabled: false } });
+    const anchor = link(/login.tailscale.com/);
+    fireEvent.click(anchor);
+    expect(props.onOpenLink).toHaveBeenCalledWith('serve-admin');
+  });
+
+  it('stops the navigation the window would refuse anyway', () => {
+    // Without `preventDefault` the click ALSO reaches the policy, which denies
+    // it -- harmless today, and exactly the kind of second path that later
+    // gets "fixed" by widening the policy.
+    const props = draw({ serve: { cliMissing: true } });
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link(/install tailscale/i).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(props.onOpenLink).toHaveBeenCalled();
+  });
+
+  it('leaves the link alone where there is no bridge to ask across', () => {
+    // The browser build: no preload, no window policy, and an ordinary anchor
+    // that already works. A `preventDefault` with nothing behind it would turn
+    // a working link into a dead one.
+    const props = draw({ serve: { cliMissing: true }, onOpenLink: undefined });
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+    link(/install tailscale/i).dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe('the steps for connecting a phone', () => {
+  const steps = () => [...document.querySelectorAll('[data-pairing-step]')];
+  const done = () =>
+    steps()
+      .filter((el) => el.getAttribute('data-done') === 'true')
+      .map((el) => el.getAttribute('data-pairing-step'));
+
+  it('draws the whole sequence, in order, before anything is set up', () => {
+    draw({ serve: { cliMissing: true, enabled: false }, devices: [], view: IDLE });
+    expect(steps().map((el) => el.getAttribute('data-pairing-step'))).toEqual([
+      'tailscale',
+      'serve',
+      'open',
+      'code',
+      'allow',
+    ]);
+  });
+
+  it('marks nothing as done when nothing is', () => {
+    draw({ serve: { cliMissing: true, enabled: false }, devices: [], view: IDLE });
+    expect(done()).toEqual([]);
+  });
+
+  it('marks Tailscale done once the CLI is there', () => {
+    draw({ serve: { cliMissing: false, enabled: false }, devices: [], view: IDLE });
+    expect(done()).toEqual(['tailscale']);
+  });
+
+  it('marks phone access done once serve is on', () => {
+    draw({ serve: { cliMissing: false, enabled: true }, devices: [], view: IDLE });
+    expect(done()).toEqual(['tailscale', 'serve']);
+  });
+
+  it('marks the last step done once a device is paired', () => {
+    draw({
+      serve: { cliMissing: false, enabled: true },
+      devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }],
+      view: IDLE,
+    });
+    expect(done()).toEqual(['tailscale', 'serve', 'allow']);
+  });
+
+  it('never marks the two steps that happen on the phone', () => {
+    // vam cannot see a camera or a keyboard on another device. A checklist
+    // that ticked those would be inventing the one thing it is for.
+    draw({
+      serve: { cliMissing: false, enabled: true },
+      devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }],
+      view: LIVE,
+    });
+    expect(done()).not.toContain('open');
+    expect(done()).not.toContain('code');
+  });
+
+  it('says what a tick means, so an unticked step is not read as a failure', () => {
+    draw();
+    const note = screen.getByTestId('pairing-steps-note').textContent ?? '';
+    expect(note.toLowerCase()).toMatch(/vam can see|from here|cannot/);
+  });
+
+  /**
+   * THE STEPS DESCRIBED A FLOW THE SERVER REFUSED. Scanning the QR reached a
+   * page that was itself behind the pairing token, so it answered vam's own
+   * 401 -- whose body reads "check the pairing screen on the desktop", which
+   * is where these steps live. The operator followed them and was sent in a
+   * circle. A walkthrough for a flow that cannot work is the same defect class
+   * as a caption for a control that cannot act, and worse here because it was
+   * followed.
+   *
+   * So the step that sends them to the phone must say what the phone SHOWS.
+   * "It worked" has to be recognisable from the sofa.
+   */
+  it('says what the phone shows when the address opens', () => {
+    draw({ serve: { cliMissing: false, enabled: true } });
+    const text = (screen.getByTestId('pairing-steps').textContent ?? '').toLowerCase();
+    expect(text).toMatch(/form/);
+    // And that it can do nothing else yet -- the honest half, so a page that
+    // shows no sessions does not read as a broken one.
+    expect(text).toMatch(/nothing else|until it has/);
+  });
+
+  it('names the phone side of each step it cannot check', () => {
+    draw({ serve: { cliMissing: false, enabled: true } });
+    const text = (screen.getByTestId('pairing-steps').textContent ?? '').toLowerCase();
+    // The two acts that happen on the other device, in words, because the
+    // operator is holding that device while they read this.
+    expect(text).toMatch(/camera|scan/);
+    expect(text).toMatch(/type|enter/);
+  });
+});
+
 describe('styled with the rest of src/renderer/settings, not a dead semantic class', () => {
   it('draws the pairing code as a large, generously tracked monospace glyph', () => {
     draw();
@@ -423,7 +682,20 @@ describe('styled with the rest of src/renderer/settings, not a dead semantic cla
     expect(name.className.length).toBeGreaterThan(0);
   });
 
-  it('gives every action button in this panel a real 44px+ hit target', () => {
+  it('gives every action button in this panel a 44px target where a finger is', () => {
+    // IT USED TO ASK FOR `min-h-[44px]`, UNCONDITIONALLY, and that is why
+    // these buttons were 44px tall on the DESKTOP -- in a dialog where every
+    // other control is 28, measured by the button census in
+    // `e2e/settings-chrome-shots.mjs`. The floor was right and the device was
+    // not: `.vam-phone .vam-tap` (`styles.css`) is how the rest of the app
+    // spells "this is a touch target", and it applies where a touch is.
+    //
+    // A CLASS-NAME ASSERTION, WHICH THIS REPO OTHERWISE DISTRUSTS, and the
+    // reason is that no guard can reach this surface: the Remote panel needs
+    // `window.api.remote`, a preload bridge, so the browser build draws the
+    // "no bridge" state instead and a phone-viewport run measures nothing
+    // here. Same position as the PRs footer. The class is therefore checked
+    // here and the RULE it depends on is measured in a browser elsewhere.
     draw({ devices: [{ deviceId: 'd-1', name: 'a phone', pairedAt: NOW, lastSeenAt: NOW }] });
     const buttons = [
       screen.getByRole('button', { name: /copy/i }),
@@ -433,7 +705,10 @@ describe('styled with the rest of src/renderer/settings, not a dead semantic cla
       screen.getByRole('button', { name: /revoke all/i }),
     ];
     for (const button of buttons) {
-      expect(button.className).toMatch(/min-h-\[44px\]/);
+      expect(button.className, `${button.textContent} is not a tap target`).toMatch(/\bvam-tap\b/);
+      // And the same resting height as its neighbours, so the phone floor is
+      // the only thing that changes between the two devices.
+      expect(button.className).toMatch(/\bh-\[28px\]/);
     }
   });
 
