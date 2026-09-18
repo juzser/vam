@@ -172,11 +172,16 @@ describe('reading the pane', () => {
       '-t',
       '=vam-atlas-a1b2c3:',
       '-F',
-      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y}',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
       ';',
       'capture-pane',
       '-p',
       '-e',
+      // The scrollback the tab scrolls through (`tmux/argv.ts`,
+      // `PANE_HISTORY_LINES`); the screen alone is what it drew before, in a
+      // box exactly that many rows tall.
+      '-S',
+      '-500',
       '-t',
       '=vam-atlas-a1b2c3:',
     ]);
@@ -331,11 +336,16 @@ describe('reading the pane a session published', () => {
       '-t',
       '=vam-atlas-cc22dd:',
       '-F',
-      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y}',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
       ';',
       'capture-pane',
       '-p',
       '-e',
+      // THE SCROLLBACK, and this is the only caller that asks for it: the tab
+      // drew exactly the rows its box could show, so there was nothing in it
+      // to scroll at all (`tmux/argv.ts`, `PANE_HISTORY_LINES`).
+      '-S',
+      '-500',
       '-t',
       '=vam-atlas-cc22dd:',
     ]);

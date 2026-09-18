@@ -29,6 +29,7 @@
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
 import { claimedPanes } from '../sources/claude-code/session-pane.js';
 import {
+  PANE_HISTORY_LINES,
   sendBackspaceArgv,
   sendBackTabArgv,
   sendControlArgv,
@@ -166,11 +167,18 @@ export function targetSession(
 }
 
 /**
- * The screen for `projectId`, or the honest reason there is none.
+ * The screen for `projectId` -- WITH THE SCROLLBACK ABOVE IT -- or the honest
+ * reason there is none.
  *
  * A `no-such-session` on the capture is reported as `gone` rather than as a
  * failure: the session was listed a moment ago and has ended since, which is
  * an answer about the session, not a loss of vam's ability to look.
+ *
+ * THIS IS THE ONE CALLER THAT ASKS FOR HISTORY, and it is the one whose answer
+ * a person reads: the Terminal tab drew exactly the rows the box could show
+ * and so had nothing to scroll at all (`argv.ts`, `PANE_HISTORY_LINES`). Every
+ * other reader of this pane -- the picker parser, the prompt reader -- wants
+ * the screen and only the screen, and gets it by not asking.
  */
 export async function readSessionPane(
   run: TmuxRun,
@@ -197,7 +205,7 @@ export async function readSessionPane(
   if (match.kind === 'mispaired') {
     return { kind: 'mispaired', published: match.published };
   }
-  const pane = await readPane(run, match.name);
+  const pane = await readPane(run, match.name, PANE_HISTORY_LINES);
   if (pane.kind === 'ok') {
     // The cursor travels WITH the screen it belongs to and is never
     // reconstructed downstream: it is a position in THIS capture, at this

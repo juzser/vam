@@ -112,7 +112,14 @@
  * no focus anywhere, so "the note is there" and "the note can be read" are
  * two facts, and only a real hover and a real Tab press answer the second --
  * and the hover half is where the guard buried an assumption of its own
- * author's (see the script's header).
+ * author's (see the script's header),
+ * and -- since the terminal learned to keep its scrollback -- whether the
+ * pane OVERFLOWS AT ALL once the capture is longer than the box (it did not,
+ * and the operator reported exactly that: `scrollHeight === clientHeight` is
+ * a number no unit environment reports at all), whether a real wheel reaches
+ * the history, and whether a poll a second later leaves the operator where
+ * they scrolled to or throws them at the live end -- which is a race between
+ * a layout effect and an interval, and has no meaning outside a browser.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -169,6 +176,7 @@ const GUARDS = [
   'out-links-shots',
   'view-width-shots',
   'model-picker-shots',
+  'terminal-scrollback-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

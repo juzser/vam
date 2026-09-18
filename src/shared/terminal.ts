@@ -57,6 +57,15 @@ import type { SourceError } from '../renderer/sources/port.js';
  * a missing field decays into.
  */
 export type PaneCursor =
+  /**
+   * `row` IS AN INDEX INTO THE TEXT IT ARRIVED WITH, and it is worth saying
+   * because tmux's own answer is not. `#{cursor_y}` counts from the top of the
+   * SCREEN, and a capture that carries scrollback begins above the screen, so
+   * the two numbers differ by however many history lines came back;
+   * `sources/tmux/spawn.ts` adds that offset before this leaves main, and says
+   * `unreadable` rather than guessing when it cannot. A consumer therefore
+   * indexes the lines it was given and never re-derives anything.
+   */
   | { readonly kind: 'at'; readonly column: number; readonly row: number }
   /** The program in the pane turned the cursor off. There is nothing to draw. */
   | { readonly kind: 'hidden' }
@@ -69,9 +78,10 @@ export type PaneView =
       readonly name: string;
       readonly text: string;
       /**
-       * Where the cursor is on the screen above -- as much a part of `ok` as
-       * the text is, and required for that reason: a producer that has not
-       * looked has to say `unreadable` out loud rather than leave a field out.
+       * Where the cursor is in the text above -- as much a part of `ok` as the
+       * text is, and required for that reason: a producer that has not looked
+       * has to say `unreadable` out loud rather than leave a field out. Its
+       * `row` is an index into THAT text, scrollback and all; see `PaneCursor`.
        */
       readonly cursor: PaneCursor;
     }
