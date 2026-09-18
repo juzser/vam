@@ -362,6 +362,35 @@ describe('a session vam can type into gets a real picker', () => {
     expect(note?.textContent ?? '').not.toContain('this session only');
   });
 
+  /**
+   * AND THE REMEDY HAS TO BE WHERE THE EYE IS, which the first draft of that
+   * caption was not.
+   *
+   * The caption is drawn in a `truncate whitespace-nowrap` line, so about
+   * forty characters of it are ever on screen at a composer's width. The
+   * sentence shipped at 220 characters with "type /model <id> in the Terminal
+   * tab" starting at character 163 -- every word of the remedy past the clip,
+   * on the one caption whose entire purpose is to say what to do instead.
+   *
+   * TWO RULES, BECAUSE ONE OF THEM ALONE WOULD ROT. Front-loading is about
+   * this sentence and a later hand may rewrite it; the `title` is about the
+   * ELEMENT and holds for every caption this row will ever draw -- a question
+   * quoted back, a model id, whatever comes next. It is the model button's own
+   * rule one control to the left: clip yourself, and stay one hover away.
+   */
+  it('puts the verb of the remedy inside the first clip, and the rest one hover away', async () => {
+    withBridge(async () => ({ kind: 'not-in-menu', choice: 'claude-opus-5-20260501' }));
+    draw({ delivers: true, terminal: true });
+    await choose('opus');
+    const note = q<HTMLElement>('[data-mode-cycle]');
+    const text = note?.textContent ?? '';
+    // What the operator DOES is in the part that survives truncation.
+    expect(text.slice(0, 45)).toContain('type /model');
+    // And nothing is lost for good: the whole sentence is on the element.
+    expect(note?.getAttribute('title')).toBe(text);
+    expect(text.length).toBeGreaterThan(45);
+  });
+
   it('holds exactly the five aliases in the listbox, and no text box beside them', async () => {
     // WHAT THIS REPLACES: a free-text id with a space in it, refused before the
     // bridge was touched. There is no field to put a space into now, so the

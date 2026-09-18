@@ -2656,11 +2656,18 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
     case 'not-in-menu':
       return {
         kind: 'refused',
-        // The choice, the reason, and the way out with its address. `choice`
-        // is read off the RESULT and not off the closure: main answers about
-        // what it was asked, and a caption naming the local variable would
-        // drift the day the two stop being the same string.
-        text: `not sent — ${result.choice} has no row on the /model menu of ${title}, and the form that takes it also saves it as your default — type /model ${result.choice} in the Terminal tab to do it yourself`,
+        // THE WAY OUT COMES FIRST, and that is not a style choice. This
+        // caption is drawn in a `truncate whitespace-nowrap` line (see
+        // `data-mode-cycle` below), so roughly forty characters of it are
+        // ever on screen at a composer's width -- and the first draft of
+        // this sentence put the remedy at character 163 of 220, where no
+        // operator would have read the one part that tells them what to do.
+        // `title` on that span is what keeps the rest reachable.
+        //
+        // `choice` is read off the RESULT and not off the closure: main
+        // answers about what it was asked, and a caption naming the local
+        // variable would drift the day the two stop being the same string.
+        text: `not sent — type /model ${result.choice} in the Terminal tab yourself: it has no row on the /model menu, and the form that takes one also saves it as your default`,
       };
     case 'question':
       return {
@@ -8361,6 +8368,18 @@ export function DetailPanel(props: DetailPanelProps) {
                     'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
+                  /*
+                    TRUNCATION MAY NOT BE THE END OF A SENTENCE. This line
+                    clips at the composer's width -- about forty characters --
+                    and some of these captions carry a remedy, a question's own
+                    words, or a model id that runs past it. The model button
+                    beside it already holds this rule ("it gives way by
+                    clipping itself instead ... and the whole name is still
+                    there for a reader, and one hover away for an eye"); the
+                    caption is the surface where clipping costs the most,
+                    because what it hides is usually what to DO.
+                  */
+                  title={cycleNote.text}
                 >
                   {cycleNote.text}
                 </span>
