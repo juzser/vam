@@ -329,18 +329,31 @@ describe('the mode icon says WHICH mode, in the tooltip and in colour', () => {
     expect(q('[data-mode-glyph]')?.getAttribute('fill')).toBe('none');
   });
 
-  it('gives the two stroked glyphs a heavier stroke, so all three read as one weight', () => {
-    // The filled star is a solid mass at 12px and a 1.7 stroke beside it is a
-    // hairline. The three are one control in three states, so they owe each
-    // other a matched weight — judged in the same screenshot as the fill.
-    draw({ draft: 'ship it' });
-    expect(q('[data-mode-glyph]')?.getAttribute('stroke-width')).toBe('1.7');
-    cleanup();
-    draw({ draft: 'mode: Manual\nship it' });
-    expect(q('[data-mode-glyph]')?.getAttribute('stroke-width')).toBe('2.2');
-    cleanup();
-    draw({ draft: 'mode: Plan\nship it' });
-    expect(q('[data-mode-glyph]')?.getAttribute('stroke-width')).toBe('2.2');
+  it('draws each glyph ONE way — filled or stroked, never both', () => {
+    // The operator: "in the mode switch in the prompt input, when the mode is
+    // filled it should not have a stroke, or the icon looks too thick." It was
+    // drawn both ways at once: `Sparkles` filled in `currentColor` AND stroked
+    // at 1.7 ON TOP of that fill, which at 12px lays most of a pixel of extra
+    // ink outside every edge of a shape that is already solid. So the star read
+    // as a blob beside two hairline glyphs, and the fix is not a lighter stroke
+    // but NO stroke — the two channels are exclusive now.
+    //
+    // ASSERTED AS THE INVARIANT, not as three literals. A test that pinned
+    // `'0'`, `'2.2'`, `'2.2'` would go on passing through an edit that filled
+    // `Hand` and left its stroke on, which is the same defect one glyph over.
+    for (const draft of ['ship it', 'mode: Manual\nship it', 'mode: Plan\nship it']) {
+      draw({ draft });
+      const glyph = q('[data-mode-glyph]');
+      const fill = glyph?.getAttribute('fill');
+      const stroke = Number(glyph?.getAttribute('stroke-width'));
+      if (fill === 'currentColor') {
+        expect(stroke, `${draft}: a filled glyph carries no stroke`).toBe(0);
+      } else {
+        expect(fill, draft).toBe('none');
+        expect(stroke, `${draft}: a stroked glyph owes the matched 2.2 weight`).toBe(2.2);
+      }
+      cleanup();
+    }
   });
 
   it('colours the popover’s three options too, which is the only legend there is', () => {
