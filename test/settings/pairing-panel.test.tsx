@@ -145,10 +145,16 @@ describe('the address as a QR', () => {
 
 describe('the pairing screen', () => {
   it('says what being on the tailnet does and does not buy', () => {
+    // BOTH HALVES, and the second is the one that matters. The copy was
+    // shortened at the operator's ask ("make the remote access content shorter
+    // and simpler, it is a bit long-winded"), so the sentence that used to
+    // spell out "being on the tailnet does not authorise a device" is now the
+    // shorter "only a device paired here can drive your agents". The claim is
+    // the same and this test still refuses a panel that states only the reach.
     draw();
     const said = document.body.textContent ?? '';
     expect(said).toMatch(/everyone on your tailnet/i);
-    expect(said).toMatch(/does not|not authoris/i);
+    expect(said).toMatch(/only a device paired here|does not|not authoris/i);
   });
 
   it('never mentions funnel, which would put this on the public internet', () => {

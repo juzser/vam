@@ -90,7 +90,7 @@ describe('RemotePanel', () => {
   });
 
   it.each([
-    ['no-cli', /could not ask/i],
+    ['no-cli', /no tailscale command/i],
     ['not-running', /Tailscale is not running/i],
     ['no-name', /will not guess/i],
   ] as const)('names %s as the reason there is no address', async (reason, said) => {
