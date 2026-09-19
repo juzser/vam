@@ -7563,10 +7563,14 @@ export function DetailPanel(props: DetailPanelProps) {
         `!==` here. It used to be exactly that chain, and the cost was that a
         new tab inherited an answer instead of being given one: the operator
         found the box drawn under the PRs list, a view where nothing typed is
-        addressed to anything. The reasons -- Terminal and Files own their own
-        keyboards, PRs is not a conversation -- are written beside the names
-        they are about, and `DetailPanel.composer-tabs.test.tsx` derives its
-        whole expectation from that one predicate.
+        addressed to anything -- and then, a day later and in the same words,
+        under the Agents ROSTER. The reasons -- Terminal and Files own their
+        own keyboards, PRs and Agents are lists a typed sentence cannot act on
+        -- are written beside the names they are about, and
+        `DetailPanel.composer-tabs.test.tsx` derives its whole expectation from
+        that one predicate. Response is the only view left that draws a box,
+        and that is the OUTCOME of four separate answers rather than a rule
+        about transcripts: a sixth tab still has to be classified by name.
 
         `composerHidden` is the orthogonal half and stays here: it is about
         this SESSION (none selected, a source that cannot record, a question
