@@ -150,8 +150,9 @@ function modelOnLine(line: string): string | null {
 }
 
 /**
- * The model of the session a row is in -- the pane resolved by the SAME
- * `targetSession` rule the read, the resize, the keystroke and the answer use.
+ * The model the CLI is painting for the session a row is in -- the pane
+ * resolved by the SAME `targetSession` rule the read, the resize, the
+ * keystroke and the answer use.
  *
  * A READ, so it is safe to poll: nothing here presses a key. It is aimed by
  * that one rule rather than a second opinion for the reason `readSessionPrompt`
@@ -159,30 +160,95 @@ function modelOnLine(line: string): string | null {
  * row's button, which is a sentence about somebody else's session wearing this
  * one's name.
  *
- * EVERY REFUSAL IS THE SAME ANSWER, and that is a decision rather than an
- * omission. `unaimed`, `mispaired`, a tmux that would not answer and a screen
- * with no footer on it are four different facts, and the pane channel next
- * door keeps them apart because the Terminal tab draws a different sentence
- * for each. This one has a single consumer -- a button label -- which draws
- * exactly one thing for all four: the word it wore before vam could read
- * anything. A second kind here would be a distinction no surface makes.
+ * EVERY REFUSAL IS `null`, and that is a decision rather than an omission.
+ * `unaimed`, `mispaired`, a tmux that would not answer and a screen with no
+ * footer on it are four different facts, and the pane channel next door keeps
+ * them apart because the Terminal tab draws a different sentence for each.
+ * The one consumer of this is a button label, which draws exactly one thing
+ * for all four: the word it wore before vam could read anything. A second kind
+ * here would be a distinction no surface makes.
+ */
+async function readPaintedModel(
+  run: TmuxRun,
+  projectId: string,
+  rowId?: string,
+  panes?: ReadonlyMap<string, string>,
+): Promise<string | null> {
+  const listed = await listVamSessions(run);
+  if (listed.kind === 'unavailable') return null;
+  const match = targetSession(listed.sessions, projectId, rowId, panes);
+  if (match.kind !== 'one') return null;
+  // The SCREEN and only the screen: no history is asked for, the way the
+  // prompt reader asks for none. The footer is on the screen by definition,
+  // and scrollback would be a thousand lines of transcript for a reader that
+  // looks at five.
+  const pane = await readPane(run, match.name);
+  if (pane.kind !== 'ok') return null;
+  return readModelLine(pane.text);
+}
+
+/**
+ * The model of the session a row is in, from the two sources vam has for it.
+ *
+ * ── WHY THERE ARE TWO, AND THE ORDER ──────────────────────────────────────
+ *
+ * Everything above this line is about a footer the CLI paints, and it is all
+ * still true. What it could not know is that the footer is OPTIONAL: an
+ * operator may set `statusLine` in `~/.claude/settings.json` to a command of
+ * their own, and the CLI then paints that command's output in its place.
+ * MEASURED on the machine this was written for -- a script emitting raw JSON
+ * across four lines (`test/main/terminal/model-status-screens.ts`, captured
+ * read-only from one of their live sessions) -- `readModelLine` answers "I
+ * cannot tell" for the life of every session on that machine, and the button
+ * wears the word `model` forever. The parser was right; the SOURCE was the
+ * problem, and a fact vam can only get from a surface the operator is free to
+ * replace is a fact vam loses entirely for some machines.
+ *
+ * THE PAINTED FOOTER IS ASKED FIRST because it is the FRESHER of the two, and
+ * the two answer measurably different questions:
+ *
+ *   - the footer carries what the CLI is SET TO right now. `/model haiku`
+ *     moves it before the session has answered anything.
+ *   - the transcript carries what the API actually SERVED on the last turn
+ *     (`sources/claude-code/transcript-model.ts`). It does not move until the
+ *     session next answers, so it LAGS a switch by exactly one turn.
+ *
+ * So the footer wins wherever it exists, and the transcript answers where it
+ * does not. That order also keeps the cost where it belongs: the footer read
+ * is one `capture-pane` vam is making anyway, and the transcript read is a
+ * directory walk plus a file read that is simply not paid on a machine whose
+ * CLI paints its own line.
+ *
+ * AND THE TWO ARE HANDED UP APART -- `model` against `last-turn`. The button
+ * wears the same word either way, but the note beside it does not: "running
+ * X" is a claim only the footer can support, and a surface that said it for a
+ * transcript-sourced name would be claiming vam had checked something it had
+ * not (`DetailPanel.tsx` draws the difference).
+ *
+ * THE TRANSCRIPT READER IS INJECTED AND DEFAULTS TO NOBODY, which is
+ * `source.ts`'s own rule for a filesystem read: "a caller that has not asked
+ * for it gets a model with `pullRequests` absent rather than a surprise
+ * network call". `terminal/ipc.ts` passes the real reader; a test passes an
+ * invented one and never touches the operator's own `~/.claude`.
+ *
+ * NONE OF THE PANE'S FOUR REFUSALS BEAR ON THE TRANSCRIPT, which is why the
+ * fallback runs after all of them rather than only after "no footer on the
+ * screen". A transcript is keyed by the ROW'S OWN SESSION ID and not by a
+ * pane, so the hazard the aiming rule exists for -- this row's button wearing
+ * another session's model -- cannot arise from reading the file this row's
+ * session writes. What vam cannot do is read a transcript for no row at all:
+ * a project is not a session, and there is no id to look up.
  */
 export async function readSessionModel(
   run: TmuxRun,
   projectId: string,
   rowId?: string,
   panes?: ReadonlyMap<string, string>,
+  fromTranscript: ((rowId: string) => Promise<string | null>) | null = null,
 ): Promise<SessionModel> {
-  const listed = await listVamSessions(run);
-  if (listed.kind === 'unavailable') return { kind: 'unknown' };
-  const match = targetSession(listed.sessions, projectId, rowId, panes);
-  if (match.kind !== 'one') return { kind: 'unknown' };
-  // The SCREEN and only the screen: no history is asked for, the way the
-  // prompt reader asks for none. The footer is on the screen by definition,
-  // and scrollback would be a thousand lines of transcript for a reader that
-  // looks at five.
-  const pane = await readPane(run, match.name);
-  if (pane.kind !== 'ok') return { kind: 'unknown' };
-  const name = readModelLine(pane.text);
-  return name === null ? { kind: 'unknown' } : { kind: 'model', name };
+  const painted = await readPaintedModel(run, projectId, rowId, panes);
+  if (painted !== null) return { kind: 'model', name: painted };
+  if (fromTranscript === null || rowId === undefined) return { kind: 'unknown' };
+  const last = await fromTranscript(rowId);
+  return last === null ? { kind: 'unknown' } : { kind: 'last-turn', name: last };
 }

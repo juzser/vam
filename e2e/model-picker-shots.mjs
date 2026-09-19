@@ -793,6 +793,66 @@ await page.keyboard.press('Escape');
 await page.waitForTimeout(150);
 
 // ---------------------------------------------------------------------------
+// 3d. A ROW WHOSE NAME CAME OUT OF THE TRANSCRIPT, NOT THE PANE.
+//
+// The defect this arm exists for: an operator may set `statusLine` in
+// `~/.claude/settings.json` to a script of their own, and the CLI then paints
+// that script's output where its footer would go. Measured on the machine this
+// was written for -- raw JSON across four lines -- the footer reader answers "I
+// cannot tell" for the life of every session there, and this button wore the
+// word `model` and nothing else. The name comes out of the session's own
+// transcript now (`main/sources/claude-code/transcript-model.ts`).
+//
+// THE LABEL IS THE SAME LABEL, which is the half a unit test can also say. What
+// only a browser can say is the TIP: it opens on a real `pointermove`, Radix
+// renders it in a portal, and what it says has to differ from the pane-sourced
+// row's -- "running X" is a claim only the footer supports, and this source
+// lags a `/model` switch by one turn.
+// ---------------------------------------------------------------------------
+await openComposer(LONG_NAME);
+await page.waitForTimeout(200);
+const lastTurnLabel = await page.evaluate(() => {
+  const button = document.querySelector('[data-model-picker]');
+  return {
+    label: (button?.querySelector('[data-tap-skin]')?.textContent ?? '').trim(),
+    name: button?.getAttribute('aria-label') ?? null,
+  };
+});
+const lastTurnBox = await page.locator('[data-model-picker]').boundingBox();
+await page.mouse.move(lastTurnBox.x - 40, lastTurnBox.y - 40);
+await page.waitForTimeout(150);
+await page.mouse.move(
+  lastTurnBox.x + lastTurnBox.width / 2,
+  lastTurnBox.y + lastTurnBox.height / 2,
+  { steps: 6 },
+);
+await page.waitForTimeout(300);
+const lastTurnTip = await tipText();
+console.log(`  ${LONG_NAME}: ${JSON.stringify(lastTurnLabel)}`);
+console.log(`  ${LONG_NAME} hover tip: ${JSON.stringify(lastTurnTip)}`);
+check(
+  'a transcript-sourced model reaches the label like any other',
+  lastTurnLabel.label === 'Sonnet 4.5',
+  JSON.stringify(lastTurnLabel.label),
+);
+check(
+  'and its tip names the TURN rather than claiming the session is running it',
+  (lastTurnTip ?? '').startsWith('last turn ran on Sonnet 4.5 ·') &&
+    !/running Sonnet 4\.5/.test(lastTurnTip ?? ''),
+  JSON.stringify(lastTurnTip),
+);
+check(
+  'and a screen reader is told the same qualifier, not only the name',
+  lastTurnLabel.name !== null &&
+    lastTurnLabel.name.includes('Sonnet 4.5') &&
+    /last turn ran on/.test(lastTurnLabel.name),
+  JSON.stringify(lastTurnLabel.name),
+);
+await page.evaluate(() => document.activeElement?.blur());
+await page.mouse.move(0, 0);
+await page.waitForTimeout(200);
+
+// ---------------------------------------------------------------------------
 // 4. PICKING ONE, IN THE BROWSER BUILD, is refused out loud: there is no
 // `window.api` here, and the shared caption says so in the same row. This is
 // the one thing a pick can be measured to do without a pane -- and it proves

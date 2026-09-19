@@ -175,7 +175,10 @@ import { type FileOpenRequest, FilesTab } from './FilesTab.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
+  modelButtonName,
   modelControlState,
+  modelRunningClause,
+  type RunningModel,
   runningModelRows,
 } from './model-command.js';
 import { Note } from './Note.js';
@@ -5917,7 +5920,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * of a row that is no longer being polled -- and the effect keeps the
    * dependencies it actually reads.
    */
-  const [running, setRunning] = useState<string | null>(null);
+  const [running, setRunning] = useState<RunningModel | null>(null);
   /** Published only while the poll below is live; see `sendModel`. */
   const lookForModel = useRef<(() => void) | null>(null);
   const modelReadable = modelControl === 'picker' && model !== undefined;
@@ -5945,10 +5948,15 @@ export function DetailPanel(props: DetailPanelProps) {
       if (!live || mine !== issued) return;
       // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
       // tell -- a question over the status line, a cut pane, a pairing it
-      // refused -- lands on the word the button wore before, because the one
-      // thing worse than an unlabelled button is a label that has quietly
-      // stopped being true.
-      setRunning(view.kind === 'model' ? view.name : null);
+      // refused, AND a transcript with no answered turn in it -- lands on the
+      // word the button wore before, because the one thing worse than an
+      // unlabelled button is a label that has quietly stopped being true.
+      //
+      // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
+      // CLI's painted footer and `last-turn` out of the session's transcript;
+      // both put the same word on the button, and only one of them can be
+      // called "running" in the words around it (`modelRunningClause`).
+      setRunning(view.kind === 'unknown' ? null : view);
     };
     lookForModel.current = () => void look();
     void look();
@@ -5959,8 +5967,16 @@ export function DetailPanel(props: DetailPanelProps) {
       clearInterval(timer);
     };
   }, [modelReadable, model, projectId, rowId]);
-  /** The rows the pane's answer marks; two when it cannot separate them. */
-  const runningRows = runningModelRows(running);
+  /**
+   * The rows the answer marks; two when the name cannot separate them.
+   *
+   * BY NAME, AND THEREFORE THE SAME FOR BOTH SOURCES. A transcript-sourced
+   * name arrives already in the footer's own shape (`displayModelName`), so
+   * the tick is the same machinery on either -- and a tick that disagreed with
+   * the label beside it would be worse than a tick that lags with it. What the
+   * lag means is carried in the words, where it can be said.
+   */
+  const runningRows = runningModelRows(running?.name ?? null);
   /**
    * THE RECORD WINS. A transcript question carries the tool's own
    * `multiSelect`, its descriptions and its previews; a screen carries none of
@@ -8403,12 +8419,19 @@ export function DetailPanel(props: DetailPanelProps) {
                       this correction, for exactly this reason. It says
                       "running", never "chosen": the name came off the
                       session's status line, and vam does not know which alias
-                      put it there. */}
+                      put it there.
+
+                      AND IT SAYS WHICH TURN IT IS ABOUT when the name came out
+                      of the transcript instead -- the only source there is on
+                      a machine whose operator has replaced the CLI's status
+                      line. `modelRunningClause` holds the two sentences and
+                      the argument for keeping them apart; the short of it is
+                      that "running" is a claim only the footer supports. */}
                   <Note
                     text={
                       running === null
                         ? MODEL_PICKER_NOTE
-                        : `running ${running} · ${MODEL_PICKER_NOTE}`
+                        : `${modelRunningClause(running)} · ${MODEL_PICKER_NOTE}`
                     }
                   >
                     <button
@@ -8433,14 +8456,22 @@ export function DetailPanel(props: DetailPanelProps) {
                          that comment was protecting, and it still holds: the
                          moment the pane stops saying, so does this.
 
+                         AND THE FOOTER IS NOT THE ONLY PANE FACT ANY MORE. An
+                         operator may replace the CLI's status line with a
+                         script of their own, and then there is no footer to
+                         read for the life of every session on that machine --
+                         which is exactly the defect this control had. The name
+                         then comes out of the session's own transcript
+                         (`main/sources/claude-code/transcript-model.ts`), and
+                         the sentence around it changes with the source rather
+                         than the label doing so.
+
                          THE NAME LEADS THE ACCESSIBLE LABEL, the way the mode
                          chip's does, so a screen reader is told the fact the
-                         eye is told rather than only what the control does. */
-                      aria-label={
-                        running === null
-                          ? 'model — choose one for this session'
-                          : `model: ${running} — choose one for this session`
-                      }
+                         eye is told rather than only what the control does --
+                         and it carries the qualifier too, because a screen
+                         reader has no tooltip to hover for the rest of it. */
+                      aria-label={modelButtonName(running)}
                       onClick={() => togglePopover('model')}
                       /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
                          THAT CAN -- because it is the only thing in the row
@@ -8472,7 +8503,7 @@ export function DetailPanel(props: DetailPanelProps) {
                         className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
                       >
                         <span data-model-label className="truncate">
-                          {modelButtonLabel(running)}
+                          {modelButtonLabel(running?.name ?? null)}
                         </span>
                         {/* The chevron never gives way: a picker with no
                             affordance left on it is a label. */}
