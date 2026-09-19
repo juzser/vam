@@ -15,10 +15,12 @@
 
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { buildBindingSheet, CURSOR_MODES } from '../../src/renderer/keyboard/keysheet.js';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
 import { shortcutSections } from '../../src/renderer/settings/sections.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 afterEach(cleanup);
 
@@ -118,14 +120,29 @@ describe('the columns of a shortcut row', () => {
    * half — without it a chord one pixel too wide goes back to wrapping into a
    * box that cannot show a second line.
    */
+  /**
+   * MEASURED AGAINST WHAT IS PAINTED, NOT AGAINST THE TOKEN — and the symbols
+   * moved that number in BOTH directions. On a Mac `Mod-Shift-[` is ⇧⌘[, three
+   * characters instead of eleven; off one it is `Ctrl+Shift+[`, which is
+   * TWELVE and one character longer than the token this column was sized for.
+   * A test still reading `row.keys` would have measured a string no surface
+   * draws any more, and would have been green while the widest chord on Linux
+   * stepped its own row's slot out of line.
+   */
   it('holds the widest chord the shipped tables contain, on one line', () => {
     open();
     const chords = [...new Set(allRows.flatMap((row) => row.keys))];
     // Not decoration: every line below is vacuous over an empty list, and the
     // sheet is the corpus this column is sized for.
     expect(chords.length).toBeGreaterThan(40);
-    const widest = chords.reduce((a, b) => (a.length >= b.length ? a : b));
-    expect(widest.length).toBeGreaterThanOrEqual(11);
+    // BOTH RENDERINGS, because one bundle is served to both platforms and the
+    // floor is a constant in the source either way.
+    const painted = chords.flatMap((chord) => [
+      chordSymbols(chord, true),
+      chordSymbols(chord, false),
+    ]);
+    const widest = painted.reduce((a, b) => (a.length >= b.length ? a : b));
+    expect(widest.length).toBeGreaterThanOrEqual(12);
     const needed = widest.length * MONO_ADVANCE_PX + SLOT_CHROME_PX;
 
     const [, floor] = tracks(lines()[0] as HTMLElement);
@@ -148,16 +165,23 @@ describe('the columns of a shortcut row', () => {
     // characters and `Mod-Alt-AudioVolumeDown` is twenty-three. No fixed
     // column can hold that, so the slot grows and the row's label column
     // yields instead. THE KEY IS NEVER THE THING THAT CLIPS.
+    //
+    // The symbols shorten the modifiers and not the KEY NAME, which is where
+    // all of that length lives — `⌥⌘AudioVolumeDown` is still seventeen.
     const row = allRows.find((candidate) => candidate.byMode === null);
     expect(row).toBeDefined();
-    open({ ...EMPTY_PREFS, keyBindings: { [row?.id ?? '']: ['Mod-Alt-AudioVolumeDown'] } });
-    const slot = document.querySelector<HTMLElement>(`[data-binding-slot="${row?.id}:0"]`);
-    expect(slot?.textContent).toBe('Mod-Alt-AudioVolumeDown');
-    // No fixed `w-[Npx]` anywhere on the slot — that is what would cut it.
-    expect(slot?.className).not.toMatch(/(?:^|\s)w-\[\d/);
-    // And the track it sits in is allowed to follow the content.
-    const [, track] = tracks((slot as HTMLElement).closest('li') as HTMLElement);
-    expect(track).toContain('max-content');
+    onBothPlatforms((mac) => {
+      open({ ...EMPTY_PREFS, keyBindings: { [row?.id ?? '']: ['Mod-Alt-AudioVolumeDown'] } });
+      const slot = document.querySelector<HTMLElement>(`[data-binding-slot="${row?.id}:0"]`);
+      expect(slot?.textContent).toBe(chordSymbols('Mod-Alt-AudioVolumeDown', mac));
+      expect((slot?.textContent ?? '').length).toBeGreaterThan(15);
+      // No fixed `w-[Npx]` anywhere on the slot — that is what would cut it.
+      expect(slot?.className).not.toMatch(/(?:^|\s)w-\[\d/);
+      // And the track it sits in is allowed to follow the content.
+      const [, track] = tracks((slot as HTMLElement).closest('li') as HTMLElement);
+      expect(track).toContain('max-content');
+      cleanup();
+    });
   });
 
   it('truncates a long label instead of pushing the key slots along', () => {

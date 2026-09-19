@@ -133,6 +133,25 @@ const APPLE_PLATFORM = isApplePlatform(
 );
 
 /**
+ * THE SAME QUESTION, ASKED AT THE MOMENT OF A PAINT — `chordSymbols`' default,
+ * and the reason it is a function rather than the const above it.
+ *
+ * A RUNTIME ANSWER AND NEVER A BUILD-TIME ONE. `build:web` is served over
+ * Tailscale to whatever machine picks it up, so the bundle that paints ⌘ for
+ * the operator's Mac has to paint `Ctrl` for a PC reading the same bytes. A
+ * constant folded at build time would ship one platform's keyboard to both.
+ *
+ * READ LIVE rather than cached, for the same reason `isApplePlatform` takes a
+ * string at all: a React component has no flag to pass down, so this is the
+ * only seam a test has to put the other platform in front of one. The cost is
+ * one small regex per chord PAINTED, which is a keystroke's worth of work in a
+ * place no keystroke is being handled.
+ */
+export function applePlatform(): boolean {
+  return isApplePlatform(globalThis.navigator?.platform ?? globalThis.navigator?.userAgent ?? '');
+}
+
+/**
  * THE DIGIT ROW, WHERE Ctrl AND Cmd ARE NOT ONE KEY ANY MORE.
  *
  * `Mod-` folds them together everywhere else in this grammar, and the fold is
@@ -1382,6 +1401,172 @@ type Binding = {
 /** How a chord is written down — in the sheet, in a slot, and in storage. */
 export function chordText(chord: Chord): string {
   return `${chord.prefix}${chord.key}`;
+}
+
+/* ---------------------------------------------------------------------------
+ * HOW A CHORD IS READ BY A PERSON — the one rendering, beside the grammar it
+ * renders.
+ *
+ * The operator, translated: "show shortcut keys in settings and in the
+ * tooltips as symbols — `Mod` should show the ⌘ icon if macOS. On Windows show
+ * `Ctrl`." `Mod-` is an INTERNAL spelling: it is the one token that can carry
+ * two physical keys, which is exactly the fact it hides from the person who
+ * has to press one of them.
+ *
+ * A DISPLAY FUNCTION AND NOTHING ELSE. Every table in this module is still
+ * keyed by the token, `normalizeKey` still answers `Mod-p`, and storage still
+ * holds what the operator's keyboard produced. Nothing that MATCHES a
+ * keystroke may ever see this output: a comparison against a glyph would move
+ * the grammar onto a string whose spelling depends on who is reading it.
+ * `test/keyboard/chord-symbols.test.ts` holds that line.
+ * ------------------------------------------------------------------------ */
+
+/** The modifier tokens, in the order `normalizeKey` writes them. */
+const MODIFIER_TOKEN = /^(Mod|Ctrl|Alt|Shift)-/;
+
+/**
+ * THE GLYPHS, AND WHY THESE ONES. Apple's own set, the one every Mac menu
+ * prints: ⌘ command, ⇧ shift, ⌥ option, ⌃ control. `Mod` IS command here —
+ * that is the whole ask — and `Ctrl` is NOT: `CTRL_GESTURES` lifted the fold
+ * for the letters, so a Control chord on a Mac is a real Control chord and
+ * rendering it ⌘ would send an operator's hand to the wrong key.
+ */
+const APPLE_MODIFIERS: Readonly<Record<string, string>> = {
+  Ctrl: '⌃',
+  Alt: '⌥',
+  Shift: '⇧',
+  Mod: '⌘',
+};
+
+/** Off a Mac the command modifier IS Control, which is why two tokens map to
+ *  one word — and why the renderer de-duplicates (see `chordSymbols`). */
+const OTHER_MODIFIERS: Readonly<Record<string, string>> = {
+  Mod: 'Ctrl',
+  Ctrl: 'Ctrl',
+  Alt: 'Alt',
+  Shift: 'Shift',
+};
+
+/**
+ * ⌃⌥⇧⌘ — the HIG's order, command last and nearest the key, which is the
+ * order every Mac menu an operator has ever read uses. The token is built in a
+ * different order (`normalizeKey`: Mod, Ctrl, Alt, Shift) and the two have no
+ * reason to agree: one is a spelling, this is a convention about hands.
+ */
+const APPLE_ORDER: readonly string[] = ['Ctrl', 'Alt', 'Shift', 'Mod'];
+
+/** Ctrl+Alt+Shift+Key, the order Windows and Linux write and read. */
+const OTHER_ORDER: readonly string[] = ['Mod', 'Ctrl', 'Alt', 'Shift'];
+
+/**
+ * The named keys, as a Mac draws them. `⏎` rather than the HIG's `↩` because
+ * vam already paints `⏎`, `⌫`, `⇧⇥` and `␣` on the phone's keystroke strip
+ * (`DetailPanel.tsx`), and one app with two glyphs for Enter is the same
+ * defect as one key with two spellings.
+ */
+const APPLE_KEYS: Readonly<Record<string, string>> = {
+  Enter: '⏎',
+  Escape: '⎋',
+  Tab: '⇥',
+  Backspace: '⌫',
+  Delete: '⌦',
+  ArrowUp: '↑',
+  ArrowDown: '↓',
+  ArrowLeft: '←',
+  ArrowRight: '→',
+  PageUp: '⇞',
+  PageDown: '⇟',
+  Home: '↖',
+  End: '↘',
+  CapsLock: '⇪',
+  ' ': '␣',
+};
+
+/**
+ * And as everything else does: words, and only where the `event.key` name is
+ * not already the word a person would say. `Enter`, `Tab`, `Backspace`,
+ * `Delete`, `Home` and `End` are missing from here deliberately — they fall
+ * through and print themselves.
+ */
+const OTHER_KEYS: Readonly<Record<string, string>> = {
+  Escape: 'Esc',
+  ArrowUp: 'Up',
+  ArrowDown: 'Down',
+  ArrowLeft: 'Left',
+  ArrowRight: 'Right',
+  PageUp: 'PgUp',
+  PageDown: 'PgDn',
+  ' ': 'Space',
+};
+
+/**
+ * The key itself, once its modifiers have been taken off the front.
+ *
+ * A BARE KEY IS LEFT EXACTLY AS THE GRAMMAR SPELLS IT, which is the one place
+ * this whole rendering does nothing — and it is deliberate twice over. `G` is
+ * the key a vim user reads as `G`; `gt` is two keystrokes rather than a
+ * modified one; and upper-casing `j` would name a key that is bound to
+ * something else entirely. Case only becomes decoration once a modifier is
+ * holding the letter, where ⇧ carries the shift and every Mac menu prints the
+ * letter capital.
+ */
+function keyLabel(key: string, mac: boolean, modified: boolean): string {
+  const named = (mac ? APPLE_KEYS : OTHER_KEYS)[key];
+  if (named !== undefined) {
+    return named;
+  }
+  return modified && /^[a-z]$/.test(key) ? key.toUpperCase() : key;
+}
+
+/**
+ * ONE CHORD, AS A PERSON READS IT: `Mod-Shift-e` is `⇧⌘E` on a Mac and
+ * `Ctrl+Shift+E` everywhere else.
+ *
+ * `mac` IS A PARAMETER, defaulting to this machine, for the reason
+ * `normalizeKey` states one screen up: both answers have to be assertable from
+ * one test run, or a suite asserts a different rendering on ubuntu than on the
+ * operator's Mac while looking identical in both.
+ *
+ * TAKES THE WHOLE CHORD STRING — a token, a prefixed pair (`gt`), a bare
+ * character — because that is what every surface holds. Only the modifier
+ * tokens and the named keys are rewritten; everything else is returned as it
+ * came in.
+ *
+ * THE TOKENS ARE STRIPPED BY PATTERN, NOT BY SPLITTING ON `-`: a hyphen is a
+ * key an operator can bind (`Mod--`), and splitting would leave that chord
+ * with no key at all. A trailing token with nothing behind it (`Mod-`) is not
+ * a chord and is handed back untouched rather than painted as a naked glyph.
+ */
+export function chordSymbols(chord: string, mac: boolean = applePlatform()): string {
+  const held = new Set<string>();
+  let rest = chord;
+  for (;;) {
+    const match = MODIFIER_TOKEN.exec(rest);
+    if (match?.[1] === undefined) {
+      break;
+    }
+    const next = rest.slice(match[0].length);
+    if (next === '') {
+      break;
+    }
+    held.add(match[1]);
+    rest = next;
+  }
+  const table = mac ? APPLE_MODIFIERS : OTHER_MODIFIERS;
+  // DE-DUPLICATED, and only off a Mac does it ever do anything: `Mod` and
+  // `Ctrl` are one physical key there, and `Mod-Ctrl-k` — which
+  // `normalizeKey`'s own comment writes down for Cmd+Ctrl+K, and which a
+  // bindings file written on a Mac carries to a PC — would otherwise render
+  // "Ctrl+Ctrl+K", a keystroke nobody can press.
+  const modifiers = [
+    ...new Set(
+      (mac ? APPLE_ORDER : OTHER_ORDER)
+        .filter((token) => held.has(token))
+        .map((token) => table[token] ?? token),
+    ),
+  ];
+  const key = keyLabel(rest, mac, held.size > 0);
+  return [...modifiers, key].join(mac ? '' : '+');
 }
 
 /** The inverse. Only a two-character string opening with a prefix is a chord:

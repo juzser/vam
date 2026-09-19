@@ -18,7 +18,9 @@ import { EDITOR_KEYS, TREE_KEYS } from '../panels/files-tree.js';
 import { TABS } from '../panels/tabs.js';
 import {
   activeBindings,
+  applePlatform,
   bindingClashes,
+  chordSymbols,
   chordText,
   effectiveBindings,
   isSelectOnlyChord,
@@ -680,8 +682,14 @@ export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetG
  * Keyed by the string `normalizeKey` produces, because that is what the two
  * lists hold and what the handlers compare against — one spelling, or the
  * sheet and the code could disagree about which keystroke a row is.
+ *
+ * A FUNCTION OF THE PLATFORM, for one caption: the Tab row discloses the other
+ * half of its key, and `Shift+Tab` is a keystroke a person has to press. The
+ * `keys` column is rendered by `KeySheet.tsx`, but a chord NAMED INSIDE PROSE
+ * has nothing to render it, so the table takes the flag and spends it on the
+ * one row that needs it. The rest are captions with no key in them.
  */
-const FILES_KEY_LABELS: Readonly<Record<string, string>> = {
+const filesKeyLabels = (mac: boolean): Readonly<Record<string, string>> => ({
   j: 'down one row of the tree',
   k: 'up one row of the tree',
   h: 'shut this directory, or step out to the one holding it',
@@ -690,14 +698,14 @@ const FILES_KEY_LABELS: Readonly<Record<string, string>> = {
   '/': 'filter the tree — from the tree',
   'Mod-p': 'find a file — from anywhere in the tab, the editor included',
   'Mod-Shift-e': 'move the keyboard between the editor and the tree',
-  Tab: 'indent in the editor — Shift+Tab outdents',
+  Tab: `indent in the editor — ${chordSymbols('Shift-Tab', mac)} outdents`,
   'Mod-s': 'save the open file',
   'Mod-Shift-f': 'tidy this file’s whitespace — refuses by name where it cannot',
   'Mod-Shift-m': 'markdown: the rendered document, or its raw text',
   'Mod-z': 'undo the last format, while the file is still what it produced',
   Escape: 'hand the keyboard back to Select',
   'Mod-[': 'hand the keyboard back to Select',
-};
+});
 
 /** What the section is called. Lower case, like every other group title. */
 const FILES_GROUP_TITLE = 'in the files tab';
@@ -707,14 +715,19 @@ const FILES_GROUP_TITLE = 'in the files tab';
  * declare them — the tree's keyboard, then the editor's, deduplicated because
  * `Escape` and `Mod-[` are on both and mean one thing.
  *
- * The parameter exists so the throw is reachable from a test, exactly as
- * `buildKeySheet`'s `overrides` is; nothing in the app passes it.
+ * The first parameter exists so the throw is reachable from a test, exactly as
+ * `buildKeySheet`'s `overrides` is; nothing in the app passes it. The second
+ * is the platform the captions are written for, defaulting to this machine —
+ * a parameter rather than a read for the reason `chords.ts` gives: both
+ * answers have to be assertable from one test run.
  */
 export function buildFilesSheet(
   keys: readonly string[] = [...TREE_KEYS, ...EDITOR_KEYS],
+  mac: boolean = applePlatform(),
 ): readonly SheetGroup[] {
+  const labels = filesKeyLabels(mac);
   const rows = [...new Set(keys)].map((key): SheetRow => {
-    const label = FILES_KEY_LABELS[key];
+    const label = labels[key];
     if (label === undefined || label === '') {
       throw new Error(`no caption for the Files-tab key "${key}" — add one to FILES_KEY_LABELS`);
     }
@@ -725,4 +738,59 @@ export function buildFilesSheet(
     return { keys: key, label, mode: null, dead: null };
   });
   return rows.length === 0 ? [] : [{ group: 'files', title: FILES_GROUP_TITLE, rows }];
+}
+
+/* ---------------------------------------------------------------------------
+ * SEARCHING THE SHEET.
+ *
+ * The operator, translated: "the shortcut table when you press `?` needs a
+ * search box". A hundred rows is more than a screen, and the sheet is opened
+ * with a question — "how do I …" — that a list can only answer by being read
+ * end to end.
+ *
+ * A PURE FUNCTION, NOT A `filter` IN THE COMPONENT, for this module's own
+ * reason: what a query MATCHES is a decision, and a decision belongs where it
+ * can be asserted without a DOM. `KeySheet.tsx` is then a box and a list.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The rows whose action or key answers `query`, group by group, with the
+ * groups that end up empty dropped — a titled heading over nothing is the
+ * "advertises nothing" shape `buildKeySheet` already refuses.
+ *
+ * WHAT A ROW IS SEARCHED BY, and each of the three is an operator with a
+ * different thing in their head:
+ *
+ *   ITS CAPTION, for "how do I get back up the transcript".
+ *   ITS CHORD AS PAINTED, for the operator who can see ⌘P on this screen and
+ *     wants the row it belongs to — the operator's own example.
+ *   ITS TOKEN, because `Mod-p` is what the README prints, what
+ *     `files-tree.ts` lists and what every commit message in this repo calls
+ *     it. An operator who arrives from the docs types what the docs said.
+ *
+ * EVERY WORD HAS TO LAND, so a query reads like a sentence and NARROWS:
+ * "reset pane" finds the row that resets the panes rather than every row with
+ * a pane in it. Case-insensitive on both sides.
+ *
+ * `mac` IS A PARAMETER, defaulting to this machine, for `chordSymbols`' own
+ * reason: the painted spelling differs by platform and both have to be
+ * assertable from one test run.
+ */
+export function filterSheet(
+  groups: readonly SheetGroup[],
+  query: string,
+  mac: boolean = applePlatform(),
+): readonly SheetGroup[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) {
+    return groups;
+  }
+  const matches = (row: SheetRow): boolean => {
+    const haystack = `${row.label} ${row.keys} ${chordSymbols(row.keys, mac)}`.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  };
+  return groups.flatMap((group) => {
+    const rows = group.rows.filter(matches);
+    return rows.length === 0 ? [] : [{ ...group, rows }];
+  });
 }

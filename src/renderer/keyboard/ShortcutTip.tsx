@@ -42,7 +42,9 @@ import { createContext, type ReactNode, useContext } from 'react';
 import {
   actionId,
   activeBindings,
+  applePlatform,
   bindingChords,
+  chordSymbols,
   isSelectOnlyChord,
   type KeyAction,
   parseChord,
@@ -83,6 +85,7 @@ export function shortcutLines(
   action: KeyAction | undefined,
   mode: CursorMode | undefined,
   overrides = activeBindings(),
+  mac: boolean = applePlatform(),
 ): readonly TipLine[] {
   if (action === undefined) {
     return [];
@@ -92,10 +95,18 @@ export function shortcutLines(
     return [];
   }
   const { label, byMode } = describeAction(action);
+  // THE TOKENS DECIDE, THE SYMBOLS ARE PRINTED. Every judgement below is made
+  // against the spelling the grammar holds -- `isSelectOnlyChord` parses one,
+  // and a rendered `⌘K` parses as nothing at all -- and `chordSymbols` is
+  // applied at the LAST step, where the string stops being data and becomes
+  // what the operator reads. `mac` is a parameter for `chords.ts`'s reason:
+  // both platforms have to be assertable from one test run.
+  const say = (list: readonly string[]) =>
+    list.map((chord) => chordSymbols(chord, mac)).join(' or ');
   const selectOnly = chords.filter((chord) => isSelectOnlyChord(parseChord(chord)));
   const modes = mode === undefined ? CURSOR_MODES : [mode];
   if (selectOnly.length === 0) {
-    const keys = chords.join(' or ');
+    const keys = say(chords);
     return byMode === null
       ? [{ caption: null, keys }]
       : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
@@ -103,7 +114,7 @@ export function shortcutLines(
   const anywhere = chords.filter((chord) => !selectOnly.includes(chord));
   const lines: TipLine[] = [];
   if (anywhere.length > 0) {
-    const keys = anywhere.join(' or ');
+    const keys = say(anywhere);
     lines.push(
       ...(byMode === null
         ? [{ caption: null, keys }]
@@ -116,7 +127,7 @@ export function shortcutLines(
   if (mode !== 'insert') {
     lines.push({
       caption: `${MODE_TITLES.select} · ${byMode === null ? label : byMode.select}`,
-      keys: selectOnly.join(' or '),
+      keys: say(selectOnly),
     });
   }
   return lines;
@@ -149,7 +160,10 @@ export function InlineChord({
   readonly action: KeyAction;
   readonly className: string;
 }) {
-  const keys = primaryChord(action);
+  const chord = primaryChord(action);
+  // THE SYMBOLS ARE PAINTED HERE, not read out of the table: `primaryChord`
+  // answers in the grammar's own spelling, and this is the pixel.
+  const keys = chord === null ? null : chordSymbols(chord);
   // `data-inline-chord` so a shell can suppress the whole family from CSS. The
   // phone does (`styles.css`): a chord is exactly the part of this hint a
   // touchscreen cannot use. Suppressed, never deleted -- the keydown listener

@@ -122,7 +122,7 @@ import type {
   FileSignature,
   FileWriteResult,
 } from '../../main/files/types.js';
-import { normalizeKey } from '../keyboard/chords.js';
+import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
 import { answeringKeys, insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
 import {
@@ -827,7 +827,7 @@ export function FilesTab({
     pendingSelection.current = { path: activePath, start: caret, end: caret };
     setFormatUndo({ path: activePath, before: buffer.content, after: result.value });
     setContent(activePath, result.value);
-    setNote('formatted — Mod-z puts it back exactly as it was.');
+    setNote(`formatted — ${chordSymbols('Mod-z')} puts it back exactly as it was.`);
   }, [activePath, buffers, setContent, settings.indent]);
 
   /** Put the file back as it was before the last format. Answers whether it
@@ -1601,7 +1601,9 @@ export function FilesTab({
                 simply absent is the truer surface. The KEY still answers
                 from anywhere (`onEditorKeyDown`), and says why. */}
             {canPreview && (
-              <Note text="Switch between the rendered document and the raw text (Mod-Shift-m). Rendered is read-only; your unsaved edits survive either way.">
+              <Note
+                text={`Switch between the rendered document and the raw text (${chordSymbols('Mod-Shift-m')}). Rendered is read-only; your unsaved edits survive either way.`}
+              >
                 <button
                   type="button"
                   data-files-preview
@@ -1633,7 +1635,7 @@ export function FilesTab({
                 copy that survives the formatter learning a file type. */}
             {activeBuffer?.kind === 'editable' && (
               <Note
-                text={`Tidy this file's whitespace (Mod-Shift-f). ${FORMAT_OFFER} — anything else is refused by name, and Mod-z puts back whatever it changed.`}
+                text={`Tidy this file's whitespace (${chordSymbols('Mod-Shift-f')}). ${FORMAT_OFFER} — anything else is refused by name, and ${chordSymbols('Mod-z')} puts back whatever it changed.`}
               >
                 <button
                   type="button"
@@ -1651,7 +1653,9 @@ export function FilesTab({
                 write is REFUSED rather than forced when the file moved under
                 it, and their own text survives that refusal. */}
             {activeBuffer?.kind === 'editable' && (
-              <Note text="Write this file to disk (Mod-s). If it changed on disk since you opened it the write is refused, not forced — your edits stay in the box either way.">
+              <Note
+                text={`Write this file to disk (${chordSymbols('Mod-s')}). If it changed on disk since you opened it the write is refused, not forced — your edits stay in the box either way.`}
+              >
                 <button
                   type="button"
                   data-files-save
@@ -2238,16 +2242,20 @@ function Tree({
           }}
           /* THE KEY IS IN THE BOX, because the box was already there and
              nobody could find it: the filter has shipped since this tab did
-             and its placeholder said only `filter…`. Spelled the way
-             `normalizeKey` spells it and parenthesised the way this file's own
-             Format and Save tooltips name theirs (`(Mod-Shift-f)`, `(Mod-s)`),
-             rather than a chip beside the input — at `TREE_WIDTH`'s 7.5rem
-             floor a chip would take a third of the column off a box that has
-             ~62px to begin with, and a placeholder clips where a flex item
-             squeezes. `Mod-p` rather than `/` because it is the spelling that
-             works from every surface in the tab; `/` has the key sheet and the
-             README. */
-          placeholder="filter… (Mod-p)"
+             and its placeholder said only `filter…`. Parenthesised the way
+             this file's own Format and Save tooltips name theirs, rather than
+             a chip beside the input — at `TREE_WIDTH`'s 7.5rem floor a chip
+             would take a third of the column off a box that has ~62px to begin
+             with, and a placeholder clips where a flex item squeezes. `Mod-p`
+             rather than `/` because it is the spelling that works from every
+             surface in the tab; `/` has the key sheet and the README.
+
+             PAINTED, NOT SPELLED. It used to read `(Mod-p)` — `normalizeKey`'s
+             own token, in a box a person reads. `Mod-` is the one token that
+             carries two physical keys, which is exactly the fact a hint must
+             not hide, so it goes through `chordSymbols` like every other chord
+             on screen: `(⌘P)` on a Mac, `(Ctrl+P)` off one. */
+          placeholder={`filter… (${chordSymbols('Mod-p')})`}
           aria-label="filter files"
           className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
         />

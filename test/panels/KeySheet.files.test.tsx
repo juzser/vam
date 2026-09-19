@@ -22,9 +22,14 @@
 
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NO_BINDINGS, setActiveBindings } from '../../src/renderer/keyboard/chords.js';
+import {
+  chordSymbols,
+  NO_BINDINGS,
+  setActiveBindings,
+} from '../../src/renderer/keyboard/chords.js';
 import { EDITOR_KEYS, TREE_KEYS } from '../../src/renderer/panels/files-tree.js';
 import { KeySheet } from '../../src/renderer/panels/KeySheet.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 afterEach(() => {
   cleanup();
@@ -39,14 +44,23 @@ const printed = () =>
 
 describe('the key sheet documents the Files tab', () => {
   it('prints every key that tab answers, including the new file search', () => {
-    render(<KeySheet onClose={vi.fn()} />);
-    const keys = printed();
-    const answered = [...new Set([...TREE_KEYS, ...EDITOR_KEYS])];
-    expect(answered.length).toBeGreaterThanOrEqual(10);
-    for (const key of answered) {
-      expect(keys, `"${key}" is answered by the Files tab but not on the sheet`).toContain(key);
-    }
-    expect(keys, 'the operator’s ask').toContain('Mod-p');
+    // EACH KEY AS ITS PLATFORM SPELLS IT. The lists hold tokens — that is what
+    // the handlers dispatch on — and the sheet paints `chordSymbols` of each,
+    // so this asks the same question in both renderings rather than in
+    // whichever one the host machine happens to produce.
+    onBothPlatforms((mac) => {
+      render(<KeySheet onClose={vi.fn()} />);
+      const keys = printed();
+      const answered = [...new Set([...TREE_KEYS, ...EDITOR_KEYS])];
+      expect(answered.length).toBeGreaterThanOrEqual(10);
+      for (const key of answered) {
+        expect(keys, `"${key}" is answered by the Files tab but not on the sheet`).toContain(
+          chordSymbols(key, mac),
+        );
+      }
+      expect(keys, 'the operator’s ask').toContain(mac ? '⌘P' : 'Ctrl+P');
+      cleanup();
+    });
   });
 
   it('draws them as a section of their own, so they read as one surface’s keys', () => {

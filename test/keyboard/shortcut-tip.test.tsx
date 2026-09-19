@@ -16,18 +16,21 @@ import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
 import {
   actionId,
   bindingChords,
+  chordSymbols,
   type KeyAction,
   NO_BINDINGS,
   setActiveBindings,
 } from '../../src/renderer/keyboard/chords.js';
 import { MODE_TITLES } from '../../src/renderer/keyboard/keysheet.js';
 import {
+  InlineChord,
   primaryChord,
   ShortcutTip,
   shortcutLines,
 } from '../../src/renderer/keyboard/ShortcutTip.js';
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { baseProps, entriesOf, makeSession } from '../panels/session-list-props.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 beforeAll(() => {
   // The canvas renders session panes that measure with APIs happy-dom does
@@ -255,10 +258,18 @@ describe('an inline chip names one chord; a tooltip names them all', () => {
   it('gives the sidebar footer one chord and its tooltip both', () => {
     const both = bindingChords(NO_BINDINGS, actionId(NEW_SESSION));
     expect(both.length, 'newSession must hold two chords for this to test anything').toBe(2);
-    render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
-    const button = screen.getByLabelText('new session');
-    expect(button.textContent).toBe(`New session${both[0]}`);
-    expect(openByFocus(button).textContent).toContain(both.join(' or '));
+    // IN EACH PLATFORM'S OWN SPELLING, because one of these two chords carries
+    // the command modifier and the other does not: `o` reads `o` everywhere,
+    // and `Mod-n` is ⌘N on a Mac and Ctrl+N off one.
+    onBothPlatforms((mac) => {
+      render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
+      const button = screen.getByLabelText('new session');
+      expect(button.textContent).toBe(`New session${chordSymbols(both[0] ?? '', mac)}`);
+      expect(openByFocus(button).textContent).toContain(
+        both.map((chord) => chordSymbols(chord, mac)).join(' or '),
+      );
+      cleanup();
+    });
   });
 
   it('primaryChord takes the first chord, and nothing when the action is unbound', () => {
@@ -266,6 +277,101 @@ describe('an inline chip names one chord; a tooltip names them all', () => {
       bindingChords(NO_BINDINGS, actionId(NEW_SESSION))[0],
     );
     expect(primaryChord(NEW_SESSION, { [actionId(NEW_SESSION)]: [] })).toBeNull();
+  });
+
+  /**
+   * `primaryChord` ANSWERS IN TOKENS, and that is the line the operator's ask
+   * does not cross: the reading is the model, and the symbols happen where the
+   * pixels do. A renderer that took a rendered string back would be one
+   * `parseChord` away from matching a keystroke against a glyph.
+   */
+  it('leaves the reading in tokens — the symbols are the chip’s doing, not the table’s', () => {
+    expect(primaryChord({ kind: 'palette' }, NO_BINDINGS)).toBe('Mod-k');
+  });
+});
+
+/**
+ * THE OPERATOR'S ASK, AT THE TWO SURFACES THIS FILE OWNS. Translated: "show
+ * shortcut keys in settings and in the tooltips as symbols — `Mod` should show
+ * the ⌘ icon if macOS. On Windows show `Ctrl`."
+ *
+ * Both platforms, every case, and never the host's: `chords.ts` says why in as
+ * many words, and `test/support/platform.ts` is the seam.
+ */
+describe('a chord reaches the screen as its own platform’s symbols', () => {
+  it('prints ⌘ in a tooltip on a Mac, and Ctrl off one', () => {
+    onBothPlatforms((mac) => {
+      renderTip({ label: 'Command palette', action: { kind: 'palette' } });
+      const text = openByFocus().textContent ?? '';
+      expect(text).toContain(mac ? '⌘K' : 'Ctrl+K');
+      expect(text, 'the internal token reached the screen').not.toContain('Mod-k');
+      cleanup();
+    });
+  });
+
+  it('prints it in the inline chip too, and keeps the marker the phone suppresses', () => {
+    onBothPlatforms((mac) => {
+      render(<InlineChord action={{ kind: 'palette' }} className="chip" />);
+      const chip = document.querySelector('[data-inline-chord]');
+      // The marker is how `styles.css` hides the whole family at 390px -- "a
+      // chord is exactly the part of this hint a touchscreen cannot use" --
+      // and a symbol must not escape that by arriving on some new element.
+      expect(chip, 'the chip lost the attribute the phone suppresses it by').not.toBeNull();
+      expect(chip?.textContent).toBe(mac ? '⌘K' : 'Ctrl+K');
+      cleanup();
+    });
+  });
+
+  it('leaves the sidebar’s own chips free of any token spelling', () => {
+    onBothPlatforms(() => {
+      render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
+      const chips = [...document.querySelectorAll('[data-inline-chord]')].map(
+        (each) => each.textContent ?? '',
+      );
+      expect(chips.length, 'the sidebar draws inline chords').toBeGreaterThan(0);
+      for (const chip of chips) {
+        expect(chip, `"${chip}" is a token, not a rendering`).not.toContain('Mod-');
+      }
+      cleanup();
+    });
+  });
+
+  /**
+   * THE SPOKEN HALF MOVES WITH THE PAINTED ONE. `Chip` renders the chord
+   * twice — an `aria-hidden` box and an `sr-only` twin — and the whole reason
+   * they are one string is that they cannot then drift. VoiceOver says
+   * "command" for ⌘, and the platform that gets the glyphs is the only one
+   * whose screen reader is asked to.
+   */
+  it('says the same symbols to a screen reader as it paints', () => {
+    onBothPlatforms((mac) => {
+      renderTip({ label: 'Command palette', action: { kind: 'palette' } });
+      const tip = openByFocus();
+      expect(tip.textContent ?? '').toContain(`shortcut: ${mac ? '⌘K' : 'Ctrl+K'}`);
+      cleanup();
+    });
+  });
+
+  it('renders a Control chord as ⌃ on a Mac — never as the command key', () => {
+    // The operator can bind one: `Ctrl-k` is what a Mac's Ctrl+K normalises
+    // to, since `CTRL_GESTURES` keeps only `d` and `u` folded.
+    onBothPlatforms((mac) => {
+      setActiveBindings({ [actionId(SETTINGS)]: ['Ctrl-k'] });
+      renderTip();
+      const text = openByFocus().textContent ?? '';
+      expect(text).toContain(mac ? '⌃K' : 'Ctrl+K');
+      if (mac) expect(text).not.toContain('⌘');
+      cleanup();
+    });
+  });
+
+  it('leaves a bare vim key exactly as the sheet spells it, on both', () => {
+    onBothPlatforms(() => {
+      setActiveBindings({ [actionId(SETTINGS)]: ['G', 'gt'] });
+      renderTip();
+      expect(openByFocus().textContent ?? '').toContain('G or gt');
+      cleanup();
+    });
   });
 });
 
@@ -288,6 +394,23 @@ describe('the status bar prints the key that opens the sheet, not a default', ()
     expect(document.querySelector('[data-keysheet-hint]')).toBeNull();
     // The caption stays: it is what makes the sheet discoverable at all.
     expect(document.body.textContent).toContain('Keyboard shortcut');
+  });
+
+  /**
+   * THE MOST PROMINENT CHORD IN THE CHROME, and the one an operator reads
+   * without opening anything — so it is painted like every other one. The
+   * shipped `?` is a bare key and looks identical on both platforms, which is
+   * exactly why this rebinds onto a modified chord to ask the question.
+   */
+  it('paints that key in the platform’s own symbols', () => {
+    seedBinding(['Mod-Shift-h']);
+    onBothPlatforms((mac) => {
+      render(<Canvas model={DEMO_MODEL} />);
+      expect(document.querySelector('[data-keysheet-hint]')?.textContent).toBe(
+        mac ? '⇧⌘H' : 'Ctrl+Shift+H',
+      );
+      cleanup();
+    });
   });
 });
 
@@ -363,31 +486,42 @@ describe('the view icons derive their shortcut, and do not repeat it in their na
    * derived, with no shipped chord spelled in this test.
    */
   it('names the view and prints every chord the table holds for its digit', () => {
-    render(<Canvas model={DEMO_MODEL} />);
     const action: KeyAction = { kind: 'pickView', digit: 2 };
     const keys = bindingChords(NO_BINDINGS, actionId(action));
     expect(keys, 'the fixture must have the digit bound, or this asserts nothing').not.toEqual([]);
     expect(keys.length, 'the digit must hold both spellings, or the split asserts nothing').toBe(2);
-    const text = openByFocus(icon('prs')).textContent ?? '';
-    expect(text).toContain('PRs view');
-    for (const chord of keys) {
-      expect(text, `the tip does not name ${chord}`).toContain(chord);
-    }
-    // And the one that works only in Select says so, rather than standing
-    // beside the chord as though they were the same key.
-    expect(text).toContain(MODE_TITLES.select);
+    // AS EACH PLATFORM SPELLS IT: `Ctrl-Alt-2` is ⌃⌥2 on a Mac and Ctrl+Alt+2
+    // off one. Still derived — the chords come from the table, and only their
+    // rendering is this file's business.
+    onBothPlatforms((mac) => {
+      render(<Canvas model={DEMO_MODEL} />);
+      const text = openByFocus(icon('prs')).textContent ?? '';
+      expect(text).toContain('PRs view');
+      for (const chord of keys) {
+        expect(text, `the tip does not name ${chord}`).toContain(chordSymbols(chord, mac));
+      }
+      // And the one that works only in Select says so, rather than standing
+      // beside the chord as though they were the same key.
+      expect(text).toContain(MODE_TITLES.select);
+      cleanup();
+    });
   });
 
   it('follows the operator to a rebound key rather than to the shipped one', () => {
     // Through STORED prefs, the operator's own route: the canvas activates
     // them on mount, so a direct `setActiveBindings` would be overwritten.
     localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { 'pickView:2': ['F2'] } }));
-    render(<Canvas model={DEMO_MODEL} />);
-    const text = openByFocus(icon('prs')).textContent ?? '';
-    expect(text).toContain('F2');
-    // And the shipped chord is not ALSO printed — the tip reads what is in
-    // force, it does not accumulate.
-    expect(text).not.toContain('Alt-2');
+    onBothPlatforms((mac) => {
+      render(<Canvas model={DEMO_MODEL} />);
+      const text = openByFocus(icon('prs')).textContent ?? '';
+      expect(text).toContain('F2');
+      // And the shipped chord is not ALSO printed — the tip reads what is in
+      // force, it does not accumulate. AS RENDERED, not as the token: `Alt-2`
+      // is a string no surface paints any more, so asking for its absence
+      // would be asking nothing.
+      expect(text).not.toContain(chordSymbols('Ctrl-Alt-2', mac));
+      cleanup();
+    });
   });
 
   it('prints no shortcut at all for a view the operator unbound', () => {
