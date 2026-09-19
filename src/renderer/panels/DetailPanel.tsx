@@ -7065,6 +7065,11 @@ export function DetailPanel(props: DetailPanelProps) {
         {files === true && (
           <FilesTab
             hidden={current !== 'Files'}
+            // The same claim `Alt+<digit>` is gated on, passed one layer
+            // further down: this tab answers `Mod-p` on the WINDOW, so every
+            // mounted instance hears every keystroke and only the pane holding
+            // the keyboard may act on one. See `FilesTab`'s own prop comment.
+            paneFocused={paneFocused}
             sessionId={entry?.session.id ?? null}
             list={globalThis.window?.api?.files?.list}
             read={globalThis.window?.api?.files?.read}

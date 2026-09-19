@@ -123,7 +123,7 @@ import type {
   FileWriteResult,
 } from '../../main/files/types.js';
 import { normalizeKey } from '../keyboard/chords.js';
-import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { answeringKeys, insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
 import {
   renderedTreeWidth,
@@ -264,6 +264,23 @@ export type FilesTabProps = {
    * shape of bug a later reorder of this file could otherwise reintroduce.
    */
   readonly hidden: boolean;
+  /**
+   * Whether the pane holding this tab is the one holding the keyboard —
+   * `DetailPanel.tsx`'s own `paneFocused`, passed on rather than re-derived
+   * off `data-split-focused`, for the reason that prop's comment gives: a
+   * second notion of focus is a second answer to one question.
+   *
+   * It gates exactly one thing here: whether this instance's WINDOW-LEVEL
+   * `Mod-p` listener answers. Two split leaves can both show this tab, and
+   * both listeners hear every keystroke in the app — so without this, a chord
+   * pressed in the pane the operator is looking at would move the keyboard
+   * into the one they are not, whichever instance mounted last.
+   *
+   * Defaults to `true`, as `paneFocused` does and for the same reason: an
+   * unsplit shell, a phone and a desktop detail column all ARE the focused
+   * pane, and none of them has a pane identity to check.
+   */
+  readonly paneFocused?: boolean;
   readonly sessionId: string | null;
   readonly list: ListFiles | undefined;
   readonly read: ReadFile | undefined;
@@ -370,6 +387,7 @@ const NO_BRIDGE: SourceError = {
 
 export function FilesTab({
   hidden,
+  paneFocused = true,
   sessionId,
   list,
   read,
@@ -1195,6 +1213,69 @@ export function FilesTab({
     box.focus();
     box.select();
   }, []);
+
+  /**
+   * — AND THE FIFTH SURFACE, WHICH IS EVERYWHERE ELSE.
+   *
+   * THE DEFECT, reported by the operator and translated: "in the files view,
+   * in SELECT MODE, I cannot press Cmd+P to filter". The four handlers above
+   * are `onKeyDown` props, so each needs DOM focus to be inside the element
+   * that carries it — and in Select the keyboard is very often inside none of
+   * them. Measured in Chromium rather than reasoned about: switching a pane to
+   * this tab leaves focus on the view-icon button that switched it (`<button
+   * data-view="files" aria-label="Files view">`, a sibling of this whole tab),
+   * and `Escape` leaves it on the body. From either, `Mod-p` fell through to
+   * `Canvas.tsx`'s window grammar, which leaves `Mod-p` unbound on purpose —
+   * so the one act this tab exists for was unreachable from the state it opens
+   * in. `e2e/files-tab-keyboard-shots.mjs` presses it from the view pill.
+   *
+   * ON THE WINDOW, NOT ON THIS TAB'S OWN ROOT, because the focus states that
+   * were broken are precisely the ones OUTSIDE that root: a listener scoped to
+   * the subtree could not have heard any of them. It is the same window
+   * `Canvas.tsx` listens on, which is what makes the guards below the whole of
+   * the contract — there is nothing else standing between this and every
+   * keystroke in the app.
+   *
+   * NOT A BINDING IN `chords.ts`, deliberately, and the same argument
+   * `files-tree.ts` already makes for `TREE_KEYS`: the grammar's table is
+   * REBINDABLE and app-wide, and an entry there would be a key the shell owns
+   * whose only meaning lives in one tab of one view. `chords.ts` records that
+   * `Mod-p` was left free on purpose; it still is.
+   *
+   * THREE GUARDS, and each is a way this could steal a key that is not its own:
+   *
+   *   `hidden` — this tab is NOT unmounted when another tab shows (see the
+   *   file header), so without this the listener would answer from behind a
+   *   `display: none`, moving the keyboard into a box nobody can see while the
+   *   operator looks at the Response view.
+   *
+   *   `paneFocused` — every mounted instance hears every keystroke. In a split
+   *   showing this tab twice, the unfocused pane would race the focused one.
+   *
+   *   `defaultPrevented` / `answeringKeys` — the first says a nearer surface
+   *   already answered (all four handlers above `preventDefault`), the second
+   *   says a caret somewhere else in the app owns the key: the command
+   *   palette's filter, a rename field, another pane's composer.
+   *   `keyboard/focus-scope.ts` carries that question and its two populations;
+   *   `Canvas.tsx` asks the same one before it moves the keyboard on vam's own
+   *   initiative. A focused BUTTON is not answering anything, which is what
+   *   leaves the view pill — the broken case — reachable.
+   *
+   * AND `preventDefault` HERE TOO, for `onEditorKeyDown`'s reason: unprevented,
+   * `Cmd+P` is a browser tab's print dialog.
+   */
+  useEffect(() => {
+    if (hidden || !paneFocused) return;
+    const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (normalizeKey(event) !== 'Mod-p') return;
+      if (answeringKeys()) return;
+      event.preventDefault();
+      focusFilter();
+    };
+    window.addEventListener('keydown', onWindowKeyDown);
+    return () => window.removeEventListener('keydown', onWindowKeyDown);
+  }, [hidden, paneFocused, focusFilter]);
 
   const onEditorKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
