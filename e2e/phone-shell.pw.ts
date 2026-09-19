@@ -54,6 +54,21 @@ const TOUCH_MIN = 44;
  * one is the 30px ambient chip. 32x36 is that table's outer envelope, so a
  * skin over it is a control painting bigger than the spec allows, not a
  * control this guard failed to anticipate.
+ *
+ * THE WIDTH CEILING DOES NOT APPLY TO A `data-tap-pill`, and that exemption is
+ * as old as the attribute even though this guard is only meeting one now.
+ * `styles.css` clamps every skin to a 30x30 SQUARE and `data-tap-pill` is the
+ * declared opt-out for a skin holding TEXT rather than one glyph -- written
+ * because "Esc → agent" measured 72px wide and, clamped to 30, spilled into
+ * the next chip on a real render. A ceiling of 32 on those skins is the same
+ * clamp by another route. Their HEIGHT ceiling stands: the pill opts out of
+ * the square, not out of the 30px paint band, and a pill growing taller is
+ * exactly the drift this guard is for.
+ *
+ * It had never fired because the two families never shared a screen: the
+ * keystroke strip is withdrawn unless the source has a terminal, and `?demo=1`
+ * has none. The prompt suggestion's accept chip is the first pill this census
+ * has ever seen.
  */
 const SKIN_MAX_W = 32;
 const SKIN_MAX_H = 36;
@@ -138,6 +153,8 @@ async function openFirstSession(page: Page): Promise<void> {
 async function readSkins(page: Page): Promise<
   readonly {
     label: string;
+    /** `data-tap-pill` -- the declared opt-out of the fixed square. */
+    pill: boolean;
     w: number;
     h: number;
     ownerW: number;
@@ -151,6 +168,7 @@ async function readSkins(page: Page): Promise<
       const o = owner?.getBoundingClientRect() ?? new DOMRect();
       return {
         label: (owner?.getAttribute('aria-label') ?? el.textContent ?? '').trim().slice(0, 30),
+        pill: el.hasAttribute('data-tap-pill'),
         w: Math.round(r.width * 10) / 10,
         h: Math.round(r.height * 10) / 10,
         ownerW: Math.round(o.width * 10) / 10,
@@ -343,8 +361,8 @@ test.describe('the phone shell at 390px', () => {
     expect(
       skins.length === 0
         ? ['no [data-tap-skin] on either phone screen -- this guard measured nothing']
-        : skins.filter((s) => s.w > SKIN_MAX_W || s.h > SKIN_MAX_H).map(fmt),
-      `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H}`,
+        : skins.filter((s) => (s.pill ? false : s.w > SKIN_MAX_W) || s.h > SKIN_MAX_H).map(fmt),
+      `skins painting larger than ${SKIN_MAX_W}x${SKIN_MAX_H} (a data-tap-pill is exempt on WIDTH only)`,
     ).toEqual([]);
     expect(
       skins.length === 0
@@ -1229,7 +1247,12 @@ test.describe('the sheets behind a source', () => {
     if (box === null) throw new Error('no session row');
     await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+    // THROUGH THE CONFIRM, which is what the `×` opens now: closing a session
+    // ends a running agent and nothing in vam undoes it, so the tap raises the
+    // question and the question is what acts (`phone/ConfirmCloseSession.tsx`).
+    // The refusal this helper is here to produce still arrives, one tap later.
     await page.locator('[data-phone-close]').tap();
+    await page.locator('[data-confirm-close-session-go]').tap();
     await expect(page.locator('[data-phone-status]').first()).toContainText('stub');
     await page.locator('[data-phone-back]').tap();
   };
@@ -1440,27 +1463,37 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
   };
 
-  test('draws one tab per session, fits 390px with room for the pinned + and ›', async ({
-    page,
-  }) => {
+  /**
+   * THE PINNED `+` AND `‹` ARE GONE, AND THIS IS WHAT THEY WERE SPENDING.
+   *
+   * They sat fixed outside the scroller and held 88px of a 390px row, which
+   * left the chips 266px: the third chip was always off screen and every name
+   * clipped at the 104px cap. Both duplicated the list screen -- `+` called
+   * `sidebar.onAddInProject`, which IS the list's per-project add, and `‹`
+   * unwound to the same list, only pre-scrolled. Cut on the operator's
+   * instruction.
+   *
+   * This case used to assert they were both inside 390px, which they were.
+   * What it asserts now is what the room bought, because "the controls are
+   * absent" is satisfied by a strip that draws nothing at all.
+   */
+  test('draws one tab per session, and all three fit inside 390px now', async ({ page }) => {
     await stubSource(page);
     await openFirstAlphaSession(page);
 
     const tabs = page.locator('[data-phone-session-tab]');
     await expect(tabs).toHaveCount(3);
-    const add = page.locator('[data-phone-session-add]');
-    const expandBtn = page.locator('[data-phone-session-expand]');
-    await expect(add).toBeVisible();
-    await expect(expandBtn).toBeVisible();
+    await expect(page.locator('[data-phone-session-add]'), 'the pinned +').toHaveCount(0);
+    await expect(page.locator('[data-phone-session-expand]'), 'the pinned ‹').toHaveCount(0);
 
-    const addBox = await add.boundingBox();
-    const expandBox = await expandBtn.boundingBox();
-    if (addBox === null || expandBox === null) throw new Error('missing strip controls');
-    // Both sit to the RIGHT of the scrollable tab region, inside the 390px
-    // viewport -- not clipped, not pushed off-screen by the tabs.
-    expect(addBox.x + addBox.width).toBeLessThanOrEqual(390);
-    expect(expandBox.x + expandBox.width).toBeLessThanOrEqual(390);
-    expect(expandBox.x).toBeGreaterThan(addBox.x);
+    const rights = await page.$$eval('[data-phone-session-tab]', (els) =>
+      els.map((el) => Math.round(el.getBoundingClientRect().right)),
+    );
+    expect(rights.length, 'chips measured').toBe(3);
+    expect(
+      rights.filter((right) => right > 390),
+      `chip right edges against the 390px screen: ${JSON.stringify(rights)}`,
+    ).toEqual([]);
   });
 
   test('every control in the session tab strip is a real 44px touch target, painted at 30px', async ({
@@ -1485,7 +1518,11 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
       });
       return controls;
     });
-    expect(geometry.length, 'controls found in the session tab strip').toBeGreaterThanOrEqual(5);
+    // THREE, NOT FIVE. It was five while the `+` and the `‹` were pinned
+    // beside them; the floor moves with the corpus rather than being left
+    // high enough to fail, and it still catches a strip that stopped drawing
+    // its tabs.
+    expect(geometry.length, 'controls found in the session tab strip').toBeGreaterThanOrEqual(3);
     const undersized = geometry.filter((c) => c.w < 44 || c.h < 44);
     expect(undersized, JSON.stringify(geometry)).toEqual([]);
     const unpaintedAt30 = geometry.filter((c) => c.skinH !== 30);
@@ -1555,37 +1592,46 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(page.locator('[data-phone-session-tabs]')).toHaveCount(0);
   });
 
-  test('the strip\'s way out is named for where it goes, not for its container', async ({
+  /**
+   * WHAT IS LEFT OF THE STRIP'S ACCESSIBLE NAMING, now that its way out is
+   * gone.
+   *
+   * Two cases stood here. One held that the `‹` did not repeat the `<nav>`'s
+   * own label (a screen reader read "sessions in factory" twice, once as the
+   * region and once as a button, with nothing to say the second one LEAVES);
+   * the other drove it back to the list at the project's heading. Both were
+   * about a control the operator has had removed -- it spent 44px of a 390px
+   * row to reach a list the back chevron already reaches.
+   *
+   * The REGION still has to name itself, and that half was never about the
+   * button: a nav landmark with no accessible name is one a screen reader
+   * cannot tell from the app bar above it. Kept, and the strip is asserted to
+   * be nothing but tabs, so the control cannot quietly return unnamed.
+   */
+  test('the strip names itself as a region, and carries nothing but its tabs', async ({
     page,
   }) => {
-    // Its `aria-label` was byte-identical to the `<nav>`'s own -- a screen
-    // reader read "sessions in factory" twice, once as the region it had just
-    // entered and once as a button, with no way to tell that the second one
-    // LEAVES. And `›` at the end of a strip that scrolls horizontally is the
-    // universal promise of more tabs, which is not what it does.
     await openDemo(page);
     await openFirstAlphaSession(page);
     const strip = page.locator('[data-phone-session-tabs]');
-    const out = page.locator('[data-phone-session-expand]');
-    const region = await strip.getAttribute('aria-label');
-    const button = await out.getAttribute('aria-label');
-    expect(region, 'the region names itself').not.toBeNull();
-    expect(button, 'and the way out does not say the same thing').not.toBe(region);
+    expect(await strip.getAttribute('aria-label'), 'the region names itself').not.toBeNull();
+    const buttons = await strip.evaluate((el) =>
+      [...el.querySelectorAll('button')].map((b) => b.hasAttribute('data-phone-session-tab')),
+    );
+    expect(buttons.length, 'controls in the strip').toBeGreaterThanOrEqual(2);
     expect(
-      (await out.textContent())?.trim(),
-      'a forward chevron at the end of a scrolling strip promises more tabs',
-    ).not.toBe('›');
+      buttons.every(Boolean),
+      'every control left in the strip is a session tab',
+    ).toBe(true);
   });
 
-  test('the › control returns to the list, scrolled to this project’s heading', async ({
+  test('the back chevron still returns to the list, which is what the ‹ duplicated', async ({
     page,
   }) => {
     await stubSource(page);
     await openFirstAlphaSession(page);
-    await page.locator('[data-phone-session-expand]').tap();
+    await page.locator('[data-phone-back]').tap();
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
-    await expect(
-      page.locator('[data-project-heading][data-project-id="p1"]'),
-    ).toBeInViewport();
+    await expect(page.locator('[data-project-heading][data-project-id="p1"]')).toBeInViewport();
   });
 });

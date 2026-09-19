@@ -62,7 +62,6 @@ import { orderedInProject } from '../domain/selectors.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
-import type { SourceDeclines } from '../sources/port.js';
 import { ConfirmCloseSession } from './ConfirmCloseSession.js';
 import { closeSession, isSessionEntry, openSession } from './history.js';
 
@@ -100,14 +99,10 @@ export type PhoneShellProps = {
    * nowhere, which is the one thing this shell is careful not to do.
    */
   readonly statusCell: ReactNode;
-  readonly tally: {
-    readonly running: number;
-    readonly waiting: number;
-    readonly done: number;
-    readonly failed: number;
-  };
-  /** The source's own words for every capability it lacks. Never this file's. */
-  readonly declines: SourceDeclines;
+  /* `tally` and `declines` were props here and are gone with the two bands
+     that read them -- the footer's `N running · N waiting · N done`, and the
+     limits list, which is in the settings dialog now. Removed rather than left
+     unread: a prop nothing draws is an invitation to draw it again. */
 };
 
 /**
@@ -240,26 +235,26 @@ const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
  * mark -- never `role="tab"`, which would be a third orphaned tablist in a
  * codebase that already has two unpaired with any `tabpanel`.
  *
- * The `+` and `›` sit fixed outside the scrollable region so they stay
- * reachable at any scroll position, and both reuse existing routes: `+` is
- * `sidebar.onAddInProject`, the same call the list screen's per-project add
- * makes; `›` unwinds this screen's own history entry and lands on the list,
- * pre-scrolled to this project's heading.
+ * TABS, AND NOTHING PINNED BESIDE THEM. A `+` and a `‹` used to sit fixed
+ * outside the scrollable region. They were 88px of a 390px row held out of the
+ * scroller, which left the chips 266px: measured, the third chip was always off
+ * screen and every name clipped at the 104px cap. Both duplicated the list
+ * screen -- `+` called `sidebar.onAddInProject`, which is exactly the list's
+ * own per-project add, and `‹` unwound to that same list, only pre-scrolled --
+ * so the operator lost a whole session tab to reach two things one tap on the
+ * back chevron already reaches. Cut on the operator's instruction; the room
+ * goes to the tabs, which are the one thing here the list cannot do in place.
  */
 function SessionTabStrip({
   project,
   sessions,
   currentSessionId,
   onPick,
-  onAdd,
-  onExpand,
 }: {
   readonly project: Project;
   readonly sessions: readonly Session[];
   readonly currentSessionId: string;
   readonly onPick: (sessionId: string) => void;
-  readonly onAdd: () => void;
-  readonly onExpand: () => void;
 }) {
   if (sessions.length < 2) return null;
   return (
@@ -317,73 +312,17 @@ function SessionTabStrip({
           );
         })}
       </div>
-      <button
-        type="button"
-        data-phone-session-add
-        aria-label={`new session in ${project.name}`}
-        onClick={onAdd}
-        className={`${TOUCH} ${FOCUS_RING} flex-none`}
-      >
-        <span
-          data-tap-skin
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
-        >
-          +
-        </span>
-      </button>
-      {/* THE WAY OUT, named for where it goes.
-          It said `sessions in <project>` -- byte-identical to the `<nav>`'s own
-          label above, so a screen reader read the same phrase twice: once as
-          the region it had just entered, once as a button, with nothing to say
-          the second one LEAVES. And `›` at the end of a strip that scrolls
-          horizontally is the universal promise of MORE TABS, which is not what
-          this does: it unwinds to the list, pre-scrolled to this project. The
-          glyph is the `‹` the header's back control already uses, because this
-          is the same journey with a better landing. */}
-      <button
-        type="button"
-        data-phone-session-expand
-        aria-label={`all sessions in ${project.name}`}
-        onClick={onExpand}
-        className={`${TOUCH} ${FOCUS_RING} flex-none`}
-      >
-        <span
-          data-tap-skin
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
-        >
-          ‹
-        </span>
-      </button>
     </nav>
   );
 }
 
-/**
- * What this connection cannot do, in the source's own words.
- *
- * Generated from `declines`, never written here: a sentence hard-coded in the
- * phone shell would go stale the first time a source gains a capability. It is
- * a standing fact about the connection, so it lives somewhere you can go and
- * read it rather than in a toast.
- */
-function RemoteLimits({ declines }: { readonly declines: SourceDeclines }) {
-  const entries = Object.entries(declines).filter(([, why]) => why !== undefined && why !== '');
-  if (entries.length === 0) return null;
-  return (
-    <details data-remote-limits className="flex-none border-line border-b bg-panel px-3">
-      <summary className="flex min-h-[44px] cursor-pointer items-center text-control text-ink-dim">
-        What this connection cannot do
-      </summary>
-      <ul className="pb-2">
-        {entries.map(([name, why]) => (
-          <li key={name} data-remote-limit={name} className="py-1 text-control text-ink-dim">
-            {why}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
+/* `RemoteLimits` used to be here, a 45px band above the transcript on every
+   session screen. It is in the settings dialog now (`settings/RemoteLimits.tsx`,
+   which carries the measurement and the argument): it is a fact about the
+   CONNECTION, not about the session on screen, and it does not change while the
+   operator works. `declines` is no longer a prop of this shell at all -- it goes
+   straight from `Canvas` to the overlay that draws it, so there is no route by
+   which this file could start drawing it again by accident. */
 
 /** Is the soft keyboard up because THIS element took focus? */
 function isTyping(target: EventTarget | null): boolean {
@@ -398,8 +337,6 @@ export function PhoneShell({
   failureCount,
   onOpenErrorLog,
   statusCell,
-  tally,
-  declines,
 }: PhoneShellProps) {
   /**
    * Which screen is on top. Derived from a tap, and NOT persisted: restoring
@@ -423,13 +360,11 @@ export function PhoneShell({
    */
   const [view, setView] = useState<Tab>('Response');
   const [viewRequest, setViewRequest] = useState<{ readonly tab: Tab } | null>(null);
-  /**
-   * A project id to scroll the list screen to, set by the session tab
-   * strip's `›` and consumed once the list is back on screen. Not a second
-   * navigation surface: `back()` still does the actual unwind, this only adds
-   * where it lands.
-   */
-  const [scrollToProjectId, setScrollToProjectId] = useState<string | null>(null);
+  /* A `scrollToProjectId` used to live here, set by the session strip's `‹` so
+     the list came back pre-scrolled to this project's heading. It went with the
+     control that wrote it: a piece of state nothing writes is how a screen ends
+     up frozen on a value nobody chose, and leaving it would have been the exact
+     mistake the step rail's removal already avoided once in this file. */
   /**
    * The session the `×` is asking about, or `null` when it is asking about
    * none. The id AND the title, because the question has to name the thing it
@@ -470,15 +405,6 @@ export function PhoneShell({
     return () => window.removeEventListener('popstate', pop);
   }, []);
 
-  useEffect(() => {
-    if (open || scrollToProjectId === null) return;
-    const heading = document.querySelector(
-      `[data-project-heading][data-project-id="${CSS.escape(scrollToProjectId)}"]`,
-    );
-    heading?.scrollIntoView({ block: 'start' });
-    setScrollToProjectId(null);
-  }, [open, scrollToProjectId]);
-
   const show = () => {
     openSession(window.history);
     pushed.current = true;
@@ -508,15 +434,6 @@ export function PhoneShell({
     }
     setOpen(false);
   };
-  /**
-   * The strip's `›`: the same unwind `back()` does, plus where it lands. No
-   * second navigation surface -- this is the list screen the chevron already
-   * reaches, arriving pre-scrolled to the right heading instead of at the top.
-   */
-  const expand = () => {
-    if (entry !== null) setScrollToProjectId(entry.project.id);
-    back();
-  };
 
   if (!open || entry === null) {
     return (
@@ -539,13 +456,30 @@ export function PhoneShell({
             }}
           />
         </div>
+        {/* WHAT THIS BAR NO LONGER SAYS. It opened with `2 running · 3 waiting
+            · 1 done` -- a 44px band restating a view of itself, directly under
+            the rows that are the tally. The desktop had the same cell removed
+            for the same reason ("the bar was restating a view of itself"), and
+            this one was worse: it counted three of the five statuses and
+            dropped `failed` and `idle` silently, so a phone could read `2
+            running · 0 waiting · 0 done` over a list with a failed session in
+            it.
+
+            SO THE BAR IS NOW ITS TWO REAL CELLS AND NOTHING ELSE, and when
+            neither has anything it costs no band at all -- only the padding
+            that keeps the last ROW clear of the home indicator, which is the
+            one job something at the bottom of this screen always has
+            (`styles.css`). The element stays in the tree either way: see the
+            refusal cell's own comment below for why its PRESENCE must not be
+            the signal. */}
         <footer
           data-phone-status-bar
-          className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim"
+          className={
+            statusCell === null && failureCount === 0
+              ? 'flex flex-none items-center'
+              : 'flex min-h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim'
+          }
         >
-          <span className="flex-none">
-            {tally.running} running · {tally.waiting} waiting · {tally.done} done
-          </span>
           {/* Drawn always, empty and out of layout when there is nothing to
               say. Conditional PRESENCE made "vam has refused nothing" and
               "this screen has no refusal channel" the same observation to
@@ -674,28 +608,20 @@ export function PhoneShell({
         {statusCell}
       </div>
 
-      {/* Out of the way while the keyboard is up, on the same rule as
-          `RemoteLimits` beside it: chrome the operator is not reading while
-          composing. This is the OTHER axis from `ViewIcons` above -- which
-          session, not which facet of it -- and it sits in the step rail's old
-          slot without being the step rail's return; see this file's header
-          comment. */}
+      {/* Out of the way while the keyboard is up: chrome the operator is not
+          reading while composing. This is the OTHER axis from `ViewIcons`
+          above -- which session, not which facet of it -- and it sits in the
+          step rail's old slot without being the step rail's return; see this
+          file's header comment. The limits band that used to stand under it
+          is gone from this screen entirely (see above `isTyping`). */}
       {!typing && (
         <SessionTabStrip
           project={entry.project}
           sessions={orderedInProject(entry.project)}
           currentSessionId={entry.session.id}
           onPick={(sessionId) => sidebar.onPick(sessionId)}
-          onAdd={() => sidebar.onAddInProject(entry.project)}
-          onExpand={expand}
         />
       )}
-
-      {/* Out of the way while the keyboard is up: chrome the operator is not
-          reading, out of the ~400px the keyboard leaves. The step rail that
-          stood here is gone entirely -- see the note at the top of this file
-          for what that costs. */}
-      {!typing && <RemoteLimits declines={declines} />}
 
       {/* The output takes every pixel the bands above and the composer below do
           not, and it is the only region that shrinks when the keyboard opens.

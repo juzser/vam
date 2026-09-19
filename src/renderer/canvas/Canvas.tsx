@@ -6274,8 +6274,6 @@ function CanvasInner({
           // same string: `StatusCell` shortens and carries the whole message
           // on its tooltip, and a phone-only copy would drift from it.
           statusCell={status === null ? null : <StatusCell text={status} />}
-          tally={tally}
-          declines={source.kind === 'session' ? source.source.declines : {}}
         />
       )}
 
@@ -6303,6 +6301,14 @@ function CanvasInner({
           onChange={savePrefs}
           onClose={() => setSettingsOpen(false)}
           initialSection={settingsSection}
+          /* WHAT THIS CONNECTION CANNOT DO, in the source's own words. It used
+             to be a band above the transcript on the phone's session screen,
+             where it cost 45px of every session on every real phone; it is a
+             standing fact about the CONNECTION, so it belongs in the one
+             section whose subject is the desktop rather than the device
+             holding it. `{}` for a source that is not a session source: there
+             is nothing to decline. */
+          declines={source.kind === 'session' ? source.source.declines : {}}
         />
       )}
 

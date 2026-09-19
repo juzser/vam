@@ -50,7 +50,12 @@ vi.mock('../../src/shared/providers.js', () => {
   function readProviderId(id: unknown) {
     return resolveProvider(id)?.id;
   }
-  return { DEFAULT_PROVIDER_ID, PROVIDERS, resolveProvider, readProviderId };
+  // The derivation moved beside the table (`src/shared/providers.ts`) so the
+  // settings picker and the composer's read one answer, so the double has to
+  // carry it too -- computed from THIS table, never hard-coded true, or the
+  // double would stop being a double of the module.
+  const CAN_CHOOSE_PROVIDER = PROVIDERS.length > 1;
+  return { CAN_CHOOSE_PROVIDER, DEFAULT_PROVIDER_ID, PROVIDERS, resolveProvider, readProviderId };
 });
 
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';

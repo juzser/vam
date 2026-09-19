@@ -106,7 +106,12 @@ import remarkGfm from 'remark-gfm';
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import type { PrAction } from '../../shared/pr-action.js';
-import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
+import {
+  CAN_CHOOSE_PROVIDER,
+  PROVIDERS,
+  type ProviderId,
+  resolveProvider,
+} from '../../shared/providers.js';
 import type {
   ModelSwitchResult,
   PaneKey,
@@ -8167,8 +8172,24 @@ export function DetailPanel(props: DetailPanelProps) {
 
               ABSENT, NOT DISABLED: drawn only when the caller can actually
               persist a change (`onSetDefaultProvider`), the same rule
-              `pickImageAttachment` follows two blocks up. */}
-              {onSetDefaultProvider !== undefined && (
+              `pickImageAttachment` follows two blocks up.
+
+              AND ONLY WHEN THERE IS A CHOICE, which is the same rule one step
+              further out and the one this control was not obeying.
+              `CAN_CHOOSE_PROVIDER` (`src/shared/providers.ts`) is `false`
+              while the table has one row, and over one row this popover is a
+              list with a single already-selected item in it: pressing it can
+              only re-choose what is chosen. `SettingsOverlay` has withdrawn
+              its own copy on that condition all along; the derivation moved
+              beside the table so both surfaces read one answer.
+
+              WHAT IT COST WHILE IT WAS DRAWN, measured at 390px: 44px of a
+              335px tool row plus its 8px gap, for "the default provider for
+              NEW sessions" on a screen whose whole job is replying to a
+              session that already exists -- and the popover opened INSIDE the
+              prompt box, 99x34 at y=739 against a textarea spanning 727-767.
+              Withdrawing it retires that overlap with it. */}
+              {CAN_CHOOSE_PROVIDER && onSetDefaultProvider !== undefined && (
                 /* `data-popover-root` IS THE DISMISSAL BOUNDARY, not decoration
                    and not a test hook: the document-level `pointerdown` handler
                    above asks whether the press landed inside the OPEN popover's

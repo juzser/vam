@@ -35,7 +35,55 @@
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * A TWO-ROW PROVIDER TABLE, so that the family stays a family of six.
+ *
+ * The provider picker is withdrawn while `PROVIDERS` (`src/shared/providers.ts`)
+ * has one row -- a popover over a single already-selected item is a control
+ * that cannot act. Reduced to the two controls the shipped table draws, this
+ * file would assert TWO ordered pairs instead of six, and the arm the operator
+ * actually reported (`provider open + click the mode control -> all THREE
+ * open`) would stop being measured anywhere.
+ *
+ * So the table is doubled rather than the coverage cut. The state machine
+ * under test is `openPopover`, which is one name shared by all three and knows
+ * nothing about how many providers exist; the double restores the third
+ * control without touching it. The idiom, the `vi.hoisted` shape and the
+ * reimplemented total functions are `test/settings/provider-double.test.tsx`'s,
+ * verbatim and for its reason.
+ */
+const TEST_TABLE = vi.hoisted(() => ({
+  DEFAULT_PROVIDER_ID: 'claude-code',
+  PROVIDERS: [
+    { id: 'claude-code', label: 'Claude Code', command: ['claude'] },
+    {
+      id: 'vam-test-second-provider',
+      label: 'Test-Only Second Provider',
+      command: ['vam-test-second-provider-cmd'],
+    },
+  ],
+}));
+
+vi.mock('../../src/shared/providers.js', () => {
+  const { DEFAULT_PROVIDER_ID, PROVIDERS } = TEST_TABLE;
+  function resolveProvider(id: unknown) {
+    const match = PROVIDERS.find((provider) => provider.id === id);
+    return match ?? PROVIDERS.find((provider) => provider.id === DEFAULT_PROVIDER_ID);
+  }
+  function readProviderId(id: unknown) {
+    return resolveProvider(id)?.id;
+  }
+  return {
+    CAN_CHOOSE_PROVIDER: PROVIDERS.length > 1,
+    DEFAULT_PROVIDER_ID,
+    PROVIDERS,
+    resolveProvider,
+    readProviderId,
+  };
+});
+
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
