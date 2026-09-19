@@ -21,6 +21,7 @@ import type {
 } from '../../src/main/files/types.js';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { FORMAT_OFFER } from '../../src/renderer/panels/files-format.js';
 import { resetUnsavedRegistry } from '../../src/renderer/panels/unsaved-files.js';
@@ -29,6 +30,7 @@ import {
   DEFAULT_EDITOR_INDENT,
   setActiveEditorSettings,
 } from '../../src/renderer/prefs/editor.js';
+import { onBothPlatformsAsync } from '../support/platform.js';
 
 const DECISION: Decision = {
   id: 'd1',
@@ -1055,8 +1057,16 @@ describe('walking the tree from the keyboard', () => {
   /** The filter box says which key gets to it, where an operator looking at
    *  the tree can read it — the feature existed and could not be found. */
   it('names its key in the filter box itself', async () => {
-    await openTree();
-    expect(q<HTMLInputElement>('[data-files-filter]')?.placeholder).toContain('Mod-p');
+    // AS THE OPERATOR'S OWN KEYBOARD SPELLS IT: ⌘P on a Mac, Ctrl+P off one.
+    // The token never reaches a placeholder — it is the internal spelling, and
+    // this box is read by a person looking for the key to press.
+    await onBothPlatformsAsync(async (mac) => {
+      await openTree();
+      const placeholder = q<HTMLInputElement>('[data-files-filter]')?.placeholder ?? '';
+      expect(placeholder).toContain(chordSymbols('Mod-p', mac));
+      expect(placeholder).not.toContain('Mod-p');
+      cleanup();
+    });
   });
 
   it('Enter in the filter box hands the keyboard to the first matching row', async () => {
@@ -1855,10 +1865,14 @@ describe('the tooltips on the two buttons the operator named', () => {
     q(selector)?.getAttribute('data-note') ?? null;
 
   it('gives Save a note a keyboard can read, naming the chord that does the same thing', async () => {
-    await openFile('/work/atlas/.env', 'A=1\n');
-    const text = noteOn('[data-files-save]');
-    expect(text).not.toBeNull();
-    expect(text).toContain('Mod-s');
+    await onBothPlatformsAsync(async (mac) => {
+      await openFile('/work/atlas/.env', 'A=1\n');
+      const text = noteOn('[data-files-save]');
+      expect(text).not.toBeNull();
+      expect(text).toContain(chordSymbols('Mod-s', mac));
+      expect(text).not.toContain('Mod-s');
+      cleanup();
+    });
   });
 
   /**
@@ -1872,10 +1886,19 @@ describe('the tooltips on the two buttons the operator named', () => {
    * rather than two that happen to agree today.
    */
   it('gives Format a note that quotes the same offer its refusals do', async () => {
+    await onBothPlatformsAsync(async (mac) => {
+      await openFile('/work/atlas/.env', 'A=1\n');
+      const said = noteOn('[data-files-format]');
+      expect(said).not.toBeNull();
+      // The tooltip names two chords, and both are painted the way the
+      // operator's keyboard makes them.
+      expect(said).toContain(chordSymbols('Mod-Shift-f', mac));
+      expect(said).toContain(chordSymbols('Mod-z', mac));
+      expect(said).not.toContain('Mod-Shift-f');
+      cleanup();
+    });
     await openFile('/work/atlas/.env', 'A=1\n');
     const text = noteOn('[data-files-format]');
-    expect(text).not.toBeNull();
-    expect(text).toContain('Mod-Shift-f');
     expect(text).toContain(FORMAT_OFFER);
 
     cleanup();
@@ -2170,11 +2193,17 @@ describe('the markdown preview', () => {
   });
 
   it('says which mode it is in, to a pointer and to a screen reader alike', async () => {
+    await onBothPlatformsAsync(async (mac) => {
+      await openFile('/work/atlas/README.md', MD);
+      const said = q('[data-files-preview]')?.getAttribute('data-note') ?? '';
+      expect(said).toContain(chordSymbols('Mod-Shift-m', mac));
+      expect(said).not.toContain('Mod-Shift-m');
+      cleanup();
+    });
     await openFile('/work/atlas/README.md', MD);
     const toggle = () => q('[data-files-preview]');
     expect(toggle()?.getAttribute('data-files-preview-state')).toBe('raw');
     expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
-    expect(toggle()?.getAttribute('data-note')).toContain('Mod-Shift-m');
     await pressPreview();
     expect(toggle()?.getAttribute('data-files-preview-state')).toBe('preview');
     expect(toggle()?.getAttribute('aria-pressed')).toBe('true');

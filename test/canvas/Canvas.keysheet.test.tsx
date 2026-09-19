@@ -14,7 +14,8 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
-import { BINDING_TABLES } from '../../src/renderer/keyboard/chords.js';
+import { BINDING_TABLES, chordSymbols } from '../../src/renderer/keyboard/chords.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 function session(id: string): Session {
   return {
@@ -111,24 +112,35 @@ describe('? opens the shortcut sheet', () => {
   });
 
   it('renders every bound key, spelling a chord as its sequence', () => {
-    render(<Canvas model={MODEL} />);
-    press('?', { shiftKey: true });
-    const printed = [...(sheet()?.querySelectorAll('[data-key-sheet-keys]') ?? [])].map(
-      (el) => el.textContent ?? '',
-    );
     const bound = BINDING_TABLES.flatMap(({ prefix, table }) =>
       Object.keys(table).map((key) => `${prefix}${key}`),
     );
     expect(bound.length).toBeGreaterThan(25);
-    for (const keys of bound) {
-      expect(printed, `"${keys}" is bound but not on the sheet`).toContain(keys);
-    }
-    expect(printed).toContain('gt');
-    expect(printed).not.toContain('t');
-    // No row may be blank: a missing label must break, not render empty space.
-    for (const label of [...(sheet()?.querySelectorAll('[data-key-sheet-label]') ?? [])]) {
-      expect((label.textContent ?? '').trim().length).toBeGreaterThan(0);
-    }
+    // ON BOTH PLATFORMS, because the sheet paints what the operator will
+    // press: `Mod-Shift-h` is ⇧⌘H on a Mac and Ctrl+Shift+H off one, and a
+    // sheet asserted against the host's rendering says nothing about the other
+    // half of the machines this bundle is served to.
+    onBothPlatforms((mac) => {
+      render(<Canvas model={MODEL} />);
+      press('?', { shiftKey: true });
+      const printed = [...(sheet()?.querySelectorAll('[data-key-sheet-keys]') ?? [])].map(
+        (el) => el.textContent ?? '',
+      );
+      for (const keys of bound) {
+        expect(printed, `"${keys}" is bound but not on the sheet`).toContain(
+          chordSymbols(keys, mac),
+        );
+      }
+      // A PREFIX CHORD IS TWO KEYSTROKES AND NO MODIFIER, so it is the one
+      // family the rendering leaves exactly as it found it.
+      expect(printed).toContain('gt');
+      expect(printed).not.toContain('t');
+      // No row may be blank: a missing label must break, not render empty space.
+      for (const label of [...(sheet()?.querySelectorAll('[data-key-sheet-label]') ?? [])]) {
+        expect((label.textContent ?? '').trim().length).toBeGreaterThan(0);
+      }
+      cleanup();
+    });
   });
 
   it('leaves the chords working while the sheet is closed', () => {

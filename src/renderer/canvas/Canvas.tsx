@@ -77,6 +77,7 @@ import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../er
 import {
   type Chord,
   type ChordState,
+  chordSymbols,
   chordText,
   EMPTY_CHORD,
   isSelectOnly,
@@ -6227,7 +6228,13 @@ function CanvasInner({
 
   // Read once per render, from the bindings in force. `null` means the
   // operator unbound `help`, and the status bar then prints no key at all.
-  const helpChord = primaryChord({ kind: 'help' });
+  //
+  // AND RENDERED HERE, because this cell paints the chord itself rather than
+  // going through `InlineChord` (it carries `data-keysheet-hint`, which the
+  // chip component has no slot for). `chordSymbols` is what every other chord
+  // in the chrome now passes through: ⌘ on a Mac, `Ctrl` off one.
+  const bound = primaryChord({ kind: 'help' });
+  const helpChord = bound === null ? null : chordSymbols(bound);
 
   return (
     // `vam-phone` is the hook the OVERLAYS hang off: they are siblings of the
