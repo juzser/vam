@@ -200,6 +200,45 @@ export const TRUST_PROMPT = [
   '',
 ].join('\n');
 
+/**
+ * THE FOOTER REPLACED BY THE OPERATOR'S OWN `statusLine` COMMAND.
+ *
+ * NOT from a throwaway session like the seven others: this one was transcribed
+ * from a READ-ONLY `capture-pane` of one of the operator's own live sessions
+ * on the machine this was written for -- no key was sent to it. Their
+ * `~/.claude/settings.json` sets `statusLine` to
+ * `bash ~/.claude/statusline-command.sh`, and the CLI paints that command's
+ * output where its own footer would go. The directory name is replaced with an
+ * invented one, which is this file's habit; the shape -- raw JSON spilt across
+ * four lines, then the mode line -- is theirs.
+ *
+ * WHAT IT PROVES. `readModelLine` answers `null` here and is RIGHT to: no line
+ * ends in `in:<x> out:<y>`, so nothing on this screen is the footer whose
+ * shape that reader checks. The `"id": "claude-opus-5"` on the second line is
+ * not an exception to be made -- it is one operator's script, and the next
+ * one's emits something else entirely. The model for this session comes out of
+ * the transcript instead (`sources/claude-code/transcript-model.ts`), which is
+ * the CLI's own record in the CLI's own shape.
+ *
+ * No escape sequences: the operator's script paints plain text, and a reader
+ * that forgot to strip CSI bytes is caught by the seven screens above.
+ */
+export const CUSTOM_STATUS_LINE = [
+  '',
+  '⏺ Done — the two files are written and the test is green.',
+  '',
+  '  ⎿  Read 42 lines',
+  '',
+  '────────────────────────────────────────',
+  '❯ ',
+  '────────────────────────────────────────',
+  '  ⣿ {',
+  '  "id": "claude-opus-5",',
+  '  "display_name": "Opus 5"',
+  '  } · wd4 · master · ctx 28%',
+  '  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents',
+].join('\n');
+
 export const PLAIN_SHELL = [
   '\u001b[1m\u001b[32m➜  \u001b[36mwd3\u001b[0m',
   '',

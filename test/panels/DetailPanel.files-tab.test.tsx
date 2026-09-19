@@ -21,6 +21,7 @@ import type {
 } from '../../src/main/files/types.js';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import { FORMAT_OFFER } from '../../src/renderer/panels/files-format.js';
 import { resetUnsavedRegistry } from '../../src/renderer/panels/unsaved-files.js';
@@ -29,6 +30,7 @@ import {
   DEFAULT_EDITOR_INDENT,
   setActiveEditorSettings,
 } from '../../src/renderer/prefs/editor.js';
+import { onBothPlatformsAsync } from '../support/platform.js';
 
 const DECISION: Decision = {
   id: 'd1',
@@ -980,6 +982,93 @@ describe('walking the tree from the keyboard', () => {
     expect(document.activeElement).toBe(q('[data-files-filter]'));
   });
 
+  /**
+   * SEARCHING FOR A FILE FROM ANYWHERE IN THE TAB — the operator's ask, and
+   * the half `/` could never answer: `/` is a character you type into a file,
+   * so with the caret in the editor there was no way to reach the filter at
+   * all. `Mod-p` is `Cmd+P`, which is "go to file" in VS Code and Sublime, and
+   * `chords.ts` left it deliberately unbound when new-project moved to
+   * `Mod-Shift-p`.
+   *
+   * MUTATION TARGET: take `Mod-p` out of `TREE_KEYS` and the first of these
+   * reddens; take it out of `EDITOR_KEYS` and the second does.
+   */
+  it('Mod-p puts the caret in the filter box from the tree, and claims the key', async () => {
+    await openTree();
+    expect(await press('p', { metaKey: true })).toBe(true);
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+  });
+
+  it('Mod-p reaches the filter box from the editor, where / never could', async () => {
+    await openTree();
+    await press('j');
+    await press('Enter');
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(editor);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      editor.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+    // Claimed, or the browser prints the page: over Tailscale Serve `Cmd+P`
+    // is the print dialog, and it is cancelable rather than reserved.
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  /**
+   * A SECOND PRESS RESTARTS THE SEARCH rather than appending to a stale one.
+   * `focus()` alone does NOT select — measured, not assumed — so this is the
+   * guard on the `select()` beside it.
+   *
+   * MUTATION TARGET: drop `select()` from `focusFilter` and this reddens.
+   */
+  it('selects what is already in the box, so a second Mod-p restarts the search', async () => {
+    await openTree();
+    const box = q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(box, { target: { value: 'env' } });
+      await Promise.resolve();
+    });
+    box.focus();
+    box.setSelectionRange(3, 3);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      box.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(box);
+    expect([box.selectionStart, box.selectionEnd]).toEqual([0, 3]);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  /** The filter box says which key gets to it, where an operator looking at
+   *  the tree can read it — the feature existed and could not be found. */
+  it('names its key in the filter box itself', async () => {
+    // AS THE OPERATOR'S OWN KEYBOARD SPELLS IT: ⌘P on a Mac, Ctrl+P off one.
+    // The token never reaches a placeholder — it is the internal spelling, and
+    // this box is read by a person looking for the key to press.
+    await onBothPlatformsAsync(async (mac) => {
+      await openTree();
+      const placeholder = q<HTMLInputElement>('[data-files-filter]')?.placeholder ?? '';
+      expect(placeholder).toContain(chordSymbols('Mod-p', mac));
+      expect(placeholder).not.toContain('Mod-p');
+      cleanup();
+    });
+  });
+
   it('Enter in the filter box hands the keyboard to the first matching row', async () => {
     await openTree();
     const box = q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement;
@@ -1071,6 +1160,179 @@ describe('walking the tree from the keyboard', () => {
     expect(q('[data-files-tree] [data-insert-scope]')).toBeNull();
     expect(q('[data-files-row][data-insert-scope]')).toBeNull();
     expect(q('[data-files-row][data-insert-stop]')).toBeNull();
+  });
+});
+
+/**
+ * `Mod-p` FROM SELECT MODE — the fifth surface, and the one the four handlers
+ * could not see.
+ *
+ * THE OPERATOR'S REPORT, translated: "in the files view, in select mode, I
+ * cannot press Cmd+P to filter". Select is the mode in which DOM focus is in
+ * no insert scope (`keyboard/focus-scope.ts`), which is where the keyboard
+ * actually IS on arrival: switching a pane to this tab leaves focus on the
+ * view-icon button that switched it — MEASURED in Chromium, `<button
+ * data-view="files" aria-label="Files view">` — and `Escape` leaves it on the
+ * body. Neither is inside this tab at all, so none of the four `onKeyDown`
+ * props ran, and the chord fell through to `Canvas.tsx`'s window grammar,
+ * which leaves `Mod-p` unbound on purpose.
+ *
+ * SO THE TAB LISTENS FOR IT ITSELF, while it is the view on screen in the
+ * pane that holds the keyboard, and routes it to the SAME `focusFilter` the
+ * other four use.
+ *
+ * MUTATION TARGETS, each named beside the check it reddens.
+ */
+describe('Mod-p in select mode — with the keyboard on none of this tab’s own surfaces', () => {
+  const TREE = {
+    list: async () => ({
+      root: '/work/atlas',
+      files: ['/work/atlas/.env', '/work/atlas/src/index.ts'],
+      truncated: false,
+    }),
+    read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+  };
+
+  /**
+   * The chord, pressed where the operator presses it: with nothing in this tab
+   * focused, on an element that is not one of the four. It is dispatched on
+   * the BODY and bubbles, which is what a real keystroke does — a listener
+   * that read `event.target` rather than the DOM's own focus would pass a
+   * `window.dispatchEvent` and fail in Chromium.
+   */
+  const pressOutside = async (): Promise<boolean> => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      document.body.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    return event.defaultPrevented;
+  };
+
+  /** MUTATION TARGET: drop the tab's own window listener and this reddens. */
+  it('reaches the filter box, and claims the key', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+    expect(q('[data-files-filter]')).not.toBe(document.activeElement);
+
+    expect(await pressOutside()).toBe(true);
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+  });
+
+  /**
+   * INERT WHILE ANOTHER TAB SHOWS — `chords.ts` vacated `Mod-p` deliberately,
+   * so a tab that answered it whether or not it was on screen would have
+   * taken a key the rest of the app is entitled to leave to the browser.
+   *
+   * MUTATION TARGET: drop the `hidden` half of the effect's guard and this
+   * reddens — the filter is still in the DOM behind a `display: none`, so the
+   * unconditional listener happily focuses something nobody can see.
+   */
+  it('does nothing at all once another tab is showing', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLButtonElement>('[data-view="response"]')?.click();
+      await Promise.resolve();
+    });
+
+    expect(await pressOutside()).toBe(false);
+    expect(document.activeElement).not.toBe(q('[data-files-filter]'));
+  });
+
+  /**
+   * ONE PANE ANSWERS, NOT EVERY PANE. Two split leaves can both show this tab;
+   * only the one holding the keyboard may move it, or a chord pressed in the
+   * pane the operator is looking at lands in the one they are not.
+   *
+   * MUTATION TARGET: drop the `paneFocused` half of the guard and this
+   * reddens.
+   */
+  it('does nothing in a pane that does not hold the keyboard', async () => {
+    withBridge(TREE);
+    draw({ files: true, paneFocused: false, tabRequest: { tab: 'Files' } });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(q('[data-files-tree]')).not.toBeNull();
+
+    expect(await pressOutside()).toBe(false);
+    expect(document.activeElement).not.toBe(q('[data-files-filter]'));
+  });
+
+  /**
+   * AND IT STANDS DOWN FOR A CARET SOMEWHERE ELSE — the command palette's
+   * filter, a rename field, another pane's composer. `answeringKeys`
+   * (`keyboard/focus-scope.ts`) is the same question `Canvas.tsx` already asks
+   * before it moves the keyboard on vam's own initiative, and the two
+   * populations it reads are exactly the two that can hold a caret here.
+   *
+   * MUTATION TARGET: drop the `answeringKeys` clause and this reddens.
+   */
+  it('stands down while a caret outside this tab is answering the keys', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    try {
+      const event = new KeyboardEvent('keydown', {
+        key: 'p',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => {
+        elsewhere.dispatchEvent(event);
+        await Promise.resolve();
+      });
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
+  /**
+   * AND EVERY OTHER KEY IS STILL THE GRAMMAR'S. The listener is on the window,
+   * which is where `Canvas.tsx`'s own is: one that claimed more than the one
+   * chord would take `Mod-k`, `Alt-<digit>` and `I` away from the whole app
+   * for as long as this tab happened to be showing.
+   */
+  it('claims Mod-p and nothing else', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+
+    // NOT `Control+p`: its SPELLING is platform-dependent (`CTRL_GESTURES`),
+    // so an assertion about it would say two different things on the two
+    // platforms this suite runs on. `Mod-Shift-p` is the one next door that
+    // matters — it is new-project, and this tab must not eat it.
+    for (const init of [
+      { key: 'k', metaKey: true },
+      { key: 'p' },
+      { key: 'p', metaKey: true, shiftKey: true },
+    ]) {
+      const event = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      await act(async () => {
+        document.body.dispatchEvent(event);
+        await Promise.resolve();
+      });
+      expect(event.defaultPrevented, `${JSON.stringify(init)} should be left alone`).toBe(false);
+    }
   });
 });
 
@@ -1603,10 +1865,14 @@ describe('the tooltips on the two buttons the operator named', () => {
     q(selector)?.getAttribute('data-note') ?? null;
 
   it('gives Save a note a keyboard can read, naming the chord that does the same thing', async () => {
-    await openFile('/work/atlas/.env', 'A=1\n');
-    const text = noteOn('[data-files-save]');
-    expect(text).not.toBeNull();
-    expect(text).toContain('Mod-s');
+    await onBothPlatformsAsync(async (mac) => {
+      await openFile('/work/atlas/.env', 'A=1\n');
+      const text = noteOn('[data-files-save]');
+      expect(text).not.toBeNull();
+      expect(text).toContain(chordSymbols('Mod-s', mac));
+      expect(text).not.toContain('Mod-s');
+      cleanup();
+    });
   });
 
   /**
@@ -1620,10 +1886,19 @@ describe('the tooltips on the two buttons the operator named', () => {
    * rather than two that happen to agree today.
    */
   it('gives Format a note that quotes the same offer its refusals do', async () => {
+    await onBothPlatformsAsync(async (mac) => {
+      await openFile('/work/atlas/.env', 'A=1\n');
+      const said = noteOn('[data-files-format]');
+      expect(said).not.toBeNull();
+      // The tooltip names two chords, and both are painted the way the
+      // operator's keyboard makes them.
+      expect(said).toContain(chordSymbols('Mod-Shift-f', mac));
+      expect(said).toContain(chordSymbols('Mod-z', mac));
+      expect(said).not.toContain('Mod-Shift-f');
+      cleanup();
+    });
     await openFile('/work/atlas/.env', 'A=1\n');
     const text = noteOn('[data-files-format]');
-    expect(text).not.toBeNull();
-    expect(text).toContain('Mod-Shift-f');
     expect(text).toContain(FORMAT_OFFER);
 
     cleanup();
@@ -1918,11 +2193,17 @@ describe('the markdown preview', () => {
   });
 
   it('says which mode it is in, to a pointer and to a screen reader alike', async () => {
+    await onBothPlatformsAsync(async (mac) => {
+      await openFile('/work/atlas/README.md', MD);
+      const said = q('[data-files-preview]')?.getAttribute('data-note') ?? '';
+      expect(said).toContain(chordSymbols('Mod-Shift-m', mac));
+      expect(said).not.toContain('Mod-Shift-m');
+      cleanup();
+    });
     await openFile('/work/atlas/README.md', MD);
     const toggle = () => q('[data-files-preview]');
     expect(toggle()?.getAttribute('data-files-preview-state')).toBe('raw');
     expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
-    expect(toggle()?.getAttribute('data-note')).toContain('Mod-Shift-m');
     await pressPreview();
     expect(toggle()?.getAttribute('data-files-preview-state')).toBe('preview');
     expect(toggle()?.getAttribute('aria-pressed')).toBe('true');

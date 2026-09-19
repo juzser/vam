@@ -1,6 +1,6 @@
 /**
- * The model control's decision table, and the keystrokes its enabled state
- * types. Pure: no React, no bridge, so the table and the line can be asserted
+ * The model control's decision table, its five rows, and the line its caption
+ * prints. Pure: no React, no bridge, so the table and the line can be asserted
  * row by row without mounting the pane.
  *
  * WHY THERE ARE THREE STATES AND NOT ONE FIELD. The composer's model control
@@ -19,12 +19,26 @@
  * once. `/model default` answers the same for the default. A BARE `/model`
  * opens an interactive menu (Default · Sonnet · Fable · Opus · Haiku, "Enter to
  * set as default · s to use this session only · Esc to cancel" -- both still
- * word for word on 2.1.276, re-captured with the versions below) -- vam never
- * drives that menu, because it cannot read it back; it sends the argument form
- * and nothing else. `claude --help` says `--model` takes "an alias for the
- * latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name",
- * which is why the picker offers the five aliases AND a free-text row for a
- * full id.
+ * word for word on 2.1.276, re-captured with the versions below).
+ *
+ * VAM DRIVES THAT MENU NOW, and this header used to say it never would. The
+ * reason given was that vam could not read it back -- which stopped being true
+ * when `main/terminal/answer.ts` learned to read a picker off a capture, and
+ * the cost of not driving it was the second half of the sentence above: EVERY
+ * model pick rewrote `~/.claude/settings.json`. `main/terminal/model-switch.ts`
+ * owns the whole route, in main, where `answer.ts`'s rules already live; this
+ * module keeps the TABLE the popover draws, and types nothing at all.
+ *
+ * AND THE TABLE IS THE WHOLE OFFER NOW -- five rows, no sixth. `claude --help`
+ * says `--model` takes "an alias for the latest model (e.g. 'fable', 'opus',
+ * or 'sonnet') or a model's full name", and the picker used to carry a
+ * free-text row for that second half. But a full name has NO ROW on the CLI's
+ * own menu, so it could only go in as `/model <id>` + Return -- the form that
+ * also saves it as the operator's default. vam disclosed that cost and took
+ * the route anyway; offered the fallback or an outright refusal, the operator
+ * chose refusal. The row is gone, main answers `not-in-menu` having typed
+ * nothing, and the one-word rule that lived here is `isModelChoice` in
+ * `shared/terminal.ts` alone -- see the comment where the builder used to be.
  *
  * SO THE TABLE IS:
  *
@@ -34,9 +48,9 @@
  *                                             line and its note, unchanged:
  *                                             nothing vam types reaches an
  *                                             agent on this source.
- *   true       !== false      true            `picker`   -- vam can type
- *                                             `/model <x>` + Enter into the
- *                                             pane it started.
+ *   true       !== false      true            `picker`   -- vam can drive
+ *                                             the CLI's own /model menu in
+ *                                             the pane it started.
  *   true       false          any             `disabled` -- the source
  *                                             delivers but has no pane
  *                                             surface here.
@@ -62,8 +76,7 @@
  * disabled control carries the remedy.
  */
 
-import type { PaneKey } from '../../shared/terminal.js';
-import { composedStrokes } from './terminal-compose.js';
+import type { SessionModel } from '../../shared/terminal.js';
 
 /** The three faces the control can wear; see the table above. */
 export type ModelControlState = 'request' | 'picker' | 'disabled';
@@ -193,44 +206,82 @@ export function modelButtonLabel(running: string | null): string {
 }
 
 /**
- * A choice is one word: an alias or a full model id, neither of which carries
- * whitespace. Anything else is refused BEFORE a key is built, because the two
- * things whitespace can be are both wrong on the wire -- a space hands the CLI
- * a second argument, and a newline in a literal payload reaches the pane as
- * 0x0a, which the REPL submits on (`tmux/argv.ts`): `/model` would go in bare,
- * opening the menu, and the rest would be typed into it. Control characters
- * are refused for the same reason `sendTextArgv` types with `-l`: the line is
- * text, never keys.
+ * A NAME THE PANEL HAS READ, AND WHICH OF THE TWO SOURCES IT CAME FROM.
+ *
+ * `SessionModel` minus its refusal: the panel keeps `null` for "vam cannot
+ * tell" and this for everything else, so the two arms cannot be flattened into
+ * a bare string on the way to the words below.
  */
-const ONE_WORD = /^[^\s\p{Cc}]+$/u;
+export type RunningModel = Extract<SessionModel, { readonly name: string }>;
 
-/** `/model <choice>`, or `null` when the choice is not one word. */
-export function modelCommandLine(choice: string): string | null {
-  const word = choice.trim();
-  if (!ONE_WORD.test(word)) return null;
-  return `/model ${word}`;
+/**
+ * THE CLAUSE THE NOTE AND THE ACCESSIBLE NAME LEAD WITH -- and it is NOT the
+ * same claim for the two sources of one name.
+ *
+ * `model` is the CLI's own painted footer: what the session is SET TO, right
+ * now. "running X" is exactly what that supports, and it is the sentence this
+ * control has carried since it learned to read the pane.
+ *
+ * `last-turn` is the session's TRANSCRIPT -- what the API served on the most
+ * recent turn (`main/sources/claude-code/transcript-model.ts`) -- and it is
+ * the only source there is for an operator who has replaced the CLI's status
+ * line with a script of their own. It lags a `/model` switch by exactly one
+ * turn, and that lag lands on the one second this button is most likely to be
+ * read: just after a switch, while somebody checks whether it took. "running
+ * X" there would be vam claiming a fact it had not checked; naming the TURN
+ * instead is both true and the sentence that explains what they are seeing.
+ *
+ * THE BUTTON'S LABEL CARRIES NO QUALIFIER, deliberately. It is ten characters
+ * wide at vam's narrowest legal pane and already clips there
+ * (`e2e/model-picker-shots.mjs` measured the overflow that made it shrinkable),
+ * so a clause on the label would be a clause nobody can read. The note and the
+ * accessible name have the room, and this is what they say.
+ */
+export function modelRunningClause(running: RunningModel | null): string | null {
+  if (running === null) return null;
+  return running.kind === 'model' ? `running ${running.name}` : `last turn ran on ${running.name}`;
 }
 
 /**
- * The strokes that type the line and submit it: the text in pieces the channel
- * accepts, then ONE interpreted Enter, last.
+ * THE WHOLE ACCESSIBLE NAME of the model button.
  *
- * SPLIT, NOT WIDENED. `/model ` plus a full model id runs past `MAX_KEY_TEXT`,
- * the sixteen-character bound `shared/terminal.ts` puts on a `text` key so the
- * channel cannot become an unbounded paste. Handed over whole it would fail
- * `isPaneKey` in main, which answers `unaimed` -- drawn as a sentence about
- * session PAIRING that would be false. `composedStrokes` was written for an IME
- * commit that has the same shape (one string, longer than a keystroke) and it
- * is used unchanged: each piece is its own `send-keys -l --`, sent in order on
- * the same aimed channel, and the pane receives the bytes of one line.
- *
- * THE ENTER IS SEPARATE AND LAST, for the reason `promptKeystrokes` keeps it
- * out of the text: `-l` types and forbids interpretation, so Return has to be
- * its own key; and it comes after every piece so a run that fails midway
- * leaves the line sitting in the pane unsent rather than half-submitted.
+ * THE NAME LEADS IT, the way the mode chip's does, so a screen reader is told
+ * the fact the eye is told rather than only what the control does -- and the
+ * qualifier above travels with it, because a screen reader has no tooltip to
+ * hover for the rest of the sentence.
  */
-export function modelCommandStrokes(choice: string): readonly PaneKey[] | null {
-  const line = modelCommandLine(choice);
-  if (line === null) return null;
-  return [...composedStrokes(line), { kind: 'enter' }];
+export function modelButtonName(running: RunningModel | null): string {
+  const tail = 'choose one for this session';
+  if (running === null) return `model — ${tail}`;
+  return running.kind === 'model'
+    ? `model: ${running.name} — ${tail}`
+    : `model: ${running.name}, what the last turn ran on — ${tail}`;
 }
+
+/*
+  NO BUILDER FOR `/model <choice>` LIVES HERE ANY MORE, and the absence is the
+  point.
+
+  TWO WENT, ONE AT A TIME. `modelCommandStrokes` cut the line into
+  sixteen-character `PaneKey`s for `terminal.send`, and `/model <alias>` +
+  Return is exactly the form the CLI answers with "and saved as your default
+  for new sessions" -- so every pick rewrote `~/.claude/settings.json`. That
+  one went when main took over the route and drove the CLI's own menu instead
+  (`main/terminal/model-switch.ts`). `modelCommandLine` outlived it by one
+  change: main still typed the argument form for the one choice with no menu
+  row, a full model id, and the renderer still printed that line in the
+  caption while refusing a choice that was not one word.
+
+  BOTH OF THOSE REASONS ARE GONE. The operator chose refusal over the
+  fallback, so main types the argument form for nothing at all; with the
+  free-text row removed with it, every choice the picker can send is one of
+  `MODEL_CHOICES`' own ids, so no input exists that the one-word rule could
+  refuse. The rule itself did not move -- `isModelChoice` in
+  `shared/terminal.ts` enforces it on whatever crosses the bridge, which is
+  where enforcement belonged. What is left here is the decision table, the
+  five rows the popover draws, and the label the button wears.
+
+  AND IT IS NOT LEFT LYING ABOUT, deliberately: a renderer-side way to spell
+  the line that costs somebody their default is a loaded gun, and the next
+  hand to need "just the string" would find it already written.
+*/

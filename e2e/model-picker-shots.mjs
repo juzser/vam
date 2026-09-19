@@ -384,8 +384,17 @@ const menu = await page.evaluate(() => {
       ? null
       : new Set(columns.map((c) => Math.round(c.rightEdge))).size,
     inListbox: options.every((el) => listbox !== null && listbox.contains(el)),
-    inputInListbox: listbox?.querySelector('[data-model-id]') !== null,
+    // THE FREE-TEXT ROW, HELD ABSENT. It took a full model id, which the CLI's
+    // own `/model` menu has no row for -- so it fell back to `/model <id>` +
+    // Return, the form that also rewrites `~/.claude/settings.json`. The
+    // operator chose refusal over that, so the row is gone and every outcome
+    // it could have had is now a refusal main answers without typing.
     freeText: popover.querySelector('[data-model-id]') !== null,
+    // Not just that ONE attribute went: nothing in the popover takes text, so
+    // a row renamed rather than removed does not pass for its own absence.
+    textBoxes: popover.querySelectorAll('input, textarea, [contenteditable]').length,
+    // And the popover's only controls are the five options themselves.
+    controls: popover.querySelectorAll('button, input, textarea, select, a').length,
     painted: options.every((el) => el.getBoundingClientRect().height > 0),
     onTop: popover.contains(atCentre),
     expanded: document.querySelector('[data-model-picker]')?.getAttribute('aria-expanded'),
@@ -434,8 +443,17 @@ check(
   menu !== null && menu.columns.every((c) => c !== null && c.sameInk),
   JSON.stringify(menu?.columns),
 );
-check('the five are options of one listbox, and the free-text row is outside it', menu?.inListbox === true && menu?.inputInListbox === false);
-check('with a free-text row for a full model id', menu?.freeText === true);
+check('the five are the options of one listbox', menu?.inListbox === true);
+check(
+  'and there is no free-text row for a full model id — vam refuses those outright',
+  menu?.freeText === false && menu?.textBoxes === 0,
+  JSON.stringify({ freeText: menu?.freeText, textBoxes: menu?.textBoxes }),
+);
+check(
+  'so the popover’s only controls are the five aliases themselves',
+  menu?.controls === 5,
+  JSON.stringify({ controls: menu?.controls }),
+);
 check('every option has a box on screen', menu?.painted === true);
 check('and the popover is on top at its own centre', menu?.onTop === true);
 check('while the button says it is expanded', menu?.expanded === 'true');
@@ -612,15 +630,23 @@ check(
   one.rows.every((row) => !row.ticked || row.tickInk === row.ink),
   JSON.stringify(one.rows.filter((row) => row.ticked).map((row) => `${row.tickInk} vs ${row.ink}`)),
 );
-// THE BOX DID NOT GROW. 158x164 is what the popover measured when the version
-// column shipped (PR 407), before any tick existed; the slot the tick sits in
-// is reserved out of the slack the free-text row's own width already gave the
-// five rows, so the box is the same box.
-check(
-  'the popover is still 158x164 — the tick did not stretch it',
-  one.box === '158x164',
-  JSON.stringify(one.box),
-);
+// THE BOX DOES NOT GROW WHEN THE TICK APPEARS -- asserted as the PROPERTY and
+// not as a number off one machine.
+//
+// IT USED TO BE PINNED TO `158x164`, which was safe while the popover's width
+// came from the free-text row's `w-[148px]` and no row could reach it. That
+// row went with the full-id route, so the widest ROW sets the width -- and the
+// first run after the removal measured 132x138 unticked against 155x138 with
+// two ticks. The glyph plus its gap, moving the whole popover and every row
+// under the pointer, on a `running` value that is POLLED while the picker is
+// open. The slot is reserved again in `DetailPanel.tsx` because of that
+// measurement; what is held here is the outcome, across all three tick states
+// (none, one, two), compared with each other rather than with a constant --
+// character widths differ between this machine and a CI runner, and a
+// hard-coded box is a measurement frozen into a premise.
+// The three are compared in one place, once all three have been measured --
+// see "the box is the same box" at the end of section 3c.
+console.log(`  box with one tick: ${one.box}`);
 check(
   'the version column is still in one lane, and still inside the box',
   one.lane === 1 && one.rows.every((row) => row.versionInside > 0),
@@ -657,9 +683,25 @@ check(
   (labelTip ?? '').startsWith('running Opus 5 ·'),
   JSON.stringify(labelTip),
 );
+// WHICH ROUTE COSTS THE OPERATOR THEIR DEFAULT: none of them, now, and the
+// note has to stop saying otherwise. It used to read "...a full id also
+// becomes the default for new sessions" -- true while vam took the argument
+// form for a full model id. The operator chose refusal over that fallback, so
+// the clause describes a route that does not exist, and a control promising a
+// rewrite of `~/.claude/settings.json` that vam will not perform is the same
+// class of defect as the silent rewrite this whole line of work removed.
 check(
-  'without dropping the CLI side effect the note has always disclosed',
-  /default for new sessions/.test(labelTip ?? ''),
+  'and the note promises no rewrite of the operator’s default, because none happens',
+  labelTip !== null && !/default for new sessions/.test(labelTip),
+  JSON.stringify(labelTip),
+);
+// WHAT IT SAYS INSTEAD, measured: vam drives the CLI's own `/model` menu and
+// presses `s` (`main/terminal/model-switch.ts`), which the CLI answers
+// "...for this session only" with `~/.claude/settings.json` byte-identical
+// afterwards. That is the whole claim the control is allowed to make.
+check(
+  'saying instead that the switch it makes is this session’s only',
+  /this session only/.test(labelTip ?? ''),
   JSON.stringify(labelTip),
 );
 await page.mouse.move(0, 0);
@@ -691,9 +733,10 @@ check(
   pair.rows.every((row) => !row.ticked || /cannot say whether/.test(pairNames[row.id])),
   JSON.stringify(pair.rows.filter((row) => row.ticked).map((row) => pairNames[row.id])),
 );
+console.log(`  box with two ticks: ${pair.box}`);
 check(
-  'with the box and the lane unmoved by two ticks',
-  pair.box === '158x164' && pair.lane === 1,
+  'with the lane unmoved by two ticks',
+  pair.lane === 1,
   JSON.stringify({ box: pair.box, lane: pair.lane }),
 );
 await shotOfTools(`${outDir}/model-picker-pair.png`, 200);
@@ -721,12 +764,93 @@ check(
   JSON.stringify(blank.rows.map((row) => blankNames[row.id])),
 );
 check(
-  'while the popover is exactly the box it is everywhere else',
-  blank.box === '158x164' && blank.lane === 1,
+  'while the lane holds with nothing ticked at all',
+  blank.lane === 1,
   JSON.stringify({ box: blank.box, lane: blank.lane }),
+);
+// ---------------------------------------------------------------------------
+// THE BOX IS THE SAME BOX -- none, one and two ticks, compared with EACH OTHER.
+//
+// This is the assertion that was `=== '158x164'` in three places. The constant
+// held only because the free-text row's `w-[148px]` set the popover's width
+// and no row could reach it; with that row gone the widest ROW decides, and
+// the tick joins the row. First measurement after the removal: 132x138 with no
+// tick, 155x138 with two -- twenty-three pixels of movement under the pointer,
+// on a value that is POLLED while the popover is open. `DetailPanel.tsx`
+// reserves the glyph's slot again because of that number.
+//
+// COMPARED, NOT PINNED. A character is 6.0079px wide on this machine and
+// 5.7180px on a CI runner, so a box quoted from here is a measurement frozen
+// into a premise; what must hold anywhere is that the three agree.
+// ---------------------------------------------------------------------------
+console.log(`  boxes — none: ${blank.box}, one: ${one.box}, two: ${pair.box}`);
+check(
+  'and the popover is the same box with no tick, one tick and two',
+  blank.box !== null && blank.box === one.box && blank.box === pair.box,
+  JSON.stringify({ none: blank.box, one: one.box, two: pair.box }),
 );
 await page.keyboard.press('Escape');
 await page.waitForTimeout(150);
+
+// ---------------------------------------------------------------------------
+// 3d. A ROW WHOSE NAME CAME OUT OF THE TRANSCRIPT, NOT THE PANE.
+//
+// The defect this arm exists for: an operator may set `statusLine` in
+// `~/.claude/settings.json` to a script of their own, and the CLI then paints
+// that script's output where its footer would go. Measured on the machine this
+// was written for -- raw JSON across four lines -- the footer reader answers "I
+// cannot tell" for the life of every session there, and this button wore the
+// word `model` and nothing else. The name comes out of the session's own
+// transcript now (`main/sources/claude-code/transcript-model.ts`).
+//
+// THE LABEL IS THE SAME LABEL, which is the half a unit test can also say. What
+// only a browser can say is the TIP: it opens on a real `pointermove`, Radix
+// renders it in a portal, and what it says has to differ from the pane-sourced
+// row's -- "running X" is a claim only the footer supports, and this source
+// lags a `/model` switch by one turn.
+// ---------------------------------------------------------------------------
+await openComposer(LONG_NAME);
+await page.waitForTimeout(200);
+const lastTurnLabel = await page.evaluate(() => {
+  const button = document.querySelector('[data-model-picker]');
+  return {
+    label: (button?.querySelector('[data-tap-skin]')?.textContent ?? '').trim(),
+    name: button?.getAttribute('aria-label') ?? null,
+  };
+});
+const lastTurnBox = await page.locator('[data-model-picker]').boundingBox();
+await page.mouse.move(lastTurnBox.x - 40, lastTurnBox.y - 40);
+await page.waitForTimeout(150);
+await page.mouse.move(
+  lastTurnBox.x + lastTurnBox.width / 2,
+  lastTurnBox.y + lastTurnBox.height / 2,
+  { steps: 6 },
+);
+await page.waitForTimeout(300);
+const lastTurnTip = await tipText();
+console.log(`  ${LONG_NAME}: ${JSON.stringify(lastTurnLabel)}`);
+console.log(`  ${LONG_NAME} hover tip: ${JSON.stringify(lastTurnTip)}`);
+check(
+  'a transcript-sourced model reaches the label like any other',
+  lastTurnLabel.label === 'Sonnet 4.5',
+  JSON.stringify(lastTurnLabel.label),
+);
+check(
+  'and its tip names the TURN rather than claiming the session is running it',
+  (lastTurnTip ?? '').startsWith('last turn ran on Sonnet 4.5 ·') &&
+    !/running Sonnet 4\.5/.test(lastTurnTip ?? ''),
+  JSON.stringify(lastTurnTip),
+);
+check(
+  'and a screen reader is told the same qualifier, not only the name',
+  lastTurnLabel.name !== null &&
+    lastTurnLabel.name.includes('Sonnet 4.5') &&
+    /last turn ran on/.test(lastTurnLabel.name),
+  JSON.stringify(lastTurnLabel.name),
+);
+await page.evaluate(() => document.activeElement?.blur());
+await page.mouse.move(0, 0);
+await page.waitForTimeout(200);
 
 // ---------------------------------------------------------------------------
 // 4. PICKING ONE, IN THE BROWSER BUILD, is refused out loud: there is no
@@ -855,14 +979,46 @@ check(
   JSON.stringify({ spill: long?.spill, overlap: long?.overlap }),
 );
 check(
-  'it gives way by clipping itself instead, the way the CLI’s own line does',
-  long?.clipped === true,
-  JSON.stringify({ label: long?.label, clipped: long?.clipped }),
-);
-check(
   'and the whole name is still there for a reader, and one hover away for an eye',
   longName.button.includes('Sonnet 4.5'),
   JSON.stringify(longName.button),
+);
+
+/**
+ * IT STILL GIVES WAY BY CLIPPING, AND THE CASE HAD TO BE FORCED TO SEE IT.
+ *
+ * This check read `long.clipped === true` on `Sonnet 4.5` -- ten characters,
+ * the longest a real status line prints, and what burst this row before the
+ * label was allowed to shrink. The composer's provider picker has since been
+ * withdrawn (`CAN_CHOOSE_PROVIDER`, `src/shared/providers.ts`: one row is not
+ * a choice), which hands this row 44px plus a gap, and at 520px the ten
+ * characters now fit WHOLE. The old assertion would have gone on demanding a
+ * clip that is no longer needed -- a symptom held in place after its cause was
+ * removed.
+ *
+ * The property is the one above it: the row never bursts, whatever the name.
+ * The MECHANISM is still worth measuring, so the name is forced past anything
+ * a CLI prints, in the DOM and not in the source: the question is a layout
+ * one, and `[data-model-label]` wears `truncate`, so writing a longer string
+ * into it and re-reading the row is the direct measurement. React owns that
+ * node and will rewrite it on the next render, which is why nothing after this
+ * depends on the text.
+ */
+await page.locator('[data-model-label]').evaluate((el) => {
+  el.textContent = 'Claude Sonnet 4.5 (2026-02-19 preview build)';
+});
+await page.waitForTimeout(50);
+const forced = await readRow();
+console.log(`  forced over-long name at 520px: ${JSON.stringify(forced)}`);
+check(
+  'a name longer than any CLI prints still pushes nothing out of the row',
+  forced !== null && forced.overflow <= 0 && forced.outside.length === 0 && forced.spill <= 0,
+  JSON.stringify({ overflow: forced?.overflow, outside: forced?.outside, spill: forced?.spill }),
+);
+check(
+  'it gives way by clipping itself instead, the way the CLI’s own line does',
+  forced?.clipped === true,
+  JSON.stringify({ label: forced?.label, clipped: forced?.clipped }),
 );
 // AND A NAME THAT IS NONE OF THE FIVE TICKS NOTHING, which is the other half
 // of `Sonnet 4.5`: the picker offers Sonnet 5, and this session is not on it.

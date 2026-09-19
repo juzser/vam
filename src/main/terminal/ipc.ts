@@ -14,8 +14,10 @@
 
 import { type AnswerResult, isAnswerRequest, type PromptView } from '../../shared/answer.js';
 import {
+  isModelChoice,
   isPaneKey,
   isPaneSize,
+  type ModelSwitchResult,
   type PaneSendResult,
   type PaneView,
   type SessionModel,
@@ -24,10 +26,13 @@ import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
+import { defaultTranscriptRoot } from '../sources/claude-code/transcript-index.js';
+import { readSessionModelFromTranscript } from '../sources/claude-code/transcript-model.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import { answerQuestion, readSessionPrompt } from './answer.js';
 import { setConciseOutput } from './concise.js';
 import { readSessionModel } from './model.js';
+import { switchSessionModel } from './model-switch.js';
 import { readSessionPane, resizeSessionPane, sendToPane, targetSession } from './pane.js';
 
 /**
@@ -91,6 +96,19 @@ export function registerTerminalIpc(
     readPublishedPanes(defaultSessionsRoot()),
   /** Injected so a test can hold time still rather than sleep through it. */
   now: () => number = () => Date.now(),
+  /**
+   * THE MODEL CHANNEL'S SECOND SOURCE: what a row's own transcript says its
+   * last turn ran on, for the sessions whose painted footer vam cannot read
+   * (`terminal/model.ts` holds the precedence and the argument for it).
+   *
+   * Injected for the reason `readPanes` above is -- the default walks the
+   * operator's own `~/.claude/projects`, and a test must never do that -- and
+   * defaulted to the real reader for the same reason that one is: this is the
+   * production wiring, and a channel registered without it would answer
+   * `unknown` forever on exactly the machines the fallback was built for.
+   */
+  readTranscriptModel: (rowId: string) => Promise<string | null> = (rowId) =>
+    readSessionModelFromTranscript(defaultTranscriptRoot(), rowId),
 ): void {
   /**
    * The pairing proven for the row currently being typed into. One entry per
@@ -336,10 +354,16 @@ export function registerTerminalIpc(
   );
 
   /**
-   * The model on the pane. A READ like the prompt above it, aimed by the same
+   * The model of a session. A READ like the prompt above it, aimed by the same
    * rule, and the one channel here whose answer is drawn while no tab of its
    * own is open: the model button sits in the composer, so this is asked for a
    * row the operator is merely LOOKING at.
+   *
+   * TWO SOURCES BEHIND ONE CHANNEL, and the channel's shape did not change for
+   * it: the pane's painted footer first, the row's own transcript where that
+   * footer cannot be read (`terminal/model.ts`). The second is the one read
+   * here that touches the filesystem rather than tmux, which is why it is
+   * injected above rather than reached for in this handler.
    *
    * IT DOES NOT TOUCH THE AIM CACHE, and that is deliberate. The tab's read
    * refreshes a proven pairing because it resolves the same pane a keystroke
@@ -368,6 +392,46 @@ export function registerTerminalIpc(
       return readSessionModel(
         run,
         projectId,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+        readTranscriptModel,
+      );
+    },
+  );
+
+  /**
+   * CHANGING the model, which is the one channel here that drives a MENU in
+   * somebody's running agent -- so the ask is validated by shape on this side
+   * of the bridge, exactly as `terminalAnswer` is and for the same reason: the
+   * renderer is the least trusted process in the app, and the choice it sends
+   * becomes text typed into a pane.
+   *
+   * `unaimed` IS EVERY REFUSAL THIS HANDLER MAKES ITSELF -- nothing was read,
+   * nothing was aimed, nothing sent -- and that is `terminalAnswer`'s own
+   * rule, kept rather than re-decided. Everything below it is passed through
+   * unchanged, because the composer draws a different sentence for each: a
+   * question already on screen, a menu that never opened, a menu that would
+   * not take an arrow and a row that is not there are four different things to
+   * a person, and only one of them means the operator should go and look.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalSwitchModel,
+    async (_event, ...args: unknown[]): Promise<ModelSwitchResult> => {
+      const [projectId, choice, rowId] = args;
+      if (
+        args.length < 2 ||
+        args.length > 3 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        !isModelChoice(choice) ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return { kind: 'unaimed' };
+      }
+      return switchSessionModel(
+        run,
+        projectId,
+        choice,
         rowId,
         rowId === undefined ? undefined : await readPanes(),
       );

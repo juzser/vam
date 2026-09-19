@@ -19,9 +19,11 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { buildKeySheet } from '../../src/renderer/keyboard/keysheet.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 function session(id: string): Session {
   return {
@@ -348,16 +350,22 @@ describe('Cmd+T starts a session in the focused pane', () => {
   });
 
   it('is the key the pane’s own `+` names, so the tooltip cannot lie', () => {
-    const { source } = sourceWith(async () => {});
-    render(<Canvas model={modelWith('a1')} source={source} />);
-    const button = newTabIn(panes()[0]);
-    act(() => {
-      button?.focus();
-      button?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+    // AS THE OPERATOR'S KEYBOARD SPELLS IT — ⌘T on a Mac, Ctrl+T off one — and
+    // asserted on both, never on the host's: the tip paints `chordSymbols`,
+    // whose default is this machine.
+    onBothPlatforms((mac) => {
+      const { source } = sourceWith(async () => {});
+      render(<Canvas model={modelWith('a1')} source={source} />);
+      const button = newTabIn(panes()[0]);
+      act(() => {
+        button?.focus();
+        button?.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
+      });
+      const tip = document.querySelector('[role="tooltip"]')?.textContent ?? '';
+      expect(tip).toContain(chordSymbols('Mod-t', mac));
+      expect(tip).not.toContain(chordSymbols('Mod-n', mac));
+      cleanup();
     });
-    const tip = document.querySelector('[role="tooltip"]')?.textContent ?? '';
-    expect(tip).toContain('Mod-t');
-    expect(tip).not.toContain('Mod-n');
   });
 });
 

@@ -320,17 +320,31 @@ describe('per-pane isolation — the composer draft is per SESSION, and two pane
   });
 });
 
-describe('the default-provider picker (#261) is wired to every pane, not only the focused one', () => {
-  it('renders its toggle inside a background (non-focused) split pane too', () => {
+describe('a GLOBAL-preference control is wired to every pane, not only the focused one', () => {
+  /**
+   * THE CONTROL CHANGED, THE PROPERTY DID NOT.
+   *
+   * This drove `[data-provider-picker-toggle]` (#261), which is withdrawn
+   * while `PROVIDERS` has one row (`src/shared/providers.ts`): a popover over
+   * a single already-selected item is a control that cannot act. It is
+   * re-pointed rather than deleted, because the thing it was really holding
+   * is not the provider picker at all -- it is that a composer in a
+   * BACKGROUND pane is built with the same props as the focused one, which is
+   * the case a focused-pane-only wiring mistake misses.
+   *
+   * `[data-prompt-tools]` is the row that carried it and carries the rest,
+   * and the attach control inside it is drawn from the same unconditional
+   * path -- so the assertion survives the next control to come or go from
+   * that row, which the old one did not.
+   */
+  it('renders the composer tools row inside a background (non-focused) split pane too', () => {
     render(<Canvas model={MODEL} />);
     act(() => sidebarRow(1).click()); // pane-1: a1, a2 — a2 in front
     pressChord('z', 'v'); // pane-1: a1 (unfocused) | pane-2: a2 (focused)
-    const [first] = splitPanes();
-    // `defaultProvider`/`onSetDefaultProvider` are global-preference props,
-    // identical for every pane (A15.4's own contract) — proving the
-    // BACKGROUND pane draws the control is the one case a focused-pane-only
-    // wiring mistake would miss.
-    expect(first?.querySelector('[data-provider-picker-toggle]')).not.toBeNull();
+    const [first, second] = splitPanes();
+    expect(second?.querySelector('[data-prompt-tools]'), 'the focused pane').not.toBeNull();
+    expect(first?.querySelector('[data-prompt-tools]'), 'the background pane').not.toBeNull();
+    expect(first?.querySelector('[data-attach]'), 'and its controls').not.toBeNull();
   });
 });
 

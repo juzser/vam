@@ -36,7 +36,18 @@ describe('the argv vam hands to gh', () => {
     expect(argv).toContain('--head');
     expect(argv[argv.indexOf('--head') + 1]).toBe('feature/panel-rework');
     const fields = argv[argv.indexOf('--json') + 1]?.split(',') ?? [];
-    expect(fields).toEqual(['number', 'title', 'state', 'isDraft', 'statusCheckRollup']);
+    // The four the ROW's identity rests on. The descriptive fields the
+    // operator asked for (the diff size, the branches, the author, the review,
+    // the labels, the address) are pinned in `pull-requests-detail.test.ts`,
+    // beside the measurements of the shapes they arrive in -- restating the
+    // whole list in two files is two lists that can drift.
+    expect(fields.slice(0, 5)).toEqual([
+      'number',
+      'title',
+      'state',
+      'isDraft',
+      'statusCheckRollup',
+    ]);
     // Nothing that writes, and no repository override: the working directory
     // decides which repository is asked about.
     expect(argv).not.toContain('--repo');
@@ -153,12 +164,19 @@ describe('reading what gh answered', () => {
     expect(list.kind).toBe('ok');
     if (list.kind !== 'ok') throw new Error('expected ok');
     expect(list.prs).toHaveLength(3);
-    expect(list.prs[0]).toEqual({
+    // The four facts this file has always asserted. The payload above predates
+    // the fields added for "it needs more information", which is the point of
+    // asserting it unchanged: a row gh answered in the OLD shape still parses,
+    // and the new fields report not-knowing rather than taking the list down.
+    expect(list.prs[0]).toMatchObject({
       number: 128,
       title: 'Rework the detail pane so a narrow column stays readable end to end',
       state: 'open',
       checks: 'passing',
     });
+    expect(list.prs[0]?.additions).toBeNull();
+    expect(list.prs[0]?.author).toBeNull();
+    expect(list.prs[0]?.labels).toEqual([]);
     // A draft is its own state, not an open PR: the difference is the whole
     // reason the operator would look at this pane before pinging anyone.
     expect(list.prs[1]?.state).toBe('draft');

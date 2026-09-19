@@ -23,6 +23,7 @@ import type {
   IssueApi,
   LinkApi,
   MainErrorsApi,
+  PrsApi,
   TerminalApi,
   UpdateApi,
   UsageApi,
@@ -70,6 +71,23 @@ declare global {
        * printed beside its text, and the control says so when pressed.
        */
       readonly link: LinkApi;
+      /**
+       * The PRs tab's own two acts: open a pull request in the operator's
+       * browser, and merge one or delete its branch.
+       *
+       * SEPARATE FROM `link` for the allowlist rather than the plumbing --
+       * `link` may go anywhere on the web because an agent's prose may
+       * reference anywhere; this may only go to github.com, which is what
+       * makes a clickable ROW a promise about where it goes.
+       *
+       * Desktop-only, and that is the bound on the WRITE half rather than an
+       * accident of which build has a bridge: a paired phone authenticated
+       * once, over the network, must not be able to merge the operator's pull
+       * requests. `remote/server.ts` has no route to these channels and must
+       * not grow one. In the browser build the member is simply absent and the
+       * pane draws no actions, which is the same rule the Files tab follows.
+       */
+      readonly prs: PrsApi;
       readonly terminal: TerminalApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;

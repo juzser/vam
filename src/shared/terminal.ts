@@ -98,22 +98,135 @@ export type PaneView =
  * (`main/terminal/model.ts`), the preload forwards it and the renderer paints
  * it on the model button, so it cannot live in any one of the three.
  *
- * TWO KINDS, AND `unknown` IS A COMMON ONE. The name comes off the CLI's own
+ * THREE KINDS, AND `unknown` IS A COMMON ONE. The name comes off the CLI's own
  * status line, which is not always on the screen: a permission prompt, the
  * CLI's `/model` menu and the trust prompt all replace it, a narrow pane cuts
- * it, and a pane vam cannot pair to a session was never read at all. The
+ * it, and a pane vam cannot pair to a session was never read at all. Those
  * reasons are collapsed into one kind on purpose -- `main/terminal/model.ts`
  * argues it where the collapse happens -- because the one surface that draws
  * this draws the same thing for every one of them: the label it wore before.
  *
+ * `last-turn` IS A DIFFERENT FACT AND NOT A WEAKER `model`, which is why it is
+ * its own kind rather than a flag on that one. `model` is what the CLI is set
+ * to NOW, read off the footer it is painting. `last-turn` is what the API
+ * actually SERVED on the most recent turn, read out of the session's own
+ * transcript (`main/sources/claude-code/transcript-model.ts`) for the sessions
+ * whose footer vam cannot read at all -- an operator may replace the CLI's
+ * status line with a script of their own, and then the footer never answers
+ * again. The two differ exactly where it matters most: a `/model` switch with
+ * no turn since moves the first and not the second. `ModelSwitchResult` next
+ * door keeps its refusals apart for the same reason -- each says a different
+ * sentence to a person, and "running X" is a claim only the footer supports.
+ *
  * `name` IS THE CLI'S OWN STRING, never one of vam's five aliases. It is
  * whatever the footer printed -- `Sonnet 5`, `Opus 5`, and `Sonnet 4.5` for a
  * session started on a full model id -- so a model vam has never heard of
- * still reaches the button.
+ * still reaches the button. A `last-turn` name is derived INTO that same shape
+ * from the transcript's model id, so one control does not carry two
+ * vocabularies (`transcript-model.ts`'s `displayModelName` holds the rule).
  */
 export type SessionModel =
   | { readonly kind: 'model'; readonly name: string }
+  | { readonly kind: 'last-turn'; readonly name: string }
   | { readonly kind: 'unknown' };
+
+/**
+ * WHAT BECAME OF A MODEL SWITCH -- one success, and a refusal for every way it
+ * can fail to be one.
+ *
+ * Beside `SessionModel` because it is the write to that read's fact, and here
+ * rather than in main for the same reason: main produces it, the preload
+ * forwards it and the renderer draws a different sentence for every arm.
+ *
+ * `sent` CARRIES NO SCOPE, AND THAT IS A DECISION RATHER THAN AN OMISSION. It
+ * used to: `session` was the menu's `s` key and `default` was the argument
+ * form, which vam took for a full model id while DISCLOSING that the CLI had
+ * also rewritten `~/.claude/settings.json`. Offered that fallback or an
+ * outright refusal, the operator chose refusal -- so one route is left, it is
+ * the menu, and every switch vam performs is this session's alone. A field
+ * with one possible value is a field that lies about there being a choice, and
+ * a caption reading the scope off it would be reading a constant. Measured on
+ * Claude Code 2.1.276: the menu's `s` answers `Set model to Haiku 4.5 for this
+ * session only` and leaves that file byte-identical -- same sha256, same mtime
+ * -- while `/model <alias>` + Return answers `Set model to Opus 5 and saved as
+ * your default for new sessions`.
+ *
+ * EVERY REFUSAL IS ITS OWN KIND, for the reason `PaneView` and `AnswerResult`
+ * keep theirs apart: each sends a person somewhere different. `question` is a
+ * picker that already has the keyboard -- vam looked and will not type past
+ * it. `not-in-menu` is a choice the CLI's own menu cannot express. `no-menu`
+ * is vam having asked for the menu and having no menu to drive
+ * afterwards, which means the `/model` line may have landed in the agent's
+ * prompt instead. `not-live` is a menu that was there and stopped behaving
+ * like one: the probe arrow moved nothing, or it left the screen mid-walk.
+ * `unmatched` is a menu with no row of that name on it. `unaimed`,
+ * `unavailable`, `mispaired` and `refused` are the pane channel's own four
+ * words, spelled the same because they are the same states.
+ */
+export type ModelSwitchResult =
+  /** It went in, on the menu's `s`: this session, and no later one. */
+  | { readonly kind: 'sent' }
+  /** A picker already has the keyboard. `title` is the line above its rows. */
+  | { readonly kind: 'question'; readonly title: string }
+  /**
+   * The choice has no row on the CLI's own `/model` menu, so vam typed
+   * NOTHING. `choice` is what was asked for, so a caption can name it.
+   *
+   * WHY THIS ARM EXISTS AT ALL. The menu is the only route that keeps a switch
+   * to one session, and it carries the five aliases and nothing else -- so a
+   * full model id such as `claude-opus-5-20260501` has no row to walk onto.
+   * The one form the CLI offers for such an id is `/model <id>` + Return, and
+   * that form ALSO saves the pick as the operator's default for new sessions:
+   * a write to `~/.claude/settings.json` made from a control reached for to
+   * change ONE session. vam does not make that write on somebody's behalf,
+   * disclosed or not, so it refuses instead -- and the caption names the
+   * remedy, because an operator who wants it can type the line themselves in
+   * the Terminal tab, knowing what it costs.
+   */
+  | { readonly kind: 'not-in-menu'; readonly choice: string }
+  /** `/model` went in and no menu came up. It may have gone in as a prompt. */
+  | { readonly kind: 'no-menu' }
+  /** A menu that will not take an arrow is one no key may be pressed on. */
+  | { readonly kind: 'not-live' }
+  /** No row of the menu carries this name. `label` is the name looked for. */
+  | { readonly kind: 'unmatched'; readonly label: string }
+  | { readonly kind: 'unaimed' }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'mispaired' }
+  /** vam could not read the screen, so it would not press a key on it. */
+  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'refused' };
+
+/**
+ * The longest model choice vam will carry. A CLI alias is one short word and a
+ * full model id is `claude-opus-5-20260501`; the bound is far above either and
+ * keeps a renderer that is no longer vam's from handing tmux a megabyte to
+ * type into somebody's agent.
+ */
+export const MAX_MODEL_CHOICE = 100;
+
+/**
+ * Whether a value off the bridge is a model choice vam will act on.
+ *
+ * ONE WORD, and the two things whitespace can be are both wrong on the wire:
+ * a space hands the CLI a second argument, and a newline in a literal payload
+ * reaches the pane as 0x0a, which the REPL submits on (`tmux/argv.ts`) -- so
+ * `/model` would go in bare, opening the menu, and the rest would be typed
+ * into it. Control characters go for the reason `sendTextArgv` types with
+ * `-l`: the line is text, never keys.
+ *
+ * CHECKED IN MAIN AS WELL AS IN THE RENDERER, and that is not a duplicate: the
+ * renderer is the least trusted process in the app, and the copy there exists
+ * to word the refusal, not to enforce it.
+ */
+export function isModelChoice(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_MODEL_CHOICE &&
+    /^[^\s\p{Cc}]+$/u.test(value)
+  );
+}
 
 /**
  * A terminal size, in tmux's own units.

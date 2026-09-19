@@ -136,7 +136,7 @@ describe('the tab menu', () => {
    *  the select button inside it, never the wrapper. */
   it('opens from the tab’s close button too, the other focusable stop in it', () => {
     twoTabs();
-    const x = document.querySelector<HTMLElement>('[aria-label="close alpha one tab"]');
+    const x = document.querySelector<HTMLElement>('[aria-label="close session alpha one"]');
     act(() => {
       fireEvent.contextMenu(x as HTMLElement, { clientX: 0, clientY: 0 });
     });

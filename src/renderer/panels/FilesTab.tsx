@@ -122,8 +122,8 @@ import type {
   FileSignature,
   FileWriteResult,
 } from '../../main/files/types.js';
-import { normalizeKey } from '../keyboard/chords.js';
-import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
+import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
+import { answeringKeys, insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
 import {
   renderedTreeWidth,
@@ -264,6 +264,23 @@ export type FilesTabProps = {
    * shape of bug a later reorder of this file could otherwise reintroduce.
    */
   readonly hidden: boolean;
+  /**
+   * Whether the pane holding this tab is the one holding the keyboard —
+   * `DetailPanel.tsx`'s own `paneFocused`, passed on rather than re-derived
+   * off `data-split-focused`, for the reason that prop's comment gives: a
+   * second notion of focus is a second answer to one question.
+   *
+   * It gates exactly one thing here: whether this instance's WINDOW-LEVEL
+   * `Mod-p` listener answers. Two split leaves can both show this tab, and
+   * both listeners hear every keystroke in the app — so without this, a chord
+   * pressed in the pane the operator is looking at would move the keyboard
+   * into the one they are not, whichever instance mounted last.
+   *
+   * Defaults to `true`, as `paneFocused` does and for the same reason: an
+   * unsplit shell, a phone and a desktop detail column all ARE the focused
+   * pane, and none of them has a pane identity to check.
+   */
+  readonly paneFocused?: boolean;
   readonly sessionId: string | null;
   readonly list: ListFiles | undefined;
   readonly read: ReadFile | undefined;
@@ -370,6 +387,7 @@ const NO_BRIDGE: SourceError = {
 
 export function FilesTab({
   hidden,
+  paneFocused = true,
   sessionId,
   list,
   read,
@@ -809,7 +827,7 @@ export function FilesTab({
     pendingSelection.current = { path: activePath, start: caret, end: caret };
     setFormatUndo({ path: activePath, before: buffer.content, after: result.value });
     setContent(activePath, result.value);
-    setNote('formatted — Mod-z puts it back exactly as it was.');
+    setNote(`formatted — ${chordSymbols('Mod-z')} puts it back exactly as it was.`);
   }, [activePath, buffers, setContent, settings.indent]);
 
   /** Put the file back as it was before the last format. Answers whether it
@@ -1174,6 +1192,91 @@ export function FilesTab({
     wantEditorFocus.current = true;
   }, []);
 
+  /**
+   * FIND A FILE — the one act, and the one code path every surface in this tab
+   * reaches it by: `/` on the tree, and `Mod-p` from the tree, the editor, the
+   * preview and either text box. Four handlers, one function, because a second
+   * `filterRef.current?.focus()` written out somewhere else is how two of them
+   * come to disagree about what the key does.
+   *
+   * IT SELECTS, AND `focus()` DOES NOT DO THAT. Measured rather than assumed
+   * (`test/panels/DetailPanel.files-tab.test.tsx`): focusing an input leaves
+   * the caret exactly where it was, so a second press on a box that already
+   * holds `env` would have appended to a stale search instead of starting a
+   * new one. Selecting makes the next keystroke replace it and `Enter` on its
+   * own still take the operator to the first match of what is there.
+   */
+  const focusFilter = useCallback(() => {
+    setNote(null);
+    const box = filterRef.current;
+    if (box === null) return;
+    box.focus();
+    box.select();
+  }, []);
+
+  /**
+   * — AND THE FIFTH SURFACE, WHICH IS EVERYWHERE ELSE.
+   *
+   * THE DEFECT, reported by the operator and translated: "in the files view,
+   * in SELECT MODE, I cannot press Cmd+P to filter". The four handlers above
+   * are `onKeyDown` props, so each needs DOM focus to be inside the element
+   * that carries it — and in Select the keyboard is very often inside none of
+   * them. Measured in Chromium rather than reasoned about: switching a pane to
+   * this tab leaves focus on the view-icon button that switched it (`<button
+   * data-view="files" aria-label="Files view">`, a sibling of this whole tab),
+   * and `Escape` leaves it on the body. From either, `Mod-p` fell through to
+   * `Canvas.tsx`'s window grammar, which leaves `Mod-p` unbound on purpose —
+   * so the one act this tab exists for was unreachable from the state it opens
+   * in. `e2e/files-tab-keyboard-shots.mjs` presses it from the view pill.
+   *
+   * ON THE WINDOW, NOT ON THIS TAB'S OWN ROOT, because the focus states that
+   * were broken are precisely the ones OUTSIDE that root: a listener scoped to
+   * the subtree could not have heard any of them. It is the same window
+   * `Canvas.tsx` listens on, which is what makes the guards below the whole of
+   * the contract — there is nothing else standing between this and every
+   * keystroke in the app.
+   *
+   * NOT A BINDING IN `chords.ts`, deliberately, and the same argument
+   * `files-tree.ts` already makes for `TREE_KEYS`: the grammar's table is
+   * REBINDABLE and app-wide, and an entry there would be a key the shell owns
+   * whose only meaning lives in one tab of one view. `chords.ts` records that
+   * `Mod-p` was left free on purpose; it still is.
+   *
+   * THREE GUARDS, and each is a way this could steal a key that is not its own:
+   *
+   *   `hidden` — this tab is NOT unmounted when another tab shows (see the
+   *   file header), so without this the listener would answer from behind a
+   *   `display: none`, moving the keyboard into a box nobody can see while the
+   *   operator looks at the Response view.
+   *
+   *   `paneFocused` — every mounted instance hears every keystroke. In a split
+   *   showing this tab twice, the unfocused pane would race the focused one.
+   *
+   *   `defaultPrevented` / `answeringKeys` — the first says a nearer surface
+   *   already answered (all four handlers above `preventDefault`), the second
+   *   says a caret somewhere else in the app owns the key: the command
+   *   palette's filter, a rename field, another pane's composer.
+   *   `keyboard/focus-scope.ts` carries that question and its two populations;
+   *   `Canvas.tsx` asks the same one before it moves the keyboard on vam's own
+   *   initiative. A focused BUTTON is not answering anything, which is what
+   *   leaves the view pill — the broken case — reachable.
+   *
+   * AND `preventDefault` HERE TOO, for `onEditorKeyDown`'s reason: unprevented,
+   * `Cmd+P` is a browser tab's print dialog.
+   */
+  useEffect(() => {
+    if (hidden || !paneFocused) return;
+    const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (normalizeKey(event) !== 'Mod-p') return;
+      if (answeringKeys()) return;
+      event.preventDefault();
+      focusFilter();
+    };
+    window.addEventListener('keydown', onWindowKeyDown);
+    return () => window.removeEventListener('keydown', onWindowKeyDown);
+  }, [hidden, paneFocused, focusFilter]);
+
   const onEditorKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (activePath === null) return;
@@ -1200,6 +1303,16 @@ export function FilesTab({
         // things to remember for no gain.
         event.preventDefault();
         setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
+        return;
+      }
+      if (key === 'Mod-p') {
+        // TO THE FILTER, from inside a text box where `/` is a character the
+        // operator is typing. Claimed rather than left to fall through: the
+        // app grammar leaves `Mod-p` unbound, so unprevented it would reach a
+        // browser tab's own print dialog (`browser-contested-chords.test.ts`
+        // lists `Mod-p` as cancelable) and nothing would have searched.
+        event.preventDefault();
+        focusFilter();
         return;
       }
       if (key === 'Mod-Shift-f') {
@@ -1262,6 +1375,7 @@ export function FilesTab({
       setContent,
       saveFile,
       focusCursorRow,
+      focusFilter,
       formatActive,
       undoFormat,
       settings.indent,
@@ -1306,8 +1420,7 @@ export function FilesTab({
           openFromTree(step.path, step.focusEditor);
           return;
         case 'filter':
-          setNote(null);
-          filterRef.current?.focus();
+          focusFilter();
           return;
         case 'editor':
           setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
@@ -1320,10 +1433,19 @@ export function FilesTab({
           return;
       }
     },
-    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor],
+    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor, focusFilter],
   );
 
-  /** Escape/Mod-[ out of either text box, and Mod-Shift-e across to the editor. */
+  /**
+   * Escape/Mod-[ out of either text box, Mod-Shift-e across to the editor, and
+   * Mod-p back to the filter.
+   *
+   * `Mod-p` IS ANSWERED IN HERE TOO, and that is what makes "a second press
+   * restarts the search" true: the first press lands the caret in this box, so
+   * the second one arrives with the caret already here. Unanswered it would
+   * have fallen through to a browser tab's print dialog from the very box the
+   * key exists to reach.
+   */
   const onBoxKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
       const key = normalizeKey(event);
@@ -1332,12 +1454,17 @@ export function FilesTab({
         event.currentTarget.blur();
         return;
       }
+      if (key === 'Mod-p') {
+        event.preventDefault();
+        focusFilter();
+        return;
+      }
       if (key === 'Mod-Shift-e') {
         event.preventDefault();
         setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
       }
     },
-    [focusEditor],
+    [focusEditor, focusFilter],
   );
 
   /**
@@ -1361,6 +1488,14 @@ export function FilesTab({
         event.currentTarget.blur();
         return;
       }
+      if (key === 'Mod-p') {
+        // The rendered view is read-only and still not a place `/` can be
+        // pressed — it is a document, not a list of rows — so it gets the same
+        // way to the filter every other surface in this tab has.
+        event.preventDefault();
+        focusFilter();
+        return;
+      }
       if (key === 'Mod-Shift-m') {
         event.preventDefault();
         togglePreview();
@@ -1371,7 +1506,7 @@ export function FilesTab({
         setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
       }
     },
-    [focusCursorRow, togglePreview],
+    [focusCursorRow, focusFilter, togglePreview],
   );
 
   if (sessionId === null) {
@@ -1466,7 +1601,9 @@ export function FilesTab({
                 simply absent is the truer surface. The KEY still answers
                 from anywhere (`onEditorKeyDown`), and says why. */}
             {canPreview && (
-              <Note text="Switch between the rendered document and the raw text (Mod-Shift-m). Rendered is read-only; your unsaved edits survive either way.">
+              <Note
+                text={`Switch between the rendered document and the raw text (${chordSymbols('Mod-Shift-m')}). Rendered is read-only; your unsaved edits survive either way.`}
+              >
                 <button
                   type="button"
                   data-files-preview
@@ -1498,7 +1635,7 @@ export function FilesTab({
                 copy that survives the formatter learning a file type. */}
             {activeBuffer?.kind === 'editable' && (
               <Note
-                text={`Tidy this file's whitespace (Mod-Shift-f). ${FORMAT_OFFER} — anything else is refused by name, and Mod-z puts back whatever it changed.`}
+                text={`Tidy this file's whitespace (${chordSymbols('Mod-Shift-f')}). ${FORMAT_OFFER} — anything else is refused by name, and ${chordSymbols('Mod-z')} puts back whatever it changed.`}
               >
                 <button
                   type="button"
@@ -1516,7 +1653,9 @@ export function FilesTab({
                 write is REFUSED rather than forced when the file moved under
                 it, and their own text survives that refusal. */}
             {activeBuffer?.kind === 'editable' && (
-              <Note text="Write this file to disk (Mod-s). If it changed on disk since you opened it the write is refused, not forced — your edits stay in the box either way.">
+              <Note
+                text={`Write this file to disk (${chordSymbols('Mod-s')}). If it changed on disk since you opened it the write is refused, not forced — your edits stay in the box either way.`}
+              >
                 <button
                   type="button"
                   data-files-save
@@ -2101,7 +2240,22 @@ function Tree({
             }
             onBoxKeyDown(event);
           }}
-          placeholder="filter…"
+          /* THE KEY IS IN THE BOX, because the box was already there and
+             nobody could find it: the filter has shipped since this tab did
+             and its placeholder said only `filter…`. Parenthesised the way
+             this file's own Format and Save tooltips name theirs, rather than
+             a chip beside the input — at `TREE_WIDTH`'s 7.5rem floor a chip
+             would take a third of the column off a box that has ~62px to begin
+             with, and a placeholder clips where a flex item squeezes. `Mod-p`
+             rather than `/` because it is the spelling that works from every
+             surface in the tab; `/` has the key sheet and the README.
+
+             PAINTED, NOT SPELLED. It used to read `(Mod-p)` — `normalizeKey`'s
+             own token, in a box a person reads. `Mod-` is the one token that
+             carries two physical keys, which is exactly the fact a hint must
+             not hide, so it goes through `chordSymbols` like every other chord
+             on screen: `(⌘P)` on a Mac, `(Ctrl+P)` off one. */
+          placeholder={`filter… (${chordSymbols('Mod-p')})`}
           aria-label="filter files"
           className="min-w-0 flex-1 bg-transparent font-mono text-control text-ink outline-none placeholder:text-ink-faint"
         />

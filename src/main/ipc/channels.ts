@@ -180,6 +180,49 @@ export const CHANNELS = {
    * decision.
    */
   linkOpen: 'vam:link:open',
+  /**
+   * OPEN A PULL REQUEST IN THE OPERATOR'S BROWSER.
+   *
+   * A SECOND CHANNEL RATHER THAN A CALL TO `linkOpen`, and the difference is
+   * the allowlist, not the plumbing. `linkOpen` governs an address a MODEL
+   * WROTE in prose and lets any http or https address through, because vam
+   * cannot enumerate the web an agent might reference. This one governs the
+   * address behind a ROW IN VAM'S OWN LIST, where the operator is promised
+   * they know where it goes without reading it -- so it accepts https on
+   * github.com and nothing else (`src/shared/pr-link.ts`). Routing this
+   * through `linkOpen` would have widened it to the whole web for the sake of
+   * reusing four lines.
+   *
+   * Authorised by the operator on 2026-09-18: `pull-requests.ts` had recorded
+   * that opening a pull request in a browser was deliberately absent, and this
+   * is the decision that changed it.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`, for `linkOpen`'s reason: a paired
+   * phone has a browser of its own.
+   */
+  prsOpen: 'vam:prs:open',
+  /**
+   * MERGE A PULL REQUEST, OR DELETE A BRANCH. The only channel in this table
+   * that changes anything on GitHub.
+   *
+   * Takes a SESSION ID, never a directory. Which repository is acted on is
+   * decided by where that session stands, exactly as
+   * `sources/claude-code/pull-requests.ts` refuses `--repo` so that a pane can
+   * only ever describe the repository vam is actually in. A channel that took
+   * a path would hand that invariant straight back.
+   *
+   * Everything else it needs is validated in main: the number, the branch (it
+   * goes into an API PATH -- see `checkBranchName`), and the merge method,
+   * which is an ALLOWLIST and is what keeps `--admin` unreachable from the
+   * renderer. The runner behind it is non-re-entrant, so a second click while
+   * one is in flight is refused rather than run.
+   *
+   * NOT A MEMBER OF `PreloadSourceApi`: there is no route to this on
+   * `remote/server.ts`'s table and there must not be. A paired phone
+   * authenticated once, over the network, must not be able to merge the
+   * operator's pull requests.
+   */
+  prsAction: 'vam:prs:action',
   updateCheck: 'vam:update:check',
   /**
    * The same question, asked AGAIN, because a person pressed a button.
@@ -259,12 +302,12 @@ export const CHANNELS = {
    * WHICH MODEL a session is running -- read off the CLI's own status line, in
    * the pane vam started for that row.
    *
-   * It exists because vam TYPES `/model <alias>` into a pane and has never
-   * read the answer back (`renderer/panels/model-command.ts`), so what vam
-   * asked for is not what the session is on: the operator can switch it in the
-   * pane themselves, and a session vam resumed was set by somebody else. The
-   * model button therefore either wears a name this channel read a moment ago
-   * or wears no name at all.
+   * It exists because vam ASKS for a model and never reads the CLI's own
+   * answer line back (`terminalSwitchModel` below), so what vam asked for is
+   * not what the session is on: the operator can switch it in the pane
+   * themselves, and a session vam resumed was set by somebody else. The model
+   * button therefore either wears a name this channel read a moment ago or
+   * wears no name at all.
    *
    * Distinct from `terminalRead` for the reason `terminalPrompt` is: that one
    * hands over a whole screen for the Terminal tab to draw, and this hands
@@ -276,6 +319,27 @@ export const CHANNELS = {
    * give the caller two ways to be told the same thing.
    */
   terminalModel: 'vam:terminal:model',
+  /**
+   * CHANGING which model a session runs -- the write to `terminalModel`'s read.
+   *
+   * A separate channel from `terminalSend` for the reason `terminalAnswer` is
+   * one: it is a separate ACT, not a keystroke. Main opens the CLI's own
+   * `/model` menu, proves it is taking arrow keys, walks the cursor onto the
+   * row that names the alias and presses `s` -- the key whose answer is `Set
+   * model to Haiku 4.5 for this session only`.
+   *
+   * IT EXISTS BECAUSE THE OBVIOUS ROUTE REWRITES THE OPERATOR'S SETTINGS.
+   * `/model <alias>` + Return -- what vam typed over `terminalSend` until this
+   * channel existed -- answers `Set model to Opus 5 and saved as your default
+   * for new sessions`, measured on Claude Code 2.1.276. The whole policy lives
+   * in `main/terminal/model-switch.ts`, so there is ONE rule and it is not in
+   * the least trusted process in the app.
+   *
+   * Answers BARE, like the reads beside it: `ModelSwitchResult` carries every
+   * refusal as its own arm (`shared/terminal.ts`), so an envelope would give
+   * the caller two ways to be told the same thing.
+   */
+  terminalSwitchModel: 'vam:terminal:switch-model',
   /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
