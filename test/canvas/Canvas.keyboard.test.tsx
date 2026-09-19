@@ -1408,7 +1408,7 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
    * suite by accident.
    */
   function fakeSessionSource(
-    over: { deliverPrompt?: boolean; recordPrompt?: boolean } = {},
+    over: { deliverPrompt?: boolean; recordPrompt?: boolean; terminal?: boolean } = {},
     recordPrompt: (sessionId: string, prompt: string) => Promise<void> = async () => {},
   ): { source: CanvasSource; wrote: { count: number } } {
     const recordPromptFlag = over.recordPrompt ?? true;
@@ -1427,7 +1427,11 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
         createSession: false,
         governance: false,
         pullRequests: false,
-        terminal: false,
+        // WHETHER THE DELIVERY HAS A PANE BEHIND IT, which is what decides
+        // the word the status bar uses: a source that types into a terminal
+        // can say so, and one that queues for a session it does not own
+        // cannot. Both deliver.
+        terminal: over.terminal ?? false,
         agentRoster: false,
       },
       declines: {},
@@ -1493,11 +1497,14 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(control()?.getAttribute('aria-busy')).toBe('false');
   });
 
-  it('says the prompt was TYPED INTO THE TERMINAL when the source delivers, not that it was answered', async () => {
+  it('says the prompt was TYPED INTO THE TERMINAL when the source delivers through a pane', async () => {
     const calls: { sessionId: string; prompt: string }[] = [];
-    const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
-      calls.push({ sessionId, prompt });
-    });
+    const { source } = fakeSessionSource(
+      { deliverPrompt: true, terminal: true },
+      async (sessionId, prompt) => {
+        calls.push({ sessionId, prompt });
+      },
+    );
     await submit(source, 'run task-4 again');
     expect(calls).toEqual([{ sessionId: 'a1', prompt: 'run task-4 again' }]);
     // After a keystroke-into-the-pane there is no echo that the turn landed, so
@@ -1507,6 +1514,20 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(statusBar()).not.toContain('recorded');
     // It must not claim a delivery that was confirmed, nor that an answer is
     // already coming -- the words the retired `--resume` echo used to earn.
+    expect(statusBar()).not.toMatch(/delivered|it will answer there/i);
+  });
+
+  it('says QUEUED when the source delivers WITHOUT a pane, which typing is not', async () => {
+    // The Codex case, and the first source vam has that is in it: the message
+    // goes into a queue the session polls, and `codex queue` answers when it
+    // is IN the queue -- not when a session has read it. A thread whose Codex
+    // has exited has nobody polling, so "typed" would be a claim about a
+    // keyboard that does not exist and "delivered" a claim vam never observed.
+    const { source } = fakeSessionSource({ deliverPrompt: true, terminal: false }, async () => {});
+    await submit(source, 'run task-4 again');
+    expect(statusBar()).toContain('queued for');
+    expect(statusBar()).not.toContain('typed into the terminal');
+    expect(statusBar()).not.toContain('recorded');
     expect(statusBar()).not.toMatch(/delivered|it will answer there/i);
   });
 

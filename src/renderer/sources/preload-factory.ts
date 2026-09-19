@@ -83,6 +83,22 @@ export async function createSourceFromPreload(api: PreloadSourceApi): Promise<Se
     history: (sessionId, cursor) => api.history(sessionId, cursor),
   };
 
+  // THE CONSTITUENTS, when main is serving more than one source. Copied
+  // across rather than derived, and ASSIGNED ONLY WHEN PRESENT, on this
+  // module's own rule: `members: undefined` would make `'members' in source`
+  // true, and `capabilitiesFor` reads absence as "this source is the only
+  // one", which is a different thing from "this source has no constituents".
+  if (descriptor.members !== undefined) {
+    (source as { members?: SessionSource['members'] }).members = descriptor.members.map(
+      (member) => ({
+        id: member.id,
+        label: member.label,
+        capabilities: member.capabilities,
+        declines: member.declines,
+      }),
+    );
+  }
+
   // A mutable view of the same object: the port declares the optional members
   // `readonly`, which is the right contract for consumers and the wrong one
   // for the single place that populates them.

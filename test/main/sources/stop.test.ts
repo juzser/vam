@@ -268,7 +268,7 @@ describe('the close-session channel, once the source can actually stop one', () 
 
   const wire = (source: MainSource) => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, source);
+    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, [source]);
     return (...args: unknown[]) => handlers.get(CHANNELS.closeSession)?.({}, ...args);
   };
 

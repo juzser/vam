@@ -35,6 +35,7 @@ import { resolve } from 'node:path';
 import type { SourceCapabilities } from '../../renderer/sources/port.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
+import { combineSources } from '../sources/combine.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
 import {
@@ -87,7 +88,14 @@ export type RemoteServerOptions = {
    */
   readonly pairedDevices?: () => readonly PairedDevice[];
   readonly allowWrites: boolean;
-  readonly source: MainSource;
+  /**
+   * THE SOURCES THIS SERVER SERVES, as a list -- one of the three places main
+   * held exactly one before `docs/design/a-second-source.md` Stage 0. Folded
+   * into the single object every route below reads by `combineSources`, which
+   * returns a list of one BY REFERENCE, so a single-source server is
+   * unchanged.
+   */
+  readonly sources: readonly MainSource[];
   readonly subscribe: (onChange: () => void) => () => void;
   /** One line per write that reached a source. Defaults to the process log. */
   readonly audit?: (line: string) => void;
@@ -248,6 +256,7 @@ function readBody(request: IncomingMessage): Promise<Record<string, unknown> | n
  */
 function write(
   options: RemoteServerOptions,
+  source: MainSource,
   name: string,
   valid: (body: Record<string, unknown>) => boolean,
   call: (source: MainSource, body: Record<string, unknown>) => Promise<SourceError | null> | null,
@@ -261,7 +270,7 @@ function write(
       });
       return;
     }
-    const performed = call(options.source, body);
+    const performed = call(source, body);
     if (performed === null) {
       send(response, 200, {
         ok: false,
@@ -408,6 +417,12 @@ export function registeredRoutePaths(options: RemoteServerOptions): readonly str
 }
 
 function routesFor(options: RemoteServerOptions): Map<string, { method: string; route: Route }> {
+  // ONE COMBINATION FOR THE LIFE OF THIS ROUTE TABLE, never one per request:
+  // `combineSources` learns which source owns which session from `load()`, and
+  // a fresh combination per call would have forgotten that by the time a write
+  // arrived. A list of one is its member by reference, so a single-source
+  // server holds exactly the object it held before.
+  const source = combineSources(options.sources);
   const table = new Map<string, { method: string; route: Route }>();
   const read = (path: string, produce: () => Promise<unknown>): void => {
     table.set(path, {
@@ -418,10 +433,8 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     });
   };
 
-  read('/api/describe', async () =>
-    servedDescriptor(options.source.descriptor, options.allowWrites),
-  );
-  read('/api/load', async () => await options.source.load());
+  read('/api/describe', async () => servedDescriptor(source.descriptor, options.allowWrites));
+  read('/api/load', async () => await source.load());
 
   /**
    * THE PAIRED DEVICES, FOR A PHONE THAT HAS NO BRIDGE TO ASK.
@@ -484,7 +497,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
         });
         return;
       }
-      const read = options.source.readHistory;
+      const read = source.readHistory;
       if (read === undefined) {
         send(response, 200, {
           ok: true,
@@ -529,7 +542,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
         });
         return;
       }
-      const read = options.source.readAgentWork;
+      const read = source.readAgentWork;
       if (read === undefined) {
         send(response, 200, {
           ok: true,
@@ -600,7 +613,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     ],
   ];
   for (const [path, name, valid, call] of writes) {
-    table.set(path, { method: 'POST', route: write(options, name, valid, call) });
+    table.set(path, { method: 'POST', route: write(options, source, name, valid, call) });
   }
   return table;
 }

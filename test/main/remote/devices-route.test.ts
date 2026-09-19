@@ -67,7 +67,7 @@ async function start(over: Partial<RemoteServerOptions> = {}): Promise<string> {
     port: 0,
     devices,
     allowWrites: false,
-    source,
+    sources: [source],
     subscribe: () => () => {},
     audit: () => {},
     pairedDevices: () => DEVICES,
@@ -111,7 +111,7 @@ describe('GET /api/devices', () => {
       port: 0,
       devices,
       allowWrites: false,
-      source,
+      sources: [source],
       subscribe: () => () => {},
       pairedDevices: () => DEVICES,
     });
@@ -150,7 +150,7 @@ describe('GET /api/devices', () => {
       port: 0,
       devices,
       allowWrites: true,
-      source,
+      sources: [source],
       subscribe: () => () => {},
       pairedDevices: () => DEVICES,
     });

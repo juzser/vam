@@ -61,7 +61,7 @@ const sourceWith = (readAgentWork: MainSource['readAgentWork']): MainSource => (
 /** The api a desktop renderer gets, over a real clone boundary. */
 function desktop(source: MainSource) {
   const pair = ipcPair();
-  registerSourceIpc(pair.ipcMain, source);
+  registerSourceIpc(pair.ipcMain, [source]);
   return { api: createPreloadApi(pair.ipcRenderer), handlers: pair.handlers };
 }
 

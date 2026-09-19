@@ -53,7 +53,7 @@ describe('registerSourceIpc, once a source can actually write', () => {
 
   const wire = (source: MainSource) => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, source);
+    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, [source]);
     return (...args: unknown[]) => handlers.get(CHANNELS.recordPrompt)?.({}, ...args);
   };
 

@@ -604,10 +604,12 @@ describe('what the network can reach', () => {
       devices: { find: (token) => (token === TOKEN ? { deviceId: 'd', name: 'a phone' } : null) },
       allowWrites: true,
       pairing: watched,
-      source: {
-        descriptor: { id: 'claude-code', label: 'Claude Code' },
-        load: async () => [],
-      } as unknown as MainSource,
+      sources: [
+        {
+          descriptor: { id: 'claude-code', label: 'Claude Code' },
+          load: async () => [],
+        } as unknown as MainSource,
+      ],
       subscribe: () => () => {},
       audit: () => {},
     });

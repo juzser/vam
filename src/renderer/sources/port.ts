@@ -131,12 +131,41 @@ export type SourceGovernance = {
  * Use `canSubscribeTo`, `canWriteTo` and `canGovernWith` to reach them; a
  * direct ungated call does not typecheck.
  */
+/**
+ * ONE CONSTITUENT of a source that is really several, for the questions that
+ * are about a ROW rather than about the app.
+ *
+ * `SessionSource.capabilities` is the OR over everything main serves, which is
+ * the right answer to "can this app do X" -- whether a control exists at all.
+ * It is the wrong answer to "can THIS ROW do X", and the two only started
+ * differing when a second source arrived: Claude Code types into a pane it
+ * started, Codex queues into a session vam never saw, and a canvas reading the
+ * OR would draw a Terminal tab over a row that has no terminal.
+ *
+ * Narrower than the descriptor it comes from on purpose: a member is consulted
+ * for a capability and for the words behind a withdrawal, never for a
+ * `viewerScope`, which is a claim about the whole connection.
+ */
+export type SourceMember = {
+  readonly id: SourceId;
+  readonly label: string;
+  readonly capabilities: SourceCapabilities;
+  readonly declines: SourceDeclines;
+};
+
 export type SessionSource = {
   readonly id: SourceId;
   readonly label: string;
   readonly capabilities: SourceCapabilities;
   readonly declines: SourceDeclines;
   readonly viewerScope: ViewerScope;
+  /**
+   * The constituents, when main is serving more than one source. ABSENT when
+   * it is serving one, and then this source IS that one -- so a reader must
+   * fall back to the top level rather than treat absence as "no capabilities".
+   * `capabilitiesFor` in `./members.ts` is the one place that rule lives.
+   */
+  readonly members?: readonly SourceMember[];
   load(): Promise<readonly Project[]>;
   /**
    * The turns BEFORE a point in one session -- scrolling back, which `load()`
