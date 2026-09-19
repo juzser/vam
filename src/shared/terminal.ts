@@ -98,21 +98,36 @@ export type PaneView =
  * (`main/terminal/model.ts`), the preload forwards it and the renderer paints
  * it on the model button, so it cannot live in any one of the three.
  *
- * TWO KINDS, AND `unknown` IS A COMMON ONE. The name comes off the CLI's own
+ * THREE KINDS, AND `unknown` IS A COMMON ONE. The name comes off the CLI's own
  * status line, which is not always on the screen: a permission prompt, the
  * CLI's `/model` menu and the trust prompt all replace it, a narrow pane cuts
- * it, and a pane vam cannot pair to a session was never read at all. The
+ * it, and a pane vam cannot pair to a session was never read at all. Those
  * reasons are collapsed into one kind on purpose -- `main/terminal/model.ts`
  * argues it where the collapse happens -- because the one surface that draws
  * this draws the same thing for every one of them: the label it wore before.
  *
+ * `last-turn` IS A DIFFERENT FACT AND NOT A WEAKER `model`, which is why it is
+ * its own kind rather than a flag on that one. `model` is what the CLI is set
+ * to NOW, read off the footer it is painting. `last-turn` is what the API
+ * actually SERVED on the most recent turn, read out of the session's own
+ * transcript (`main/sources/claude-code/transcript-model.ts`) for the sessions
+ * whose footer vam cannot read at all -- an operator may replace the CLI's
+ * status line with a script of their own, and then the footer never answers
+ * again. The two differ exactly where it matters most: a `/model` switch with
+ * no turn since moves the first and not the second. `ModelSwitchResult` next
+ * door keeps its refusals apart for the same reason -- each says a different
+ * sentence to a person, and "running X" is a claim only the footer supports.
+ *
  * `name` IS THE CLI'S OWN STRING, never one of vam's five aliases. It is
  * whatever the footer printed -- `Sonnet 5`, `Opus 5`, and `Sonnet 4.5` for a
  * session started on a full model id -- so a model vam has never heard of
- * still reaches the button.
+ * still reaches the button. A `last-turn` name is derived INTO that same shape
+ * from the transcript's model id, so one control does not carry two
+ * vocabularies (`transcript-model.ts`'s `displayModelName` holds the rule).
  */
 export type SessionModel =
   | { readonly kind: 'model'; readonly name: string }
+  | { readonly kind: 'last-turn'; readonly name: string }
   | { readonly kind: 'unknown' };
 
 /**

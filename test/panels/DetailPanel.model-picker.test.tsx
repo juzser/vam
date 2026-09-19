@@ -646,6 +646,42 @@ describe('the button names the model the session is running', () => {
     expect(picker()?.getAttribute('data-note') ?? '').not.toContain('running');
   });
 
+  it('wears a transcript-sourced name on the label, exactly as a pane-sourced one', async () => {
+    // THE SESSIONS THIS WAS BUILT FOR. An operator who has replaced the CLI's
+    // status line with a script of their own has no footer for vam to read,
+    // and this button said the word `model` for the life of every session on
+    // that machine. The name comes out of the session's own transcript now
+    // (`main/sources/claude-code/transcript-model.ts`), already in the shape
+    // the footer would have printed -- so the label and the tick are the same
+    // machinery, fed from the other source.
+    const { model } = reader({ kind: 'last-turn', name: 'Opus 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    expect(label()).toBe('Opus 5');
+    act(() => picker()?.click());
+    expect(ticked()).toEqual(['opus']);
+  });
+
+  it('does not claim a transcript-sourced name is what the session is running', async () => {
+    // THE ONE THING THE TWO SOURCES DISAGREE ABOUT. The footer is what the CLI
+    // is set to NOW; the transcript is what the API served on the LAST turn,
+    // so a `/model` switch with no turn since moves one and not the other --
+    // and that is precisely the second an operator looks at this button. The
+    // note says which turn it is about rather than claiming vam checked.
+    const { model } = reader({ kind: 'last-turn', name: 'Opus 5' });
+    draw({ delivers: true, terminal: true, model });
+    await settle();
+    const note = picker()?.getAttribute('data-note') ?? '';
+    expect(note).toContain('last turn ran on Opus 5');
+    expect(note).not.toContain('running Opus 5');
+    // The note's own sentence survives the prefix, as it does for the footer.
+    expect(note).toContain('this session only');
+    // And a screen reader is told the same thing, not merely the name.
+    const name = picker()?.getAttribute('aria-label') ?? '';
+    expect(name).toContain('Opus 5');
+    expect(name).toContain('last turn ran on');
+  });
+
   it('ticks the row whose model that is, and no other', async () => {
     const { model } = reader({ kind: 'model', name: 'Opus 5' });
     draw({ delivers: true, terminal: true, model });

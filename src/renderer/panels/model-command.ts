@@ -76,6 +76,8 @@
  * disabled control carries the remedy.
  */
 
+import type { SessionModel } from '../../shared/terminal.js';
+
 /** The three faces the control can wear; see the table above. */
 export type ModelControlState = 'request' | 'picker' | 'disabled';
 
@@ -201,6 +203,59 @@ export function runningModelRows(running: string | null): readonly string[] {
  */
 export function modelButtonLabel(running: string | null): string {
   return running ?? 'model';
+}
+
+/**
+ * A NAME THE PANEL HAS READ, AND WHICH OF THE TWO SOURCES IT CAME FROM.
+ *
+ * `SessionModel` minus its refusal: the panel keeps `null` for "vam cannot
+ * tell" and this for everything else, so the two arms cannot be flattened into
+ * a bare string on the way to the words below.
+ */
+export type RunningModel = Extract<SessionModel, { readonly name: string }>;
+
+/**
+ * THE CLAUSE THE NOTE AND THE ACCESSIBLE NAME LEAD WITH -- and it is NOT the
+ * same claim for the two sources of one name.
+ *
+ * `model` is the CLI's own painted footer: what the session is SET TO, right
+ * now. "running X" is exactly what that supports, and it is the sentence this
+ * control has carried since it learned to read the pane.
+ *
+ * `last-turn` is the session's TRANSCRIPT -- what the API served on the most
+ * recent turn (`main/sources/claude-code/transcript-model.ts`) -- and it is
+ * the only source there is for an operator who has replaced the CLI's status
+ * line with a script of their own. It lags a `/model` switch by exactly one
+ * turn, and that lag lands on the one second this button is most likely to be
+ * read: just after a switch, while somebody checks whether it took. "running
+ * X" there would be vam claiming a fact it had not checked; naming the TURN
+ * instead is both true and the sentence that explains what they are seeing.
+ *
+ * THE BUTTON'S LABEL CARRIES NO QUALIFIER, deliberately. It is ten characters
+ * wide at vam's narrowest legal pane and already clips there
+ * (`e2e/model-picker-shots.mjs` measured the overflow that made it shrinkable),
+ * so a clause on the label would be a clause nobody can read. The note and the
+ * accessible name have the room, and this is what they say.
+ */
+export function modelRunningClause(running: RunningModel | null): string | null {
+  if (running === null) return null;
+  return running.kind === 'model' ? `running ${running.name}` : `last turn ran on ${running.name}`;
+}
+
+/**
+ * THE WHOLE ACCESSIBLE NAME of the model button.
+ *
+ * THE NAME LEADS IT, the way the mode chip's does, so a screen reader is told
+ * the fact the eye is told rather than only what the control does -- and the
+ * qualifier above travels with it, because a screen reader has no tooltip to
+ * hover for the rest of the sentence.
+ */
+export function modelButtonName(running: RunningModel | null): string {
+  const tail = 'choose one for this session';
+  if (running === null) return `model — ${tail}`;
+  return running.kind === 'model'
+    ? `model: ${running.name} — ${tail}`
+    : `model: ${running.name}, what the last turn ran on — ${tail}`;
 }
 
 /*
