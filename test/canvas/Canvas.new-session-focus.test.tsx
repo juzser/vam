@@ -313,20 +313,28 @@ describe('it does not take a keyboard the operator has moved', () => {
   /**
    * THE PALETTE IS CAUGHT TWICE OVER — it holds a text box, so the "already
    * answering keys" clause would decline even with no overlay rule at all.
-   * The key sheet is the case that isolates the overlay rule: `Canvas.tsx`'s
-   * own keydown comment records that the sheet and the settings overlay
-   * "contain none", which is exactly why they need a rule of their own.
+   * This case is the one that ISOLATES the overlay rule, and it needs an
+   * overlay with no text box in it to do that.
+   *
+   * IT USED TO BE THE KEY SHEET, on `Canvas.tsx`'s own keydown comment ("the
+   * sheet and the settings overlay contain none"). The sheet grew a search box
+   * when the operator asked for one, and the settings overlay mounts every
+   * panel at once — hex fields included — so the error log is what is left:
+   * a full-screen overlay, in `overlayOpen` like the rest, with nothing in it
+   * to type into. The assertion below says so out loud rather than assuming
+   * it, so the day THAT surface grows a box this case declares itself instead
+   * of quietly testing the other clause.
    */
   it('leaves it alone while an overlay with no text box owns it', async () => {
     const source = sourceWith();
     const { rerender } = render(<Canvas model={modelWith('a1')} source={source} />);
     await click(newTabIn(paneFor('pane-1')));
-    press('?');
-    const sheet = document.querySelector('[data-key-sheet]');
-    expect(sheet, 'the key sheet did not open').not.toBeNull();
+    press('E', { shiftKey: true });
+    const log = document.querySelector('[data-error-log]');
+    expect(log, 'the error log did not open').not.toBeNull();
     expect(
-      sheet?.querySelector('input, textarea'),
-      'the key sheet grew a text box, so this case no longer isolates the overlay rule',
+      log?.querySelector('input, textarea'),
+      'the error log grew a text box, so this case no longer isolates the overlay rule',
     ).toBeNull();
 
     await act(async () => {

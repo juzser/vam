@@ -219,6 +219,13 @@ const GUARDS = [
   // fixture's answers contain no table, and putting one in it would change the
   // transcript every demo-driven guard counts turns and rows in.
   'out-table-shots',
+  // THE `?` SHEET'S SHAPE: one column, label left and key right, a rule
+  // between sections, and a search box that holds the keyboard. Every term of
+  // that is a rectangle or a distance -- "clearer separation" is the claim
+  // that one gap is bigger than another, and both are zero in a unit
+  // environment. It also drives the box with REAL keystrokes, which is the
+  // only way to tell `?`-types-a-character from `?`-closes-the-sheet.
+  'key-sheet-shots',
   // THE SHORTCUT SYMBOLS, on both platforms out of one bundle. Loads the page
   // twice with `navigator.platform` overridden before any module runs, which
   // is the only way to prove ⌘-or-Ctrl is a RUNTIME answer in the shipped

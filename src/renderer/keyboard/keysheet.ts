@@ -739,3 +739,58 @@ export function buildFilesSheet(
   });
   return rows.length === 0 ? [] : [{ group: 'files', title: FILES_GROUP_TITLE, rows }];
 }
+
+/* ---------------------------------------------------------------------------
+ * SEARCHING THE SHEET.
+ *
+ * The operator, translated: "the shortcut table when you press `?` needs a
+ * search box". A hundred rows is more than a screen, and the sheet is opened
+ * with a question — "how do I …" — that a list can only answer by being read
+ * end to end.
+ *
+ * A PURE FUNCTION, NOT A `filter` IN THE COMPONENT, for this module's own
+ * reason: what a query MATCHES is a decision, and a decision belongs where it
+ * can be asserted without a DOM. `KeySheet.tsx` is then a box and a list.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The rows whose action or key answers `query`, group by group, with the
+ * groups that end up empty dropped — a titled heading over nothing is the
+ * "advertises nothing" shape `buildKeySheet` already refuses.
+ *
+ * WHAT A ROW IS SEARCHED BY, and each of the three is an operator with a
+ * different thing in their head:
+ *
+ *   ITS CAPTION, for "how do I get back up the transcript".
+ *   ITS CHORD AS PAINTED, for the operator who can see ⌘P on this screen and
+ *     wants the row it belongs to — the operator's own example.
+ *   ITS TOKEN, because `Mod-p` is what the README prints, what
+ *     `files-tree.ts` lists and what every commit message in this repo calls
+ *     it. An operator who arrives from the docs types what the docs said.
+ *
+ * EVERY WORD HAS TO LAND, so a query reads like a sentence and NARROWS:
+ * "reset pane" finds the row that resets the panes rather than every row with
+ * a pane in it. Case-insensitive on both sides.
+ *
+ * `mac` IS A PARAMETER, defaulting to this machine, for `chordSymbols`' own
+ * reason: the painted spelling differs by platform and both have to be
+ * assertable from one test run.
+ */
+export function filterSheet(
+  groups: readonly SheetGroup[],
+  query: string,
+  mac: boolean = applePlatform(),
+): readonly SheetGroup[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) {
+    return groups;
+  }
+  const matches = (row: SheetRow): boolean => {
+    const haystack = `${row.label} ${row.keys} ${chordSymbols(row.keys, mac)}`.toLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  };
+  return groups.flatMap((group) => {
+    const rows = group.rows.filter(matches);
+    return rows.length === 0 ? [] : [{ ...group, rows }];
+  });
+}
