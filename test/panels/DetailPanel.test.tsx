@@ -4347,22 +4347,32 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
   });
 
-  it('keeps the composer on Agents, which is still about the answer', () => {
-    // Agents is read alongside a reply being written, and nothing about it
-    // makes the prompt box the wrong place to type.
+  it('withdraws it on Agents and on PRs, and brings it back on Response', () => {
+    // THIS CASE HAS NOW SAID THE OPPOSITE TWICE, and both reversals are the
+    // operator's, a day apart and in the same words. It read "PRs keeps the
+    // composer" until 2026-09-18 ("it does not need the prompt input"), then
+    // "Agents keeps the composer, which is still about the answer" until the
+    // sentence that followed it: "the agents view doesn't need the prompt
+    // input either." Neither view is a conversation with the agent -- one is a
+    // list of pull requests on GitHub, the other a roster of who is running --
+    // so there is nothing on either that a typed sentence is addressed to.
     //
-    // PRs USED TO BE ASSERTED HERE TOO, and the operator's review on
-    // 2026-09-18 said it should not have been: "it does not need the prompt
-    // input." A list of pull requests on GitHub is not a conversation with the
-    // agent, so there is nothing a sentence typed under it is addressed to.
-    // Which views draw a composer is now `drawsComposer`'s (`tabs.ts`) and is
-    // pinned, per name, in `DetailPanel.composer-tabs.test.tsx`.
+    // It is kept as a case rather than deleted into `composer-tabs` because
+    // this suite is where the TERMINAL withdrawal is proved, and the three
+    // belong side by side: the reasons differ (a keyboard of its own, a list,
+    // a roster) and the outcome is the same. Which views draw a composer is
+    // `drawsComposer`'s (`tabs.ts`) and is pinned, per name, in
+    // `DetailPanel.composer-tabs.test.tsx`.
     withBridge();
     draw();
     fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
-    expect(q('[data-prompt-box]')).not.toBeNull();
+    expect(q('[data-prompt-box]')).toBeNull();
     fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).toBeNull();
+    // And back, so this is a fact about the views and not a composer that was
+    // torn down for good.
+    fireEvent.click(q<HTMLButtonElement>('[data-view="response"]') as HTMLButtonElement);
+    expect(q('[data-prompt-box]')).not.toBeNull();
   });
 });
 

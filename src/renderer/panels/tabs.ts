@@ -77,7 +77,7 @@ export function narrowsAsProse(tab: Tab): boolean {
  * answered for.
  *
  * THE QUESTION IS "IS THIS VIEW A CONVERSATION WITH THE AGENT", and only
- * that. Three names say no, for three different reasons, and none of them is
+ * that. FOUR names say no, for four different reasons, and none of them is
  * "it is a list":
  *
  *  - `Terminal` has its OWN keyboard. A second insert scope underneath it
@@ -93,13 +93,27 @@ export function narrowsAsProse(tab: Tab): boolean {
  *    that was breaking it. The actions the operator DOES want here (merge,
  *    delete the branch) are buttons on the row they act on, where the number
  *    and the title they name are already on screen.
+ *  - `Agents` is the SAME report, one view later and in the same words: "the
+ *    agents view doesn't need the prompt input either." The paragraph that
+ *    stood at the bottom of this comment named it a conversation; it is not
+ *    one, and the reason is the PRs argument exactly. This view is a ROSTER --
+ *    which agents are running, on what, and what each last did. A sentence
+ *    typed under it is addressed to the SESSION, not to any agent on the list,
+ *    and the ANSWER to it is drawn on Response, so the box stood over a list
+ *    it could neither act on nor report back into. The view pill is one
+ *    keystroke wide (`Ctrl-Alt-<digit>`, or `Mod-Shift-[`/`]`), which is what
+ *    makes the withdrawal cheap rather than a loss: prompting is a view away,
+ *    where what comes back is already on screen.
  *
- * It is NOT "does this view have a keyboard of its own": `Response` and
- * `Agents` both draw one, and both are places where a typed sentence reaches
- * the agent.
+ * IT IS NOT "DOES THIS VIEW HAVE A KEYBOARD OF ITS OWN", which is what the
+ * closing line here used to say while `Agents` was in the set. Three of the
+ * four refusals above have nothing to do with a keyboard at all: the box
+ * belongs where a typed sentence has something ON SCREEN to be about, and the
+ * one view that draws the answer to a prompt is the one that draws the
+ * transcript.
  */
 export function drawsComposer(tab: Tab): boolean {
-  return tab === 'Response' || tab === 'Agents';
+  return tab === 'Response';
 }
 
 /**
