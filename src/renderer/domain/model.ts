@@ -656,6 +656,32 @@ export type Session = {
    */
   readonly vamControlled?: boolean;
   /**
+   * THE MODEL THIS SESSION IS ON, when its SOURCE holds that fact -- never
+   * read off a screen, and never what vam last asked for.
+   *
+   * WHY A FIELD RATHER THAN THE BRIDGE THAT ALREADY ANSWERS THIS. vam has one
+   * way to learn a model today: `main/terminal/model.ts` reads the CLI's own
+   * status line out of a pane vam started, with the session's transcript as
+   * the fallback. Both of those exist because Claude Code keeps the fact
+   * nowhere a program can ask for it. Codex keeps it in `threads.model`, so
+   * the source simply knows -- there is no pane to read, and there does not
+   * need to be one.
+   *
+   * THREE STATES, the shape `agents` and `vamControlled` established. ABSENT
+   * is a source with no such fact, which is every Claude Code row and every
+   * fixture: those rows still get their name from the pane read, and a field
+   * that defaulted to `null` would have claimed the source had looked. NULL is
+   * a source that holds the field and found it empty -- one of the 789 threads
+   * measured here has no model recorded. A STRING is the model as the source
+   * spells it, verbatim, because it is the provider's own identifier and not
+   * something vam may normalise.
+   *
+   * IT IS NOT A CONTROL. A source that can say which model a session is on
+   * cannot necessarily CHANGE it, and this one cannot: see the Codex source's
+   * `terminal` decline.
+   */
+  readonly model?: string | null;
+  /**
    * The `AskUserQuestion` questions this session asked, oldest first, or
    * absent when the source has no such surface.
    *

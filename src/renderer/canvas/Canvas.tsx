@@ -162,6 +162,7 @@ import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.j
 import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
+import { capabilitiesFor } from '../sources/members.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
@@ -2041,7 +2042,31 @@ function CanvasInner({
    * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
    * the same list -- and that is the point: the digit must count what is drawn.
    */
-  const terminalTab = source.kind === 'session' && source.source.capabilities.terminal;
+  /**
+   * PER ROW, NOT PER APP, and that is the change a second source forced.
+   *
+   * This used to read `source.source.capabilities.terminal` -- the OR over
+   * everything main serves -- which was right while main served one source and
+   * became wrong the moment it served two. Claude Code types into a pane it
+   * started; Codex queues into a thread vam never saw and withdraws `terminal`
+   * with its own words. The OR would have drawn a Terminal tab over a Codex
+   * row that has no terminal behind it.
+   *
+   * The `source.kind === 'session'` gate stays and is still load-bearing for
+   * the compiler as much as for the UI: `capabilities` only TYPE-EXISTS on a
+   * session source. See `filesTab` below for the flag that deliberately has no
+   * such gate.
+   */
+  const terminalFor = useCallback(
+    (sourceId: string | undefined): boolean =>
+      source.kind === 'session' && capabilitiesFor(source.source, sourceId).capabilities.terminal,
+    [source],
+  );
+  /**
+   * The same fact, for whichever row the KEYBOARD is on -- which is what
+   * `Mod-<digit>` counts, because the digit must count what the focused pane
+   * draws. Defined below `focusedEntry`, not here, for the ordinary reason.
+   */
   /**
    * Whether THIS BUILD can show a file editor at all -- read the same way
    * `dialog.chooseDirectory`'s own presence already is (`window.api?.dialog?.
@@ -2835,6 +2860,7 @@ function CanvasInner({
     () => entries.find((e) => e.session.id === focusedSessionId) ?? null,
     [entries, focusedSessionId],
   );
+  const terminalTab = terminalFor(focusedEntry?.session.source ?? focusedEntry?.project.source);
 
   /**
    * Composer state, bound to whichever session is the ACTIVE TAB — kept as
@@ -3870,17 +3896,39 @@ function CanvasInner({
           setStatus(`${sessionSource.label} cannot be written to`);
           return;
         }
-        const painted = beginPaint(sessionSource.capabilities.deliverPrompt);
+        /**
+         * WHAT THIS ROW'S OWN SOURCE CAN DO, not what any source main serves
+         * can do -- the same per-row read `delivers` and `terminal` now make.
+         */
+        const here = capabilitiesFor(
+          sessionSource,
+          entry.session.source ?? entry.project.source,
+        ).capabilities;
+        const painted = beginPaint(here.deliverPrompt);
         try {
           await sessionSource.write.recordPrompt(entry.session.id, text);
           setStatus(
-            // What vam can honestly claim differs by source. A delivering
-            // source (Claude Code) TYPED the prompt into the pane it owns;
-            // there is no echo that the turn landed, so it claims none, and the
-            // turn appears here when the session's transcript records it. A
-            // recording source only appended to a log.
-            sessionSource.capabilities.deliverPrompt
-              ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
+            // WHAT VAM CAN HONESTLY CLAIM DIFFERS BY SOURCE, AND NOW IT
+            // DIFFERS THREE WAYS.
+            //
+            // A source that delivers THROUGH A PANE it owns (Claude Code)
+            // typed the prompt; there is no echo that the turn landed, so it
+            // claims none, and the turn appears here when the transcript
+            // records it.
+            //
+            // A source that delivers WITHOUT A PANE (Codex) put the message in
+            // a queue its session polls. `codex queue` answers when the
+            // message is IN the queue, not when a session has read it -- and a
+            // thread whose Codex has exited has nobody polling. So the word is
+            // QUEUED, including for a thread that is in fact drained a second
+            // later: claiming a delivery vam did not observe is the one
+            // failure this route must not have.
+            //
+            // A recording source only appended to a log.
+            here.deliverPrompt
+              ? here.terminal
+                ? `typed into the terminal of ${entry.session.title} — it will show here when the session records it`
+                : `queued for ${entry.session.title} — its session drains the queue; it will show here when the session records it`
               : `recorded in the log of ${entry.session.title} — recorded, not sent to the agent`,
           );
           lastSent.current.set(entry.session.id, { text, at: Date.now() });
@@ -5926,7 +5974,17 @@ function CanvasInner({
         // See `detailProps`'s own long-standing comment on this prop, still
         // true per pane: it is "which session THIS pane's cursor sits on".
         focusNodeId: sessionId,
-        delivers: source.kind === 'session' && source.source.capabilities.deliverPrompt,
+        /**
+         * PER ROW, like `terminal` below it: whether THIS pane's session can
+         * be reached, not whether any source main serves can reach anything.
+         * Claude Code and Codex both deliver, so this reads the same for both
+         * today -- and it is read per row anyway, because the next source that
+         * cannot is one the canvas must not promise for.
+         */
+        delivers:
+          source.kind === 'session' &&
+          capabilitiesFor(source.source, entry?.session.source ?? entry?.project.source)
+            .capabilities.deliverPrompt,
         pickImageAttachment:
           source.kind === 'session' ? source.source.write?.pickImageAttachment : undefined,
         answer: globalThis.window?.api?.terminal?.answer,
@@ -5955,7 +6013,12 @@ function CanvasInner({
             ? async (_projectId: string, rowId?: string) =>
                 (await import('../fixtures/demo.js')).demoSessionModel(rowId)
             : globalThis.window?.api?.terminal?.model,
-        terminal: terminalTab,
+        // THIS PANE'S ROW, not the focused one: two panes can show two
+        // sessions from two sources, and a background pane handed the focused
+        // row's terminal fact would draw a tab its own session has no pane
+        // for. `terminalTab` above stays the FOCUSED row's answer because that
+        // is what `Mod-<digit>` counts.
+        terminal: terminalFor(entry?.session.source ?? entry?.project.source),
         files: filesTab,
         // A15.4 — the GLOBAL "what a new session starts with"
         // preference, identical for every pane (it names nothing about
@@ -6046,7 +6109,7 @@ function CanvasInner({
       viewBySession,
       viewSeed,
       source,
-      terminalTab,
+      terminalFor,
       filesTab,
       viewNote,
       prefs,

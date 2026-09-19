@@ -8,6 +8,7 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +47,7 @@ import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/p
 import { prRepoOverride } from './sources/claude-code/pr-repos.js';
 import { projectIdOf } from './sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
+import { defaultCodexSource } from './sources/codex/source.js';
 import type { MainSource } from './sources/source.js';
 import { createTmuxRunner } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
@@ -124,9 +126,30 @@ const LAUNCH_FIXTURE_SOURCE: MainSource = {
  * on. Written here, where it can be read, rather than derived somewhere a
  * reader would have to reconstruct it.
  */
-const DESKTOP_SOURCES: readonly MainSource[] = [
-  process.env.VAM_FIXTURE_SOURCE === '1' ? LAUNCH_FIXTURE_SOURCE : CLAUDE_CODE_SOURCE,
-];
+const DESKTOP_SOURCES: readonly MainSource[] =
+  process.env.VAM_FIXTURE_SOURCE === '1'
+    ? [LAUNCH_FIXTURE_SOURCE]
+    : [
+        CLAUDE_CODE_SOURCE,
+        /**
+         * THE OPERATOR'S OWN CODEX THREADS, read from `~/.codex/state_5.sqlite`
+         * and their rollout files, with `codex queue` as the one write.
+         *
+         * SECOND, AND THE ORDER IS THE CONTRACT ABOVE: Claude Code's rows come
+         * first in the canvas, and `createSessionInDirectory` -- the "new
+         * project" route, which has no session and no project to key on --
+         * goes to the first source that advertises `createSession`, which is
+         * Claude Code. The Codex source withdraws `createSession` for exactly
+         * that reason: starting a Codex session is Stage 2.
+         *
+         * Registered whether or not Codex is installed. A machine with no
+         * `~/.codex` gets a source that withdraws everything and SAYS WHY in
+         * its label and in every decline, which is the version answer this
+         * source owes; an empty list of threads would read as "you have no
+         * Codex sessions", which is the one lie it must not tell.
+         */
+        defaultCodexSource(existsSync),
+      ];
 
 /**
  * Where main's own change-stream connects, absolute (main is not served from

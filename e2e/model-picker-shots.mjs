@@ -82,27 +82,49 @@ page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('CONSOLE ERROR:', msg.text());
 });
 
-const TERMINAL = 't.kind===`session`&&t.source.capabilities.terminal';
-const DELIVERS = 't.kind===`session`&&t.source.capabilities.deliverPrompt';
+/**
+ * THE EXPRESSIONS ARE MATCHED AS PATTERNS NOW, NOT AS LITERALS, and the reason
+ * is the second source.
+ *
+ * These used to be the exact minified strings
+ * `t.kind===\`session\`&&t.source.capabilities.terminal` and its
+ * `deliverPrompt` twin. Both stopped existing when the canvas started reading
+ * a capability PER ROW instead of per app: it calls
+ * `capabilitiesFor(source.source, <the row's source id>)`, whose helper name
+ * and argument names are whatever the minifier chose on the day. A literal
+ * could only ever match one build.
+ *
+ * What is stable is the SHAPE -- the `kind===\`session\`` guard, a call, and
+ * the capability being read off it -- so that is what these match. The throw
+ * below is unchanged and is still what keeps this honest: if the pattern ever
+ * stops matching, the script fails rather than quietly photographing a pane
+ * with no control in it.
+ */
+const TERMINAL = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.terminal/g;
+const DELIVERS = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.deliverPrompt/g;
+const has = (body, pattern) => {
+  pattern.lastIndex = 0;
+  return pattern.test(body);
+};
 let patched = 0;
 await page.route('**/assets/*.js', async (route) => {
   const response = await route.fetch();
   const body = await response.text();
-  if (!body.includes(TERMINAL) && !body.includes(DELIVERS)) {
+  if (!has(body, TERMINAL) && !has(body, DELIVERS)) {
     await route.fulfill({ response, body });
     return;
   }
-  if (!body.includes(TERMINAL) || !body.includes(DELIVERS)) {
+  if (!has(body, TERMINAL) || !has(body, DELIVERS)) {
     throw new Error(
       `the bundle carries only one of the two capability expressions this harness forces ` +
-        `(terminal: ${body.includes(TERMINAL)}, deliverPrompt: ${body.includes(DELIVERS)})`,
+        `(terminal: ${has(body, TERMINAL)}, deliverPrompt: ${has(body, DELIVERS)})`,
     );
   }
   patched += 1;
   console.log('forced terminal and deliverPrompt in', route.request().url());
   await route.fulfill({
     response,
-    body: body.split(TERMINAL).join('!0').split(DELIVERS).join('!0'),
+    body: body.replace(TERMINAL, '!0').replace(DELIVERS, '!0'),
   });
 });
 

@@ -5464,8 +5464,29 @@ export function DetailPanel(props: DetailPanelProps) {
   const modelControl = modelControlState({
     delivers,
     terminal,
+    /**
+     * THE TWO CLAIMS `vamControlled` USED TO BE ONE BOOLEAN FOR, and this is
+     * the site that wanted the FIRST of them.
+     *
+     * "vam started this session and holds its pane" is what drives the CLI's
+     * own `/model` menu; "vam can reach this session" is a different fact, and
+     * it lives in `delivers` above. The two were the same for as long as vam
+     * had one source, because Claude Code's pane IS its channel -- so nothing
+     * ever forced them apart. Codex is the case that does: vam did not start
+     * the thread and can still queue for it, so this is false while `delivers`
+     * is true, and the control lands on `disabled` with the model still shown
+     * beside it.
+     */
     vamControlled: entry?.session.vamControlled,
   });
+  /**
+   * THE MODEL THE ROW'S OWN SOURCE RECORDED, for the disabled control below.
+   *
+   * ABSENT IS NOT NULL HERE EITHER: a source that keeps no such fact leaves
+   * the field off entirely and the control wears the word it has always worn.
+   * See `Session.model`.
+   */
+  const recordedModel = entry?.session.model ?? null;
   /**
    * The mode ON SCREEN, read back out of the draft on every render. A draft
    * carrying some other word on its `mode:` line reads as the default: only
@@ -8716,7 +8737,30 @@ export function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {modelControl === 'disabled' && (
-                <Note text="vam owns no terminal here — open the session in a vam terminal to send /model">
+                /* THE NAME WHEN THE SOURCE KEEPS ONE, AND THE OLD WORD WHEN
+                   IT DOES NOT.
+
+                   `Session.model` is a fact the SOURCE holds -- Codex records
+                   it on the thread row (`threads.model`), so vam knows which
+                   model without reading anything off a screen. Absent on every
+                   Claude Code row and every fixture, where the only route to
+                   the name is the pane read above, which this branch is
+                   precisely the case of not having.
+
+                   AND IT IS STILL DISABLED, which is the honest pair: a model
+                   is a property of the SESSION, which has one whether or not
+                   vam can reach it, so the control is there-but-greyed rather
+                   than absent (`model-command.ts` carries that argument). The
+                   note is where the two halves are said in one sentence --
+                   here is the model, and here is why this button cannot
+                   change it. */
+                <Note
+                  text={
+                    recordedModel === null
+                      ? 'vam owns no terminal here — open the session in a vam terminal to send /model'
+                      : `${recordedModel} — what this session's own record says it is on; vam did not start this session and has no keyboard into it, so it cannot change the model from here`
+                  }
+                >
                   <span
                     data-model-picker-shell
                     // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see `StatusCell`, and the block comment above.
@@ -8729,7 +8773,11 @@ export function DetailPanel(props: DetailPanelProps) {
                       data-model-picker-state="disabled"
                       disabled
                       aria-disabled="true"
-                      aria-label="model — vam cannot choose one for this session"
+                      aria-label={
+                        recordedModel === null
+                          ? 'model — vam cannot choose one for this session'
+                          : `model: ${recordedModel} — vam cannot choose one for this session`
+                      }
                       /* `text-ink-faint` is the disabled ink `SettingsOverlay`'s
                          stepper buttons take (`disabled:text-ink-faint`), and it
                          is measured against this card in
@@ -8745,10 +8793,18 @@ export function DetailPanel(props: DetailPanelProps) {
                          because only the picker wore the class. A tab stop
                          with a tooltip is still something a finger aims at.
                          `.vam-phone`-scoped, so the desktop keeps its 24. */
-                      className="vam-tap flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
+                      className="vam-tap flex h-6 min-w-0 shrink items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
                     >
-                      model
-                      <ChevronDown size={11} strokeWidth={2} />
+                      {/* `truncate` and `shrink` for the same measured reason
+                          the enabled twin carries them: this label is the only
+                          thing in the row whose width is not vam's to choose,
+                          and a model id a source recorded can be longer than
+                          the word it replaces. The whole name is one hover or
+                          one Tab away, in the note and the accessible name. */}
+                      <span data-model-label className="truncate">
+                        {recordedModel ?? 'model'}
+                      </span>
+                      <ChevronDown size={11} strokeWidth={2} className="flex-none" />
                     </button>
                   </span>
                 </Note>
