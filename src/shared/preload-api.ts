@@ -60,6 +60,24 @@ export type SourceDescriptor = {
   readonly capabilities: SourceCapabilities;
   readonly declines: SourceDeclines;
   readonly viewerScope: ViewerScope;
+  /**
+   * WHEN MAIN SERVES SEVERAL SOURCES AT ONCE, each of their descriptors,
+   * whole and unmerged -- and absent when there is only one, which is then
+   * this descriptor itself (`main/sources/combine.ts`).
+   *
+   * THE TOP LEVEL ANSWERS A DIFFERENT QUESTION FROM THESE. `capabilities`
+   * above is the OR: "can this app do X at all", which is what a control that
+   * exists once for the whole window needs. A member answers "can THIS ROW do
+   * X", which is what the Terminal tab and the model control need the moment
+   * two sources disagree -- Claude Code types into a pane it started, Codex
+   * queues into a session vam never saw. Read one by matching a row's
+   * `Session.source` against `id`.
+   *
+   * Plain data, like everything else here, because it crosses the bridge by
+   * structured clone. Optional so that a source built by hand -- a fixture, a
+   * test -- is not obliged to describe a combination it is not part of.
+   */
+  readonly members?: readonly SourceDescriptor[];
 };
 
 /**

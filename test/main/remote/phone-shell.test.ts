@@ -75,7 +75,7 @@ async function start(over: Partial<RemoteServerOptions> = {}): Promise<string> {
     port: 0,
     devices,
     allowWrites: true,
-    source,
+    sources: [source],
     subscribe: () => () => {},
     audit: () => {},
     pairing: {
@@ -215,7 +215,7 @@ describe('every route that is not the pairing door still refuses', () => {
       port: 0,
       devices,
       allowWrites: true,
-      source,
+      sources: [source],
       subscribe: () => () => {},
     } as unknown as RemoteServerOptions;
     const paths = registeredRoutePaths(options).filter((path) => path !== '/api/pair');

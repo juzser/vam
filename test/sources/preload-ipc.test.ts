@@ -68,7 +68,7 @@ function createIpcPair() {
 
 function wire(source: MainSource) {
   const pair = createIpcPair();
-  registerSourceIpc(pair.ipcMain, source);
+  registerSourceIpc(pair.ipcMain, [source]);
   return { api: createPreloadApi(pair.ipcRenderer), ...pair };
 }
 

@@ -112,8 +112,21 @@ const LAUNCH_FIXTURE_SOURCE: MainSource = {
  * browser build cannot use it and does not import it -- `src/renderer` never
  * names this module, and the web target is unaffected.
  */
-const DESKTOP_SOURCE =
-  process.env.VAM_FIXTURE_SOURCE === '1' ? LAUNCH_FIXTURE_SOURCE : CLAUDE_CODE_SOURCE;
+/**
+ * A LIST, IN THE ORDER VAM ASKS THEM, and the list is where a second source
+ * arrives -- `docs/design/a-second-source.md` Stage 0. One member today, and
+ * `combineSources` folds a list of one to that member by reference, so this
+ * is the same object every consumer below held before it became a list.
+ *
+ * THE ORDER IS PART OF THE CONTRACT, not incidental: it is the order projects
+ * are concatenated in, and the order `createSessionInDirectory` picks its
+ * first willing source from -- a route with no session and no project to key
+ * on. Written here, where it can be read, rather than derived somewhere a
+ * reader would have to reconstruct it.
+ */
+const DESKTOP_SOURCES: readonly MainSource[] = [
+  process.env.VAM_FIXTURE_SOURCE === '1' ? LAUNCH_FIXTURE_SOURCE : CLAUDE_CODE_SOURCE,
+];
 
 /**
  * Where main's own change-stream connects, absolute (main is not served from
@@ -452,7 +465,7 @@ function startRemoteTransport(): void {
         pairing,
         streams,
         webRoot,
-        source: DESKTOP_SOURCE,
+        sources: DESKTOP_SOURCES,
         subscribe,
       });
     } catch (error) {
@@ -598,7 +611,7 @@ void app.whenReady().then(async () => {
   applyApplicationMenu();
   // Registered before the window is created, so the renderer's first call can
   // never race an unregistered channel.
-  registerSourceIpc(ipcMain, DESKTOP_SOURCE);
+  registerSourceIpc(ipcMain, DESKTOP_SOURCES);
   // Reads the Keychain and calls the real usage endpoint only when the
   // renderer asks; both side effects are `reader.ts`'s own, never this
   // module's -- main-process-only because a Keychain read is not a thing the

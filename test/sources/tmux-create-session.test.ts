@@ -73,7 +73,7 @@ function handlerFor(source: MainSource) {
         handlers.set(channel, listener);
       },
     },
-    source,
+    [source],
   );
   return async (channel: string, ...args: unknown[]) =>
     (await handlers.get(channel)?.({}, ...args)) as
