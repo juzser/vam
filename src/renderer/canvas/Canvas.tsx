@@ -5051,7 +5051,13 @@ function CanvasInner({
            * digit inside `TABS` names a real view THIS SOURCE has withdrawn,
            * and a digit past `TABS` names nothing at all.
            */
-          const drawn = visibleTabs(terminalTab, filesTab);
+          // `phone` rather than a literal `false`: this listener is not
+          // installed on a phone at all (the effect returns above), so the
+          // value can only ever BE false here -- and passing the real fact
+          // means this route cannot become the one that disagrees if that ever
+          // changes. `tabs.ts` is where a view's presence is decided; this is
+          // a caller reporting which shell it is, not deciding anything.
+          const drawn = visibleTabs(terminalTab, filesTab, phone);
           const view = tabForDigit(drawn, action.digit);
           if (view === undefined) {
             const named = TABS[action.digit - 1];

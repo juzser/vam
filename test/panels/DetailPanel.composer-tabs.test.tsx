@@ -110,7 +110,10 @@ describe('the views that draw a prompt box', () => {
 
   it('paints a composer on exactly those views and on no other', () => {
     draw();
-    const drawn = visibleTabs(true, true);
+    // `false` for `phone`: this case is about the DESKTOP bar, which is the
+    // only shell that draws all five names -- a phone has no strip at all, and
+    // no PRs view to ask about.
+    const drawn = visibleTabs(true, true, false);
     // The harness has to actually reach every name, or this loop would be
     // green having examined two of five.
     expect(drawn).toEqual(TABS);

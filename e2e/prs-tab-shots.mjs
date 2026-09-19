@@ -1,6 +1,6 @@
 /**
  * THE PRs TAB, IN A REAL BROWSER — what it draws, where it goes, what it does,
- * and whether any of it fits a phone.
+ * and, since the operator cut it from mobile, that a phone cannot reach it.
  *
  * WHY THIS EXISTS AT ALL, and it is not "more coverage". The unit tests for
  * this tab run in happy-dom, which performs NO LAYOUT: every assertion they
@@ -21,17 +21,21 @@
  * reaches this file.
  *
  * WHAT IT ASSERTS, none of which a unit environment can answer:
- *  - the row's own box stays inside the pane at 390px, with every field
- *    visible rather than clipped -- a row that overflowed would hide the one
- *    field the operator opened this tab to read;
+ *  - the row's own box stays inside the pane at 520px -- the narrowest window
+ *    that still draws columns -- with every field visible rather than clipped,
+ *    because a row that overflowed would hide the one field the operator
+ *    opened this tab to read;
  *  - the composer really is gone from this view, measured off the DOM after a
  *    real click rather than off a predicate;
  *  - a click on the row reaches `prs.open` with the address that was drawn;
  *  - Merge OPENS A QUESTION and spawns nothing, and the question names the
  *    pull request -- the one guarantee standing between a side-panel button
  *    and an irreversible act on somebody's repository;
- *  - the confirm's own box fits a 390px screen, because a dialog that
- *    overflows is a dialog whose Cancel can be off-screen.
+ *  - the confirm's own box fits that 520px screen, because a dialog that
+ *    overflows is a dialog whose Cancel can be off-screen;
+ *  - and at 390x844, with the same bridge installed and the same five pull
+ *    requests served, NO view a phone can open reaches a row, a Merge or a
+ *    Delete branch at all.
  *
  *   node e2e/prs-tab-shots.mjs http://localhost:5520 e2e/test-results
  */
@@ -283,14 +287,17 @@ const browser = await chromium.launch();
 /**
  * Open the PRs view and wait for its rows.
  *
- * TWO SELECTORS, because the two shells genuinely have two view bars:
- * `PhoneShell` draws `data-phone-view` and states in its own header that the
- * hook is deliberately not the desktop's `data-view`. A guard that knew only
- * one of them would pass on a desktop and time out on a phone -- which is how
- * a 390px defect ships.
+ * ONE SELECTOR NOW, AND THAT IS THE POINT. This took a `phone` flag and a
+ * second selector (`data-phone-view`, the hook `PhoneShell` states is
+ * deliberately not the desktop's `data-view`) because both shells drew this
+ * view. The phone does not: the operator cut it, and `visibleTabs`
+ * (`src/renderer/panels/tabs.ts`) withdraws the name there. A second selector
+ * kept for a shell that cannot reach this view would be a route this guard
+ * believed in and the app did not -- so the phone's case is asserted as an
+ * ABSENCE, in its own block below, rather than hidden behind an argument.
  */
-async function openPrs(page, phone = false) {
-  await page.click(phone ? '[data-phone-view="prs"]' : '[data-view="prs"]');
+async function openPrs(page) {
+  await page.click('[data-view="prs"]');
   await page.waitForSelector('[data-pr-row]', { timeout: 5_000 });
 }
 
@@ -909,7 +916,33 @@ async function installInk(page) {
   await page.close();
 }
 
-// ------------------------------------------------------------------ 390px
+/*
+ * ------------------------------------------------------------------- 390px
+ *
+ * THIS BLOCK USED TO OPEN THE PRs TAB ON THE PHONE SHELL AND MEASURE IT.
+ * There is no such screen any more: the operator cut the PRs view from mobile
+ * entirely, and the withdrawal is `visibleTabs`' (`src/renderer/panels/
+ * tabs.ts`). So what is measured here now is the CUT -- at the same 390x844,
+ * against the same stubbed bridge, from a session that really does have five
+ * pull requests to show.
+ *
+ * WHAT WENT WITH THE SCREEN, stated rather than quietly dropped, because a
+ * check that disappears from a guard is indistinguishable from one that was
+ * never written:
+ *
+ *  - the 44x44 touch floor on Merge and Delete branch, and the label-fits-its-
+ *    skin check beside it. Both were about `.vam-phone .vam-tap`, a rule that
+ *    only applies under the phone shell. There is no phone route to these two
+ *    controls to hold to a floor.
+ *  - `every row stacks its status under its identity at 390px`. NOT lost: the
+ *    desktop block above WALKS the row's container from 300px to 560px and
+ *    measures where the split actually happens, which is a strictly stronger
+ *    statement than one reading at one width, and it is the assertion that
+ *    catches a `@min-[...]` class Tailwind never emitted.
+ *  - the confirm dialog fitting 390px. The narrowest window this dialog can
+ *    now appear in is 520px (`SIDEBAR_MIN + DETAIL_MIN`; below it vam draws
+ *    the phone shell), and it is measured at exactly that width below.
+ */
 {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.addInitScript(install);
@@ -917,13 +950,98 @@ async function installInk(page) {
   // The phone shell opens on the LIST; a session has to be entered first.
   await page.waitForSelector('[data-phone-shell] [data-session-row]', { timeout: 10_000 });
   await page.locator('[data-phone-shell] [data-session-row]').first().click();
-  await openPrs(page, true);
 
   /**
-   * THE MEASUREMENT THIS GUARD EXISTS FOR. A row that is wider than the
-   * surface it sits in does not look broken in a unit test -- it looks
-   * identical. Every row's own box, and the box of every field inside it,
-   * must stay within the viewport.
+   * THE CORPUS, PROVED BEFORE THE ABSENCES. Every check below is "there is no
+   * such thing on this screen", and that is exactly as green over a session
+   * screen that failed to open as over one that opened and withdrew the view.
+   * So: the shell is on the session screen, its view row was found, and the
+   * stub bridge that makes the two irreversible controls drawable is installed.
+   */
+  const icons = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-phone-shell] [data-phone-views] [data-phone-view]')].map(
+      (el) => el.getAttribute('data-phone-view'),
+    ),
+  );
+  console.log(`  the phone's view row: ${JSON.stringify(icons)}`);
+  check(
+    'the phone session screen and its view row were reached at all',
+    (await page.locator('[data-phone-shell="session"]').count()) === 1 && icons.length > 0,
+    JSON.stringify(icons),
+  );
+  check(
+    'the bridge that draws Merge and Delete branch is installed on this page',
+    await page.evaluate(() => typeof globalThis.window.api?.prs?.act === 'function'),
+  );
+
+  check('the phone offers Response and Agents, and nothing else', icons.join(',') === 'response,agents', icons.join(','));
+  check(
+    'there is no PRs icon on the phone',
+    (await page.locator('[data-phone-view="prs"]').count()) === 0,
+  );
+
+  /**
+   * NO PANE BY ANY ROUTE, checked after EVERY icon rather than once. Checking
+   * at the end would only ever measure whichever view the last tap opened --
+   * the shape of sweep this repo has already shipped as a clean verdict over
+   * an empty corpus.
+   */
+  const reached = [];
+  for (const view of [...icons, ...icons].reverse()) {
+    await page.click(`[data-phone-view="${view}"]`);
+    reached.push({
+      view,
+      rows: await page.locator('[data-pr-row]').count(),
+      merge: await page.locator('[data-pr-merge]').count(),
+      del: await page.locator('[data-pr-delete-branch]').count(),
+      pane: await page.locator('[data-prs]').count(),
+    });
+  }
+  console.log(`  after every view the phone has: ${JSON.stringify(reached)}`);
+  check(
+    'no view a phone can open draws a pull request row',
+    reached.length >= 2 && reached.every((r) => r.rows === 0 && r.pane === 0),
+    JSON.stringify(reached),
+  );
+  check(
+    'and neither Merge nor Delete branch is reachable from any of them',
+    reached.every((r) => r.merge === 0 && r.del === 0),
+    JSON.stringify(reached),
+  );
+  check(
+    'nothing was sent to the pull-request bridge while trying',
+    (await page.evaluate(() => globalThis.window.__prs.acted.length)) === 0,
+  );
+
+  await page.screenshot({ path: `${outDir}/prs-tab-phone-withdrawn.png` });
+  console.log(`${outDir}/prs-tab-phone-withdrawn.png`);
+  await page.close();
+}
+
+/*
+ * --------------------------------------------- 520px: the narrowest desktop
+ *
+ * `SIDEBAR_MIN + DETAIL_MIN` is 520, the narrowest window in which vam draws
+ * columns at all -- one pixel under it is the phone shell, which no longer has
+ * this view. So this is now the narrowest screen the PRs tab can be seen on,
+ * and it is where the two claims that outlived the phone belong: nothing in a
+ * row spills off the screen, and the confirm for an irreversible act keeps
+ * both of its buttons on it.
+ */
+{
+  const page = await browser.newPage({ viewport: { width: 520, height: 844 } });
+  await page.addInitScript(install);
+  await page.goto(origin, { waitUntil: 'networkidle' });
+  check(
+    'at 520 the desktop shell draws, not the phone one',
+    (await page.locator('[data-phone-shell]').count()) === 0,
+  );
+  await openPrs(page);
+
+  /**
+   * THE MEASUREMENT THIS GUARD EXISTS FOR. A row wider than the surface it
+   * sits in does not look broken in a unit test -- it looks identical. Every
+   * row's own box, and the box of every field inside it, must stay on screen.
    */
   const overflow = await page.evaluate(() => {
     const problems = [];
@@ -933,10 +1051,14 @@ async function installInk(page) {
       if (box.right > limit + 0.5 || box.left < -0.5) {
         problems.push(`row ${row.getAttribute('data-pr-state')} ${box.left}..${box.right}`);
       }
-      for (const field of row.querySelectorAll('[data-pr-branches], [data-pr-label], [data-pr-merge], [data-pr-delete-branch], [data-pr-title]')) {
+      for (const field of row.querySelectorAll(
+        '[data-pr-branches], [data-pr-label], [data-pr-merge], [data-pr-delete-branch], [data-pr-title]',
+      )) {
         const f = field.getBoundingClientRect();
         if (f.right > limit + 0.5) {
-          problems.push(`${field.getAttribute('data-pr-title') === null ? field.tagName : 'title'} ${f.right} > ${limit}`);
+          problems.push(
+            `${field.getAttribute('data-pr-title') === null ? field.tagName : 'title'} ${f.right} > ${limit}`,
+          );
         }
       }
     }
@@ -946,8 +1068,8 @@ async function installInk(page) {
   // as green over three rows as over none, and "none" is what a renamed
   // attribute or a tab that failed to open would silently produce.
   const rowsHere = await page.locator('[data-pr-row]').count();
-  check('there are rows at 390px to measure at all', rowsHere === 5, String(rowsHere));
-  check('no row and no field overflows a 390px screen', overflow.length === 0, overflow.join('; '));
+  check('there are rows at 520px to measure at all', rowsHere === 5, String(rowsHere));
+  check('no row and no field overflows a 520px screen', overflow.length === 0, overflow.join('; '));
 
   // And the row is actually TALL -- a wrapped row is fine, a clipped one is not.
   const clipped = await page.evaluate(() =>
@@ -957,121 +1079,9 @@ async function installInk(page) {
   );
   check('no row is scrolled sideways inside its own box', clipped === false);
 
-  /**
-   * AND AT 390 THE TWO SIDES STACK, which is the whole point of the split
-   * being a container query: the phone's row box is below `PR_SPLIT_PX`, so
-   * the status block goes UNDER the identity rather than beside it. A row
-   * that kept two columns here would be the 390px defect this file exists to
-   * catch, and it would look identical in every unit test.
-   */
-  const phoneStack = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-pr-row]')].map((row) => {
-      const id = row.querySelector('[data-pr-identity]').getBoundingClientRect();
-      const st = row.querySelector('[data-pr-status]').getBoundingClientRect();
-      const cs = getComputedStyle(row);
-      const num = (k) => Number.parseFloat(cs.getPropertyValue(k)) || 0;
-      return {
-        content:
-          row.getBoundingClientRect().width -
-          num('padding-left') -
-          num('padding-right') -
-          num('border-left-width') -
-          num('border-right-width'),
-        stacked: st.top >= id.bottom - 0.5,
-        idWidth: Math.round(id.width),
-        stWidth: Math.round(st.width),
-      };
-    }),
-  );
-  console.log(`  the phone's row container measures ${phoneStack[0]?.content?.toFixed(1)}px`);
-  check(
-    'the phone really is below the split, so this measures the stacked case',
-    phoneStack.length === 5 && phoneStack.every((s) => s.content < PR_SPLIT_PX),
-    phoneStack.map((s) => s.content.toFixed(1)).join(', '),
-  );
-  check(
-    'every row stacks its status under its identity at 390px',
-    phoneStack.every((s) => s.stacked),
-    JSON.stringify(phoneStack),
-  );
-  check(
-    'and both sides take the full width there rather than sharing it',
-    phoneStack.every((s) => s.idWidth > 200 && s.stWidth > 200),
-    JSON.stringify(phoneStack.map((s) => [s.idWidth, s.stWidth])),
-  );
-
-  /**
-   * THE TOUCH FLOOR, AND THE HALF OF IT NOBODY CHECKS.
-   *
-   * This repo's phone floor is 44x44 (`.vam-phone .vam-tap`), and every
-   * existing assertion about it asks one question: is the HIT BOX at least
-   * 44? That question is blind to the failure this pair of controls is most
-   * exposed to -- a variable-width skin whose own word does not fit the box
-   * it is painted in, which stayed green through every floor check in this
-   * repo once already and was found by looking at a screenshot.
-   *
-   * `phone-shell.pw.ts` CANNOT COVER THESE. It drives `?demo=1`, whose
-   * fixture declares no pull requests at all, so no PR control has ever been
-   * measured by it. This is the only place these boxes exist on a phone.
-   */
-  const taps = await page.evaluate(() => {
-    const out = [];
-    for (const el of document.querySelectorAll('[data-pr-merge], [data-pr-delete-branch]')) {
-      const hit = el.getBoundingClientRect();
-      const skinEl = el.querySelector('[data-tap-skin]');
-      const skin = skinEl?.getBoundingClientRect() ?? null;
-      const range = document.createRange();
-      range.selectNodeContents(skinEl ?? el);
-      const word = range.getBoundingClientRect();
-      range.detach();
-      out.push({
-        hook: el.hasAttribute('data-pr-merge') ? 'merge' : 'delete-branch',
-        state: el.getAttribute('data-pr-merge-state'),
-        label: (el.textContent ?? '').trim(),
-        hitW: Math.round(hit.width * 10) / 10,
-        hitH: Math.round(hit.height * 10) / 10,
-        skinW: skin === null ? null : Math.round(skin.width * 10) / 10,
-        skinH: skin === null ? null : Math.round(skin.height * 10) / 10,
-        // THE SECOND QUESTION: does the word fit the box it is painted in?
-        wordW: Math.round(word.width * 10) / 10,
-        overflows:
-          skinEl === null ||
-          skinEl.scrollWidth > skinEl.clientWidth + 1 ||
-          skinEl.scrollHeight > skinEl.clientHeight + 1 ||
-          word.right > (skin?.right ?? 0) + 0.5 ||
-          word.left < (skin?.left ?? 0) - 0.5,
-      });
-    }
-    return out;
-  });
-  console.log(`  phone action boxes ${JSON.stringify(taps)}`);
-  check('there are action controls on the phone to measure at all', taps.length >= 3, String(taps.length));
-  const under = taps.filter((t) => t.hitW < 44 || t.hitH < 44);
-  check(
-    'every pull request action clears the 44x44 touch floor',
-    under.length === 0,
-    under.map((t) => `${t.label} ${t.hitW}x${t.hitH}`).join('; '),
-  );
-  const spilling = taps.filter((t) => t.overflows);
-  check(
-    'and every one of their labels FITS the box it is painted in',
-    spilling.length === 0,
-    spilling.map((t) => `${t.label} word ${t.wordW} in skin ${t.skinW}`).join('; '),
-  );
-  // The paint is deliberately SMALLER than the hit, which is this app's own
-  // answer to "on mobile the buttons are too big" -- assert it, so a later
-  // edit that inflates the border onto the 44 box is caught here.
-  check(
-    'the paint comes inward: the skin is shorter than the 44px hit box',
-    taps.every((t) => t.skinH !== null && t.skinH < t.hitH),
-    JSON.stringify(taps.map((t) => [t.label, t.skinH, t.hitH])),
-  );
-
-  // The stacked row itself, before anything is pressed -- the shot the old
-  // one below could not be, because it is taken with the confirm dialog open
-  // over three of the five rows.
-  await page.screenshot({ path: `${outDir}/prs-tab-phone-rows.png` });
-  console.log(`${outDir}/prs-tab-phone-rows.png`);
+  // The rows as they sit in the narrowest pane vam will ever give them.
+  await page.screenshot({ path: `${outDir}/prs-tab-narrow-rows.png` });
+  console.log(`${outDir}/prs-tab-narrow-rows.png`);
 
   /**
    * THE CONFIRM HAS TO FIT TOO. A dialog wider than the screen is a dialog
@@ -1083,17 +1093,17 @@ async function installInk(page) {
   const cancel = await page.locator('[data-confirm-pr-action-cancel]').boundingBox();
   const go = await page.locator('[data-confirm-pr-action-go]').boundingBox();
   check(
-    'both of the confirm’s buttons are on the 390px screen',
+    'both of the confirm’s buttons are on the 520px screen',
     cancel !== null &&
       go !== null &&
       cancel.x >= 0 &&
-      cancel.x + cancel.width <= 390 &&
+      cancel.x + cancel.width <= 520 &&
       go.x >= 0 &&
-      go.x + go.width <= 390,
+      go.x + go.width <= 520,
     JSON.stringify({ cancel, go }),
   );
-  await page.screenshot({ path: `${outDir}/prs-tab-phone.png` });
-  console.log(`${outDir}/prs-tab-phone.png`);
+  await page.screenshot({ path: `${outDir}/prs-tab-narrow.png` });
+  console.log(`${outDir}/prs-tab-narrow.png`);
   await page.close();
 }
 

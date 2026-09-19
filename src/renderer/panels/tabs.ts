@@ -103,8 +103,8 @@ export function drawsComposer(tab: Tab): boolean {
 }
 
 /**
- * The tabs actually drawn, given whether the source has a terminal to show
- * and whether this build can show a file editor at all.
+ * The tabs actually drawn, given whether the source has a terminal to show,
+ * whether this build can show a file editor at all, and which SHELL is asking.
  *
  * `Terminal` is withdrawn rather than mounted-and-apologising when the source
  * declares none, which moves every tab after it up a position IN THIS LIST.
@@ -127,9 +127,41 @@ export function drawsComposer(tab: Tab): boolean {
  * including every existing test that predates this tab -- keeps it withdrawn
  * simply by doing nothing, rather than needing to learn a new flag to stay
  * correct.
+ *
+ * `phone` IS THE THIRD WITHDRAWAL AND THE FIRST THAT IS NOT A CAPABILITY.
+ * Operator instruction, after a mobile audit: "cut the PRs view from mobile
+ * entirely". vam on a phone exists to send a prompt and read the answer, and a
+ * list of pull requests serves neither -- `drawsComposer` above already says
+ * so in the operator's own words -- while being the ONE place a phone can do
+ * something irreversible to a real GitHub repository. `data-pr-merge` merges
+ * on GitHub with the operator's own credentials and `data-pr-delete-branch`
+ * deletes a remote branch; vam can undo neither, and on a 390px bar they sit a
+ * few pixels from a view switch.
+ *
+ * IT IS DECIDED HERE, AND THAT IS THE WHOLE POINT OF THIS MODULE. The phone
+ * shell could have filtered its own icon row in three lines, and it would have
+ * been the third instance of the bug this file's header records twice: a
+ * caller deciding a view's presence for itself, while `DetailPanel` -- which
+ * the phone RE-HOSTS, and which owns the `current === 'PRs'` branch that
+ * mounts the pane -- went on believing the view was offered. A row that draws
+ * no icon over a pane that would still mount one is not a withdrawal.
+ *
+ * ITS POLARITY IS THE OTHER WAY ROUND FROM THE OTHER TWO, deliberately.
+ * `terminal` and `files` ask "can this source or this build OFFER it"; `phone`
+ * asks "which shell is this", and a caller answering `true` is not offering
+ * anything. The policy -- that a phone does not get PRs -- lives in the filter
+ * below rather than at the three call sites, so a fourth caller inherits it by
+ * saying what it is instead of by remembering what it must hide. Passing
+ * `false` is what every desktop route does, including `Canvas`'s
+ * `Ctrl-Alt-<digit>`, whose listener does not even install on a phone.
  */
-export function visibleTabs(terminal: boolean, files: boolean): readonly Tab[] {
-  return TABS.filter((name) => (name !== 'Terminal' || terminal) && (name !== 'Files' || files));
+export function visibleTabs(terminal: boolean, files: boolean, phone: boolean): readonly Tab[] {
+  return TABS.filter(
+    (name) =>
+      (name !== 'Terminal' || terminal) &&
+      (name !== 'Files' || files) &&
+      (name !== 'PRs' || !phone),
+  );
 }
 
 /**

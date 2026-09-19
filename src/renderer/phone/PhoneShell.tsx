@@ -20,10 +20,20 @@
  * fixture: the session's first line moves from y=209 to y=102, so 107px of an
  * 844px viewport came back. The price, so that the next reader does not
  * restore any of it as an obvious omission:
- *   - The views are NOT lost: `Response / PRs / Agents` are icon buttons in
- *     the app bar below, driving the pane through its `tabRequest` seam. What
- *     is lost is the WORD on each one, which is why every icon carries an
+ *   - The views that remain are NOT lost: `Response / Agents` are icon buttons
+ *     in the app bar below, driving the pane through its `tabRequest` seam.
+ *     What is lost is the WORD on each one, which is why every icon carries an
  *     `aria-label` and the selected one is marked by a shape, not a hue.
+ *   - `PRs` IS lost, and that one is a cut rather than a compression. The
+ *     operator asked for it after a mobile audit: this screen exists to send a
+ *     prompt and read the answer, the PRs list serves neither, and it was the
+ *     only place a phone could merge a pull request or delete a remote branch
+ *     -- both irreversible, both against a real repository, both one tap from
+ *     a view switch on a 390px bar. The withdrawal is `visibleTabs`'
+ *     (`panels/tabs.ts`), beside Terminal's and Files', and NOT a filter on
+ *     this file's own list: the pane below re-hosts `DetailPanel`, which reads
+ *     the same function, and a row that hid an icon over a pane that would
+ *     still mount it is not a withdrawal.
  *   - There is no step navigation at all. The screen always shows the NEWEST
  *     step (`session.decisions[0]`, derived on every render), which is the
  *     step a waiting session is waiting in and the one a reply answers. Older
@@ -112,6 +122,11 @@ export type PhoneShellProps = {
  */
 const VIEW_ICON: Record<Tab, LucideIcon> = {
   Response: MessageSquare,
+  // Never drawn on a phone either, and for a reason that is a DECISION rather
+  // than a missing bridge: `visibleTabs` withdraws `PRs` from this shell on
+  // the operator's instruction. Kept for the same mechanical reason `Files`
+  // below is -- this is a `Record<Tab, _>`, and a map that cannot be built is
+  // a compile error, not a smaller row.
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
   Agents: Bot,
@@ -390,7 +405,15 @@ export function PhoneShell({
   // `detail.files` reads `false`/`undefined` on every real phone -- there is
   // no desktop bridge behind a browser build, ever -- so this withdraws
   // `Files` the same way `detail.terminal !== false` withdraws Terminal.
-  const views = visibleTabs(detail.terminal !== false, detail.files === true);
+  //
+  // THE THIRD ARGUMENT IS `true` AND THE LIST IS NOT FILTERED HERE. `PRs` is
+  // off the phone on the operator's instruction, and the WHOLE of that
+  // decision is in `tabs.ts` -- a `.filter()` on this line would be the third
+  // instance of the bug that file's header records twice, because the pane
+  // this shell re-hosts reads the same function and would go on believing the
+  // view was offered. `true` is a statement about which shell is asking, which
+  // is the only thing a caller is allowed to say.
+  const views = visibleTabs(detail.terminal !== false, detail.files === true, true);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -416,7 +439,7 @@ export function PhoneShell({
     // used to greet the NEXT one -- "this source does not report which agents
     // a session is running", about a session that was waiting for an answer.
     // A remembered tab is cheap on a desktop, where every view is one click
-    // away in a labelled strip; here they are four unlabelled glyphs and the
+    // away in a labelled strip; here they are unlabelled glyphs and the
     // recovery costs a tap on the screen whose whole budget is taps.
     //
     // Both halves, because they say different things (see `view` above): the
