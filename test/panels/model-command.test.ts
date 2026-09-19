@@ -40,7 +40,9 @@ import * as modelCommand from '../../src/renderer/panels/model-command.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
+  modelButtonName,
   modelControlState,
+  modelRunningClause,
   runningModelRows,
 } from '../../src/renderer/panels/model-command.js';
 import { isModelChoice } from '../../src/shared/terminal.js';
@@ -210,6 +212,65 @@ describe('what the button says', () => {
     // said before it could read anything, and it is what an operator who
     // cannot be told the truth is shown.
     expect(modelButtonLabel(null)).toBe('model');
+  });
+
+  it('wears the same word whichever source the name came from', () => {
+    // ONE VOCABULARY. The transcript hands up an id (`claude-opus-5`) and
+    // main derives the footer's own shape from it before it crosses the
+    // bridge (`transcript-model.ts`), so the button does not rename itself
+    // when a session's footer appears or disappears.
+    expect(modelButtonLabel('Opus 5')).toBe(modelButtonLabel('Opus 5'));
+    expect(runningModelRows('Opus 5')).toEqual(['opus']);
+  });
+});
+
+/**
+ * WHAT THE NOTE AND THE ACCESSIBLE NAME MAY CLAIM, which is not the same for
+ * the two sources of one name.
+ *
+ * `model` is the CLI's painted footer: what the session is SET TO, now. The
+ * note has always said "running X" for it and still does.
+ *
+ * `last-turn` is the session's own transcript: what the API SERVED on the most
+ * recent turn (`main/sources/claude-code/transcript-model.ts`), which is the
+ * only source there is on a machine whose operator has replaced the CLI's
+ * status line with a script of their own. It LAGS by exactly one turn, and the
+ * moment it lags is the moment an operator is most likely to be reading it --
+ * they have just switched the model and are looking at the button to see
+ * whether it took. So the words change with the source: a note reading
+ * "running Opus 5" a second after a switch to Haiku would be vam claiming a
+ * fact it had not checked, and the sentence that explains what they are seeing
+ * is the one that says which turn it is about.
+ *
+ * THE BUTTON'S OWN LABEL DOES NOT CHANGE, and that is deliberate rather than
+ * an oversight: it is ten characters wide at vam's narrowest legal pane and
+ * already clips (`e2e/model-picker-shots.mjs` measured the overflow), so a
+ * qualifier there would be a qualifier nobody can read. The note and the
+ * accessible name have room; the label has none.
+ */
+describe('how much the words around the button claim', () => {
+  it('says "running" only for the footer, which is the only source that knows', () => {
+    expect(modelRunningClause({ kind: 'model', name: 'Opus 5' })).toBe('running Opus 5');
+  });
+
+  it('says which turn it is about when the name came from the transcript', () => {
+    expect(modelRunningClause({ kind: 'last-turn', name: 'Opus 5' })).toBe(
+      'last turn ran on Opus 5',
+    );
+  });
+
+  it('says nothing at all when vam could not read one', () => {
+    expect(modelRunningClause(null)).toBeNull();
+  });
+
+  it('carries the same distinction into the accessible name', () => {
+    expect(modelButtonName({ kind: 'model', name: 'Opus 5' })).toBe(
+      'model: Opus 5 — choose one for this session',
+    );
+    expect(modelButtonName({ kind: 'last-turn', name: 'Opus 5' })).toBe(
+      'model: Opus 5, what the last turn ran on — choose one for this session',
+    );
+    expect(modelButtonName(null)).toBe('model — choose one for this session');
   });
 });
 
