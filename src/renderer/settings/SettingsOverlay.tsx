@@ -25,6 +25,7 @@ import { t } from '../i18n/strings.js';
 import {
   bindingClashes,
   bindKey,
+  chordSymbols,
   clearBindings,
   isReserved,
   type KeyBindings,
@@ -319,8 +320,14 @@ export function SettingsOverlay({
       return;
     }
     if (isReserved(key)) {
+      // THE TWO CHORDS IN THIS SENTENCE ARE RENDERED, ITS WORDS ARE NOT. The
+      // quoted key is the keystroke the operator just made, so it is named the
+      // way their keyboard makes it (⌘[ on a Mac, Ctrl+[ off one), and so is
+      // the one reserved chord the sentence points at. "Escape" and `g/y/z`
+      // stay English: they are prose naming keys, not chords being displayed,
+      // and the armed row beside this already says "Esc cancels".
       setMessage(
-        `"${key}" is reserved — Escape cancels this capture, g/y/z open chords, Mod-[ leaves the prompt box`,
+        `"${chordSymbols(key)}" is reserved — Escape cancels this capture, g/y/z open chords, ${chordSymbols('Mod-[')} leaves the prompt box`,
       );
       return;
     }
@@ -1129,7 +1136,13 @@ export function SettingsOverlay({
                           : 'border-line text-ink-dim'
                       }`}
                     >
-                      {SUBMIT_KEY_LABELS[key]}
+                      {/* THE SEND KEY IS A CHORD, and the table spells it as
+                          one on purpose (`Shift-Enter`, "vam already has one
+                          spelling for a modified key and this is it") — so it
+                          reaches the screen through the same renderer as every
+                          other key on this surface: ⇧⏎ on a Mac, Shift+Enter
+                          off one. */}
+                      {chordSymbols(SUBMIT_KEY_LABELS[key])}
                     </button>
                   ))}
                 </div>
@@ -1564,11 +1577,27 @@ function labelFor(overrides: KeyBindings, id: string): string {
  *
  * Eleven characters at a measured 7.226px per advance (`Enter` and `Mod-1`,
  * five characters each, 36.13px each, at this same 12px) is 79.5px of ink;
- * with `px-2` and a 1px border either side that is 97.5px. 104 is that plus
+ * with `px-2` and a 1px border either side that is 97.5px. 104 was that plus
  * one character of headroom, for a fallback face a shade wider than Geist
  * Mono. `test/settings/binding-columns.test.tsx` recomputes it from the sheet
  * rather than trusting this comment, and `e2e/settings-chrome-shots.mjs`
  * measures the rendered result in a browser, where the wrapping was found.
+ *
+ * AND THE SYMBOLS MOVED IT — UPWARDS, WHICH IS THE OPPOSITE OF WHAT THEY LOOK
+ * LIKE THEY WOULD DO. A slot paints `chordSymbols` now, so on a Mac the widest
+ * chord in the shipped tables is ⇧⌘[ — three characters where the token had
+ * eleven. Off a Mac it is `Ctrl+Shift+[`, which is TWELVE: one character MORE
+ * than the token this column was last sized for, and 104.7px of ink against a
+ * 104px floor. The floor is a constant in one bundle that both platforms are
+ * served, so it is sized for the longer of the two renderings: twelve
+ * characters is 104.7px, plus the same one character of headroom is 111.9,
+ * hence 112.
+ *
+ * WHAT WOULD HAVE HAPPENED AT 104 is not a clipped chord — `max-content` still
+ * grows the track — but a misaligned one: each row is its own grid, so the one
+ * row whose chord passed the floor would have stepped its key columns 0.7px
+ * out of line with every other row on a Linux or Windows screen, which is the
+ * one thing the floor exists to prevent.
  *
  * SPELLED OUT AT BOTH CALL SITES rather than interpolated from a constant:
  * Tailwind generates a utility only for a class name it can find as text in
@@ -1593,14 +1622,16 @@ function labelFor(overrides: KeyBindings, id: string): string {
  *  `whitespace-nowrap` DOES NOT DO THAT — the growth is the track's doing, and
  *  deleting this class at 1100px or 390px changes nothing, which is exactly
  *  how it survived its first mutation. It earns its place at 320px, where the
- *  grid runs OUT of room: the track falls back to the 104px floor, the slot
- *  measures 154px against 166px of chord, and without this the chord wraps
- *  onto a second line that a 26px box cannot show. With it the overflow is
- *  sideways, one line, and still 113px inside the panel that clips. That is
- *  the whole of what it does, and `e2e/settings-chrome-shots.mjs` plants a
- *  long chord at 320px so that deleting it goes red. */
+ *  grid runs OUT of room: the track falls back to its floor, the slot is
+ *  narrower than the chord, and without this the chord wraps onto a second
+ *  line that a 26px box cannot show. With it the overflow is sideways, one
+ *  line, and still inside the panel that clips. Measured at the 104px floor
+ *  this column had before the symbols: a 154px slot against 166px of chord,
+ *  and 113px of room to spare. That is the whole of what it does, and
+ *  `e2e/settings-chrome-shots.mjs` plants a long chord at 320px so that
+ *  deleting it goes red. */
 const SLOT_BOX =
-  'vam-tap h-[26px] min-w-[104px] whitespace-nowrap rounded border px-2 text-center font-mono text-control';
+  'vam-tap h-[26px] min-w-[112px] whitespace-nowrap rounded border px-2 text-center font-mono text-control';
 
 /** One action: its name, its slots, and a way back to the shipped keys. */
 function BindingLine({
@@ -1628,13 +1659,13 @@ function BindingLine({
     // label starts at the same x AND both key columns hold one x down the whole
     // list, however long the label above them was.
     //
-    // `minmax(104px,max-content)` rather than a fixed width, and the second
+    // `minmax(112px,max-content)` rather than a fixed width, and the second
     // half of that is not decoration: the floor holds every chord the shipped
     // tables contain (see `SLOT_MIN_PX`'s note), and `max-content` is what
     // happens past it, because a captured chord has no length bound. On such a
     // row the LABEL gives up the pixels -- it truncates legibly, and a key
     // missing its last four characters does not.
-    <li className="grid grid-cols-[1fr_minmax(104px,max-content)_minmax(104px,max-content)] items-center gap-x-[10px] py-[3px]">
+    <li className="grid grid-cols-[1fr_minmax(112px,max-content)_minmax(112px,max-content)] items-center gap-x-[10px] py-[3px]">
       {/* The reset control rides in the label column rather than claiming a
           fourth one: a track that exists only on overridden rows would shove
           their key slots sideways, and the operator asked for three columns.
@@ -1644,7 +1675,7 @@ function BindingLine({
         {/* While the row is armed the label column carries the instruction that
             used to live in the capture box's 160px placeholder -- which is how
             the box keeps the same geometry in every state. The armed box takes
-            a fixed `w-[104px]` rather than `SLOT_BOX`'s floor: an `<input>`
+            a fixed `w-[112px]` rather than `SLOT_BOX`'s floor: an `<input>`
             with no width contributes its `size` default (about twenty
             characters) to a `max-content` track, so arming a row would widen
             the whole column for as long as the box was open. */}
@@ -1702,7 +1733,7 @@ function BindingLine({
               // is showing the armed state, not the cursor. It is also the only
               // permanent ring on this surface, which is how the operator tells
               // which Escape they are about to press.
-              className={`${SLOT_BOX} w-[104px] border-ink bg-raised text-ink outline-2 outline-ink outline-offset-2`}
+              className={`${SLOT_BOX} w-[112px] border-ink bg-raised text-ink outline-2 outline-ink outline-offset-2`}
             />
           );
         }
@@ -1711,6 +1742,14 @@ function BindingLine({
         // how F3 stayed invisible, and a strikethrough alone is nothing at all
         // to a screen reader.
         const dead = keys === undefined ? undefined : row.dead[keys];
+        // THE SLOT HOLDS A TOKEN AND PRINTS A KEYSTROKE. `keys` stays the
+        // grammar's spelling — it is what `row.dead` is keyed by one line up,
+        // what `data-binding-dead` identifies the slot to an e2e guard with,
+        // and what `bindKey` writes — while `said` is what the operator reads:
+        // ⌘K on a Mac, Ctrl+K off one. The accessible name takes the rendering
+        // too, because a screen reader never sees the `<kbd>` and "Mod dash K"
+        // is the one announcement nobody can act on.
+        const said = keys === undefined ? undefined : chordSymbols(keys);
         // An empty second slot is still a control: it is how a second binding
         // is added, and it is the only affordance that says one is possible.
         return (
@@ -1719,13 +1758,13 @@ function BindingLine({
             type="button"
             data-binding-slot={`${row.id}:${slot}`}
             data-binding-dead={dead === undefined ? undefined : keys}
-            title={dead === undefined ? undefined : `dead — ${dead} has "${keys}"`}
+            title={dead === undefined ? undefined : `dead — ${dead} has "${said}"`}
             aria-label={
-              keys === undefined
+              said === undefined
                 ? `add a key for ${row.label}`
                 : dead === undefined
-                  ? `${keys}, ${row.label}`
-                  : `${keys}, ${row.label} — dead, ${dead} has this key`
+                  ? `${said}, ${row.label}`
+                  : `${said}, ${row.label} — dead, ${dead} has this key`
             }
             onClick={() => onCapture({ id: row.id, slot, scope })}
             className={`${SLOT_BOX} cursor-pointer hover:border-ink hover:text-ink ${FOCUS_RING} ${
@@ -1736,11 +1775,11 @@ function BindingLine({
                   : 'border-waiting bg-transparent text-ink-dim line-through'
             }`}
           >
-            {keys === undefined ? (
+            {said === undefined ? (
               <Plus size={12} strokeWidth={2} className="mx-auto" aria-hidden="true" />
             ) : (
               <kbd data-settings-keys className="border-none bg-transparent">
-                {keys}
+                {said}
               </kbd>
             )}
           </button>

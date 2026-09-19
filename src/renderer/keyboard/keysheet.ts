@@ -18,7 +18,9 @@ import { EDITOR_KEYS, TREE_KEYS } from '../panels/files-tree.js';
 import { TABS } from '../panels/tabs.js';
 import {
   activeBindings,
+  applePlatform,
   bindingClashes,
+  chordSymbols,
   chordText,
   effectiveBindings,
   isSelectOnlyChord,
@@ -680,8 +682,14 @@ export function buildKeySheet(overrides: KeyBindings = activeBindings()): SheetG
  * Keyed by the string `normalizeKey` produces, because that is what the two
  * lists hold and what the handlers compare against — one spelling, or the
  * sheet and the code could disagree about which keystroke a row is.
+ *
+ * A FUNCTION OF THE PLATFORM, for one caption: the Tab row discloses the other
+ * half of its key, and `Shift+Tab` is a keystroke a person has to press. The
+ * `keys` column is rendered by `KeySheet.tsx`, but a chord NAMED INSIDE PROSE
+ * has nothing to render it, so the table takes the flag and spends it on the
+ * one row that needs it. The rest are captions with no key in them.
  */
-const FILES_KEY_LABELS: Readonly<Record<string, string>> = {
+const filesKeyLabels = (mac: boolean): Readonly<Record<string, string>> => ({
   j: 'down one row of the tree',
   k: 'up one row of the tree',
   h: 'shut this directory, or step out to the one holding it',
@@ -690,14 +698,14 @@ const FILES_KEY_LABELS: Readonly<Record<string, string>> = {
   '/': 'filter the tree — from the tree',
   'Mod-p': 'find a file — from anywhere in the tab, the editor included',
   'Mod-Shift-e': 'move the keyboard between the editor and the tree',
-  Tab: 'indent in the editor — Shift+Tab outdents',
+  Tab: `indent in the editor — ${chordSymbols('Shift-Tab', mac)} outdents`,
   'Mod-s': 'save the open file',
   'Mod-Shift-f': 'tidy this file’s whitespace — refuses by name where it cannot',
   'Mod-Shift-m': 'markdown: the rendered document, or its raw text',
   'Mod-z': 'undo the last format, while the file is still what it produced',
   Escape: 'hand the keyboard back to Select',
   'Mod-[': 'hand the keyboard back to Select',
-};
+});
 
 /** What the section is called. Lower case, like every other group title. */
 const FILES_GROUP_TITLE = 'in the files tab';
@@ -707,14 +715,19 @@ const FILES_GROUP_TITLE = 'in the files tab';
  * declare them — the tree's keyboard, then the editor's, deduplicated because
  * `Escape` and `Mod-[` are on both and mean one thing.
  *
- * The parameter exists so the throw is reachable from a test, exactly as
- * `buildKeySheet`'s `overrides` is; nothing in the app passes it.
+ * The first parameter exists so the throw is reachable from a test, exactly as
+ * `buildKeySheet`'s `overrides` is; nothing in the app passes it. The second
+ * is the platform the captions are written for, defaulting to this machine —
+ * a parameter rather than a read for the reason `chords.ts` gives: both
+ * answers have to be assertable from one test run.
  */
 export function buildFilesSheet(
   keys: readonly string[] = [...TREE_KEYS, ...EDITOR_KEYS],
+  mac: boolean = applePlatform(),
 ): readonly SheetGroup[] {
+  const labels = filesKeyLabels(mac);
   const rows = [...new Set(keys)].map((key): SheetRow => {
-    const label = FILES_KEY_LABELS[key];
+    const label = labels[key];
     if (label === undefined || label === '') {
       throw new Error(`no caption for the Files-tab key "${key}" — add one to FILES_KEY_LABELS`);
     }

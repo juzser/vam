@@ -1148,9 +1148,17 @@ check(
   (await editor.inputValue()) === 'A=1\n\n# a note\nB=2\n',
   JSON.stringify(await editor.inputValue()),
 );
+// THE NOTE NAMES THE UNDO KEY THE WAY THIS BROWSER PAINTS IT — ⌘Z on a Mac,
+// Ctrl+Z off one. It used to read `Mod-z`, the grammar's internal spelling,
+// which reaches no screen any more: asking for that string here would report a
+// missing note rather than a renamed one. Derived from the page's own platform
+// rather than imported — a guard shares no module with the bundle it measures.
+const undoChord = await page.evaluate(() =>
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘Z' : 'Ctrl+Z',
+);
 check(
   'and says so, with the way back out of it on screen',
-  (await page.locator('[data-files-note]').textContent())?.includes('Mod-z') === true &&
+  (await page.locator('[data-files-note]').textContent())?.includes(undoChord) === true &&
     (await page.locator('[data-files-format-undo]').count()) === 1,
 );
 await page.keyboard.press('Meta+KeyZ');

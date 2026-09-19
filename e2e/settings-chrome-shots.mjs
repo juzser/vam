@@ -458,7 +458,19 @@ for (const width of [1100, NARROWEST_DESKTOP]) {
   });
   // The plant not landing would make every line below vacuous — a slot
   // showing `r` passes all of them and proves nothing.
-  if (planted === null || planted.keys !== 'Mod-Alt-AudioVolumeDown') {
+  //
+  // THE PLANT IS A TOKEN AND THE SLOT PAINTS A KEYSTROKE. `Mod-Alt-<key>` is
+  // what `normalizeKey` stores and what goes into prefs; what a slot draws is
+  // `chordSymbols` of it — ⌥⌘AudioVolumeDown on a Mac, Ctrl+Alt+AudioVolumeDown
+  // off one. The symbols shorten the MODIFIERS and not the key name, which is
+  // where all of this chord's length lives, so it is still the longest thing
+  // this column is ever asked to hold.
+  const wanted = await page.evaluate(() =>
+    /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+      ? '⌥⌘AudioVolumeDown'
+      : 'Ctrl+Alt+AudioVolumeDown',
+  );
+  if (planted === null || planted.keys !== wanted) {
     throw new Error(
       `${width}px: the long-chord override did not reach the editor: ${JSON.stringify(planted)} — this check measured nothing`,
     );

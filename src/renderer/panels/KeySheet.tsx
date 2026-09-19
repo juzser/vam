@@ -24,6 +24,7 @@
  */
 
 import { useEffect, useRef } from 'react';
+import { chordSymbols } from '../keyboard/chords.js';
 import { buildFilesSheet, buildKeySheet } from '../keyboard/keysheet.js';
 
 export type KeySheetProps = {
@@ -100,7 +101,12 @@ export function KeySheet({ onClose }: KeySheetProps) {
                           : 'bg-transparent text-ink-dim line-through'
                       }`}
                     >
-                      {row.keys}
+                      {/* THE SYMBOLS ARE PAINTED HERE AND NOWHERE EARLIER.
+                          `row.keys` is the grammar's own spelling — the string
+                          `buildKeySheet` judged `isSelectOnlyChord` against and
+                          keyed `row.dead` by — and `chordSymbols` is what a
+                          person reads: ⌘ on a Mac, `Ctrl` off one. */}
+                      {chordSymbols(row.keys)}
                     </kbd>
                     <span data-key-sheet-label className="text-ink-dim">
                       {row.label}

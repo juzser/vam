@@ -219,6 +219,12 @@ const GUARDS = [
   // fixture's answers contain no table, and putting one in it would change the
   // transcript every demo-driven guard counts turns and rows in.
   'out-table-shots',
+  // THE SHORTCUT SYMBOLS, on both platforms out of one bundle. Loads the page
+  // twice with `navigator.platform` overridden before any module runs, which
+  // is the only way to prove ⌘-or-Ctrl is a RUNTIME answer in the shipped
+  // bytes -- and RASTERISES each glyph against the notdef box, because a tofu
+  // is four identical bytes to every string assertion in the unit suite.
+  'chord-symbol-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

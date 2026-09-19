@@ -778,10 +778,21 @@ const sheetHasIt = await settle(
   'the key sheet opens',
 );
 
+// AS THIS BROWSER PAINTS IT, not as the grammar spells it. The sheet prints
+// `chordSymbols` now — ⇧⌘P on a Mac, `Ctrl+Shift+P` off one — so a lookup for
+// the token `Mod-Shift-p` would find no row at all and this whole section
+// would report a missing feature. Derived here rather than imported: a guard
+// runs against a SERVED bundle and shares no module with it, which is what
+// makes it an independent reading.
+const newProjectChord = await page.evaluate(() =>
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⇧⌘P' : 'Ctrl+Shift+P',
+);
+console.log(`this browser spells newProject "${newProjectChord}"`);
+
 if (sheetHasIt) {
-  const row = await page.evaluate(() => {
+  const row = await page.evaluate((chord) => {
     const li = [...document.querySelectorAll('[data-key-sheet] li')].find(
-      (each) => (each.querySelector('[data-key-sheet-keys]')?.textContent ?? '') === 'Mod-Shift-p',
+      (each) => (each.querySelector('[data-key-sheet-keys]')?.textContent ?? '') === chord,
     );
     if (li === undefined) return null;
     const box = li.getBoundingClientRect();
@@ -792,9 +803,9 @@ if (sheetHasIt) {
       painted: box.width > 0 && box.height > 0,
       struck: chip === null ? '' : getComputedStyle(chip).textDecorationLine,
     };
-  });
-  console.log('sheet row for Mod-Shift-p:', JSON.stringify(row));
-  check('the sheet lists Mod-Shift-p', row !== null, 'no row carries that chord');
+  }, newProjectChord);
+  console.log(`sheet row for ${newProjectChord}:`, JSON.stringify(row));
+  check(`the sheet lists ${newProjectChord}`, row !== null, 'no row carries that chord');
   check(
     'and captions it by the act rather than by the chord',
     row?.label.toLowerCase().includes('directory') === true,

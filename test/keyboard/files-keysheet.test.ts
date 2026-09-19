@@ -74,6 +74,25 @@ describe('the sheet’s Files section', () => {
     expect(() => buildFilesSheet(['Mod-Alt-nonesuch'])).toThrow(/Mod-Alt-nonesuch/);
   });
 
+  /**
+   * A CAPTION THAT NAMES A CHORD NAMES IT THE PLATFORM'S WAY TOO. The Tab row
+   * discloses the OTHER half of its key — Shift+Tab outdents — and that is a
+   * keystroke like any other: ⇧⇥ on a Mac, `Shift+Tab` off one. The `keys`
+   * column is rendered by `KeySheet.tsx`; a caption is prose and has to carry
+   * its own rendering, which is why this builder takes the platform.
+   */
+  it('renders a chord named inside a caption', () => {
+    const tab = (mac: boolean) =>
+      buildFilesSheet(['Tab'], mac)
+        .flatMap((group) => group.rows)
+        .find((row) => row.keys === 'Tab');
+    expect(tab(true)?.label).toContain('⇧⇥');
+    expect(tab(true)?.label).not.toContain('Shift+Tab');
+    expect(tab(false)?.label).toContain('Shift+Tab');
+    // And the row's own key is still the token the handlers dispatch on.
+    expect(tab(true)?.keys).toBe('Tab');
+  });
+
   it('says the file search is reachable from anywhere in the tab', () => {
     // The operator's ask, in the one place they go to look for a key. `/` is
     // the tree's own spelling and stays; `Mod-p` is the one that also works

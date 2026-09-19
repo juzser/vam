@@ -15,12 +15,15 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import {
   DEFAULT_PROMPT_SUBMIT_KEY,
+  SUBMIT_KEY_LABELS,
   setActivePromptSubmitKey,
 } from '../../src/renderer/prefs/submit-key.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 const TURN: Decision = {
   id: 'd1',
@@ -109,9 +112,20 @@ describe('the sessions section offers the two keys', () => {
     // One table (`SUBMIT_KEY_LABELS`), two surfaces. A picker that said
     // "shift-enter" over a box that said "Shift-Enter" would be two spellings
     // of one key, which is how a setting comes to look like a different one.
-    open();
-    expect(option('enter')?.textContent).toBe('Enter');
-    expect(option('shift-enter')?.textContent).toBe('Shift-Enter');
+    //
+    // AND THE TABLE'S SPELLING IS A CHORD, so it reaches this button through
+    // `chordSymbols` like every other key in settings: ⇧⏎ on a Mac, and
+    // `Shift+Enter` off one. Both, from one run — see `chords.ts`.
+    onBothPlatforms((mac) => {
+      open();
+      expect(option('enter')?.textContent).toBe(chordSymbols(SUBMIT_KEY_LABELS.enter, mac));
+      expect(option('shift-enter')?.textContent).toBe(
+        chordSymbols(SUBMIT_KEY_LABELS['shift-enter'], mac),
+      );
+      expect(option('enter')?.textContent).toBe(mac ? '⏎' : 'Enter');
+      expect(option('shift-enter')?.textContent).toBe(mac ? '⇧⏎' : 'Shift+Enter');
+      cleanup();
+    });
   });
 
   it('follows a stored choice rather than the default', () => {
