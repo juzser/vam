@@ -817,17 +817,23 @@ describe('the keyboard model', () => {
     // check used to read `firstStop.hasAttribute('data-files-editor')`, which
     // answered the question only for the ONE element that carried a mark at
     // the time. The tree added a filter box and a "new file" box to this
-    // hidden subtree; marking either of them — conditionally or not — would
-    // put a `display: none` stop first in document order and make `I` fail
-    // silently on every other tab, and the old assertion would have passed,
-    // because the first stop still would not have been the editor.
+    // hidden subtree; marking either of them AS A STOP — conditionally or not
+    // — would put a `display: none` stop first in document order and make `I`
+    // fail silently on every other tab, and the old assertion would have
+    // passed, because the first stop still would not have been the editor.
     const firstStop = q('[data-question-option], [data-insert-stop]');
     expect(firstStop).not.toBeNull();
     expect(firstStop?.closest('[data-files]')).toBeNull();
-    // The two boxes in the tree are not insert surfaces at all, showing or
-    // hidden: a native `input` is already exempt from the chord grammar by
-    // tag name, and the marks are for what the STATUS BAR must call Insert.
-    for (const box of qa('[data-files] input')) {
+    // The two boxes in the tree ARE insert scopes now — that is how `Mod-0`
+    // gets the keyboard back out of them (`FilesTab.tsx`'s header carries the
+    // argument and the measurement) — but they are scopes ONLY, and the scope
+    // comes off with `hidden` exactly as the editor's does. So on a tab that
+    // is not showing, this subtree carries no insert mark of any kind: no
+    // `display: none` region can claim a mode, and no `display: none` stop can
+    // swallow `I`.
+    const boxes = qa('[data-files] input');
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
       expect(box.hasAttribute('data-insert-scope')).toBe(false);
       expect(box.hasAttribute('data-insert-stop')).toBe(false);
     }
@@ -1155,11 +1161,28 @@ describe('walking the tree from the keyboard', () => {
     expect(row('/work/atlas/src')?.getAttribute('aria-selected')).toBe('false');
   });
 
-  it('the tree is not an insert scope — bare j and k could not mean "walk" if it were', async () => {
+  /**
+   * THE ROWS ARE NOT AN INSERT SCOPE — narrowed from "nothing in this column
+   * is", which stopped being the claim when the two text boxes in the tree's
+   * HEADER became scopes so `Mod-0` could get out of them (`FilesTab.tsx`'s
+   * header). The boxes never had a bearing on this property: what makes bare
+   * `j`/`k` free to mean "walk" is that the thing being walked is a list of
+   * `<button>`s, and the assertion has to be about those.
+   */
+  it('the tree rows are not an insert scope — bare j and k could not mean "walk" if they were', async () => {
     await openTree();
-    expect(q('[data-files-tree] [data-insert-scope]')).toBeNull();
-    expect(q('[data-files-row][data-insert-scope]')).toBeNull();
-    expect(q('[data-files-row][data-insert-stop]')).toBeNull();
+    const rows = qa('[data-files-row]');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const el of rows) {
+      expect(el.hasAttribute('data-insert-scope')).toBe(false);
+      expect(el.hasAttribute('data-insert-stop')).toBe(false);
+      // Nor inside one: a row that merely SAT in a scope would report Insert
+      // just the same, because the mode is `closest`, not `matches`.
+      expect(el.closest('[data-insert-scope]')).toBeNull();
+    }
+    // The scroller and the `role="tree"` wrapper are not scopes either — a
+    // mark on either would cover every row at once.
+    expect(q('[role="tree"]')?.hasAttribute('data-insert-scope')).toBe(false);
   });
 });
 

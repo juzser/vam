@@ -682,6 +682,97 @@ check(
   )) === 'src',
 );
 
+/**
+ * THE WAY OUT OF THE FILTER — the operator's own report, and the one claim in
+ * this section that only a real browser can settle.
+ *
+ * TRANSLATED: "when the file filter is focused, I can't press Cmd-0 to get
+ * back to select mode -- so should the file filter be insert mode?" Measured
+ * here before anything was changed, with the keyboard really in the box:
+ * `Meta+0` was CLAIMED (`defaultPrevented: true`) and moved nothing at all,
+ * the chip read Select, and the status bar printed "the keyboard is already on
+ * the session list" -- false twice over, because the keyboard was in the
+ * filter and had not moved. The filter was deliberately unmarked on an
+ * argument about not STEALING chords, which never asked how to get OUT; the
+ * mark is what `releaseInsert` reads, so an unmarked box is one `focusList`
+ * cannot reach into.
+ *
+ * WHY IT IS HERE AND NOT ONLY IN HAPPY-DOM: what is claimed is that a real
+ * `<input>` really loses the keyboard, and `document.activeElement` in a unit
+ * environment is not the browser's answer to who owns it -- happy-dom will
+ * even focus a `display: none` element. The chip is the same live-DOM signal
+ * `mode-truth-shots.mjs` reads, and it is the status bar's own truth about
+ * where the keyboard is.
+ *
+ * MUTATION: take `insertScopeMark` off the filter's `<input>` in
+ * `FilesTab.tsx` and the first two checks redden -- the chip goes back to
+ * Select and `Meta+0` leaves the caret sitting in the box.
+ */
+const modeInFilter = await page.evaluate(
+  () => document.querySelector('[data-mode]')?.textContent ?? '',
+);
+check(
+  'the mode chip reads Insert while the FILTER holds the keyboard',
+  modeInFilter === 'Insert',
+  `it reads ${modeInFilter}`,
+);
+await page.keyboard.press('Meta+0');
+await page
+  .waitForFunction(
+    () => !(document.activeElement?.matches('[data-files-filter]') ?? false),
+    null,
+    { timeout: 3_000 },
+  )
+  .catch(() => {});
+check(
+  'Mod-0 takes the keyboard OUT of the filter — the documented way back',
+  (await page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false)) ===
+    false,
+  `focus is on ${await focusedTag()}`,
+);
+const modeAfterZero = await page.evaluate(
+  () => document.querySelector('[data-mode]')?.textContent ?? '',
+);
+check(
+  'and the chip follows it back to Select',
+  modeAfterZero === 'Select',
+  `it reads ${modeAfterZero}`,
+);
+/**
+ * AND THE SENTENCE THAT USED TO FOLLOW IT. `focusList` refuses aloud when
+ * there was nowhere to come back FROM, reading the cursor mode captured at the
+ * top of the handler -- so while the filter was unmarked this exact keystroke
+ * produced that refusal at an operator whose keyboard was in a text box. It is
+ * asserted as the STRING rather than as an empty bar: the bar is legitimately
+ * cleared by `setStatus(null)` on any claimed chord, so "it is empty" would be
+ * green for reasons that have nothing to do with this.
+ */
+const statusAfterZero = await page.evaluate(
+  () => document.querySelector('[data-status]')?.textContent ?? '',
+);
+check(
+  'and never claims the keyboard was already on the list while it was in the box',
+  statusAfterZero !== 'the keyboard is already on the session list',
+  `the bar reads ${JSON.stringify(statusAfterZero)}`,
+);
+
+// AND ESCAPE IS THE SECOND ROUTE, which already worked and must keep working:
+// `onBoxKeyDown` blurs explicitly. Two ways out, measured, not one.
+await page.keyboard.press('Meta+p');
+await page
+  .waitForFunction(() => document.activeElement?.matches('[data-files-filter]') ?? false, null, {
+    timeout: 3_000,
+  })
+  .catch(() => {});
+await page.keyboard.press('Escape');
+await page.waitForTimeout(150);
+check(
+  'and Escape still leaves the filter too — the other route, unchanged',
+  (await page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false)) ===
+    false,
+  `focus is on ${await focusedTag()}`,
+);
+
 // Back to where the rest of this file expects the keyboard: clear the filter,
 // and put the caret in the editor again.
 await page.keyboard.press('Meta+p');

@@ -74,24 +74,65 @@
  * and its own header carries the reasoning; what matters here is that
  * `list.ts` is untouched by this change.
  *
- * THE FOURTH INSERT SCOPE, AND THE TWO BOXES THAT ARE DELIBERATELY NOT ONE.
+ * THE FOURTH INSERT SCOPE, AND THE TWO BOXES THAT ARE NOW THE FIFTH AND SIXTH.
  * `keyboard/focus-scope.ts` names three today: the question card, the
  * composer, the terminal pane. The editor's own `<textarea>` is marked
  * `data-insert-scope`/`data-insert-stop` below, conditionally on `!hidden` --
  * see that prop's own comment for why an ALWAYS-MOUNTED stop would silently
- * break `I` on every OTHER tab. The tree's FILTER box and the "new file" box
- * are left UNMARKED, the same as `SessionList.tsx`'s own session-search box:
- * a native `<input>` is already exempt from vam's chord grammar by tag name
+ * break `I` on every OTHER tab.
+ *
+ * THE TREE'S TWO TEXT BOXES USED TO BE UNMARKED, and the paragraph that stood
+ * here argued it this way: the FILTER box and the "new file" box are left
+ * UNMARKED, the same as `SessionList.tsx`'s own session-search box, because a
+ * native `<input>` is already exempt from vam's chord grammar by tag name
  * (`Canvas.tsx`'s own `typing` guard), which is what makes typing into either
  * safe without the extra mark; the mark itself is reserved for surfaces the
  * STATUS BAR must call Insert, and neither a filter box nor a "name a new
- * file" box is that. It is also the sharper half of the `hidden` rule: this
- * component is mounted EARLIER in the pane than the composer, so an
- * unconditionally marked filter box would be the first `data-insert-stop`
- * `focusInsertStop` finds on every other tab, and a `display: none` element
- * cannot take focus -- `I` would silently stop reaching the composer. There
- * is a guard for exactly that in `test/panels/DetailPanel.files-tab.test.tsx`
- * and it asserts the whole tab, not just the textarea.
+ * file" box is that. Every clause of that is still true ABOUT THE COST IT WAS
+ * WEIGHING -- and it was weighing the wrong cost. It asks whether these boxes
+ * would STEAL chords. It never asks how the operator gets OUT of one.
+ *
+ * THE OPERATOR ASKED, translated: "when the file filter is focused, I can't
+ * press Cmd-0 to get back to select mode -- so should the file filter be
+ * insert mode?" It should, and what the old argument had actually cost is
+ * `Mod-0` entirely. Measured in Chromium: the chord resolves to `focusList`,
+ * `releaseInsert` looks for an insert scope around the caret, an unmarked
+ * `<input>` is inside none -- so nothing was blurred, the key was swallowed,
+ * and because `cursorModeAt` read Select for that same reason the bar then
+ * printed "the keyboard is already on the session list" to an operator whose
+ * keyboard was in the filter box. `Mod-Shift-h`, `focusList`'s other chord,
+ * did the same. `Escape` (`onBoxKeyDown`, which blurs explicitly) was the one
+ * way out that worked, and it is not the documented one.
+ *
+ * `data-insert-scope` IS WHAT `releaseInsert` READS, so the mark is the escape
+ * hatch rather than a claim on the grammar -- and nothing else about these
+ * boxes changes. Unmodified keys still never reach the window listener (the
+ * `typing` guard, unchanged); `Mod-p`, `Mod-<digit>` and `Mod-k` still work
+ * from inside them exactly as they do from inside the composer. ONE chord does
+ * change: `Ctrl-D`/`Ctrl-U`, which `isSelectOnly` now stands down here. That
+ * is the right way round -- `Ctrl-D` is delete-forward in every macOS text
+ * view, and what it did in the filter before was put "nothing to scroll --
+ * this pane is not showing a transcript" on the bar.
+ *
+ * STILL SCOPES AND NOT STOPS, AND STILL CONDITIONAL ON `hidden`. The sharper
+ * half of the old paragraph survives the change intact and is why these two
+ * take the scope mark ALONE: this component is mounted EARLIER in the pane
+ * than the composer, so a STOP on either box would be the first
+ * `data-insert-stop` `focusInsertStop` finds on every other tab, and a
+ * `display: none` element cannot take focus -- `I` would silently stop
+ * reaching the composer. Neither carries a stop, and the scope mark comes off
+ * with `hidden` anyway, for the same reason the editor's does. There is a
+ * guard for exactly that in `test/panels/DetailPanel.files-tab.test.tsx` and
+ * it asserts the whole tab, not just the textarea;
+ * `test/canvas/Canvas.files-filter-scope.test.tsx` holds the other side --
+ * that the mark is an exit and not an appetite.
+ *
+ * AND `SessionList.tsx`'s SEARCH BOX IS DELIBERATELY NOT SWEPT UP IN THIS,
+ * which is where the two stop being alike. The bar does not lie about that
+ * one: while it is open the mode cell reads FILTER, a state of its own that
+ * outranks both Select and Insert (`Canvas.tsx`'s `ModeState`), and `Escape`
+ * there cancels the search and hands the keyboard back. It is a sidebar mode
+ * with its own word and its own exit, not a text box the bar calls Select.
  *
  * AND THE TREE IS NOT AN INSERT SCOPE EITHER, for the opposite reason: it is
  * walked with BARE `j`/`k`/`h`/`l`, and those keys are only free to mean
@@ -1827,6 +1868,7 @@ export function FilesTab({
         </div>
 
         <Tree
+          hidden={hidden}
           treeRef={treeRef}
           boxRef={treeBoxRef}
           widthPx={drawnTreeWidth}
@@ -2146,6 +2188,7 @@ function Editor({
 }
 
 function Tree({
+  hidden,
   treeRef,
   boxRef,
   widthPx,
@@ -2169,6 +2212,16 @@ function Tree({
   onNewFileName,
   onNewFile,
 }: {
+  /** Whether the whole tab is behind another view, and so `display: none`.
+   *
+   *  HERE FOR THE INSERT MARKS AND NOTHING ELSE — the same reason `Editor`
+   *  takes it. Both text boxes below are insert SCOPES (see this file's
+   *  header), and a scope on a hidden subtree is a region the keyboard cannot
+   *  be inside, so it is taken off rather than left to be inert: this tab is
+   *  the one that stays MOUNTED when it is not showing, and the invariant
+   *  `test/panels/DetailPanel.files-tab.test.tsx` holds over the hidden tab is
+   *  that it carries no insert marks at all. */
+  readonly hidden: boolean;
   readonly treeRef: React.RefObject<HTMLDivElement | null>;
   /** The tree's OUTER box — what a gesture that starts on a tree still using
    *  the share has to measure, because there is no stored number to read. */
@@ -2223,12 +2276,17 @@ function Tree({
           className="flex-none text-ink-faint"
           aria-hidden="true"
         />
-        {/* UNMARKED, deliberately — see this file's header. A native `input`
-            is already exempt from the chord grammar by tag name; the insert
-            marks are for surfaces the status bar must call Insert, and a
-            filter box is not one. */}
+        {/* AN INSERT SCOPE, AND ONLY A SCOPE — see this file's header, which
+            carries the argument this replaced and why it was wrong. The short
+            of it: the mark is what `releaseInsert` reads, so without it `Mod-0`
+            and `Mod-Shift-h` could not get the keyboard back OUT of this box,
+            and the bar called a caret in a text box Select. No
+            `data-insert-stop` beside it, ever: this component draws before the
+            composer, so a stop here would be the first one `focusInsertStop`
+            finds on every other tab. */}
         <input
           ref={filterRef}
+          {...(hidden ? {} : insertScopeMark)}
           data-files-filter
           value={filter}
           onChange={(event) => onFilterChange(event.target.value)}
@@ -2283,7 +2341,13 @@ function Tree({
           className="flex-none text-ink-faint"
           aria-hidden="true"
         />
+        {/* THE SAME MARK, FOR THE SAME REASON, and it is the same box: this
+            one shares `onBoxKeyDown` with the filter and was measured trapping
+            `Mod-0` in exactly the same way. A fix that left it out would have
+            put the operator's own report one Tab press away from being true
+            again. */}
         <input
+          {...(hidden ? {} : insertScopeMark)}
           value={newFileName}
           onChange={(event) => onNewFileName(event.target.value)}
           onKeyDown={onBoxKeyDown}
