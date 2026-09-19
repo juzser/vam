@@ -60,9 +60,46 @@ import { useOutActions } from './out-actions.js';
  * everything else is built around that so a heading or a table reads as a
  * step up from the body rather than as a different app.
  *
- * Two elements get their own scroller: a fenced block and a table have no
- * width of their own and this pane is resizable and 408px by default, so
+ * Two elements get their own scroller: a fenced block and a table can both be
+ * wider than any pane, and this pane is resizable and 408px by default, so
  * without it the widest line in an answer decides how wide the pane is.
+ *
+ * WHAT THAT SCROLLER IS FOR IS NOT THE SAME IN BOTH, though, and this
+ * rendering used to treat them as if it were. A fence is quoted text and is
+ * never wrapped — a wrapped command line reads as two commands. A TABLE IS
+ * PROSE: it was `w-max`, sized to its own content, so no cell ever had a
+ * reason to break a line and every table went sideways, including a table of
+ * three sentences that would have fitted the pane with room to spare. The
+ * operator asked for the other behaviour ("tables in the out response need
+ * slightly larger padding, and word wrap"), so the table now declares no width
+ * at all and the CSS table algorithm sizes it against the pane —
+ * `max(min-content, min(max-content, the pane))`. A table narrower than the
+ * pane keeps its own size; a table of sentences takes the pane and wraps
+ * inside it; a table that cannot be narrowed any further overflows into the
+ * scroller exactly as before. That last case is the whole of what the scroller
+ * now does.
+ *
+ * NO FLOOR OF ITS OWN UNDER A COLUMN, and that is a decision rather than an
+ * omission. The algorithm already refuses to narrow a column below its own
+ * minimum content width — the widest unbreakable run in it — so a cell is
+ * never cut down to a sliver of broken letters, and the cases where that floor
+ * is too wide for the pane (a hash, a bare id, more columns than any pane can
+ * hold) are precisely the cases the scroller exists for. A `min-width` here
+ * would buy a slightly wider column in a six-column table of SENTENCES and
+ * charge for it everywhere else: a six-column table of short values fits the
+ * default pane today and a floor it does not need would push it into the
+ * scroller.
+ *
+ * WHAT HOLDS THAT FLOOR UP is one utility in another file: the answer's column
+ * in `DetailPanel.tsx` carries `break-words` — `overflow-wrap: break-word` —
+ * and every cell inherits it. `break-word` leaves INTRINSIC SIZING alone, so a
+ * column is still measured against its widest unbreakable run and a word is
+ * only ever cut when something forces a cell below that. Its neighbour
+ * `anywhere` DOES change intrinsic sizing, and swapping one for the other
+ * would quietly let every column here collapse towards one character.
+ * `e2e/out-table-shots.mjs` measures all of this in Chromium at the 408px pane
+ * and at a 390px phone, because `w-max` and no width at all leave the
+ * identical DOM behind and differ only in the picture.
  *
  * `a` and `img` are the two that do NOT render as themselves, and the reason
  * is the same for both: `out` is an AGENT's text, which vam cannot vouch for.
@@ -678,18 +715,30 @@ export const OUT_MARKDOWN: Components = {
       </Fenced.Provider>
     );
   },
+  // NO WIDTH ON THE TABLE, DELIBERATELY — see this file's header. The scroller
+  // around it stays, for the table the algorithm cannot narrow into the pane.
+  //
+  // The cells' padding is the operator's other half ("slightly larger"):
+  // 10px/6px, up from 8px/4px. Horizontal first, because a border-collapsed
+  // grid is read column by column and 8px left the words nearly touching a
+  // line they are not part of; the vertical step is the smaller one because
+  // this is the element that now WRAPS — the space between two lines of the
+  // same cell is `leading`, and padding that matched it would make one cell's
+  // second line look like the next row's first. 10/6 is the same rhythm the
+  // fence above uses (`px-2.5 py-2`) one notch tighter, which is what a row in
+  // a grid wants beside a block that is one box.
   table: ({ children }) => (
     <div className="vam-no-scrollbar overflow-x-auto">
-      <table className="w-max border-collapse text-[0.958em] text-ink-dim">{children}</table>
+      <table className="border-collapse text-[0.958em] text-ink-dim">{children}</table>
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-line bg-raised px-2 py-1 text-left font-medium text-chip">
+    <th className="border border-line bg-raised px-2.5 py-1.5 text-left font-medium text-chip">
       {children}
     </th>
   ),
   td: ({ children }) => (
-    <td className="border border-line px-2 py-1 align-top">
+    <td className="border border-line px-2.5 py-1.5 align-top">
       <Prose>{children}</Prose>
     </td>
   ),

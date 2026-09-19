@@ -1756,12 +1756,20 @@ describe('the out region renders the agent’s markdown', () => {
     // `remark-gfm` is actually plugged in and not merely installed.
     expect(out.querySelector('del')?.textContent).toBe('struck');
     expect(out.querySelectorAll('li')).toHaveLength(2);
-    // The pane is resizable and 408px by default, so the two elements that
-    // have no width of their own scroll inside their own box rather than
-    // widening the pane.
+    // The pane is resizable and 408px by default, so a table that cannot be
+    // narrowed into it scrolls inside its own box rather than widening the
+    // pane. That box is the fallback and no longer the normal case: the table
+    // itself declares NO width, so the CSS table algorithm sizes it against
+    // the pane and its cells wrap (the operator's request, see
+    // `out-markdown.tsx`). Both halves of that are layout and happy-dom
+    // performs none — `e2e/out-table-shots.mjs` measures the wrap, the fit and
+    // the scroller in Chromium at 408px and at 390px. What is left here is a
+    // spelling alarm: `w-max` coming back would restore the old behaviour
+    // exactly, in one word, and this is the cheap place to notice.
     const table = out.querySelector('table');
     expect(table).not.toBeNull();
     expect(table?.parentElement?.className).toContain('overflow-x-auto');
+    expect(table?.className).not.toContain('w-max');
   });
 
   it('scrolls a fenced block sideways rather than widening the pane', () => {
