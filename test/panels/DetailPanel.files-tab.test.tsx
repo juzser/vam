@@ -1153,6 +1153,179 @@ describe('walking the tree from the keyboard', () => {
   });
 });
 
+/**
+ * `Mod-p` FROM SELECT MODE — the fifth surface, and the one the four handlers
+ * could not see.
+ *
+ * THE OPERATOR'S REPORT, translated: "in the files view, in select mode, I
+ * cannot press Cmd+P to filter". Select is the mode in which DOM focus is in
+ * no insert scope (`keyboard/focus-scope.ts`), which is where the keyboard
+ * actually IS on arrival: switching a pane to this tab leaves focus on the
+ * view-icon button that switched it — MEASURED in Chromium, `<button
+ * data-view="files" aria-label="Files view">` — and `Escape` leaves it on the
+ * body. Neither is inside this tab at all, so none of the four `onKeyDown`
+ * props ran, and the chord fell through to `Canvas.tsx`'s window grammar,
+ * which leaves `Mod-p` unbound on purpose.
+ *
+ * SO THE TAB LISTENS FOR IT ITSELF, while it is the view on screen in the
+ * pane that holds the keyboard, and routes it to the SAME `focusFilter` the
+ * other four use.
+ *
+ * MUTATION TARGETS, each named beside the check it reddens.
+ */
+describe('Mod-p in select mode — with the keyboard on none of this tab’s own surfaces', () => {
+  const TREE = {
+    list: async () => ({
+      root: '/work/atlas',
+      files: ['/work/atlas/.env', '/work/atlas/src/index.ts'],
+      truncated: false,
+    }),
+    read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+  };
+
+  /**
+   * The chord, pressed where the operator presses it: with nothing in this tab
+   * focused, on an element that is not one of the four. It is dispatched on
+   * the BODY and bubbles, which is what a real keystroke does — a listener
+   * that read `event.target` rather than the DOM's own focus would pass a
+   * `window.dispatchEvent` and fail in Chromium.
+   */
+  const pressOutside = async (): Promise<boolean> => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'p',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => {
+      document.body.dispatchEvent(event);
+      await Promise.resolve();
+    });
+    return event.defaultPrevented;
+  };
+
+  /** MUTATION TARGET: drop the tab's own window listener and this reddens. */
+  it('reaches the filter box, and claims the key', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+    expect(q('[data-files-filter]')).not.toBe(document.activeElement);
+
+    expect(await pressOutside()).toBe(true);
+    expect(document.activeElement).toBe(q('[data-files-filter]'));
+  });
+
+  /**
+   * INERT WHILE ANOTHER TAB SHOWS — `chords.ts` vacated `Mod-p` deliberately,
+   * so a tab that answered it whether or not it was on screen would have
+   * taken a key the rest of the app is entitled to leave to the browser.
+   *
+   * MUTATION TARGET: drop the `hidden` half of the effect's guard and this
+   * reddens — the filter is still in the DOM behind a `display: none`, so the
+   * unconditional listener happily focuses something nobody can see.
+   */
+  it('does nothing at all once another tab is showing', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLButtonElement>('[data-view="response"]')?.click();
+      await Promise.resolve();
+    });
+
+    expect(await pressOutside()).toBe(false);
+    expect(document.activeElement).not.toBe(q('[data-files-filter]'));
+  });
+
+  /**
+   * ONE PANE ANSWERS, NOT EVERY PANE. Two split leaves can both show this tab;
+   * only the one holding the keyboard may move it, or a chord pressed in the
+   * pane the operator is looking at lands in the one they are not.
+   *
+   * MUTATION TARGET: drop the `paneFocused` half of the guard and this
+   * reddens.
+   */
+  it('does nothing in a pane that does not hold the keyboard', async () => {
+    withBridge(TREE);
+    draw({ files: true, paneFocused: false, tabRequest: { tab: 'Files' } });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(q('[data-files-tree]')).not.toBeNull();
+
+    expect(await pressOutside()).toBe(false);
+    expect(document.activeElement).not.toBe(q('[data-files-filter]'));
+  });
+
+  /**
+   * AND IT STANDS DOWN FOR A CARET SOMEWHERE ELSE — the command palette's
+   * filter, a rename field, another pane's composer. `answeringKeys`
+   * (`keyboard/focus-scope.ts`) is the same question `Canvas.tsx` already asks
+   * before it moves the keyboard on vam's own initiative, and the two
+   * populations it reads are exactly the two that can hold a caret here.
+   *
+   * MUTATION TARGET: drop the `answeringKeys` clause and this reddens.
+   */
+  it('stands down while a caret outside this tab is answering the keys', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+
+    const elsewhere = document.createElement('input');
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    try {
+      const event = new KeyboardEvent('keydown', {
+        key: 'p',
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      await act(async () => {
+        elsewhere.dispatchEvent(event);
+        await Promise.resolve();
+      });
+      expect(event.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(elsewhere);
+    } finally {
+      elsewhere.remove();
+    }
+  });
+
+  /**
+   * AND EVERY OTHER KEY IS STILL THE GRAMMAR'S. The listener is on the window,
+   * which is where `Canvas.tsx`'s own is: one that claimed more than the one
+   * chord would take `Mod-k`, `Alt-<digit>` and `I` away from the whole app
+   * for as long as this tab happened to be showing.
+   */
+  it('claims Mod-p and nothing else', async () => {
+    withBridge(TREE);
+    draw({ files: true });
+    await openFiles();
+
+    // NOT `Control+p`: its SPELLING is platform-dependent (`CTRL_GESTURES`),
+    // so an assertion about it would say two different things on the two
+    // platforms this suite runs on. `Mod-Shift-p` is the one next door that
+    // matters — it is new-project, and this tab must not eat it.
+    for (const init of [
+      { key: 'k', metaKey: true },
+      { key: 'p' },
+      { key: 'p', metaKey: true, shiftKey: true },
+    ]) {
+      const event = new KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      await act(async () => {
+        document.body.dispatchEvent(event);
+        await Promise.resolve();
+      });
+      expect(event.defaultPrevented, `${JSON.stringify(init)} should be left alone`).toBe(false);
+    }
+  });
+});
+
 /** Did anything veto the page going away? Shared with the quit tests below. */
 const dispatchBeforeUnload = (): boolean => {
   const event = new Event('beforeunload', { cancelable: true });

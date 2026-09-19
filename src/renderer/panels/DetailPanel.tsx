@@ -1273,6 +1273,7 @@ function PullRequestsTab({
   repo,
   sessionId,
   bridge,
+  reserveCornerHeight = 0,
   now = () => new Date(),
 }: {
   readonly pullRequests: PullRequestList | undefined;
@@ -1291,6 +1292,14 @@ function PullRequestsTab({
    * that could not act.
    */
   readonly bridge?: PrsBridge;
+  /**
+   * How far the floating view pill reaches DOWN into this tab, in px, or 0
+   * when no pill is drawn (an unfocused pane, the phone). Passed rather than
+   * measured, for the reason `cornerReserveHeight` gives at its declaration:
+   * measuring the pill in a layout effect and re-rendering with the result
+   * is what unpinned a column once already. See the `<ul>` below.
+   */
+  readonly reserveCornerHeight?: number;
   /** Injected so the relative time in a row is testable against a fixed instant. */
   readonly now?: () => Date;
 }) {
@@ -1467,6 +1476,31 @@ function PullRequestsTab({
     <>
       <ul
         data-prs
+        /**
+         * THE CORNER THE VIEW PILL FLOATS OVER, RESERVED -- and it is this
+         * change that made it necessary.
+         *
+         * `data-view-overlay` is absolutely positioned at the pane's top
+         * right and reaches ~34px down into whatever is below it. That cost
+         * nothing while this row stacked everything into ONE LEFT COLUMN:
+         * the top right of the first row was empty, so the pill floated over
+         * blank card. Putting the status rail there puts the first row's
+         * state word, checks and diff directly under it -- laid out, measured
+         * as visible by every rectangle check, and then PAINTED OVER. That is
+         * audit F1's exact shape, and the same one the identity line was
+         * deleted for.
+         *
+         * DOWNWARDS, NOT SIDEWAYS. `reserveCorner` (the width) would take
+         * ~96px off the right of EVERY row to clear a pill that overhangs
+         * only the first; the height clears it for the one row it touches and
+         * costs the others nothing. Zero when the pane is unfocused, because
+         * an unfocused pane paints no pill at all.
+         *
+         * MEASURED AS OCCLUSION, not as a rectangle: `e2e/prs-tab-shots.mjs`
+         * asks `elementFromPoint` what is on top of each status glyph, which
+         * is the only question that can see a half-buried control.
+         */
+        style={reserveCornerHeight > 0 ? { paddingTop: reserveCornerHeight } : undefined}
         className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
       >
         {pullRequests.prs.map((pr) => (
@@ -1538,6 +1572,95 @@ const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink
 };
 
 /**
+ * THE WIDTH AT WHICH A PULL REQUEST ROW HAS TWO SIDES.
+ *
+ * WRITTEN OUT AS `356` IN EVERY CLASS BELOW, and this constant is what a test
+ * reads rather than what the markup interpolates -- the same bargain
+ * `AGENT_SPLIT_PX` makes and for the same reason: Tailwind finds classes by
+ * scanning source TEXT for complete strings, so `@min-[${PR_SPLIT_PX}px]:…`
+ * is not a string it can find and the rule would simply never be generated.
+ * The row would then be one column at every width, silently, which is the
+ * exact shape this repo has already shipped once.
+ *
+ * A CONTAINER QUERY, NOT A VIEWPORT ONE. The detail pane is resizable between
+ * `DETAIL_MIN` (320) and `DETAIL_MAX` (520), so a desktop pane can be
+ * NARROWER than a phone screen. Asking the viewport would put two columns in
+ * a 320px pane and one column on a 390px phone -- both backwards.
+ *
+ * 356 IS MEASURED, NOT CHOSEN. The status rail is `PR_STATUS_PX` wide because
+ * that is what its widest natural line needs, and the split's gap takes 12
+ * more. What is left for identity at 356 is 176px, less the check dot's 6 and
+ * its 8px gap: 162px of title. Below that a title stops being a title and
+ * becomes two words and an ellipsis, so below that the two sides STACK
+ * instead of crushing each other. Measured against the real paint in
+ * `e2e/prs-tab-shots.mjs`, which walks the row's own container across the
+ * seam and asserts where it actually falls -- a class that was merely TYPED
+ * proves nothing about what paints.
+ *
+ * WHAT IT MEANS IN PRACTICE: vam's default pane and its widest both split;
+ * the narrowest legal pane (`DETAIL_MIN`, 320) and the 390px phone both
+ * stack. The phone landing on the stacked side is not a compromise -- a 390px
+ * screen has no room for two columns of eleven fields, and the one thing
+ * worse than a row that stacks is a row that clips.
+ */
+export const PR_SPLIT_PX = 356;
+
+/**
+ * HOW WIDE THE STATUS RAIL IS above the split, typed as `w-[168px]` below for
+ * the reason `PR_SPLIT_PX` gives.
+ *
+ * 168 IS THE WIDEST NATURAL LINE THE RAIL HOLDS, measured rather than
+ * rounded: `changes requested` is the longest phrase any status field draws,
+ * and `Delete branch` the wider of the two controls. A rail narrower than
+ * either would wrap a two-word phrase onto two lines on every row that has
+ * one; a wider one takes space out of the title for nothing, because no
+ * status line uses it.
+ *
+ * FIXED RATHER THAN CONTENT-SIZED on purpose. The whole gain of a right rail
+ * is that the words line up DOWN the list -- "which of these is ready" is one
+ * vertical scan. A rail sized to each row's own content would start at a
+ * different x on every row and give that back.
+ */
+export const PR_STATUS_PX = 168;
+
+/**
+ * THE TWO HALVES OF A PULL REQUEST ACTION BUTTON: the box a finger hits, and
+ * the box that is painted.
+ *
+ * THEY ARE NOT THE SAME BOX, and the operator's two reports are what say so.
+ * "The action buttons need different colours" came first; "bigger" came next.
+ * The old chip was `px-2 py-0.5 text-meta` -- 22px tall on an 11px type step,
+ * which is the scale's own FLOOR and is documented there as "chrome
+ * ANNOTATING what is being read", never a control. A control that offers to
+ * merge somebody's pull request should not be drawn in the size reserved for
+ * a timestamp.
+ *
+ * SO THE PAINT IS 30px AND `--text-control`, which is the size this app's
+ * phone chrome already paints (`.vam-phone .vam-tap > [data-tap-skin]`), and
+ * `px-3` rather than `px-2` so the word has room either side of it. Nothing
+ * here is a new number: 30 and the 8px radius are `styles.css`'s own, argued
+ * at length where they were chosen.
+ *
+ * AND THE HIT IS 44 ON A PHONE, through `vam-tap` -- which is this repo's
+ * OPT-IN, per control, and deliberately not a net cast from the stylesheet
+ * over `[data-phone-shell] button` (that was tried once and burst a heading
+ * row). `data-tap-pill` is the second half: the shared skin rule pins every
+ * skin to a 30x30 SQUARE, correct for the icon skins it was written for and
+ * wrong for a skin holding a WORD -- "Delete branch" clamped to 30px wide
+ * would spill its own label past the box it is painted in, which a
+ * `getBoundingClientRect` check asking only "is it AT LEAST 44?" stays green
+ * through. `e2e/prs-tab-shots.mjs` measures BOTH: the hit box clears 44, and
+ * the label fits inside its own skin.
+ *
+ * THE COLOURS ARE NOT HERE. Each control names its own, because green, grey
+ * and red are the whole point of the pair being distinguishable and a shared
+ * string is where that distinction would quietly come back.
+ */
+const PR_ACTION_HIT = 'vam-tap flex flex-none items-center justify-center rounded-[8px]';
+const PR_ACTION_SKIN =
+  'flex h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border px-3 text-control';
+
+/**
  * ONE PULL REQUEST, drawn.
  *
  * ITS OWN COMPONENT because the row grew from four facts to fifteen when the
@@ -1556,11 +1679,31 @@ const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink
  * rather than children -- a button inside a button is invalid markup and, in
  * practice, one click that fires both.
  *
- * THE METADATA WRAPS. Measured against the phone (`e2e/playwright.phone`) and
- * the narrowest legal pane: at 390px the diff, the branches, the author and
- * the labels cannot share one line, so the row is `flex-wrap` with a small
- * gap rather than a fixed grid -- a row that clipped would hide the one field
- * the operator opened this tab to read.
+ * TWO SIDES: WHAT IT IS, AND WHAT STATE IT IS IN. The operator's ask on
+ * 2026-09-19 was to separate the information and split it left and right, and
+ * the seam the fields fall either side of is that question. IDENTITY is what
+ * does not change while the pull request is open -- its title, its number,
+ * the branches it moves between, who wrote it, what it is labelled -- and it
+ * goes LEFT, where reading starts. STATUS is everything that can be different
+ * on the next poll -- the state word, the checks, the diff, the review, a
+ * conflict, how long ago it moved -- and it goes RIGHT, right-aligned into
+ * its own `PR_STATUS_REM` column, with the two controls that act on it
+ * beneath. Scanning a list for "which of these is ready" is then one column
+ * of aligned words rather than fifteen facts to read past.
+ *
+ * THE CHECK DOT STAYS LEFT and is the one status fact that does. It is 6px of
+ * colour on the title's own line: it is what the eye runs DOWN the list on,
+ * and moved to the right rail it would be a coloured speck at the end of a
+ * paragraph. Its WORDS ("checks pass") went right with the rest of the
+ * status, so the fact is in both places for the two different ways it is
+ * read.
+ *
+ * THE METADATA STILL WRAPS, and both sides do it independently. Measured
+ * against the phone (`e2e/playwright.phone`) and the narrowest legal pane:
+ * below `PR_SPLIT_PX` the two sides STACK rather than crush each other, and
+ * within each side the fields wrap with a small gap rather than sit in a
+ * fixed grid -- a row that clipped would hide the one field the operator
+ * opened this tab to read.
  */
 function PullRequestRow({
   pr,
@@ -1596,81 +1739,67 @@ function PullRequestRow({
   const mayDeleteBranch =
     onAsk !== null && (pr.state === 'merged' || pr.state === 'closed') && headRef !== null;
 
+  /**
+   * WHETHER GITHUB HAS RULED THAT THIS CANNOT MERGE, and the whole point of
+   * this line is the comparison it does NOT make.
+   *
+   * `mergeable` has THREE values, not two. `'conflicting'` is GitHub saying
+   * it tried and the branches disagree. `'mergeable'` is GitHub saying it
+   * tried and they do not. `null` is GitHub not having tried -- it computes
+   * mergeability lazily and `UNKNOWN` is what MOST open pull requests carry,
+   * which the reader maps to `null` (`model.ts`). So `!== 'mergeable'` would
+   * grey the control on nearly every row the operator owns and refuse merges
+   * GitHub has no objection to at all. Only the literal `'conflicting'`
+   * counts, and `test/panels/DetailPanel.pr-detail.test.tsx` pins all three.
+   */
+  const conflicting = pr.mergeable === 'conflicting';
+
+  /**
+   * WHAT THE PULL REQUEST IS -- the left side. Nothing here changes while it
+   * is open, which is why it is the side that holds still.
+   */
   const identity = (
     <>
-      {/* Truncated, not shortened: the pane is a narrow column, and the whole
-          title stays in the DOM for anything that reads it. */}
-      <span data-pr-title className="block truncate text-left text-body text-ink">
+      {/* Truncated, not shortened: the pane is a narrow column and this one
+          is now narrower still. The whole title stays in the DOM for anything
+          that reads it, AND on `title=` for an eye -- a truncated name with
+          nowhere to read the rest is information the pane had and threw away,
+          which is the same bargain `data-pr-branches` makes below. */}
+      <span data-pr-title title={pr.title} className="block truncate text-left text-body text-ink">
         {pr.title}
       </span>
-      <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta">
-        <span data-pr-number className="font-mono text-ink-faint">
+      <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ink-faint">
+        <span data-pr-number className="flex-none font-mono">
           {`#${pr.number}`}
         </span>
-        <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
-          {pr.state}
-        </span>
-        <span className="truncate text-ink-faint">{CHECK_MARK[pr.checks].label}</span>
-        {pr.additions === null ? null : (
-          <span data-pr-additions className="font-mono text-done">
-            {`+${pr.additions}`}
-          </span>
-        )}
-        {pr.deletions === null ? null : (
-          <span data-pr-deletions className="font-mono text-danger">
-            {`−${pr.deletions}`}
-          </span>
-        )}
-        {pr.changedFiles === null ? null : (
-          <span data-pr-files className="text-ink-faint">
-            {`${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'}`}
-          </span>
-        )}
-        {pr.review === null ? null : (
-          <span data-pr-review className={PR_REVIEW[pr.review].ink}>
-            {PR_REVIEW[pr.review].label}
-          </span>
-        )}
-        {pr.mergeable === 'conflicting' ? (
-          <span data-pr-mergeable className="text-danger">
-            conflicts
-          </span>
-        ) : null}
-        {pr.updatedAt === null ? null : (
-          <span data-pr-updated className="text-ink-faint">
-            {relativeTime(pr.updatedAt, now)}
+        {pr.headRefName === null || pr.baseRefName === null ? null : (
+          /* HEAD then BASE: the order IS the sentence -- this branch into
+             that one. `min-w-0` + `truncate` so a long branch name cannot
+             push the row wider than the pane. */
+          <span
+            data-pr-branches
+            /* MEASURED at 390px: a real branch name truncates there, and a
+               truncated name with nowhere to read the rest is information
+               the pane had and threw away. The full pair lives on `title`,
+               which is the same bargain the repo heading above makes with
+               its directory path. */
+            title={`${pr.headRefName} → ${pr.baseRefName}`}
+            className="min-w-0 truncate font-mono"
+          >
+            {`${pr.headRefName} → ${pr.baseRefName}`}
           </span>
         )}
       </span>
-      {pr.headRefName === null && pr.baseRefName === null && pr.author === null ? null : (
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ink-faint">
-          {pr.headRefName === null || pr.baseRefName === null ? null : (
-            /* HEAD then BASE: the order IS the sentence -- this branch into
-               that one. `min-w-0` + `truncate` so a long branch name cannot
-               push the row wider than the pane. */
-            <span
-              data-pr-branches
-              /* MEASURED at 390px: a real branch name truncates there, and a
-                 truncated name with nowhere to read the rest is information
-                 the pane had and threw away. The full pair lives on `title`,
-                 which is the same bargain the repo heading above makes with
-                 its directory path. */
-              title={`${pr.headRefName} → ${pr.baseRefName}`}
-              className="min-w-0 truncate font-mono"
-            >
-              {`${pr.headRefName} → ${pr.baseRefName}`}
-            </span>
+      {pr.author === null && pr.labels.length === 0 ? null : (
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-meta">
+          {pr.author === null ? null : (
+            <span data-pr-author className="text-ink-faint">{`@${pr.author}`}</span>
           )}
-          {pr.author === null ? null : <span data-pr-author>{`@${pr.author}`}</span>}
-        </span>
-      )}
-      {pr.labels.length === 0 ? null : (
-        <span className="mt-1 flex flex-wrap items-center gap-1">
           {pr.labels.map((label) => (
             <span
               key={label}
               data-pr-label
-              className="rounded-full border border-line px-1.5 py-px text-ink-dim text-meta"
+              className="rounded-full border border-line px-1.5 py-px text-ink-dim"
             >
               {label}
             </span>
@@ -1680,82 +1809,255 @@ function PullRequestRow({
     </>
   );
 
+  /**
+   * WHAT STATE IT IS IN -- the right side, in two lines and then its
+   * controls. VERDICTS first (words GitHub or a reviewer decided), NUMBERS
+   * second (how big and how fresh). Right-aligned above `PR_SPLIT_PX` so the
+   * column reads DOWN the list as one stack of aligned words, which is how a
+   * list is scanned for "which of these is ready".
+   */
+  const status = (
+    <>
+      <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-meta">
+        <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
+          {pr.state}
+        </span>
+        {/* The dot's own words. The dot stays left as the thing the eye runs
+            down; this is the same fact for the reader who is stopped on this
+            row, and it is queryable by name for the guard that measures it. */}
+        <span data-pr-checks-label className="text-ink-faint">
+          {CHECK_MARK[pr.checks].label}
+        </span>
+        {pr.review === null ? null : (
+          <span data-pr-review className={PR_REVIEW[pr.review].ink}>
+            {PR_REVIEW[pr.review].label}
+          </span>
+        )}
+        {conflicting ? (
+          <span data-pr-mergeable className="text-danger">
+            conflicts
+          </span>
+        ) : null}
+      </span>
+      {pr.additions === null &&
+      pr.deletions === null &&
+      pr.changedFiles === null &&
+      pr.updatedAt === null ? null : (
+        <span className="mt-0.5 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-meta">
+          {pr.additions === null ? null : (
+            <span data-pr-additions className="font-mono text-done">
+              {`+${pr.additions}`}
+            </span>
+          )}
+          {pr.deletions === null ? null : (
+            <span data-pr-deletions className="font-mono text-danger">
+              {`−${pr.deletions}`}
+            </span>
+          )}
+          {pr.changedFiles === null ? null : (
+            <span data-pr-files className="text-ink-faint">
+              {`${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'}`}
+            </span>
+          )}
+          {pr.updatedAt === null ? null : (
+            <span data-pr-updated className="text-ink-faint">
+              {relativeTime(pr.updatedAt, now)}
+            </span>
+          )}
+        </span>
+      )}
+      {mayMerge || mayDeleteBranch ? (
+        <span data-pr-actions className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+          {mayMerge && conflicting ? (
+            /**
+             * DISABLED, NOT ABSENT, and the difference is a sentence. GitHub
+             * has RULED here -- it computed the merge and the branches
+             * disagree -- so withdrawing the control would say "there is no
+             * action on this row", which is false: there is one, and it is
+             * blocked on a named, fixable cause. A greyed control says "there
+             * is an action here and it is not available now", and the note on
+             * it carries the reason. Same shape as `data-model-picker-shell`,
+             * and for the same two mechanical reasons: a disabled button
+             * takes NO pointer events and NO focus, so neither hover nor Tab
+             * would ever reach an explanation hung on the button itself.
+             */
+            <Note text="GitHub says this branch conflicts with its base. Merge or rebase the base branch into it and push, then this can go in.">
+              <span
+                data-pr-merge-note
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see the block comment above.
+                tabIndex={0}
+                className={`inline-flex flex-none rounded ${FOCUS_RING}`}
+              >
+                <button
+                  type="button"
+                  data-pr-merge
+                  data-pr-merge-state="conflicting"
+                  disabled
+                  aria-disabled="true"
+                  aria-label={`merge pull request ${pr.number} — GitHub says it conflicts with its base`}
+                  className={`${PR_ACTION_HIT} cursor-not-allowed`}
+                >
+                  {/* `text-ink-faint` on `border-line-strong` is the disabled
+                      ink this app already uses (`data-model-picker-state
+                      ="disabled"`, and `SettingsOverlay`'s steppers), and it
+                      is measured as PAINT in `e2e/prs-tab-shots.mjs`: the
+                      label must still clear 3:1 in both themes, because a
+                      greyed control an operator cannot read is a control that
+                      is not there. */}
+                  <span
+                    data-tap-skin
+                    data-tap-pill
+                    className={`${PR_ACTION_SKIN} border-line-strong text-ink-faint`}
+                  >
+                    Merge
+                  </span>
+                </button>
+              </span>
+            </Note>
+          ) : null}
+          {mayMerge && !conflicting ? (
+            <button
+              type="button"
+              data-pr-merge
+              data-pr-merge-state="ready"
+              aria-label={`merge pull request ${pr.number}`}
+              onClick={() =>
+                onAsk({
+                  verb: 'Merge',
+                  number: pr.number,
+                  title: pr.title,
+                  consequence:
+                    'This merges the pull request on GitHub, now, with your own credentials. vam cannot undo it, and nothing about your branch protection is overridden — if the repository refuses, GitHub’s own words are what you will see.',
+                  // The exact command, so the strategy is never a private
+                  // decision of this button's. See `ConfirmPrAction`.
+                  command: `gh pr merge ${pr.number} --squash`,
+                  action: { kind: 'merge', number: pr.number, method: 'squash' },
+                })
+              }
+              className={`${PR_ACTION_HIT} cursor-pointer ${FOCUS_RING}`}
+            >
+              {/* GREEN, at the operator's ask, and `--color-icon-green` rather
+                  than `--color-running`. The greens this palette holds are the
+                  running status and the icon tone, and `--color-running` is
+                  ALREADY ON THIS ROW three spans away: `PR_STATE_INK.open` is
+                  `text-running`. Painting the affirmative control with it
+                  would make the button and the word `open` the same colour and
+                  the same claim. The icon tones are named by TONE and make no
+                  claim at all (`styles.css`), which is exactly what a control
+                  wants. `--color-done` is not a candidate either -- in this
+                  palette it is BLUE, and it is on this row too, carrying
+                  `+additions`. Measured as paint in both themes by
+                  `e2e/prs-tab-shots.mjs`. */}
+              <span
+                data-tap-skin
+                data-tap-pill
+                className={`${PR_ACTION_SKIN} border-icon-green text-icon-green hover:bg-icon-green hover:text-ground`}
+              >
+                Merge
+              </span>
+            </button>
+          ) : null}
+          {mayDeleteBranch && headRef !== null ? (
+            <button
+              type="button"
+              data-pr-delete-branch
+              aria-label={`delete the remote branch ${headRef}`}
+              onClick={() =>
+                onAsk({
+                  verb: 'Delete branch',
+                  number: pr.number,
+                  title: pr.title,
+                  consequence: `This deletes the remote branch ${headRef} on GitHub. vam cannot undo it. Your local copy of the branch is untouched.`,
+                  command: `gh api --method DELETE repos/{owner}/{repo}/git/refs/heads/${headRef}`,
+                  action: { kind: 'delete-branch', branch: headRef },
+                })
+              }
+              className={`${PR_ACTION_HIT} cursor-pointer ${FOCUS_RING}`}
+            >
+              {/* RED AT REST, not only under a pointer. It wore `border-line
+                  … text-ink-dim` -- byte-identical to Merge -- and became red
+                  on hover, which is a warning an operator gets only once they
+                  have already reached for it. `--color-danger` is this app's
+                  ACTION red and says so in `styles.css`: "an action must not
+                  be mistakable for the status of the row beside it".
+
+                  RED WORD, NEUTRAL BOUNDARY, and that pairing is the answer to
+                  a real tension. Merge is the affirmative and must have the
+                  stronger presence; a full red outline on the destructive one
+                  would out-shout it, and a list of merged pull requests would
+                  be a column of red chips. So the ink carries the warning, the
+                  boundary stays `line-strong` like every other quiet control,
+                  and the full `bg-danger` commitment arrives on hover -- which
+                  is `ConfirmPrAction`'s own Go button, the other place in this
+                  feature where something irreversible is offered. */}
+              <span
+                data-tap-skin
+                data-tap-pill
+                className={`${PR_ACTION_SKIN} border-line-strong text-danger hover:border-danger hover:bg-danger hover:text-ground`}
+              >
+                Delete branch
+              </span>
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+    </>
+  );
+
   return (
     <li
       data-pr-row
       data-pr-state={pr.state}
       data-pr-checks={pr.checks}
-      className="flex items-start gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
+      /* THE QUERY CONTAINER IS THE ROW AND THE RESPONDING BOX IS INSIDE IT. A
+         container query does not apply to the element that DECLARES the
+         container, so `@container` and `@min-[356px]:flex-row` on one element
+         is a rule that can never fire -- the row would be one column at every
+         width and nothing on screen would say so. `AgentsTab` paid for that
+         lesson; this is the same two-box shape, measured the same way. */
+      className="@container rounded-[9px] border border-line bg-card px-3 py-2"
     >
-      <span
-        data-pr-checks-mark
-        title={CHECK_MARK[pr.checks].label}
-        /* `mt-[7px]` puts the dot on the title's own first line now that the
-           row is several lines tall -- centred against the whole row it would
-           drift down as fields appear. */
-        className={`mt-[7px] h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
-      />
-      <span className="flex min-w-0 flex-1 flex-col">
-        {clickable ? (
-          <button
-            type="button"
-            data-pr-open
-            title={url}
-            aria-label={`open pull request ${pr.number} on GitHub`}
-            onClick={() => onOpen(url)}
-            className={`flex min-w-0 cursor-pointer flex-col rounded text-left ${FOCUS_RING}`}
-          >
-            {identity}
-          </button>
-        ) : (
-          <span className="flex min-w-0 flex-col">{identity}</span>
-        )}
-        {mayMerge || mayDeleteBranch ? (
-          <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            {mayMerge ? (
-              <button
-                type="button"
-                data-pr-merge
-                onClick={() =>
-                  onAsk({
-                    verb: 'Merge',
-                    number: pr.number,
-                    title: pr.title,
-                    consequence:
-                      'This merges the pull request on GitHub, now, with your own credentials. vam cannot undo it, and nothing about your branch protection is overridden — if the repository refuses, GitHub’s own words are what you will see.',
-                    // The exact command, so the strategy is never a private
-                    // decision of this button's. See `ConfirmPrAction`.
-                    command: `gh pr merge ${pr.number} --squash`,
-                    action: { kind: 'merge', number: pr.number, method: 'squash' },
-                  })
-                }
-                className={`vam-hit-24 cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-line-loud hover:text-ink ${FOCUS_RING}`}
-              >
-                Merge
-              </button>
-            ) : null}
-            {mayDeleteBranch && headRef !== null ? (
-              <button
-                type="button"
-                data-pr-delete-branch
-                onClick={() =>
-                  onAsk({
-                    verb: 'Delete branch',
-                    number: pr.number,
-                    title: pr.title,
-                    consequence: `This deletes the remote branch ${headRef} on GitHub. vam cannot undo it. Your local copy of the branch is untouched.`,
-                    command: `gh api --method DELETE repos/{owner}/{repo}/git/refs/heads/${headRef}`,
-                    action: { kind: 'delete-branch', branch: headRef },
-                  })
-                }
-                className={`vam-hit-24 cursor-pointer rounded border border-line px-2 py-0.5 text-ink-dim text-meta hover:border-danger hover:text-danger ${FOCUS_RING}`}
-              >
-                Delete branch
-              </button>
-            ) : null}
-          </span>
-        ) : null}
-      </span>
+      <div
+        data-pr-split
+        className="flex flex-col gap-1.5 @min-[356px]:flex-row @min-[356px]:items-start @min-[356px]:gap-3"
+      >
+        <div data-pr-identity className="flex min-w-0 flex-1 items-start gap-2">
+          <span
+            data-pr-checks-mark
+            title={CHECK_MARK[pr.checks].label}
+            /* `mt-[7px]` puts the dot on the title's own first line now that the
+               row is several lines tall -- centred against the whole row it would
+               drift down as fields appear. */
+            className={`mt-[7px] h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
+          />
+          {clickable ? (
+            <button
+              type="button"
+              data-pr-open
+              title={url}
+              aria-label={`open pull request ${pr.number} on GitHub`}
+              onClick={() => onOpen(url)}
+              className={`flex min-w-0 flex-1 cursor-pointer flex-col rounded text-left ${FOCUS_RING}`}
+            >
+              {identity}
+            </button>
+          ) : (
+            <span className="flex min-w-0 flex-1 flex-col">{identity}</span>
+          )}
+        </div>
+        {/* `w-[168px]` IS `PR_STATUS_PX`, typed where Tailwind can read it and
+            named where a person can -- see `PR_SPLIT_PX` for why the number
+            cannot be interpolated. Below the split it is a full-width block
+            under the identity; above it, a fixed rail the identity flexes
+            against, so the status words line up down the list instead of
+            starting wherever the longest title happened to end. */}
+        <div
+          data-pr-status
+          className="flex min-w-0 flex-col @min-[356px]:w-[168px] @min-[356px]:flex-none"
+        >
+          {status}
+        </div>
+      </div>
     </li>
   );
 }
@@ -6523,6 +6825,12 @@ export function DetailPanel(props: DetailPanelProps) {
                and on the phone, where the list still draws and the controls
                simply do not. */
             bridge={globalThis.window?.api?.prs}
+            /* The floating view pill's downward reach, so the first row's
+               status rail is not painted over by it -- see the `<ul>` inside
+               the tab. Threaded like `FilesTab`'s below, and for the same
+               reason it is: a column at the pane's right edge cannot be
+               cleared by right-hand padding. */
+            reserveCornerHeight={cornerReserveHeight}
           />
         ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
         // see its own comment for why. This slot contributes nothing so the
@@ -7065,6 +7373,11 @@ export function DetailPanel(props: DetailPanelProps) {
         {files === true && (
           <FilesTab
             hidden={current !== 'Files'}
+            // The same claim `Alt+<digit>` is gated on, passed one layer
+            // further down: this tab answers `Mod-p` on the WINDOW, so every
+            // mounted instance hears every keystroke and only the pane holding
+            // the keyboard may act on one. See `FilesTab`'s own prop comment.
+            paneFocused={paneFocused}
             sessionId={entry?.session.id ?? null}
             list={globalThis.window?.api?.files?.list}
             read={globalThis.window?.api?.files?.read}

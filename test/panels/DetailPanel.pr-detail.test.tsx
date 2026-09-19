@@ -24,7 +24,11 @@
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
-import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import {
+  DetailPanel,
+  type DetailPanelProps,
+  PR_SPLIT_PX,
+} from '../../src/renderer/panels/DetailPanel.js';
 import type { PrAction, PrActionOutcome } from '../../src/shared/pr-action.js';
 import type { PrLinkOutcome } from '../../src/shared/pr-link.js';
 import { makePullRequest } from '../support/pull-request.js';
@@ -452,4 +456,214 @@ describe('a build with no bridge', () => {
     expect(q('[data-pr-merge]')).toBeNull();
     expect(q('[data-pr-delete-branch]')).toBeNull();
   });
+});
+
+/**
+ * THE ROW HAS TWO SIDES: WHAT THE PULL REQUEST IS, AND WHAT STATE IT IS IN.
+ *
+ * The operator's ask on 2026-09-19 was to separate the information and split
+ * it left and right. The split is not decoration: a fifteen-fact row stacked
+ * in one column makes the reader scan every line to find the one fact they
+ * came for. Identity goes LEFT -- title, number, branches, author, labels,
+ * the facts that do not change while the pull request is open. Status goes
+ * RIGHT -- state, checks, the diff, review, conflicts, freshness, and the two
+ * controls that act on them.
+ *
+ * WHAT IS ASSERTED HERE AND WHAT IS NOT. This environment performs NO LAYOUT,
+ * so "to the right" is unanswerable here and is measured as rectangles in
+ * `e2e/prs-tab-shots.mjs`. What IS answerable is which side each field is on
+ * -- the claim a later edit would silently break by moving one field back
+ * across the seam.
+ */
+describe('the two sides of a row', () => {
+  const inSide = (side: string, selector: string) => q(`[data-pr-${side}] ${selector}`) !== null;
+
+  it('puts what the pull request IS on the left', () => {
+    draw(list(FULL));
+    for (const selector of [
+      '[data-pr-title]',
+      '[data-pr-number]',
+      '[data-pr-branches]',
+      '[data-pr-author]',
+      '[data-pr-label]',
+    ]) {
+      expect(inSide('identity', selector), selector).toBe(true);
+      expect(inSide('status', selector), `${selector} must not be on the right`).toBe(false);
+    }
+  });
+
+  it('puts what STATE it is in on the right', () => {
+    draw(list(makePullRequest({ ...FULL, mergeable: 'conflicting' })));
+    for (const selector of [
+      '[data-pr-state-label]',
+      '[data-pr-checks-label]',
+      '[data-pr-additions]',
+      '[data-pr-deletions]',
+      '[data-pr-files]',
+      '[data-pr-review]',
+      '[data-pr-mergeable]',
+      '[data-pr-updated]',
+      '[data-pr-merge]',
+    ]) {
+      expect(inSide('status', selector), selector).toBe(true);
+      expect(inSide('identity', selector), `${selector} must not be on the left`).toBe(false);
+    }
+  });
+
+  /**
+   * TRUNCATED, WITH SOMEWHERE TO READ THE REST. Both sides are narrower than
+   * the old single column, so both of these can clip -- and a truncated name
+   * with no `title` behind it is information the pane HAD and threw away.
+   */
+  it('keeps the whole title and the whole branch pair reachable', () => {
+    draw(list(FULL));
+    expect(q('[data-pr-title]')?.className).toContain('truncate');
+    expect(q('[data-pr-title]')?.getAttribute('title')).toBe(FULL.title);
+    expect(q('[data-pr-branches]')?.className).toContain('truncate');
+    expect(q('[data-pr-branches]')?.getAttribute('title')).toBe('smith/atlas/tab-shell → main');
+  });
+
+  /** The split is a CONTAINER query: a 320px pane may be narrower than a phone. */
+  it('asks its own box how wide it is, not the viewport', () => {
+    draw(list(FULL));
+    expect(q('[data-pr-row]')?.className).toContain('@container');
+    expect(q('[data-pr-split]')?.className).toContain(`@min-[${PR_SPLIT_PX}px]:flex-row`);
+  });
+});
+
+/**
+ * MERGE IS GREEN, AND IT IS GREY ONLY WHEN GITHUB ACTUALLY SAID SO.
+ *
+ * `mergeable` HAS THREE VALUES AND THIS IS THE WHOLE TEST. GitHub computes
+ * mergeability lazily, so `UNKNOWN` -- read as `null` -- is what MOST rows
+ * carry: a button greyed on `null` would refuse a legitimate merge on nearly
+ * every pull request the operator owns. Only the literal `'conflicting'` may
+ * grey it, and when it does the control STAYS ON SCREEN and says why, because
+ * this repo's rule for a case GitHub has already ruled on is DISABLED, NOT
+ * ABSENT -- the same bargain `data-model-picker-state="disabled"` makes.
+ *
+ * The COLOUR is measured as paint in `e2e/prs-tab-shots.mjs`; what is pinned
+ * here is the state machine behind it.
+ */
+describe('the colour and the state of the merge control', () => {
+  const openPr = makePullRequest({
+    number: 411,
+    title: 'The prompt row',
+    state: 'open',
+    url: 'https://github.com/juzser/atlas/pull/411',
+    headRefName: 'feature/x',
+    baseRefName: 'main',
+  });
+
+  it('is offered and actionable when GitHub says it merges', () => {
+    draw(list(makePullRequest({ ...openPr, mergeable: 'mergeable' })));
+    const merge = q<HTMLButtonElement>('[data-pr-merge]');
+    expect(merge?.getAttribute('data-pr-merge-state')).toBe('ready');
+    expect(merge?.disabled).toBe(false);
+  });
+
+  /**
+   * THE ONE THAT MATTERS. `null` is "GitHub has not computed it", the ordinary
+   * state of an open pull request nobody has asked about yet.
+   */
+  it('is offered and actionable when GitHub has not said — which is most rows', () => {
+    draw(list(makePullRequest({ ...openPr, mergeable: null })));
+    const merge = q<HTMLButtonElement>('[data-pr-merge]');
+    expect(merge?.getAttribute('data-pr-merge-state')).toBe('ready');
+    expect(merge?.disabled).toBe(false);
+  });
+
+  it('is drawn grey and refuses, naming the reason, only on a real conflict', () => {
+    draw(list(makePullRequest({ ...openPr, mergeable: 'conflicting' })));
+    const merge = q<HTMLButtonElement>('[data-pr-merge]');
+    // THERE, not gone: a withdrawn control says "there is no action here",
+    // which is false -- there is one, blocked on a cause that has a name.
+    expect(merge).not.toBeNull();
+    expect(merge?.getAttribute('data-pr-merge-state')).toBe('conflicting');
+    expect(merge?.disabled).toBe(true);
+    expect(merge?.getAttribute('aria-disabled')).toBe('true');
+    // AND IT SAYS WHY, on a stop the keyboard can reach -- a disabled button
+    // takes no focus and no pointer events, so the note hangs on its wrapper.
+    const note = q('[data-pr-merge-note]');
+    expect(note?.getAttribute('data-note')).toMatch(/conflict/i);
+    expect(note?.getAttribute('tabindex')).toBe('0');
+  });
+
+  it('spawns no question when the greyed control is pressed anyway', () => {
+    draw(list(makePullRequest({ ...openPr, mergeable: 'conflicting' })));
+    act(() => {
+      q<HTMLButtonElement>('[data-pr-merge]')?.click();
+    });
+    expect(q('[data-confirm-pr-action]')).toBeNull();
+    expect(acted).toEqual([]);
+  });
+
+  /**
+   * TWO CONTROLS THAT DO OPPOSITE THINGS MUST NOT LOOK THE SAME AT REST. They
+   * were byte-identical until now -- `border-line … text-ink-dim` on both --
+   * and differed only on hover, which is a distinction a reader gets only
+   * after they have already reached for one of them.
+   */
+  it('draws Merge and Delete branch differently before either is touched', () => {
+    // The SKIN, not the hit box: the hit box is a 44px-on-a-phone envelope
+    // and carries no colour by design (`PR_ACTION_HIT`), so comparing those
+    // two strings would compare the one part of the pair that is shared.
+    draw(list(makePullRequest({ ...openPr, mergeable: 'mergeable' })));
+    const merge = q('[data-pr-merge] [data-tap-skin]')?.className ?? '';
+    cleanup();
+    draw(list(makePullRequest({ ...openPr, state: 'merged', headRefName: 'feature/x' })));
+    const del = q('[data-pr-delete-branch] [data-tap-skin]')?.className ?? '';
+    expect(merge).not.toBe('');
+    expect(del).not.toBe('');
+    // The REST ink of each, with every `hover:` and `focus` rule stripped, is
+    // what an untouched eye sees.
+    const rest = (cls: string) =>
+      cls
+        .split(/\s+/)
+        .filter((c) => !c.startsWith('hover:') && !c.startsWith('focus'))
+        .join(' ');
+    expect(rest(merge)).not.toBe(rest(del));
+  });
+
+  /**
+   * BIGGER, AND ON THE RIGHT -- the operator's second report on this row.
+   *
+   * The old chips were `px-2 py-0.5 text-meta`, and `--text-meta` is the type
+   * scale's own FLOOR, documented there as "chrome ANNOTATING what is being
+   * read" and "never the only thing in its container". A control that merges
+   * somebody's pull request was being drawn at the size of a timestamp.
+   *
+   * THE PAIR OF BOXES IS THE POINT. `vam-tap` is this repo's per-control
+   * opt-in to the phone's 44px floor, and `data-tap-pill` is the half that
+   * keeps a WORD from being clamped into the 30x30 square the shared skin
+   * rule pins every icon skin to -- the failure that a `getBoundingClientRect`
+   * check asking only "is it at least 44?" stays green through. Both boxes
+   * are then measured as real rectangles at 390px in `e2e/prs-tab-shots.mjs`.
+   */
+  for (const [what, pr, hook] of [
+    ['Merge', makePullRequest({ ...openPr, mergeable: 'mergeable' }), 'data-pr-merge'],
+    ['the greyed Merge', makePullRequest({ ...openPr, mergeable: 'conflicting' }), 'data-pr-merge'],
+    [
+      'Delete branch',
+      makePullRequest({ ...openPr, state: 'merged', headRefName: 'feature/x' }),
+      'data-pr-delete-branch',
+    ],
+  ] as const) {
+    it(`draws ${what} as a 44-on-a-phone hit box around a word-shaped skin`, () => {
+      draw(list(pr));
+      const button = q(`[${hook}]`);
+      expect(button?.classList.contains('vam-tap'), 'the phone 44px floor is opted into').toBe(
+        true,
+      );
+      const skin = q(`[${hook}] [data-tap-skin]`);
+      expect(skin, 'the paint comes inward from a skin').not.toBeNull();
+      expect(skin?.hasAttribute('data-tap-pill'), 'a skin holding a word is a pill').toBe(true);
+      // The size the operator asked to grow, and NOT the scale's floor.
+      expect(skin?.className).toContain('text-control');
+      expect(skin?.className).not.toContain('text-meta');
+      // And it is on the RIGHT: inside the status rail, never the identity.
+      expect(q(`[data-pr-status] [${hook}]`)).not.toBeNull();
+      expect(q(`[data-pr-identity] [${hook}]`)).toBeNull();
+    });
+  }
 });

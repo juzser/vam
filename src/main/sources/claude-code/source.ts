@@ -536,7 +536,21 @@ const NO_SURFACE = 'the CLI exposes no such operation on a session, so vam has n
 
 const DESCRIPTOR: SourceDescriptor = {
   id: 'claude-code',
-  label: 'Claude Code (local sessions, read-only)',
+  /*
+    "READ-ONLY" WAS TRUE ONCE AND HAS NOT BEEN FOR A LONG TIME, and the
+    operator read it off the status bar and reported it as wrong -- which it
+    was. This source TYPES prompts into a session's tmux pane (`reply.ts`),
+    answers a picker by navigating it (`terminal/answer.ts`), switches a
+    session's model through the CLI's own menu (`terminal/model-switch.ts`)
+    and, since the PRs tab grew actions, merges pull requests and deletes
+    remote branches with the operator's own credentials.
+
+    The capability table below is the honest account of what this source can
+    do, and it says `deliverPrompt: true` three lines down. A label that
+    contradicts the table under it is worse than no label: it is the one line
+    an operator reads when deciding whether vam can reach a session at all.
+  */
+  label: 'Claude Code',
   capabilities: {
     liveUpdates: false,
     // Both true, and they mean different things. `deliverPrompt` is the real
