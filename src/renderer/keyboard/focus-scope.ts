@@ -107,6 +107,49 @@ export function cursorModeAt(node: unknown): CursorMode {
 }
 
 /**
+ * IS SOMETHING ALREADY ANSWERING THE KEYS? Read off the DOM, like the mode.
+ *
+ * Asked by the acts that move the keyboard on VAM's own initiative rather than
+ * the operator's, so that they can decline: `Canvas.tsx`'s arrival of a new
+ * session, and `FilesTab.tsx`'s window-level `Mod-p`. Every other focus move
+ * is the direct answer to a key the operator just pressed, and none of them
+ * has any business asking.
+ *
+ * TWO CLAUSES BECAUSE THERE ARE TWO POPULATIONS, and neither contains the
+ * other. `cursorModeAt` covers the regions marked `data-insert-scope` — the
+ * composer, the question card, the terminal — which is Insert, and the reason
+ * they are marked. The tag test covers the boxes that are NOT marked and never
+ * should be: the command palette's filter, the search line, a rename field.
+ * They are overlays and inline edits rather than places the pane cursor lives,
+ * so they carry no scope; they still hold a caret in the middle of a word, and
+ * that is the whole question being asked. It is the same shape as the keydown
+ * handler's own `typing` guard, which reads the same two tag names for the
+ * same reason one layer down.
+ *
+ * A FOCUSED BUTTON IS NOT ANSWERING ANYTHING, deliberately. Measured in
+ * Chromium: a pointer press on a `<button>` leaves `document.activeElement` on
+ * that button. happy-dom's `.click()` moves no focus, so a rule phrased as
+ * "activeElement is not the body" would have declined on every mouse-driven
+ * creation there is — in production only, while every test written against it
+ * stayed green. `Canvas.new-session-focus.test.tsx` focuses the `+`
+ * explicitly for that reason. It is also what makes the Files tab's `Mod-p`
+ * reachable at all: the view-icon button that SWITCHED to that tab is what
+ * holds focus when the operator presses it.
+ *
+ * HERE RATHER THAN IN `Canvas.tsx`, where it was written, because it has a
+ * second caller now — and this module is already the one authority on who
+ * owns the keyboard. A second copy of this predicate is a second answer to
+ * the same question, which is the duplication this file exists to prevent.
+ */
+export function answeringKeys(): boolean {
+  const active = document.activeElement;
+  if (cursorModeAt(active) === 'insert') {
+    return true;
+  }
+  return active instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(active.tagName);
+}
+
+/**
  * Hand the keyboard back: blur `node` if it is inside an insert scope.
  *
  * Returns whether it released anything, so a caller can tell "I left Insert"

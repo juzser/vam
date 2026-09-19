@@ -84,7 +84,12 @@ import {
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
-import { cursorModeAt, focusInsertStop, releaseInsert } from '../keyboard/focus-scope.js';
+import {
+  answeringKeys,
+  cursorModeAt,
+  focusInsertStop,
+  releaseInsert,
+} from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
@@ -483,41 +488,6 @@ function drawnPaneTabs(
  */
 function paneElement(paneId: string): Element | null {
   return document.querySelector(`[data-split-pane="${CSS.escape(paneId)}"]`);
-}
-
-/**
- * IS SOMETHING ALREADY ANSWERING THE KEYS? Read off the DOM, like the mode.
- *
- * Asked by the one act in this file that moves the keyboard on VAM's
- * initiative rather than the operator's — the new session's arrival — so that
- * it can decline. Every other focus move here is the direct answer to a key
- * the operator just pressed, and none of them has any business asking.
- *
- * TWO CLAUSES BECAUSE THERE ARE TWO POPULATIONS, and neither contains the
- * other. `cursorModeAt` covers the regions marked `data-insert-scope` — the
- * composer, the question card, the terminal — which is Insert, and the reason
- * they are marked. The tag test covers the boxes that are NOT marked and never
- * should be: the command palette's filter, the search line, a rename field.
- * They are overlays and inline edits rather than places the pane cursor lives,
- * so they carry no scope; they still hold a caret in the middle of a word, and
- * that is the whole question being asked. It is the same shape as the keydown
- * handler's own `typing` guard, which reads the same two tag names for the
- * same reason one layer down.
- *
- * A FOCUSED BUTTON IS NOT ANSWERING ANYTHING, deliberately. Measured in
- * Chromium: a pointer press on a `<button>` leaves `document.activeElement` on
- * that button. happy-dom's `.click()` moves no focus, so a rule phrased as
- * "activeElement is not the body" would have declined on every mouse-driven
- * creation there is — in production only, while every test written against it
- * stayed green. `Canvas.new-session-focus.test.tsx` focuses the `+`
- * explicitly for that reason.
- */
-function answeringKeys(): boolean {
-  const active = document.activeElement;
-  if (cursorModeAt(active) === 'insert') {
-    return true;
-  }
-  return active instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(active.tagName);
 }
 
 /**
