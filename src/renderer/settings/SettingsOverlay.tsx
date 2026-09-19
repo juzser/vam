@@ -20,7 +20,11 @@
 
 import { Minus, Plus, RotateCcw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { PROVIDERS, resolveProvider } from '../../shared/providers.js';
+import {
+  CAN_CHOOSE_PROVIDER as CAN_CHOOSE_PROVIDER_SHARED,
+  PROVIDERS,
+  resolveProvider,
+} from '../../shared/providers.js';
 import { t } from '../i18n/strings.js';
 import {
   bindingClashes,
@@ -86,6 +90,8 @@ import {
   type TerminalTheme,
   terminalThemesFor,
 } from '../prefs/terminal-scheme.js';
+import type { SourceDeclines } from '../sources/port.js';
+import { RemoteLimits } from './RemoteLimits.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
 import { PHONE_SECTIONS, SECTIONS, type SectionId, shortcutSections } from './sections.js';
@@ -113,6 +119,16 @@ export type SettingsOverlayProps = {
    * fifth required prop through every other opener.
    */
   readonly initialSection?: SectionId;
+  /**
+   * The source's own words for every capability it lacks, drawn under the
+   * Remote section by `RemoteLimits`. Never this file's words: a sentence
+   * written here would go stale the first time a source gained a capability.
+   *
+   * OPTIONAL, and `{}` is the honest default rather than a convenience: a
+   * source that declines nothing and a caller that has not wired this are the
+   * same picture -- no list -- and every caller that HAS a source passes it.
+   */
+  readonly declines?: SourceDeclines;
 };
 
 const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
@@ -153,26 +169,18 @@ type Capturing = { readonly id: string; readonly slot: number; readonly scope: s
  * border, an outline reads as a thicker border rather than as a cursor.
  */
 /**
- * IS THERE A CHOICE HERE AT ALL? Read from the table rather than assumed, and
- * it is what decides whether this section OFFERS a provider or REPORTS one.
+ * IS THERE A CHOICE HERE AT ALL? It decides whether this section OFFERS a
+ * provider or REPORTS one -- and the answer is no longer derived here.
  *
- * `PROVIDERS` has one row and will until a second source exists in main
- * (`src/shared/providers.ts` argues why). A segmented picker over one row is a
- * control that cannot act: its single button is `aria-pressed` from the first
- * paint, it hovers, it takes the keyboard, and clicking it calls `onChange`
- * with a `Prefs` identical to the one it was handed. `RemotePanel`'s header, in
- * this same directory, states the rule it breaks — "A CONTROL THAT CANNOT ACT
- * IS NOT DRAWN AS ONE" — and `DetailPanel`'s provider button says the same
- * thing in the other spelling, "ABSENT, NOT DISABLED".
- *
- * So the picker is CONDITIONAL, not deleted. The day a second provider ships
- * this is `true` and the segmented control is back, unchanged, with no edit
- * here; `test/settings/provider-double.test.tsx` mocks that table and proves
- * it. Withdrawing the control does not withdraw the ANSWER: the label and the
- * command it runs are what the operator came to this section to read, and both
- * stay.
+ * It read `PROVIDERS.length > 1` in this file, which was right and was only
+ * half the rule: the composer's own provider picker (`DetailPanel.tsx`) asks
+ * the same question about the same table and did not ask it at all. One
+ * derivation, in `src/shared/providers.ts` beside the table, is what stops the
+ * two surfaces disagreeing about whether there is a choice to offer -- and
+ * that file carries the whole argument, including what each control costs
+ * while the answer is `false`.
  */
-const CAN_CHOOSE_PROVIDER = PROVIDERS.length > 1;
+const CAN_CHOOSE_PROVIDER = CAN_CHOOSE_PROVIDER_SHARED;
 
 /**
  * Why the list is one item long, said where the operator can read it rather
@@ -227,6 +235,7 @@ export function SettingsOverlay({
   onChange,
   onClose,
   initialSection,
+  declines = {},
 }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
@@ -1172,6 +1181,18 @@ export function SettingsOverlay({
                 copyText={window.api?.clipboard?.writeText}
                 active={section === 'remote'}
               />
+              {/* WHAT THIS CONNECTION CANNOT DO, which the phone's session
+                  screen used to spend 45px a session carrying. It sits UNDER
+                  the panel rather than above it: the panel answers "how do I
+                  reach this desktop", which is what the operator opened the
+                  section for, and this answers "and what will not work once I
+                  have" -- a fact worth having, and not the first thing. Drawn
+                  on the desktop too, where it costs a closed disclosure row
+                  and says the same true thing about whatever source is
+                  connected. */}
+              <div className="mt-4">
+                <RemoteLimits declines={declines} />
+              </div>
             </Panel>
 
             <Panel

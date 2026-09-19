@@ -283,13 +283,23 @@ describe('an open popover takes Escape before the agent does', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('closes the provider popover instead of interrupting, from inside the box', () => {
+  /**
+   * THE SECOND LAYER, AND IT IS THE MODEL MENU NOW.
+   *
+   * This case drove the PROVIDER popover, which is withdrawn while
+   * `PROVIDERS` has one row (`src/shared/providers.ts`) -- and re-pointing it
+   * is better than doubling the table here, because the model menu is a live
+   * third layer in the shipped app that this file had never driven at all.
+   * `DetailPanel.popover-dismiss.test.tsx` keeps the provider arm alive
+   * against a two-row double, so nothing is dropped.
+   */
+  it('closes the model menu instead of interrupting, from inside the box', () => {
     const send = bridge();
-    draw({}, { onSetDefaultProvider: () => {} });
-    fireEvent.click(q('[data-provider-picker-toggle]') as HTMLElement);
-    expect(q('[data-provider-picker]')).not.toBeNull();
+    draw({ vamControlled: true }, { delivers: true, terminal: true });
+    fireEvent.click(q('[data-model-picker]') as HTMLElement);
+    expect(q('[data-model-picker-menu]')).not.toBeNull();
     fireEvent.keyDown(box(), { key: 'Escape' });
-    expect(q('[data-provider-picker]')).toBeNull();
+    expect(q('[data-model-picker-menu]')).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 

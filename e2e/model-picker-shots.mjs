@@ -919,14 +919,46 @@ check(
   JSON.stringify({ spill: long?.spill, overlap: long?.overlap }),
 );
 check(
-  'it gives way by clipping itself instead, the way the CLI’s own line does',
-  long?.clipped === true,
-  JSON.stringify({ label: long?.label, clipped: long?.clipped }),
-);
-check(
   'and the whole name is still there for a reader, and one hover away for an eye',
   longName.button.includes('Sonnet 4.5'),
   JSON.stringify(longName.button),
+);
+
+/**
+ * IT STILL GIVES WAY BY CLIPPING, AND THE CASE HAD TO BE FORCED TO SEE IT.
+ *
+ * This check read `long.clipped === true` on `Sonnet 4.5` -- ten characters,
+ * the longest a real status line prints, and what burst this row before the
+ * label was allowed to shrink. The composer's provider picker has since been
+ * withdrawn (`CAN_CHOOSE_PROVIDER`, `src/shared/providers.ts`: one row is not
+ * a choice), which hands this row 44px plus a gap, and at 520px the ten
+ * characters now fit WHOLE. The old assertion would have gone on demanding a
+ * clip that is no longer needed -- a symptom held in place after its cause was
+ * removed.
+ *
+ * The property is the one above it: the row never bursts, whatever the name.
+ * The MECHANISM is still worth measuring, so the name is forced past anything
+ * a CLI prints, in the DOM and not in the source: the question is a layout
+ * one, and `[data-model-label]` wears `truncate`, so writing a longer string
+ * into it and re-reading the row is the direct measurement. React owns that
+ * node and will rewrite it on the next render, which is why nothing after this
+ * depends on the text.
+ */
+await page.locator('[data-model-label]').evaluate((el) => {
+  el.textContent = 'Claude Sonnet 4.5 (2026-02-19 preview build)';
+});
+await page.waitForTimeout(50);
+const forced = await readRow();
+console.log(`  forced over-long name at 520px: ${JSON.stringify(forced)}`);
+check(
+  'a name longer than any CLI prints still pushes nothing out of the row',
+  forced !== null && forced.overflow <= 0 && forced.outside.length === 0 && forced.spill <= 0,
+  JSON.stringify({ overflow: forced?.overflow, outside: forced?.outside, spill: forced?.spill }),
+);
+check(
+  'it gives way by clipping itself instead, the way the CLI’s own line does',
+  forced?.clipped === true,
+  JSON.stringify({ label: forced?.label, clipped: forced?.clipped }),
 );
 // AND A NAME THAT IS NONE OF THE FIVE TICKS NOTHING, which is the other half
 // of `Sonnet 4.5`: the picker offers Sonnet 5, and this session is not on it.

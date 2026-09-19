@@ -138,7 +138,12 @@ describe('the prompt row’s tooltips are short', () => {
     // having examined zero elements.
     render(<Harness />);
     const notes = notesInComposer();
-    expect(notes.length).toBeGreaterThanOrEqual(6);
+    // FIVE, AND IT WAS SIX. The provider picker is withdrawn while `PROVIDERS`
+    // has one row (`src/shared/providers.ts`), and its note went with the
+    // control -- a tooltip is not a thing to keep after the control it hangs
+    // on. The floor moves with the corpus rather than being left high enough
+    // to fail, and low enough to still catch the selector going dead.
+    expect(notes.length).toBeGreaterThanOrEqual(5);
     for (const note of notes) expect(note.text.length).toBeGreaterThan(0);
   });
 
@@ -202,8 +207,15 @@ describe('and shorter did not mean emptier', () => {
     expect(tip('[data-attach]')).toMatch(/uploads nothing/);
     expect(tip('[data-attach-image]')).toMatch(/uploads nothing/);
     expect(tip('[data-attach-image]')).toMatch(/this session’s own directory/);
-    expect(tip('[data-provider-picker-toggle]')).toMatch(/NEW sessions/);
-    expect(tip('[data-provider-picker-toggle]')).toMatch(/not this one/);
+    // THE PROVIDER PICKER'S TWO CLAIMS ARE NOT DROPPED, THE CONTROL IS. It is
+    // withdrawn while the table has one row (`CAN_CHOOSE_PROVIDER`), so there
+    // is nothing here to make a claim about; the note travels with the button
+    // and comes back with it, unchanged, the day a second provider ships. The
+    // rule this file holds -- a claim may be corrected, never quietly dropped
+    // -- is what makes the distinction worth writing down rather than just
+    // deleting two lines. `test/panels/DetailPanel.provider-double.test.tsx`
+    // is where both sentences are still asserted, against a two-row table.
+    expect(tip('[data-provider-picker-toggle]'), 'withdrawn with its control').toBeNull();
     // THE MODEL PICKER'S CLAIM CHANGED SIDES, and it is still a claim. It used
     // to disclose the CLI's own side effect -- "a full id also becomes the
     // default for new sessions" -- true while vam typed `/model <id>` for a

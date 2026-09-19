@@ -17,11 +17,17 @@
  * three can be present on one machine without either config's `webServer`
  * deciding it has found the other's server.
  *
- * `?demo=1` is the whole fixture: the built page's demo mode renders the
- * fixture with every write refused in the renderer. No live factory, no proxy,
- * no port to keep free, and the same four sessions every run -- a layout
- * assertion against a live factory would measure whatever that factory
- * happened to be doing.
+ * `?demo=1` is `phone-shell.pw.ts`'s whole fixture: the built page's demo mode
+ * renders the fixture with every write refused in the renderer. No live
+ * factory, no proxy, no port to keep free, and the same four sessions every
+ * run -- a layout assertion against a live factory would measure whatever that
+ * factory happened to be doing.
+ *
+ * `phone-core-loop.pw.ts` runs here too and DOES NOT use it, for the reason
+ * written at the top of that file: demo declines nothing, and the phone vam is
+ * used from is the web build over Tailscale Serve, where the remote server
+ * turns four capabilities off for every client. Both fixtures serve from the
+ * same build on the same port; what differs is only who answers `/api/*`.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,7 +38,7 @@ const repoRoot = path.resolve(here, '..');
 
 export default defineConfig({
   testDir: '.',
-  testMatch: 'phone-shell.pw.ts',
+  testMatch: ['phone-shell.pw.ts', 'phone-core-loop.pw.ts'],
   outputDir: path.join(here, 'test-results'),
   workers: 1,
   retries: 0,

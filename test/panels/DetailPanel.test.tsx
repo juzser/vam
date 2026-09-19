@@ -66,6 +66,7 @@ import {
   AgentWorkReaderProvider,
 } from '../../src/renderer/sources/agent-work-reader.js';
 import type { AgentWork } from '../../src/shared/agent-work.js';
+import { PROVIDERS } from '../../src/shared/providers.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 import { makePullRequest } from '../support/pull-request.js';
 
@@ -2067,57 +2068,38 @@ describe('the composer draws both controls, and both do something', () => {
  * `onSetDefaultProvider` undefined means the caller has nowhere to put a
  * change, so no button pretends otherwise.
  */
-describe('A15.4: the default-provider picker lives beside the model field', () => {
+describe('A15.4: the default-provider picker, and why it is not on screen', () => {
   it('is absent when the caller has no way to persist a change', () => {
     draw();
     expect(q('[data-provider-picker-toggle]')).toBeNull();
   });
 
-  it('names the current default with a real accessible name, immediately beside the model field', () => {
+  /**
+   * AND ABSENT EVEN WHEN IT COULD WRITE, because there is nothing to choose.
+   *
+   * `CAN_CHOOSE_PROVIDER` (`src/shared/providers.ts`) is `false` while the
+   * table has one row, and over one row this popover is a list with a single
+   * already-selected item: pressing it can only re-choose what is chosen.
+   * `SettingsOverlay` had withdrawn its own copy on that condition all along
+   * and this one had not -- one table, two readers, two different answers --
+   * so the derivation moved beside the table and both surfaces read it.
+   *
+   * WHAT IT COST WHILE IT WAS DRAWN, measured at 390px: 44px of a 335px tool
+   * row plus its 8px gap, for "the default provider for NEW sessions" on the
+   * screen whose whole job is replying to a session that already exists -- and
+   * the popover opened INSIDE the prompt box, 99x34 against a textarea
+   * spanning 727-767.
+   *
+   * THIS ASSERTION ALONE CANNOT TELL A CONDITIONAL CONTROL FROM A DELETED
+   * ONE. `DetailPanel.provider-double.test.tsx` is what tells them apart: it
+   * mocks a two-row table and every behaviour that used to be asserted here
+   * is asserted there, against a picker that has something to pick.
+   */
+  it('is absent with a two-way caller too, while the table has one row', () => {
     draw({ defaultProvider: 'claude-code', onSetDefaultProvider: () => {} });
-    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
-    const model = q<HTMLElement>('[data-model-request]');
-    expect(toggle?.tagName).toBe('BUTTON');
-    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
-    expect(model).not.toBeNull();
-    // "Beside": immediately before the model field in document order, not
-    // merely somewhere in the same pane.
-    expect(toggle !== null && model !== null).toBe(true);
-    if (toggle !== null && model !== null) {
-      expect(
-        Boolean(toggle.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING),
-      ).toBe(true);
-    }
-  });
-
-  it('opens a real listbox on click, marks the current provider, and closes once one is picked', () => {
-    const seen: string[] = [];
-    draw({
-      defaultProvider: 'claude-code',
-      onSetDefaultProvider: (id) => seen.push(id),
-    });
-    expect(q('[data-provider-picker]'), 'closed at rest').toBeNull();
-    act(() => {
-      q<HTMLButtonElement>('[data-provider-picker-toggle]')?.click();
-    });
-    const list = q<HTMLElement>('[data-provider-picker]');
-    expect(list?.getAttribute('role')).toBe('listbox');
-    const option = q<HTMLButtonElement>('[data-provider-option="claude-code"]');
-    expect(option?.getAttribute('role')).toBe('option');
-    expect(option?.getAttribute('aria-selected')).toBe('true');
-    act(() => {
-      option?.click();
-    });
-    expect(seen).toEqual(['claude-code']);
-    expect(q('[data-provider-picker]'), 'closes once a pick lands').toBeNull();
-  });
-
-  it('reads the default provider from a fresh vam the same way resolveProvider does', () => {
-    // No `defaultProvider` passed at all -- the honest "nothing chosen yet"
-    // case, which must not render a blank or a crash.
-    draw({ onSetDefaultProvider: () => {} });
-    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
-    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
+    expect(PROVIDERS).toHaveLength(1);
+    expect(q('[data-provider-picker-toggle]')).toBeNull();
+    expect(q('[data-provider-picker]')).toBeNull();
   });
 });
 

@@ -2779,6 +2779,69 @@ html {
  * screen. It wears its own hook for the same reason this rule was re-pointed
  * once already -- so nothing written for the desktop bar can collect it. */
 
+/*
+ * THE ONE SCREEN THE PHONE EXISTS FOR: a waiting session, with the keyboard up.
+ *
+ * WHAT WAS WRONG. `[data-question-bar]` is `flex-none`, so it takes its whole
+ * content height and cannot give any of it back. Measured at 390x844 against a
+ * remote-shaped source (`e2e/phone-core-loop.pw.ts`), the card wanted 444px --
+ * and 48 (app bar) + 444 + 140 (composer) is already 632 of the 464px a 380px
+ * keyboard leaves. The flexible band between them is the TRANSCRIPT, so it is
+ * the one that paid: it collapsed to 24px, the shell overflowed its own
+ * `100dvh`, and the engine scrolled the root to keep the focused box in view --
+ * which put the app bar at y=-103 and the whole of the agent's answer above the
+ * top edge. While you compose a reply, the thing you are replying to was not on
+ * screen at ANY of the three keyboard heights, in either keyboard model.
+ *
+ * WHY A CAP AND NOT A COLLAPSE, and the answer is that the collapse ALREADY
+ * EXISTS and is not the state this rule fires in. `QuestionCard` folds a
+ * picked step down to its marked line by itself (`data-question-collapsed`),
+ * so a card the operator has answered is already short and this cap never
+ * bites it. What the measurement above is of is the OTHER card: the only route
+ * from an open question to a box is `Chat about this`, which is the route taken
+ * when the operator has decided to TYPE rather than pick -- so the card under a
+ * keyboard characteristically carries NO mark, stands at its full 444px, and a
+ * collapse-to-mark has nothing to collapse to. A cap keeps the question, the
+ * step tabs and the first option on screen and leaves the rest a scroll away,
+ * which is what a reference wants to be while you write against it.
+ *
+ * WHERE 140 COMES FROM, so it can be re-derived rather than re-argued:
+ *
+ *     844   the shortest iPhone portrait viewport this shell targets
+ *   - 380   the TALLEST soft keyboard in the real 291-380 range
+ *   -  48   the app bar
+ *   - 138   the composer with an empty draft and the trim below, measured
+ *   - 138   the answer's share, which clears the 120px (six lines at
+ *           `--text-body--line-height`) the guard holds, with 18 to spare
+ *   = 140
+ *
+ * It is a constant and it is answerable as one: `e2e/phone-core-loop.pw.ts`
+ * asserts the OUTCOME -- pixels of the answer left on screen -- at all three
+ * keyboard heights in both keyboard models, so a wrong figure here reddens
+ * there with the margin printed.
+ *
+ * `overflow-y: auto` is the other half and is not decoration: capped without
+ * it, the options below the fold of the card would be unreachable rather than
+ * one scroll away. */
+[data-phone-shell][data-phone-keyboard='open'] [data-question-bar] {
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+/* AND THE COMPOSER'S BREATHING ROOM ABOVE THE BOX, which is the cheapest pixel
+ * on the scarcest screen vam draws.
+ *
+ * THE BOTTOM PADDING IS DELIBERATELY NOT TOUCHED, and the reason is worth
+ * writing down because the saving is tempting: with a SOFT keyboard up the home
+ * indicator really is behind it, so the `max(12px,
+ * env(safe-area-inset-bottom))` above looks like 34px of waste. But
+ * `data-phone-keyboard` is written from FOCUS, not from a keyboard -- a folio
+ * keyboard at 390px focuses this box and raises nothing -- so trimming it would
+ * put the composer under the indicator in exactly the case the rule exists for.
+ * `e2e/phone-shell.pw.ts` emulates that inset and says so. */
+[data-phone-shell][data-phone-keyboard='open'] [data-composer-bar] {
+  padding-top: 6px;
+}
 
 /*
  * The overlays, as bottom sheets.
