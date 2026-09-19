@@ -103,16 +103,14 @@ describe('the phone session screen', () => {
     // withdrawal reaches the topbar because both read `visibleTabs`.
     expect(document.querySelector('[data-view-tabs]')).toBeNull();
     expect(document.querySelectorAll('[data-view]')).toHaveLength(0);
-    expect(views().map((b) => b.getAttribute('data-phone-view'))).toEqual([
-      'response',
-      'prs',
-      'agents',
-    ]);
+    // Two, not three: `PRs` is withdrawn from the phone in `tabs.ts`, beside
+    // Terminal's and Files' withdrawals. See the describe below.
+    expect(views().map((b) => b.getAttribute('data-phone-view'))).toEqual(['response', 'agents']);
   });
 
   it('says which view is on by more than colour', () => {
     openSession();
-    expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false']);
+    expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
     // The second channel, which is a shape and not a hue: only the selected
     // control draws the underline mark. WCAG 1.4.1 -- this codebase has
     // shipped a Level A colour-alone failure before.
@@ -147,8 +145,11 @@ describe('the phone session screen', () => {
     act(() => {
       fireEvent.click(views()[1] as Element);
     });
-    expect(document.querySelector('[data-prs]'), 'the PRs view').not.toBeNull();
-    expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true', 'false']);
+    // WAS THE PRs VIEW, which the second icon used to be. PRs is off the phone
+    // now, so the second icon is Agents and this case asserts the same
+    // property against it: the tap reaches the pane, not only the row.
+    expect(document.querySelector('[data-agents]'), 'the Agents view').not.toBeNull();
+    expect(views().map((b) => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
     expect(views()[1]?.querySelector('[data-phone-view-mark]')).not.toBeNull();
   });
 

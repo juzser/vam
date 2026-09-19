@@ -5074,7 +5074,16 @@ export function DetailPanel(props: DetailPanelProps) {
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
-  const tabs = visibleTabs(terminal !== false, files === true);
+  //
+  // `phone` IS PASSED HERE, NOT ONLY IN THE PHONE SHELL'S ICON ROW, and that
+  // is what makes the PRs withdrawal structural rather than cosmetic. This
+  // panel is the component the phone RE-HOSTS, and the `current === 'PRs'`
+  // branch far below is the only thing that ever mounts the tab. Withdrawing
+  // the icon alone would leave that branch reachable by any route that names a
+  // tab without going through the row -- a remembered `prefs.detailTab`, a
+  // `tabRequest` from somewhere else, an `initialTab` off the store -- and
+  // `current`'s fallback is precisely what catches all of them at once.
+  const tabs = visibleTabs(terminal !== false, files === true, phone);
   const current = tabs.includes(tab) ? tab : 'Response';
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */

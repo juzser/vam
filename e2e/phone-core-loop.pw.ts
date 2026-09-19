@@ -771,9 +771,16 @@ test.describe('every control a finger meets, in every state', () => {
     }
     void popovers;
 
-    for (const view of ['agents', 'prs'] as const) {
+    // WAS `['agents', 'prs']`, with a `continue` for an icon that was not
+    // drawn. `prs` is off the phone now (`panels/tabs.ts`), so leaving it in
+    // this list would have been a SILENT SKIP -- a census quietly reporting a
+    // state it never opened, which is the exact failure the corpus check
+    // inside `record` exists to catch one level up. The withdrawal is asserted
+    // as an absence in its own describe below; here the list is simply the
+    // views a phone has, and the count is asserted rather than skipped past.
+    for (const view of ['agents'] as const) {
       const icon = page.locator(`[data-phone-shell] [data-phone-view="${view}"]`);
-      if ((await icon.count()) === 0) continue;
+      await expect(icon, `the ${view} icon, which this census must reach`).toHaveCount(1);
       await icon.tap();
       await expect(icon).toHaveAttribute('aria-pressed', 'true');
       await record(`session screen, ${view} view`);
@@ -843,6 +850,86 @@ test.describe('what the session screen no longer spends room on', () => {
     // "vam has refused nothing" and "this screen has no refusal channel" must
     // not be the same observation.
     await expect(page.locator('[data-phone-shell] [data-phone-status]')).toHaveCount(1);
+  });
+
+  /**
+   * THE PRs VIEW, CUT ENTIRELY -- and measured as "no route reaches it" rather
+   * than as "the icon is gone".
+   *
+   * WHY THIS FIXTURE AND NOT `?demo=1`. The stub descriptor above declares
+   * `pullRequests: true` and session `s1` carries a REAL open pull request
+   * (#421, mergeable, with a head branch). So every absence below is a
+   * withdrawal by the shell, not an empty list from a source with nothing to
+   * say -- which is the only way this test can fail for the right reason.
+   */
+  test('the PRs view is not on the phone, by any route', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: SHELL_H });
+    await stubRemote(page);
+    await openWaiting(page);
+
+    // THE ROW IS FOUND FIRST. An absence asserted against a selector that
+    // matches nothing is a green test about nothing.
+    const icons = page.locator('[data-phone-shell] [data-phone-views] [data-phone-view]');
+    await expect(icons, 'the view icon row').toHaveCount(2);
+    expect(await icons.evaluateAll((els) => els.map((el) => el.getAttribute('data-phone-view')))).toEqual(
+      ['response', 'agents'],
+    );
+    await expect(page.locator('[data-phone-shell] [data-phone-view="prs"]')).toHaveCount(0);
+
+    // NO PANE, AT ANY ICON. Checked after EVERY tap rather than once at the
+    // end, which would only ever measure the last view opened.
+    for (const view of ['response', 'agents', 'response'] as const) {
+      await page.locator(`[data-phone-shell] [data-phone-view="${view}"]`).tap();
+      await expect(page.locator(`[data-phone-shell] [data-phone-view="${view}"]`)).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expect(page.locator('[data-phone-shell] [data-prs]'), `after ${view}`).toHaveCount(0);
+      await expect(
+        page.locator('[data-phone-shell] [data-pr-merge]'),
+        `merge, after ${view}`,
+      ).toHaveCount(0);
+      await expect(
+        page.locator('[data-phone-shell] [data-pr-delete-branch]'),
+        `delete branch, after ${view}`,
+      ).toHaveCount(0);
+    }
+
+    // AND NO NAME OF A PULL REQUEST ANYWHERE ON THE SCREEN. The row hooks are
+    // asserted above; this catches a pane that mounted without them.
+    expect(await page.locator('[data-phone-shell]').innerText()).not.toContain('421');
+
+    // THE ROOM IT GAVE BACK, on the one bar a phone has: the row is two 44px
+    // hit boxes where it was three.
+    const widths = await icons.evaluateAll((els) =>
+      els.map((el) => Math.round(el.getBoundingClientRect().width)),
+    );
+    expect(widths, 'two 44px hit boxes, not three').toEqual([TOUCH_MIN, TOUCH_MIN]);
+    const row = await page.locator('[data-phone-shell] [data-phone-views]').boundingBox();
+    expect(Math.round(row?.width ?? 0), 'the view row on a 390px bar').toBe(2 * TOUCH_MIN);
+  });
+
+  /**
+   * THE OTHER HALF, AND THE REASON THE PARAGRAPH ABOVE IS NOT A TAUTOLOGY:
+   * the same page, the same served pull request, at a viewport wide enough for
+   * the desktop shell. The view IS there. The cut is the phone's, not the
+   * build's and not the source's, and the desktop is untouched.
+   */
+  test('and the desktop shell serving the same data still has it', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: SHELL_H });
+    await stubRemote(page);
+    await openWaiting(page);
+    await expect(page.locator('[data-phone-shell] [data-phone-view="prs"]')).toHaveCount(0);
+
+    await page.setViewportSize({ width: 1280, height: SHELL_H });
+    await expect(page.locator('[data-phone-shell]'), 'the phone shell steps aside').toHaveCount(0);
+    const prsTab = page.locator('[data-view-tabs] [data-view="prs"]');
+    await expect(prsTab, 'the desktop’s own PRs tab').toHaveCount(1);
+    await prsTab.click();
+    await expect(page.locator('[data-prs]'), 'and the pane it opens').toBeVisible();
+    await expect(page.locator('[data-pr-title]').first()).toContainText(
+      'a table of prose wraps into the pane',
+    );
   });
 
   test('the composer draws no provider picker while there is one provider', async ({ page }) => {

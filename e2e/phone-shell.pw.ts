@@ -498,8 +498,8 @@ test.describe('the phone shell at 390px', () => {
    * opening another lands on Agents, reading "this source does not report
    * which agents a session is running" about a session that was waiting for
    * an answer. On a desktop a remembered tab is cheap: every view is one
-   * click away in a labelled strip. Here they are four unlabelled glyphs and
-   * the recovery costs a tap on the screen whose whole budget is taps.
+   * click away in a labelled strip. Here they are unlabelled glyphs and the
+   * recovery costs a tap on the screen whose whole budget is taps.
    */
   test('opening another session lands on Response, not on the last view used', async ({ page }) => {
     await openDemo(page);
