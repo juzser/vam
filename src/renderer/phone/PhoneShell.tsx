@@ -63,6 +63,7 @@ import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
 import type { SourceDeclines } from '../sources/port.js';
+import { ConfirmCloseSession } from './ConfirmCloseSession.js';
 import { closeSession, isSessionEntry, openSession } from './history.js';
 
 /** 44x44 is WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure, not a taste. */
@@ -429,6 +430,16 @@ export function PhoneShell({
    * where it lands.
    */
   const [scrollToProjectId, setScrollToProjectId] = useState<string | null>(null);
+  /**
+   * The session the `×` is asking about, or `null` when it is asking about
+   * none. The id AND the title, because the question has to name the thing it
+   * would end and the entry it was raised from may have gone by the time it is
+   * answered.
+   */
+  const [confirmClose, setConfirmClose] = useState<{
+    readonly id: string;
+    readonly title: string;
+  } | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
@@ -615,19 +626,42 @@ export function PhoneShell({
             The list row's own `x` is revealed by hover and a finger has no
             hover, so on a phone it is not a control at all (styles.css) -- and
             it sat over the row's primary tap, which is the worst place for one.
-            Here it is visible, it is eight pixels clear of the back chevron at
-            the other end of the bar, and it goes through the same confirm the
-            `x` chord does. */}
+            Here it is visible, and it is at the other end of the bar from the
+            back chevron.
+
+            IT ASKS BEFORE IT ACTS, AND THIS COMMENT USED TO CLAIM IT ALREADY
+            DID -- "it goes through the same confirm the `x` chord does". There
+            was no such confirm on either path: `Canvas`'s `onSidebarClose`
+            calls `closeSession` straight, and `ConfirmForceClose` is only
+            offered AFTER a close has been refused. Driven at 390px against a
+            source that can close, one tap sent the write and opened no dialog
+            at all. What makes that an S2 rather than a nicety is the geometry
+            beside it: the Agents icon ends 8px before this control starts, so
+            a view switch and an unundoable stop are neighbours under one
+            finger. See `ConfirmCloseSession` for why the question is the
+            phone's and not the chord's. */}
         <button
           type="button"
           data-phone-close
           aria-label="close session"
-          onClick={() => sidebar.onClose(entry.session.id)}
+          onClick={() => setConfirmClose({ id: entry.session.id, title: entry.session.title })}
           className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[16px] text-ink-dim`}
         >
           ×
         </button>
       </header>
+
+      {confirmClose !== null && (
+        <ConfirmCloseSession
+          title={confirmClose.title}
+          onCancel={() => setConfirmClose(null)}
+          onConfirm={() => {
+            const target = confirmClose;
+            setConfirmClose(null);
+            sidebar.onClose(target.id);
+          }}
+        />
+      )}
 
       {/* The same refusal channel the list screen has. A rename or a close
           that is declined says so here, rather than into a status bar that is

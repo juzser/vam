@@ -2037,7 +2037,15 @@ function PullRequestRow({
               title={url}
               aria-label={`open pull request ${pr.number} on GitHub`}
               onClick={() => onOpen(url)}
-              className={`flex min-w-0 flex-1 cursor-pointer flex-col rounded text-left ${FOCUS_RING}`}
+              /* `vam-tap` for the phone's floor, and a note on what that is
+                 worth TODAY: `onOpen` is `null` without a desktop bridge and
+                 the browser build has none, so this control is not drawn on a
+                 phone at all -- verified at 390px against both `?demo=1` and a
+                 remote-shaped source, where the PRs view draws rows and no
+                 opener. The class is here so the day a phone gets a route to
+                 open a link the control is already a touch target, and the
+                 phone census cannot hold it to that until then. */
+              className={`vam-tap flex min-w-0 flex-1 cursor-pointer flex-col rounded text-left ${FOCUS_RING}`}
             >
               {identity}
             </button>
@@ -2355,7 +2363,12 @@ function AgentsTab({
         data-agents-toggle
         aria-pressed={showIdle}
         onClick={() => setShowIdle((open) => !open)}
-        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink"
+        /* `vam-tap` is the phone's 44px floor, opted into at the component the
+           way `styles.css` asks for a control the shell HOSTS. Agents is one
+           of the three views a phone can be in and the only control in it --
+           measured 74x20 there, half a touch target, and invisible to the
+           repo's census because that census only ever opened Response. */
+        className="vam-tap flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink"
       >
         {showIdle ? `hide ${idleCount} idle` : `show ${idleCount} idle`}
       </button>
@@ -3672,9 +3685,21 @@ function QuestionCard({
           >
             {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
               not printed at all when the key is not held -- a caption naming a
-              key that does nothing is the defect, not the absence of one. */}
+              key that does nothing is the defect, not the absence of one.
+              `data-inline-chord` PUTS IT IN THE FAMILY, and that is the rest of
+              the same rule. `styles.css` suppresses the chord hints on a phone,
+              and this hook was not one of them -- so the single card a phone
+              operator has to use went on printing `c` at 6x16, on a screen with
+              no `c` to press, through every release of that rule. Suppressed,
+              never deleted: the key still fires under a folio keyboard at
+              390px. `data-question-chat-key` stays beside it because it names
+              WHICH hint this is, which the family hook cannot. */}
             {keys.chat[0] !== undefined && (
-              <span data-question-chat-key className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+              <span
+                data-question-chat-key
+                data-inline-chord
+                className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}
+              >
                 {keys.chat[0]}
               </span>
             )}
@@ -3758,7 +3783,20 @@ function QuestionCard({
             ? // Still exactly true where there is no delivery: nothing here can
               // reach the tool call, and a control that implied otherwise would
               // be the lie this sentence was written against.
-              'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; type your choice in the box below.'
+              //
+              // IT USED TO END "type your choice in the box below", AND THERE
+              // IS NO BOX BELOW. `composerHidden` withdraws the composer for an
+              // unanswered question -- on the desktop as well as the phone, so
+              // this was never a phone bug -- and measured at 390x844 the card
+              // sat over `[data-composer-bar]` count 0 and `textarea` count 0.
+              // Picking an option does not draw one either. The one route from
+              // a card to a box is the card's own last row, so the sentence
+              // names THAT -- a control drawn just above it, which already says
+              // "it opens the box below" in its own caption. Drawing the
+              // composer instead was the other candidate and was measured and
+              // refused: it costs 140px on the one screen this whole change is
+              // about, and it would put two surfaces under one prompt.
+              'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; tap Chat about this to open the box and type your choice.'
             : // And still true where there is: picking sends nothing. Submit is
               // the thing that sends, and it sends the whole set at once, the
               // way the call was asked.
@@ -7889,15 +7927,34 @@ export function DetailPanel(props: DetailPanelProps) {
                 }}
                 // The ghost, in the placeholder's own faint ink: unmistakably
                 // not a draft yet, and naming the key that would make it one.
+                //
+                // NOT ON A PHONE, AND THE CAPTION IS ONLY HALF THE REASON. A
+                // touchscreen has no Tab, so `— Tab to use` named a key that is
+                // not there; worse, a placeholder holds ONE string, so printing
+                // the ghost cost the sentence that says what the box is for at
+                // the exact moment a phone operator has just opened it. Both
+                // halves are fixed in one place: the phone keeps the sentence,
+                // and the offer moves to `data-prompt-suggestion-use` in the
+                // tools row below -- a control a finger can take, in a row that
+                // is already 44px tall, so it costs no height at all. The
+                // attribute stays on both, because it is what says an offer is
+                // standing at all.
                 data-prompt-suggestion={promptSuggestion ?? undefined}
                 placeholder={
                   entry === null
                     ? 'Pick a session first'
-                    : promptSuggestion !== null
+                    : promptSuggestion !== null && !phone
                       ? `${promptSuggestion} — Tab to use`
                       : 'Reply to agent, answer with a number, or paste a plan…'
                 }
-                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
+                /* `vam-tap` IS THE TOUCH FLOOR, and the box you type in is a
+                   touch target like any other: measured at 390px it came back
+                   335x40, four pixels under the AAA figure the rest of this
+                   shell keeps -- and it is the one control on the screen that
+                   exists to be tapped. The class is `.vam-phone`-scoped
+                   (`styles.css`), so the desktop box is untouched, and
+                   `max-h-[120px]` still caps the grown height. */
+                className="vam-no-scrollbar vam-tap max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
                 aria-label="prompt to session"
               />
             </div>
@@ -7932,6 +7989,65 @@ export function DetailPanel(props: DetailPanelProps) {
               hook is what lets a test say "beside the model field" without a
               layout engine. */}
             <div data-prompt-tools className="flex items-center gap-2">
+              {/* THE OFFER, AS A CONTROL, because on a phone `Tab` is not one.
+                See the placeholder above for the whole rule. Three things
+                decide the shape:
+
+                  - IT IS THE PHONE'S ONLY ROUTE to `promptSuggestion`, so it
+                    is drawn exactly where the key is missing and nowhere else.
+                    The desktop keeps the caption and the key; a second control
+                    there would be a second way to do a thing that already has
+                    one.
+                  - IT SAYS WHAT IT WOULD WRITE. A pill rather than a glyph:
+                    "Use" alone is a control whose object is invisible once the
+                    ghost has left the placeholder. `data-tap-pill` is the
+                    existing opt-out of the 30x30 square for a skin holding
+                    TEXT (`styles.css`).
+                  - AND IT IS THE ROW'S FLEXIBLE ITEM, which is the part that
+                    was measured rather than reasoned. Every other control
+                    here is fixed at 44 or 65 and none of them will give way,
+                    so a pill sized to its own content pushes the LAST one --
+                    Record -- off the screen: driven at 390px with a
+                    multi-select's three marks joined, the row overflowed its
+                    335px and Record's right edge landed at 397. So this one
+                    shrinks and clips with an ellipsis, down to the 44px floor
+                    `vam-tap` gives it, and the whole label is the accessible
+                    name, which is the channel that cannot be clipped. `max-w`
+                    is the other end: an offer does not get to own half a row
+                    it is only suggesting something into.
+                  - IT IS WITHDRAWN THE MOMENT IT IS TAKEN, because
+                    `promptSuggestion` is null over a non-empty draft: the same
+                    trade the Tab binding already refuses -- an accept that
+                    could only overwrite what the operator has written. */}
+              {phone && promptSuggestion !== null && (
+                <button
+                  type="button"
+                  data-prompt-suggestion-use
+                  aria-label={`use the suggested reply: ${promptSuggestion}`}
+                  onClick={() => onDraftChange(promptSuggestion)}
+                  className="vam-tap flex min-w-0 shrink cursor-pointer items-center justify-center"
+                >
+                  <span
+                    aria-hidden="true"
+                    data-tap-skin
+                    data-tap-pill
+                    className="flex h-[30px] min-w-0 max-w-[132px] items-center gap-1 rounded-[8px] border border-line-strong bg-card px-1.5 text-control text-ink-quiet active:bg-line-strong"
+                  >
+                    {/* THE `truncate` IS ON THIS INNER SPAN AND NOT ON THE
+                      SKIN, and the difference is visible rather than
+                      pedantic: `text-overflow: ellipsis` does nothing on a
+                      FLEX container -- the text becomes an anonymous flex
+                      item and is clipped with no mark at all. Caught on a
+                      screenshot, not by a guard: the chip read `Server-sent
+                      eve`, which is not a shortened label, it is a wrong one.
+                      `data-model-label` two controls over already does it
+                      this way for the same reason. */}
+                    <span data-prompt-suggestion-label className="truncate">
+                      {promptSuggestion}
+                    </span>
+                  </span>
+                </button>
+              )}
               {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
@@ -8110,8 +8226,15 @@ export function DetailPanel(props: DetailPanelProps) {
                               onSetDefaultProvider(provider.id);
                               setOpenPopover(null);
                             }}
+                            /* `vam-tap`: a popover row is a touch target too,
+                               and this one measured 89x24 at 390px the first
+                               time a census ever opened the popover it lives
+                               in. Dormant while `PROVIDERS` has one row and
+                               this whole control is withdrawn -- and that is
+                               the point of putting it here now rather than
+                               with the row that brings it back. */
                             className={[
-                              'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                              'vam-tap flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
                               selected
                                 ? 'bg-line-strong text-ink'
                                 : 'text-ink-dim hover:bg-line-strong hover:text-ink',
@@ -8552,7 +8675,16 @@ export function DetailPanel(props: DetailPanelProps) {
                          `e2e/model-picker-shots.mjs`: the label must still
                          clear 3:1, because a greyed control an operator cannot
                          read is a control that is not there. */
-                      className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
+                      /* `vam-tap` LIKE ITS ENABLED TWIN twenty rows up, and
+                         for a reason the word "disabled" hides: this control
+                         is the one the PHONE draws. Over the remote server
+                         `terminal` is UNSERVED, so `modelControlState` lands
+                         on this row every time -- and it measured 65x24 at
+                         390px while the picker beside it measured 44,
+                         because only the picker wore the class. A tab stop
+                         with a tooltip is still something a finger aims at.
+                         `.vam-phone`-scoped, so the desktop keeps its 24. */
+                      className="vam-tap flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
                     >
                       model
                       <ChevronDown size={11} strokeWidth={2} />
