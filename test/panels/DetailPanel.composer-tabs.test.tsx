@@ -100,12 +100,20 @@ const open = (tab: Tab) => {
 };
 
 describe('the views that draw a prompt box', () => {
-  it('is every conversational view — and PRs is not one of them', () => {
+  it('is Response alone — and every other name was answered for, one at a time', () => {
     // The pin, stated once. Everything below derives from the predicate.
-    expect(TABS.filter(drawsComposer)).toEqual(['Response', 'Agents']);
+    expect(TABS.filter(drawsComposer)).toEqual(['Response']);
     expect(drawsComposer('PRs')).toBe(false);
     expect(drawsComposer('Terminal')).toBe(false);
     expect(drawsComposer('Files')).toBe(false);
+    expect(drawsComposer('Agents')).toBe(false);
+    // The property this file exists for, restated as an assertion rather than
+    // as a comment: EVERY name in `TABS` has been classified here, so a sixth
+    // one fails this line until somebody decides what it is. The two lists
+    // above are the whole of `TABS` between them.
+    expect([...TABS.filter(drawsComposer), 'PRs', 'Terminal', 'Files', 'Agents'].sort()).toEqual(
+      [...TABS].sort(),
+    );
   });
 
   it('paints a composer on exactly those views and on no other', () => {
@@ -135,6 +143,26 @@ describe('the views that draw a prompt box', () => {
     expect(q('[data-composer-bar]')).toBeNull();
     // And it comes back, so this is a fact about the view and not about a
     // composer that was torn down for good.
+    open('Response');
+    expect(q('[data-composer-bar]')).not.toBeNull();
+  });
+
+  /**
+   * AND THE SAME ON AGENTS — the operator's second report, in the same words
+   * as the first: "the agents view doesn't need the prompt input either."
+   *
+   * Its own case rather than a line in the loop above, for the reason the PRs
+   * case has one: the loop derives its expectation FROM `drawsComposer`, so it
+   * is green whatever that function says. Only a case that names the view and
+   * the outcome can fail when the function is wrong.
+   */
+  it('withdraws the box on Agents too, and the same session still prompts on Response', () => {
+    draw();
+    open('Agents');
+    expect(q('[data-composer-bar]')).toBeNull();
+    // The Agents view itself is still drawn -- this is a withdrawal of the box
+    // and not of the view.
+    expect(q('[data-agents]')).not.toBeNull();
     open('Response');
     expect(q('[data-composer-bar]')).not.toBeNull();
   });
