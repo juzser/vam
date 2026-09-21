@@ -206,6 +206,12 @@ const GUARDS = [
   'view-width-shots',
   'model-picker-shots',
   'terminal-scrollback-shots',
+  // THE SCROLLBACK SURVIVES A KEYSTROKE. The guard above proves the pane
+  // scrolls and the poll leaves it alone, against a stub that answers every
+  // read with the whole window whatever `mode` asked -- so the echo read's
+  // screen-only answer never reached its DOM, and "can't scroll" shipped past
+  // it green. This one's stub honours `mode` as main does, and it TYPES.
+  'terminal-echo-scroll-shots',
   'terminal-insert-shots',
   'prompt-popovers-shots',
   // The PRs tab, which `?demo=1` structurally cannot reach with content: the

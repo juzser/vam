@@ -525,10 +525,80 @@ export function atBottom(
  * Two modes ask the same question: the interval read and an echo read for an
  * operator who has scrolled up both want the whole window.
  *
- * It exists for `sameScreen`'s sake -- see the call site in `poll`.
+ * It exists for `composeScreen`'s sake -- see the call site in `poll`.
  */
 export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
   return mode === 'echo' ? 'screen' : 'window';
+}
+
+/**
+ * THE SCREEN AN ECHO READ ANSWERED WITH, PUT BACK ON TOP OF THE HISTORY THE
+ * OPERATOR CAN STILL SCROLL INTO.
+ *
+ * ── THE DEFECT THIS EXISTS FOR ───────────────────────────────────────────
+ * The operator's report, translated: "can't scroll in the terminal view". An
+ * `echo` read asks for the screen alone, which is the whole of its measured
+ * win (7,760 bytes and 5.55ms against 86,260 and 10.30ms, `shared/
+ * terminal.ts`), and that answer was being put on screen AS THE VIEW -- so
+ * the five hundred lines above it left the DOM with it. What follows is a
+ * chicken and egg, and it locks:
+ *
+ *   a pane holding one screen has `scrollHeight === clientHeight`, so there
+ *   is nothing to scroll; so `atLiveEnd()` is permanently true; so
+ *   `echo-scrollback` is never the mode asked for; and while typing
+ *   continues the echo sequence (one every `ECHO_MS`) outruns every poll's
+ *   full window, whose answer the sequence guard then drops as stale -- so
+ *   the history does not come back until the typing stops.
+ *
+ * MEASURED in Chromium against the real bundle: `scrollHeight` collapsed
+ * 10401 -> 714 against a `clientHeight` of 714 the moment typing began, and a
+ * wheel over the pane moved `scrollTop` by 0 for as long as it lasted.
+ *
+ * ── WHY SPLICING IS SOUND ────────────────────────────────────────────────
+ * The screen is a SUFFIX of the window -- `capture-pane` with no `-S` returns
+ * exactly the window's rows, and with `-S -500` the same rows with history
+ * above them (verified against tmux 3.7b, and the property the pin's own note
+ * already rested on). So the shown text's last `n` lines are the previous
+ * answer to the same question the echo has just re-answered, and replacing
+ * them is the same rectangle rather than a guess about one.
+ *
+ * THE CARET MOVES WITH IT, and that is not a detail: `PaneCursor.row` is an
+ * index into whichever text arrived with it (`shared/terminal.ts`), so a row
+ * counted from the top of a forty-line screen names a line of the SCROLLBACK
+ * once five hundred lines sit above it. A composition that carried it across
+ * unchanged would draw the block cursor somewhere in the history on every
+ * keystroke.
+ *
+ * ── WHAT IT REFUSES TO DO ────────────────────────────────────────────────
+ * It never invents history. A view that has drawn nothing, a failure on
+ * either side, an answer about a DIFFERENT SESSION, and a screen at least as
+ * long as the whole view all yield the answer untouched -- the last because
+ * a session with no scrollback yet really does return the same lines to both
+ * questions, and there is then nothing above the screen to keep.
+ *
+ * A pure function of its two answers and the mode, which is what lets it live
+ * inside a `setState` updater: React may call an updater twice, and anything
+ * that wrote a ref in there would be written twice for one answer.
+ */
+export function composeScreen(
+  shown: PaneView | null,
+  next: PaneView,
+  mode: PaneReadMode,
+): PaneView {
+  if (paneShape(mode) === 'window') return next;
+  if (next.kind !== 'ok' || shown === null || shown.kind !== 'ok') return next;
+  if (shown.name !== next.name) return next;
+  const drawn = shown.text.split('\n');
+  const screen = next.text.split('\n');
+  const above = drawn.length - screen.length;
+  if (above <= 0) return next;
+  return {
+    kind: 'ok',
+    name: next.name,
+    text: [...drawn.slice(0, above), ...screen].join('\n'),
+    cursor:
+      next.cursor.kind === 'at' ? { ...next.cursor, row: next.cursor.row + above } : next.cursor,
+  };
 }
 
 export function sameScreen(previous: PaneView | null, next: PaneView): boolean {
@@ -641,18 +711,21 @@ export function TerminalTab({
   /** The size tmux was last told, for the session it was told about. */
   const sent = useRef<PaneSize | null>(null);
   /**
-   * WHICH QUESTION THE VALUE ABOVE IS AN ANSWER TO (`paneShape`). `null` until
-   * one has been answered -- which is also what a cleared `view` is, so the
-   * two are reset together below.
+   * THERE IS NO `shownShape` REF HERE ANY MORE, and the absence is the fix:
+   * it recorded which question the drawn answer came from, so that the
+   * bail-out below never compared a screen-only answer against a windowed
+   * one -- two coordinate systems, since `PaneCursor.row` indexes whichever
+   * text arrived with it. `composeScreen` removes the mismatch at its source
+   * by putting every screen-shaped answer back into the shown answer's own
+   * coordinates before anything looks at it, so what reaches `sameScreen` is
+   * always two answers to one question and the guard has nothing left to do.
    */
-  const shownShape = useRef<'screen' | 'window' | null>(null);
   if (shownFor.current !== projectId) {
     shownFor.current = projectId;
     // The remembered size belongs to the session it was sent for. Keeping it
     // across a change of project would leave the next session unresized
     // whenever the two panes happen to be the same shape.
     sent.current = null;
-    shownShape.current = null;
     if (view !== null && read !== undefined) setView(null);
   }
 
@@ -738,22 +811,6 @@ export function TerminalTab({
   const poll = useCallback(
     (mode: PaneReadMode, mine: () => boolean) => {
       if (read === undefined || projectId === null) return;
-      /**
-       * WHAT SHAPE THE ANSWER ON SCREEN IS, read BEFORE the state updater runs
-       * and never inside it: React may call an updater twice, so a ref written
-       * in there would be written twice for one answer.
-       *
-       * IT IS PART OF THE COMPARISON BECAUSE THE TWO SHAPES ARE TWO
-       * COORDINATE SYSTEMS, not two sizes of the same one. A screen-only
-       * capture answers "the screen"; a `-S -500` capture answers "the screen
-       * and the 500 lines above it" -- and `PaneCursor.row` is an index into
-       * whichever text arrived with it, so the same caret is row 3 in one and
-       * row 503 in the other (`shared/terminal.ts`). A bail-out says "this
-       * answer is the one already on screen", and that sentence can only be
-       * true between two answers to the same question. Comparing across them
-       * would be asking whether two different questions got the same reply.
-       */
-      const asked = shownShape.current;
       read(projectId, rowId, mode)
         .then((next) => {
           // AN UNCHANGED SCREEN IS NOT A STATE CHANGE. Returning the state it
@@ -763,10 +820,18 @@ export function TerminalTab({
           // keeps no dependency on `view` (one would restart the interval
           // below on every read). See `sameScreen` for what it costs and
           // saves.
+          //
+          // COMPOSED FIRST, AND THAT ORDER IS THE WHOLE FIX. A screen-shaped
+          // answer is put back on top of the history already drawn
+          // (`composeScreen`) before it is either compared or shown, so the
+          // pane never holds one boxful with nothing to scroll -- and so the
+          // comparison below is always between two answers in one coordinate
+          // system, which is what it used to need a shape guard to be.
           if (!mine()) return;
-          const shape = paneShape(mode);
-          setView((shown) => (asked === shape && sameScreen(shown, next) ? shown : next));
-          shownShape.current = shape;
+          setView((shown) => {
+            const composed = composeScreen(shown, next, mode);
+            return sameScreen(shown, composed) ? shown : composed;
+          });
         })
         .catch((cause: unknown) => {
           // A rejected bridge call is vam not having asked. Reporting it as an
@@ -944,24 +1009,17 @@ export function TerminalTab({
    * from main; it is left undone rather than guessed at, and it is bounded by
    * the output rate of the pane being read.
    *
-   * AND WHY THE ECHO READ'S SHORTER ANSWER DOES NOT DISTURB IT. While somebody
+   * AND WHY THE ECHO READ'S SHORTER ANSWER DOES NOT REACH IT. While somebody
    * is typing at the live end, the answers alternate: ~50 lines from an echo
    * read, ~550 from the interval read behind it (`shared/terminal.ts`,
-   * `PaneReadMode`). The content height therefore changes several times a
-   * second -- and the operator cannot see it, for two reasons that are
-   * measured rather than hoped for. The screen is a byte-suffix of the window
-   * (verified against tmux 3.7b), so the rectangle on screen is the same
-   * either way; and a capture with no `-S` is exactly the window's rows, which
-   * `fitPane` has already made exactly the box's rows, so a screen-only view
-   * has nothing to scroll and this pin puts it at the bottom of itself.
-   *
-   * The residue, named because it is real: between a resize being observed and
-   * tmux being told, those two row counts differ, so a screen-only view can be
-   * scrollable by a sliver. An operator who scrolls into that sliver in the
-   * quarter-second before the next interval read gets put back at the live end
-   * by this pin. An echo read is only ever issued for a view that is AT the
-   * live end (`atLiveEnd`), so this is the only way in, and it costs one
-   * sliver of scroll during a resize while typing.
+   * `PaneReadMode`). The first cut let the shorter one become the whole view,
+   * on the argument that the rectangle on screen was the same either way --
+   * true, and beside the point: a view one boxful tall has nothing to scroll,
+   * so the operator could not leave the live end while typing, and could not
+   * therefore ever be asked `echo-scrollback` (`composeScreen` records the
+   * lock and the measurement). Now a screen-shaped answer is spliced onto the
+   * history before it is shown, so the content height does not move between
+   * the two kinds of read and this pin sees one steady document.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read here, it is read by the LAYOUT this measures -- the content height moves when the type does, and the remembered height has to move with it
   useLayoutEffect(() => {
