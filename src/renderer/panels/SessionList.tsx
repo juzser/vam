@@ -515,7 +515,11 @@ export type SessionListProps = {
   readonly onOriginFilters: (next: SessionFilters) => void;
   /** How many sessions each rule matches, over the UNFILTERED workspace. A
    * toggle that hid things without saying how many would be a disappearance. */
-  readonly hiddenCounts: { readonly agent: number; readonly unprompted: number };
+  readonly hiddenCounts: {
+    readonly agent: number;
+    readonly unprompted: number;
+    readonly ended: number;
+  };
   readonly renamingId: string | null;
   readonly renameDraft: string;
   readonly onRenameChange: (value: string) => void;
@@ -1196,7 +1200,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const applied = (key: keyof SessionFilters) =>
     originFilters[key] && !DEFAULT_SESSION_FILTERS[key] ? 1 : 0;
   const activeFilters =
-    (statusFilter === 'all' ? 0 : 1) + applied('hideAgentStarted') + applied('onlyPrompted');
+    (statusFilter === 'all' ? 0 : 1) +
+    applied('hideAgentStarted') +
+    applied('onlyPrompted') +
+    applied('hideEnded');
 
   /**
    * Whether ANY rule is narrowing the list, default or not — what the toggle's
@@ -1210,7 +1217,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * hidden session indistinguishable from one that does not exist.
    */
   const narrowing =
-    activeFilters > 0 || originFilters.hideAgentStarted || originFilters.onlyPrompted;
+    activeFilters > 0 ||
+    originFilters.hideAgentStarted ||
+    originFilters.onlyPrompted ||
+    originFilters.hideEnded;
 
   // Sized against the column when there is one. With no width the pane fills
   // its host, and the popover opens at its full 288 -- which still clears the
@@ -1750,6 +1760,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   hiddenCounts.unprompted,
                   DEFAULT_SESSION_FILTERS.onlyPrompted,
                 ],
+                // ON BY DEFAULT, and the count beside it is the whole reason a
+                // toggle was accepted in place of a hard removal: "the filter
+                // should get a toggle to show/hide those recent sessions".
+                // Turning it off is how a finished session is found again, and
+                // the row it brings back is the one that carries Reopen.
+                [
+                  'ended',
+                  'Hide ended sessions',
+                  originFilters.hideEnded,
+                  hiddenCounts.ended,
+                  DEFAULT_SESSION_FILTERS.hideEnded,
+                ],
               ] as const
             ).map(([key, label, on, hides, byDefault]) => (
               <button
@@ -1761,7 +1783,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   onOriginFilters(
                     key === 'agent'
                       ? { ...originFilters, hideAgentStarted: !on }
-                      : { ...originFilters, onlyPrompted: !on },
+                      : key === 'ended'
+                        ? { ...originFilters, hideEnded: !on }
+                        : { ...originFilters, onlyPrompted: !on },
                   )
                 }
                 className={[

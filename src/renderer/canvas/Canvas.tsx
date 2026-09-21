@@ -71,7 +71,13 @@ import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
-import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
+import {
+  isAgentStarted,
+  isEnded,
+  isHiddenByEndedFilter,
+  isHiddenByOriginFilters,
+  isUnprompted,
+} from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
@@ -2750,7 +2756,19 @@ function CanvasInner({
     // — see `session-filter.ts`. A session whose timeline has not arrived is
     // `unknown` and survives both, because hiding what you did not check is
     // how a filter loses work rather than narrowing it.
-    return byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
+    const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
+    // AND THE SAME DISCIPLINE FOR ENDINGS. `isEnded` is the `done` status and
+    // nothing else, which is a fact a source has positively reported: the
+    // Codex source reads it off a writer lock it probed, and says `idle`
+    // rather than `done` wherever it could not look.
+    //
+    // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
+    // to `CommandPalette` below, so the palette's groups are drawn from the
+    // list this line has already narrowed — which is why ended sessions are a
+    // filter here and not the third palette group
+    // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
+    // by this array and so would be empty in exactly the state it exists for.
+    return byOrigin.filter((e) => !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter));
   }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs.filters]);
 
   /**
@@ -2765,6 +2783,7 @@ function CanvasInner({
     () => ({
       agent: allEntries.filter((e) => isAgentStarted(e.session)).length,
       unprompted: allEntries.filter((e) => isUnprompted(e.session)).length,
+      ended: allEntries.filter((e) => isEnded(e.session)).length,
     }),
     [allEntries],
   );

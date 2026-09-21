@@ -62,7 +62,6 @@ describe('readThreads', () => {
     path: DB,
     exists: () => true,
     sidecars: () => ({ shm: false, walBytes: 0 }),
-    now: 1_700_000_000_000,
   };
 
   it('declines by version when the store is not there, never with an empty list', async () => {
@@ -156,19 +155,32 @@ describe('classifyStoreFailure', () => {
 });
 
 describe('threadsSql', () => {
-  it('interpolates nothing but the two numbers vam computed', () => {
-    const sql = threadsSql(1_700_000_000_000, 12);
-    expect(sql).toContain('1700000000000');
+  it('interpolates nothing but the one number vam computed', () => {
+    const sql = threadsSql(12);
     expect(sql).toContain('LIMIT 12');
     // Codex's own visibility rule, which its `idx_threads_visible_*` indexes
     // are built on -- not vam's invention.
     expect(sql).toContain("archived = 0 AND preview <> ''");
   });
 
+  /**
+   * THE RECENCY WINDOW IS GONE, and its absence is asserted rather than left
+   * to be noticed. It was a stand-in for liveness from before liveness could
+   * be read (`liveness.ts`); a thread is drawn now because a Codex holds its
+   * writer lock, and no clause about the clock can answer that. A window
+   * silently reappearing here would quietly hide live threads all over again.
+   */
+  it('no longer filters by the clock at all', () => {
+    expect(threadsSql(12)).not.toContain('recency_at_ms >=');
+  });
+
+  it('still orders by recency, which is what breaks the cap’s tie', () => {
+    expect(threadsSql(12)).toContain('ORDER BY recency_at_ms DESC');
+  });
+
   it('cannot be made to carry a fractional or negative bound', () => {
-    const sql = threadsSql(-5, 0.5);
-    expect(sql).toContain('recency_at_ms >= 0');
-    expect(sql).toContain('LIMIT 1');
+    expect(threadsSql(0.5)).toContain('LIMIT 1');
+    expect(threadsSql(-5)).toContain('LIMIT 1');
   });
 });
 

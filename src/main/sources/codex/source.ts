@@ -19,20 +19,44 @@
  * attached, and the words are the whole explanation an operator gets. They are
  * not polish here.
  *
- * LIVENESS IS THE ONE VAM REFUSES TO GUESS. `threads` has no `status` and no
- * pid column; `~/.codex/thread-writer-locks/<uuid>.lock` files exist and were
- * STALE for threads long finished. So every Codex row is drawn without a live
- * mark, `status` is the neutral one, `runningAgents` is 0, and the decline
- * says vam cannot tell. `a-second-source.md` §Stage 3 is where that changes,
- * after the experiment that says what liveness can be read from.
+ * ── STAGE 3: LIVENESS IS READ NOW, AND THE RECENCY WINDOW IS GONE ─────────
  *
- * `status: 'idle'` IS A CHOICE BETWEEN FIVE WRONG WORDS AND IT IS THE LEAST
- * WRONG. `SessionStatus` has no "vam cannot tell" arm. `running` would claim
- * the thing this source refuses to guess; `done` would claim a thread ENDED,
- * which vam equally cannot see; `waiting` paints amber, and an amber row per
- * thread is exactly the false alarm `model.ts`'s own header records `idle`
- * being invented to stop. `idle` paints neutral, and neutral is the state of
- * vam's knowledge.
+ * This source used to say "liveness is the one vam refuses to guess", draw
+ * every thread of the last seven days, and paint all of them neutral. The
+ * experiment `a-second-source.md` §Experiments asked for has since run, and
+ * `liveness.ts` carries what it measured: a live Codex holds an exclusive
+ * `flock` on `~/.codex/thread-writer-locks/<uuid>.lock`, while the stale file
+ * a killed one leaves behind probes free. So vam can see which threads are
+ * running, and §Stage 3 is built rather than deferred.
+ *
+ * THE SEVEN-DAY WINDOW WAS NEVER A WINDOW. It was a stand-in for liveness,
+ * chosen when liveness was believed unreadable, and a bad one: measured on the
+ * operator's own machine it drew 12 rows of which ONE was live, minted 8
+ * project rows to hold that one session, and sorted the live row THIRD because
+ * `recency_at_ms DESC` is the only order the store offers. That is the
+ * operator's complaint -- "it makes managing active sessions harder" -- and
+ * the proxy is what caused it. A row is drawn now because it is live; the
+ * ended ones are kept behind the sidebar's own filter toggle.
+ *
+ * ── WHAT A ROW'S STATUS CLAIMS, AND WHAT IT STILL DOES NOT ────────────────
+ *
+ * `idle` for a live thread is no longer PR 429's least-wrong neutral; it is
+ * `SessionStatus`'s own definition -- "alive, ... simply between turns" -- and
+ * vam has now measured the first half of it. `done` for a thread whose lock
+ * nobody holds is that same union's "a job that ENDED", equally measured. The
+ * one word of `idle`'s definition this source does not earn is "attached,
+ * stoppable", and it does not pretend to: `terminal` and `closeSession` are
+ * both withdrawn with this source's own sentence on them.
+ *
+ * What the lock does NOT say is whether a live thread is mid-turn or waiting
+ * on the operator, so `running` and `waiting` remain guesses and remain
+ * unmade. An amber row per thread is the false alarm `model.ts`'s own header
+ * records `idle` being invented to stop.
+ *
+ * `unknown` STAYS A REAL ANSWER. Where the probe cannot run -- a platform
+ * without the flag, a lock directory vam may not read -- every row is unknown,
+ * and this source draws exactly the list it drew before Stage 3 rather than an
+ * empty canvas, which would read as "you have no Codex sessions".
  *
  * ── NEVER AN EMPTY LIST FOR A STORE VAM COULD NOT READ ────────────────────
  *
@@ -56,21 +80,85 @@ import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { fileTranscriptSource } from '../claude-code/window.js';
 import type { MainSource } from '../source.js';
+import { type Liveness, livenessOf, type ProbeLock, probeLockViaOpen } from './liveness.js';
 import { queueMessage, type RunCodex, runCodexViaCli } from './queue.js';
 import { readRolloutTail } from './rollout.js';
 import {
   codexHome,
-  MAX_THREADS,
   type RunSqlite,
   readSidecars,
   readThreads,
   runSqliteViaCli,
+  STORE_SCAN_LIMIT,
   type StoreRead,
   stateDbPath,
   type ThreadRow,
 } from './store.js';
 
 export const CODEX_SOURCE_ID = 'codex';
+
+/**
+ * HOW MANY ENDED THREADS THE SIDEBAR WILL HOLD once the operator asks to see
+ * them, and the number the source's label discloses.
+ *
+ * It caps the ENDED rows only. A live thread is a Codex process on this
+ * machine, there are never many, and there is no honest rule for which of the
+ * sessions that may need you to drop -- so live rows are never capped.
+ */
+export const ENDED_ROW_LIMIT = 12;
+
+/** One thread, with what vam measured about its writer. */
+export type Selection = {
+  /** The rows to draw, live ones first. */
+  readonly drawn: readonly ThreadRow[];
+  readonly live: number;
+  readonly ended: number;
+  readonly unknown: number;
+};
+
+/**
+ * WHICH THREADS REACH THE SIDEBAR.
+ *
+ * Live first and all of them; then, up to `endedLimit`, the most recently
+ * touched of the rest. The input arrives in `recency_at_ms DESC` order and
+ * this is a stable partition of it, so recency still orders within each half
+ * -- what it no longer does is decide which half a row is in.
+ *
+ * AN `unknown` ROW IS NOT SPENT AGAINST THE ENDED CAP. Where the probe cannot
+ * answer, every row is unknown, and charging them to a cap meant for finished
+ * conversations would silently shrink the list on exactly the platform where
+ * vam knows least. Unknown rows are drawn after the live ones and before the
+ * ended ones, which is also the order of how much vam can say about them.
+ */
+export function selectThreads(input: {
+  readonly threads: readonly ThreadRow[];
+  readonly liveness: (threadId: string) => Liveness;
+  readonly endedLimit?: number;
+}): Selection {
+  const cap = Math.max(0, input.endedLimit ?? ENDED_ROW_LIMIT);
+  const live: ThreadRow[] = [];
+  const unknown: ThreadRow[] = [];
+  const ended: ThreadRow[] = [];
+  for (const row of input.threads) {
+    const answer = input.liveness(row.id);
+    if (answer === 'live') live.push(row);
+    else if (answer === 'unknown') unknown.push(row);
+    else ended.push(row);
+  }
+  return {
+    drawn: [...live, ...unknown, ...ended.slice(0, cap)],
+    live: live.length,
+    ended: ended.length,
+    unknown: unknown.length,
+  };
+}
+
+/** `SessionStatus` for what the lock said. See the header for each word. */
+export function statusFor(liveness: Liveness): Session['status'] {
+  if (liveness === 'live') return 'idle';
+  if (liveness === 'ended') return 'done';
+  return 'idle';
+}
 
 /**
  * THE PROJECT ID IS SOURCE-NAMESPACED, exactly as `claude-code/project-id.ts`
@@ -117,7 +205,7 @@ export function compactAge(ms: number): string | null {
   return `${Math.floor(hours / 24)}d`;
 }
 
-const descriptorFor = (store: StoreRead | null, threads: number): SourceDescriptor => {
+const descriptorFor = (store: StoreRead | null, livenessReadable: boolean): SourceDescriptor => {
   const unavailable = store !== null && store.kind === 'unavailable' ? store : null;
   if (unavailable !== null) {
     // EVERYTHING WITHDRAWN, WITH THE READER'S OWN SENTENCE ON EVERY ONE. The
@@ -163,10 +251,18 @@ const descriptorFor = (store: StoreRead | null, threads: number): SourceDescript
   }
   return {
     id: CODEX_SOURCE_ID,
-    // THE CAP IS IN THE LABEL, because a truncated list that does not say it
-    // is truncated is the same lie as an empty one. The label is drawn in the
-    // status bar (`Canvas.tsx`'s `SourceReadout`).
-    label: `Codex — the ${Math.min(threads, MAX_THREADS)} most recent threads`,
+    // WHAT THE LABEL MUST NOT DO IS CLAIM THE OLD CAP. PR 429 put "the 12 most
+    // recent threads" here because that was the whole list; the list is now
+    // "every live thread", and the 12 binds only the ended rows the filter
+    // toggle reveals. A label that still said 12 would be disclosing a limit
+    // that no longer applies to the rows the operator is looking at -- the
+    // same lie as not disclosing one, told backwards.
+    //
+    // The platform arm is not hedging: `liveness.ts` cannot probe off darwin,
+    // and there the list really is the recent one, so it says so.
+    label: livenessReadable
+      ? `Codex — live threads, plus the ${ENDED_ROW_LIMIT} most recent ended ones when asked`
+      : `Codex — the ${ENDED_ROW_LIMIT} most recent threads; vam cannot tell which are running on this platform`,
     capabilities: {
       // Nothing watches the store or the rollouts; this source re-reads on the
       // canvas's poll. A live badge with no event behind it is a promise
@@ -222,7 +318,7 @@ const descriptorFor = (store: StoreRead | null, threads: number): SourceDescript
  * One thread, as a row. Every field is either read from the store, read from
  * the rollout, or a documented absence.
  */
-async function sessionFor(row: ThreadRow, nowMs: number): Promise<Session> {
+async function sessionFor(row: ThreadRow, nowMs: number, liveness: Liveness): Promise<Session> {
   let facts: Awaited<ReturnType<typeof readRolloutTail>> | null = null;
   try {
     facts = await readRolloutTail(fileTranscriptSource(row.rolloutPath), `codex-${row.id}`);
@@ -242,9 +338,17 @@ async function sessionFor(row: ThreadRow, nowMs: number): Promise<Session> {
     title: titleOf(row),
     icon: null,
     epic: null,
-    // See the header: the union has no "vam cannot tell" arm and `idle` is the
-    // only neutral paint.
-    status: 'idle',
+    // WHAT THE WRITER LOCK SAID, and nothing beyond it. See the header: `idle`
+    // is alive-and-between-turns, `done` is a job that ended, and the neutral
+    // paint is what an unreadable probe still earns.
+    status: statusFor(liveness),
+    // THE SAME FACT, ASKED THE OTHER WAY, and the one the sidebar's filter
+    // reads. Set ONLY where the probe answered: `unknown` leaves it off, on
+    // `Session.ended`'s own rule that an absence must never be read as a
+    // measurement. This is what keeps a finished Codex thread off the live
+    // list without also hiding Claude Code's finished background agents,
+    // which are `done` too and are not what the operator asked to lose.
+    ...(liveness === 'ended' ? { ended: true } : {}),
     // NOT A GUESS AND NOT A ZERO-BY-DEFAULT: vam has no agent surface on this
     // source at all, so it reports no agents running, which is what `0` with
     // `agentRoster: false` beside it says.
@@ -273,14 +377,23 @@ async function sessionFor(row: ThreadRow, nowMs: number): Promise<Session> {
   };
 }
 
-/** Threads grouped into projects by their `cwd`, newest project first. */
+/**
+ * Threads grouped into projects by their `cwd`, newest project first.
+ *
+ * `liveness` defaults to "vam could not ask", which is the honest answer for
+ * any caller that has not probed -- never `ended`, which would claim a thread
+ * had finished on no evidence at all.
+ */
 export async function projectsFrom(
   threads: readonly ThreadRow[],
   nowMs: number,
+  liveness: (threadId: string) => Liveness = () => 'unknown',
 ): Promise<readonly Project[]> {
   const byProject = new Map<string, { cwd: string; sessions: Session[] }>();
   const order: string[] = [];
-  const sessions = await Promise.all(threads.map((row) => sessionFor(row, nowMs)));
+  const sessions = await Promise.all(
+    threads.map((row) => sessionFor(row, nowMs, liveness(row.id))),
+  );
   threads.forEach((row, index) => {
     const id = codexProjectId(row.cwd);
     let bucket = byProject.get(id);
@@ -324,10 +437,26 @@ export function createCodexSource(input: {
   readonly runCodex: RunCodex;
   readonly now?: () => number;
   readonly probe?: StoreRead | null;
+  /**
+   * How this source asks whether a thread has a live writer. Injected for the
+   * same reason every filesystem read in this tree is: a test must never be
+   * pointed at the operator's own `~/.codex`.
+   */
+  readonly probeLock?: ProbeLock;
+  /**
+   * Whether the lock probe can answer AT ALL here, which is a fact about the
+   * platform and therefore a construction-time one -- so the label can say it.
+   */
+  readonly livenessReadable?: boolean;
 }): MainSource {
   const path = stateDbPath(input.home ?? codexHome());
+  const home = input.home ?? codexHome();
   const now = input.now ?? (() => Date.now());
-  const descriptor = descriptorFor(input.probe ?? null, MAX_THREADS);
+  const probeLock = input.probeLock ?? probeLockViaOpen();
+  const descriptor = descriptorFor(
+    input.probe ?? null,
+    input.livenessReadable ?? process.platform === 'darwin',
+  );
 
   return {
     descriptor,
@@ -337,12 +466,25 @@ export function createCodexSource(input: {
         exists: input.exists,
         sidecars: readSidecars,
         run: input.runSqlite,
-        now: now(),
       });
       // NEVER A REJECTION, and never a silent empty list either: the reason is
       // already on the descriptor, which the source cell draws. See the header.
       if (read.kind === 'unavailable') return [];
-      return await projectsFrom(read.threads, now());
+      // One probe per scanned row, and the answer is REMEMBERED rather than
+      // asked twice: `selectThreads` decides which rows are drawn and
+      // `projectsFrom` paints each row's status, and the two must not be able
+      // to disagree -- a thread that ended between the two calls would
+      // otherwise be sorted as live and painted as done in the same list.
+      const answers = new Map<string, Liveness>();
+      const liveness = (threadId: string): Liveness => {
+        const remembered = answers.get(threadId);
+        if (remembered !== undefined) return remembered;
+        const fresh = livenessOf(threadId, probeLock, home);
+        answers.set(threadId, fresh);
+        return fresh;
+      };
+      const chosen = selectThreads({ threads: read.threads, liveness });
+      return await projectsFrom(chosen.drawn, now(), liveness);
     },
     recordPrompt: async (sessionId, prompt) => {
       if (!descriptor.capabilities.recordPrompt) {

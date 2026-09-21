@@ -522,6 +522,35 @@ export type Session = {
   readonly epic: string | null;
   readonly status: SessionStatus;
   /**
+   * HAS THIS CONVERSATION FINISHED — as something the source MEASURED?
+   *
+   * Absent means no source said so, which is not the same as `false`, and is
+   * why it is optional: a source that has never looked leaves it off, and
+   * nothing downstream may read the absence as "still going".
+   *
+   * ── WHY THIS IS NOT SIMPLY `status === 'done'` ────────────────────────────
+   *
+   * Because `done` is already spoken for, by a different thing wearing the
+   * same word. Claude Code reports `done` for a BACKGROUND AGENT that has
+   * finished inside a session the operator is still working in
+   * (`sources/claude-code/agents.ts`) — a row that belongs on the canvas,
+   * beside the work it came out of. Hiding those was tried here and measured:
+   * it broke 461 assertions across 62 files, which is this repo's own corpus
+   * saying that a `done` row is ordinary furniture.
+   *
+   * What the operator asked to stop seeing is the other thing — a finished
+   * CONVERSATION a source went and dug out of an archive: "Don't show recent
+   * threads, it makes managing active sessions harder." The Codex source sets
+   * this from a writer-lock probe (`main/sources/codex/liveness.ts`), and only
+   * where that probe actually answered; where it could not look the field
+   * stays off rather than claiming an ending nobody observed.
+   *
+   * `status` still answers the other question — what colour the row is — and
+   * such a session is `done` there too. One fact seen from two sides, not one
+   * boolean doing two jobs.
+   */
+  readonly ended?: boolean;
+  /**
    * How many agents this session is running right now — the `●N` on the header.
    * This is the ONLY place a subagent appears: it is work happening under
    * a session you started, not a session of its own, and giving it a row would

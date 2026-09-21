@@ -753,14 +753,14 @@ describe('SessionList projects header', () => {
     // the status choice is theirs, so the badge reads 1.
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
-      originFilters: { hideAgentStarted: true, onlyPrompted: false },
+      originFilters: { hideAgentStarted: true, onlyPrompted: false, hideEnded: false },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
     cleanup();
 
     const { container: three } = mountWith(twoProjects(), {
       statusFilter: 'done',
-      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+      originFilters: { hideAgentStarted: true, onlyPrompted: true, hideEnded: false },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
@@ -798,6 +798,38 @@ describe('SessionList filter popover', () => {
     expect(Number.parseInt(menu(normal).style.width, 10)).toBeGreaterThan(212);
   });
 
+  /**
+   * THE THIRD ROW, which is the operator's own proposal: "the filter should
+   * get a toggle to show/hide those recent sessions". It ships ON, so the
+   * count beside it is the whole of what keeps a hidden session from being
+   * indistinguishable from one that does not exist.
+   */
+  it('offers a row for ended sessions, on by default and saying how many it holds back', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 11 },
+    });
+    const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
+    expect(row.textContent).toContain('11');
+  });
+
+  it('turns the ended rule off without disturbing the other two', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-origin-toggle="ended"]') as Element);
+    });
+    expect(seen).toEqual([{ hideAgentStarted: true, onlyPrompted: false, hideEnded: false }]);
+  });
+
   it('draws the badge in the filter badge yellow, not in a status colour', () => {
     const { container } = mountWith(twoProjects(), { statusFilter: 'waiting' });
     const badge = container.querySelector('[data-filter-badge]') as HTMLElement;
@@ -810,7 +842,7 @@ describe('SessionList filter popover', () => {
     // rules the badge counts -- even though it does narrow the list.
     const { container } = mountWith(twoProjects(), {
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0 },
     });
     expect(container.querySelector('[data-filter-badge]')).toBeNull();
     cleanup();
@@ -825,7 +857,7 @@ describe('SessionList filter popover', () => {
 
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
-      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+      originFilters: { hideAgentStarted: true, onlyPrompted: true, hideEnded: false },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
@@ -836,7 +868,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
     expect(row.getAttribute('aria-pressed')).toBe('true');
@@ -853,13 +885,13 @@ describe('SessionList filter popover', () => {
     act(() => {
       fireEvent.click(live.querySelector('[data-origin-toggle="agent"]') as Element);
     });
-    expect(seen).toEqual([{ hideAgentStarted: false, onlyPrompted: false }]);
+    expect(seen).toEqual([{ hideAgentStarted: false, onlyPrompted: false, hideEnded: true }]);
   });
 
   it('drops the default tag from a rule the operator applied', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
-      originFilters: { hideAgentStarted: true, onlyPrompted: true },
+      originFilters: { hideAgentStarted: true, onlyPrompted: true, hideEnded: false },
     });
     const prompted = container.querySelector('[data-origin-toggle="prompted"]') as HTMLElement;
     expect(prompted.querySelector('[data-filter-default]')).toBeNull();

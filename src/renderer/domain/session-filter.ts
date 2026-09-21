@@ -20,16 +20,37 @@ export const STATUS_FILTERS: readonly (readonly [StatusFilter, string])[] = [
 ];
 
 /**
- * The two origin toggles the filter popover owns.
+ * The toggles the filter popover owns.
  *
  * Not keyed by source, unlike `Prefs.icons`: these are a fact about how YOU
  * want the list read, the same kind of thing as the theme, and a session id
  * never enters them — so the (sourceId, id) keying that keeps two sources'
  * sessions apart has nothing to keep apart here.
+ *
+ * That is also why `hideEnded` applies to every source rather than only to the
+ * one whose rows prompted it. A filter that meant one thing for Codex and
+ * another for Claude Code would be a single boolean standing for two claims,
+ * which is the mistake `a-second-source.md` records `vamControlled` making.
  */
 export type SessionFilters = {
   readonly hideAgentStarted: boolean;
   readonly onlyPrompted: boolean;
+  /**
+   * THE LIVE LIST HOLDS LIVE SESSIONS.
+   *
+   * The operator, of the Codex source PR 429 shipped: "Don't show recent threads
+   * — it makes managing active sessions harder. Better to have a history
+   * section to view and resume old sessions." And then, offering the cheaper
+   * half themselves: "the filter should get a toggle to show/hide those recent
+   * sessions."
+   *
+   * Measured on their own machine, that source drew 12 rows of which ONE was
+   * live, under 8 project headings, with 6 of the 12 sharing a title. A
+   * sidebar row is something that may need you and a finished conversation
+   * never does — `docs/design/reopening-a-session.md`'s rule, and the reason
+   * this one ships on.
+   */
+  readonly hideEnded: boolean;
 };
 
 /**
@@ -44,6 +65,7 @@ export type SessionFilters = {
 export const DEFAULT_SESSION_FILTERS: SessionFilters = {
   hideAgentStarted: true,
   onlyPrompted: false,
+  hideEnded: true,
 };
 
 /**
@@ -127,4 +149,49 @@ export function isHiddenByOriginFilters(session: Session, filters: SessionFilter
     (filters.hideAgentStarted && isAgentStarted(session)) ||
     (filters.onlyPrompted && isUnprompted(session))
   );
+}
+
+/**
+ * Toggle C's predicate. Only a session whose own source POSITIVELY MEASURED
+ * that it is over — the same direction as the two rules above, where a session
+ * vam never classified survives.
+ *
+ * NOT `status === 'done'`, and `Session.ended`'s own comment carries the
+ * measurement behind that: `done` is also what Claude Code calls a background
+ * agent that finished inside a session you are still working in, and hiding
+ * those was tried here and broke 461 assertions across 62 files. A finished
+ * conversation dug out of an archive is a different row from a finished agent
+ * beside live work, and only the source that produced it can tell them apart.
+ */
+export function isEnded(session: Session): boolean {
+  return session.ended === true;
+}
+
+/**
+ * Does the ended rule remove this session from the list?
+ *
+ * ── WHY THE STATUS PILL WINS ──────────────────────────────────────────────
+ *
+ * The popover holds both controls: a status pill row whose fourth pill is
+ * `Done`, and this toggle, which is ON by default. Left alone they fight —
+ * selecting `Done` would select nothing, and the explanation would be a
+ * different control three rows further down the same popover.
+ *
+ * So an explicit status choice stands this rule down. Naming a status is a
+ * narrower and more deliberate act than never having touched a default, and
+ * the only status it can actually differ on is `Done` itself: no ended session
+ * survives the `Running`, `Needs you` or `All`-minus-default paths anyway.
+ *
+ * Separate from `isHiddenByOriginFilters` rather than folded into it, because
+ * an ending is not an origin and that function's name is load-bearing where it
+ * is called.
+ */
+export function isHiddenByEndedFilter(
+  session: Session,
+  filters: SessionFilters,
+  status: StatusFilter,
+): boolean {
+  if (!filters.hideEnded) return false;
+  if (status !== 'all') return false;
+  return isEnded(session);
 }
