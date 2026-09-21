@@ -232,6 +232,15 @@ const GUARDS = [
   // bytes -- and RASTERISES each glyph against the notdef box, because a tofu
   // is four identical bytes to every string assertion in the unit suite.
   'chord-symbol-shots',
+  // THE PROVIDER MARK on a sidebar row, at 1280, at the 200px sidebar floor
+  // and at 390px. Every claim in it is a rectangle, a rasterised glyph or a
+  // resolved token -- including the one the unit file gets WRONG: "before the
+  // title" is DOM ORDER there, and an `order-last` on the mark's wrapper moves
+  // the painted glyph past the title while leaving the whole unit file green.
+  // It also rewrites the served bundle's `orca` source to `codex` on one page,
+  // so the operator's actual pair is measured rather than argued from a
+  // fixture that contains neither.
+  'provider-mark-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

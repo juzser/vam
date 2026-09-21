@@ -31,7 +31,7 @@
  * that same id again.
  */
 
-import { Box, Factory, FlaskConical, type LucideIcon, Pencil, Plus } from 'lucide-react';
+import { Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
   type DragEvent as ReactDragEvent,
@@ -164,7 +164,7 @@ import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
 import { capabilitiesFor } from '../sources/members.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
-import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import {
   adoptOrphans,
@@ -6801,11 +6801,6 @@ function sourceKeyOf(entry: SessionEntry): string {
   return entry.session.source ?? entry.project.source ?? '';
 }
 
-const SOURCE_ICON: Readonly<Record<string, LucideIcon>> = {
-  factory: Factory,
-  'bundled-sample': FlaskConical,
-};
-
 function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   if (source === null || source === undefined || source === '') {
     return null;
@@ -6816,10 +6811,11 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
   // a shape that claims nothing, never another provider's logo and never a
   // blank. `data-source-mark` records WHICH register answered, so the fallback
   // is an assertable outcome rather than an invisible default.
-  const mark = PROVIDER_MARKS[source];
-  const Native = SOURCE_ICON[source];
-  const register = mark !== undefined ? 'brand' : Native !== undefined ? 'native' : 'neutral';
-  const Icon = Native ?? Box;
+  //
+  // THE TABLE AND THE ORDER LEFT THIS FILE and live in `provider-marks.tsx`,
+  // because the sidebar row now draws the same mark and a module-private copy
+  // here is how one source comes to have two glyphs in one application.
+  const register = markRegisterOf(source);
   return (
     <Note text={`this session comes from ${source}`}>
       {/* `role="img"` is load-bearing: `aria-label` on a roleless span is
@@ -6840,11 +6836,11 @@ function SourceGlyph({ source }: { readonly source: SourceId | null }) {
         tabIndex={0}
         className="flex items-center text-ink-dim"
       >
-        {mark === undefined ? (
-          <Icon size={11} strokeWidth={1.6} aria-hidden="true" />
-        ) : (
-          <mark.Glyph size={11} />
-        )}
+        {/* 12 is the LANE, not the ink: `SourceMark` takes a pixel off a
+            brand path, which fills its viewBox, so the two registers paint
+            the same amount of it. The status bar's line is 12px
+            (`text-meta`), so the lane is the line. */}
+        <SourceMark source={source} lane={12} />
       </span>
     </Note>
   );
