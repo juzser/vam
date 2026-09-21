@@ -77,6 +77,7 @@ function sessionSourceWith(closeSession?: (sessionId: string, force?: boolean) =
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: closeSession === undefined ? { closeSession: 'no verb for it' } : {},
     viewerScope: { kind: 'connection', note: 'one local process' },

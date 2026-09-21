@@ -261,6 +261,7 @@ describe('the close-session channel, once the source can actually stop one', () 
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {},
     viewerScope: { kind: 'connection' as const, note: 'test' },

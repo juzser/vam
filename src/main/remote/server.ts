@@ -341,6 +341,7 @@ const WRITE_CAPABILITIES = [
   'deliverPrompt',
   'closeSession',
   'createSession',
+  'resumeSession',
 ] as const;
 
 /**
@@ -582,6 +583,16 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
       'recordPrompt',
       (b) => isText(b.sessionId) && isPrompt(b.prompt),
       (s, b) => s.recordPrompt?.(b.sessionId as string, b.prompt as string) ?? null,
+    ],
+    [
+      // The phone gets this for the same reason it gets `close-session`: a
+      // session that ended while the operator was away from the desk is
+      // exactly the one they want back, and the refusals that matter are
+      // enforced in the source rather than by which caller asked.
+      '/api/resume-session',
+      'resumeSession',
+      (b) => isText(b.sessionId),
+      (s, b) => s.resumeSession?.(b.sessionId as string) ?? null,
     ],
     [
       '/api/close-session',

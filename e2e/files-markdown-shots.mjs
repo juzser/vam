@@ -168,6 +168,7 @@ await page.addInitScript(() => {
         // clear of the pill at the width the pill really reaches.
         terminal: true,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: 'operator',

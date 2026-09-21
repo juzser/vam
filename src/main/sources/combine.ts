@@ -84,6 +84,7 @@ const CAPABILITIES: readonly (keyof SourceCapabilities)[] = [
   'pullRequests',
   'terminal',
   'agentRoster',
+  'resumeSession',
 ];
 
 const NO_SOURCES = 'vam was started with no sources at all, so there is nothing to ask';
@@ -235,6 +236,10 @@ export function combineSources(sources: readonly MainSource[]): MainSource {
     load,
     recordPrompt: (sessionId, prompt) =>
       routeWrite(sessionId, (s) => s.recordPrompt?.(sessionId, prompt)),
+    // Routed by the ROW, like every other per-session write: the source that
+    // produced it is the only one that knows where that conversation ran and
+    // how to address it again.
+    resumeSession: (sessionId) => routeWrite(sessionId, (s) => s.resumeSession?.(sessionId)),
     closeSession: (sessionId, force) =>
       routeWrite(sessionId, (s) => s.closeSession?.(sessionId, force)),
     createSession: async (projectId, title, provider) => {

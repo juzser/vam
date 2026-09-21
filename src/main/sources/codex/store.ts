@@ -98,24 +98,36 @@ export const STORE_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
 /**
- * HOW MANY THREADS VAM DRAWS, AND WHY IT IS NOT ALL OF THEM.
+ * HOW MANY THREADS VAM READS BEFORE IT KNOWS WHICH OF THEM ARE LIVE.
  *
  * 789 rows on the machine this was written for, 787 of them "visible" by
- * Codex's own rule, going back months. vam's canvas is a list of work in
- * progress; 787 rows is an archive, and every drawn row costs a bounded tail
- * read of its rollout on every ten-second poll, so the whole store would be
- * 72 MB of reading per tick.
+ * Codex's own rule (`archived = 0 AND preview <> ''`, which is what its
+ * `idx_threads_visible_*` indexes are built on), going back months.
  *
- * So: Codex's own visibility rule (`archived = 0 AND preview <> ''`, which is
- * what its `idx_threads_visible_*` indexes are built on), the most recent
- * `RECENCY_WINDOW_MS`, and a hard cap. 93 rows on this machine fall in the
- * window, so the cap is what binds and it is deliberately small.
+ * This is the SCAN and not the draw. `source.ts` probes each scanned row's
+ * writer lock and then keeps the live ones -- all of them -- plus a small,
+ * disclosed number of ended ones.
  *
- * THE CAP IS DISCLOSED, in the source's own label, because a truncated list
- * that does not say it is truncated is the same lie as an empty one.
+ * ── WHY THERE IS NO RECENCY WINDOW HERE ANY MORE ──────────────────────────
+ *
+ * There used to be one, of seven days, and it was never really a window: it
+ * was a stand-in for liveness, chosen when liveness was believed unreadable.
+ * It is readable now (`./liveness.ts`), and the stand-in was a poor one --
+ * measured on the operator's own store it drew 11 finished conversations in
+ * order to surface the 1 live thread among them.
+ *
+ * ── WHAT THE SCAN LIMIT COSTS, NAMED RATHER THAN PAPERED OVER ─────────────
+ *
+ * The scan is one indexed SELECT returning small rows; what is expensive per
+ * row is the ROLLOUT TAIL read, and only a row that will be drawn is read. So
+ * 200 is generous for the query and costs nothing in tail reads.
+ *
+ * The gap it leaves: a live thread outside the 200 most recently touched would
+ * not be found. Measured on this store, 200 rows reach back to 2026-08-27 --
+ * 25 days -- and a thread whose Codex is holding its writer lock does not sit
+ * 25 days without touching `recency_at_ms`.
  */
-export const MAX_THREADS = 12;
-export const RECENCY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+export const STORE_SCAN_LIMIT = 200;
 
 /** One row of `threads`, narrowed to what vam actually draws. */
 export type ThreadRow = {
@@ -235,13 +247,12 @@ export const missingStore = (path: string): Extract<StoreRead, { kind: 'unavaila
  * A thread id never reaches SQL at all -- `queue.ts` addresses a thread by
  * argv, and the filter below is by time.
  */
-export function threadsSql(sinceMs: number, limit: number): string {
-  const since = Math.max(0, Math.floor(sinceMs));
+export function threadsSql(limit: number): string {
   const cap = Math.max(1, Math.floor(limit));
   return (
     'SELECT id, rollout_path, cwd, preview, name, model, git_branch, recency_at_ms ' +
     'FROM threads ' +
-    `WHERE archived = 0 AND preview <> '' AND recency_at_ms >= ${since} ` +
+    "WHERE archived = 0 AND preview <> '' " +
     `ORDER BY recency_at_ms DESC LIMIT ${cap};`
   );
 }
@@ -330,15 +341,10 @@ export async function readThreads(input: {
   readonly exists: (path: string) => boolean;
   readonly sidecars: (path: string) => Sidecars;
   readonly run: RunSqlite;
-  readonly now: number;
   readonly limit?: number;
-  readonly windowMs?: number;
 }): Promise<StoreRead> {
   if (!input.exists(input.path)) return missingStore(input.path);
-  const sql = threadsSql(
-    input.now - (input.windowMs ?? RECENCY_WINDOW_MS),
-    input.limit ?? MAX_THREADS,
-  );
+  const sql = threadsSql(input.limit ?? STORE_SCAN_LIMIT);
   const plan = connectionPlan(input.path, input.sidecars(input.path));
   let last: SqliteResult | null = null;
   for (const attempt of plan) {

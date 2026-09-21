@@ -103,6 +103,7 @@ function sourceWith(canCreate: boolean): {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: canCreate ? {} : { createSession: 'this source has no way to start one' },
     viewerScope: { kind: 'connection', note: 'one local process' },

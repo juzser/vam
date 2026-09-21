@@ -136,6 +136,7 @@ await page.addInitScript(() => {
         // 22-50px short everywhere else. Nothing here opens the Terminal tab.
         terminal: true,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: 'operator',

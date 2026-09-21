@@ -60,11 +60,15 @@ describe('a Codex row', () => {
     expect(project?.sessions[0]?.id).toBe(THREAD);
   });
 
-  it('carries no live mark, because liveness is not in the store', async () => {
+  /**
+   * A caller that did not probe gets the neutral paint, never a verdict.
+   * `codex-live-rows.test.ts` covers what each MEASURED answer paints; this
+   * pins the default, which must not be `done` -- that would claim every
+   * thread had finished on the strength of nobody having looked.
+   */
+  it('carries the neutral paint when nothing asked about its writer', async () => {
     const [project] = await projectsFrom([row()], NOW);
     const session = project?.sessions[0];
-    // `idle` paints neutral; `running` would be the guess this source refuses,
-    // and `waiting` would paint amber on every thread the operator owns.
     expect(session?.status).toBe('idle');
     expect(session?.runningAgents).toBe(0);
   });
@@ -159,8 +163,34 @@ describe('the Codex source’s descriptor', () => {
     }
   });
 
-  it('says in its label that the list is capped', () => {
-    expect(available.descriptor.label).toMatch(/most recent threads/);
+  /**
+   * #429's label said "the 12 most recent threads", and that WAS the whole
+   * list then. It is not the list now -- live threads are drawn because they
+   * are live, and they are not capped -- so a label still claiming that cap
+   * would disclose a limit that does not apply to the rows on screen.
+   */
+  it('stops claiming a cap on the list once liveness decides it', () => {
+    const readable = sourceWith({
+      exists: () => true,
+      runSqlite: sqliteAnswering([]),
+      runCodex: codexNeverRun,
+      now: () => NOW,
+      livenessReadable: true,
+    });
+    expect(readable.descriptor.label).toContain('live threads');
+    expect(readable.descriptor.label).not.toMatch(/the 12 most recent threads/);
+  });
+
+  it('says plainly, where it cannot read liveness, that the list is the recent one', () => {
+    const blind = sourceWith({
+      exists: () => true,
+      runSqlite: sqliteAnswering([]),
+      runCodex: codexNeverRun,
+      now: () => NOW,
+      livenessReadable: false,
+    });
+    expect(blind.descriptor.label).toContain('most recent threads');
+    expect(blind.descriptor.label).toContain('cannot tell');
   });
 });
 

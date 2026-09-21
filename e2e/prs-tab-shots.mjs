@@ -134,6 +134,7 @@ const install = () => {
         pullRequests: true,
         terminal: false,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: 'operator',

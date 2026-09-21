@@ -26,6 +26,7 @@ export const CHANNELS = {
    * different way.
    */
   createSessionIn: 'vam:source:create-session-in',
+  resumeSession: 'vam:source:resume-session',
   /**
    * SCROLLING BACK through one session: the turns before a point, read on
    * demand. Distinct from `load`, which reads a fixed tail of every live

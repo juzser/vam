@@ -31,6 +31,7 @@ const NONE: SourceCapabilities = {
   pullRequests: false,
   terminal: false,
   agentRoster: false,
+  resumeSession: false,
 };
 
 const session = (id: string) => ({

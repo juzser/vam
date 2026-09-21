@@ -114,6 +114,7 @@ function sourceWith(closeSession: (sessionId: string) => Promise<void>): CanvasS
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {},
     viewerScope: { kind: 'connection', note: 'one local process' },

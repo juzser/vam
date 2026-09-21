@@ -638,6 +638,7 @@ describe('the descriptor the server serves', () => {
       pullRequests: true,
       terminal: true,
       agentRoster: true,
+      resumeSession: true,
     },
     declines: {},
   } as unknown as MainSource['descriptor'];

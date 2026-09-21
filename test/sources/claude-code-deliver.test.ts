@@ -46,6 +46,7 @@ describe('registerSourceIpc, once a source can actually write', () => {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: recordPrompt ? {} : { recordPrompt: 'no' },
     viewerScope: { kind: 'connection' as const, note: 'test' },

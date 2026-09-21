@@ -78,6 +78,7 @@ const STUB = {
     pullRequests: true,
     terminal: false,
     agentRoster: true,
+    resumeSession: true,
   },
   declines: {
     promptAttachments: 'the remote endpoint takes no attachments',

@@ -32,14 +32,30 @@ describe('the session-origin filters, persisted', () => {
     // Toggle A on: an agent-made session is noise by default. Toggle B off:
     // it would hide `dogfood-mcp-1` (379 events, no `user_prompt`), which is
     // real work — so it is a choice, never a default.
-    expect(DEFAULT_SESSION_FILTERS).toEqual({ hideAgentStarted: true, onlyPrompted: false });
+    expect(DEFAULT_SESSION_FILTERS).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      // The live list holds live sessions: see `session-filter.ts`.
+      hideEnded: true,
+    });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
 
   it('survives a write/read round trip', () => {
     const s = store();
-    writePrefs(s, setSessionFilters(EMPTY_PREFS, { hideAgentStarted: false, onlyPrompted: true }));
-    expect(readPrefs(s).filters).toEqual({ hideAgentStarted: false, onlyPrompted: true });
+    writePrefs(
+      s,
+      setSessionFilters(EMPTY_PREFS, {
+        hideAgentStarted: false,
+        onlyPrompted: true,
+        hideEnded: false,
+      }),
+    );
+    expect(readPrefs(s).filters).toEqual({
+      hideAgentStarted: false,
+      onlyPrompted: true,
+      hideEnded: false,
+    });
   });
 
   it('falls back to the defaults for a payload written before the field existed', () => {
@@ -70,11 +86,20 @@ describe('the session-origin filters, persisted', () => {
     expect(readPrefs(store(raw)).filters).toEqual({
       hideAgentStarted: false,
       onlyPrompted: true,
+      // Per FIELD, which is this reader's whole rule: the two stored choices
+      // are kept, and the key this payload predates takes the shipped default.
+      hideEnded: true,
     });
   });
 
   it('takes only real booleans — garbage falls back per field, not wholesale', () => {
     const raw = '{"filters":{"hideAgentStarted":false,"onlyPrompted":"yes"}}';
-    expect(readPrefs(store(raw)).filters).toEqual({ hideAgentStarted: false, onlyPrompted: false });
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: false,
+      onlyPrompted: false,
+      // Absent, not garbage -- and an absent key is every store that
+      // predates this rule, which must read back as the shipped default.
+      hideEnded: true,
+    });
   });
 });

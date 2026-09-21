@@ -36,6 +36,7 @@ const CAPABILITIES: SourceCapabilities = {
   pullRequests: false,
   terminal: false,
   agentRoster: false,
+  resumeSession: false,
 };
 
 const DESCRIPTOR: SourceDescriptor = {

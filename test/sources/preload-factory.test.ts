@@ -19,6 +19,7 @@ const NO_CAPABILITIES: SourceCapabilities = {
   pullRequests: false,
   terminal: false,
   agentRoster: false,
+  resumeSession: false,
 };
 
 const ALL_CAPABILITIES: SourceCapabilities = {
@@ -34,6 +35,7 @@ const ALL_CAPABILITIES: SourceCapabilities = {
   pullRequests: true,
   terminal: true,
   agentRoster: true,
+  resumeSession: true,
 };
 
 /**
@@ -74,6 +76,7 @@ function makeApi(descriptor: SourceDescriptor): PreloadSourceApi {
   return {
     describe: vi.fn(async () => descriptor),
     load: vi.fn(async () => []),
+    resumeSession: vi.fn(async () => {}),
     subscribe: vi.fn(() => unsubscribe),
     agentWork: vi.fn(async () => ({ kind: 'work' as const, turns: [], brief: null, whole: true })),
     recordPrompt: vi.fn(async () => undefined),

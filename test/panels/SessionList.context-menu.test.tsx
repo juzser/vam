@@ -121,8 +121,49 @@ describe('what the row menu offers', () => {
     draw({ onRenameSession: vi.fn(), onPickSessionIcon: vi.fn() });
     openOn('a1');
     expect([...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)).toEqual(
-      ['Rename session', 'Change session icon', 'Close session'],
+      [
+        'Rename session',
+        'Change session icon',
+        // Drawn and disabled, carrying its reason: this harness wires no
+        // reopen route, which is the phone shell's case too.
+        'Reopen session — not available here',
+        'Close session',
+      ],
     );
+  });
+
+  /**
+   * REOPEN, END TO END THROUGH THE ROW. `SessionList.reopen.test.ts` pins the
+   * item's rules; this pins that a right-click on a row the source has
+   * MEASURED as ended reaches the callback with that row's id -- the wiring
+   * the pure test cannot see.
+   */
+  it('reopens the row that was right-clicked, when its source says it ended', () => {
+    const onReopen = vi.fn();
+    // `twoProjects()` answers ENTRIES, and the row menu reads the session on
+    // the entry it was opened over -- so the mark goes on that session.
+    const entries = twoProjects();
+    const withEnded = entries.map((e, index) =>
+      index === 0 ? { ...e, session: { ...e.session, ended: true } } : e,
+    );
+    const props = { ...baseProps(withEnded), onReopen, canReopen: true };
+    render(<SessionList {...props} />);
+    openOn('a1');
+    const item = entry('reopen') as HTMLButtonElement;
+    expect(item.disabled).toBe(false);
+    fireEvent.click(item);
+    expect(onReopen).toHaveBeenCalledWith('a1');
+  });
+
+  /** And the 409 rule, on the surface the operator actually touches. */
+  it('will not reopen a row that is still running', () => {
+    const onReopen = vi.fn();
+    draw({ onReopen, canReopen: true });
+    openOn('a1');
+    const item = entry('reopen') as HTMLButtonElement;
+    expect(item.disabled).toBe(true);
+    fireEvent.click(item);
+    expect(onReopen).not.toHaveBeenCalled();
   });
 
   it('renames the row that was right-clicked, not the focused one', () => {

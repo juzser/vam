@@ -71,7 +71,13 @@ import { cycleMatch, searchMatches } from '../domain/search.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
-import { isAgentStarted, isHiddenByOriginFilters, isUnprompted } from '../domain/session-filter.js';
+import {
+  isAgentStarted,
+  isEnded,
+  isHiddenByEndedFilter,
+  isHiddenByOriginFilters,
+  isUnprompted,
+} from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
 import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../errors/log.js';
 import {
@@ -2750,7 +2756,19 @@ function CanvasInner({
     // — see `session-filter.ts`. A session whose timeline has not arrived is
     // `unknown` and survives both, because hiding what you did not check is
     // how a filter loses work rather than narrowing it.
-    return byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
+    const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
+    // AND THE SAME DISCIPLINE FOR ENDINGS. `isEnded` is the `done` status and
+    // nothing else, which is a fact a source has positively reported: the
+    // Codex source reads it off a writer lock it probed, and says `idle`
+    // rather than `done` wherever it could not look.
+    //
+    // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
+    // to `CommandPalette` below, so the palette's groups are drawn from the
+    // list this line has already narrowed — which is why ended sessions are a
+    // filter here and not the third palette group
+    // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
+    // by this array and so would be empty in exactly the state it exists for.
+    return byOrigin.filter((e) => !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter));
   }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs.filters]);
 
   /**
@@ -2765,6 +2783,7 @@ function CanvasInner({
     () => ({
       agent: allEntries.filter((e) => isAgentStarted(e.session)).length,
       unprompted: allEntries.filter((e) => isUnprompted(e.session)).length,
+      ended: allEntries.filter((e) => isEnded(e.session)).length,
     }),
     [allEntries],
   );
@@ -4047,6 +4066,59 @@ function CanvasInner({
         // EVERY path, and that is the whole of this `finally`. A spinner still
         // spinning after a refusal turns a clear failure into an apparent
         // hang, which is worse than never having shown one.
+        setPendingAction(null);
+      }
+    },
+    [source, pendingAction],
+  );
+
+  /**
+   * REOPEN A CONVERSATION THAT HAS ENDED.
+   *
+   * `docs/design/reopening-a-session.md` §3, and shaped exactly like
+   * `closeSession` above because it is the same kind of act: one write, one
+   * pending row, one sentence in the status bar whether it worked or not.
+   *
+   * IT DOES NOT CHECK LIVENESS HERE. The row menu declines to offer it for a
+   * session that has not ended, and the SOURCE refuses it outright -- a check
+   * in the middle would be a third copy of a rule, one poll out of date, in
+   * the layer least able to enforce it.
+   */
+  const reopenSession = useCallback(
+    async (sessionId: string, title: string): Promise<void> => {
+      if (pendingAction !== null) {
+        setStatus(
+          `something else is still running — "${title}" was not reopened; try again in a moment`,
+        );
+        return;
+      }
+      if (source.kind !== 'session') {
+        setStatus(`the factory has no reopen command — "${title}" was not reopened`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource) || sessionSource.write.resumeSession === undefined) {
+        // THE SOURCE'S OWN WORDS, not this component's. Every `false`
+        // capability owes a decline, and this is where one is spent.
+        setStatus(
+          `${sessionSource.label} cannot reopen a session — ${
+            sessionSource.declines.resumeSession ?? 'it advertises no way to'
+          }`,
+        );
+        return;
+      }
+      setPendingAction(sessionId);
+      setStatus(`reopening "${title}"…`);
+      try {
+        await sessionSource.write.resumeSession(sessionId);
+        // "STARTED", not "reopened". What vam did is start a process; the row
+        // appears when the next poll sees it, and claiming it is back before
+        // it is drawn would be the same overclaim `model-command.ts` refuses.
+        setStatus(`started "${title}" again — it will appear when vam next reads the source`);
+        source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure('reopen session', cause));
+      } finally {
         setPendingAction(null);
       }
     },
@@ -5712,6 +5784,20 @@ function CanvasInner({
     [removeProject],
   );
 
+  /**
+   * `allEntries`, deliberately — never the narrowed `entries`. A reopenable
+   * row is by definition one the ended filter is hiding whenever that filter
+   * is on, and looking it up in the filtered list would make the control work
+   * only in the state where it is least needed.
+   */
+  const onSidebarReopen = useCallback(
+    (sessionId: string) => {
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      void reopenSession(sessionId, entry?.session.title ?? sessionId);
+    },
+    [allEntries, reopenSession],
+  );
+
   const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
 
   const onSidebarPickIcon = useCallback((project: Project) => {
@@ -5851,6 +5937,11 @@ function CanvasInner({
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
     hiddenCounts: hiddenCounts,
+    onReopen: onSidebarReopen,
+    canReopen:
+      source.kind === 'session' &&
+      canWriteTo(source.source) &&
+      source.source.write.resumeSession !== undefined,
     onFilterCommit: onSidebarFilterCommit,
     onFilterCancel: onSidebarFilterCancel,
     renamingId: renamingId,
@@ -6721,6 +6812,15 @@ function CanvasInner({
             onRenameSession: onSidebarRenameSession,
             onPickSessionIcon: onSidebarPickSessionIcon,
             onClose: (sessionId) => void closeSession(sessionId, tabMenu.entry.session.title),
+            // Same builder, same session, so the same fourth item. The entry
+            // is right here, so `ended` is read off it rather than captured:
+            // a tab menu closes on the poll that would change it.
+            onReopen: (sessionId) => void reopenSession(sessionId, tabMenu.entry.session.title),
+            ended: tabMenu.entry.session.ended === true,
+            canReopen:
+              source.kind === 'session' &&
+              canWriteTo(source.source) &&
+              source.source.write.resumeSession !== undefined,
           })}
         />
       )}

@@ -1178,6 +1178,7 @@ test.describe('the sheets behind a source', () => {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {
       liveUpdates: 'the stub does not stream',
@@ -1380,6 +1381,7 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
       pullRequests: false,
       terminal: true,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {
       liveUpdates: 'the stub does not stream',
