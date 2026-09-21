@@ -27,10 +27,43 @@
  *    also catches the failure this repo has shipped twice: a Tailwind class
  *    naming a token that does not exist emits no rule at all, silently -- and
  *    a glyph on the wrong ink, or on none, is not a thing a class list knows.
- *  - NOT BY COLOUR. The computed `color` of every mark on screen has to be
- *    the SAME, which is the only way to prove the shape is carrying the whole
- *    signal. An operator who cannot rely on hue is the reason; `status-mark.tsx`
- *    already holds this line for the five statuses.
+ *  - BY SHAPE, AND NOW ALSO BY COLOUR. THIS ASSERTION IS THE REVERSE OF WHAT
+ *    IT WAS, and the reversal is why it is spelled out rather than edited.
+ *
+ *    Until 2026-09-21 this file required the computed `color` of every mark on
+ *    screen to be IDENTICAL: the mark inherited the meta line's ink, the
+ *    `GitBranch` four pixels away wore the same grey, and one ink for all of
+ *    them was how "the shape carries the whole signal" was proved. That was
+ *    right for the code that existed. The operator then asked for colour in
+ *    the provider icons, each brand mark took a themed token of its own
+ *    (`--vam-brand-claude`, `--vam-brand-openai`), and the old check would now
+ *    be asserting the opposite of the truth -- green while the feature is
+ *    missing and red when it works.
+ *
+ *    So it is inverted, in three parts, because "coloured at all" is the weak
+ *    version of the claim and not the one worth having:
+ *      1. a brand mark's ink is measurably NOT the meta line's. This is what
+ *         catches the silent Tailwind failure: a v4 utility naming a token
+ *         that does not exist emits NO RULE, the mark quietly inherits, and
+ *         the picture looks very nearly right.
+ *      2. the two brand marks are two DIFFERENT colours from each other, so a
+ *         token repointed at the other provider's value fails here instead of
+ *         passing as "both are coloured".
+ *      3. each clears 3:1 against the fill it sits on, COMPOSITED with the
+ *         meta line's `opacity-[0.82]`. A mark is a non-text object (WCAG
+ *         1.4.11) and the number that matters is the one the compositor
+ *         paints -- the point `sidebar-tree-shots.mjs` makes about the text on
+ *         this same line, which it cannot make about the mark any more
+ *         because the mark no longer shares that ink.
+ *    WHAT DID NOT CHANGE is the register that has no colour: `native` and
+ *    `neutral` still take the row's own ink, and that is still asserted.
+ *
+ *    AND THE SHAPES STILL CARRY IT ALONE. WCAG 1.4.1 is not waived by any of
+ *    this -- the signature comparison further down is what says the marks are
+ *    different pictures, and it is untouched. In the dark theme the two brand
+ *    values sit 1.05:1 apart in luminance, so a reader who receives no hue
+ *    sees two marks of the SAME grey and is reading the outlines.
+ *    `status-mark.tsx` holds the same line for the five statuses.
  *  - WHAT IT COSTS THE LINE IT IS ON. The bill is measured rather than
  *    asserted -- the painted box at the 200px sidebar minimum, with the lane
  *    and with it taken away -- because a number in a comment is not a
@@ -169,6 +202,15 @@ const rowFacts = (page, scope = '') =>
         announces: (mark?.textContent ?? '').trim(),
         drew: mark?.querySelector('svg') !== null && mark?.querySelector('svg') !== undefined,
         colour: mark === null ? null : getComputedStyle(mark).color,
+        // THE SVG'S OWN INK, which is where a brand tone lives: the class is
+        // on the drawn element and not on the lane, because the lane also
+        // holds the `GitBranch` and colouring it would have coloured that too.
+        // Reading the wrapper here -- which is what this guard did while every
+        // mark inherited -- would now measure the line and report no colour.
+        glyphColour:
+          mark?.querySelector('svg') == null
+            ? null
+            : getComputedStyle(mark.querySelector('svg')).color,
         // The ink of the line the mark rides, so "it takes the line's own
         // colour" is a comparison and not an assumption. `GitBranch` beside
         // it inherits the same value.
@@ -191,6 +233,68 @@ const rowFacts = (page, scope = '') =>
       };
     });
   }, scope);
+
+/**
+ * WHAT THE COMPOSITOR REALLY PAINTS A MARK IN, and what it paints it on.
+ *
+ * Three facts, per mark on screen, because a contrast number built from any
+ * two of them is wrong:
+ *
+ *  - the ink: `color` on the `<svg>`, which is where the brand tone lives.
+ *  - the alpha: the PRODUCT of every `opacity` between the glyph and the
+ *    ground. The sidebar's meta line carries `opacity-[0.82]` and the lane is
+ *    inside it, so a ratio computed from the token alone is a ratio nobody
+ *    sees. `sidebar-tree-shots.mjs` composites the same alpha by hand for the
+ *    text on this line, and cannot do it for the mark any more: it reads the
+ *    line element, and the mark no longer shares that ink.
+ *  - the ground: the nearest ancestor that actually paints. `rgba(0,0,0,0)`
+ *    is not a ground, and taking it for black is how a contrast check reports
+ *    a comfortable pass over nothing.
+ */
+const markPaint = (page, scope = '') =>
+  page.evaluate((prefix) => {
+    const channels = (value) => {
+      const parts = value.match(/[\d.]+/g);
+      return parts === null ? null : parts.slice(0, 3).map(Number);
+    };
+    return [...document.querySelectorAll(`${prefix}[data-row-source]`)]
+      .map((lane) => {
+        const svg = lane.querySelector('svg');
+        if (svg === null) return null;
+        let alpha = 1;
+        let ground = null;
+        for (let node = svg; node !== null; node = node.parentElement) {
+          const cs = getComputedStyle(node);
+          alpha *= Number(cs.opacity);
+          if (ground === null) {
+            const bg = cs.backgroundColor.match(/[\d.]+/g)?.map(Number);
+            if (bg !== undefined && (bg.length < 4 || bg[3] > 0)) ground = bg.slice(0, 3);
+          }
+        }
+        return {
+          source: lane.getAttribute('data-row-source'),
+          register: lane.getAttribute('data-source-mark'),
+          ink: channels(getComputedStyle(svg).color),
+          inkText: getComputedStyle(svg).color,
+          line: getComputedStyle(lane.parentElement).color,
+          alpha,
+          ground,
+        };
+      })
+      .filter((m) => m !== null);
+  }, scope);
+
+/** WCAG 2.x relative luminance, with the alpha applied the way a compositor
+ *  applies it -- the same arithmetic `sidebar-tree-shots.mjs` runs on the meta
+ *  line's text, so the two guards report numbers that mean the same thing. */
+function compositedRatio({ ink, alpha, ground }) {
+  const lin = (c) => (c / 255 <= 0.04045 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4);
+  const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  const painted = ink.map((c, i) => alpha * c + (1 - alpha) * ground[i]);
+  const a = lum(painted);
+  const b = lum(ground);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
 
 /**
  * What one element actually PUTS ON SCREEN: the bounding box of its ink, how
@@ -380,66 +484,66 @@ async function inkOf(page, selector) {
     `${onTitleLine} of ${rows.length} rows`,
   );
 
-  const colours = [...new Set(rows.map((r) => r.colour))];
-  check(
-    'every mark is drawn in ONE ink, so hue carries none of the signal',
-    colours.length === 1 && /^rgba?\(\s*\d/.test(colours[0] ?? ''),
-    JSON.stringify(colours),
-  );
-
   /**
-   * AND IT IS THE META LINE'S OWN INK, which is a different claim from the
-   * one this block used to make and is made differently.
+   * THE INK, WHICH IS TWO CLAIMS NOW AND USED TO BE ONE.
    *
-   * On the title line the mark carried `text-ink-faint` of its own, and what
-   * had to be proved was that the CLASS emitted a rule at all -- this repo
-   * has shipped a Tailwind v4 class naming a missing token twice, silently,
-   * so a probe took `var(--color-ink-faint)` and the mark's colour was
-   * required to equal it and to differ from what it would have inherited.
-   *
-   * On the meta line the mark has NO colour class: it inherits, deliberately,
-   * so that it and the `GitBranch` four pixels away are one grey rather than
-   * two. There is therefore no class here to be missing, and the honest check
-   * is the property that replaced it -- the mark's computed colour is the
-   * line's, exactly. A stray `text-*` reintroduced on the lane would break
-   * this, which is the regression the old check was really guarding against.
-   * The line's own ink is measured, composited with its `opacity-[0.82]`, by
-   * `sidebar-tree-shots.mjs`, and held above 4.5:1 on the worst row.
+   * The header records the reversal in full. What is measured here is the
+   * PAINT -- `getComputedStyle` on the drawn `<svg>` -- and never the
+   * stylesheet, because a guard that greps CSS proves only that somebody
+   * typed the rule. A Tailwind v4 utility naming a token that does not exist
+   * emits nothing at all, and the mark then inherits and looks almost right.
    */
-  const ink = await page.evaluate(() => {
-    // A row that HAS a branch: the glyph is suppressed for a null one (a mark
-    // spent on an absence), and four of the demo's rows are null. Picking the
-    // first mark on screen would compare against a glyph that is not there
-    // and read as a failure of the ink rather than of the choice of row.
-    const marks = [...document.querySelectorAll('[data-row-source]')];
-    const withGlyph =
-      marks.find((m) => m.parentElement.querySelector('svg.lucide-git-branch') !== null) ?? null;
-    const mark = withGlyph ?? marks[0];
-    const glyph = mark.parentElement.querySelector('svg.lucide-git-branch');
-    return {
-      foundABranchRow: withGlyph !== null,
-      mark: getComputedStyle(mark).color,
-      line: getComputedStyle(mark.parentElement).color,
-      branchGlyph: glyph === null ? null : getComputedStyle(glyph).color,
-    };
-  });
-  console.log(`  ink: ${JSON.stringify(ink)}`);
+  const paints = await markPaint(page);
   check(
-    'the mark is painted in the meta line’s own ink, with no colour class of its own',
-    ink.mark === ink.line && /^rgba?\(\s*\d/.test(ink.mark),
-    JSON.stringify(ink),
+    'every mark on screen was measured, so the two claims below are about something',
+    paints.length === rows.length && paints.every((p) => p.ink !== null && p.ground !== null),
+    `${paints.length} of ${rows.length} rows`,
+  );
+  const branded = paints.filter((p) => p.register === 'brand');
+  const plain = paints.filter((p) => p.register !== 'brand');
+  console.log(`  paints: ${JSON.stringify(paints.map((p) => [p.source, p.inkText, p.alpha]))}`);
+
+  // 1. THE BRAND MARK IS NOT THE LINE'S INK. This is the check that catches
+  //    the silent Tailwind failure, and it is the exact inverse of what this
+  //    block asserted until the marks were coloured.
+  check(
+    'a brand mark is painted in an ink of its OWN, measurably not the meta line’s',
+    branded.length > 0 && branded.every((p) => p.inkText !== p.line),
+    JSON.stringify(branded.map((p) => ({ s: p.source, mark: p.inkText, line: p.line }))),
+  );
+  // 2. AND THE UNCOLOURED REGISTERS STILL INHERIT. `factory` and
+  //    `bundled-sample` are vam's own concepts and the neutral box claims
+  //    nothing; an invented colour for either is the decoration
+  //    `provider-marks.tsx` exists to refuse. The old assertion survives here,
+  //    scoped to the rows it is still true of.
+  check(
+    'and a native or neutral mark still takes the row’s own ink, with no tone of its own',
+    plain.length > 0 && plain.every((p) => p.inkText === p.line),
+    JSON.stringify(plain.map((p) => ({ s: p.source, r: p.register, mark: p.inkText, line: p.line }))),
+  );
+  // 3. THREE-TO-ONE, COMPOSITED. A mark is a non-text object (WCAG 1.4.11),
+  //    and the meta line dims the whole lane with `opacity-[0.82]`, so the
+  //    only honest number is the one the compositor paints.
+  for (const p of branded) {
+    const ratio = compositedRatio(p);
+    check(
+      `${p.source}: its mark clears 3:1 composited on the fill it is really drawn on`,
+      ratio >= 3,
+      `${ratio.toFixed(2)}:1 — rgb(${p.ink.join(',')}) at ${p.alpha} over rgb(${p.ground.join(',')})`,
+    );
+  }
+  // AND THE LINE ITSELF IS STILL ONE GREY down the column. The branch glyph
+  // four pixels from the mark inherits it, and that has not changed -- only
+  // the mark opted out.
+  const branchInks = await page.evaluate(() =>
+    [...new Set(
+      [...document.querySelectorAll('svg.lucide-git-branch')].map((g) => getComputedStyle(g).color),
+    )],
   );
   check(
-    'so the provider glyph and the branch glyph beside it are one grey, not two',
-    ink.foundABranchRow && ink.branchGlyph === ink.mark,
-    ink.foundABranchRow
-      ? JSON.stringify(ink)
-      : 'no row on screen reports a branch, so this compared nothing',
-  );
-  check(
-    'and every mark on screen still agrees on that ink',
-    [...new Set(rows.map((r) => r.lineColour))].length === 1,
-    JSON.stringify([...new Set(rows.map((r) => r.lineColour))]),
+    'the branch glyph beside it still wears the line’s own grey, on every row that has one',
+    branchInks.length === 1 && [...new Set(rows.map((r) => r.lineColour))].length === 1,
+    `${JSON.stringify(branchInks)} vs lines ${JSON.stringify([...new Set(rows.map((r) => r.lineColour))])}`,
   );
 
   // ------------------------------------------------ three registers, three pictures
@@ -594,11 +698,54 @@ async function inkOf(page, selector) {
     codex.length > 0 && claude.length > 0,
     `${codex.length} codex, ${claude.length} claude-code`,
   );
+  // THIS ASSERTION IS REVERSED TOO, and for the reason `provider-marks.tsx`
+  // now argues at length: Codex draws OpenAI's own mark, taken verbatim from
+  // the Simple Icons 15.0.0 tag. It used to require `native` -- a
+  // `SquareTerminal` -- on the conclusion that vam may not carry that mark.
   check(
-    'Codex takes vam’s own glyph -- not a borrowed OpenAI mark and not a blank',
-    codex.every((r) => r.register === 'native' && r.drew),
+    'Codex draws OpenAI’s own mark -- the brand register, not a lucide stand-in',
+    codex.every((r) => r.register === 'brand' && r.drew),
     JSON.stringify(codex.map((r) => r.register)),
   );
+
+  /**
+   * THE OPERATOR'S OWN PAIR, IN COLOUR: two marks, two inks, both legible.
+   *
+   * This is the page where the second half of the colour claim can be made at
+   * all -- the demo fixture has one brand source on it, and "each brand mark
+   * is its own colour" needs two. Without this, a token repointed at the other
+   * provider's value would satisfy every check above: both marks would still
+   * differ from the line, and both would still clear 3:1.
+   */
+  const pairPaint = await markPaint(page);
+  const codexPaint = pairPaint.filter((p) => p.source === 'codex');
+  const claudePaint = pairPaint.filter((p) => p.source === 'claude-code');
+  check(
+    'both of the operator’s sources were measured, so the comparison is not of one mark',
+    codexPaint.length > 0 && claudePaint.length > 0,
+    `${codexPaint.length} codex, ${claudePaint.length} claude-code`,
+  );
+  const codexInks = [...new Set(codexPaint.map((p) => p.inkText))];
+  const claudeInks = [...new Set(claudePaint.map((p) => p.inkText))];
+  console.log(`  codex ink ${JSON.stringify(codexInks)}, claude ink ${JSON.stringify(claudeInks)}`);
+  check(
+    'each provider has its OWN colour -- not merely "coloured", and not each other’s',
+    codexInks.length === 1 && claudeInks.length === 1 && codexInks[0] !== claudeInks[0],
+    `${JSON.stringify(codexInks)} vs ${JSON.stringify(claudeInks)}`,
+  );
+  check(
+    'and neither of them is the meta line’s grey, on any row',
+    [...codexPaint, ...claudePaint].every((p) => p.inkText !== p.line),
+    JSON.stringify([...codexPaint, ...claudePaint].map((p) => [p.source, p.inkText, p.line])),
+  );
+  for (const p of [...codexPaint, ...claudePaint]) {
+    const ratio = compositedRatio(p);
+    check(
+      `${p.source}: clears 3:1 composited here too, where both brands are on screen`,
+      ratio >= 3,
+      `${ratio.toFixed(2)}:1`,
+    );
+  }
   const codexInk = await inkOf(page, `[data-session-row="${codex[0]?.id}"] [data-row-source]`);
   const claudeInk = await inkOf(page, `[data-session-row="${claude[0]?.id}"] [data-row-source]`);
   console.log(`  codex ${JSON.stringify(codexInk)}\n  claude ${JSON.stringify(claudeInk)}`);

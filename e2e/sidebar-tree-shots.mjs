@@ -724,6 +724,16 @@ check(
 // the accessibility floor for this row can only be checked HERE, against
 // composited pixels: the alpha is applied by hand over the nearest ancestor
 // that actually paints, which is what the compositor does.
+//
+// IT DOES NOT COVER THE PROVIDER MARK, AND IT USED TO. The style is read off
+// `[data-row-meta-line]` -- the LINE -- and until the marks were coloured
+// (2026-09-21) the mark inherited that ink, so this number was the mark's
+// number as well. It is not any more: a brand mark carries a
+// `text-brand-*` token of its own, and the line's colour is now a colour the
+// mark does not paint in. Its composited ratio is measured by
+// `e2e/provider-mark-shots.mjs`, which reads the `<svg>` and applies this same
+// 0.82 the same way. Two guards, two inks, and neither quietly answering for
+// the other.
 const metaInk = await page.evaluate(() => {
   const channels = (value) => {
     const parts = value.match(/[\d.]+/g);

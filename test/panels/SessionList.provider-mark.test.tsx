@@ -137,13 +137,24 @@ describe('the provider mark on a session row', () => {
     const claude = markIn(container, 's-claude-code');
     const codex = markIn(container, 's-codex');
     expect(claude?.getAttribute('data-source-mark')).toBe('brand');
-    expect(codex?.getAttribute('data-source-mark')).toBe('native');
-    // The registers differing is not enough: the whole ask is that the two
-    // rows LOOK different, so the drawn geometry is what is compared.
+    // BOTH ARE `brand` NOW, and that makes the comparison below the whole
+    // test rather than half of it. Codex used to take the `native` register,
+    // so two differing registers were themselves a signal; since OpenAI's mark
+    // went into the table the only thing separating these two rows is the
+    // drawing -- which was always the claim worth making.
+    expect(codex?.getAttribute('data-source-mark')).toBe('brand');
     const drawn = (node: Element | null) => node?.querySelector('svg')?.innerHTML ?? '';
     expect(drawn(claude).length, 'the claude-code row drew nothing').toBeGreaterThan(0);
     expect(drawn(codex).length, 'the codex row drew nothing').toBeGreaterThan(0);
     expect(drawn(claude)).not.toBe(drawn(codex));
+    // AND THE SHAPES CARRY IT WITHOUT THE COLOUR, which is the WCAG 1.4.1 half
+    // of `provider-marks.tsx`'s rewritten "colour is never the ONLY signal".
+    // Strip the tone from both and they must still be two pictures; in the
+    // dark theme the two brand values are 1.05:1 apart in luminance, so a
+    // reader receiving no hue is reading exactly this.
+    const paths = (node: Element | null) =>
+      [...(node?.querySelectorAll('path') ?? [])].map((p) => p.getAttribute('d')).join('|');
+    expect(paths(claude)).not.toBe(paths(codex));
   });
 
   it('draws the neutral mark -- not another provider’s -- for a source it has never heard of', () => {
@@ -197,7 +208,9 @@ describe('the provider mark on a session row', () => {
     const { container } = mount([entry('codex')], { phone: true });
     const lane = markIn(container, 's-codex');
     expect(lane, 'the phone row dropped the provider mark').not.toBe(null);
-    expect(lane?.getAttribute('data-source-mark')).toBe('native');
+    // `brand` since OpenAI's mark entered the table; `codex` was `native` when
+    // this was written.
+    expect(lane?.getAttribute('data-source-mark')).toBe('brand');
   });
 
   it('opens the phone’s own meta line with it, ahead of the branch there too', () => {
