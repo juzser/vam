@@ -54,7 +54,6 @@ function draw(
   const built: Session = {
     id: 's1',
     title: 'Provider survey',
-    icon: null,
     epic: null,
     branch: null,
     status: 'running',

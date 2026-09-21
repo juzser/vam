@@ -95,7 +95,6 @@ const DECISIONS = [
 const SESSION: Session = {
   id: 's1',
   title: 'Sprint board reorder',
-  icon: null,
   epic: 'board',
   branch: null,
   status: 'waiting',

@@ -36,7 +36,6 @@ const TURN: Decision = {
 const SESSION: Session = {
   id: 'a1',
   title: 'a1',
-  icon: null,
   epic: null,
   branch: null,
   status: 'running',

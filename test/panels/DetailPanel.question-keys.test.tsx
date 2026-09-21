@@ -32,7 +32,6 @@ const SET = [question(0, 'Colour', ['Crimson', 'Cobalt']), question(1, 'Fruit', 
 const SESSION: Session = {
   id: 's1',
   title: 'Colour study',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

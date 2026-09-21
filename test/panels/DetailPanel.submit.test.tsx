@@ -41,7 +41,6 @@ const SESSION: Session = {
   vamControlled: true,
   id: 's1',
   title: 'Colour study',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

@@ -75,7 +75,8 @@ describe('the reopen item', () => {
     expect(reopen({ onReopen: undefined })?.unavailable).not.toBe(null);
   });
 
-  it('leaves the three items that were here alone', () => {
-    expect(menu().map((item) => item.id)).toEqual(['rename', 'icon', 'reopen', 'close']);
+  it('leaves the items that were here alone', () => {
+    // Two, not three: `icon` was here until session icons were removed.
+    expect(menu().map((item) => item.id)).toEqual(['rename', 'reopen', 'close']);
   });
 });

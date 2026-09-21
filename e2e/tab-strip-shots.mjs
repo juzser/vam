@@ -649,12 +649,23 @@ function checkProvider(tab) {
 }
 
 /** AND THE SESSION ICON IS GONE, from every tab of every project on screen.
- *  The fixture seeds emoji icons on five of its sessions, so this is a corpus
- *  and not an empty sweep -- `tree-icon-shots.mjs` names them. */
+ *
+ *  THE CORPUS IS THE TABS, not the icons, and that changed with the feature.
+ *  The fixture used to seed emoji on five of its sessions, so a zero here was
+ *  a zero against five real candidates; a session has no icon to seed now, so
+ *  the only thing that makes this sweep non-vacuous is that there are tabs on
+ *  screen to have drawn one. Counted rather than assumed -- a strip that
+ *  failed to render would otherwise report "no session icons" and be right. */
 async function checkNoSessionIcon(on) {
-  const drawn = await on.evaluate(() => document.querySelectorAll('[data-session-icon]').length);
-  if (drawn > 0) {
-    throw new Error(`${drawn} tab(s) still draw a session icon the operator removed`);
+  const seen = await on.evaluate(() => ({
+    drawn: document.querySelectorAll('[data-session-icon]').length,
+    tabs: document.querySelectorAll('[data-session-tab]').length,
+  }));
+  if (seen.tabs === 0) {
+    throw new Error('no tabs on screen, so the session-icon sweep below measured nothing');
+  }
+  if (seen.drawn > 0) {
+    throw new Error(`${seen.drawn} of ${seen.tabs} tab(s) draw a session icon the operator removed`);
   }
 }
 

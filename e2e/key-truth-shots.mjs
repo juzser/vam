@@ -848,7 +848,10 @@ await settle(
 // keydown delivered to whatever holds focus.
 
 await page.addInitScript(() => {
-  window.localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { icon: ['r'] } }));
+  window.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ keyBindings: { filterMenu: ['r'] } }),
+  );
 });
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-session-row]');
@@ -898,7 +901,7 @@ if (sheetOpen) {
   check('exactly one of them is marked dead', dead.length === 1, `${dead.length} marked`);
   check(
     'the dead one is the row whose key was taken, and it names the taker',
-    dead[0]?.label.includes('rename') === true && dead[0]?.dead?.includes('icon') === true,
+    dead[0]?.label.includes('rename') === true && dead[0]?.dead?.includes('filter') === true,
     `label "${dead[0]?.label}", mark "${dead[0]?.dead}"`,
   );
   check(
@@ -923,12 +926,13 @@ await settle(
   'the sheet closes before the key is pressed',
 );
 
-// AND THE KEYSTROKE ITSELF. The sheet says `icon` has `r`; if `r` opened a
-// rename field instead, the sheet would be wrong in the new direction rather
-// than the old one — which is why this is measured and not reasoned about.
+// AND THE KEYSTROKE ITSELF. The sheet says `filterMenu` has `r`; if `r`
+// opened a rename field instead, the sheet would be wrong in the new
+// direction rather than the old one — which is why this is measured and not
+// reasoned about.
 await page.keyboard.press('r');
 const reached = await settle(
-  () => document.querySelector('[data-icon-picker]') !== null,
+  () => document.querySelector('[data-filter-menu]') !== null,
   undefined,
   '`r` invokes the action the sheet names as the winner',
 );
@@ -939,7 +943,7 @@ if (reached) {
   check(
     'and the shadowed action did not also run',
     renaming === false,
-    'a rename field opened as well as the icon panel',
+    'a rename field opened as well as the filter popover',
   );
 }
 
@@ -983,13 +987,15 @@ if (settingsOpen) {
   console.log('settings over a contested map:', JSON.stringify(editor));
   check(
     'the notice names the key, the winner and the loser',
-    editor.text.includes('"r"') && editor.text.includes('icon') && editor.text.includes('rename'),
+    editor.text.includes('"r"') &&
+      editor.text.includes('filter') &&
+      editor.text.includes('rename'),
     editor.text,
   );
   check('and it is painted', editor.painted && editor.inView, 'the notice has no visible box');
   check(
     'the dead slot says so in its accessible name, not only in ink',
-    editor.slotLabel.includes('dead') && editor.slotLabel.includes('icon'),
+    editor.slotLabel.includes('dead') && editor.slotLabel.includes('filter'),
     editor.slotLabel,
   );
   check(
@@ -1011,14 +1017,14 @@ if (settingsOpen) {
 
 // AND THE REFUSAL ITSELF, driven the way an operator drives it. The map is
 // the one F3's first two steps leave behind — `rename` moved to a free key,
-// `icon` on the freed `r` — and the third step is the click that used to hand
+// `filterMenu` on the freed `r` — and the third step is the click that used to hand
 // `r` to two actions in silence. A unit test can prove the write did not
 // happen; only this can prove the control is reachable, the message lands on
 // screen, and the row still shows the binding it refused to change.
 await page.addInitScript(() => {
   window.localStorage.setItem(
     'vam.prefs.v1',
-    JSON.stringify({ keyBindings: { rename: ['b'], icon: ['r'] } }),
+    JSON.stringify({ keyBindings: { rename: ['b'], filterMenu: ['r'] } }),
   );
 });
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
@@ -1070,7 +1076,7 @@ if (editorOpen) {
     console.log('refused reset:', JSON.stringify(said));
     check(
       'the refusal names the key and the action that owns it',
-      said.text.includes('"r"') && said.text.includes('icon'),
+      said.text.includes('"r"') && said.text.includes('filter'),
       said.text,
     );
     check('and a way out of it', said.text.includes('reset shortcuts'), said.text);

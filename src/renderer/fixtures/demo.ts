@@ -143,7 +143,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: true,
           id: 'factory-sse-1',
           title: 'factory-sse-1',
-          icon: '🔨',
           epic: 'ui-server-sse',
           branch: null,
           status: 'waiting',
@@ -333,7 +332,6 @@ export const DEMO_MODEL: CanvasModel = {
         {
           id: 'crosscheck-2',
           title: 'crosscheck-2',
-          icon: '🧪',
           epic: 'cross-provider',
           branch: null,
           status: 'running',
@@ -375,7 +373,6 @@ export const DEMO_MODEL: CanvasModel = {
         {
           id: 'dogfood-4',
           title: 'dogfood-4',
-          icon: '📦',
           epic: 'd257-verdict',
           branch: null,
           status: 'done',
@@ -451,7 +448,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: false,
           id: 'vam-build-1',
           title: 'vam-build-1',
-          icon: '📐',
           epic: 'canvas-epic-1',
           branch: null,
           status: 'waiting',
@@ -493,7 +489,7 @@ export const DEMO_MODEL: CanvasModel = {
               label: 'icon',
               input: 'Rename sessions and pick an icon for them, like orca does.',
               output:
-                'Orca uses emoji-picker-react (class .repo-icon-emoji-picker), not a fixed list. Switched the picker to one with search. Press s on a row to try it.',
+                'Orca uses emoji-picker-react (class .repo-icon-emoji-picker), not a fixed list. Switched the picker to one with search. Open a project heading’s icon to try it.',
               commands: [],
             },
             {
@@ -562,7 +558,6 @@ export const DEMO_MODEL: CanvasModel = {
           },
           id: 'notes-1',
           title: 'notes-1',
-          icon: '🌙',
           epic: 'd257-verdict',
           branch: 'smith/d257/verdict-notes',
           status: 'idle',
@@ -588,7 +583,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: true,
           id: 'notes-2',
           title: 'notes-2',
-          icon: '📝',
           epic: 'd257-verdict',
           branch: 'smith/d257/ledger-sweep',
           status: 'waiting',
@@ -630,7 +624,6 @@ export const DEMO_MODEL: CanvasModel = {
           vamControlled: true,
           id: 'notes-3',
           title: 'notes-3',
-          icon: '🧯',
           epic: 'd257-verdict',
           branch: 'smith/d257/projection-backfill',
           status: 'failed',
@@ -661,18 +654,24 @@ export const DEMO_MODEL: CanvasModel = {
           // not be taken, and `e2e/tab-strip-shots.mjs` could not measure a
           // bare tab's width against a spinning one's on the same row.
           //
-          // NO ICON, deliberately, and the only session in this project
-          // without one: with the icon switch on by default, a tab with an
-          // icon always draws SOMETHING before its title, and the guard needs
-          // one tab whose only mark is its status -- so that "the spinner is
-          // the mark" is measured on a tab where nothing else could be.
+          // THE REASON THIS ROW HAD NO ICON IS GONE, and the row is not.
+          // It read: with the icon switch on by default a tab with an icon
+          // always draws SOMETHING before its title, so the guard needed one
+          // tab whose only mark was its status, and "the spinner is the mark"
+          // could be measured where nothing else could interfere. Sessions
+          // have no icons now (pull request 433 took the tab's, and the
+          // picker went after it) and every tab carries its provider glyph
+          // regardless, so no tab is bare and no fixture row can make one.
+          // What the guard measures instead is the DIFFERENCE between this
+          // running tab and an idle one on the same strip, which is what the
+          // operator's rule was always about; the row stays because that
+          // comparison still needs two tabs.
           //
           // `factory` still holds exactly three; the split-pane guards are
           // written around that and this row does not touch it.
           vamControlled: true,
           id: 'notes-4',
           title: 'notes-4',
-          icon: null,
           epic: 'd257-verdict',
           branch: 'smith/d257/ledger-diff',
           status: 'running',

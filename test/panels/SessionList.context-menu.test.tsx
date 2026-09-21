@@ -117,13 +117,12 @@ describe('the row menu opens', () => {
 });
 
 describe('what the row menu offers', () => {
-  it('offers the three the chord table already offers for this row', () => {
-    draw({ onRenameSession: vi.fn(), onPickSessionIcon: vi.fn() });
+  it('offers the ones the chord table already offers for this row', () => {
+    draw({ onRenameSession: vi.fn() });
     openOn('a1');
     expect([...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)).toEqual(
       [
         'Rename session',
-        'Change session icon',
         // Drawn and disabled, carrying its reason: this harness wires no
         // reopen route, which is the phone shell's case too.
         'Reopen session — not available here',
@@ -175,14 +174,6 @@ describe('what the row menu offers', () => {
     expect(menu()).toBeNull();
   });
 
-  it('picks the icon for the row that was right-clicked', () => {
-    const onPickSessionIcon = vi.fn();
-    draw({ onPickSessionIcon });
-    openOn('a2');
-    fireEvent.click(entry('icon') as HTMLElement);
-    expect(onPickSessionIcon).toHaveBeenCalledWith('a2');
-  });
-
   it('closes the row that was right-clicked', () => {
     const onClose = vi.fn();
     draw({ onClose });
@@ -198,7 +189,7 @@ describe('what the row menu offers', () => {
    * between two surfaces showing the same row.
    */
   it('disables what this caller cannot do, with the reason', () => {
-    draw({ onRenameSession: undefined, onPickSessionIcon: undefined });
+    draw({ onRenameSession: undefined });
     openOn('a1');
     expect(entry('rename')?.disabled).toBe(true);
     expect(entry('rename')?.textContent).toContain('not available here');

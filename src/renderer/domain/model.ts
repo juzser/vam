@@ -508,16 +508,6 @@ export type Session = {
   readonly id: string;
   /** Short name shown on the tab and the sidebar row — an epic id, a task id, a run name. */
   readonly title: string;
-  /**
-   * A single glyph the operator picked, or `null` for none.
-   *
-   * Borrowed from orca, where a workspace carries one. It earns its place for
-   * the same reason there: a list of a dozen sessions named `D-2xx` is a list
-   * you read character by character, and a glyph is the thing the eye finds
-   * before it starts reading. It is chosen by a person and means whatever they
-   * decided — nothing derives it, and nothing should.
-   */
-  readonly icon: string | null;
   /** Optional second label beside the title, e.g. which epic a task belongs to. */
   readonly epic: string | null;
   readonly status: SessionStatus;

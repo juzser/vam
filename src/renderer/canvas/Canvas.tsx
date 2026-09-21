@@ -107,7 +107,7 @@ import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
-import { describeIcon, IconMark, parseIcon } from '../panels/icon-value.js';
+import { describeIcon, parseIcon } from '../panels/icon-value.js';
 import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -115,7 +115,6 @@ import { type ProjectChoice, ProjectPicker } from '../panels/ProjectPicker.js';
 import type { RemovalPlan } from '../panels/remove-project.js';
 import { NEW_PROJECT_PENDING, rowMenuItems, SessionList } from '../panels/SessionList.js';
 import { SplitResizer } from '../panels/SplitResizer.js';
-import { resolveSessionIcon } from '../panels/session-icon.js';
 import { StatusMark } from '../panels/status-mark.js';
 import { halfPageTarget } from '../panels/stick-to-bottom.js';
 import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
@@ -125,15 +124,14 @@ import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
 import { DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
-  applyIcons,
   applyPalette,
+  applyProjectIcons,
   applyRenames,
   applyTheme,
   browserStorage,
   createGroup,
   deleteGroup,
   type EffectiveTheme,
-  type FocusChoice,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
@@ -149,7 +147,6 @@ import {
   setFocusView,
   setGroupCollapsed,
   setGroupIcon,
-  setIcon,
   setLastFocus,
   setPaneWidth,
   setProjectCollapsed,
@@ -403,19 +400,23 @@ function jumpLabels(ids: readonly string[]): Map<string, string> {
 }
 
 /**
- * What the icon picker is aiming at.
+ * What an in-place session rename is aiming at.
  *
- * The SOURCE is captured when the picker opens, not re-derived when it
- * closes. Re-deriving it meant `allEntries.find(e => e.session.id === id)`,
- * a lookup by session id ACROSS EVERY SOURCE — the exact ambiguity this
- * epic re-keyed storage to remove. With two sources holding a session
- * `D-257`, `.find` returns whichever sorts first, so the glyph could land in
- * the wrong source's bucket and appear on the other session. The title is
- * carried for the same reason: it was a second lookup with the same flaw,
- * and it also cannot go stale if the entry disappears while the picker is
- * open.
+ * The SOURCE is captured when the edit opens, not re-derived when it commits.
+ * Re-deriving it meant `allEntries.find(e => e.session.id === id)`, a lookup
+ * by session id ACROSS EVERY SOURCE — the exact ambiguity this epic re-keyed
+ * storage to remove. With two sources holding a session `D-257`, `.find`
+ * returns whichever sorts first, so the name could land in the wrong source's
+ * bucket and appear on the other session. The title is carried for the same
+ * reason: it was a second lookup with the same flaw, and it also cannot go
+ * stale if the entry disappears while the edit is open.
+ *
+ * IT WAS `IconTarget`, AND THE ICON PICKER IS WHY IT EXISTS: the bug above was
+ * found there first, and the rename flow adopted the fix. The session-icon
+ * picker has since been removed outright, so the name follows the one caller
+ * that is left rather than the one that taught it the lesson.
  */
-type IconTarget = {
+type RenameTarget = {
   readonly source: SourceId;
   readonly sessionId: string;
   readonly title: string;
@@ -423,7 +424,7 @@ type IconTarget = {
 
 /**
  * What the PROJECT icon picker is aiming at — same shape and same reasoning
- * as `IconTarget`, one level up: captured when the picker opens rather than
+ * as `RenameTarget`, one level up: captured when the picker opens rather than
  * re-derived, so a model refresh mid-pick cannot move the write to the wrong
  * project.
  */
@@ -1173,22 +1174,15 @@ function TabStrip({
     >
       {tabs.map((entry) => {
         const active = entry.session.id === activeId;
-        // OFF, AND STILL HERE ON PURPOSE. `icon` left `TAB_INDICATORS` when
-        // the operator said "remove the session icon from the tab" in the
-        // same breath as asking for the provider glyph below, so this
-        // resolves to `null` on every tab today and the block that draws it
-        // renders nothing. It is not dead code: `tab-indicators.ts` documents
-        // "off but still in the union" as the re-enable path -- one entry in
-        // that list brings this back, correct, rather than somebody
-        // reconstructing the chain from memory.
+        // A SESSION ICON USED TO BE RESOLVED HERE, and the block that drew
+        // it sat just before the title below. It was kept for one release
+        // after "remove the session icon from the tab", switched off but
+        // intact, because `tab-indicators.ts` documented "off but still in
+        // the union" as the way back. There is no way back now: with the tab
+        // gone the picker wrote where nothing read, and the operator removed
+        // the picker too. Rendering that had no value to draw is rendering
+        // nobody can turn on, so it went with the id.
         //
-        // The chain (`panels/session-icon.tsx`): the session's own choice,
-        // else its project's, else nothing drawn -- deliberately not the
-        // module's own placeholder glyph, which would put a Monitor icon on
-        // every tab nobody has picked one for. It answers with a KIND (an
-        // emoji, or a named glyph in a tone), not a character, so the tone
-        // arrives here without this strip knowing that colours exist.
-        const icon = isTabIndicatorOn('icon') ? resolveSessionIcon(entry) : null;
         // WHICH AGENT RAN THIS TAB. The operator: "put the provider glyph
         // after the indicator, on the tab name." The same two fields the
         // sidebar row's `rowSource` reads, in the same order, because they
@@ -1308,25 +1302,6 @@ function TabStrip({
               onContextMenu={tabMenuOf(entry)}
               className={`max-w-[160px] cursor-pointer truncate py-1 ${active ? TAB_STATUS_INK[entry.session.status] : ''}`}
             >
-              {icon !== null && (
-                <>
-                  {/* `inline-flex` so a drawn glyph sits on the label's centre
-                      line rather than on its baseline, which is where an
-                      inline `<svg>` lands by default and is about 3px too low
-                      beside 12px text. An emoji is unaffected: it is the only
-                      thing in the box either way. 12 is `--text-control`, the
-                      tab label's own size, so the two kinds of icon occupy the
-                      same height. */}
-                  <span
-                    data-session-icon={entry.session.id}
-                    data-tab-mark="icon"
-                    aria-hidden="true"
-                    className="inline-flex items-center align-middle"
-                  >
-                    <IconMark value={icon} size={TAB_MARK_GLYPH_PX} fallback={null} />
-                  </span>{' '}
-                </>
-              )}
               {entry.session.title}
             </button>
             {/* THE MARKS ABOUT YOU, after the title. Siblings of the select
@@ -1726,11 +1701,11 @@ function CanvasInner({
     // source's.
     () =>
       applyRenames(
-        applyIcons(factoryModel, prefs.icons, prefs.projectIcons),
+        applyProjectIcons(factoryModel, prefs.projectIcons),
         prefs.renames,
         prefs.projectNames,
       ),
-    [factoryModel, prefs.icons, prefs.projectIcons, prefs.renames, prefs.projectNames],
+    [factoryModel, prefs.projectIcons, prefs.renames, prefs.projectNames],
   );
 
   /**
@@ -2332,14 +2307,14 @@ function CanvasInner({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   /**
    * WHICH source's session is being renamed, captured when the editor opens
-   * rather than re-derived when it commits -- the same argument `IconTarget`
+   * rather than re-derived when it commits -- the same argument
+   * `RenameTarget`
    * makes above, and the same bug avoided: a lookup by session id across
    * every source returns whichever sorts first, and the name would land in
    * the wrong source's bucket.
    */
-  const [renameTarget, setRenameTarget] = useState<IconTarget | null>(null);
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  const [pickingIconFor, setPickingIconFor] = useState<IconTarget | null>(null);
   /** The group whose glyph is being picked, captured when the picker opens --
    *  the reasoning `ProjectIconTarget` records, one level up again. */
   const [pickingGroupIconFor, setPickingGroupIconFor] = useState<{
@@ -2403,25 +2378,6 @@ function CanvasInner({
     setRenamingId(entry.session.id);
   }, []);
 
-  const openSessionIconPicker = useCallback((entry: SessionEntry) => {
-    // A project with no source cannot store an icon under one: guessing a
-    // fallback here would reintroduce the exact cross-source collision this
-    // epic's storage re-key removed.
-    const projectSource = entry.project.source;
-    if (projectSource === undefined) {
-      setStatus('this project has no source — icon unavailable');
-      return;
-    }
-    setPickingIconFor((current) =>
-      current !== null && current.sessionId === entry.session.id && current.source === projectSource
-        ? null
-        : {
-            source: projectSource,
-            sessionId: entry.session.id,
-            title: entry.session.title,
-          },
-    );
-  }, []);
   /** The sidebar's filter popover — the ONE home for narrowing (SessionList). */
   const [filterMenuOpen, setFilterMenuOpen] = useState(false);
   /*
@@ -2878,20 +2834,27 @@ function CanvasInner({
   );
 
   /**
-   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the three levels.
+   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the two levels.
    *
    * DELIBERATELY NOT CAPTURED INTO THE TARGET beside the source and the id.
-   * What a target freezes is WHICH thing is being edited -- `IconTarget` argues
+   * What a target freezes is WHICH thing is being edited -- `RenameTarget` argues
    * why, and that is the part that must not move under an open panel. The icon
    * ITSELF is the part that has to move: a glyph and its colour are two
    * presses, and a frozen value would leave the swatches still refusing on the
    * grounds that nothing was chosen, one press after something was.
    *
    * READ OFF THE MODEL RATHER THAN THE PREFS BUCKET, so the picker marks what
-   * the operator can SEE. The two agree for a project and a group -- prefs is
-   * the only writer of either -- but a session's icon can also come from a
-   * source's own fixture (`fixtures/demo.ts`), which never reaches prefs at
-   * all.
+   * the operator can SEE. Today the two always agree -- prefs is the only
+   * writer of either level -- so this reads as a redundant indirection, and it
+   * is kept deliberately: the model is what gets PAINTED, and a source that
+   * ever supplies a project icon of its own would make the bucket disagree
+   * with the column while the picker went on ticking the bucket's answer.
+   * There WAS a third level here, and it is the reason this note names the
+   * distinction: a session's icon could come from a source's own fixture and
+   * never reach prefs at all. Sessions no longer have icons (pull request
+   * 433 took the last surface, and the picker went after it), so the
+   * exception is gone -- but the rule it taught is what keeps the remaining
+   * two honest.
    */
   const projectIcons = useMemo(
     () => new Map(allEntries.map((entry) => [entry.project.id, entry.project.icon ?? null])),
@@ -5415,13 +5378,6 @@ function CanvasInner({
           }
           beginSessionRename(focusedEntry);
           return;
-        case 'icon':
-          if (focusedEntry === null) {
-            setStatus('pick a session first');
-            return;
-          }
-          openSessionIconPicker(focusedEntry);
-          return;
         case 'close':
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -5638,7 +5594,6 @@ function CanvasInner({
           setFiltering(false);
           setComposing(false);
           setRenamingId(null);
-          setPickingIconFor(null);
           setConfirmForceClose(null);
           // The last layer Escape peels is the keyboard itself, and peeling it
           // is a blur. Note that an Escape typed INSIDE the composer never
@@ -5699,7 +5654,6 @@ function CanvasInner({
     terminalTab,
     filesTab,
     overlayOpen,
-    openSessionIconPicker,
     splitFocused,
     closeFocusedSplit,
     stepFocusedSplit,
@@ -5761,15 +5715,6 @@ function CanvasInner({
       beginSessionRename(found);
     },
     [entries, beginSessionRename],
-  );
-
-  const onSidebarPickSessionIcon = useCallback(
-    (sessionId: string) => {
-      const found = entries.find((candidate) => candidate.session.id === sessionId);
-      if (found === undefined) return;
-      openSessionIconPicker(found);
-    },
-    [entries, openSessionIconPicker],
   );
 
   const onSidebarPick = useCallback(
@@ -6004,7 +5949,6 @@ function CanvasInner({
     onPick: onSidebarPick,
     onClose: onSidebarClose,
     onRenameSession: onSidebarRenameSession,
-    onPickSessionIcon: onSidebarPickSessionIcon,
     onAdd: onSidebarAdd,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
@@ -6554,32 +6498,6 @@ function CanvasInner({
         />
       )}
 
-      {pickingIconFor !== null && (
-        <IconPicker
-          title={pickingIconFor.title}
-          value={entriesById.get(pickingIconFor.sessionId)?.session.icon ?? null}
-          onPick={(icon) => {
-            // Both the source and the session come from the target captured
-            // when the picker opened, so there is nothing to look up and
-            // nothing to guess: AC-1's collision cannot reach this path.
-            savePrefs(
-              setIcon(prefs, pickingIconFor.source, pickingIconFor.sessionId, icon, new Date()),
-            );
-            setStatus(
-              icon === ''
-                ? 'icon cleared — kept on this machine, never in the event log'
-                : // `describeIcon`, not the stored string: `lucide:rocket:teal`
-                  // in this sentence is vam reading its own storage format
-                  // aloud. An emoji still reports as itself.
-                  `${describeIcon(icon)} — kept on this machine, never in the event log`,
-            );
-            if (keepPickerOpen(icon)) return;
-            setPickingIconFor(null);
-          }}
-          onClose={() => setPickingIconFor(null)}
-        />
-      )}
-
       {pickingMembersFor !== null && (
         <ProjectPicker
           groupName={pickingMembersFor.name}
@@ -6862,7 +6780,6 @@ function CanvasInner({
             // "what can I do to this session", and they would drift.
             closing: pendingAction === tabMenu.entry.session.id,
             onRenameSession: onSidebarRenameSession,
-            onPickSessionIcon: onSidebarPickSessionIcon,
             onClose: (sessionId) => void closeSession(sessionId, tabMenu.entry.session.title),
             // Same builder, same session, so the same fourth item. The entry
             // is right here, so `ended` is read off it rather than captured:

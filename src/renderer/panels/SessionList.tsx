@@ -454,7 +454,6 @@ export function rowMenuItems(
     /** `pendingAction` for this row: closing can take the full stop timeout. */
     readonly closing: boolean;
     readonly onRenameSession?: ((sessionId: string) => void) | undefined;
-    readonly onPickSessionIcon?: ((sessionId: string) => void) | undefined;
     readonly onClose: (sessionId: string) => void;
     readonly onReopen?: ((sessionId: string) => void) | undefined;
     /** Has this row's source MEASURED that the conversation is over? */
@@ -476,12 +475,6 @@ export function rowMenuItems(
       label: 'Rename session',
       unavailable: stopping ?? (how.onRenameSession === undefined ? noRoute : null),
       onPick: () => how.onRenameSession?.(sessionId),
-    },
-    {
-      id: 'icon',
-      label: 'Change session icon',
-      unavailable: stopping ?? (how.onPickSessionIcon === undefined ? noRoute : null),
-      onPick: () => how.onPickSessionIcon?.(sessionId),
     },
     {
       id: 'reopen',
@@ -670,7 +663,6 @@ export type SessionListProps = {
    * level up.
    */
   readonly onRenameSession?: (sessionId: string) => void;
-  readonly onPickSessionIcon?: (sessionId: string) => void;
   readonly onAdd: () => void;
   /**
    * The `+` in a project's heading. Separate from `onAdd` because it can say
@@ -896,7 +888,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onReopen,
     canReopen,
     onRenameSession,
-    onPickSessionIcon,
     onAdd,
     onAddInProject,
     onNewProject,
@@ -3510,7 +3501,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           items={rowMenuItems(rowMenu.sessionId, {
             closing: pendingAction === rowMenu.sessionId,
             onRenameSession,
-            onPickSessionIcon,
             onClose,
             onReopen,
             ended: rowMenu.ended,

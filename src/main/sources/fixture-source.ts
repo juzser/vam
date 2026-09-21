@@ -68,7 +68,6 @@ const PROJECTS: readonly Project[] = [
       {
         id: 'vam-electron-shell/task-4',
         title: 'task-4-load-ipc',
-        icon: null,
         epic: 'vam-electron-shell',
         status: 'waiting',
         runningAgents: 0,
@@ -91,7 +90,6 @@ const PROJECTS: readonly Project[] = [
       {
         id: 'vam-electron-shell/task-5',
         title: 'task-5-push',
-        icon: '○',
         epic: 'vam-electron-shell',
         status: 'running',
         runningAgents: 1,

@@ -63,7 +63,6 @@ function draw(over: Partial<DetailPanelProps> = {}) {
   const session: Session = {
     id: 's1',
     title: 'Provider survey',
-    icon: null,
     epic: null,
     branch: 'topic/rework',
     status: 'running',

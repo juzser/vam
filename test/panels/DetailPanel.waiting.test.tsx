@@ -45,7 +45,6 @@ import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/De
 const SESSION: Session = {
   id: 's1',
   title: 'Provider survey',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

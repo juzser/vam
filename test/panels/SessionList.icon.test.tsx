@@ -3,19 +3,22 @@
 /**
  * The sidebar draws no icon for a session -- and still draws one per project.
  *
- * This file used to assert the opposite: that the row drew whatever the shared
- * resolver resolved, checked against `resolveSessionGlyph` rather than against
- * a repeated literal. The operator removed that display ("bo icon o truoc
- * session name trong sidebar, chi de o project"), so the subject here is now
- * its absence, on both row shapes -- the ordinary row and the rename editor,
- * which drew the same slot. The chain itself did not go away; it is pinned in
- * isolation at `test/panels/session-icon.test.ts` and live at the tab strip
- * (`test/canvas/Canvas.tab-strip.test.tsx`), the surface that draws it since
- * the 0.2 migration retired the canvas root node.
+ * This file used to assert the opposite: that the row drew whatever a shared
+ * session-else-project resolver resolved. The operator removed that display
+ * ("bo icon o truoc session name trong sidebar, chi de o project"), then the
+ * tab's ("remove the session icon from the tab"), and finally the picker
+ * itself, since by then it wrote to a store no surface read.
  *
- * The project heading's icon is a different control with its own picker and
- * its own placeholder, and it is asserted here so that "the sidebar shows no
- * icon" can never be satisfied by removing both.
+ * So the session half of this file is down to ONE question, and it is the one
+ * that is still answerable: a row must not draw its PROJECT's glyph. A
+ * session's own icon cannot be asserted about any more -- there is no field to
+ * set -- but a project icon is a live feature, which makes inheritance the
+ * only way a glyph could still appear on a row by mistake.
+ *
+ * Everything below the first block is the project and group heading's own
+ * icon: a different control, with its own picker and its own placeholder,
+ * asserted here so that "the sidebar shows no session icon" can never be
+ * satisfied by quietly removing all of them.
  */
 
 import { cleanup, render } from '@testing-library/react';
@@ -36,7 +39,6 @@ function session(over: Partial<Session> = {}): Session {
   return {
     id: 's1',
     title: 'alpha-refactor',
-    icon: null,
     epic: null,
     branch: 'work',
     status: 'running',
@@ -57,27 +59,19 @@ function mount(entries: readonly SessionEntry[], over: Record<string, unknown> =
 }
 
 describe('a session row carries no icon', () => {
-  it('draws no icon slot, and no glyph either end of the chain would have given it', () => {
-    const owned: SessionEntry = {
-      project: project({ icon: '📦' }),
-      session: session({ id: 'own', icon: '🦀' }),
-    };
+  it('draws no icon slot, and does not inherit the glyph its project heading draws', () => {
     const inherited: SessionEntry = {
       project: project({ icon: '📦' }),
       session: session({ id: 'inherited' }),
     };
-    const { container } = mount([owned, inherited]);
+    const { container } = mount([inherited]);
     expect(container.querySelector('[data-row-icon]')).toBe(null);
-    for (const id of ['own', 'inherited']) {
-      const row = container.querySelector(`[data-session-row="${id}"]`);
-      expect(row, `no row for ${id}; the assertion below would be vacuous`).not.toBe(null);
-      expect(row?.textContent).not.toContain('🦀');
-      expect(row?.textContent).not.toContain('📦');
-      // The empty end of the chain used to draw a lucide placeholder in the
-      // row. The row still has svg of its own (the branch glyph), so this is
-      // asserted on the placeholder's own marker rather than on `svg`.
-      expect(row?.querySelector('[data-session-icon-placeholder]')).toBe(null);
-    }
+    const row = container.querySelector('[data-session-row="inherited"]');
+    expect(row, 'no row rendered; the assertion below would be vacuous').not.toBe(null);
+    // The heading above it IS drawing this glyph, which is what makes the
+    // absence below a measurement rather than a tautology.
+    expect(container.querySelector('[data-project-icon="p1"]')?.textContent).toBe('📦');
+    expect(row?.textContent).not.toContain('📦');
   });
 
   it('draws no icon slot in the rename editor either', () => {
@@ -88,11 +82,10 @@ describe('a session row carries no icon', () => {
       null,
     );
     // The rename row's slot never carried `data-row-icon`, so it is asserted
-    // by what it drew: the project glyph this session inherits, and the
-    // placeholder the empty chain would have drawn instead.
+    // by what it would have drawn: the project glyph this session's row sits
+    // under.
     const editor = input?.parentElement as HTMLElement;
     expect(editor.textContent).not.toContain('📦');
-    expect(editor.querySelector('[data-session-icon-placeholder]')).toBe(null);
   });
 });
 

@@ -1,11 +1,19 @@
 // @vitest-environment happy-dom
 
 /**
- * The project heading's icon picker, mouse-only (there is no keyboard
- * shortcut for it, unlike the session picker's `s`). Mirrors
- * `Canvas.keyboard.test.tsx`'s "renaming, icons and closing" block, one
- * level up: a project instead of a session, `data-project-icon` instead of
- * `s`.
+ * The project heading's icon picker, mouse-only — there is no keyboard
+ * shortcut for it, and there is no longer a session-level picker for it to
+ * mirror: that one was removed outright once the tab strip stopped drawing a
+ * session icon and the picker was left writing where nothing read.
+ *
+ * WHICH MAKES THIS FILE THE ONLY HOME FOR THE CAPTURED TARGET, the last block
+ * below. That property was pinned against the session picker and would have
+ * died with it. It is not a fact about session icons; it is a fact about any
+ * overlay that aims at something in a SOURCE and can outlive it, and this
+ * picker is now the only one of those. (The rename flow captures the same
+ * three fields for the same reason, but its editor is drawn ON THE ROW, so
+ * the entry vanishing unmounts the input and the hazard cannot be reached
+ * from there — checked, not assumed.)
  */
 
 import { act, cleanup, render, screen } from '@testing-library/react';
@@ -17,7 +25,6 @@ function session(id: string, over: Partial<Session> = {}): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -170,5 +177,75 @@ describe('the project heading icon picker', () => {
     const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
     expect(stored.icons ?? {}).toEqual({});
     expect(stored.projectIcons ?? {}).toEqual({});
+  });
+});
+
+/**
+ * The picker aims at a project in a SOURCE, and it must still know which one
+ * after the model underneath it has moved on.
+ *
+ * A model refresh between opening the picker and picking is the one input
+ * that separates CARRYING the target from RE-DERIVING it. Re-deriving meant a
+ * lookup by project id across every source with a `?? 'factory'` on the end —
+ * and once the project is gone that fallback fires, so a pick aimed at an
+ * ORCA project silently rewrote the factory bucket instead.
+ *
+ * `shared` exists under both sources in the STORE here, so the wrong bucket is
+ * a real entry rather than a harmless no-op, which is what makes the two
+ * directions distinguishable at all. The model holds one project per source
+ * with distinct ids, because two projects sharing an id would collide on
+ * React's key and make the render itself the thing under test.
+ */
+describe('the picker keeps aiming at the source it was opened from', () => {
+  const TWO_SOURCES: CanvasModel = {
+    projects: [
+      { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1')] },
+      { id: 'shared', name: 'beta', source: 'orca', sessions: [session('b1')] },
+    ],
+  };
+  /** The same model with orca's project gone — the refresh that lost it. */
+  const WITHOUT_ORCA: CanvasModel = { projects: [TWO_SOURCES.projects[0] as never] };
+
+  const seedBothBuckets = () =>
+    localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({
+        projectIcons: {
+          factory: { shared: { icon: '🛠', at: new Date().toISOString() } },
+          orca: { shared: { icon: '🐋', at: new Date().toISOString() } },
+        },
+      }),
+    );
+
+  it("keeps aiming at orca's project after the model drops it mid-pick", () => {
+    seedBothBuckets();
+    const { rerender } = render(<Canvas model={TWO_SOURCES} />);
+    act(() => {
+      projectIcon('shared')?.click();
+    });
+    // The refresh that used to lose the source.
+    act(() => rerender(<Canvas model={WITHOUT_ORCA} />));
+    expect(iconPicker(), 'the picker closed on the refresh; nothing below is measured').not.toBe(
+      null,
+    );
+    act(() => {
+      screen.getByText('clear icon').click();
+    });
+    const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
+    // ORCA's entry was cleared and factory's was left alone. Both halves
+    // matter: asserting only the first would pass for a write that cleared
+    // BOTH, and asserting only the second for one that cleared nothing.
+    expect(stored.projectIcons?.orca ?? {}).toEqual({});
+    expect(stored.projectIcons?.factory?.shared?.icon).toBe('🛠');
+  });
+
+  it('names the project it is picking for even after the entry is gone', () => {
+    // The title came from the same lookup and fell back to the raw id.
+    const { rerender } = render(<Canvas model={TWO_SOURCES} />);
+    act(() => {
+      projectIcon('shared')?.click();
+    });
+    act(() => rerender(<Canvas model={WITHOUT_ORCA} />));
+    expect(iconPicker()?.textContent).toContain('beta');
   });
 });

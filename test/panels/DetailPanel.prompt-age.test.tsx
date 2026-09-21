@@ -50,7 +50,6 @@ function draw(decision: Decision) {
   const session: Session = {
     id: 's1',
     title: 'Provider survey',
-    icon: null,
     epic: null,
     branch: null,
     status: 'running',

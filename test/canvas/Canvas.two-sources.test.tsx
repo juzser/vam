@@ -43,7 +43,6 @@ const NO_PANE = 'vam did not start this session and has no pane into it';
 const session = (id: string, source: string, over: Partial<Session> = {}): Session => ({
   id,
   title: id,
-  icon: null,
   epic: null,
   branch: null,
   status: 'idle',
