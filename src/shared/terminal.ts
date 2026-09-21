@@ -92,6 +92,50 @@ export type PaneView =
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 /**
+ * WHY THE TAB IS ASKING -- which is what decides how much work main does for
+ * one screen. Here rather than in main because the renderer is what knows the
+ * answer, and the preload carries the word across.
+ *
+ * THE THREE ARE THREE SITUATIONS, not three optimisation levels, and the
+ * difference between them is measured. On this machine (tmux 3.7b, a 200x50
+ * pane with 1600 lines of coloured scrollback, private `-L` socket, n=30, load
+ * ~8): a capture with `-S -500` is 86,260 bytes and 10.30ms median, the same
+ * capture of the screen alone is 7,760 bytes and 5.55ms, and the
+ * `list-sessions` in front of it is another ~5ms.
+ *
+ * `poll` -- the tab's own interval (`panels/TerminalTab.tsx`, `REFRESH_MS`).
+ * It PROVES the pairing between the row and the tmux session vam started for
+ * it, and it asks for the whole window: the scrollback has to be in the DOM
+ * for the operator to be able to scroll into it at all.
+ *
+ * `echo` -- the read right after a keystroke landed, with the view stuck to
+ * the live end. It rides the pairing the last `poll` proved
+ * (`main/terminal/ipc.ts`, `AIM_TTL_MS`) and asks for the screen only, because
+ * a view at the bottom is showing no scrollback: nobody is looking at the 500
+ * lines it would cost ~5ms and 78KB to fetch and ten times the React work to
+ * draw. This is the one mode allowed to prove nothing, and the poll's own
+ * proof is what bounds it.
+ *
+ * `echo-scrollback` -- the same read with the operator SCROLLED UP. It rides
+ * the aim too, but it asks for the whole window: serving the screen alone
+ * would empty the region under their cursor.
+ *
+ * Absent means `poll`. A caller that does not say which situation it is in
+ * gets the one that assumes nothing.
+ */
+export type PaneReadMode = 'poll' | 'echo' | 'echo-scrollback';
+
+/**
+ * Checked rather than trusted, for the reason `isPaneKey` and `isPaneSize` are
+ * checked: this value arrives from the least trusted process in the app and it
+ * decides how much main re-proves before it aims a read at a tmux session.
+ * Anything unrecognised is a malformed ask, never a default.
+ */
+export function isPaneReadMode(value: unknown): value is PaneReadMode {
+  return value === 'poll' || value === 'echo' || value === 'echo-scrollback';
+}
+
+/**
  * WHICH MODEL A SESSION IS RUNNING, or vam's inability to say so.
  *
  * Here for the reason `PaneView` is here: main reads it off a captured screen

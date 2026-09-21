@@ -50,6 +50,7 @@ import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.j
 import type {
   ModelSwitchResult,
   PaneKey,
+  PaneReadMode,
   PaneSendResult,
   PaneView,
   SessionModel,
@@ -398,8 +399,13 @@ export type TerminalApi = {
    * `rowId` is optional and is what makes the answer per SESSION: a project
    * vam started two sessions in has two panes, and only the session itself
    * knows which one it is in (`main/sources/claude-code/session-pane.ts`).
+   *
+   * `mode` is optional too, and absent means the careful one: main proves the
+   * pairing again and captures the whole window. The Terminal tab names its
+   * situation instead, because it is the only process that knows where the
+   * operator has scrolled to (`shared/terminal.ts`, `PaneReadMode`).
    */
-  read(projectId: string, rowId?: string): Promise<PaneView>;
+  read(projectId: string, rowId?: string, mode?: PaneReadMode): Promise<PaneView>;
   /**
    * How big the pane can draw, in cells. tmux composes the screen at the
    * session's own size, so this is the only thing that makes a captured screen
@@ -480,10 +486,17 @@ export type TerminalApi = {
  */
 export function createTerminalApi(ipc: InvokerLike): TerminalApi {
   return {
-    read: (projectId, rowId) =>
+    // THE TRAILING ARGUMENTS ARE OMITTED RATHER THAN PASSED AS `undefined`,
+    // exactly as every other member here omits an absent `rowId`: main counts
+    // `args.length` to tell "not given" from "given as nothing", and a mode
+    // cannot be asked for without a row to ask it about anyway -- the tab
+    // always has one.
+    read: (projectId, rowId, mode) =>
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalRead, projectId)
-        : ipc.invoke(CHANNELS.terminalRead, projectId, rowId)) as Promise<PaneView>,
+        : mode === undefined
+          ? ipc.invoke(CHANNELS.terminalRead, projectId, rowId)
+          : ipc.invoke(CHANNELS.terminalRead, projectId, rowId, mode)) as Promise<PaneView>,
     resize: (projectId, columns, rows, rowId) =>
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalResize, projectId, columns, rows)

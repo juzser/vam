@@ -316,9 +316,13 @@ const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y}
  * scroll. That was the operator's report, and `-S` is the whole of the fix.
  *
  * WHY NOT ALL OF IT. tmux's own default `history-limit` is 2000 (measured on
- * the same socket), and the cost of asking is paid on EVERY read -- the tab
- * polls once a second, and ten times a second while the operator is typing
- * (`panels/TerminalTab.tsx`, `ECHO_MS`). Both halves were measured on a
+ * the same socket), and the cost of asking is paid on every read that ASKS --
+ * the tab polls four times a second (`panels/TerminalTab.tsx`, `REFRESH_MS`).
+ * The reads in between, up to thirty a second while the operator is typing,
+ * ask for `history = 0` whenever the view is at the live end, which is what
+ * makes that rate affordable at all: nothing above the screen is on screen,
+ * so nothing above the screen is fetched (`shared/terminal.ts`,
+ * `PaneReadMode`). Both halves were measured on a
  * 137x41 pane of densely coloured output, through the real bundle in
  * Chromium:
  *
