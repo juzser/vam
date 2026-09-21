@@ -654,11 +654,18 @@ export const DEMO_MODEL: CanvasModel = {
           // not be taken, and `e2e/tab-strip-shots.mjs` could not measure a
           // bare tab's width against a spinning one's on the same row.
           //
-          // NO ICON, deliberately, and the only session in this project
-          // without one: with the icon switch on by default, a tab with an
-          // icon always draws SOMETHING before its title, and the guard needs
-          // one tab whose only mark is its status -- so that "the spinner is
-          // the mark" is measured on a tab where nothing else could be.
+          // THE REASON THIS ROW HAD NO ICON IS GONE, and the row is not.
+          // It read: with the icon switch on by default a tab with an icon
+          // always draws SOMETHING before its title, so the guard needed one
+          // tab whose only mark was its status, and "the spinner is the mark"
+          // could be measured where nothing else could interfere. Sessions
+          // have no icons now (pull request 433 took the tab's, and the
+          // picker went after it) and every tab carries its provider glyph
+          // regardless, so no tab is bare and no fixture row can make one.
+          // What the guard measures instead is the DIFFERENCE between this
+          // running tab and an idle one on the same strip, which is what the
+          // operator's rule was always about; the row stays because that
+          // comparison still needs two tabs.
           //
           // `factory` still holds exactly three; the split-pane guards are
           // written around that and this row does not touch it.

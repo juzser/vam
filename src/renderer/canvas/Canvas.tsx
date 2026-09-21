@@ -107,7 +107,7 @@ import { copyText } from '../panels/clipboard.js';
 import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
-import { describeIcon, IconMark, parseIcon } from '../panels/icon-value.js';
+import { describeIcon, parseIcon } from '../panels/icon-value.js';
 import { KeySheet } from '../panels/KeySheet.js';
 import { Note } from '../panels/Note.js';
 import { PaneResizer } from '../panels/PaneResizer.js';
@@ -132,7 +132,6 @@ import {
   createGroup,
   deleteGroup,
   type EffectiveTheme,
-  type FocusChoice,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
@@ -2835,7 +2834,7 @@ function CanvasInner({
   );
 
   /**
-   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the three levels.
+   * WHAT AN OPEN ICON PICKER IS LOOKING AT, live, at each of the two levels.
    *
    * DELIBERATELY NOT CAPTURED INTO THE TARGET beside the source and the id.
    * What a target freezes is WHICH thing is being edited -- `RenameTarget` argues
@@ -2845,10 +2844,17 @@ function CanvasInner({
    * grounds that nothing was chosen, one press after something was.
    *
    * READ OFF THE MODEL RATHER THAN THE PREFS BUCKET, so the picker marks what
-   * the operator can SEE. The two agree for a project and a group -- prefs is
-   * the only writer of either -- but a session's icon can also come from a
-   * source's own fixture (`fixtures/demo.ts`), which never reaches prefs at
-   * all.
+   * the operator can SEE. Today the two always agree -- prefs is the only
+   * writer of either level -- so this reads as a redundant indirection, and it
+   * is kept deliberately: the model is what gets PAINTED, and a source that
+   * ever supplies a project icon of its own would make the bucket disagree
+   * with the column while the picker went on ticking the bucket's answer.
+   * There WAS a third level here, and it is the reason this note names the
+   * distinction: a session's icon could come from a source's own fixture and
+   * never reach prefs at all. Sessions no longer have icons (pull request
+   * 433 took the last surface, and the picker went after it), so the
+   * exception is gone -- but the rule it taught is what keeps the remaining
+   * two honest.
    */
   const projectIcons = useMemo(
     () => new Map(allEntries.map((entry) => [entry.project.id, entry.project.icon ?? null])),
