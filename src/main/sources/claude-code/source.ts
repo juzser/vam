@@ -73,6 +73,7 @@ import {
 } from './pull-requests.js';
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
+import { resumeClaudeSession } from './resume.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
 import {
@@ -569,6 +570,12 @@ const DESCRIPTOR: SourceDescriptor = {
     // transcript for whether it is running, and the `meta.json` beside it for
     // what it is. See `agent-roster.ts`.
     agentRoster: true,
+    // `claude --resume <sessionId>` -- `docs/design/reopening-a-session.md`
+    // §3, built in `./resume.ts`. It is offered only for a row whose whole
+    // conversation has finished; that rule is enforced at the spawn, not
+    // here, because a capability is a fact about the SOURCE and this one is
+    // a fact about a row.
+    resumeSession: true,
   },
   declines: {
     // No watch is implemented, so no live badge is claimed: flipping this on
@@ -741,6 +748,20 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
   /** No agent list to consult: the operator named the directory themselves. */
   createSessionInDirectory: async (cwd, title, provider) =>
     createSessionInDirectory({ cwd, title, provider, run: createTmuxRunner() }),
+  /**
+   * `docs/design/reopening-a-session.md` §3.
+   *
+   * The agent list is asked for INSIDE `resumeClaudeSession` rather than
+   * gathered here, for the reason that module documents: what has to be true
+   * is that nothing is live on that SESSION ID -- not merely that this row has
+   * finished -- and the canvas's idea of either is one poll old.
+   */
+  resumeSession: async (sessionId) =>
+    resumeClaudeSession({
+      rowId: sessionId,
+      agents: listLiveAgents,
+      run: createTmuxRunner(),
+    }),
   /**
    * NO agent list is asked for here, unlike every write above, and that is the
    * point of the difference: this reads a FILE, and a transcript outlives the

@@ -1433,6 +1433,7 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
         // cannot. Both deliver.
         terminal: over.terminal ?? false,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: { kind: 'connection', note: 'one local process' },

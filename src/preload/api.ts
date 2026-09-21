@@ -173,6 +173,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   } satisfies Pick<PreloadSourceApi, 'describe' | 'load'>;
 
   const writes = {
+    resumeSession: (sessionId) => unwrap<void>(ipc.invoke(CHANNELS.resumeSession, sessionId)),
     recordPrompt: (sessionId, prompt) =>
       unwrap<void>(ipc.invoke(CHANNELS.recordPrompt, sessionId, prompt)),
     renameSession: (sessionId, title) =>
@@ -208,6 +209,7 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
     | 'closeSession'
     | 'createSession'
     | 'createSessionIn'
+    | 'resumeSession'
     | 'pickImageAttachment'
   >;
 

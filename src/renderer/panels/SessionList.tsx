@@ -369,6 +369,11 @@ export function rowMenuItems(
     readonly onRenameSession?: ((sessionId: string) => void) | undefined;
     readonly onPickSessionIcon?: ((sessionId: string) => void) | undefined;
     readonly onClose: (sessionId: string) => void;
+    readonly onReopen?: ((sessionId: string) => void) | undefined;
+    /** Has this row's source MEASURED that the conversation is over? */
+    readonly ended?: boolean;
+    /** Does this row's source advertise `resumeSession`? */
+    readonly canReopen?: boolean;
   },
 ): ContextMenuItem[] {
   // A row on its way out takes no orders -- the same fact the row button and
@@ -390,6 +395,34 @@ export function rowMenuItems(
       label: 'Change session icon',
       unavailable: stopping ?? (how.onPickSessionIcon === undefined ? noRoute : null),
       onPick: () => how.onPickSessionIcon?.(sessionId),
+    },
+    {
+      id: 'reopen',
+      label: 'Reopen session',
+      /**
+       * `docs/design/reopening-a-session.md` §3: never offered for a session
+       * that is LIVE, because `--resume` on a running one starts a COPY, and
+       * two processes on one conversation is the collision that once made
+       * Close kill the wrong tmux session.
+       *
+       * Drawn-and-disabled rather than dropped, on this menu's own rule above.
+       * "Not offered" as an absence teaches the operator nothing; the sentence
+       * is what tells them a finished session could be reopened here and that
+       * this one has not finished.
+       *
+       * `ended` is the source's own MEASUREMENT, not the row's colour --
+       * `Session.ended` carries why those are different.
+       */
+      unavailable:
+        stopping ??
+        (how.onReopen === undefined
+          ? noRoute
+          : how.canReopen === false
+            ? 'this source has no way to return to a conversation'
+            : how.ended === true
+              ? null
+              : 'this session is still running — reopening would start a second copy of it'),
+      onPick: () => how.onReopen?.(sessionId),
     },
     {
       id: 'close',
@@ -527,6 +560,14 @@ export type SessionListProps = {
   readonly onRenameCancel: () => void;
   readonly onPick: (sessionId: string) => void;
   readonly onClose: (sessionId: string) => void;
+  /** Absent where there is no reopen flow to offer -- the phone shell. */
+  readonly onReopen?: ((sessionId: string) => void) | undefined;
+  /**
+   * Whether a source here advertises `resumeSession` at all. The PER-ROW
+   * refusals belong to the callback, which answers in the source's own words;
+   * this only decides whether the item can ever be live.
+   */
+  readonly canReopen?: boolean;
   /**
    * THE RIGHT-CLICK MENU'S TWO NEW ROUTES, and the reason they are new.
    *
@@ -765,6 +806,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onRenameCancel,
     onPick,
     onClose,
+    onReopen,
+    canReopen,
     onRenameSession,
     onPickSessionIcon,
     onAdd,
@@ -930,6 +973,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const [rowMenu, setRowMenu] = useState<{
     readonly sessionId: string;
     readonly title: string;
+    // Captured WHEN THE MENU OPENS rather than read when an item is picked.
+    // The operator is deciding about the row they right-clicked, and a poll
+    // landing while the menu is up must not quietly change what the item in
+    // front of them means.
+    readonly ended: boolean;
     readonly at: { readonly x: number; readonly y: number };
   } | null>(null);
   const [openGroupMenu, setOpenGroupMenu] = useState<string | null>(null);
@@ -964,10 +1012,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * it could only answer with a mouse.
    */
   const onRowMenu =
-    (sessionId: string, title: string) =>
+    (sessionId: string, title: string, ended: boolean) =>
     (event: { preventDefault: () => void; clientX: number; clientY: number }) => {
       event.preventDefault();
-      setRowMenu({ sessionId, title, at: { x: event.clientX, y: event.clientY } });
+      setRowMenu({ sessionId, title, ended, at: { x: event.clientX, y: event.clientY } });
     };
 
   const toggleCollapse = useCallback(
@@ -2698,7 +2746,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                    Electron opens the SHELL's menu over the
                                    app's, offering Reload and Inspect Element
                                    over a session list. */
-                                onContextMenu={onRowMenu(session.id, session.title)}
+                                onContextMenu={onRowMenu(
+                                  session.id,
+                                  session.title,
+                                  session.ended === true,
+                                )}
                                 // Not actionable and not a tab stop -- but still
                                 // drawn, and still the row for THIS session: the
                                 // operator has to be able to see which one is
@@ -3102,7 +3154,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   /* The `x` sits OUTSIDE the row button, so a
                                      right-click on it would otherwise reach
                                      nothing. Same menu, same session. */
-                                  onContextMenu={onRowMenu(session.id, session.title)}
+                                  onContextMenu={onRowMenu(
+                                    session.id,
+                                    session.title,
+                                    session.ended === true,
+                                  )}
                                   aria-label={`close ${session.title}`}
                                   {...pending(session.id, `Stopping ${session.title}…`)}
                                   className={[
@@ -3256,6 +3312,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             onRenameSession,
             onPickSessionIcon,
             onClose,
+            onReopen,
+            ended: rowMenu.ended,
+            canReopen,
           })}
         />
       )}

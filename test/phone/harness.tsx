@@ -80,6 +80,7 @@ export function phoneSource(
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
       ...over.capabilities,
     },
     declines: over.declines ?? {},

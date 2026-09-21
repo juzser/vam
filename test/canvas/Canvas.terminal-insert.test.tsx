@@ -76,6 +76,7 @@ function withTerminal(): CanvasSource {
       pullRequests: false,
       terminal: true,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {},
     viewerScope: { kind: 'connection', note: 'one local process' },

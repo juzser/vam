@@ -80,8 +80,10 @@ import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { fileTranscriptSource } from '../claude-code/window.js';
 import type { MainSource } from '../source.js';
+import { createTmuxRunner, type TmuxRun } from '../tmux/spawn.js';
 import { type Liveness, livenessOf, type ProbeLock, probeLockViaOpen } from './liveness.js';
 import { queueMessage, type RunCodex, runCodexViaCli } from './queue.js';
+import { resumeThread } from './resume.js';
 import { readRolloutTail } from './rollout.js';
 import {
   codexHome,
@@ -228,6 +230,7 @@ const descriptorFor = (store: StoreRead | null, livenessReadable: boolean): Sour
         pullRequests: false,
         terminal: false,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {
         liveUpdates: every,
@@ -242,6 +245,7 @@ const descriptorFor = (store: StoreRead | null, livenessReadable: boolean): Sour
         pullRequests: every,
         terminal: every,
         agentRoster: every,
+        resumeSession: every,
       },
       viewerScope: {
         kind: 'connection',
@@ -290,6 +294,15 @@ const descriptorFor = (store: StoreRead | null, livenessReadable: boolean): Sour
       // pane, which no source has said before.
       terminal: false,
       agentRoster: false,
+      // `codex resume <uuid>`, measured: it replayed the thread's own turns
+      // and took the SAME uuid's writer lock, so a reopened thread is the
+      // same thread and `load()` finds it live on the next poll.
+      //
+      // TRUE WHILE `createSession` IS FALSE, and the pair is the point: vam
+      // cannot START a Codex thread yet (Stage 2 of `a-second-source.md`) and
+      // can return to one that exists. Folding the two into one boolean would
+      // have cost the operator this.
+      resumeSession: true,
     },
     declines: {
       liveUpdates:
@@ -448,6 +461,8 @@ export function createCodexSource(input: {
    * platform and therefore a construction-time one -- so the label can say it.
    */
   readonly livenessReadable?: boolean;
+  /** Injected so no test spawns tmux. */
+  readonly runTmux?: TmuxRun;
 }): MainSource {
   const path = stateDbPath(input.home ?? codexHome());
   const home = input.home ?? codexHome();
@@ -497,6 +512,30 @@ export function createCodexSource(input: {
       }
       return await queueMessage({ threadId: sessionId, message: prompt, run: input.runCodex });
     },
+    /**
+     * `codex resume <uuid>` in the thread's own directory.
+     *
+     * The store AND the writer lock are both re-read here rather than trusted
+     * from the last `load()`: a thread the canvas drew as finished ten seconds
+     * ago may have been resumed from a terminal since, and starting a second
+     * Codex on one conversation is the thing this must never do. See
+     * `./resume.ts`.
+     */
+    resumeSession: async (sessionId) =>
+      await resumeThread({
+        threadId: sessionId,
+        threads: async () => {
+          const read = await readThreads({
+            path,
+            exists: input.exists,
+            sidecars: readSidecars,
+            run: input.runSqlite,
+          });
+          return read.kind === 'threads' ? read.threads : [];
+        },
+        liveness: (threadId) => livenessOf(threadId, probeLock, home),
+        run: input.runTmux ?? createTmuxRunner(),
+      }),
   };
 }
 

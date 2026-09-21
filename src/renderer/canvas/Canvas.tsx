@@ -4073,6 +4073,59 @@ function CanvasInner({
   );
 
   /**
+   * REOPEN A CONVERSATION THAT HAS ENDED.
+   *
+   * `docs/design/reopening-a-session.md` §3, and shaped exactly like
+   * `closeSession` above because it is the same kind of act: one write, one
+   * pending row, one sentence in the status bar whether it worked or not.
+   *
+   * IT DOES NOT CHECK LIVENESS HERE. The row menu declines to offer it for a
+   * session that has not ended, and the SOURCE refuses it outright -- a check
+   * in the middle would be a third copy of a rule, one poll out of date, in
+   * the layer least able to enforce it.
+   */
+  const reopenSession = useCallback(
+    async (sessionId: string, title: string): Promise<void> => {
+      if (pendingAction !== null) {
+        setStatus(
+          `something else is still running — "${title}" was not reopened; try again in a moment`,
+        );
+        return;
+      }
+      if (source.kind !== 'session') {
+        setStatus(`the factory has no reopen command — "${title}" was not reopened`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource) || sessionSource.write.resumeSession === undefined) {
+        // THE SOURCE'S OWN WORDS, not this component's. Every `false`
+        // capability owes a decline, and this is where one is spent.
+        setStatus(
+          `${sessionSource.label} cannot reopen a session — ${
+            sessionSource.declines.resumeSession ?? 'it advertises no way to'
+          }`,
+        );
+        return;
+      }
+      setPendingAction(sessionId);
+      setStatus(`reopening "${title}"…`);
+      try {
+        await sessionSource.write.resumeSession(sessionId);
+        // "STARTED", not "reopened". What vam did is start a process; the row
+        // appears when the next poll sees it, and claiming it is back before
+        // it is drawn would be the same overclaim `model-command.ts` refuses.
+        setStatus(`started "${title}" again — it will appear when vam next reads the source`);
+        source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure('reopen session', cause));
+      } finally {
+        setPendingAction(null);
+      }
+    },
+    [source, pendingAction],
+  );
+
+  /**
    * A22 — a tab's own `×` closes THE SESSION that tab is for.
    *
    * The operator reported it as a dead button, and it was one. A15.5 gave the
@@ -5731,6 +5784,20 @@ function CanvasInner({
     [removeProject],
   );
 
+  /**
+   * `allEntries`, deliberately — never the narrowed `entries`. A reopenable
+   * row is by definition one the ended filter is hiding whenever that filter
+   * is on, and looking it up in the filtered list would make the control work
+   * only in the state where it is least needed.
+   */
+  const onSidebarReopen = useCallback(
+    (sessionId: string) => {
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      void reopenSession(sessionId, entry?.session.title ?? sessionId);
+    },
+    [allEntries, reopenSession],
+  );
+
   const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
 
   const onSidebarPickIcon = useCallback((project: Project) => {
@@ -5870,6 +5937,11 @@ function CanvasInner({
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
     hiddenCounts: hiddenCounts,
+    onReopen: onSidebarReopen,
+    canReopen:
+      source.kind === 'session' &&
+      canWriteTo(source.source) &&
+      source.source.write.resumeSession !== undefined,
     onFilterCommit: onSidebarFilterCommit,
     onFilterCancel: onSidebarFilterCancel,
     renamingId: renamingId,
@@ -6740,6 +6812,15 @@ function CanvasInner({
             onRenameSession: onSidebarRenameSession,
             onPickSessionIcon: onSidebarPickSessionIcon,
             onClose: (sessionId) => void closeSession(sessionId, tabMenu.entry.session.title),
+            // Same builder, same session, so the same fourth item. The entry
+            // is right here, so `ended` is read off it rather than captured:
+            // a tab menu closes on the poll that would change it.
+            onReopen: (sessionId) => void reopenSession(sessionId, tabMenu.entry.session.title),
+            ended: tabMenu.entry.session.ended === true,
+            canReopen:
+              source.kind === 'session' &&
+              canWriteTo(source.source) &&
+              source.source.write.resumeSession !== undefined,
           })}
         />
       )}

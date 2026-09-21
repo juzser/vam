@@ -58,6 +58,18 @@ export type MainSource = {
     provider?: string,
   ): Promise<SourceError | null>;
   /**
+   * Start a session that CONTINUES an existing conversation, addressed by the
+   * row id the canvas already holds.
+   *
+   * Its own capability rather than part of `createSession`, because the two
+   * are independently true: Codex cannot start a thread and CAN resume one.
+   *
+   * Takes no cwd and no provider. Both are facts the SOURCE already holds
+   * about that conversation, and letting a caller supply either would be
+   * letting it decide where somebody else's session resumes.
+   */
+  resumeSession?(sessionId: string): Promise<SourceError | null>;
+  /**
    * The turns BEFORE a point in a session -- scrolling back, which `load()`
    * deliberately cannot do: it reads a fixed tail per session so the poll stays
    * cheap, and the median session is three times that tail.

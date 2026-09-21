@@ -30,6 +30,20 @@ export type SourceCapabilities = {
   readonly pullRequests: boolean;
   readonly terminal: boolean;
   readonly agentRoster: boolean;
+  /**
+   * THE THIRTEENTH, and the first affordance added to this list rather than
+   * gated out of it. The header above says "gate every affordance the canvas
+   * already draws, never a new one" — reopening is a new one, and it needs a
+   * boolean for the same reason the other twelve do: whether it can act is
+   * known before the control would be drawn, so a source that cannot resume
+   * must be able to withdraw it with a sentence rather than fail when pressed.
+   *
+   * It is NOT folded into `createSession`. Codex separates them by example:
+   * vam cannot start a Codex thread (that is Stage 2 of
+   * `docs/design/a-second-source.md`) and CAN resume one, because
+   * `codex resume <uuid>` exists and was measured.
+   */
+  readonly resumeSession: boolean;
 };
 
 /**
@@ -107,6 +121,17 @@ export type SourceWrites = {
    * the cwd of a live session, so it begins existing only once this returns).
    */
   createSessionIn?(cwd: string, title: string): Promise<void>;
+  /**
+   * Continue a conversation that has ended, addressed by the row id the
+   * canvas holds. Gated by `resumeSession`, which is its OWN capability and
+   * not `createSession`'s -- Codex is the case that separates them: vam
+   * cannot start a Codex thread and can return to one.
+   *
+   * No cwd and no provider: both are facts the source holds about that
+   * conversation, and a caller supplying either would be deciding where
+   * somebody else's session resumes.
+   */
+  resumeSession?(sessionId: string): Promise<void>;
   /**
    * Opens a picker for one image, scoped to and validated against the
    * session's own working directory, and answers the resolved path -- or

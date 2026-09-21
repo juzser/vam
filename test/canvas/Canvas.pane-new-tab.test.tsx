@@ -66,6 +66,7 @@ function sourceWith(createSession?: (projectId: string, title: string) => Promis
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines:
       createSession === undefined ? { createSession: 'this source has no way to start one' } : {},

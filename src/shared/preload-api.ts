@@ -95,6 +95,8 @@ export type PreloadSourceApi = {
   closeSession(sessionId: string, force?: boolean): Promise<void>;
   createSession(projectId: string, title: string, provider?: string): Promise<void>;
   createSessionIn(cwd: string, title: string, provider?: string): Promise<void>;
+  /** Continue a conversation that has ended. See `MainSource.resumeSession`. */
+  resumeSession(sessionId: string): Promise<void>;
   /**
    * Opens the native image picker scoped to the session's own working
    * directory and answers a validated absolute path, `null` on cancel, or

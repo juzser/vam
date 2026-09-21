@@ -178,6 +178,7 @@ await page.addInitScript(() => {
         pullRequests: false,
         terminal: true,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: 'operator',

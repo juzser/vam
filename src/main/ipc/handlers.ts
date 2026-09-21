@@ -126,6 +126,7 @@ const ARGUMENTS: Record<string, readonly ((value: unknown) => boolean)[]> = {
   [CHANNELS.closeSession]: [isText, isOptionalBool],
   [CHANNELS.createSession]: [isText, isText, isOptionalText],
   [CHANNELS.createSessionIn]: [isDirectoryPath, isText, isOptionalText],
+  [CHANNELS.resumeSession]: [isText],
   [CHANNELS.sessionHistory]: [isText, isCursor],
   [CHANNELS.sessionAgentWork]: [isText, isText],
   [CHANNELS.applyWaivers]: [isText, isTextList],
@@ -283,6 +284,7 @@ export function registerSourceIpc(ipcMain: IpcMainLike, sources: readonly MainSo
     [CHANNELS.closeSession, 'closeSession'],
     [CHANNELS.createSession, 'createSession'],
     [CHANNELS.createSessionIn, 'createSession'],
+    [CHANNELS.resumeSession, 'resumeSession'],
     [CHANNELS.applyWaivers, 'governance'],
     [CHANNELS.transitionLesson, 'governance'],
   ];

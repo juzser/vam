@@ -36,6 +36,7 @@ const DESCRIPTOR: SourceDescriptor = {
     pullRequests: false,
     terminal: false,
     agentRoster: false,
+    resumeSession: false,
   },
   declines: {
     liveUpdates: 'the bundled sample never changes, and nothing pushes at it',
@@ -50,6 +51,7 @@ const DESCRIPTOR: SourceDescriptor = {
     pullRequests: NO_BACKEND,
     terminal: 'the desktop shell holds no PTY',
     agentRoster: NO_BACKEND,
+    resumeSession: NO_BACKEND,
   },
   viewerScope: {
     kind: 'connection',

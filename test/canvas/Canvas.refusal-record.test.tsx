@@ -64,6 +64,7 @@ function cannotCreate(): CanvasSource {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: { createSession: 'the CLI on this machine has no session command' },
     viewerScope: { kind: 'connection', note: 'one local process' },

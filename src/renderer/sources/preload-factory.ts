@@ -44,6 +44,16 @@ function buildWrites(api: PreloadSourceApi, descriptor: SourceDescriptor): Sourc
     // and one in a directory that is about to become a project.
     writes.createSessionIn = (cwd, title) => api.createSessionIn(cwd, title, activeProviderId());
   }
+  // Its own flag for the same reason `promptAttachments` has one, and the
+  // asymmetry is real rather than defensive: the Codex source answers false
+  // to `createSession` and true to this.
+  if (capabilities.resumeSession) {
+    // No provider is read here, unlike `createSession` above. A reopened
+    // session continues a conversation that was started by a particular
+    // agent, and running it under whatever the operator has selected TODAY
+    // would hand one agent's history to another.
+    writes.resumeSession = (sessionId) => api.resumeSession(sessionId);
+  }
   // Its own flag, not folded into `createSession`'s: a source can deliver
   // text without being able to scope a picker to a directory.
   if (capabilities.promptAttachments) {

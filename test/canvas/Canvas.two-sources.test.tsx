@@ -34,6 +34,7 @@ const caps = (over: Partial<SourceCapabilities> = {}): SourceCapabilities => ({
   pullRequests: false,
   terminal: false,
   agentRoster: false,
+  resumeSession: false,
   ...over,
 });
 
