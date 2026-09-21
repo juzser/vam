@@ -63,7 +63,13 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
+import type {
+  PaneKey,
+  PaneReadMode,
+  PaneSendResult,
+  PaneSize,
+  PaneView,
+} from '../../shared/terminal.js';
 import { isControlLetter } from '../../shared/terminal.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import {
@@ -85,15 +91,31 @@ import { fitPane, sameSize } from './terminal-size.js';
 /**
  * How often the open tab re-reads the pane.
  *
- * One second. Each refresh is a single short-lived `tmux capture-pane` that
- * prints a screenful and exits, so the cost is bounded by the screen, not by
- * how long the session has run; a second is fast enough that a working agent
- * reads as live to a person, and slow enough that vam is not spawning
- * processes at interaction rates. It runs ONLY while this component is
- * mounted and the window is visible, which is the constraint that actually
- * bounds the cost -- a closed tab refreshes at no rate at all.
+ * A QUARTER OF A SECOND, and this constant is half of what the operator
+ * reported -- translated: "tmux streaming has quite a lot of delay". Nothing
+ * pushes output out of tmux (`main/terminal/ipc.ts`: there is no timer in main
+ * at all), so a line an agent prints is on screen when the next read asks for
+ * it: mean lag is half this interval. At one second that was 500ms of nothing
+ * happening after an agent spoke, which is the "delay" in the report. At 250ms
+ * it is 125ms, which reads as live.
+ *
+ * WHAT THE FOUR-PER-SECOND COSTS, measured on this machine (tmux 3.7b, a
+ * 200x50 pane with 1600 lines of coloured scrollback, private `-L` socket,
+ * n=30, load ~8): one read is a `list-sessions` spawn (~5ms) and one
+ * `display-message ; capture-pane -S -500` spawn (10.30ms median, 86,260
+ * bytes). So about 60ms of main-process work per second for a visible tab,
+ * against 15ms before. It is the whole of the cost, and it is bounded by the
+ * same two conditions it always was: this component is mounted only while the
+ * Terminal tab is open, and the interval runs only while the window is
+ * VISIBLE (see the effect below, which stops outright on `visibilitychange`).
+ * A hidden window and a closed tab both still refresh at no rate at all --
+ * that was true before this number moved and it is why it could move.
+ *
+ * It is also what bounds the echo read's one liberty: the pairing an `echo`
+ * rides is re-proven by this tick, so the mis-aim window it widens is a
+ * quarter of a second rather than a second (`main/terminal/ipc.ts`).
  */
-export const REFRESH_MS = 1_000;
+export const REFRESH_MS = 250;
 
 /**
  * How soon after a keystroke actually lands the tab re-reads the pane, and
@@ -115,13 +137,30 @@ export const REFRESH_MS = 1_000;
  *
  * WHAT IT COSTS, said plainly because `REFRESH_MS`'s own note says vam is
  * "not spawning processes at interaction rates": while a person is actually
- * typing into a pane, this spawns up to ten short-lived `capture-pane`
- * reads a second instead of one. That is a real change to that rule, and it
+ * typing into a pane, this spawns up to thirty short-lived `capture-pane`
+ * reads a second instead of four. That is a real change to that rule, and it
  * is deliberately bounded to exactly the moment it buys something -- a human
  * typing at a keyboard, watching for their own characters. Idle costs
  * nothing extra: no key, no read.
+ *
+ * THIRTY-THREE MILLISECONDS, AND WHAT PAID FOR IT. This was 100ms, which is
+ * the other half of the operator's report -- translated: "[it] makes the
+ * prompt-typing experience bad". A leading-edge throttle adds a mean wait of
+ * half its window, so 100 was ~50ms added to every character after the first;
+ * 33 is ~17ms, which is under the ~24ms the rest of the path costs and so
+ * stops being the thing you feel. It is affordable because an echo read at
+ * the live end no longer asks for the scrollback: measured here, 7,760 bytes
+ * and 5.55ms instead of 86,260 and 10.30ms, plus the `list-sessions` (~5ms)
+ * it no longer spawns either (`shared/terminal.ts`, `PaneReadMode`). About
+ * 6ms of main-process work per read instead of ~15, which is what makes 30 a
+ * second a smaller total than 10 a second was.
+ *
+ * AND IT DOES NOT GO LOWER, nor become a setting. Below about 30ms the win
+ * stops being perceptible -- the rest of the path is the floor -- so every
+ * millisecond under this buys nothing and is paid for in spawns on a machine
+ * that is running somebody's agents.
  */
-export const ECHO_MS = 100;
+export const ECHO_MS = 33;
 
 /**
  * The reader the tab is given: `window.api.terminal.read`, or nothing.
@@ -130,8 +169,17 @@ export const ECHO_MS = 100;
  * the tmux session vam started for it is recorded on the tmux session at
  * creation and read back (`main/terminal/pane.ts`); a title reached the name
  * once, was slugged and truncated on the way, and matched nothing.
+ *
+ * `mode` IS THE SITUATION THIS TAB IS IN, and only this tab knows it: main
+ * cannot see where the operator has scrolled to, and that is what decides
+ * whether the scrollback is worth fetching (`shared/terminal.ts`,
+ * `PaneReadMode`, which holds the measurements and the trade).
  */
-export type ReadPane = (projectId: string, rowId?: string) => Promise<PaneView>;
+export type ReadPane = (
+  projectId: string,
+  rowId?: string,
+  mode?: PaneReadMode,
+) => Promise<PaneView>;
 
 /**
  * Telling tmux how big to draw: `window.api.terminal.resize`, or nothing.
@@ -452,14 +500,14 @@ export function atBottom(
  * to do with the newer one.
  *
  * WHY THIS EXISTS AT ALL. Every read allocates a new `PaneView`, so the state
- * changes identity once a second whether or not one pixel of the operator's
- * terminal did, and the whole scrollback is re-parsed and re-reconciled for
- * it. Measured in Chromium against the real bundle, on a 137x41 pane of
- * densely coloured output: 5.7ms per update at the five hundred lines
- * `PANE_HISTORY_LINES` asks for, against 0.9ms for the screen alone. Dropping
- * an unchanged capture here makes an IDLE tab cost nothing at all rather than
- * that every second, and it is what keeps a `scrollTop` the operator set from
- * being disturbed by a screen that did not move.
+ * changes identity four times a second whether or not one pixel of the
+ * operator's terminal did, and the whole scrollback is re-parsed and
+ * re-reconciled for it. Measured in Chromium against the real bundle, on a
+ * 137x41 pane of densely coloured output: 5.7ms per update at the five hundred
+ * lines `PANE_HISTORY_LINES` asks for, against 0.9ms for the screen alone.
+ * Dropping an unchanged capture here makes an IDLE tab cost nothing at all
+ * rather than that four times a second, and it is what keeps a `scrollTop` the
+ * operator set from being disturbed by a screen that did not move.
  *
  * ONLY `ok` IS EVER THE SAME. A failure carries a message, and two failures
  * that read alike are still two separate answers about a live tmux -- and
@@ -467,6 +515,22 @@ export function atBottom(
  * re-asserted. The caret is part of the comparison because the caret moving IS
  * the screen changing: it is what a character typed at a prompt moves first.
  */
+/**
+ * WHICH QUESTION A READ ASKED -- "the screen", or "the screen and the 500
+ * lines above it".
+ *
+ * A MIRROR OF `main/terminal/ipc.ts`'s own `mode === 'echo' ? 0 :
+ * PANE_HISTORY_LINES`, and it is written as its own function so that the
+ * mirror has a name rather than being an expression buried in a comparison.
+ * Two modes ask the same question: the interval read and an echo read for an
+ * operator who has scrolled up both want the whole window.
+ *
+ * It exists for `sameScreen`'s sake -- see the call site in `poll`.
+ */
+export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
+  return mode === 'echo' ? 'screen' : 'window';
+}
+
 export function sameScreen(previous: PaneView | null, next: PaneView): boolean {
   if (previous === null || previous.kind !== 'ok' || next.kind !== 'ok') return false;
   if (previous.name !== next.name || previous.text !== next.text) return false;
@@ -576,14 +640,56 @@ export function TerminalTab({
   const shownFor = useRef(projectId);
   /** The size tmux was last told, for the session it was told about. */
   const sent = useRef<PaneSize | null>(null);
+  /**
+   * WHICH QUESTION THE VALUE ABOVE IS AN ANSWER TO (`paneShape`). `null` until
+   * one has been answered -- which is also what a cleared `view` is, so the
+   * two are reset together below.
+   */
+  const shownShape = useRef<'screen' | 'window' | null>(null);
   if (shownFor.current !== projectId) {
     shownFor.current = projectId;
     // The remembered size belongs to the session it was sent for. Keeping it
     // across a change of project would leave the next session unresized
     // whenever the two panes happen to be the same shape.
     sent.current = null;
+    shownShape.current = null;
     if (view !== null && read !== undefined) setView(null);
   }
+
+  /**
+   * THE SCROLL REGION ITSELF, and its one-row ruler.
+   *
+   * DECLARED HERE, ABOVE THE POLL, and the position is load-bearing rather
+   * than tidy: `echo` below has to ask where the operator is looking BEFORE
+   * it issues a read, because that is what decides whether the read asks for
+   * the scrollback. The layout effect that pins the pane to the bottom is
+   * still the only other reader, and it is where the rest of the argument
+   * about these two elements lives.
+   */
+  const paneRef = useRef<HTMLElement | null>(null);
+  const rulerRef = useRef<HTMLElement | null>(null);
+
+  /**
+   * IS THE OPERATOR LOOKING AT THE LIVE END, right now?
+   *
+   * Against the pane's CURRENT `scrollHeight`, which is the one difference
+   * from the layout effect's use of `atBottom` and the reason it is worth
+   * naming: there, the content has just changed under a preserved `scrollTop`
+   * and the only meaningful height is the previous one. Here nothing has
+   * changed -- this runs between renders, on a settled DOM -- so the height
+   * the element reports is the height the operator is scrolling in.
+   *
+   * `true` when there is no pane yet, which is the same answer `atBottom`
+   * gives for a height it has never measured: a tab with nothing drawn is
+   * showing the live end by definition, and a first read that asked for 500
+   * lines of somebody else's scrollback to draw none of would be the cost
+   * this exists to avoid.
+   */
+  const atLiveEnd = useCallback((): boolean => {
+    const pane = paneRef.current;
+    if (pane === null) return true;
+    return atBottom(pane.scrollHeight, pane, rulerRef.current?.getBoundingClientRect().height ?? 0);
+  }, []);
 
   /**
    * The running effect's own `tick`, published so the SEND path can ask for a
@@ -594,16 +700,24 @@ export function TerminalTab({
    * stop. `null` whenever nothing is polling: a hidden window, no bridge, no
    * project. Asking then is not deferred, it is declined.
    */
-  const readNow = useRef<(() => void) | null>(null);
+  const readNow = useRef<((mode: PaneReadMode) => void) | null>(null);
   const lastEcho = useRef(0);
   const echoTimer = useRef<number | undefined>(undefined);
 
-  /** Ask for a read now, or at the end of the current `ECHO_MS` window. */
+  /**
+   * Ask for a read now, or at the end of the current `ECHO_MS` window.
+   *
+   * THE SITUATION IS DECIDED WHEN THE READ IS ISSUED, not when it was asked
+   * for: a trailing echo fires up to `ECHO_MS` after the key landed, and the
+   * operator may have scrolled in between. `fire` is therefore the only place
+   * that asks `atLiveEnd`, which keeps the window between the question and
+   * the argv it becomes down to the length of one bridge call.
+   */
   const echo = useCallback(() => {
     const fire = () => {
       lastEcho.current = Date.now();
       echoTimer.current = undefined;
-      readNow.current?.();
+      readNow.current?.(atLiveEnd() ? 'echo' : 'echo-scrollback');
     };
     if (echoTimer.current !== undefined) return;
     const waited = Date.now() - lastEcho.current;
@@ -612,7 +726,7 @@ export function TerminalTab({
       return;
     }
     echoTimer.current = window.setTimeout(fire, ECHO_MS - waited);
-  }, []);
+  }, [atLiveEnd]);
 
   useEffect(
     () => () => {
@@ -622,9 +736,25 @@ export function TerminalTab({
   );
 
   const poll = useCallback(
-    (mine: () => boolean) => {
+    (mode: PaneReadMode, mine: () => boolean) => {
       if (read === undefined || projectId === null) return;
-      read(projectId, rowId)
+      /**
+       * WHAT SHAPE THE ANSWER ON SCREEN IS, read BEFORE the state updater runs
+       * and never inside it: React may call an updater twice, so a ref written
+       * in there would be written twice for one answer.
+       *
+       * IT IS PART OF THE COMPARISON BECAUSE THE TWO SHAPES ARE TWO
+       * COORDINATE SYSTEMS, not two sizes of the same one. A screen-only
+       * capture answers "the screen"; a `-S -500` capture answers "the screen
+       * and the 500 lines above it" -- and `PaneCursor.row` is an index into
+       * whichever text arrived with it, so the same caret is row 3 in one and
+       * row 503 in the other (`shared/terminal.ts`). A bail-out says "this
+       * answer is the one already on screen", and that sentence can only be
+       * true between two answers to the same question. Comparing across them
+       * would be asking whether two different questions got the same reply.
+       */
+      const asked = shownShape.current;
+      read(projectId, rowId, mode)
         .then((next) => {
           // AN UNCHANGED SCREEN IS NOT A STATE CHANGE. Returning the state it
           // was given makes React bail out of the whole re-render -- the
@@ -633,7 +763,10 @@ export function TerminalTab({
           // keeps no dependency on `view` (one would restart the interval
           // below on every read). See `sameScreen` for what it costs and
           // saves.
-          if (mine()) setView((shown) => (sameScreen(shown, next) ? shown : next));
+          if (!mine()) return;
+          const shape = paneShape(mode);
+          setView((shown) => (asked === shape && sameScreen(shown, next) ? shown : next));
+          shownShape.current = shape;
         })
         .catch((cause: unknown) => {
           // A rejected bridge call is vam not having asked. Reporting it as an
@@ -665,18 +798,24 @@ export function TerminalTab({
     let issued = 0;
     let timer: number | undefined;
 
-    const tick = () => {
+    const tick = (mode: PaneReadMode) => {
       issued += 1;
       const seq = issued;
-      poll(() => !cancelled && seq === issued);
+      poll(mode, () => !cancelled && seq === issued);
     };
     const start = () => {
       if (timer !== undefined) return;
       // Published only while a poll is actually running, so `echo` cannot ask
       // a hidden window (or a tab with no bridge) for a screen nobody reads.
+      // This is also what bounds what an echo read is allowed to assume: the
+      // pairing it rides is re-proven by the interval below, and the two stop
+      // together (`main/terminal/ipc.ts`).
       readNow.current = tick;
-      tick();
-      timer = window.setInterval(tick, REFRESH_MS);
+      tick('poll');
+      // `() => tick('poll')` rather than `tick`: a timer that handed its own
+      // arguments to the callback would be issuing some other read entirely,
+      // and the interval is the one read that must always prove the pairing.
+      timer = window.setInterval(() => tick('poll'), REFRESH_MS);
     };
     const stop = () => {
       if (timer === undefined) return;
@@ -701,8 +840,6 @@ export function TerminalTab({
     };
   }, [poll, read, projectId]);
 
-  const paneRef = useRef<HTMLElement | null>(null);
-  const rulerRef = useRef<HTMLElement | null>(null);
   /**
    * THE SIZE THE SCREEN IS DRAWN AT, read from the store rather than taken as
    * a prop -- `prefs/terminal-font.ts` carries the whole argument, and the
@@ -755,7 +892,8 @@ export function TerminalTab({
   /**
    * The screen, parsed once per screen rather than once per render. The tab
    * re-renders for focus, for a refusal and for every resize observation; the
-   * text only changes when a read answers, which is once a second.
+   * text only changes when a read answers, which is four times a second and,
+   * while somebody is typing, up to thirty.
    */
   const lines = useMemo(
     () =>
@@ -805,6 +943,25 @@ export function TerminalTab({
    * of lines that left, which is not in the DOM and would have to be carried
    * from main; it is left undone rather than guessed at, and it is bounded by
    * the output rate of the pane being read.
+   *
+   * AND WHY THE ECHO READ'S SHORTER ANSWER DOES NOT DISTURB IT. While somebody
+   * is typing at the live end, the answers alternate: ~50 lines from an echo
+   * read, ~550 from the interval read behind it (`shared/terminal.ts`,
+   * `PaneReadMode`). The content height therefore changes several times a
+   * second -- and the operator cannot see it, for two reasons that are
+   * measured rather than hoped for. The screen is a byte-suffix of the window
+   * (verified against tmux 3.7b), so the rectangle on screen is the same
+   * either way; and a capture with no `-S` is exactly the window's rows, which
+   * `fitPane` has already made exactly the box's rows, so a screen-only view
+   * has nothing to scroll and this pin puts it at the bottom of itself.
+   *
+   * The residue, named because it is real: between a resize being observed and
+   * tmux being told, those two row counts differ, so a screen-only view can be
+   * scrollable by a sliver. An operator who scrolls into that sliver in the
+   * quarter-second before the next interval read gets put back at the live end
+   * by this pin. An echo read is only ever issued for a view that is AT the
+   * live end (`atLiveEnd`), so this is the only way in, and it costs one
+   * sliver of scroll during a resize while typing.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read here, it is read by the LAYOUT this measures -- the content height moves when the type does, and the remembered height has to move with it
   useLayoutEffect(() => {

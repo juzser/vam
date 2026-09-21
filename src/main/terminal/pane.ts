@@ -188,6 +188,13 @@ export async function readSessionPane(
   // answer this module gave before, `ambiguous` and all.
   rowId?: string,
   panes?: ReadonlyMap<string, string>,
+  /**
+   * How many lines ABOVE the screen to ask for. The default is the tab's whole
+   * window, because that is what every caller of this function wanted before
+   * there was an argument; `0` is the echo read at the live end, and
+   * `shared/terminal.ts`'s `PaneReadMode` holds the whole of why.
+   */
+  history: number = PANE_HISTORY_LINES,
 ): Promise<PaneView> {
   const listed = await listVamSessions(run);
   if (listed.kind === 'unavailable') {
@@ -205,13 +212,35 @@ export async function readSessionPane(
   if (match.kind === 'mispaired') {
     return { kind: 'mispaired', published: match.published };
   }
-  const pane = await readPane(run, match.name, PANE_HISTORY_LINES);
+  return readAimedPane(run, match.name, history);
+}
+
+/**
+ * The screen of a session that has ALREADY been paired to the row asking --
+ * the read with no proof in front of it.
+ *
+ * SPLIT OUT OF THE FUNCTION ABOVE rather than duplicated, so there is exactly
+ * one place that turns a `TmuxText` into a `PaneView` and exactly one rule
+ * about which failure is `gone`. The proving caller above is the normal one;
+ * the other is the echo read, which rides an aim proven less than
+ * `AIM_TTL_MS` ago (`terminal/ipc.ts`, where that trade is argued and where
+ * the aim is dropped when this answers anything but `ok`).
+ *
+ * IT PROVES NOTHING, and the name is meant to say so. Every safety argument
+ * for the session it is handed was made by whoever aimed it.
+ */
+export async function readAimedPane(
+  run: TmuxRun,
+  name: string,
+  history: number = PANE_HISTORY_LINES,
+): Promise<PaneView> {
+  const pane = await readPane(run, name, history);
   if (pane.kind === 'ok') {
     // The cursor travels WITH the screen it belongs to and is never
     // reconstructed downstream: it is a position in THIS capture, at this
     // moment, and a value kept across two reads would be one screen's caret
     // drawn on another's (`shared/terminal.ts`, `PaneCursor`).
-    return { kind: 'ok', name: match.name, text: pane.text, cursor: pane.cursor };
+    return { kind: 'ok', name, text: pane.text, cursor: pane.cursor };
   }
   return pane.error.code === 'no-such-session'
     ? { kind: 'gone' }
@@ -286,11 +315,14 @@ export async function resizeSessionPane(
  * AND IT IS WIDER THAN IT LOOKS SINCE THE LATENCY FIX. A typing run proves
  * its pairing once and reuses it (`terminal/ipc.ts`, `AIM_TTL_MS`), so the
  * gap between the proof and a given keystroke is no longer the milliseconds
- * between two spawns; it is up to a second in practice and two at the
- * backstop. That trade was made deliberately and the reasoning is written
- * where the constant is, including the two things that keep it bounded: tmux
- * failing loudly for a name that no longer exists, and the tab's once-a-second
- * read re-proving the same pairing for free.
+ * between two spawns; it is up to a quarter of a second in practice and two
+ * whole ones at the backstop. That trade was made deliberately and the
+ * reasoning is written where the constant is, including the two things that
+ * keep it bounded: tmux failing loudly for a name that no longer exists, and
+ * the tab's INTERVAL read re-proving the same pairing for free, four times a
+ * second. The echo read in between proves nothing and is not allowed to
+ * extend the aim either; `terminal/ipc.ts` holds that rule and its worst
+ * case.
  *
  * WHY THAT IS IMPROBABLE AND NOT IMPOSSIBLE. A vam session name carries six
  * base-36 characters of randomness (`vamSessionName`), about 2.2e9 values, so

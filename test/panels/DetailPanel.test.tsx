@@ -4194,7 +4194,7 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     // are its own -- so the row travels with it and main pairs against the
     // pane that session published. A title was slugged and truncated on the
     // way in and matched nothing that was ever created.
-    expect(read).toHaveBeenCalledWith(PROJECT.id, SESSION.id);
+    expect(read).toHaveBeenCalledWith(PROJECT.id, SESSION.id, 'poll');
     expect(q<HTMLElement>('[data-terminal-pane]')?.textContent).toContain('the pane');
 
     const whileOpen = read.mock.calls.length;
