@@ -9,10 +9,17 @@
  *  - "BEFORE". `SessionList.provider-mark.test.tsx` asserts DOM order with
  *    `compareDocumentPosition`, and that is a proxy. It was falsified
  *    deliberately: adding `order-last` to the mark's wrapper moves the painted
- *    glyph to the far side of the title and leaves the DOM untouched, and the
- *    whole unit file stayed green. Only two rectangles answer "before", so
- *    that is what is compared here -- the mark's right edge against the
- *    title's left edge, on every row on screen.
+ *    glyph to the far side of what it leads and leaves the DOM untouched, and
+ *    the whole unit file stayed green. Only two rectangles answer "before", so
+ *    that is what is compared here, on every row on screen.
+ *
+ *    WHAT IT IS BEFORE HAS CHANGED. The operator moved the mark: "in the
+ *    sidebar, put the provider glyph before the branch name, under the session
+ *    name." So the mark's right edge is compared with the BRANCH's left edge,
+ *    and -- the half no DOM test can see at all -- its top against the
+ *    title's bottom, because "under" is a fact about two lines and `order-last`
+ *    could have put it after the title while leaving it on the title's line.
+ *    The title line is separately required to hold no mark at all.
  *  - "TELL THEM APART". Two marks that both resolve to the same glyph satisfy
  *    every "a mark is present" assertion ever written. So each register's mark
  *    is RASTERISED and reduced to an occupancy signature, and the three are
@@ -24,11 +31,12 @@
  *    the SAME, which is the only way to prove the shape is carrying the whole
  *    signal. An operator who cannot rely on hue is the reason; `status-mark.tsx`
  *    already holds this line for the five statuses.
- *  - WHAT IT COSTS THE TITLE. The row was already carrying a status lane, a
- *    truncating title and hover controls, so the bill is measured rather than
- *    asserted: the title's painted box at the 200px sidebar minimum, with the
- *    lane and with it taken away. A number in a comment is not a measurement,
- *    and this file's own repo has a lesson about exactly that.
+ *  - WHAT IT COSTS THE LINE IT IS ON. The bill is measured rather than
+ *    asserted -- the painted box at the 200px sidebar minimum, with the lane
+ *    and with it taken away -- because a number in a comment is not a
+ *    measurement, and this repo has a lesson about exactly that. It is the
+ *    BRANCH's box now: the mark left the title line, so the title pays
+ *    nothing, and that is asserted too rather than assumed.
  *  - THE INKS MATCH. A Simple Icons outline fills its 24-unit viewBox and a
  *    lucide glyph keeps about two units of margin inside its own, so the same
  *    `size` paints two different amounts of ink. `SessionList.tsx`'s
@@ -61,11 +69,14 @@ const outDir = process.argv[3] ?? 'docs/ui';
 
 /** `PROVIDER_LANE_PX` in `SessionList.tsx`. Copied, because a guard cannot
  *  import a TypeScript module -- and pinned by being measured on every row
- *  below, so a change to the constant that forgot this file fails here. */
-const LANE = 12;
-/** The `gap-1.5` between the status mark and the provider mark, which is the
- *  other half of what the title pays. */
-const PAIR_GAP = 6;
+ *  below, so a change to the constant that forgot this file fails here. Ten
+ *  since the mark moved to the meta line, where it leads a 10px `GitBranch`
+ *  rather than following a 14px status lane. */
+const LANE = 10;
+/** The meta line's `gap-1` between the provider mark and the branch glyph,
+ *  which is the other half of what the BRANCH now pays. It was `gap-1.5`
+ *  beside the status mark, and the title was paying it. */
+const META_GAP = 4;
 /** `SIDEBAR_MIN` in `prefs/panes.ts`. The window width that produces it is
  *  520 -- `SIDEBAR_MIN + DETAIL_MIN` -- for the reason `branch-overlap.spec.ts`
  *  states in full: one pixel narrower and there is no sidebar at all. */
@@ -123,7 +134,7 @@ async function open({ width, height, asCodex = false }) {
   return page;
 }
 
-/** Every row's two rectangles and the ink they are drawn in, in one pass. */
+/** Every row's rectangles and the ink they are drawn in, in one pass. */
 const rowFacts = (page, scope = '') =>
   page.evaluate((prefix) => {
     const rect = (el) => {
@@ -134,11 +145,18 @@ const rowFacts = (page, scope = '') =>
     return [...document.querySelectorAll(`${prefix}[data-session-row]`)].map((row) => {
       const mark = row.querySelector('[data-row-source]');
       const title = row.querySelector('[data-row-title]');
-      // The title's own line box. How much room the title HAS is
-      // `line.right - title.left`, and that is the number the lane moves --
-      // the title element itself is content-sized until it runs out of space,
-      // so its own width says nothing at all for a title that still fits.
-      const line = title?.parentElement ?? null;
+      const branch = row.querySelector('[data-session-branch]');
+      // The box the TITLE has: its own line, less whatever precedes it. The
+      // title element is content-sized until it runs out of space, so its own
+      // width says nothing for a title that still fits -- which is every
+      // title in this fixture, and is how a first version of this guard
+      // measured the lane's cost as zero and was believed.
+      const titleLine = title?.parentElement ?? null;
+      // The same question for the BRANCH, which is what the lane costs now
+      // that it leads the meta line. The mark's own parent is the box that
+      // holds them both -- the branch cell on the desktop, the whole meta
+      // line on the phone -- so one expression serves both rows.
+      const branchCell = mark?.parentElement ?? null;
       return {
         id: row.getAttribute('data-session-row'),
         source: mark?.getAttribute('data-row-source') ?? null,
@@ -151,9 +169,25 @@ const rowFacts = (page, scope = '') =>
         announces: (mark?.textContent ?? '').trim(),
         drew: mark?.querySelector('svg') !== null && mark?.querySelector('svg') !== undefined,
         colour: mark === null ? null : getComputedStyle(mark).color,
+        // The ink of the line the mark rides, so "it takes the line's own
+        // colour" is a comparison and not an assumption. `GitBranch` beside
+        // it inherits the same value.
+        lineColour: branchCell === null ? null : getComputedStyle(branchCell).color,
         mark: rect(mark),
         title: rect(title),
-        room: line === null || title === null ? null : line.getBoundingClientRect().right - title.getBoundingClientRect().left,
+        branch: rect(branch),
+        // Drawn only for a row that HAS a branch -- a glyph beside an absence
+        // would be a mark spent on nothing -- so it also sorts the rows into
+        // the two shapes the meta line really has.
+        branchGlyph: rect(row.querySelector('svg.lucide-git-branch')),
+        room:
+          titleLine === null || title === null
+            ? null
+            : titleLine.getBoundingClientRect().right - title.getBoundingClientRect().left,
+        branchRoom:
+          branchCell === null || branch === null
+            ? null
+            : branchCell.getBoundingClientRect().right - branch.getBoundingClientRect().left,
       };
     });
   }, scope);
@@ -270,9 +304,19 @@ async function inkOf(page, selector) {
 
   for (const row of rows) {
     check(
-      `${row.id}: the mark is PAINTED before the title, not merely before it in the DOM`,
-      row.mark !== null && row.title !== null && row.mark.r <= row.title.l + 0.5,
-      row.mark === null ? 'no mark' : `mark right ${row.mark.r}, title left ${row.title.l}`,
+      `${row.id}: the mark is PAINTED before the branch name, not merely before it in the DOM`,
+      row.mark !== null && row.branch !== null && row.mark.r <= row.branch.l + 0.5,
+      row.mark === null ? 'no mark' : `mark right ${row.mark.r}, branch left ${row.branch.l}`,
+    );
+    // "UNDER THE SESSION NAME", the other half of the operator's sentence and
+    // the half a DOM-order test cannot see at all: the mark is on the line
+    // BELOW the title, not merely later in the markup. Rectangles, because
+    // the move is a move in paint -- and because `order-last` could have put
+    // it after the title while leaving it on the title's own line.
+    check(
+      `${row.id}: and it is painted BELOW the title, on the meta line`,
+      row.mark !== null && row.title !== null && row.mark.t >= row.title.b - 0.5,
+      row.mark === null ? 'no mark' : `mark top ${row.mark.t}, title bottom ${row.title.b}`,
     );
     check(
       `${row.id}: its lane is exactly ${LANE}px, whatever answered`,
@@ -280,17 +324,60 @@ async function inkOf(page, selector) {
       row.mark === null ? 'no mark' : `${row.mark.w}px`,
     );
     check(
-      `${row.id}: the mark is decorative, so a reader is not told the provider before every title`,
+      `${row.id}: the mark is decorative, so a reader is not told the provider on every row`,
       row.hidden === 'true' && row.announces === '',
       `aria-hidden=${row.hidden}, text ${JSON.stringify(row.announces)}`,
     );
   }
 
-  const titleLefts = [...new Set(rows.map((r) => Math.round(r.title.l - r.mark.l)))];
+  /**
+   * THE COLUMN DOES NOT RIPPLE -- read within each of the two shapes the meta
+   * line has, because it genuinely has two and one number over both would be
+   * a check nobody could satisfy. A row whose source reports no branch draws
+   * no branch GLYPH (a mark beside an absence is a mark spent on nothing), so
+   * its name starts the lane plus one gap past the mark; a row with one
+   * starts a glyph and a second gap further. What must not vary is the
+   * distance WITHIN each group.
+   *
+   * THIS IS THE CHECK THAT CAUGHT THE SHRINKING GLYPH. It came back
+   * [14, 28, 26]: an `<svg>` is a flex item with an auto basis, so `GitBranch`
+   * was being squeezed to 8x10 on the tightest rows -- before the provider
+   * lane existed, and worse with it. `flex-none` in `SessionList.tsx` is the
+   * fix, and these two numbers are what hold it.
+   */
+  for (const [label, group] of [
+    ['with a branch glyph', rows.filter((r) => r.branchGlyph !== null)],
+    ['with no branch to name', rows.filter((r) => r.branchGlyph === null)],
+  ]) {
+    const lefts = [...new Set(group.map((r) => Math.round(r.branch.l - r.mark.l)))];
+    check(
+      `every row ${label} starts its branch name the same distance past its lane`,
+      group.length > 0 && lefts.length === 1,
+      `${group.length} rows, offsets ${JSON.stringify(lefts)}`,
+    );
+  }
+  // And the glyph is the square it was drawn as. A `flex-none` that came off
+  // would show up above as a rippling column and here as the reason.
+  const squashed = rows
+    .filter((r) => r.branchGlyph !== null && Math.round(r.branchGlyph.w) !== 10)
+    .map((r) => `${r.id} ${r.branchGlyph.w}x${r.branchGlyph.h}`);
   check(
-    'every title starts the same distance past its lane, so the column does not ripple',
-    titleLefts.length === 1,
-    JSON.stringify(titleLefts),
+    'the branch glyph is 10x10 on every row, not squeezed narrow by a tight line',
+    squashed.length === 0,
+    JSON.stringify(squashed),
+  );
+  // AND THE TITLE LINE IS CLEAR OF IT. The mark used to sit between the
+  // status mark and the title; drawing it in both places would satisfy every
+  // check above and give the operator two glyphs a row.
+  const onTitleLine = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-row-title]')].filter(
+      (title) => title.parentElement?.querySelector('[data-row-source]') !== null,
+    ).length,
+  );
+  check(
+    'no title line still carries a provider mark',
+    onTitleLine === 0,
+    `${onTitleLine} of ${rows.length} rows`,
   );
 
   const colours = [...new Set(rows.map((r) => r.colour))];
@@ -301,40 +388,58 @@ async function inkOf(page, selector) {
   );
 
   /**
-   * AND THE CLASS THAT SETS THAT INK EMITTED A RULE AT ALL.
+   * AND IT IS THE META LINE'S OWN INK, which is a different claim from the
+   * one this block used to make and is made differently.
    *
-   * "One colour on every mark" is satisfied just as well by a class that
-   * emitted NOTHING, because then every mark inherits the same ink and the
-   * set still has one member. This repo has shipped a Tailwind v4 class
-   * naming a missing token twice, silently, so the claim is made against the
-   * token itself: a probe takes `var(--color-ink-faint)`, and an undefined
-   * custom property is invalid at computed-value time and falls back to the
-   * inherited ink -- so a token that does not exist makes `token` and
-   * `inherited` the same string, and this goes red.
+   * On the title line the mark carried `text-ink-faint` of its own, and what
+   * had to be proved was that the CLASS emitted a rule at all -- this repo
+   * has shipped a Tailwind v4 class naming a missing token twice, silently,
+   * so a probe took `var(--color-ink-faint)` and the mark's colour was
+   * required to equal it and to differ from what it would have inherited.
+   *
+   * On the meta line the mark has NO colour class: it inherits, deliberately,
+   * so that it and the `GitBranch` four pixels away are one grey rather than
+   * two. There is therefore no class here to be missing, and the honest check
+   * is the property that replaced it -- the mark's computed colour is the
+   * line's, exactly. A stray `text-*` reintroduced on the lane would break
+   * this, which is the regression the old check was really guarding against.
+   * The line's own ink is measured, composited with its `opacity-[0.82]`, by
+   * `sidebar-tree-shots.mjs`, and held above 4.5:1 on the worst row.
    */
   const ink = await page.evaluate(() => {
-    const mark = document.querySelector('[data-row-source]');
-    const probe = document.createElement('span');
-    probe.style.color = 'var(--color-ink-faint)';
-    mark.parentElement.append(probe);
-    const token = getComputedStyle(probe).color;
-    probe.remove();
+    // A row that HAS a branch: the glyph is suppressed for a null one (a mark
+    // spent on an absence), and four of the demo's rows are null. Picking the
+    // first mark on screen would compare against a glyph that is not there
+    // and read as a failure of the ink rather than of the choice of row.
+    const marks = [...document.querySelectorAll('[data-row-source]')];
+    const withGlyph =
+      marks.find((m) => m.parentElement.querySelector('svg.lucide-git-branch') !== null) ?? null;
+    const mark = withGlyph ?? marks[0];
+    const glyph = mark.parentElement.querySelector('svg.lucide-git-branch');
     return {
+      foundABranchRow: withGlyph !== null,
       mark: getComputedStyle(mark).color,
-      token,
-      inherited: getComputedStyle(mark.parentElement).color,
+      line: getComputedStyle(mark.parentElement).color,
+      branchGlyph: glyph === null ? null : getComputedStyle(glyph).color,
     };
   });
   console.log(`  ink: ${JSON.stringify(ink)}`);
   check(
-    'the token the mark asks for exists, rather than being a class that emitted no rule',
-    ink.token !== ink.inherited && /^rgba?\(\s*\d/.test(ink.token),
+    'the mark is painted in the meta line’s own ink, with no colour class of its own',
+    ink.mark === ink.line && /^rgba?\(\s*\d/.test(ink.mark),
     JSON.stringify(ink),
   );
   check(
-    'and it is the ink the mark is actually painted in',
-    ink.mark === ink.token,
-    JSON.stringify(ink),
+    'so the provider glyph and the branch glyph beside it are one grey, not two',
+    ink.foundABranchRow && ink.branchGlyph === ink.mark,
+    ink.foundABranchRow
+      ? JSON.stringify(ink)
+      : 'no row on screen reports a branch, so this compared nothing',
+  );
+  check(
+    'and every mark on screen still agrees on that ink',
+    [...new Set(rows.map((r) => r.lineColour))].length === 1,
+    JSON.stringify([...new Set(rows.map((r) => r.lineColour))]),
   );
 
   // ------------------------------------------------ three registers, three pictures
@@ -384,7 +489,18 @@ async function inkOf(page, selector) {
   await page.close();
 }
 
-// ══════════════════════════════════════════ what it costs the title at SIDEBAR_MIN
+// ══════════════════════════════════════ what it costs the BRANCH at SIDEBAR_MIN
+/**
+ * The bill moved with the mark, and so did this block.
+ *
+ * It measured what the lane took from the TITLE, because the lane sat on the
+ * title's line: 18px at the 200px minimum, about three characters of a name
+ * that was already truncating. The operator has moved the mark down to the
+ * meta line, so the title pays nothing now and the BRANCH pays instead --
+ * which is a smaller bill against a line that had two things on it rather
+ * than four. Both halves are measured here: what the branch lost, and that
+ * the title really got it back.
+ */
 {
   const page = await open({ width: SIDEBAR_MIN_WINDOW, height: 860 });
   const before = await rowFacts(page);
@@ -397,13 +513,13 @@ async function inkOf(page, selector) {
     `${before.length} rows`,
   );
 
-  // How much of the line the two marks and their gaps occupy, read BEFORE the
+  // How much of the meta line the mark and its gap occupy, read BEFORE the
   // lane is taken away -- afterwards there is nothing left to measure.
-  const ornaments = await page.evaluate(() => {
+  const ornament = await page.evaluate(() => {
     const mark = document.querySelector('[data-row-source]');
-    const line = document.querySelector('[data-row-title]')?.parentElement ?? null;
-    if (mark === null || line === null) return null;
-    return Math.round(mark.getBoundingClientRect().right - line.getBoundingClientRect().left);
+    if (mark === null) return null;
+    const cell = mark.parentElement.getBoundingClientRect();
+    return Math.round(mark.getBoundingClientRect().right - cell.left);
   });
 
   // The lane taken away, gap and all: `display: none` removes a flex item, and
@@ -412,39 +528,55 @@ async function inkOf(page, selector) {
   await page.addStyleTag({ content: '[data-row-source] { display: none !important; }' });
   const after = await rowFacts(page);
 
-  // THE BILL IS THE ROOM THE TITLE HAS, not the box it currently fills. Every
-  // demo title is short enough to fit at 200px, so their own widths are
-  // content widths and do not move at all when the lane goes -- a guard
-  // reading THOSE would have reported a cost of zero and been believed.
-  const costs = before.map((row, i) => Math.round(after[i].room - row.room));
+  // THE BILL IS THE ROOM THE BRANCH HAS, not the box it currently fills. The
+  // same trap the title version of this check recorded: a demo name short
+  // enough to fit has a content width that does not move when the lane goes,
+  // and a guard reading THOSE would report a cost of zero and be believed.
+  const costs = before
+    .map((row, i) => (row.branchRoom === null ? null : Math.round(after[i].branchRoom - row.branchRoom)))
+    .filter((n) => n !== null);
   const cost = [...new Set(costs)];
-  console.log(`  room for the title, with the mark: ${JSON.stringify(before.map((r) => Math.round(r.room)))}`);
-  console.log(`  room for the title, without it:   ${JSON.stringify(after.map((r) => Math.round(r.room)))}`);
+  console.log(`  room for the branch, with the mark: ${JSON.stringify(before.map((r) => (r.branchRoom === null ? null : Math.round(r.branchRoom))))}`);
+  console.log(`  room for the branch, without it:    ${JSON.stringify(after.map((r) => (r.branchRoom === null ? null : Math.round(r.branchRoom))))}`);
   check(
-    'the mark costs every title the same width -- the lane plus one gap and nothing else',
-    cost.length === 1 && cost[0] === LANE + PAIR_GAP,
-    `${JSON.stringify(cost)}px (expected ${LANE + PAIR_GAP})`,
+    'the mark is measured on every row, so the cost below is not a cost of nothing',
+    costs.length === before.length,
+    `${costs.length} of ${before.length} rows`,
+  );
+  check(
+    'the mark costs every branch name the same width -- the lane plus one gap and nothing else',
+    cost.length === 1 && cost[0] === LANE + META_GAP,
+    `${JSON.stringify(cost)}px (expected ${LANE + META_GAP})`,
   );
   /**
-   * WHAT IS LEFT, held at a number rather than admired.
+   * AND THE TITLE GOT ITS LINE BACK, held at a number rather than admired.
    *
-   * 107px today, down from 125. The floor below is not a design claim -- it is
-   * a REGRESSION BAR with a measurement behind it: the next ornament somebody
-   * adds to this line has to come and argue with this number instead of
-   * quietly taking the rest of the title. 100 is the round number just under
-   * what the mark actually left.
+   * 125px, which is what it was before the mark was ever drawn on that line;
+   * the paired version measured 107. The floor below is not a design claim --
+   * it is a REGRESSION BAR with a measurement behind it: the next ornament
+   * somebody puts on the title line has to come and argue with this number
+   * instead of quietly taking the rest of the name. 100 is the round number
+   * the paired layout was already close to, and it is kept rather than raised
+   * to 118 so that this reads as the same bar the ornament has to clear, not
+   * a new one drawn around today's paint.
    */
   check(
     'the title still has a usable line at the sidebar minimum',
     before.every((row) => row.room >= 100),
     JSON.stringify(before.map((r) => Math.round(r.room))),
   );
-  // And the shape of the line has not inverted: the title is still the
-  // biggest thing on it, not a remainder after two marks and their gaps.
   check(
-    'the title line still gives the title more room than all its ornaments take',
-    ornaments !== null && before.every((row) => row.room > ornaments),
-    `ornaments ${ornaments}px, title ${Math.round(before[0]?.room ?? 0)}px`,
+    'hiding the lane does not move the title at all, because it is not on the title’s line',
+    before.every((row, i) => Math.round(after[i].room) === Math.round(row.room)),
+    'hiding the lane moved the title, so the lane is still on the title line: ' +
+      `${JSON.stringify(before.map((r) => Math.round(r.room)))} vs ${JSON.stringify(after.map((r) => Math.round(r.room)))}`,
+  );
+  // And the shape of the meta line has not inverted: the branch name is still
+  // the biggest thing on it, not a remainder after a mark and a glyph.
+  check(
+    'the meta line still gives the branch more room than its ornament takes',
+    ornament !== null && before.every((row) => row.branchRoom > ornament),
+    `ornament ${ornament}px, branch ${Math.round(before[0]?.branchRoom ?? 0)}px`,
   );
   await page.close();
 }
@@ -500,12 +632,30 @@ async function inkOf(page, selector) {
       row.mark !== null && row.drew && Math.round(row.mark.w) === LANE,
       row.mark === null ? 'no mark' : `${row.mark.w}px`,
     );
+    // The phone draws its OWN meta line -- the status word, the age, then the
+    // branch -- so the mark had to be moved there separately, and a desktop
+    // that looked right proved nothing about this row.
     check(
-      `${row.id}: and it is still painted before the title`,
-      row.mark !== null && row.title !== null && row.mark.r <= row.title.l + 0.5,
-      row.mark === null ? 'no mark' : `mark right ${row.mark.r}, title left ${row.title.l}`,
+      `${row.id}: and it is painted below the title, on the phone’s own meta line`,
+      row.mark !== null && row.title !== null && row.mark.t >= row.title.b - 0.5,
+      row.mark === null ? 'no mark' : `mark top ${row.mark.t}, title bottom ${row.title.b}`,
+    );
+    check(
+      `${row.id}: and it opens that line, ahead of everything on it`,
+      row.mark !== null && row.branch === null
+        ? true
+        : row.mark !== null && row.branch !== null && row.mark.r <= row.branch.l + 0.5,
+      row.mark === null ? 'no mark' : `mark right ${row.mark.r}, branch left ${row.branch?.l}`,
     );
   }
+  // The branch is the LAST segment of the phone's line and is drawn only when
+  // the source reports one, so the order check above is vacuous on a row
+  // without it. This is the corpus assertion that at least one row had one.
+  check(
+    'at least one phone row reports a branch, so the order check was about something',
+    rows.some((r) => r.branch !== null),
+    `${rows.filter((r) => r.branch !== null).length} of ${rows.length} rows`,
+  );
   // The one thing extra width on a 390px row can break: a row that no longer
   // fits its column. `scrollWidth` past `clientWidth` is the browser saying so.
   const overflow = await page.evaluate(() =>

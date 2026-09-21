@@ -8,10 +8,16 @@
  * to show the dot on the tab. A tab should only show certain indicators."
  * Every tab used to carry a 6px dot in its status colour; the dot is gone,
  * and in its place is AT MOST ONE status mark, the same glyph the sidebar row
- * draws (`panels/status-mark.tsx`), then the session's icon, then the title,
+ * draws (`panels/status-mark.tsx`), then the PROVIDER glyph, then the title,
  * then the three indicators that are about the operator's own state rather
- * than the agent's. Each is a switch in Settings (`prefs/tab-indicators.ts`),
- * and idle is not one of them.
+ * than the agent's. The list is a constant, not a setting
+ * (`prefs/tab-indicators.ts`), and idle is not on it.
+ *
+ * THE SESSION ICON USED TO SIT WHERE THE PROVIDER NOW DOES, and the operator
+ * removed it: "put the provider glyph after the indicator, on the tab name.
+ * Remove the session icon from the tab." Its describe block below is what
+ * that removal is pinned by -- an absence, asserted, rather than tests
+ * deleted along with the behaviour they covered.
  *
  * WHAT THIS FILE CAN SAY: which elements the strip puts in the DOM for which
  * state and which preference, and what a screen reader is handed. What it
@@ -24,7 +30,12 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session, SessionStatus } from '../../src/renderer/domain/model.js';
-import { TAB_INDICATOR_IDS, type TabIndicatorId } from '../../src/renderer/prefs/tab-indicators.js';
+import {
+  isTabIndicatorOn,
+  TAB_INDICATOR_IDS,
+  TAB_INDICATORS,
+  type TabIndicatorId,
+} from '../../src/renderer/prefs/tab-indicators.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
@@ -208,7 +219,15 @@ describe('the status marks, one per tab at most', () => {
   });
 });
 
-describe('the session’s own icon', () => {
+describe('the session’s own icon, which the operator took off the tab', () => {
+  /**
+   * "Remove the session icon from the tab." What it drew was the
+   * session-else-project chain, and on a strip of one project's tabs that is
+   * the project's own mark repeated across every tab -- the same argument
+   * that took it off the sidebar row (`SessionList.icon.test.tsx`), arriving
+   * at the other surface. The provider glyph below takes the slot, and says
+   * something the strip does not otherwise say.
+   */
   const WITH_ICON: CanvasModel = {
     projects: [
       {
@@ -220,18 +239,138 @@ describe('the session’s own icon', () => {
     ],
   };
 
-  it('is drawn by default, and is the only thing an idle tab with one draws', () => {
+  it('draws nothing for a session that has one of its own', () => {
     render(<Canvas model={WITH_ICON} />);
-    expect(marksOf('idle-1')).toEqual(['icon']);
-    expect(markOf('idle-1', 'icon')?.textContent).toBe('🌙');
+    expect(markOf('idle-1', 'icon')).toBeNull();
+    expect(tabOf('idle-1')?.querySelector('[data-session-icon]')).toBeNull();
   });
 
-  it('is on the list, so a tab that has one always draws it', () => {
-    seed();
+  it('draws nothing for the project fallback either -- the whole chain is off', () => {
+    // The chain is what was removed, not one link of it: a tab with no icon
+    // of its own used to inherit its project's, so asserting only the session
+    // case would leave the louder half of the old behaviour untested.
+    const FROM_PROJECT: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'claude-code',
+          icon: '🏭',
+          sessions: [session('idle-1', 'idle')],
+        },
+      ],
+    };
+    render(<Canvas model={FROM_PROJECT} />);
+    expect(tabOf('idle-1')?.querySelector('[data-session-icon]')).toBeNull();
+  });
+
+  it('leaves the title reading as the title, with nothing in front of it', () => {
     render(<Canvas model={WITH_ICON} />);
-    expect(marksOf('idle-1')).toEqual(['icon']);
-    // The icon rides INSIDE the title button, so the title reads with it.
-    expect(titleOf('idle-1')).toBe('🌙 idle-1');
+    expect(titleOf('idle-1')).toBe('idle-1');
+  });
+
+  it('is off the LIST without leaving the vocabulary, so re-enabling it is one entry', () => {
+    // `tab-indicators.ts` keeps the id in the union on purpose, and this is
+    // the test that "an indicator that is off draws nothing" is about now
+    // that `icon` is the off one -- which is what makes the JSX in
+    // `Canvas.tsx` live code behind a list rather than something to delete.
+    seed();
+    expect(TAB_INDICATOR_IDS).toContain('icon');
+    expect(TAB_INDICATORS).not.toContain('icon');
+    expect(isTabIndicatorOn('icon')).toBe(false);
+  });
+});
+
+/**
+ * WHICH AGENT RAN THIS TAB, in the slot the session icon has just left.
+ *
+ * The operator's ask, translated: "put the provider glyph after the
+ * indicator, on the tab name." So a tab reads status mark, provider, title:
+ * what the session is doing, who ran it, what it is called.
+ */
+describe('the provider glyph', () => {
+  const providerOf = (id: string) => tabOf(id)?.querySelector('[data-tab-source]') ?? null;
+
+  it('draws on every tab, whatever the session is doing', () => {
+    render(<Canvas model={MODEL} />);
+    for (const id of ['idle-1', 'running-1', 'waiting-1', 'failed-1', 'done-1']) {
+      expect(providerOf(id)?.getAttribute('data-tab-source'), id).toBe('claude-code');
+      expect(providerOf(id)?.getAttribute('data-source-mark'), id).toBe('brand');
+      expect(providerOf(id)?.querySelector('svg'), `${id} drew an empty lane`).not.toBeNull();
+    }
+  });
+
+  it('rides after the status mark and before the title, and is not inside it', () => {
+    render(<Canvas model={MODEL} />);
+    const tab = tabOf('running-1');
+    const order = [
+      ...(tab?.querySelectorAll('[data-tab-mark], [data-tab-source], [data-tab-select]') ?? []),
+    ].map((el) =>
+      el.hasAttribute('data-tab-source') ? 'source' : (el.getAttribute('data-tab-mark') ?? 'title'),
+    );
+    expect(order).toEqual(['running', 'source', 'title']);
+    // A SIBLING of the select button, never a child of it -- the reason the
+    // draft pencil is one: the button truncates, and a long title would take
+    // the glyph into the ellipsis with it.
+    expect(tab?.querySelector('[data-tab-select] [data-tab-source]')).toBeNull();
+  });
+
+  it('draws nothing at all when nothing names a source -- no lane is reserved', () => {
+    // Unlike the sidebar, where the empty lane keeps a COLUMN of titles
+    // aligned. Tabs sit side by side, so there is no column to protect, and a
+    // lane held open for a mark that is not coming is the invisible dot the
+    // operator asked to be rid of.
+    const NO_SOURCE: CanvasModel = {
+      projects: [{ id: 'p1', name: 'alpha', sessions: [session('idle-1', 'idle')] }],
+    };
+    render(<Canvas model={NO_SOURCE} />);
+    expect(tabOf('idle-1')?.querySelector('[data-tab-source]')).toBeNull();
+    expect(tabOf('idle-1')?.firstElementChild?.hasAttribute('data-tab-select')).toBe(true);
+  });
+
+  it('prefers the session’s own source to its project’s', () => {
+    // `Session.source` and `Project.source` are stamped by different readers,
+    // and the tab reads them in the order the sidebar row and the status bar
+    // already read them in.
+    const MIXED: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'codex',
+          sessions: [session('idle-1', 'idle', { source: 'claude-code' })],
+        },
+      ],
+    };
+    render(<Canvas model={MIXED} />);
+    expect(providerOf('idle-1')?.getAttribute('data-source-mark')).toBe('brand');
+  });
+
+  it('draws the neutral mark -- not another provider’s -- for a source it has never heard of', () => {
+    const UNKNOWN: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'some-agent-from-2027',
+          sessions: [session('idle-1', 'idle')],
+        },
+      ],
+    };
+    render(<Canvas model={UNKNOWN} />);
+    expect(providerOf('idle-1')?.getAttribute('data-source-mark')).toBe('neutral');
+    expect(providerOf('idle-1')?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('is decorative, as the status mark beside it is', () => {
+    // A provider is a constant of the tab, and every tab of one project has
+    // the same one: announced, it would read the source aloud before each of
+    // eight titles. The status bar's `SourceGlyph` names the FOCUSED
+    // session's source once, in a labelled `role="img"`.
+    render(<Canvas model={MODEL} />);
+    const mark = providerOf('running-1');
+    expect(mark?.getAttribute('aria-hidden')).toBe('true');
+    expect(mark?.textContent).toBe('');
   });
 });
 

@@ -61,7 +61,11 @@ import { IconMark, parseIcon } from './icon-value.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
-import { MARK_LANE_PX, StatusMark } from './status-mark.js';
+// `MARK_LANE_PX` is no longer imported: the provider lane was derived from it
+// while the two marks shared the title line, and on the meta line it is sized
+// by its own neighbours instead (`PROVIDER_LANE_PX`). The comments below still
+// reason about that constant, which is a reference and not a dependency.
+import { StatusMark } from './status-mark.js';
 
 /**
  * What `pendingAction` holds while "new project" is running.
@@ -207,35 +211,84 @@ export const HEADING_GLYPH_PX = HEADING_SLOT_PX - 4;
 /**
  * The lane the PROVIDER mark sits in, in px — which agent ran this session.
  *
- * TWELVE, and it is `MARK_LANE_PX` less two for a stated reason rather than
- * for symmetry: the status mark is the louder of the pair and has to stay so.
- * A status changes under the operator's eyes and is the thing they are
- * scanning for; a provider is a constant property of the row that answers a
- * question asked once. Drawn at the same size the two would compete, and the
- * column would read as two status columns. Twelve is also `TAB_MARK_LANE_PX`
- * in `Canvas.tsx`, which reaches the same number from the other end (a tab
- * label's own 12px), so the app has one size for "a small mark beside a
- * label" rather than three.
+ * IT LIVES ON THE META LINE NOW, not beside the status mark. The operator:
+ * "in the sidebar, put the provider glyph before the branch name, under the
+ * session name." That is a statement about what the two facts have to do with
+ * each other — a branch and the agent that worked it are one sentence about
+ * where this session's work came from, and the title line is for what the
+ * session IS. It is also what buys the title back the 18px the pairing cost
+ * it, at the 200px minimum where that was three characters of a name that was
+ * already truncating.
  *
- * WHAT IT COSTS THE TITLE, because space here is not free and the row already
- * carries a status lane, a truncating title, and hover controls. The mark
- * sits INSIDE the pair `gap-1.5` rather than as a third child of the row's
- * `gap-2`, so the bill is one six-pixel gap plus this lane — 18px, measured
- * in `e2e/provider-mark-shots.mjs` against the painted title box at
- * `SIDEBAR_MIN`, not estimated here. At the 200px minimum that is about three
- * characters of a title that was already truncating; at the 264px default it
- * is the same 18px out of a wider box.
+ * TEN, DOWN FROM TWELVE, and the number moved with the mark because a lane is
+ * sized by its NEIGHBOURS and the neighbours changed. Twelve was chosen
+ * against a 13px title and a 14px status lane, where the mark was the quieter
+ * of a pair and had to stay so. On the meta line it leads a 10px `GitBranch`
+ * and 11px mono text (`--text-meta`), and a 12px glyph in front of those does
+ * the opposite of what twelve was for: the ornament would be the largest
+ * thing on the line it is only introducing. Ten is the branch glyph's own
+ * size, so the two marks that open the line are one height.
+ *
+ * THE LANE IS STILL DRAWN WHEN IT IS EMPTY, which is the one argument that
+ * survives the move intact — restated because it is now about a different
+ * column. A lane that collapses to its content moves the thing beside it, and
+ * that thing is now every row's branch name rather than every row's title.
  *
  * IT IS NOT CONDITIONAL ON THE LIST HOLDING TWO SOURCES, which was the
  * obvious way to make an operator with one source pay nothing — and is the
  * shape of `CAN_CHOOSE_PROVIDER` in `shared/providers.ts`. It was rejected on
  * the one thing that argument does not cover: the sidebar FILTERS. A filter
  * that hid the last Codex row would take the mark off every Claude row with
- * it, so every title in the column would jump 18px on a keystroke, and come
+ * it, so every branch name in the column would jump on a keystroke, and come
  * back on the next. A lane that is sometimes there is worse than a lane that
- * costs 18px, which is the whole of `status-mark.tsx`'s "THE LANE IS FIXED".
+ * costs its width, which is the whole of `status-mark.tsx`'s "THE LANE IS
+ * FIXED".
  */
-export const PROVIDER_LANE_PX = MARK_LANE_PX - 2;
+export const PROVIDER_LANE_PX = 10;
+
+/**
+ * That lane, drawn — ONE component because two rows draw it.
+ *
+ * The phone's meta line and the desktop's are different elements with
+ * different ink and different contents, and the mark opens both. Written
+ * twice, the pair would drift: the likeliest edit here is a new hook or a
+ * changed lane, and the file has enough depth of nesting that the second copy
+ * is easy to miss. The hooks in particular are not decoration —
+ * `data-row-source` and `data-source-mark` are what
+ * `SessionList.provider-mark.test.tsx` and `e2e/provider-mark-shots.mjs` find
+ * the element by, and the guard asserts the SAME attributes on both rows.
+ *
+ * `source` is the row's resolved source (`session.source ?? project.source`),
+ * or `null` for a model that names neither — which is possible, both fields
+ * are optional. That case draws the lane and nothing in it rather than
+ * claiming a provider vam cannot name.
+ *
+ * NO INK OF ITS OWN, deliberately, unlike the version that rode the title
+ * line and carried `text-ink-faint`. Here it leads a `GitBranch` of the same
+ * size four pixels away, and two glyphs that size apart in two different
+ * greys read as a mistake. Inheriting also puts its contrast under a
+ * measurement that already exists: `e2e/sidebar-tree-shots.mjs` composites
+ * the meta line's ink and its `opacity-[0.82]` by hand and holds the WORST
+ * row above 4.5:1 — comfortably past the 3:1 WCAG 1.4.11 asks of a graphical
+ * object — and the phone's line is `text-ink-dim` for the same reason.
+ */
+function ProviderLane({ source }: { readonly source: string | null }): ReactNode {
+  return (
+    <span
+      data-row-source={source ?? ''}
+      {...(source === null ? {} : { 'data-source-mark': markRegisterOf(source) })}
+      aria-hidden="true"
+      /* An inline style, not `w-[10px]`: Tailwind's scanner reads source text,
+         so a class assembled from a constant is one it never generates and the
+         lane would collapse -- the trap `StatusMark` and `BRANCH_TAIL_MAX_CHARS`
+         both record. */
+      style={{ width: PROVIDER_LANE_PX, height: PROVIDER_LANE_PX }}
+      className="flex flex-none items-center justify-center"
+    >
+      {source !== null && <SourceMark source={source} lane={PROVIDER_LANE_PX} />}
+    </span>
+  );
+}
 
 /**
  * A branch name split so the END survives a narrow column.
@@ -2873,17 +2926,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 )}
 
                                 <span className="flex items-center gap-2">
-                                  {/* THE TWO MARKS, PAIRED. `gap-1.5` between
-                                    them and the row's own `gap-2` after, so
-                                    they read as two marks about this row
-                                    rather than as one smear or as two
-                                    separate columns -- and so the whole
-                                    ornament costs the title one gap, not two.
-                                    What each says is different in kind: the
-                                    status changes under the operator's eyes,
-                                    the provider never changes at all. */}
-                                  <span className="flex flex-none items-center gap-1.5">
-                                    {/* A MARK, not a dot. Five statuses drawn as
+                                  {/* ONE MARK ON THIS LINE, and it used to be
+                                    two. The status mark and the provider mark
+                                    were paired inside a `gap-1.5` wrapper
+                                    here, so that they read as two marks about
+                                    this row and cost the title one gap rather
+                                    than two. The operator unpaired them: "in
+                                    the sidebar, put the provider glyph before
+                                    the branch name, under the session name."
+                                    The wrapper went with the pairing -- a
+                                    flex box around a single `flex-none` child
+                                    is a box that does nothing, and a comment
+                                    explaining a pair would be describing a
+                                    layout that is no longer here.
+
+                                    WHAT THE SPLIT SAYS. The title line is now
+                                    only about what the session IS: its status
+                                    and its name. Where the work came from --
+                                    the agent that ran it, the branch it ran
+                                    on -- is one sentence, and it is the line
+                                    below. The title also gets back the 18px
+                                    the pair cost it, which at the 200px
+                                    sidebar minimum was about three characters
+                                    of a name that was already truncating. */}
+                                  {/* A MARK, not a dot. Five statuses drawn as
                                     five circles differing only in hue is the
                                     reading the operator called samey -- and
                                     hue is the one channel that is missing for
@@ -2900,66 +2966,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     prints the status as visible text there,
                                     and a second invisible copy is read
                                     twice. */}
-                                    <StatusMark status={session.status} announce={!phone} />
-                                    {/* WHICH AGENT RAN THIS. The operator's
-                                    words, once vam had a second source: "there
-                                    needs to be an icon before each session to
-                                    tell the providers apart in the sidebar."
-                                    Nothing else on the row answers it -- two
-                                    checkouts of one directory read by two
-                                    sources are two project headings with the
-                                    same basename on them.
-
-                                    NOT THE SESSION ICON COMING BACK. That one
-                                    (removed just above, and pinned by
-                                    `SessionList.icon.test.tsx`) repeated the
-                                    project heading's own mark down the column
-                                    and said nothing new. This says a thing no
-                                    other part of the row says.
-
-                                    DECORATIVE, and that is a decision rather
-                                    than an omission. Every row under one
-                                    heading has the same source, so an
-                                    announced mark would read the provider
-                                    aloud before each of a project's twelve
-                                    titles -- the ornament with the highest
-                                    cost and the least to say, which is the
-                                    argument the tab strip's own status mark
-                                    already makes for itself. The fact is not
-                                    lost to a screen reader: the status bar's
-                                    `SourceGlyph` names the FOCUSED session's
-                                    source, once, in a labelled `role="img"`
-                                    that takes a tab stop and carries a
-                                    tooltip.
-
-                                    THE LANE IS DRAWN EVEN WHEN EMPTY, on
-                                    `status-mark.tsx`'s rule: a lane that
-                                    collapses to its content moves the title
-                                    of every row beside it. A model that names
-                                    no source at all -- possible, the field is
-                                    optional -- pays the width and draws
-                                    nothing in it rather than claiming a
-                                    provider vam cannot name. */}
-                                    <span
-                                      data-row-source={rowSource ?? ''}
-                                      {...(rowSource === null
-                                        ? {}
-                                        : { 'data-source-mark': markRegisterOf(rowSource) })}
-                                      aria-hidden="true"
-                                      /* An inline style, not `w-[12px]`:
-                                       Tailwind's scanner reads source text, so
-                                       a class assembled from a constant is one
-                                       it never generates and the lane would
-                                       collapse -- the trap `StatusMark` and
-                                       `BRANCH_TAIL_MAX_CHARS` both record. */
-                                      style={{ width: PROVIDER_LANE_PX, height: PROVIDER_LANE_PX }}
-                                      className="flex flex-none items-center justify-center text-ink-faint"
-                                    >
-                                      {rowSource !== null && (
-                                        <SourceMark source={rowSource} lane={PROVIDER_LANE_PX} />
-                                      )}
-                                    </span>
-                                  </span>
+                                  <StatusMark status={session.status} announce={!phone} />
                                   <span
                                     data-row-title
                                     className={[
@@ -2994,6 +3001,22 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     data-row-meta
                                     className="flex min-w-0 items-center gap-1 truncate font-mono text-meta text-ink-dim"
                                   >
+                                    {/* THE PROVIDER OPENS THIS LINE TOO, and
+                                        the phone is not an afterthought
+                                        here: it draws its OWN meta line, with
+                                        the status word and the age the
+                                        desktop has no room for, so moving the
+                                        mark on one row and not the other is
+                                        the exact shape of a defect that looks
+                                        right in whichever surface its author
+                                        had open. The branch is last on this
+                                        line rather than next, because at
+                                        390px it is the segment that has to
+                                        truncate first -- so "before the
+                                        branch name" is satisfied by leading
+                                        the line, and the mark keeps the ink
+                                        and the height of the text it leads. */}
+                                    <ProviderLane source={rowSource} />
                                     {session.status === 'waiting' ? (
                                       <span data-row-needs-you className="flex-none text-waiting">
                                         needs you
@@ -3117,6 +3140,53 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     className="flex items-center gap-1.5 font-mono text-meta text-ink-faint opacity-[0.82]"
                                   >
                                     <span className="flex min-w-0 flex-1 items-center gap-1">
+                                      {/* WHICH AGENT RAN THIS, before the
+                                          branch it ran on. The operator moved
+                                          it here from the title line: "put the
+                                          provider glyph before the branch
+                                          name, under the session name."
+
+                                          WHY THE TWO BELONG TOGETHER. Nothing
+                                          else on the row answers "which
+                                          provider" -- two checkouts of one
+                                          directory read by two sources are two
+                                          project headings with the same
+                                          basename on them -- and the branch is
+                                          the other half of the same question:
+                                          where this session's work came from.
+                                          The title line above says what the
+                                          session IS; this line says where it
+                                          is from. That is also why the mark
+                                          leads the line rather than joining
+                                          the age on the right: it introduces
+                                          the branch, and a mark after the name
+                                          it belongs to introduces nothing.
+
+                                          UNCONDITIONAL, WHERE THE BRANCH GLYPH
+                                          BELOW IS NOT, and the two rules are
+                                          not in conflict. `GitBranch` is
+                                          suppressed for a null branch because
+                                          it would be a mark spent on an
+                                          absence -- there is no name for it to
+                                          sit beside. The provider lane is
+                                          drawn empty for a sourceless row
+                                          because a lane that collapses to its
+                                          content moves the branch name of
+                                          every row beside it, which is
+                                          `status-mark.tsx`'s rule and the
+                                          reason `ProviderLane` owns the width
+                                          rather than the glyph.
+
+                                          NOT THE SESSION ICON COMING BACK.
+                                          That one (removed from the row, and
+                                          pinned by `SessionList.icon.test.tsx`)
+                                          repeated the project heading's own
+                                          mark down the column and said nothing
+                                          new; this says a thing no other part
+                                          of the row says. Its decorativeness
+                                          and its size are argued at
+                                          `ProviderLane` and `PROVIDER_LANE_PX`. */}
+                                      <ProviderLane source={rowSource} />
                                       {/* THE GLYPH GOES WITH THE NAME. A branch
                                           icon beside an em-dash is a row
                                           announcing that it has nothing to
@@ -3130,7 +3200,34 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                           in the row's accessible name, where
                                           it was the only copy anyway. */}
                                       {session.branch !== null && (
-                                        <GitBranch size={10} strokeWidth={1.6} />
+                                        /* `flex-none` IS A FIX, not tidying.
+                                           An `<svg>` is a flex item with an
+                                           auto basis, so this glyph shrank
+                                           whenever the line was tight --
+                                           MEASURED at the 264px default
+                                           sidebar on the demo fixture: 8x10
+                                           on one row and 9.9x10 on another,
+                                           a branch icon squeezed narrow
+                                           while keeping its height. It was
+                                           already happening before the
+                                           provider lane arrived (8.7x10 with
+                                           the lane hidden), and the lane's
+                                           14px made it worse, which is how
+                                           it was found: the guard's "every
+                                           branch name starts the same
+                                           distance past its lane" came back
+                                           [14, 28, 26].
+                                           The NAME is what gives way on this
+                                           line -- `data-branch-head`
+                                           truncates and `data-branch-tail`
+                                           is `flex-none` for exactly this
+                                           reason -- and a 10px glyph has no
+                                           two pixels to give. */
+                                        <GitBranch
+                                          size={10}
+                                          strokeWidth={1.6}
+                                          className="flex-none"
+                                        />
                                       )}
                                       <span
                                         data-session-branch

@@ -27,10 +27,19 @@
  *    in the open panel is a fact about the DOM, and it is the one that decides
  *    whether an operator ever reads it.
  *
- * AND THE BACKWARD COMPATIBILITY, AS PAINT. The demo fixture's five sessions
- * carry emoji icons written before glyphs existed (`fixtures/demo.ts`), and
- * this guard deliberately leaves one of them alone: a tab still drawing 🔨 in
- * a real browser is the evidence that no migration was needed.
+ * AND THE BACKWARD COMPATIBILITY, AS PAINT. Icons written before glyphs
+ * existed are still in the store and must still work, so the `notes` project
+ * is seeded with a bare 🌙 and a heading drawing it in a real browser is the
+ * evidence that no migration was needed.
+ *
+ * IT WAS TWO LEVELS OF THAT UNTIL THE SESSION ICON LOST ITS LAST SURFACE. The
+ * demo fixture's five sessions carry emoji of their own (`fixtures/demo.ts`),
+ * and `factory-sse-1`'s 🔨 was read off its TAB -- the sidebar row had given
+ * up drawing one long ago, and now the tab has too ("remove the session icon
+ * from the tab", with the provider glyph taking the slot). So the session
+ * half of this file is an ABSENCE now: seeds are still written, and
+ * `[data-session-icon]` has to match nothing in the whole document. The
+ * project half is unchanged and still carries the migration claim.
  *
  * `?demo=1`, always: vam is public, and every real session on this machine is
  * somebody's work.
@@ -89,12 +98,25 @@ const SEEDED = [
   { level: 'project', selector: '[data-project-icon="vam"]', glyph: 'code', tone: 'purple' },
   // `notes` is not here on purpose: it carries an emoji, and is asserted as
   // one below rather than as a glyph that failed to appear.
-  {
-    level: 'session',
-    selector: '[data-session-icon="crosscheck-2"]',
-    glyph: 'flask-conical',
-    tone: 'pink',
-  },
+  //
+  // AND NEITHER IS THE SESSION LEVEL, WHICH PAINTS NOWHERE NOW. It was
+  // `[data-session-icon="crosscheck-2"]`, a `flask-conical` in `pink`, read
+  // off the TAB -- the last surface drawing a session's icon once the sidebar
+  // row had dropped it. The operator has taken it off the tab as well
+  // ("remove the session icon from the tab"; the provider glyph stands there
+  // instead), so `data-session-icon` is in no DOM to measure. The entry is
+  // removed rather than left to fail as "the glyph is drawn: drew null", its
+  // seed STAYS in `PREFS` above, and the absence is asserted below -- a
+  // stored icon that reaches no surface is the claim now.
+  //
+  // WHAT THAT COSTS THIS FILE, stated rather than glossed: `pink` is no
+  // longer measured in either theme, and the tone questions at the top are
+  // answered at the group and project levels only. The PROPERTIES survive --
+  // a tone that resolves, a light theme that remaps, ink that clears 3:1 --
+  // because each is a property of the token and the cascade, shared by all
+  // eight tones and all three levels. The session level's own store
+  // round-trip is pinned in unit space instead, through the picker that still
+  // reads it (`test/canvas/Canvas.keyboard.test.tsx`).
 ];
 
 const failures = [];
@@ -116,9 +138,12 @@ await page.addInitScript((prefs) => {
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-session-row]');
 
-// Two tabs, so a session's own icon is on screen at all: the sidebar row
-// carries none by the operator's own decision (`SessionList.icon.test.tsx`),
-// and the strip is where the session chain is drawn.
+// TWO TABS OPEN, and the reason has inverted: it used to be "so a session's
+// own icon is on screen at all", since the strip was the one surface that
+// drew the chain. It is now so that the strip HAS tabs for the absence check
+// to be about -- both of these sessions carry a stored icon (🔨 from the
+// fixture, a pink flask from `PREFS`), so "nothing draws a session icon" is a
+// claim with a corpus behind it rather than a sweep over an empty strip.
 await page.locator('[data-session-row="factory-sse-1"]').click();
 await page.locator('[data-session-row="crosscheck-2"]').click();
 await page.keyboard.press('Escape');
@@ -215,8 +240,17 @@ for (const theme of ['dark', 'light']) {
     painted[`${theme}/${m.tone}`] = m.colour;
   }
 
-  // The two icons that were never migrated, still drawn, at two different
-  // levels: one written by a source's fixture, one stored by the old picker.
+  // THE ICON THAT WAS NEVER MIGRATED, still drawn: `notes` carries the bare
+  // emoji the old picker stored, and a heading that draws it is the evidence
+  // that no migration was needed.
+  //
+  // IT USED TO BE TWO, at two levels -- the fixture's own 🔨 on
+  // `factory-sse-1` was read off that session's TAB. The session half is now
+  // an ABSENCE instead, and deliberately not deleted: the seeds are still in
+  // the store, and "no surface draws a session icon" is exactly what the
+  // operator asked for and exactly the kind of thing that comes back by
+  // accident. The `[data-session-icon]` sweep is over the whole document, so
+  // it also catches the slot reappearing somewhere new.
   const emoji = await page.evaluate(() => {
     const at = (sel) => {
       const host = document.querySelector(sel);
@@ -227,12 +261,15 @@ for (const theme of ['dark', 'light']) {
         drewSvg: host !== null && host.querySelector('svg') !== null,
       };
     };
-    return { session: at('[data-session-icon="factory-sse-1"]'), project: at('[data-project-icon="notes"]') };
+    return {
+      sessionIcons: document.querySelectorAll('[data-session-icon]').length,
+      project: at('[data-project-icon="notes"]'),
+    };
   });
   check(
-    `${theme}: a session icon stored as a bare emoji still draws, with no migration`,
-    emoji.session.text === '🔨' && !emoji.session.drewSvg,
-    `tab drew ${JSON.stringify(emoji.session)}`,
+    `${theme}: no surface draws a session icon, though two sessions have one stored`,
+    emoji.sessionIcons === 0,
+    `${emoji.sessionIcons} drawn`,
   );
   check(
     `${theme}: a project icon stored as a bare emoji still draws, with no migration`,
@@ -285,7 +322,7 @@ for (const theme of ['dark', 'light']) {
 // stored value, two themes: if the light block were a copy of the dark one
 // these would be equal and the light sidebar would be carrying a pale glyph
 // on near-white.
-for (const tone of ['teal', 'orange', 'purple', 'pink']) {
+for (const tone of ['teal', 'orange', 'purple']) {
   const [d, l] = [painted[`dark/${tone}`], painted[`light/${tone}`]];
   check(
     `the light theme remaps ${tone} rather than reproducing it`,

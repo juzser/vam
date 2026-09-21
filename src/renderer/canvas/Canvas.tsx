@@ -923,29 +923,33 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
  * sidebar row's own glyph (`panels/status-mark.tsx`: a spinner, a bell, a
  * triangle, a tick), so the two surfaces say one thing -- and only for a
  * status the indicator list names (`prefs/tab-indicators.ts`). Idle is not a
- * switch: a resting tab with no icon and no draft is its title and nothing
- * else, and no empty lane is reserved for the mark it is not wearing. A quiet
- * tab is narrower than a busy one; that is the point, not a cost.
+ * switch: a resting tab with no draft is its provider glyph and its title and
+ * nothing else, and no empty lane is reserved for the STATUS mark it is not
+ * wearing. A quiet tab is narrower than a busy one; that is the point, not a
+ * cost.
  *
  * THE LANE IS `--text-control`, 12px, the tab label's own size -- and the
  * glyph fills it. The sidebar row centres a 12px glyph in a 14px lane under a
- * 13px title; a tab's title is 12px on a 16px line, and the session icon
- * beside it already draws at exactly 12 (`IconMark size={12}` below, "the
- * tab label's own size, so the two kinds of icon occupy the same height"). A
- * mark at the same 12 sits in the same square as that icon and on the same
- * centre line as the label, which is what makes the two read as one row of
- * things rather than a big thing beside a small one. The two pixels of air
- * the sidebar keeps inside its lane are for a triangle and a circle sitting
- * centred beside each other in a COLUMN; on a tab the mark has no neighbour
- * above or below to be centred against, and the lucide glyphs carry their own
- * pixel of air inside the box (a 24-unit viewBox with 2 units of margin). The
- * 16px line has two pixels above and below the lane; the row is 36 and does
- * not move (measured in `e2e/tab-strip-shots.mjs`).
+ * 13px title; a tab's title is 12px on a 16px line, and the provider glyph
+ * beside the mark takes this same number (`SourceMark lane={TAB_MARK_GLYPH_PX}`
+ * below), so the two things drawn before a title occupy one square each and
+ * sit on the label's own centre line -- which is what makes them read as one
+ * row of things rather than a big thing beside a small one. (The session
+ * icon used to be the glyph making that argument, at exactly 12 for exactly
+ * this reason; the operator removed it and the provider inherited both the
+ * slot and the number.) The two pixels of air the sidebar keeps inside its
+ * lane are for a triangle and a circle sitting centred beside each other in a
+ * COLUMN; on a tab the mark has no neighbour above or below to be centred
+ * against, and the lucide glyphs carry their own pixel of air inside the box
+ * (a 24-unit viewBox with 2 units of margin). The 16px line has two pixels
+ * above and below the lane; the row is 36 and does not move (measured in
+ * `e2e/tab-strip-shots.mjs`).
  *
- * Mark first, then the icon, then the title, then the marks about the
- * OPERATOR's state in this tab -- an unsent draft, a prompt not yet recorded,
- * sub-agents at work -- because reading order on a strip is left to right and
- * what the session is doing outranks what you were doing here.
+ * Mark first, then the PROVIDER glyph, then the title, then the marks about
+ * the OPERATOR's state in this tab -- an unsent draft, a prompt not yet
+ * recorded, sub-agents at work -- because reading order on a strip is left to
+ * right, and what the session is doing outranks who ran it, which outranks
+ * what you were doing here.
  */
 export const TAB_MARK_LANE_PX = 12;
 /** The glyph is the lane: see above for why the tab keeps no air the sidebar
@@ -1169,20 +1173,33 @@ function TabStrip({
     >
       {tabs.map((entry) => {
         const active = entry.session.id === activeId;
-        // The chain (`panels/session-icon.ts`): the session's own choice, else
-        // its project's, else nothing drawn -- deliberately not the module's
-        // own placeholder glyph, which would put a Monitor icon on every tab
-        // nobody has picked one for. Adopting the chain is the point: this
-        // used to read `entry.session.icon` alone, so a tab never fell back
-        // to its project's glyph the way the (now-deleted) canvas root node
-        // already did, and the two surfaces disagreed the moment one carried
-        // a project icon and no session icon of its own.
+        // OFF, AND STILL HERE ON PURPOSE. `icon` left `TAB_INDICATORS` when
+        // the operator said "remove the session icon from the tab" in the
+        // same breath as asking for the provider glyph below, so this
+        // resolves to `null` on every tab today and the block that draws it
+        // renders nothing. It is not dead code: `tab-indicators.ts` documents
+        // "off but still in the union" as the re-enable path -- one entry in
+        // that list brings this back, correct, rather than somebody
+        // reconstructing the chain from memory.
         //
-        // The chain answers with a KIND now (an emoji, or a named glyph in a
-        // tone), not a character, so the tone arrives here without this strip
-        // knowing that colours exist -- see `session-icon.tsx` for why that is
-        // one chain and not two.
+        // The chain (`panels/session-icon.tsx`): the session's own choice,
+        // else its project's, else nothing drawn -- deliberately not the
+        // module's own placeholder glyph, which would put a Monitor icon on
+        // every tab nobody has picked one for. It answers with a KIND (an
+        // emoji, or a named glyph in a tone), not a character, so the tone
+        // arrives here without this strip knowing that colours exist.
         const icon = isTabIndicatorOn('icon') ? resolveSessionIcon(entry) : null;
+        // WHICH AGENT RAN THIS TAB. The operator: "put the provider glyph
+        // after the indicator, on the tab name." The same two fields the
+        // sidebar row's `rowSource` reads, in the same order, because they
+        // are stamped by different readers and the narrower one wins -- and
+        // `null` when neither answers, which draws NOTHING rather than an
+        // empty lane. The sidebar reserves its lane because it is a column
+        // and a collapsing lane moves every row's branch name; tabs sit side
+        // by side, so there is no alignment to protect and a lane held open
+        // for a mark that is not coming would be the invisible dot the
+        // operator had removed from this very strip.
+        const tabSource = entry.session.source ?? entry.project.source ?? null;
         const mark = tabStatusMark(entry.session.status);
         const draft = isTabIndicatorOn('draft') && hasDraft(drafts[entry.session.id]);
         const queued =
@@ -1237,6 +1254,41 @@ function TabStrip({
                   lane={TAB_MARK_LANE_PX}
                   glyph={TAB_MARK_GLYPH_PX}
                 />
+              </span>
+            )}
+            {/* THE PROVIDER, BETWEEN THE MARK AND THE TITLE -- the operator's
+                own order: what the session is doing, who ran it, what it is
+                called. A SIBLING of the select button rather than a child,
+                which is the reason the draft pencil is one: the button
+                truncates at 160px, and a glyph inside it goes into the
+                ellipsis on exactly the tabs whose titles are long enough to
+                need telling apart.
+
+                DECORATIVE, on the argument the status mark beside it already
+                makes: every tab of one project carries the same provider, so
+                an announced mark reads the source aloud before each of eight
+                titles. The fact is not lost to a screen reader -- the status
+                bar's `SourceGlyph` names the FOCUSED session's source, once,
+                in a labelled `role="img"` with a tab stop.
+
+                `data-source-mark` records WHICH register answered (brand,
+                vam's own glyph, or the neutral box), so a mark that quietly
+                fell back is an assertable outcome rather than an invisible
+                default -- the hook `SourceGlyph` and the sidebar row both
+                carry, for that reason.
+
+                NO INK OF ITS OWN: it inherits the tab's, so it dims with the
+                tab and lights with it, the way the pending ring's
+                `border-current` does. The status marks are the exception on
+                this strip, and deliberately -- theirs is a status colour. */}
+            {tabSource !== null && (
+              <span
+                data-tab-source={tabSource}
+                data-source-mark={markRegisterOf(tabSource)}
+                aria-hidden="true"
+                className="flex flex-none"
+              >
+                <SourceMark source={tabSource} lane={TAB_MARK_GLYPH_PX} />
               </span>
             )}
             <button

@@ -1,19 +1,25 @@
 // @vitest-environment happy-dom
 
 /**
- * The tab strip's own icon slot, and clicking a tab.
+ * The tab strip's own icon slot — now empty of the session icon — and
+ * clicking a tab.
  *
- * 0.2 migration, step 2: `TabStrip` used to read `entry.session.icon` alone,
- * so a tab never fell back to its project's glyph the way the (now-deleted)
- * canvas root node already did — the two surfaces disagreed the moment one
- * carried a project icon and no session icon of its own. Routing the tab
- * through the shared chain (`resolveSessionGlyph`, pinned in isolation at
- * `test/panels/session-icon.test.ts`) fixes that disagreement; this file pins
- * the chain actually being live at the one surface that draws it now.
+ * 0.2 migration, step 2 routed the tab through the shared chain
+ * (`resolveSessionGlyph`, pinned in isolation at
+ * `test/panels/session-icon.test.ts`) so that a tab fell back to its
+ * project's glyph the way the (now-deleted) canvas root node did — the two
+ * surfaces disagreed the moment one carried a project icon and no session
+ * icon of its own. The operator has since taken the slot away entirely: "put
+ * the provider glyph after the indicator, on the tab name. Remove the session
+ * icon from the tab."
  *
- * Deliberately not the module's own `Monitor` placeholder: a tab nobody has
- * picked an icon for draws nothing rather than a mark every unpicked tab
- * would share.
+ * What this half of the file pins therefore TURNED OVER rather than
+ * disappeared. The three cases it drove — no icon anywhere, a project icon
+ * inherited, a session icon of its own — are exactly the three that must now
+ * draw nothing, and together they are the cheapest proof that what was
+ * removed is the CHAIN and not one link of it. The slot is not idle: the
+ * provider glyph has it, as a SIBLING of the select button, which is asserted
+ * here and measured in full in `Canvas.tab-indicators.test.tsx`.
  *
  * The second half relocates `Canvas.keyboard.test.tsx`'s "a canvas card is
  * clickable, and a click focuses that session": every session used to be a
@@ -68,7 +74,7 @@ function press(key: string) {
 
 afterEach(cleanup);
 
-describe('the tab strip draws the fallback chain, not the bare session field', () => {
+describe('the tab strip draws no session icon at all, whichever link of the chain has one', () => {
   it('shows nothing when neither the session nor its project has chosen a glyph', () => {
     const model: CanvasModel = {
       projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] }],
@@ -77,17 +83,18 @@ describe('the tab strip draws the fallback chain, not the bare session field', (
     expect(tabIcon('a1')).toBeNull();
   });
 
-  it('falls back to the project glyph when the session has none of its own', () => {
+  it('does not fall back to the project glyph — the link that used to be the loud one', () => {
     const model: CanvasModel = {
       projects: [
         { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')], icon: '🏭' },
       ],
     };
     render(<Canvas model={model} />);
-    expect(tabIcon('a1')?.textContent).toBe('🏭');
+    expect(tabIcon('a1')).toBeNull();
+    expect(tabSelect('a1')?.textContent).toBe('a1');
   });
 
-  it('prefers the session’s own glyph over its project’s', () => {
+  it('does not draw the session’s own glyph either', () => {
     const model: CanvasModel = {
       projects: [
         {
@@ -100,7 +107,30 @@ describe('the tab strip draws the fallback chain, not the bare session field', (
       ],
     };
     render(<Canvas model={model} />);
-    expect(tabIcon('a1')?.textContent).toBe('🦊');
+    expect(tabIcon('a1')).toBeNull();
+    expect(tabSelect('a1')?.textContent).toBe('a1');
+  });
+
+  it('draws the provider glyph in that slot instead, outside the title button', () => {
+    // The slot did not go quiet, it changed hands. Inside the button the
+    // glyph would truncate with a long title; outside it, it cannot.
+    const model: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'claude-code',
+          sessions: [session('a1', '🦊')],
+          icon: '🏭',
+        },
+      ],
+    };
+    render(<Canvas model={model} />);
+    const tab = document.querySelector('[data-session-tab]');
+    expect(tab?.querySelector('[data-tab-source]')?.getAttribute('data-tab-source')).toBe(
+      'claude-code',
+    );
+    expect(tab?.querySelector('[data-tab-select] [data-tab-source]')).toBeNull();
   });
 });
 

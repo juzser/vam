@@ -142,9 +142,13 @@ const headings = () =>
   [...document.querySelectorAll('[data-project-heading]')].map((el) => el.textContent ?? '');
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
-/** What the session row draws for its icon -- the one icon display left. */
-const nodeIcon = (id: string) =>
-  document.querySelector(`[data-session-icon="${id}"]`)?.textContent ?? null;
+// `nodeIcon` used to live here: `[data-session-icon="<id>"]`, the tab's own
+// slot and the last surface that drew a session's icon. The operator has
+// since taken that off the tab as well ("remove the session icon from the
+// tab"), so the selector matches nothing anywhere and a helper built on it
+// could only ever answer `null` -- which is how a green assertion comes to
+// mean nothing. The two tests that used it say what is true now instead: the
+// store still round-trips through the picker, and nothing draws the value.
 // A <textarea>, not an <input>: the composer is multiline, so a prompt is
 // prose rather than the tail of one line.
 const promptInput = () =>
@@ -996,20 +1000,41 @@ describe('renaming, icons and closing', () => {
     expect(iconPicker()?.textContent).toContain('a2');
   });
 
-  it('shows an icon you chose on a previous visit', () => {
-    // The read half of the store, end to end: what localStorage holds reaches
-    // the icon slot without the canvas knowing an icon is a local
-    // preference. This used to read the SIDEBAR row (`rowText('a1')` contains
-    // the glyph, `rowText('a2')` does not); the sidebar no longer draws a
-    // session icon, so the same end-to-end path is asserted on the surface
-    // that still displays it -- the assertion moved, it was not dropped.
+  it('remembers an icon you chose on a previous visit, though nothing draws it now', () => {
+    /**
+     * The read half of the store, end to end -- and the surface it is read on
+     * has now moved twice.
+     *
+     * It read the SIDEBAR row until the operator took the session icon off
+     * the row; it read the TAB until the operator took it off the tab too
+     * ("remove the session icon from the tab", with the provider glyph
+     * arriving in its place). There is no third display: `data-session-icon`
+     * appears nowhere in `src/` any more, so what the chain resolves to is
+     * drawn by nothing.
+     *
+     * The PATH still exists and is still worth pinning -- the picker reads
+     * the same stored value back, which is how an operator sees what they
+     * chose -- so the assertion moved again rather than being dropped, and
+     * the second half states the absence outright instead of leaving a
+     * `nodeIcon` call that can only ever be `null` and would pass for a
+     * reason nobody meant.
+     *
+     * A GLYPH, not the emoji this used: our own shell marks a chosen glyph
+     * with `aria-pressed`, while an emoji's selection lives inside the
+     * third-party grid, which is not this test's to drive.
+     */
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
+      JSON.stringify({
+        icons: { a1: { icon: 'lucide:wrench:teal', at: new Date().toISOString() } },
+      }),
     );
     render(<Canvas model={MODEL} />);
-    expect(nodeIcon('a1')).toBe('🛠');
-    expect(rowText('a1')).not.toContain('🛠');
+    press('s');
+    expect(
+      iconPicker()?.querySelector('[data-icon-choice="wrench"]')?.getAttribute('aria-pressed'),
+    ).toBe('true');
+    expect(document.querySelector('[data-session-icon]')).toBeNull();
   });
 
   it('clearing the icon says where it was kept, and forgets it', () => {
@@ -1030,9 +1055,12 @@ describe('renaming, icons and closing', () => {
     // the event log.
     expect(screen.getByText(/on this machine/)).toBeTruthy();
     expect(iconPicker()).toBeNull();
-    // Also moved off the sidebar row: it asserted `rowText('a1')` no longer
-    // contained the cleared glyph, and now asserts the icon slot does not.
-    expect(nodeIcon('a1')).not.toBe('🛠');
+    // The cleared glyph is gone from the whole screen. This asserted
+    // `rowText('a1')`, then the tab's icon slot; with no surface drawing a
+    // session icon at all, a slot-shaped assertion would be `null !== '🛠'`
+    // and true for ever. The document is the honest scope -- and still not a
+    // vacuous one, since it would catch the glyph surviving anywhere.
+    expect(document.body.textContent).not.toContain('🛠');
     expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
   });
 
