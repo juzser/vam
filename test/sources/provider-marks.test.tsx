@@ -15,6 +15,16 @@
  * one of them. That is also a hard constraint of the repo (13.1 bans a literal
  * hex under src/), so it is checked here at the value level rather than left to
  * the file-scanning rule alone.
+ *
+ * THE BRAND MARKS CARRY A COLOUR NOW, and none of the sentence above changed.
+ * The colour arrives as a TOKEN CLASS -- `text-brand-claude` -- which resolves
+ * to a different hex under each theme, so `currentColor` and the no-hex rule
+ * both hold exactly as written: what a mark carries is a NAME, and
+ * `styles.css` decides what that name is worth per theme.
+ * `test/renderer/token-contrast.test.ts` holds the two values to their floors,
+ * and only `e2e/provider-mark-shots.mjs` can prove a class emitted a rule at
+ * all -- a Tailwind v4 utility naming a token that does not exist emits none,
+ * silently, and no unit environment can see that.
  */
 
 import { createHash } from 'node:crypto';
@@ -89,6 +99,62 @@ describe('the provider mark table', () => {
       expect(mark.title.length, `${id} has no brand name`).toBeGreaterThan(0);
     }
   });
+
+  /**
+   * WHICH MARKS ARE COLOURED IS A DECISION, written down as a table rather
+   * than left as whatever the code happens to do.
+   *
+   * The two sources an operator really has are coloured; the other three
+   * marks are in the table for a source vam does not stamp yet and take no
+   * tone, because a tone is not a hex somebody copied -- it is two measured
+   * values, one per theme (`token-contrast.test.ts`). The day one of those
+   * sources goes live, this row is what says the measurement is owed.
+   */
+  const TONES: Readonly<Record<string, string | null>> = {
+    'claude-code': 'text-brand-claude',
+    codex: 'text-brand-openai',
+    'github-copilot': null,
+    gemini: null,
+    opencode: null,
+  };
+
+  it('gives each mark the tone it was measured for, and no other mark one', () => {
+    expect(Object.keys(PROVIDER_MARKS).sort()).toEqual(Object.keys(TONES).sort());
+    for (const [id, tone] of Object.entries(TONES)) {
+      expect(PROVIDER_MARKS[id]?.ink ?? null, `${id}'s tone`).toBe(tone);
+    }
+  });
+
+  it('paints a tone with a token class and never with a literal, on the drawn svg', () => {
+    // The PAINTED element, not the wrapper: the wrapper belongs to whichever
+    // surface drew the lane, and colouring that would have coloured the branch
+    // glyph beside it in the sidebar. The class has to be a literal in the
+    // module's source text too -- Tailwind scans source, so a class assembled
+    // from a constant is one it never generates -- and that is what makes the
+    // e2e paint check load-bearing rather than decorative.
+    for (const [source, tone] of [
+      ['claude-code', 'text-brand-claude'],
+      ['codex', 'text-brand-openai'],
+    ] as const) {
+      const { container } = render(<SourceMark source={source} lane={12} />);
+      const svg = container.querySelector('svg');
+      expect(svg?.getAttribute('class'), `${source} paints no tone`).toBe(tone);
+      expect(/#[0-9a-fA-F]{3,8}\b/.test(svg?.outerHTML ?? ''), `${source} bakes a hex`).toBe(false);
+      cleanup();
+    }
+  });
+
+  it('leaves vam’s own concepts and the unknown box on the row’s ink', () => {
+    // `factory` and `bundled-sample` are vam's own ideas, not companies, and
+    // an invented colour for them would be the decoration the module exists to
+    // refuse. The neutral box claims nothing and is painted like it.
+    for (const source of ['factory', 'bundled-sample', 'a-source-from-2027']) {
+      const { container } = render(<SourceMark source={source} lane={12} />);
+      const cls = container.querySelector('svg')?.getAttribute('class') ?? '';
+      expect(cls, `${source} took a brand tone`).not.toMatch(/brand/);
+      cleanup();
+    }
+  });
 });
 
 describe('the status bar glyph for a session source', () => {
@@ -123,9 +189,9 @@ describe('the status bar glyph for a session source', () => {
     expect(glyph()?.getAttribute('data-source-mark')).toBe('neutral');
   });
 
-  it('draws vam’s own glyph for codex, not a borrowed OpenAI one', () => {
+  it('draws OpenAI’s own mark for codex, which is what ran that session', () => {
     render(<Canvas model={modelFromSource('codex')} />);
-    expect(glyph()?.getAttribute('data-source-mark')).toBe('native');
+    expect(glyph()?.getAttribute('data-source-mark')).toBe('brand');
     expect(glyph()?.getAttribute('aria-label')).toBe('source: codex');
   });
 });
@@ -142,24 +208,33 @@ describe('the status bar glyph for a session source', () => {
  * is what makes it loud.
  *
  * TO RE-DERIVE, or to update one on purpose: fetch
- * raw.githubusercontent.com/simple-icons/simple-icons/16.32.0/icons/<slug>.svg
+ * raw.githubusercontent.com/simple-icons/simple-icons/<tag>/icons/<slug>.svg
  * and take the `d` of its single `<path>`. The slug for each key is in the
  * table; they are not the same strings as vam's source ids, which is exactly
  * why they are written down.
+ *
+ * TWO TAGS, AND THE SECOND ONE IS THE POINT OF WRITING THE TAG DOWN AT ALL.
+ * Four marks come from 16.32.0. OpenAI's comes from 15.0.0, because Simple
+ * Icons REMOVED `icons/openai.svg` in 16.0.0 -- verified on 2026-09-21: that
+ * path is 200 at the 15.0.0 tag and 404 at 16.32.0. The module header carries
+ * the whole argument for taking it anyway; what this file is for is that the
+ * copy stays a copy, and a digest taken against the wrong tag would be a pin
+ * to nothing.
  */
-const SIMPLE_ICONS_16_32_0: Readonly<Record<string, { slug: string; digest: string }>> = {
-  'claude-code': { slug: 'claude', digest: '0442033dcc3824e5' },
-  'github-copilot': { slug: 'githubcopilot', digest: '995f11748f4ada6b' },
-  gemini: { slug: 'googlegemini', digest: 'a27790dcbe07c23d' },
-  opencode: { slug: 'opencode', digest: 'f4f11e1603a4a49c' },
+const SIMPLE_ICONS_PINS: Readonly<Record<string, { slug: string; tag: string; digest: string }>> = {
+  'claude-code': { slug: 'claude', tag: '16.32.0', digest: '0442033dcc3824e5' },
+  codex: { slug: 'openai', tag: '15.0.0', digest: '3fae9b38d571a5ab' },
+  'github-copilot': { slug: 'githubcopilot', tag: '16.32.0', digest: '995f11748f4ada6b' },
+  gemini: { slug: 'googlegemini', tag: '16.32.0', digest: 'a27790dcbe07c23d' },
+  opencode: { slug: 'opencode', tag: '16.32.0', digest: 'f4f11e1603a4a49c' },
 };
 
 describe('the brand paths are still the ones that were copied', () => {
-  it('pins every mark to its Simple Icons 16.32.0 outline, byte for byte', () => {
+  it('pins every mark to the Simple Icons outline it was taken from, byte for byte', () => {
     // A table emptied out, or a key renamed, must not pass by having nothing
     // left to check.
-    expect(Object.keys(PROVIDER_MARKS).sort()).toEqual(Object.keys(SIMPLE_ICONS_16_32_0).sort());
-    for (const [id, { digest }] of Object.entries(SIMPLE_ICONS_16_32_0)) {
+    expect(Object.keys(PROVIDER_MARKS).sort()).toEqual(Object.keys(SIMPLE_ICONS_PINS).sort());
+    for (const [id, { digest }] of Object.entries(SIMPLE_ICONS_PINS)) {
       const mark = PROVIDER_MARKS[id];
       expect(mark, `${id} is gone from the table`).not.toBeUndefined();
       // The `expect` above is the failure; this is the NARROWING, which
@@ -171,7 +246,7 @@ describe('the brand paths are still the ones that were copied', () => {
       expect(d.length, `${id} draws an empty path`).toBeGreaterThan(0);
       expect(
         createHash('sha256').update(d).digest('hex').slice(0, 16),
-        `${id}'s outline is no longer the one copied from Simple Icons 16.32.0. If that was deliberate, re-derive the digest from the URL above; if it was a hand edit to make the mark fit, undo it -- an adjusted logo is an invented one.`,
+        `${id}'s outline is no longer the one copied from Simple Icons ${SIMPLE_ICONS_PINS[id]?.tag}. If that was deliberate, re-derive the digest from the URL above; if it was a hand edit to make the mark fit, undo it -- an adjusted logo is an invented one.`,
       ).toBe(digest);
       cleanup();
     }
@@ -184,9 +259,10 @@ describe('the three registers, as one answer every surface reads', () => {
     // vam's own concepts: no brand to borrow and none wanted.
     expect(markRegisterOf('factory')).toBe('native');
     expect(markRegisterOf('bundled-sample')).toBe('native');
-    // Codex: a real product whose mark vam may not carry. See the module
-    // header for the receipt.
-    expect(markRegisterOf('codex')).toBe('native');
+    // Codex: OpenAI's own product, drawn with OpenAI's own mark. The module
+    // header carries the receipt and the argument for taking it from the
+    // 15.0.0 tag.
+    expect(markRegisterOf('codex')).toBe('brand');
     expect(markRegisterOf('orca')).toBe('neutral');
     expect(markRegisterOf('a-source-from-2027')).toBe('neutral');
     // The empty string is what `sourceKeyOf` writes for an entry that names
@@ -194,14 +270,21 @@ describe('the three registers, as one answer every surface reads', () => {
     expect(markRegisterOf('')).toBe('neutral');
   });
 
-  it('carries no OpenAI mark, because it is not vam’s to redistribute', () => {
-    // Simple Icons REMOVED the OpenAI icon in 16.0.0 (PR 13944): the usage
-    // terms at openai.com/brand grant a non-transferable permission, so they
-    // could not ship it under CC0. Lifting it out of the 15.x tag would be
-    // redistributing what its custodians concluded they may not, and drawing
-    // something similar would be worse. If permission is ever obtained this
-    // line is the one to change, deliberately, having read why it was here.
-    expect(PROVIDER_MARKS.codex).toBeUndefined();
+  it('carries OpenAI’s mark for Codex, and it is the real one and not a lookalike', () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and the reversal is the record.
+    // Simple Icons removed the OpenAI icon in 16.0.0 (PR 13944, issue 12739):
+    // openai.com/brand grants a NON-TRANSFERABLE permission, so they -- a
+    // redistributor relicensing everything they ship as CC0 -- could not carry
+    // it. vam is not a redistributor of an icon set. It draws the mark to
+    // identify OpenAI's own product beside its own name, on a session that
+    // really came from it, which is the nominative use this file already
+    // accepts for the Claude mark. The operator read the position and decided.
+    //
+    // What has NOT changed is the thing the removal makes riskiest: an
+    // approximation. The path is taken verbatim from the 15.0.0 tag and pinned
+    // by digest above, so "make it fit" fails rather than ships.
+    expect(PROVIDER_MARKS.codex).not.toBeUndefined();
+    expect(PROVIDER_MARKS.codex?.title).toBe('OpenAI');
   });
 
   it('draws three different shapes for the three registers', () => {
@@ -212,7 +295,10 @@ describe('the three registers, as one answer every surface reads', () => {
       return html;
     };
     const brand = drawn('claude-code');
-    const native = drawn('codex');
+    // `factory` rather than `codex`: Codex moved to the brand register, and
+    // sampling it here would have compared two brand marks and called one of
+    // them the native register.
+    const native = drawn('factory');
     const neutral = drawn('a-source-from-2027');
     // Non-empty first: three equal empty strings would satisfy "all three
     // differ" for exactly the wrong reason.
@@ -239,7 +325,10 @@ describe('the three registers, as one answer every surface reads', () => {
       return value;
     };
     expect(width('claude-code')).toBe('11');
-    expect(width('codex')).toBe('12');
+    // Codex is a brand path now, so it pays the same pixel Claude does; the
+    // lucide register is `factory`.
+    expect(width('codex')).toBe('11');
+    expect(width('factory')).toBe('12');
     expect(width('a-source-from-2027')).toBe('12');
   });
 });
