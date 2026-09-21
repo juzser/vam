@@ -73,24 +73,28 @@ import {
   ChevronDown,
   ChevronsDown,
   ChevronsUp,
+  Circle,
   CircleSlash,
   FileText,
   GitPullRequest,
   Hand,
   Image as ImageIcon,
   ListChecks,
+  LoaderCircle,
   MessageSquare,
   Mic,
   NotepadText,
   Paperclip,
   Sparkles,
   SquareTerminal,
+  TriangleAlert,
   Users,
   X,
 } from 'lucide-react';
 import {
   type KeyboardEvent,
   memo,
+  type ReactElement,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -185,6 +189,7 @@ import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
+import { GLYPH_PX, MARK_LANE_PX } from './status-mark.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
 import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
@@ -1238,20 +1243,137 @@ function ViewIcons({
 }
 
 /**
- * How a pull request's checks are drawn: one token per verdict, and `none`
- * deliberately quiet.
+ * How a pull request's checks are drawn: A SHAPE AND THEN A HUE, which is
+ * `status-mark.tsx`'s house rule carried to a second vocabulary.
  *
- * `none` uses the same dim ink as unknown text rather than a colour, because
- * a repository with no checks configured has nothing to report -- painting it
- * green would be the pane inventing a passing build.
+ * IT WAS FOUR DISCS DIFFERING ONLY IN COLOUR, and two things were wrong with
+ * that at once.
+ *
+ * The first is WCAG 1.4.1: hue alone is the channel that is missing for
+ * somebody, and this mark is the only carrier of the checks verdict on any row
+ * whose rail is saying something more severe -- `conflicts` and
+ * `changes requested` both outrank a checks word in `prVerdict` below, so on
+ * those rows the disc was the whole answer.
+ *
+ * The second is that one of the four discs was not visible at all.
+ * `none` was `bg-line-strong` on `bg-card`, MEASURED at 1.713:1 in dark and
+ * 1.457:1 in light against WCAG 1.4.11's 3:1 floor for a non-text mark --
+ * a 6px speck the operator could not see, reporting "this repository runs no
+ * checks" to nobody. `text-ink-faint` is 6.17:1 / 5.38:1 and says the same
+ * quiet thing legibly; the argument for keeping `none` QUIET is unchanged --
+ * a repository with no checks configured has nothing to report, and painting
+ * it green would be the pane inventing a passing build.
+ *
+ * `none` KEEPS THE CIRCLE, at rest: the house's "nothing is happening" shape
+ * (`status-mark.tsx`'s `idle`), and the only glyph here that draws no verdict.
+ *
+ * NOT `StatusMark` ITSELF. That component is typed on `SessionStatus`, and a
+ * pull request's checks are a different vocabulary with a different ladder --
+ * making it take both would be one table answering two questions. The LANE is
+ * shared, though, imported rather than retyped, so the two marks are the same
+ * size wherever they meet.
  */
-const CHECK_MARK: Record<PullRequest['checks'], { readonly dot: string; readonly label: string }> =
-  {
-    passing: { dot: 'bg-running', label: 'checks pass' },
-    failing: { dot: 'bg-failed', label: 'checks fail' },
-    pending: { dot: 'bg-waiting', label: 'checks running' },
-    none: { dot: 'bg-line-strong', label: 'no checks' },
-  };
+const CHECK_MARK: Record<
+  PullRequest['checks'],
+  { readonly glyph: (size: number) => ReactElement; readonly ink: string; readonly label: string }
+> = {
+  passing: {
+    glyph: (size) => <Check size={size} strokeWidth={2} />,
+    ink: 'text-running',
+    label: 'checks pass',
+  },
+  failing: {
+    glyph: (size) => <TriangleAlert size={size} strokeWidth={1.8} />,
+    ink: 'text-failed',
+    label: 'checks fail',
+  },
+  pending: {
+    /* `.vam-spin` is the stylesheet's own rule and is not scoped to a
+       sidebar mark, so it reaches here unchanged. WHAT IT DOES NOT BRING is
+       `status-mark.tsx`'s two-body reduced-motion swap: that swap is keyed on
+       `[data-status-mark]` in `styles.css`, so under
+       `prefers-reduced-motion` this arc parks rather than becoming a whole
+       ring. Stated rather than discovered: the hue and the rail's own
+       `checks running` both still carry the fact, and closing the gap
+       properly means a stylesheet rule, which this change deliberately does
+       not touch. */
+    glyph: (size) => <LoaderCircle className="vam-spin" size={size} strokeWidth={1.8} />,
+    ink: 'text-waiting',
+    label: 'checks running',
+  },
+  none: {
+    glyph: (size) => <Circle size={size} strokeWidth={1.8} />,
+    ink: 'text-ink-faint',
+    label: 'no checks',
+  },
+};
+
+/**
+ * THE ONE WORD THE RAIL SAYS ABOUT READINESS, and the ladder that picks it.
+ *
+ * THE ROW USED TO DRAW UP TO FOUR OF THESE AT ONCE, from four different
+ * vocabularies -- `open` (GitHub's state), `checks fail` (a CI verdict),
+ * `review required` (a review decision) and `conflicts` (a mergeability
+ * ruling) -- wrapped across two or three bands, in an order decided by how
+ * they happened to fit. The operator's report was that the cluster "all runs
+ * together", and four words from four vocabularies with no ranking between
+ * them is what that is.
+ *
+ * SO THE SLOT HOLDS EXACTLY ONE WORD: the most severe LIVE BLOCKER. The order
+ * below is the order in which a blocker has to be dealt with, so the word the
+ * reader gets is the one that is in the way next.
+ *
+ * `review required` IS NOT ON THE LADDER AT ALL. It is GitHub's default for
+ * every open pull request with a requested reviewer: it is implied by `open`,
+ * it never changes a decision, and it was the field doing most of the wrapping
+ * -- it is what pushed the conflicting row onto a third band. It stays in the
+ * row's accessible sentence (`prSentence`), so a reader who stops on the row
+ * still has it; it is off the PAINT, where it was costing a slot.
+ *
+ * `approved` is dropped as a rail word for the same kind of reason: a row
+ * whose state reads `open` and whose verdict reads `checks pass` IS the ready
+ * row, and a green `approved` beside it is a second way to say so.
+ *
+ * `checks pass` DOES duplicate the mark to its left, and that is deliberate:
+ * the mark is the only other carrier, and a word is what keeps the fact off a
+ * hue-only channel on the rows where the ladder gives the slot to something
+ * more severe.
+ */
+function prVerdict(pr: PullRequest): { readonly label: string; readonly ink: string } {
+  if (pr.mergeable === 'conflicting') return { label: 'conflicts', ink: 'text-danger' };
+  if (pr.review === 'changes-requested') return { label: 'changes requested', ink: 'text-danger' };
+  if (pr.checks === 'failing') return { label: 'checks fail', ink: 'text-failed' };
+  if (pr.checks === 'pending') return { label: 'checks running', ink: 'text-waiting' };
+  return { label: CHECK_MARK[pr.checks].label, ink: 'text-ink-faint' };
+}
+
+/**
+ * The one word each review decision gets. NO INK BESIDE IT ANY MORE: none of
+ * the three is painted on the row, so a colour for them would be a token
+ * nothing renders.
+ */
+const PR_REVIEW_WORD: Record<NonNullable<PullRequest['review']>, string> = {
+  approved: 'approved',
+  'changes-requested': 'changes requested',
+  'review-required': 'review required',
+};
+
+/**
+ * EVERYTHING THE RAIL KNOWS, AS ONE SENTENCE, for a reader who is not looking
+ * at the paint.
+ *
+ * The rail draws two words where it used to draw four, and the two it stopped
+ * drawing -- `review required`, `approved` -- were dropped because they cost a
+ * slot and changed no decision, NOT because the row stopped knowing them. This
+ * is where they stay: on the row control's accessible name, which no
+ * `innerText` reads and no pixel is spent on.
+ */
+function prSentence(pr: PullRequest): string {
+  const parts = [pr.state, CHECK_MARK[pr.checks].label];
+  if (pr.review !== null) parts.push(PR_REVIEW_WORD[pr.review]);
+  if (pr.mergeable === 'conflicting') parts.push('conflicts');
+  return parts.join(', ');
+}
 
 /** The one word each state gets. `draft` is not a kind of `open`. */
 const PR_STATE_INK: Record<PullRequest['state'], string> = {
@@ -1572,13 +1694,6 @@ type PendingPrAction = {
   readonly action: PrAction;
 };
 
-/** The one word each review decision gets, and the ink it wears. */
-const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink: string }> = {
-  approved: { label: 'approved', ink: 'text-done' },
-  'changes-requested': { label: 'changes requested', ink: 'text-danger' },
-  'review-required': { label: 'review required', ink: 'text-ink-dim' },
-};
-
 /**
  * THE WIDTH AT WHICH A PULL REQUEST ROW HAS TWO SIDES.
  *
@@ -1596,11 +1711,11 @@ const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink
  * a 320px pane and one column on a 390px phone -- both backwards.
  *
  * 356 IS MEASURED, NOT CHOSEN. The status rail is `PR_STATUS_PX` wide because
- * that is what its widest natural line needs, and the split's gap takes 12
- * more. What is left for identity at 356 is 176px, less the check dot's 6 and
- * its 8px gap: 162px of title. Below that a title stops being a title and
- * becomes two words and an ellipsis, so below that the two sides STACK
- * instead of crushing each other. Measured against the real paint in
+ * that is what both of its fixed lines add up to, and the split's gap takes 12
+ * more. What is left for identity at 356 is 188px, less the checks mark's lane
+ * (`MARK_LANE_PX`, 14) and its 8px gap: 166px of title. Below that a title
+ * stops being a title and becomes two words and an ellipsis, so below that the
+ * two sides STACK instead of crushing each other. Measured against the paint in
  * `e2e/prs-tab-shots.mjs`, which walks the row's own container across the
  * seam and asserts where it actually falls -- a class that was merely TYPED
  * proves nothing about what paints.
@@ -1614,22 +1729,114 @@ const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink
 export const PR_SPLIT_PX = 356;
 
 /**
- * HOW WIDE THE STATUS RAIL IS above the split, typed as `w-[168px]` below for
+ * HOW WIDE THE STATUS RAIL IS above the split, typed as `w-[156px]` below for
  * the reason `PR_SPLIT_PX` gives.
  *
- * 168 IS THE WIDEST NATURAL LINE THE RAIL HOLDS, measured rather than
- * rounded: `changes requested` is the longest phrase any status field draws,
- * and `Delete branch` the wider of the two controls. A rail narrower than
- * either would wrap a two-word phrase onto two lines on every row that has
- * one; a wider one takes space out of the title for nothing, because no
- * status line uses it.
+ * 156 IS THE SUM OF BOTH FIXED LINES, which is a DERIVATION and not a
+ * measurement of any string: `PR_SLOT_STATE` + 6 + `PR_SLOT_VERDICT` is
+ * 56 + 6 + 94, and `PR_SLOT_DIFF` + 6 + `PR_SLOT_FILES` is 94 + 6 + 56. Both
+ * lines fill the rail exactly, which is what lets its right edge stay flush
+ * while every slot's left edge lands on the same x on every row.
+ *
+ * IT WAS 168, AND THE NUMBER WAS WRONG IN THE DIRECTION ITS OWN COMMENT
+ * CLAIMED IT WAS RIGHT. That comment said 168 was "the widest natural line
+ * the rail holds". Scanned pixel by pixel out of the committed desktop
+ * screenshot, the widest INKED band in the whole rail was 132px
+ * (`review required conflicts`), and the rail's leftmost 36px was never
+ * painted on any of the five rows. So the rail was carrying 36px of
+ * guaranteed-blank width taken out of the title, on the strength of a
+ * sentence about a line that does not exist. What replaced the claim is an
+ * arithmetic identity over four constants a guard reads out of this file --
+ * a number that can be checked rather than believed.
  *
  * FIXED RATHER THAN CONTENT-SIZED on purpose. The whole gain of a right rail
  * is that the words line up DOWN the list -- "which of these is ready" is one
  * vertical scan. A rail sized to each row's own content would start at a
  * different x on every row and give that back.
  */
-export const PR_STATUS_PX = 168;
+export const PR_STATUS_PX = 156;
+
+/**
+ * THE FOUR SLOTS OF THE RAIL, in px, and none of them may ever shrink.
+ *
+ * WHAT THE RAGGEDNESS ACTUALLY WAS. Over the eleven inked status bands of the
+ * committed desktop shot the left edges fell at x = 1121, 1124, 1141, 1142,
+ * 1143, 1145, 1153, 1156, 1165, 1176 and 1184 -- a 63px spread -- while every
+ * right edge sat at 1251-1252. The rail was right-aligned and its STARTS were
+ * noise, because the fields were flex children of a wrapping line and each one
+ * was sized by its own word. Reading "which of these is blocked" down a
+ * column meant re-finding where the column began on every row.
+ *
+ * SO EVERY SLOT IS `flex-none` AT A FIXED WIDTH. The rail is fixed-width, so a
+ * shrinking slot has nothing to negotiate about; what shrink actually bought
+ * was exactly the raggedness above. Words align on their STARTS (lines 1) and
+ * numbers align on their ENDS (line 2), which is the direction each is read
+ * in.
+ *
+ * WHAT THE WIDTHS ARE SIZED AGAINST, measured in Chromium at `--text-meta`
+ * (11px): `merged` 40.0, `changes requested` 100.4, `checks running` 79.9,
+ * `+6269 −317` 66.2 (mono), `76 files` 38.3. Every slot is oversized against
+ * that -- AND THE MEASUREMENT IS NOT THE GUARANTEE. This repo has already
+ * frozen 6.0079px/char on macOS into a premise that was 5.718 on the CI
+ * runner. The guarantee is mechanical instead: `truncate` inside a `flex-none`
+ * box cannot push the rail wider whatever the font does, and
+ * `e2e/prs-tab-shots.mjs` asserts `scrollWidth <= clientWidth` per slot, so a
+ * platform whose metrics are wider reddens rather than clipping in silence.
+ *
+ * THE ONE INTENTIONAL EXCEPTION is `changes requested` at 100.4 in a 94px
+ * slot: it degrades to `changes requeste…` with the whole phrase on `title`,
+ * and the ladder means the reader already knows from the prefix that
+ * something is blocked. Shortening it to `changes req.` is NOT the answer --
+ * an abbreviation invents a vocabulary GitHub does not use.
+ */
+export const PR_SLOT_STATE_PX = 56;
+export const PR_SLOT_VERDICT_PX = 94;
+export const PR_SLOT_DIFF_PX = 94;
+export const PR_SLOT_FILES_PX = 56;
+
+/**
+ * HOW TALL THE RAIL IS AT MINIMUM, and so how tall every row is.
+ *
+ * 16 + 2 + 16 + 8 + 30: line one, the `mt-0.5` between the lines, line two,
+ * the `mt-2` above the action, and the action's own 30px paint.
+ *
+ * THE ROWS USED TO BE 108, 56, 74, 90 AND 108 -- a 52px spread over five rows
+ * with 7px gutters, which is the "it all runs together" the operator reported
+ * as much as the cluster was. A row with less to say now spends the space on
+ * the action slot it reserves and on the empty half of its number line;
+ * nothing is stretched or centred.
+ *
+ * `min-h`, NOT `h`. A fixed height CLIPS the day a field is added, silently. A
+ * minimum grows, and the guard's uniform-height assertion reddens instead of
+ * the pane lying -- which is also what happens if `--vam-pane-size` is turned
+ * up, since `--text-body` and `--text-control` scale with it and `--text-meta`
+ * does not.
+ */
+export const PR_RAIL_MIN_PX = 72;
+
+/**
+ * HOW TALL THE STACKED ROW IS RESERVED FOR, below `PR_SPLIT_PX`.
+ *
+ * ONLY THE STACKED CASE NEEDS THIS. Above the split the rail is the taller of
+ * the two sides on every row -- 72 against an identity that reaches 60 at
+ * worst -- so `PR_RAIL_MIN_PX` alone makes the height uniform there. Stacked,
+ * the two are ADDED (identity + a 6px gap + rail), and a row with one identity
+ * line would sit 40px shorter than a row with three: exactly the raggedness
+ * the split layout just stopped having.
+ *
+ * 60 + 6 + 72. THE 60 IS A DERIVATION AND IT IS NOT THE OBVIOUS ONE: title 20,
+ * `mt-0.5`, meta 16, `mt-0.5`, and then the author-and-labels line at **20**
+ * rather than the 16 its text step would suggest -- `data-pr-label` is a pill
+ * with `py-px` and a 1px border, which is 4px of chrome around an 11px line
+ * box. A row with an author and no labels draws that line at 16 and is the
+ * shorter case the floor is here to lift.
+ *
+ * DERIVED, NOT MEASURED AGAIN, so the moment a fourth identity line is added
+ * this number is too small, the heights go ragged, and the guard's
+ * uniform-height assertion says so at 520px rather than the pane quietly
+ * clipping.
+ */
+export const PR_STACKED_MIN_PX = 138;
 
 /**
  * THE TWO HALVES OF A PULL REQUEST ACTION BUTTON: the box a finger hits, and
@@ -1776,7 +1983,24 @@ function PullRequestRow({
       <span data-pr-title title={pr.title} className="block truncate text-left text-body text-ink">
         {pr.title}
       </span>
-      <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ink-faint">
+      {/* THE META LINE, AND THE AGE IS ON IT NOW.
+          `3h` used to be the third quantity on the rail's number line, sharing
+          one size, one 6px gap and no separator with `+6269 −317` and
+          `76 files` -- three magnitudes of three different kinds reading as
+          one run of digits. It is not a quantity about the DIFF, it is a fact
+          about the ROW, and this house already puts ages on the left meta
+          line: `SessionList.tsx` draws `data-session-age` · `data-session-
+          branch` in exactly this shape, mono, with a `·` between.
+
+          SO THE SHRINK RULE IS COPIED, NOT RE-DERIVED. The branch pair is the
+          only thing here allowed to give way (`min-w-0 truncate`, whole pair
+          on `title`); the number and the age are `flex-none` and never do.
+          `overflow-hidden` on the parent is what actually refuses to paint a
+          branch past its box -- no arithmetic budget, so an age string nobody
+          expected (`12345d`, or `relativeTime`'s raw-ISO parse-failure
+          branch) cannot overrun it. That is the sidebar's own stated reason;
+          `e2e/branch-overlap.spec.ts` is where it was measured. */}
+      <span className="mt-0.5 flex min-w-0 items-center gap-x-1.5 overflow-hidden text-meta text-ink-faint">
         <span data-pr-number className="flex-none font-mono">
           {`#${pr.number}`}
         </span>
@@ -1784,18 +2008,29 @@ function PullRequestRow({
           /* HEAD then BASE: the order IS the sentence -- this branch into
              that one. `min-w-0` + `truncate` so a long branch name cannot
              push the row wider than the pane. */
-          <span
-            data-pr-branches
-            /* MEASURED at 390px: a real branch name truncates there, and a
-               truncated name with nowhere to read the rest is information
-               the pane had and threw away. The full pair lives on `title`,
-               which is the same bargain the repo heading above makes with
-               its directory path. */
-            title={`${pr.headRefName} → ${pr.baseRefName}`}
-            className="min-w-0 truncate font-mono"
-          >
-            {`${pr.headRefName} → ${pr.baseRefName}`}
-          </span>
+          <>
+            <span className="flex-none">·</span>
+            <span
+              data-pr-branches
+              /* MEASURED at 390px: a real branch name truncates there, and a
+                 truncated name with nowhere to read the rest is information
+                 the pane had and threw away. The full pair lives on `title`,
+                 which is the same bargain the repo heading above makes with
+                 its directory path. */
+              title={`${pr.headRefName} → ${pr.baseRefName}`}
+              className="min-w-0 truncate font-mono"
+            >
+              {`${pr.headRefName} → ${pr.baseRefName}`}
+            </span>
+          </>
+        )}
+        {pr.updatedAt === null ? null : (
+          <>
+            <span className="flex-none">·</span>
+            <span data-pr-updated className="flex-none font-mono">
+              {relativeTime(pr.updatedAt, now)}
+            </span>
+          </>
         )}
       </span>
       {pr.author === null && pr.labels.length === 0 ? null : (
@@ -1818,64 +2053,116 @@ function PullRequestRow({
   );
 
   /**
-   * WHAT STATE IT IS IN -- the right side, in two lines and then its
-   * controls. VERDICTS first (words GitHub or a reviewer decided), NUMBERS
-   * second (how big and how fresh). Right-aligned above `PR_SPLIT_PX` so the
-   * column reads DOWN the list as one stack of aligned words, which is how a
-   * list is scanned for "which of these is ready".
+   * WHAT STATE IT IS IN -- the right side: TWO FIXED LINES AND AN ANCHORED
+   * ACTION, which is the whole of the operator's "it all runs together".
+   *
+   * FOUR SLOTS AT FOUR CONSTANT x POSITIONS. Line one holds words and is read
+   * left to right, so its two slots are left-aligned and a reader's eye finds
+   * `open` and then the verdict at the same place on every row. Line two holds
+   * magnitudes and is compared down the column, so its two slots are
+   * right-aligned and `tabular-nums` keeps the digit columns from jittering.
+   * Nothing separates the slots but their geometry: a `·` would be ink spent
+   * on a boundary the grid already draws.
+   *
+   * WHERE A SLOT IS EMPTY THE BOX STAYS. `gh` not having said how many files
+   * moved must draw NOTHING -- that is the model's rule -- but it must not
+   * shift the slot beside it either, or the alignment this whole rail exists
+   * for is conditional on a field being present. So an absent field leaves its
+   * width behind as a spacer with no hook and no ink on it.
    */
+  const verdict = prVerdict(pr);
+  const diff =
+    pr.additions === null && pr.deletions === null
+      ? null
+      : [
+          pr.additions === null ? null : `+${pr.additions}`,
+          pr.deletions === null ? null : `−${pr.deletions}`,
+        ]
+          .filter((part) => part !== null)
+          .join(' ');
   const status = (
     <>
-      <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-meta">
-        <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
+      <span className="flex items-start justify-end gap-x-1.5 text-meta">
+        <span
+          data-pr-state-label
+          title={pr.state}
+          style={{ width: PR_SLOT_STATE_PX }}
+          className={`flex-none truncate ${PR_STATE_INK[pr.state]}`}
+        >
           {pr.state}
         </span>
-        {/* The dot's own words. The dot stays left as the thing the eye runs
-            down; this is the same fact for the reader who is stopped on this
-            row, and it is queryable by name for the guard that measures it. */}
-        <span data-pr-checks-label className="text-ink-faint">
-          {CHECK_MARK[pr.checks].label}
+        <span
+          data-pr-verdict
+          /* THE ONE PLACE IN THE RAIL THAT IS EXPECTED TO CLIP.
+             `changes requested` measures 100.4px here against a 94px slot, so
+             it degrades to `changes requeste…` -- see `PR_SLOT_VERDICT_PX` for
+             why that is the bargain and not a bug, and why the whole phrase
+             has to be on `title` for it to be one. */
+          title={verdict.label}
+          style={{ width: PR_SLOT_VERDICT_PX }}
+          className={`flex-none truncate ${verdict.ink}`}
+        >
+          {verdict.label}
         </span>
-        {pr.review === null ? null : (
-          <span data-pr-review className={PR_REVIEW[pr.review].ink}>
-            {PR_REVIEW[pr.review].label}
-          </span>
-        )}
-        {conflicting ? (
-          <span data-pr-mergeable className="text-danger">
-            conflicts
-          </span>
-        ) : null}
       </span>
-      {pr.additions === null &&
-      pr.deletions === null &&
-      pr.changedFiles === null &&
-      pr.updatedAt === null ? null : (
-        <span className="mt-0.5 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-meta">
-          {pr.additions === null ? null : (
-            <span data-pr-additions className="font-mono text-done">
-              {`+${pr.additions}`}
+      {diff === null && pr.changedFiles === null ? null : (
+        <span className="mt-0.5 flex items-start justify-end gap-x-1.5 text-meta">
+          {diff === null ? (
+            <span aria-hidden="true" style={{ width: PR_SLOT_DIFF_PX }} className="flex-none" />
+          ) : (
+            <span
+              data-pr-diff
+              /* ONE BOX FOR THE PAIR, and `truncate` is why: `text-overflow`
+                 belongs to a box with its own text, so two flex children in a
+                 flex line would clip with no ellipsis at all. The two inks
+                 stay separate spans inside it -- green for what arrived, red
+                 for what left -- which is what the guard and the unit suite
+                 both read.
+
+                 `tabular-nums` IS LOAD-BEARING. Right-aligned proportional
+                 digits still jitter column to column, and "which of these is
+                 the big one" is a digit-column scan. Mono here against a
+                 proportional `76 files` is the second channel that stops the
+                 two reading as one number. */
+              title={diff}
+              style={{ width: PR_SLOT_DIFF_PX }}
+              className="flex-none truncate text-right font-mono tabular-nums"
+            >
+              {pr.additions === null ? null : (
+                <span data-pr-additions className="text-done">{`+${pr.additions}`}</span>
+              )}
+              {pr.additions !== null && pr.deletions !== null ? ' ' : null}
+              {pr.deletions === null ? null : (
+                <span data-pr-deletions className="text-danger">{`−${pr.deletions}`}</span>
+              )}
             </span>
           )}
-          {pr.deletions === null ? null : (
-            <span data-pr-deletions className="font-mono text-danger">
-              {`−${pr.deletions}`}
-            </span>
-          )}
-          {pr.changedFiles === null ? null : (
-            <span data-pr-files className="text-ink-faint">
+          {pr.changedFiles === null ? (
+            <span aria-hidden="true" style={{ width: PR_SLOT_FILES_PX }} className="flex-none" />
+          ) : (
+            <span
+              data-pr-files
+              title={`${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'}`}
+              style={{ width: PR_SLOT_FILES_PX }}
+              className="flex-none truncate text-right text-ink-faint"
+            >
               {`${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'}`}
-            </span>
-          )}
-          {pr.updatedAt === null ? null : (
-            <span data-pr-updated className="text-ink-faint">
-              {relativeTime(pr.updatedAt, now)}
             </span>
           )}
         </span>
       )}
       {mayMerge || mayDeleteBranch ? (
-        <span data-pr-actions className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+        /* `mt-auto` IS THE ANCHOR. The action used to sit wherever the two
+           lines above it happened to end -- 63px below the card's top on one
+           row, 29 on the next, 47 on the third -- so there was no y to aim at.
+           Pushed to the bottom of a rail with a floor (`PR_RAIL_MIN_PX`), its
+           bottom edge is 9px above the row's own on every row that has one,
+           and its right edge is the rail's. A row with NO action keeps the
+           30px anyway: that reserved quiet is what buys the uniform height. */
+        <span
+          data-pr-actions
+          className="mt-auto flex flex-none flex-wrap items-center justify-end gap-1.5 pt-2"
+        >
           {mayMerge && conflicting ? (
             /**
              * DISABLED, NOT ABSENT, and the difference is a sentence. GitHub
@@ -2027,23 +2314,47 @@ function PullRequestRow({
     >
       <div
         data-pr-split
-        className="flex flex-col gap-1.5 @min-[356px]:flex-row @min-[356px]:items-start @min-[356px]:gap-3"
+        /* `min-h-[138px]` IS `PR_STACKED_MIN_PX`, and it is withdrawn above the
+           split (`@min-[356px]:min-h-0`) because up there the rail's own floor
+           already makes every row the same height. Stacked, identity and rail
+           are ADDED rather than compared, so without a floor a one-line row
+           would be 38px shorter than a three-line one -- the raggedness the
+           split layout just stopped having. Both strings are written out for
+           Tailwind's scanner, like every other number in this row. */
+        className="flex min-h-[138px] flex-col gap-1.5 @min-[356px]:min-h-0 @min-[356px]:flex-row @min-[356px]:items-start @min-[356px]:gap-3"
       >
         <div data-pr-identity className="flex min-w-0 flex-1 items-start gap-2">
           <span
             data-pr-checks-mark
             title={CHECK_MARK[pr.checks].label}
-            /* `mt-[7px]` puts the dot on the title's own first line now that the
-               row is several lines tall -- centred against the whole row it would
-               drift down as fields appear. */
-            className={`mt-[7px] h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
-          />
+            /* THE LANE IS A CONSTANT AND THE GLYPH MOVES INSIDE IT --
+               `status-mark.tsx`'s rule, imported rather than retyped so the
+               two marks stay the same size wherever they meet. The size is an
+               inline `style` for that file's own reason: Tailwind's scanner
+               reads source text, so a class assembled from a constant is a
+               class it never generates and the lane would collapse to its
+               content.
+
+               `mt-[3px]` sits the 14px lane's optical centre on the title's
+               first line. It was `mt-[7px]` when the mark was a 6px dot; a
+               taller lane needs less of an offset to centre on the same line,
+               and centring against the whole row would drift down as fields
+               appear. */
+            style={{ width: MARK_LANE_PX, height: MARK_LANE_PX }}
+            className={`mt-[3px] flex flex-none items-center justify-center ${CHECK_MARK[pr.checks].ink}`}
+          >
+            {CHECK_MARK[pr.checks].glyph(GLYPH_PX)}
+          </span>
           {clickable ? (
             <button
               type="button"
               data-pr-open
               title={url}
-              aria-label={`open pull request ${pr.number} on GitHub`}
+              /* THE ROW'S SENTENCE, and the only place `review required` and
+                 `approved` still live. The rail stopped painting them (see
+                 `prVerdict`); the row did not stop knowing them, and an
+                 attribute costs no pixels and no `innerText`. */
+              aria-label={`open pull request ${pr.number} on GitHub — ${prSentence(pr)}`}
               onClick={() => onOpen(url)}
               /* `vam-tap` for the phone's floor, and a note on what that is
                  worth TODAY: `onOpen` is `null` without a desktop bridge and
@@ -2058,18 +2369,30 @@ function PullRequestRow({
               {identity}
             </button>
           ) : (
-            <span className="flex min-w-0 flex-1 flex-col">{identity}</span>
+            /* No bridge, so no control to hang an accessible name on -- the
+               sentence goes on `title` instead, which is the carrier the two
+               truncating fields in here already use. */
+            <span title={prSentence(pr)} className="flex min-w-0 flex-1 flex-col">
+              {identity}
+            </span>
           )}
         </div>
-        {/* `w-[168px]` IS `PR_STATUS_PX`, typed where Tailwind can read it and
-            named where a person can -- see `PR_SPLIT_PX` for why the number
-            cannot be interpolated. Below the split it is a full-width block
-            under the identity; above it, a fixed rail the identity flexes
+        {/* `w-[156px]` IS `PR_STATUS_PX` and `min-h-[72px]` is
+            `PR_RAIL_MIN_PX`, typed where Tailwind can read them and named
+            where a person can -- see `PR_SPLIT_PX` for why the numbers cannot
+            be interpolated. Below the split it is a full-width block under the
+            identity, its lines still `justify-end` so it reads as a detached
+            right-hand column; above it, a fixed rail the identity flexes
             against, so the status words line up down the list instead of
-            starting wherever the longest title happened to end. */}
+            starting wherever the longest title happened to end.
+
+            THE FLOOR IS ON THE RAIL RATHER THAN THE ROW because the rail is
+            the taller side on every row above the split, so a floor here is a
+            floor on the row -- and it is the rail that owns the reserved
+            action slot the floor is mostly made of. */}
         <div
           data-pr-status
-          className="flex min-w-0 flex-col @min-[356px]:w-[168px] @min-[356px]:flex-none"
+          className="flex min-h-[72px] min-w-0 flex-col @min-[356px]:w-[156px] @min-[356px]:flex-none"
         >
           {status}
         </div>
