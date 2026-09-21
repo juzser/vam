@@ -80,7 +80,6 @@ const LAUNCH_FIXTURE_SOURCE: MainSource = {
           {
             id: 'launch-fixture-1',
             title: 'launch fixture session',
-            icon: null,
             epic: null,
             branch: null,
             status: 'waiting',
