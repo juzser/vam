@@ -39,6 +39,11 @@ describe('the phone list screen', () => {
   it('says where the rows came from — a dropped tunnel must not look idle', () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
     const readout = document.querySelector('[data-source]');
+    // The name is `sr-only` now that the healthy arm has stopped painting the
+    // joined source labels (`Canvas.source-cell.test.tsx` holds that decision
+    // and the operator's reason for it). It is still IN the cell, which is
+    // what this test is about: the phone must not look idle when the tunnel
+    // drops, and it still names the source to anything that reads the DOM.
     expect(readout?.textContent).toContain('Claude Code');
     // In the app bar, not in a canvas top bar that is not drawn.
     expect(readout?.closest('header')).not.toBeNull();

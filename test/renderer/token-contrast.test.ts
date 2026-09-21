@@ -65,6 +65,7 @@ import { describe, expect, it } from 'vitest';
 import { FILE_ROW_INKS } from '../../src/renderer/panels/files-icons.js';
 import { ICON_TONE_INK, ICON_TONES } from '../../src/renderer/panels/icon-value.js';
 import { PALETTE_TEMPLATES, templatePalette } from '../../src/renderer/prefs/palette-templates.js';
+import { PROVIDER_MARKS } from '../../src/renderer/sources/provider-marks.js';
 import { contrast } from '../support/contrast.js';
 import { ruleBody, THEMES, tokens } from '../support/css-tokens.js';
 
@@ -685,5 +686,178 @@ describe('non-text floors, on every colour template', () => {
         expect({ pairs, failing }).toEqual({ pairs: 441, failing: [] });
       });
     });
+  }
+});
+
+/**
+ * THE TWO PROVIDER BRAND MARKS.
+ *
+ * `provider-marks.tsx` draws Claude's and OpenAI's outlines in a brand colour
+ * now, and its header's first reason for having refused colour before was that
+ * "a baked brand colour is invisible in one theme". That is still true; the
+ * answer is a token per theme, and this is what checks the two values are
+ * worth the sentence.
+ *
+ * THREE THINGS ARE ASKED, and only the first is the usual one:
+ *
+ *  1. 3:1, WCAG 1.4.11, because a logo is a non-text graphical object -- the
+ *     same floor the eight icon tones answer to, argued there.
+ *  2. THE SAME, COMPOSITED. The sidebar's meta line carries `opacity-[0.82]`
+ *     and the lane is inside it, so the ratio a token has on paper is not the
+ *     ratio an eye receives. `sidebar-tree-shots.mjs` makes this point about
+ *     the meta line's TEXT and cannot make it about the mark, because it reads
+ *     the line element and the mark now has an ink of its own. The alpha is
+ *     applied here the way the compositor applies it.
+ *  3. IT IS STILL THE BRAND'S COLOUR. A per-theme value invites the drift this
+ *     whole feature exists to avoid -- somebody nudges a token towards
+ *     something that looks nicer and vam is drawing a company's mark in a
+ *     colour that company does not use. So the hue and saturation are held to
+ *     the published brand hex and only LIGHTNESS is allowed to move. That is
+ *     also the assertion that reddens if the two tokens are ever swapped,
+ *     which "both clear 3:1" would not notice at all.
+ *
+ * Over every palette a template can paint under a mark, not just the base
+ * stylesheet, for the reason the sweep above gives.
+ */
+describe('the provider brand marks', () => {
+  /**
+   * THE TOKENS, DERIVED FROM THE MODULE THAT PAINTS THEM rather than typed
+   * again here -- the bridge `ICON_TONE_TOKENS` and `TREE_GLYPH_INKS` both
+   * make, for the reason a mutation proved on the second of them: a typed
+   * copy goes on measuring the old token after the module is repointed.
+   */
+  const BRAND_TOKENS = Object.entries(PROVIDER_MARKS)
+    .filter(([, mark]) => mark.ink !== null)
+    .map(([id, mark]) => ({ id, token: `--vam-${(mark.ink as string).replace(/^text-/, '')}` }));
+
+  /**
+   * THE FILLS A PROVIDER MARK IS REALLY DRAWN ON -- not the same list as
+   * `ICON_GROUNDS`, and the difference is the point of writing a second one.
+   * `raised` is in: a SELECTED sidebar row fills itself with it and the mark
+   * rides that row, where a chosen icon never does (which is why `raised` is
+   * excluded at the top of this file). `panel` is out: no picker draws a
+   * provider mark. Sidebar, the tab strip's pane and an active tab's ground
+   * are the other three.
+   */
+  const BRAND_GROUNDS = ['--vam-sidebar', '--vam-raised', '--vam-pane', '--vam-ground'] as const;
+
+  /** `opacity-[0.82]` on `[data-row-meta-line]` in `SessionList.tsx`. */
+  const META_LINE_ALPHA = 0.82;
+
+  /** What the compositor paints for an element at `alpha` over `ground`. */
+  const over = (ink: string, ground: string, alpha: number): string => {
+    const parts = (h: string) => [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16));
+    const f = parts(ink);
+    const b = parts(ground);
+    return `#${f
+      .map((c, i) => Math.round(alpha * c + (1 - alpha) * (b[i] as number)))
+      .map((n) => n.toString(16).padStart(2, '0'))
+      .join('')}`;
+  };
+
+  it('has both marks to measure, so nothing below sweeps an empty table', () => {
+    expect(BRAND_TOKENS.map((b) => b.id).sort()).toEqual(['claude-code', 'codex']);
+    expect(BRAND_TOKENS.map((b) => b.token).sort()).toEqual([
+      '--vam-brand-claude',
+      '--vam-brand-openai',
+    ]);
+  });
+
+  for (const theme of THEMES) {
+    const base = tokens(ruleBody(CSS, theme.selector));
+    const palettes = [
+      ['stylesheet', {} as Record<string, string | undefined>] as const,
+      ...PALETTE_TEMPLATES.filter((t) => t.kind === 'values').map(
+        (t) => [t.id, templatePalette(t.id, theme.name)] as const,
+      ),
+    ];
+
+    describe(theme.name, () => {
+      it('clears 3:1 on every fill a mark is drawn on, before and after the meta line dims it', () => {
+        const failing: string[] = [];
+        let pairs = 0;
+        for (const [palette, values] of palettes) {
+          const hex = (name: string): string => {
+            const value = values[name] ?? base.get(name);
+            expect(value, `${theme.name}/${palette} resolves ${name}`).toBeDefined();
+            return value as string;
+          };
+          for (const { token } of BRAND_TOKENS) {
+            for (const ground of BRAND_GROUNDS) {
+              const fill = hex(ground);
+              // The token as written, and the token as the compositor paints
+              // it inside the sidebar's dimmed meta line. Both owe 3:1.
+              for (const [label, ink] of [
+                ['flat', hex(token)],
+                ['dimmed', over(hex(token), fill, META_LINE_ALPHA)],
+              ] as const) {
+                pairs += 1;
+                const ratio = contrast(ink, fill);
+                if (ratio < 3) {
+                  failing.push(`${palette}: ${token} ${label} on ${ground} = ${ratio.toFixed(3)}`);
+                }
+              }
+            }
+          }
+        }
+        // 8 palettes x 2 marks x 4 fills x 2 (flat and dimmed). A literal, for
+        // the reason every other count in this file is one.
+        expect({ pairs, failing }).toEqual({ pairs: 128, failing: [] });
+      });
+
+      /**
+       * THE PUBLISHED BRAND HEXES, read from `data/simple-icons.json` at the
+       * tag each mark's outline was taken from: Claude at 16.32.0, OpenAI at
+       * 15.0.0 (the release before it was removed -- `provider-marks.tsx`
+       * carries that whole argument).
+       */
+      it('moves only lightness away from the published brand colour', () => {
+        const BRAND = {
+          '--vam-brand-claude': '#d97757',
+          '--vam-brand-openai': '#412991',
+        } as const;
+        const hsl = (h: string): [number, number, number] => {
+          const [r, g, b] = [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16) / 255) as [
+            number,
+            number,
+            number,
+          ];
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          const l = (max + min) / 2;
+          const d = max - min;
+          if (d === 0) return [0, 0, l];
+          const hue =
+            max === r
+              ? 60 * (((g - b) / d) % 6)
+              : max === g
+                ? 60 * ((b - r) / d + 2)
+                : 60 * ((r - g) / d + 4);
+          return [hue < 0 ? hue + 360 : hue, d / (1 - Math.abs(2 * l - 1)), l];
+        };
+        const drift: string[] = [];
+        for (const [token, brand] of Object.entries(BRAND)) {
+          const [bh, bs] = hsl(brand);
+          const [th, ts] = hsl(hex(token));
+          // A degree and a point of saturation, which is the most eight-bit
+          // rounding can cost when only L was meant to move. Anything larger
+          // is somebody having chosen a different colour.
+          if (Math.abs(th - bh) > 1 || Math.abs(ts - bs) > 0.01) {
+            drift.push(
+              `${token} is ${hex(token)} (h=${th.toFixed(1)} s=${(ts * 100).toFixed(1)}%), not ${brand}'s h=${bh.toFixed(1)} s=${(bs * 100).toFixed(1)}%`,
+            );
+          }
+        }
+        expect(drift).toEqual([]);
+      });
+    });
+
+    /** `hex`, for the theme's own block. Declared after the loop body above
+     *  uses `base` so both read the same source of truth. */
+    function hex(name: string): string {
+      const v = base.get(name);
+      expect(v, `${theme.name} block defines ${name}`).toBeDefined();
+      return v as string;
+    }
   }
 });
