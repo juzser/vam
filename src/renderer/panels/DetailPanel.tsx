@@ -1734,9 +1734,11 @@ export const PR_SPLIT_PX = 356;
  *
  * 156 IS THE SUM OF BOTH FIXED LINES, which is a DERIVATION and not a
  * measurement of any string: `PR_SLOT_STATE` + 6 + `PR_SLOT_VERDICT` is
- * 56 + 6 + 94, and `PR_SLOT_DIFF` + 6 + `PR_SLOT_FILES` is 94 + 6 + 56. Both
+ * 46 + 6 + 104, and `PR_SLOT_DIFF` + 6 + `PR_SLOT_FILES` is 94 + 6 + 56. Both
  * lines fill the rail exactly, which is what lets its right edge stay flush
- * while every slot's left edge lands on the same x on every row.
+ * while every slot's left edge lands on the same x on every row -- and it is
+ * why line one could be rebalanced to fit its longest phrase without anything
+ * outside the rail noticing.
  *
  * IT WAS 168, AND THE NUMBER WAS WRONG IN THE DIRECTION ITS OWN COMMENT
  * CLAIMED IT WAS RIGHT. That comment said 168 was "the widest natural line
@@ -1783,14 +1785,30 @@ export const PR_STATUS_PX = 156;
  * `e2e/prs-tab-shots.mjs` asserts `scrollWidth <= clientWidth` per slot, so a
  * platform whose metrics are wider reddens rather than clipping in silence.
  *
- * THE ONE INTENTIONAL EXCEPTION is `changes requested` at 100.4 in a 94px
- * slot: it degrades to `changes requeste…` with the whole phrase on `title`,
- * and the ladder means the reader already knows from the prefix that
- * something is blocked. Shortening it to `changes req.` is NOT the answer --
- * an abbreviation invents a vocabulary GitHub does not use.
+ * LINE ONE IS 46 + 104, NOT 56 + 94, and the difference is the whole of the
+ * clipping this rail used to do. At 94 the verdict slot could not hold
+ * `changes requested` (100.4) and it degraded to `changes requeste…` -- ON THE
+ * TOP ROW OF THE FIXTURE, the first thing an eye lands on, and the only
+ * clipped string anywhere on the surface. A deliberate truncation that happens
+ * exactly once does not read as a rule; it reads as the layout failing.
+ *
+ * The 10px came from the state slot, which had 16px of slack: `merged` is the
+ * widest state word at 40.0 and keeps ~6px at 46. The verdict now has ~3.6px
+ * spare. THE RAIL IS STILL 156 -- 46 + 6 + 104 -- so nothing above or below
+ * moves: the rail's floor, the stacked height, the width left for the title
+ * and every edge the guard pins are all untouched, and line two keeps
+ * 94 + 6 + 56. The two lines have never shared an internal boundary and do not
+ * need one: line one is read from its starts, line two from its ends.
+ *
+ * SO NOTHING IN THE RAIL CLIPS, BY CONSTRUCTION. Every slot still carries its
+ * whole text on `title` -- that is the fallback for a platform whose metrics
+ * are wider than these, not a bargain being struck here -- and the guard's
+ * overflow check is now a plain failure rather than one with an exception
+ * carved into it. Shortening the label to `changes req.` was never the answer
+ * either: an abbreviation invents a vocabulary GitHub does not use.
  */
-export const PR_SLOT_STATE_PX = 56;
-export const PR_SLOT_VERDICT_PX = 94;
+export const PR_SLOT_STATE_PX = 46;
+export const PR_SLOT_VERDICT_PX = 104;
 export const PR_SLOT_DIFF_PX = 94;
 export const PR_SLOT_FILES_PX = 56;
 
@@ -2093,11 +2111,13 @@ function PullRequestRow({
         </span>
         <span
           data-pr-verdict
-          /* THE ONE PLACE IN THE RAIL THAT IS EXPECTED TO CLIP.
-             `changes requested` measures 100.4px here against a 94px slot, so
-             it degrades to `changes requeste…` -- see `PR_SLOT_VERDICT_PX` for
-             why that is the bargain and not a bug, and why the whole phrase
-             has to be on `title` for it to be one. */
+          /* THE WIDEST PHRASE THE RAIL HOLDS, and the slot is sized to it
+             rather than around it: `changes requested` measures 100.4px and
+             the slot is 104, bought from the state slot's 16px of slack --
+             see `PR_SLOT_VERDICT_PX`. The `title` is the fallback for a
+             platform whose metrics are wider than these, not a bargain being
+             struck here; nothing in this rail clips on the metrics it was
+             measured against. */
           title={verdict.label}
           style={{ width: PR_SLOT_VERDICT_PX }}
           className={`flex-none truncate ${verdict.ink}`}

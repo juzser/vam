@@ -751,43 +751,58 @@ const readRails = () =>
   );
 
   /**
-   * 9.4 AND 9.5 TOGETHER, BECAUSE THE SPEC PUTS THEM IN CONTRADICTION AND ONE
-   * OF THEM HAS TO GIVE.
+   * 9.4 NOTHING IN THE RAIL CLIPS -- plainly, at both widths, with no
+   * exception carved into it.
    *
-   * §9.4 asks that NO slot overflow at either width. §9.5 asks that at least
-   * one slot DOES clip, so the `title` bargain is not asserted over four boxes
-   * that never needed it. Both cannot hold: every slot here is `flex-none` at
-   * a width that does not change between 1280 and 520, so the set of clipping
-   * slots is the same at both -- and §1 of the spec names exactly one member
-   * of it, `changes requested` at a measured 100.4px in the 94px verdict slot,
-   * and calls that "the only intentional truncation in the rail".
+   * §9.5 IS DELETED, AND THIS IS WHERE IT IS SAID rather than left to be
+   * noticed. It asked that at least one slot DOES clip, so the `title` bargain
+   * was not asserted over boxes that never needed it. It contradicted §9.4
+   * outright -- every slot is `flex-none` at a width that does not change
+   * between 1280 and 520, so the clipping set is identical at both -- and the
+   * only member the spec named for it was `changes requested` at 100.4px in a
+   * 94px verdict slot, "the only intentional truncation in the rail".
    *
-   * SO THE OVERFLOW CHECK IS SCOPED TO WHAT IT IS ACTUALLY FOR. Its purpose is
-   * a platform whose font metrics are wider than the ones these widths were
-   * sized against -- the failure this repo has already had, 6.0079px/char on
-   * macOS against 5.718 on the CI runner. That is caught by holding the three
-   * slots with room to spare to zero overflow, and by requiring the ONE
-   * expected clip to be exactly the declared string. A wider font shows up
-   * either as a second clipping slot or as a clip in `state`, `diff` or
-   * `files`, and both redden.
+   * THAT TRUNCATION IS GONE. Line one was rebalanced from 56 + 6 + 94 to
+   * 46 + 6 + 104, paid for out of the state slot's 16px of slack, and the rail
+   * is still 156. It was the ONLY clipped string on the surface and it sat on
+   * the top row, where a deliberate clip that happens exactly once reads as
+   * the layout failing rather than as a rule. So the clip set is now EMPTY BY
+   * CONSTRUCTION: §9.5 has no member left to be satisfied by, and keeping it
+   * alive would have meant finding some other string to sacrifice to it.
+   *
+   * WHAT THE CHECK IS FOR IS UNCHANGED -- a platform whose font metrics are
+   * wider than the ones these widths were measured against, the failure this
+   * repo has already had at 6.0079px/char on macOS against 5.718 on the CI
+   * runner -- and it is STRONGER than §9.4 could be with an exception in it:
+   * the first overflowing pixel anywhere in the rail is now a failure.
    */
-  const EXPECTED_CLIP = { name: 'verdict', text: 'changes requested' };
   const clipping = slotBoxes.filter((s) => s.over > 1);
-  const unexpected = clipping.filter((s) => s.name !== EXPECTED_CLIP.name || s.text !== EXPECTED_CLIP.text);
   check(
-    `no rail slot overflows its box except the declared ${EXPECTED_CLIP.text} one`,
-    unexpected.length === 0,
-    unexpected.map((s) => `${s.name} "${s.text}" over by ${s.over}`).join('; '),
+    'no rail slot overflows its box, at all',
+    clipping.length === 0,
+    clipping.map((s) => `${s.name} "${s.text}" over by ${s.over}`).join('; '),
+  );
+  // THE CORPUS THAT SENTENCE IS ABOUT. "Nothing overflowed" is exactly as
+  // green over four short words as over the two long ones the line is SIZED
+  // for, and a fixture that quietly lost its widest cases is how that happens.
+  const widest = new Set(
+    slotBoxes.filter((s) => s.text === 'merged' || s.text === 'changes requested').map((s) => s.text),
   );
   check(
-    'and the declared one really is clipping, so the bargain below is not vacuous',
-    clipping.some((s) => s.name === EXPECTED_CLIP.name && s.text === EXPECTED_CLIP.text),
-    clipping.map((s) => `${s.name} ${s.over}`).join('; '),
+    'and the two widest words line one is sized against are among the boxes measured',
+    widest.size === 2,
+    [...new Set(slotBoxes.map((s) => s.text))].join(' | '),
   );
-  const noTitle = clipping.filter((s) => s.title !== s.text);
+  /*
+   * The `title` is the FALLBACK for that wider platform, not a bargain being
+   * struck on these metrics -- so it is asserted unconditionally, over every
+   * slot. Filtering by `over > 1` the way §9.5 did would now be a sweep over
+   * the empty set: green, and about nothing.
+   */
+  const noTitle = slotBoxes.filter((s) => s.title !== s.text);
   check(
-    'every clipping slot carries its whole value on `title`',
-    noTitle.length === 0,
+    'every rail slot carries its whole value on `title`',
+    slotBoxes.length >= 16 && noTitle.length === 0,
     noTitle.map((s) => `${s.name} title=${JSON.stringify(s.title)} text=${JSON.stringify(s.text)}`).join('; '),
   );
 
@@ -1713,19 +1728,23 @@ const readRails = () =>
     stackedHeights[0] === stackedExpected,
     String(stackedHeights[0]),
   );
+  // AND NOTHING CLIPS HERE EITHER, which is the point of the slots keeping
+  // their fixed widths when the rail detaches: the clip set does not depend on
+  // the breakpoint, so this reading and the 1280 one have to agree. See the
+  // 9.4 block up there for why the set is empty and where §9.5 went.
   const stackedClips = stackedSlots.filter((s) => s.over > 1);
-  const stackedUnexpected = stackedClips.filter(
-    (s) => s.name !== 'verdict' || s.text !== 'changes requested',
+  check(
+    'no slot overflows at 520 either',
+    stackedClips.length === 0,
+    stackedClips.map((s) => `${s.name} "${s.text}" over by ${s.over}`).join('; '),
+  );
+  const stackedWidest = new Set(
+    stackedSlots.filter((s) => s.text === 'merged' || s.text === 'changes requested').map((s) => s.text),
   );
   check(
-    'no slot overflows at 520 either, beyond the one declared truncation',
-    stackedUnexpected.length === 0,
-    stackedUnexpected.map((s) => `${s.name} "${s.text}" over by ${s.over}`).join('; '),
-  );
-  check(
-    'and every slot that clips here still carries its whole value on `title`',
-    stackedClips.length > 0 && stackedClips.every((s) => s.title === s.text),
-    stackedClips.map((s) => `${s.name} ${s.over} title=${JSON.stringify(s.title)}`).join('; '),
+    'and the two widest words are on screen at this width too',
+    stackedWidest.size === 2,
+    [...new Set(stackedSlots.map((s) => s.text))].join(' | '),
   );
   // The action anchor is scoped to the split layout by §5, and `mt-auto` is a
   // no-op in a stacked block with no spare height. What must still hold here
