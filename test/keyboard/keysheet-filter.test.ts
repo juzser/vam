@@ -64,8 +64,8 @@ describe('the sheet filter', () => {
     expect(rowsOf(filterSheet(sheet(true), 'ctrl+p', true))).toEqual([]);
   });
 
-  /** And in the grammar's own spelling, which is what the README prints. */
-  it('matches the token an operator may have read in the README', () => {
+  /** And in the grammar's own spelling, which is what the docs print. */
+  it('matches the token an operator may have read in docs/keyboard.md', () => {
     for (const mac of [true, false]) {
       expect(rowsOf(filterSheet(sheet(mac), 'mod-shift-e', mac)).map((row) => row.keys)).toContain(
         'Mod-Shift-e',

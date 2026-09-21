@@ -1323,7 +1323,7 @@ export function FilesTab({
       if (activePath === null) return;
       const key = normalizeKey(event);
       // NOT OURS, AND SAID FIRST -- `EDITOR_KEYS` is the list, and it is the
-      // same list the README's Files-tab table is held against. Everything
+      // same list `docs/keyboard.md`'s Files-tab table is held against. Everything
       // else falls through unprevented to the app-wide grammar, which is what
       // keeps `Mod-<digit>`, `Mod-k` and `Mod-Shift-[` working from inside
       // this box exactly as they do from inside the composer.
@@ -2306,7 +2306,7 @@ function Tree({
              would take a third of the column off a box that has ~62px to begin
              with, and a placeholder clips where a flex item squeezes. `Mod-p`
              rather than `/` because it is the spelling that works from every
-             surface in the tab; `/` has the key sheet and the README.
+             surface in the tab; `/` has the key sheet and `docs/keyboard.md`.
 
              PAINTED, NOT SPELLED. It used to read `(Mod-p)` — `normalizeKey`'s
              own token, in a box a person reads. `Mod-` is the one token that

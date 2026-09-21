@@ -216,7 +216,8 @@ describe('the position is still the key, on every layout', () => {
 
 describe('what the unfold deliberately did NOT touch', () => {
   it('keeps the bracket pair folded, so Ctrl-[ still leaves the prompt box', () => {
-    // vim's own way out of insert mode, and the README promises it by name.
+    // vim's own way out of insert mode, and `docs/keyboard.md` promises it by
+    // name.
     // Ctrl and Cmd still mean one intent here, which is the whole test for
     // whether a family should be folded.
     for (const mac of [MAC, PC]) {

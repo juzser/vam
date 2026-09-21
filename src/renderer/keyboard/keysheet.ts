@@ -763,7 +763,7 @@ export function buildFilesSheet(
  *   ITS CAPTION, for "how do I get back up the transcript".
  *   ITS CHORD AS PAINTED, for the operator who can see ⌘P on this screen and
  *     wants the row it belongs to — the operator's own example.
- *   ITS TOKEN, because `Mod-p` is what the README prints, what
+ *   ITS TOKEN, because `Mod-p` is what `docs/keyboard.md` prints, what
  *     `files-tree.ts` lists and what every commit message in this repo calls
  *     it. An operator who arrives from the docs types what the docs said.
  *

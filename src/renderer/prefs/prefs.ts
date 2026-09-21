@@ -270,9 +270,9 @@ export type Prefs = {
    * the factory's pull requests while the work is in another repository
    * entirely. The operator asked for a way to point it.
    *
-   * PER PROJECT, BECAUSE A PROJECT IS A CWD. The README states it: "there is
-   * no stored project in vam: a project is live sessions grouped by their
-   * cwd." The thing being corrected here IS that cwd, so the correction
+   * PER PROJECT, BECAUSE A PROJECT IS A CWD. `docs/keyboard.md` states it:
+   * "there is no stored project in vam: a project is live sessions grouped by
+   * their cwd." The thing being corrected here IS that cwd, so the correction
    * belongs at the same grain. Per session it would let two sessions with an
    * identical cwd disagree about which repository that cwd is, which is not
    * inconvenient but incoherent.
