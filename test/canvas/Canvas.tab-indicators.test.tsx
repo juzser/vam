@@ -43,7 +43,6 @@ function session(id: string, status: SessionStatus, over: Partial<Session> = {})
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status,
@@ -219,65 +218,57 @@ describe('the status marks, one per tab at most', () => {
   });
 });
 
-describe('the session’s own icon, which the operator took off the tab', () => {
+describe('the session icon, which the operator removed outright', () => {
   /**
-   * "Remove the session icon from the tab." What it drew was the
-   * session-else-project chain, and on a strip of one project's tabs that is
-   * the project's own mark repeated across every tab -- the same argument
-   * that took it off the sidebar row (`SessionList.icon.test.tsx`), arriving
-   * at the other surface. The provider glyph below takes the slot, and says
-   * something the strip does not otherwise say.
+   * "Remove the session icon from the tab" -- and then, once that left a
+   * picker writing where nothing read, "remove the picker". So this block is
+   * no longer about an indicator that is switched off; it is about a feature
+   * that is gone, and what it can still assert is correspondingly narrower.
+   *
+   * A session has no icon field to set any more, so the only way a glyph
+   * could still reach a tab is the PROJECT's, which is a live feature with a
+   * live picker. That is the case below, and it is the one worth keeping: it
+   * is the door still open.
    */
-  const WITH_ICON: CanvasModel = {
+  const FROM_PROJECT: CanvasModel = {
     projects: [
       {
         id: 'p1',
         name: 'alpha',
         source: 'claude-code',
-        sessions: [session('idle-1', 'idle', { icon: '🌙' })],
+        icon: '🏭',
+        sessions: [session('idle-1', 'idle')],
       },
     ],
   };
 
-  it('draws nothing for a session that has one of its own', () => {
-    render(<Canvas model={WITH_ICON} />);
-    expect(markOf('idle-1', 'icon')).toBeNull();
-    expect(tabOf('idle-1')?.querySelector('[data-session-icon]')).toBeNull();
-  });
-
-  it('draws nothing for the project fallback either -- the whole chain is off', () => {
-    // The chain is what was removed, not one link of it: a tab with no icon
-    // of its own used to inherit its project's, so asserting only the session
-    // case would leave the louder half of the old behaviour untested.
-    const FROM_PROJECT: CanvasModel = {
-      projects: [
-        {
-          id: 'p1',
-          name: 'alpha',
-          source: 'claude-code',
-          icon: '🏭',
-          sessions: [session('idle-1', 'idle')],
-        },
-      ],
-    };
+  it('draws nothing for the project glyph, the one link that still exists', () => {
     render(<Canvas model={FROM_PROJECT} />);
     expect(tabOf('idle-1')?.querySelector('[data-session-icon]')).toBeNull();
   });
 
   it('leaves the title reading as the title, with nothing in front of it', () => {
-    render(<Canvas model={WITH_ICON} />);
+    render(<Canvas model={FROM_PROJECT} />);
     expect(titleOf('idle-1')).toBe('idle-1');
   });
 
-  it('is off the LIST without leaving the vocabulary, so re-enabling it is one entry', () => {
-    // `tab-indicators.ts` keeps the id in the union on purpose, and this is
-    // the test that "an indicator that is off draws nothing" is about now
-    // that `icon` is the off one -- which is what makes the JSX in
-    // `Canvas.tsx` live code behind a list rather than something to delete.
+  it('is out of the vocabulary entirely, so there is nothing to switch back on', () => {
+    // It stayed in the union for one release as the documented re-enable
+    // path. That path led to a value nothing could set once the picker went,
+    // so the id went too -- which is what let the rendering in `Canvas.tsx`
+    // be deleted rather than kept as live code behind a list.
     seed();
-    expect(TAB_INDICATOR_IDS).toContain('icon');
-    expect(TAB_INDICATORS).not.toContain('icon');
-    expect(isTabIndicatorOn('icon')).toBe(false);
+    expect(TAB_INDICATOR_IDS).not.toContain('icon');
+  });
+
+  it('still draws nothing for an indicator that is merely OFF -- `done`', () => {
+    // The property the block above used to carry, moved onto an id that is
+    // genuinely off rather than deleted, so "an indicator not on the list
+    // draws nothing" keeps a live subject.
+    seed();
+    expect(TAB_INDICATOR_IDS).toContain('done');
+    expect(TAB_INDICATORS).not.toContain('done');
+    expect(isTabIndicatorOn('done')).toBe(false);
   });
 });
 

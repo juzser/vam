@@ -20,7 +20,6 @@ export function session(id: string, over: Partial<Session> = {}): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',

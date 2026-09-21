@@ -349,7 +349,6 @@ async function sessionFor(row: ThreadRow, nowMs: number, liveness: Liveness): Pr
     // because one session can be running twice.
     id: row.id,
     title: titleOf(row),
-    icon: null,
     epic: null,
     // WHAT THE WRITER LOCK SAID, and nothing beyond it. See the header: `idle`
     // is alive-and-between-turns, `done` is a job that ended, and the neutral

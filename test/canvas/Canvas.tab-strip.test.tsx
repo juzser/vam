@@ -4,20 +4,19 @@
  * The tab strip's own icon slot — now empty of the session icon — and
  * clicking a tab.
  *
- * 0.2 migration, step 2 routed the tab through the shared chain
- * (`resolveSessionGlyph`, pinned in isolation at
- * `test/panels/session-icon.test.ts`) so that a tab fell back to its
- * project's glyph the way the (now-deleted) canvas root node did — the two
- * surfaces disagreed the moment one carried a project icon and no session
- * icon of its own. The operator has since taken the slot away entirely: "put
- * the provider glyph after the indicator, on the tab name. Remove the session
- * icon from the tab."
+ * 0.2 migration, step 2 routed the tab through a session-else-project chain
+ * so that a tab fell back to its project's glyph the way the (now-deleted)
+ * canvas root node did. The operator then took the slot away: "put the
+ * provider glyph after the indicator, on the tab name. Remove the session
+ * icon from the tab." With the tab gone, the picker wrote where nothing read,
+ * and the operator removed that too — so there is no session icon left to
+ * draw, anywhere, from any source.
  *
- * What this half of the file pins therefore TURNED OVER rather than
- * disappeared. The three cases it drove — no icon anywhere, a project icon
- * inherited, a session icon of its own — are exactly the three that must now
- * draw nothing, and together they are the cheapest proof that what was
- * removed is the CHAIN and not one link of it. The slot is not idle: the
+ * What this half of the file pins therefore NARROWED rather than disappeared.
+ * The case that is still constructible is the loud one: a project WITH an
+ * icon must not put it on its sessions' tabs. (The other two cases it drove
+ * were a session's own glyph and the empty chain; neither can be built now,
+ * because a session has no icon field to set.) The slot is not idle: the
  * provider glyph has it, as a SIBLING of the select button, which is asserted
  * here and measured in full in `Canvas.tab-indicators.test.tsx`.
  *
@@ -35,11 +34,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 
-function session(id: string, icon: string | null = null): Session {
+function session(id: string): Session {
   return {
     id,
     title: id,
-    icon,
     epic: null,
     branch: null,
     status: 'done',
@@ -74,8 +72,8 @@ function press(key: string) {
 
 afterEach(cleanup);
 
-describe('the tab strip draws no session icon at all, whichever link of the chain has one', () => {
-  it('shows nothing when neither the session nor its project has chosen a glyph', () => {
+describe('the tab strip draws no session icon, not even its project’s', () => {
+  it('shows nothing on a tab whose project has no glyph either', () => {
     const model: CanvasModel = {
       projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] }],
     };
@@ -84,26 +82,14 @@ describe('the tab strip draws no session icon at all, whichever link of the chai
   });
 
   it('does not fall back to the project glyph — the link that used to be the loud one', () => {
+    // THE CASE THAT IS STILL REAL, and the reason this block survived the
+    // removal. A project icon is a live feature with its own picker, so a tab
+    // CAN be handed a glyph to draw by mistake; a session icon cannot, since
+    // there is no longer a field to put one in. This is the assertion that
+    // would catch the slot coming back by the only door still open to it.
     const model: CanvasModel = {
       projects: [
         { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')], icon: '🏭' },
-      ],
-    };
-    render(<Canvas model={model} />);
-    expect(tabIcon('a1')).toBeNull();
-    expect(tabSelect('a1')?.textContent).toBe('a1');
-  });
-
-  it('does not draw the session’s own glyph either', () => {
-    const model: CanvasModel = {
-      projects: [
-        {
-          id: 'p1',
-          name: 'alpha',
-          source: 'claude-code',
-          sessions: [session('a1', '🦊')],
-          icon: '🏭',
-        },
       ],
     };
     render(<Canvas model={model} />);
@@ -120,7 +106,7 @@ describe('the tab strip draws no session icon at all, whichever link of the chai
           id: 'p1',
           name: 'alpha',
           source: 'claude-code',
-          sessions: [session('a1', '🦊')],
+          sessions: [session('a1')],
           icon: '🏭',
         },
       ],

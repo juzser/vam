@@ -43,7 +43,6 @@ const DECISION: Decision = {
 const SESSION: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

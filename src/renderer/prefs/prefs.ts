@@ -168,8 +168,8 @@ export function clampOutFontSize(size: number): number {
   return Math.min(OUT_FONT_SIZE_MAX, Math.max(OUT_FONT_SIZE_MIN, size));
 }
 
-/** Session id → the emoji you gave it, for one source. */
-export type IconsBySession = Readonly<Record<string, IconChoice>>;
+/** Project id → the emoji you gave it, for one source. */
+export type IconsById = Readonly<Record<string, IconChoice>>;
 
 /**
  * A session, named the way the store names sessions everywhere else: by source
@@ -197,27 +197,6 @@ export type StoredGroup = {
 };
 
 export type Prefs = {
-  /**
-   * Source id → session id → the emoji you gave it.
-   *
-   * Session ids are unique only within a source (§ epic.md, AC-1): two
-   * sources can both name a session `D-257`, and without this outer key they
-   * would share one glyph. Both levels are built on `Object.create(null)`
-   * objects populated by explicit loops, never a bare `{}` mutated with
-   * `obj[key] = …`, because a plain object's `__proto__` is an inherited
-   * SETTER: assigning through it produces no own property at all, so the entry
-   * misses the store's own-property count and vanishes on the next
-   * `JSON.stringify` round trip (AC-2).
-   *
-   * `__proto__` is the ONLY key that does this, and naming a second one here
-   * would be wrong rather than merely cautious. `constructor`, `prototype` and
-   * `toString` are inherited WRITABLE DATA properties, so assigning through
-   * them shadows the inherited value with a real own property that serialises
-   * like any other — measured, not assumed. The null-prototype accumulator is
-   * still the right shape: it removes the hazard by construction instead of
-   * relying on a list of key names staying complete.
-   */
-  readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
   /**
    * The two dragged pane widths, always present — there are exactly two
@@ -230,14 +209,38 @@ export type Prefs = {
   /**
    * Source id → project id → the emoji you gave that project's heading.
    *
-   * Same idiom as `icons`, one level up, for the same reason: a project id is
-   * unique only within a source (`to-canvas.ts` builds it from that source's
-   * own `overview.runningSessions`), so a bare `{ projectId: IconChoice }`
-   * would let two sources' projects collide the way session ids already do.
-   * There is no legacy flat shape to migrate here — this key never shipped
-   * before this field existed.
+   * KEYED BY SOURCE, because a project id is unique only within a source
+   * (`to-canvas.ts` builds it from that source's own
+   * `overview.runningSessions`), so a bare `{ projectId: IconChoice }` would
+   * let two sources' projects collide. There is no legacy flat shape to
+   * migrate here — this key never shipped before this field existed.
+   *
+   * A SESSION-SCOPED TWIN USED TO SIT ABOVE THIS ONE, under `icons`, and its
+   * removal is why the paragraphs below now live here. The tab strip was the
+   * last surface drawing a session's own icon; pull request 433 took it off,
+   * which left a
+   * picker writing where nothing read, and the operator's answer was "remove
+   * the picker". A stored `icons` key from before that day is simply IGNORED:
+   * `parsePrefs` no longer looks for it, and an unknown key in the stored
+   * document has always been dropped. Nothing is migrated, because there is no
+   * surface left for the value to migrate to.
+   *
+   * BOTH LEVELS ARE BUILT ON `Object.create(null)` objects populated by
+   * explicit loops, never a bare `{}` mutated with `obj[key] = …`, because a
+   * plain object's `__proto__` is an inherited SETTER: assigning through it
+   * produces no own property at all, so the entry misses the store's
+   * own-property count and vanishes on the next `JSON.stringify` round trip
+   * (AC-2).
+   *
+   * `__proto__` is the ONLY key that does this, and naming a second one here
+   * would be wrong rather than merely cautious. `constructor`, `prototype` and
+   * `toString` are inherited WRITABLE DATA properties, so assigning through
+   * them shadows the inherited value with a real own property that serialises
+   * like any other — measured, not assumed. The null-prototype accumulator is
+   * still the right shape: it removes the hazard by construction instead of
+   * relying on a list of key names staying complete.
    */
-  readonly projectIcons: Readonly<Record<string, IconsBySession>>;
+  readonly projectIcons: Readonly<Record<string, IconsById>>;
   /**
    * Source id → project id → the name you gave that project's heading, or
    * nothing for "use the source's own name".
@@ -608,7 +611,6 @@ export type Prefs = {
 };
 
 export const EMPTY_PREFS: Prefs = {
-  icons: {},
   theme: DEFAULT_THEME,
   panes: DEFAULT_PANES,
   projectIcons: {},
@@ -699,7 +701,6 @@ function parsePrefs(
     return EMPTY_PREFS;
   }
   const record = parsed as {
-    icons?: unknown;
     panes?: unknown;
     projectIcons?: unknown;
     projectNames?: unknown;
@@ -713,20 +714,6 @@ function parsePrefs(
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return {
-    // `migrateSourceKey` runs BEFORE `pruneBuckets`: it only reshuffles which
-    // source a bucket sits under, and the TTL cutoff is evaluated per entry
-    // regardless, so the order does not change what survives -- but pruning
-    // the merged, current-named picture reads as the one true timeline rather
-    // than two half-histories pruned separately then stitched together.
-    icons: pruneBuckets(
-      migrateSourceKey(
-        readIcons(record.icons, migrateSource),
-        LEGACY_HTTP_SOURCE_ID,
-        migrateSource,
-        mergeTimestamped,
-      ),
-      cutoff,
-    ),
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
@@ -734,9 +721,12 @@ function parsePrefs(
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
     panes: readPanes(record.panes),
-    // Same TTL as session icons, same reasoning: a project's glyph is not
-    // worth remembering forever either. Same old-id migration too -- a
-    // project's glyph is keyed by source exactly like a session's is.
+    // TTL'd: a project's glyph is not worth remembering forever. And
+    // `migrateSourceKey` runs BEFORE `pruneBuckets` -- it only reshuffles
+    // which source a bucket sits under, and the TTL cutoff is evaluated per
+    // entry regardless, so the order does not change what survives, but
+    // pruning the merged, current-named picture reads as one true timeline
+    // rather than two half-histories pruned separately then stitched together.
     projectIcons: pruneBuckets(
       migrateSourceKey(
         readProjectIcons(record.projectIcons),
@@ -750,8 +740,8 @@ function parsePrefs(
     // up -- see the field's own comment. `readBuckets` rather than a
     // dedicated `readProjectNames`: every top-level entry here is already
     // `projectId → RenameChoice`, exactly what `readBuckets` already reads
-    // for `renames`, so there is no flat legacy shape of its own to special-
-    // case the way `readIcons` does for `icons`.
+    // for `renames`, so there is no flat legacy shape of its own to
+    // special-case.
     projectNames: pruneBuckets(
       migrateSourceKey(
         readBuckets(record.projectNames, readRename),
@@ -1096,7 +1086,8 @@ export function renameGroup(prefs: Prefs, source: string, groupId: string, name:
   return withGroup(prefs, source, groupId, (group) => ({ ...group, name }));
 }
 
-/** An empty icon clears the choice rather than storing "", as `setIcon` does. */
+/** An empty icon clears the choice rather than storing "", as `setProjectIcon`
+ *  does. */
 export function setGroupIcon(
   prefs: Prefs,
   source: string,
@@ -1186,13 +1177,13 @@ export function setSessionFilters(prefs: Prefs, filters: SessionFilters): Prefs 
   return { ...prefs, filters };
 }
 
-/** No legacy flat shape to migrate — unlike `readIcons`, every top-level
- * entry here is already `projectId → IconChoice`. */
+/** No legacy flat shape to migrate: every top-level entry here is already
+ * `projectId → IconChoice`, and this key never shipped in any other shape. */
 function readProjectIcons(raw: unknown): Prefs['projectIcons'] {
   if (typeof raw !== 'object' || raw === null) {
-    return emptyMap<IconsBySession>();
+    return emptyMap<IconsById>();
   }
-  const out = emptyMap<IconsBySession>();
+  const out = emptyMap<IconsById>();
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const nested = readMap(value, readIcon);
     if (Object.keys(nested).length > 0) {
@@ -1479,27 +1470,7 @@ function withoutEntry<T>(map: Record<string, T>, key: string): Record<string, T>
   return out;
 }
 
-/** An empty icon clears the choice rather than storing "". */
-export function setIcon(
-  prefs: Prefs,
-  sourceId: SourceId,
-  sessionId: string,
-  icon: string,
-  now: Date,
-): Prefs {
-  const bucket = prefs.icons[sourceId] ?? emptyMap<IconChoice>();
-  const nextBucket =
-    icon === ''
-      ? withoutEntry(bucket, sessionId)
-      : withEntry(bucket, sessionId, { icon, at: now.toISOString() });
-  const icons =
-    Object.keys(nextBucket).length > 0
-      ? withEntry(prefs.icons, sourceId, nextBucket)
-      : withoutEntry(prefs.icons, sourceId);
-  return { ...prefs, icons };
-}
-
-/** An empty icon clears the project's choice, same as `setIcon`. */
+/** An empty icon clears the project's choice rather than storing "". */
 export function setProjectIcon(
   prefs: Prefs,
   sourceId: SourceId,
@@ -1620,14 +1591,13 @@ export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): 
 
 /**
  * Put the stored names onto the model, once, before anything reads it -- the
- * same trick `applyIcons` plays one field over, and for the same reason: the
- * sidebar and the detail panel both render `session.title`,
- * and neither should have to know that a title can be local.
+ * same trick `applyProjectIcons` plays one field over, and for the same
+ * reason: the sidebar and the detail panel both render `session.title`, and
+ * neither should have to know that a title can be local.
  *
- * `projectNames` defaults to `{}` for the same reason `applyIcons`'
- * `projectIcons` argument does: every existing two-argument call site
- * (session renames only) still compiles. Applied to `project.name` --
- * never `project.id`, which every one of `applyIcons`, `isProjectCollapsed`,
+ * `projectNames` defaults to `{}` so every existing two-argument call site
+ * (session renames only) still compiles. Applied to `project.name` -- never
+ * `project.id`, which every one of `applyProjectIcons`, `isProjectCollapsed`,
  * `isProjectHidden` and the group layer keys off and which a rename must
  * leave alone.
  */
@@ -1666,47 +1636,37 @@ export function applyRenames(
 }
 
 /**
- * Put the stored icons onto the model, once, before anything reads it.
+ * Put the stored project icons onto the model, once, before anything reads it.
  *
- * Only the tab strip renders `session.icon` today, and it should not
- * know that an icon is a local preference rather than something the
- * factory said. Applying it here means one place knows. Looked up per
- * project's `source`, not by session id alone — two sources can name a
- * session the same thing (AC-1). `projectIcons` follows the same rule one
- * level up, and defaults to `{}` so every existing two-argument call site
- * (session icons only) still compiles.
+ * Only the project heading renders `project.icon`, and it should not know that
+ * an icon is a local preference rather than something the source said.
+ * Applying it here means one place knows. Looked up per project's `source`,
+ * not by project id alone — two sources can name a project the same thing.
+ *
+ * IT WAS `applyIcons` AND DID TWO LEVELS. The other level was the session's
+ * own icon, and it went when the feature did ("remove the picker", once pull
+ * request 433 had taken the last surface that drew one). The name says one level now
+ * because that is what is left: a function called `applyIcons` that silently
+ * applies only half of what the word covers is the kind of thing a reader
+ * trusts and should not.
  */
-export function applyIcons(
+export function applyProjectIcons(
   model: CanvasModel,
-  icons: Prefs['icons'],
-  projectIcons: Prefs['projectIcons'] = {},
+  projectIcons: Prefs['projectIcons'],
 ): CanvasModel {
-  if (Object.keys(icons).length === 0 && Object.keys(projectIcons).length === 0) {
+  if (Object.keys(projectIcons).length === 0) {
     return model;
   }
   return {
     ...model,
     projects: model.projects.map((project) => {
       // A project with no source has no bucket to look one up in — the same
-      // "cannot store under an unknown source" call `setIcon`'s caller makes.
+      // "cannot store under an unknown source" call the picker's caller makes.
       if (project.source === undefined) {
         return project;
       }
-      const bucket = icons[project.source];
-      const projectBucket = projectIcons[project.source];
-      const projectChoice = projectBucket?.[project.id];
-      const withIcon =
-        projectChoice === undefined ? project : { ...project, icon: projectChoice.icon };
-      if (bucket === undefined) {
-        return withIcon;
-      }
-      return {
-        ...withIcon,
-        sessions: withIcon.sessions.map((session) => {
-          const choice = bucket[session.id];
-          return choice === undefined ? session : { ...session, icon: choice.icon };
-        }),
-      };
+      const choice = projectIcons[project.source]?.[project.id];
+      return choice === undefined ? project : { ...project, icon: choice.icon };
     }),
   };
 }
@@ -1725,27 +1685,6 @@ function readMap<T>(value: unknown, read: (entry: unknown) => T | null): Record<
   return out;
 }
 
-/**
- * Build the by-source icon map from whatever is under the stored `icons` key,
- * migrating the pre-AC-1 flat shape (`{sessionId: IconChoice}`) as it goes.
- *
- * Handles a payload holding both shapes at once (AC-5) — the case an operator
- * hits mid-upgrade with vam open in two tabs, one writing the old flat shape
- * and one already writing the new nested one to the same key. Each top-level
- * entry is inspected on its own: one that parses as an `IconChoice` is an old
- * flat entry keyed by session id, migrated into `migrateSource`'s bucket;
- * anything else is tried as a new-shape bucket (session id → `IconChoice`)
- * keyed by its own source id. Both merge into the same source's bucket.
- *
- * WHEN THEY CONTEND FOR THE SAME KEY, THE LATER `at` WINS. `migrateSource` is
- * a real source id, so a migrated flat entry and a genuine nested entry can
- * name the same session under the same source -- exactly what the two-tab
- * upgrade produces. An unconditional overwrite would make the survivor depend
- * on `Object.entries` order, which is to say on nothing, and would silently
- * drop an icon that exists nowhere else. An unparseable `at` sorts oldest, so
- * a readable choice always beats an unreadable one; if neither parses the
- * first seen is kept, because there is nothing to prefer it by.
- */
 /** Milliseconds for ordering; an unreadable date sorts oldest and never wins. */
 function ageOf(choice: { readonly at: string }): number {
   const t = Date.parse(choice.at);
@@ -1794,13 +1733,14 @@ const LEGACY_HTTP_SOURCE_ID = 'black-smith';
  * a person with devtools open, and permanently invisible to vam. That is
  * exactly the silent loss a rename must not cause.
  *
- * `merge` resolves the one case that is rare rather than impossible: an
- * install old enough to still carry pre-AC-1 flat data (which `readIcons`
- * folds into `migrateSource`'s bucket on its own) can ALSO already have a
- * genuine nested bucket sitting under the literal old id, in the same
- * payload -- so a bucket can exist under both names in the same read, and
- * dropping either half would be the same silent loss this function exists to
- * prevent.
+ * `merge` resolves the one case that is rare rather than impossible: a bucket
+ * can exist under BOTH the old and the new source name in the same payload --
+ * an install that wrote under the legacy id, then wrote again after the
+ * rename -- and dropping either half would be the same silent loss this
+ * function exists to prevent. (It resolved one more case until recently: the
+ * pre-AC-1 FLAT session-icon shape, which `readIcons` folded into
+ * `migrateSource`'s bucket before this ran. Session icons are gone and so is
+ * that reader; the both-names case below is real on its own.)
  */
 function migrateSourceKey<T>(
   buckets: Readonly<Record<string, T>>,
@@ -1859,31 +1799,6 @@ function migrateLastFocusSource(
   to: string,
 ): FocusChoice | null {
   return focus !== null && focus.source === from ? { ...focus, source: to } : focus;
-}
-
-function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
-  if (typeof raw !== 'object' || raw === null) {
-    return emptyMap<IconsBySession>();
-  }
-  let outer = emptyMap<IconsBySession>();
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    const flatLeaf = readIcon(value);
-    if (flatLeaf !== null) {
-      const bucket = outer[migrateSource] ?? emptyMap<IconChoice>();
-      outer = withEntry(outer, migrateSource, keepNewer(bucket, key, flatLeaf));
-      continue;
-    }
-    const nested = readMap(value, readIcon);
-    if (Object.keys(nested).length === 0) {
-      continue;
-    }
-    let bucket = outer[key] ?? emptyMap<IconChoice>();
-    for (const [sid, choice] of Object.entries(nested)) {
-      bucket = keepNewer(bucket, sid, choice);
-    }
-    outer = withEntry(outer, key, bucket);
-  }
-  return outer;
 }
 
 /** `fresh` applied per source, dropping a source whose bucket becomes empty. */

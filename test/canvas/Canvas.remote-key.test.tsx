@@ -30,7 +30,6 @@ const MODEL: CanvasModel = {
         {
           id: 'a1',
           title: 'a1',
-          icon: null,
           epic: null,
           branch: null,
           status: 'done',

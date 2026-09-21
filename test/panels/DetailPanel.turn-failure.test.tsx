@@ -33,7 +33,6 @@ function draw(decisions: readonly Decision[], props: Partial<DetailPanelProps> =
   const session: Session = {
     id: 's1',
     title: 'Provider survey',
-    icon: null,
     epic: null,
     branch: null,
     status: 'running',

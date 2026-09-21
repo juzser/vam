@@ -252,7 +252,6 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // side.
   prompt: { group: 'session', label: () => 'type into this pane — its box, or its screen' },
   rename: { group: 'session', label: () => 'rename this session' },
-  icon: { group: 'session', label: () => 'pick this session’s icon' },
   close: { group: 'session', label: () => 'close this session' },
   newSession: { group: 'session', label: () => 'start a new session' },
   // Named for the pane, because that is the whole difference from

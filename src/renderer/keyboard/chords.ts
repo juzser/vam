@@ -483,8 +483,6 @@ export type KeyAction =
   | { readonly kind: 'focusList' }
   /** `r` — rename the focused session in place. */
   | { readonly kind: 'rename' }
-  /** `s` — pick the focused session's icon. */
-  | { readonly kind: 'icon' }
   /** `x` — close the focused session. */
   | { readonly kind: 'close' }
   /** `o` / `Mod-n` — start a new session IN THE FOCUSED SESSION'S PROJECT.
@@ -771,11 +769,20 @@ const MOVES: Readonly<Record<string, KeyAction>> = {
  * Chosen so a vim user does not have to learn them so much as guess them:
  * `i` stops moving and starts saying something, `I` is its stronger form and
  * moves the whole caret into the pane where saying things happens, `o` opens
- * a new one, `r` replaces a name, `x` deletes. Only `s` (icon) and `,`
- * (settings) are conventions borrowed from elsewhere, and both are
- * conventions rather than inventions. (Bare `H`/`L` used to sit here too, as
- * "far left"/"far right"; `H` moved to `Mod-Shift-h` at the operator's
- * request and `L` is unbound — neither is a single-key guess any more.)
+ * a new one, `r` replaces a name, `x` deletes. Only `,` (settings) is a
+ * convention borrowed from elsewhere, and it is a convention rather than an
+ * invention. (Bare `H`/`L` used to sit here too, as "far left"/"far right";
+ * `H` moved to `Mod-Shift-h` at the operator's request and `L` is unbound —
+ * neither is a single-key guess any more.)
+ *
+ * `s` IS FREE, AND IS LEFT FREE. It held `icon`, the session-icon picker,
+ * until the operator removed that feature outright ("remove the picker", once
+ * pull request 433 had taken the last surface that drew a session icon off
+ * the tab). A
+ * freed key is worth more empty than spent: handing `s` to something else
+ * would make an operator's muscle memory do a NEW thing silently, which is a
+ * worse trade than the one keystroke it saves. Whoever wants it should want it
+ * on its own merits, not because it happened to be lying there.
  *
  * Orca's sidebar has the same capabilities under Cmd-chords — `workspace.rename`,
  * `workspace.delete`, `sidebar.search.toggle`, `sidebar.focusWorktreeList` — so
@@ -785,7 +792,6 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   i: { kind: 'prompt' },
   I: { kind: 'focusAction' },
   r: { kind: 'rename' },
-  s: { kind: 'icon' },
   x: { kind: 'close' },
   o: { kind: 'newSession' },
   ',': { kind: 'settings' },
@@ -1731,8 +1737,8 @@ export function bindingClashes(overrides: KeyBindings): readonly BindingClash[] 
  *
  * The difference is taken over WHO IS SHADOWED, not over which chord is
  * contested. "That chord was contested already" is too coarse by exactly the
- * case that matters: over a map where `icon` has taken `rename`'s `r`, giving
- * `r` to a third action would newly kill `icon` too, and the chord was
+ * case that matters: over a map where `close` has taken `rename`'s `r`, giving
+ * `r` to a third action would newly kill `close` too, and the chord was
  * contested before and after. What comes back is each clash narrowed to the
  * bindings this write would newly leave dead, so a refusal can name them.
  */
@@ -1778,7 +1784,9 @@ function buildTables(overrides: KeyBindings): Tables {
   // button checked nothing, so `rename` onto `b`, `icon` onto the freed `r`,
   // then reset `rename` put a second claim on `r` through the ordinary
   // editor — after which `r` invoked `icon` while the sheet went on
-  // advertising it for `rename`. Both write paths now judge the whole
+  // advertising it for `rename`. (`icon` was the session-icon picker, removed
+  // outright since; the finding is kept in its own terms because retelling it
+  // with a different action would be inventing a defect nobody found.) Both write paths now judge the whole
   // resulting map (`newClashes`), so the editor cannot mint one.
   //
   // Two doors stay open and this precedence is what they land on: a payload

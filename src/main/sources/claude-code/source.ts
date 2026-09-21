@@ -388,7 +388,6 @@ export async function loadClaudeCodeProjects(
       // The CLI's name is the operator's own; the generated title is only a
       // fallback, and the session id a fallback for that.
       title: agent.name ?? read.facts.aiTitle ?? agent.sessionId,
-      icon: null,
       // The branch is the second label: it is what actually distinguishes two
       // sessions on the same project at a glance.
       epic: read.facts.branch,

@@ -33,18 +33,27 @@
  * is the commonest thing left open after a working day, and a tick on every
  * one of them is the grey dot again in a different shape.
  *
- * ── `icon` IS OFF NOW, BECAUSE THE PROVIDER GLYPH TOOK ITS PLACE ──────────
- * The operator again, once vam had a second source: "put the provider glyph
- * after the indicator, on the tab name. Remove the session icon from the
- * tab." The two halves are one decision. What `icon` drew was the
- * session-else-project chain (`panels/session-icon.tsx`), and down a strip of
- * one project's tabs that is the project's own mark repeated on every tab --
- * the same "it says again what the heading already said" the operator used
- * when they took that glyph off the sidebar row. The provider mark answers
- * the one question a strip of tabs cannot otherwise answer, which agent ran
- * this, and it is NOT an indicator: it is a constant property of the tab
- * rather than a state that comes and goes, so it has no id here, no switch to
- * be off, and the strip draws it unconditionally.
+ * ── `icon` IS GONE ENTIRELY, NOT MERELY OFF ───────────────────────────────
+ * The operator, once vam had a second source: "put the provider glyph after
+ * the indicator, on the tab name. Remove the session icon from the tab." What
+ * `icon` drew was a session-else-project chain, and down a strip of one
+ * project's tabs that is the project's own mark repeated on every tab -- the
+ * same "it says again what the heading already said" the operator used when
+ * they took that glyph off the sidebar row.
+ *
+ * It sat here one more release as an id that was merely OFF, kept as the
+ * documented way to switch it back on. That path is closed now: the tab was
+ * the last surface that drew a session icon, so with it gone the picker wrote
+ * into a store nobody read, and the operator's answer was "remove the picker".
+ * There is no longer any way to SET a session icon, which makes an id for
+ * drawing one an instruction to render a value that cannot exist. So the id
+ * went with the feature, and this paragraph is its headstone rather than its
+ * switch.
+ *
+ * The provider mark answers the one question a strip of tabs cannot otherwise
+ * answer, which agent ran this, and it is NOT an indicator: it is a constant
+ * property of the tab rather than a state that comes and goes, so it has no id
+ * here, no switch to be off, and the strip draws it unconditionally.
  *
  * ── THE THREE THAT RIDE AFTER THE TITLE ───────────────────────────────────
  * `draft` (a pencil: unsent text in this session's composer) ships on,
@@ -78,18 +87,16 @@
  * defaults, the settings rows and the tests all derive from it.
  *
  * The order is also the strip's reading order: the four status marks first
- * (a tab draws at most one), then the session's own icon, then the three that
- * follow the title. What the strip reads TODAY is mark, provider glyph,
- * title, draft: the provider is not in this list and never will be, because
- * it is not an indicator (the header says why), and it stands in the slot
- * `icon` used to have.
+ * (a tab draws at most one), then the three that follow the title. What the
+ * strip reads TODAY is mark, provider glyph, title, draft: the provider is not
+ * in this list and never will be, because it is not an indicator (the header
+ * says why), and it stands in the slot the session's own icon used to have.
  */
 export const TAB_INDICATOR_IDS = [
   'running',
   'waiting',
   'failed',
   'done',
-  'icon',
   'draft',
   'pending',
   'agents',
@@ -100,28 +107,25 @@ export type TabIndicatorId = (typeof TAB_INDICATOR_IDS)[number];
 /**
  * WHAT A TAB DRAWS, AND IT IS NOT A SETTING.
  *
- * The operator chose five from the eight the model can answer -- running,
- * waiting, failed, the session's own icon, and an unsent draft -- and then,
- * reading the settings panel they had appeared in: "there is no need for a
- * session tab indicator setting". So the list is a constant and the switches
- * are gone. `done` is not here on purpose: a finished turn with nothing
- * pending is the resting state of most tabs, and a mark on all of them is a
- * mark that says nothing. `pending` and `agents` are the two the operator did
- * not pick.
+ * The operator chose from what the model can answer -- running, waiting,
+ * failed and an unsent draft -- and then, reading the settings panel the
+ * switches had appeared in: "there is no need for a session tab indicator
+ * setting". So the list is a constant and the switches are gone. `done` is not
+ * here on purpose: a finished turn with nothing pending is the resting state
+ * of most tabs, and a mark on all of them is a mark that says nothing.
+ * `pending` and `agents` are the two the operator did not pick.
  *
- * FOUR OF THEM NOW: `icon` came off. "Remove the session icon from the tab"
- * -- the same breath as "put the provider glyph after the indicator, on the
- * tab name", so the slot did not go quiet, it changed hands (the header says
- * why, and `Canvas.tsx` draws the provider mark outside this list because a
- * provider is not a state).
+ * The session's own icon was once a fifth. It is not off, it is GONE -- both
+ * from this list and from the union above, because the feature it drew was
+ * removed outright (the header says why, and `Canvas.tsx` draws the provider
+ * mark outside this list because a provider is not a state).
  *
- * THE OTHER FOUR IDS STAY IN THE UNION, and that is not dead code: they are
- * what `tabStatusMark` and the strip are written against, so adding one back
- * is one entry in this list rather than a new branch -- for `icon`
- * specifically, the rendering in `Canvas.tsx` is still there and still
- * correct, waiting on this line. They are also what the tests that cover "an
- * indicator that is off draws nothing" are about, and `icon` is the one they
- * are about today (`test/canvas/Canvas.tab-indicators.test.tsx`).
+ * THE THREE UNPICKED IDS STAY IN THE UNION, and that is not dead code: they
+ * are what `tabStatusMark` and the strip are written against, so switching one
+ * on is one entry in this list rather than a new branch. They are also what
+ * the tests that cover "an indicator that is off draws nothing" are about --
+ * `done` is the one they are about today, `icon` having been the one they used
+ * before it was deleted (`test/canvas/Canvas.tab-indicators.test.tsx`).
  */
 export const TAB_INDICATORS: readonly TabIndicatorId[] = ['running', 'waiting', 'failed', 'draft'];
 

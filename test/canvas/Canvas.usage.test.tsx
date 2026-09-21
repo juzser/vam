@@ -256,7 +256,6 @@ function fixtureSession(id: string, source?: string): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',

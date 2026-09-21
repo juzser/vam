@@ -377,7 +377,6 @@ every `Mod-` chord answers it as it always did.
 | `I` | Move keyboard control into the right-hand action pane |
 | `Mod-Shift-h` / `Mod-0` | Move keyboard control back to the session list. `Cmd+Shift+H` rather than `Cmd+H`, which is macOS's own Hide and is claimed by the application menu before the page ever sees it |
 | `r` | Rename the focused session |
-| `s` | Pick the focused session's icon |
 | `x` / `Mod-w` | Close the focused session |
 | `o` / `Mod-n` | Start a new session, in the focused session's project |
 | `Mod-t` | Start a new session as a tab of the FOCUSED PANE — the pane's own `+`, and it names the project on screen when that pane is empty |

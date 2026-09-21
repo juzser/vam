@@ -35,7 +35,6 @@ function session(id: string): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -299,10 +298,10 @@ describe('a binding is edited by pressing the key', () => {
   it('moves the armed box when a second slot is clicked', () => {
     open();
     fireEvent.click(slot('rename', 0) as HTMLElement);
-    fireEvent.click(slot('icon', 0) as HTMLElement);
+    fireEvent.click(slot('close', 0) as HTMLElement);
     expect(capture()).not.toBeNull();
     expect(slot('rename', 0)).not.toBeNull();
-    expect(slot('icon', 0)).toBeNull();
+    expect(slot('close', 0)).toBeNull();
   });
 
   it('refuses a reserved key and says which it was', () => {
@@ -339,10 +338,10 @@ describe('a binding is edited by pressing the key', () => {
   });
 
   it('resets one action, and all of them', () => {
-    const prefs: Prefs = { ...EMPTY_PREFS, keyBindings: { rename: ['p'], icon: ['q'] } };
+    const prefs: Prefs = { ...EMPTY_PREFS, keyBindings: { rename: ['p'], close: ['q'] } };
     const { onChange } = open(prefs);
     fireEvent.click(document.querySelector('[data-binding-reset="rename"]') as HTMLElement);
-    expect(changed(onChange, 0).keyBindings).toEqual({ icon: ['q'] });
+    expect(changed(onChange, 0).keyBindings).toEqual({ close: ['q'] });
     // The overlay opens on Appearance, and the three panels it is not showing
     // carry the HTML `hidden` attribute — which `getByRole` respects, unlike
     // the `querySelector` above. Navigating is what an operator does anyway.

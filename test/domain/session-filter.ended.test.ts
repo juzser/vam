@@ -43,7 +43,6 @@ import {
 const session = (over: Partial<Session> = {}): Session => ({
   id: 'an-invented-id',
   title: 'an invented session',
-  icon: null,
   epic: null,
   status: 'idle',
   runningAgents: 0,

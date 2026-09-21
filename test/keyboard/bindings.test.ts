@@ -124,8 +124,8 @@ describe('conflicts are refused, and named', () => {
   it('sees the conflict against what is in force, not against the shipped table', () => {
     const bindings = bindKey(NO_BINDINGS, 'rename', 0, 'q');
     // `r` was freed by the override, `q` is now taken.
-    expect(newClashes(bindings, bindKey(bindings, 'icon', 0, 'r'))).toEqual([]);
-    expect(newClashes(bindings, bindKey(bindings, 'icon', 0, 'q'))[0]?.shadowed).toEqual([
+    expect(newClashes(bindings, bindKey(bindings, 'close', 0, 'r'))).toEqual([]);
+    expect(newClashes(bindings, bindKey(bindings, 'close', 0, 'q'))[0]?.shadowed).toEqual([
       'rename',
     ]);
   });

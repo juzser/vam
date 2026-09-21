@@ -61,7 +61,6 @@ const QUESTION: AgentQuestion = {
 const SESSION: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',

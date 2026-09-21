@@ -8,13 +8,19 @@
  * so. So each status takes a SHAPE, and the hue becomes the second channel
  * rather than the only one.
  *
- * A module of its own, like `session-icon.tsx` beside it and for the same
- * reason: "which mark stands for a status" is a rule about the session model,
- * not a detail of the sidebar. The sidebar was the first caller; the tab
- * strip is the second (`Canvas.tsx`, `TabStrip`), and it adopted this table
- * rather than keeping its own dot, which is what this paragraph asked of it.
- * The phone list still draws its own. The argument that outlives the caller
- * count is that the rule is statable and testable on its own.
+ * A module of its own, on the argument that "which mark stands for a status"
+ * is a rule about the session model, not a detail of the sidebar. The sidebar
+ * was the first caller; the tab strip is the second (`Canvas.tsx`,
+ * `TabStrip`), and it adopted this table rather than keeping its own dot,
+ * which is what this paragraph asked of it. The phone list still draws its
+ * own. The argument that outlives the caller count is that the rule is
+ * statable and testable on its own.
+ *
+ * `session-icon.tsx` used to sit beside this file making the same argument for
+ * "which glyph stands for a session". That question has no answer now -- the
+ * operator removed session icons outright -- so this module is the last of the
+ * pair, and the reasoning above stands on its own merits rather than on a
+ * neighbour's.
  *
  * THE LANE IS FIXED, AND THAT IS HALF THE POINT. A status changes under the
  * operator's eyes -- `running` becomes `waiting` the moment an agent asks a

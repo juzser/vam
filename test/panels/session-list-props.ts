@@ -19,7 +19,6 @@ export function makeSession(over: Partial<Session> = {}): Session {
   return {
     id: 's1',
     title: 'alpha-refactor',
-    icon: null,
     epic: null,
     branch: 'work',
     status: 'running',

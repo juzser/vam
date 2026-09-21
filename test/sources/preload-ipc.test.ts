@@ -155,7 +155,6 @@ const SESSION_OPTIONAL: Shape = { pullRequests: isPullRequestList };
 const SESSION_SHAPE: Shape = {
   id: isString,
   title: isString,
-  icon: nullable(isString),
   epic: nullable(isString),
   branch: nullable(isString),
   status: oneOf('running', 'waiting', 'done', 'failed'),
@@ -483,7 +482,6 @@ describe('Session.pullRequests survives the boundary as itself', () => {
       {
         id: 's-prs',
         title: 'branch work',
-        icon: null,
         epic: null,
         branch: 'topic/rework',
         status: 'running',

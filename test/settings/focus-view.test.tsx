@@ -33,7 +33,6 @@ function session(id: string, decisions: readonly Decision[]): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',

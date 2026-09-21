@@ -32,14 +32,21 @@
  * is seeded with a bare 🌙 and a heading drawing it in a real browser is the
  * evidence that no migration was needed.
  *
- * IT WAS TWO LEVELS OF THAT UNTIL THE SESSION ICON LOST ITS LAST SURFACE. The
- * demo fixture's five sessions carry emoji of their own (`fixtures/demo.ts`),
- * and `factory-sse-1`'s 🔨 was read off its TAB -- the sidebar row had given
- * up drawing one long ago, and now the tab has too ("remove the session icon
- * from the tab", with the provider glyph taking the slot). So the session
- * half of this file is an ABSENCE now: seeds are still written, and
- * `[data-session-icon]` has to match nothing in the whole document. The
- * project half is unchanged and still carries the migration claim.
+ * IT WAS TWO LEVELS OF THAT UNTIL THE SESSION ICON WAS REMOVED. `factory-sse-1`'s
+ * 🔨 was read off its TAB -- the sidebar row had given up drawing one long
+ * before, and then the tab did too ("remove the session icon from the tab",
+ * with the provider glyph taking the slot). That left a picker writing to a
+ * key nothing read, so the operator removed the picker as well.
+ *
+ * WHICH TURNS THE SESSION HALF OF THIS FILE INTO A DIFFERENT CLAIM, and a
+ * better one than the absence it was. `PREFS` still seeds an `icons` key --
+ * the exact bytes an operator who used the feature still has in their
+ * browser -- and what is asserted is that a real vam LOADS that store and
+ * draws nothing from it. Not "the key is absent", which any empty store would
+ * satisfy: a stored value from that day is ignored rather than migrated, and
+ * the rest of the document parses around it, which is what the project
+ * assertions beside it prove. The project half is otherwise unchanged and
+ * still carries the migration claim.
  *
  * `?demo=1`, always: vam is public, and every real session on this machine is
  * somebody's work.
@@ -78,6 +85,9 @@ const PREFS = {
     orca: { vam: { icon: 'lucide:code:purple', at: NOW } },
     'claude-code': { notes: { icon: '🌙', at: NOW } },
   },
+  // A RETIRED KEY, SEEDED ON PURPOSE. Session icons are gone; `parsePrefs` no
+  // longer looks for this. It stays so the sweep below is over a store that
+  // really holds one, rather than over an empty one that would pass for free.
   icons: {
     factory: {
       'crosscheck-2': { icon: 'lucide:flask-conical:pink', at: NOW },
@@ -99,15 +109,14 @@ const SEEDED = [
   // `notes` is not here on purpose: it carries an emoji, and is asserted as
   // one below rather than as a glyph that failed to appear.
   //
-  // AND NEITHER IS THE SESSION LEVEL, WHICH PAINTS NOWHERE NOW. It was
+  // AND NEITHER IS THE SESSION LEVEL, WHICH NO LONGER EXISTS. It was
   // `[data-session-icon="crosscheck-2"]`, a `flask-conical` in `pink`, read
   // off the TAB -- the last surface drawing a session's icon once the sidebar
-  // row had dropped it. The operator has taken it off the tab as well
-  // ("remove the session icon from the tab"; the provider glyph stands there
-  // instead), so `data-session-icon` is in no DOM to measure. The entry is
-  // removed rather than left to fail as "the glyph is drawn: drew null", its
-  // seed STAYS in `PREFS` above, and the absence is asserted below -- a
-  // stored icon that reaches no surface is the claim now.
+  // row had dropped it. The tab lost it, then the picker went with it, so
+  // there is no such glyph and no `data-session-icon` in any DOM to measure.
+  // The entry is removed rather than left to fail as "the glyph is drawn:
+  // drew null", its seed STAYS in `PREFS` above, and the absence is asserted
+  // below -- a RETIRED key that reaches no surface is the claim now.
   //
   // WHAT THAT COSTS THIS FILE, stated rather than glossed: `pink` is no
   // longer measured in either theme, and the tone questions at the top are
@@ -245,12 +254,16 @@ for (const theme of ['dark', 'light']) {
   // that no migration was needed.
   //
   // IT USED TO BE TWO, at two levels -- the fixture's own 🔨 on
-  // `factory-sse-1` was read off that session's TAB. The session half is now
-  // an ABSENCE instead, and deliberately not deleted: the seeds are still in
-  // the store, and "no surface draws a session icon" is exactly what the
-  // operator asked for and exactly the kind of thing that comes back by
-  // accident. The `[data-session-icon]` sweep is over the whole document, so
-  // it also catches the slot reappearing somewhere new.
+  // `factory-sse-1` was read off that session's TAB. The session half is an
+  // ABSENCE now, and deliberately not deleted: the retired key is still
+  // seeded, and "no surface draws a session icon" is exactly what the operator
+  // asked for and exactly the kind of thing that comes back by accident. The
+  // `[data-session-icon]` sweep is over the whole document, so it also catches
+  // the slot reappearing somewhere new.
+  //
+  // `tabs` is counted in the same pass so the sweep can prove it had something
+  // to sweep: zero drawn icons on zero tabs is a green that measured nothing,
+  // and this strip is exactly where the last one used to be.
   const emoji = await page.evaluate(() => {
     const at = (sel) => {
       const host = document.querySelector(sel);
@@ -263,11 +276,17 @@ for (const theme of ['dark', 'light']) {
     };
     return {
       sessionIcons: document.querySelectorAll('[data-session-icon]').length,
+      tabs: document.querySelectorAll('[data-session-tab]').length,
       project: at('[data-project-icon="notes"]'),
     };
   });
   check(
-    `${theme}: no surface draws a session icon, though two sessions have one stored`,
+    `${theme}: the strip is drawn at all, so the sweep below has a corpus`,
+    emoji.tabs > 0,
+    `${emoji.tabs} tabs`,
+  );
+  check(
+    `${theme}: a retired \`icons\` key is ignored — nothing draws a session icon`,
     emoji.sessionIcons === 0,
     `${emoji.sessionIcons} drawn`,
   );

@@ -44,7 +44,6 @@ const DECISION: Decision = {
 const BASE: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: 'feature/atlas',
   status: 'waiting',

@@ -26,7 +26,6 @@ function session(id: string, title: string): Session {
   return {
     id,
     title,
-    icon: null,
     epic: null,
     branch: null,
     status: 'idle',
@@ -103,7 +102,7 @@ describe('the tab menu', () => {
     expect(opened).toBe(false);
   });
 
-  it('offers the same four the sidebar row offers', () => {
+  it('offers the same items the sidebar row offers', () => {
     twoTabs();
     act(() => {
       fireEvent.contextMenu(tabFor('alpha two'), { clientX: 40, clientY: 30 });
@@ -111,7 +110,6 @@ describe('the tab menu', () => {
     expect([...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)).toEqual(
       [
         'Rename session',
-        'Change session icon',
         // Drawn with its reason, on the menu's own always-drawn rule. This
         // harness's source advertises no `resumeSession`, and THAT is the
         // reason the operator gets -- a source that cannot do a thing is a

@@ -26,7 +26,6 @@ import type { CanvasSource } from '../../src/renderer/sources/source.js';
 const session = (id: string, title: string): Session => ({
   id,
   title,
-  icon: null,
   epic: null,
   branch: null,
   status: 'done',
