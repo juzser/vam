@@ -47,8 +47,11 @@ describe('the Terminal tab shows the focused session pane', () => {
     await settle();
 
     // No row given here, so the project alone is asked -- the older answer,
-    // still available and still correct for a project with one pane.
-    expect(read).toHaveBeenCalledWith(ATLAS, undefined);
+    // still available and still correct for a project with one pane. `poll` is
+    // the tab naming its own situation: this is the interval read, the one
+    // that re-proves the pairing and carries the scrollback
+    // (`shared/terminal.ts`, `PaneReadMode`).
+    expect(read).toHaveBeenCalledWith(ATLAS, undefined, 'poll');
     const pane = q<HTMLElement>('[data-terminal-pane]');
     expect(pane?.textContent).toContain('thinking about the branch');
     // The already-composed screen, drawn as plain text -- vam has no terminal
@@ -419,6 +422,6 @@ describe('the row it asks about', () => {
         send={undefined}
       />,
     );
-    await waitFor(() => expect(read).toHaveBeenCalledWith(ATLAS, 'sess-beta#8'));
+    await waitFor(() => expect(read).toHaveBeenCalledWith(ATLAS, 'sess-beta#8', 'poll'));
   });
 });
