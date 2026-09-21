@@ -1394,6 +1394,40 @@ function TabStrip({
  * phone shell's app bar, which has no canvas top bar to put it in. The one
  * thing a dashboard must never do is look the same whether or not it is
  * connected, so it is never dropped from either.
+ *
+ * ── THE HEALTHY ARM STOPPED NAMING THE SOURCES ───────────────────────────
+ *
+ * The operator: "status bar -- show only the provider of the session that is
+ * open, not Claude Code + Codex." That string was not a bug, it was this cell
+ * working as written: with two desktop sources registered,
+ * `main/sources/combine.ts` builds the label as
+ * `members.map((m) => m.label).join(' + ')`, so the resting state of the bar
+ * was a list of everything vam is connected to. Two cells along, `SourceGlyph`
+ * draws the mark of the source the FOCUSED session came from -- which is the
+ * question an operator actually has, answered about one session rather than
+ * about the registry.
+ *
+ * SO THE NAMES LEFT THE PAINT AND NOT THE DOM. This cell's job is HEALTH, not
+ * naming -- the paragraph above is what gives it a permanent home -- and the
+ * mark is what says health. The names move to where a name is still
+ * answerable from: `sr-only` text, so a screen reader gets them as the cell's
+ * accessible name, and a `Note`, so a pointer or a keyboard can ask. Nothing
+ * is destroyed; it stops being spent on every frame.
+ *
+ * THE ERROR AND CONNECTING ARMS ARE UNTOUCHED, deliberately. They are the
+ * whole point of the cell -- `● {error}` in red, `○ connecting to the source…`
+ * -- and they were already right.
+ *
+ * A BARE COLOURED DOT WOULD BE A COLOUR-ONLY SIGNAL (WCAG 1.4.1), the rule
+ * `status-mark.tsx` holds for the five session statuses and which this cell
+ * must not become the exception to. Two channels carry "connected" without
+ * hue. The `sr-only` word is read aloud, so nothing reading the DOM depends on
+ * green. And for a sighted reader who cannot use hue, the healthy session arm
+ * is the ONLY arm that paints a mark and NOTHING ELSE: every other state here
+ * puts words beside its glyph -- the error, both connecting messages, the demo
+ * note, even the factory's own healthy `● factory`. A lone mark is the shape
+ * of "connected"; a mark with words after it is the shape of "something to
+ * read".
  */
 function SourceReadout({ source }: { source: CanvasSource }) {
   return (
@@ -1416,7 +1450,19 @@ function SourceReadout({ source }: { source: CanvasSource }) {
         // defect this arm exists to prevent, and the failure badge in the
         // status bar was the only surface saying otherwise.
         source.error === undefined || source.error === null ? (
-          <span className="text-done">● {source.source.label}</span>
+          <Note text={`connected to ${source.source.label}`}>
+            {/* The tab stop is what makes the `Note` worth having, and it is
+                the argument `StatusCell` and `SourceGlyph` both make in this
+                same bar: a tooltip that opens on focus is worth nothing on an
+                element that cannot be focused. The tooltip opening IS the
+                visible response to focus here, as it is on the glyph cell.
+                The suppression sits on the line above the attribute because
+                biome reports it there and suppresses by line. */}
+            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS how the names stay reachable -- see `StatusCell`. */}
+            <span className="text-done" tabIndex={0}>
+              ●<span className="sr-only"> connected to {source.source.label}</span>
+            </span>
+          </Note>
         ) : (
           <span className="text-failed">● {source.error}</span>
         )

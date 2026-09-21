@@ -207,6 +207,15 @@
   --color-icon-purple: var(--vam-icon-purple);
   --color-icon-pink: var(--vam-icon-pink);
 
+  /* THE TWO PROVIDER BRAND COLOURS, so `text-brand-claude` and
+     `text-brand-openai` exist as utilities. Without these two lines the
+     classes in `provider-marks.tsx` would emit NO RULE AT ALL and the marks
+     would quietly inherit the row's ink -- which looks almost right, which is
+     why `e2e/provider-mark-shots.mjs` measures the paint instead of the
+     stylesheet. The values and their floors are at `--vam-brand-claude`. */
+  --color-brand-claude: var(--vam-brand-claude);
+  --color-brand-openai: var(--vam-brand-openai);
+
   --color-line: var(--vam-line);
   --color-line-strong: var(--vam-line-strong);
   --color-line-loud: var(--vam-line-loud);
@@ -1270,6 +1279,36 @@
   --vam-icon-purple: #c084fc;
   --vam-icon-pink: #f472b6;
 
+  /* THE PROVIDER BRAND COLOURS. Two, one per brand vam draws a mark for
+     (`sources/provider-marks.tsx`). Named after the BRAND and not after vam's
+     source id, because the value is the company's and `codex` is only the id
+     vam stamps on rows that came from OpenAI.
+
+     NOT AN ICON TONE, and they sit beside that family rather than in it on
+     purpose: a tone is chosen by a person and means whatever they decided,
+     while these two mean one thing each and nobody may repoint them. Naming
+     one `--vam-icon-orange` would have offered Claude's colour to a session
+     that merely likes orange.
+
+     THE BRAND'S OWN HEX WHERE IT SURVIVES THE THEME, its own HUE where it does
+     not -- which is the whole reason a brand colour has to be a token at all.
+     Claude's #d97757 clears the floor on every dark surface, so it is carried
+     verbatim here. OpenAI's #412991 measures 1.46:1 on this sidebar, so dark
+     takes the same colour at a higher lightness: H 253.85 and S 55.9% are
+     unchanged from the brand hex and only L moves, 36.5% to 68%.
+
+     A MARK IS A NON-TEXT OBJECT, so the floor is WCAG 1.4.11's 3:1, on the
+     four fills one is really drawn on (`sidebar`, `raised` for a selected row,
+     `pane` for the tab strip, `ground` for an active tab) and across all seven
+     colour templates -- and composited with the `opacity-[0.82]` the sidebar's
+     meta line dims the whole lane with, which is the number that actually
+     reaches an eye. Worst case, composited: Claude 3.51:1, OpenAI 3.40:1.
+     `test/renderer/token-contrast.test.ts` computes every one of those, and
+     `e2e/provider-mark-shots.mjs` is what proves the utility emitted a rule at
+     all -- a Tailwind v4 class naming a missing token emits none, silently. */
+  --vam-brand-claude: #d97757;
+  --vam-brand-openai: #9580db;
+
   --vam-running: #4ade80;
   /* A near-black on dark's bright green: 11.36:1. Taken under its own name
      rather than reaching for `--vam-ground`, the way `--vam-filter-badge` is
@@ -1643,6 +1682,19 @@ html.light {
   --vam-icon-teal: #0f766e;
   --vam-icon-purple: #7e22ce;
   --vam-icon-pink: #be185d;
+
+  /* THE TWO BRAND COLOURS, the other way round from dark -- which is the
+     clearest evidence that one value per brand could never have worked.
+     OpenAI's #412991 is a deep indigo and reads at 9.27:1 on these near-white
+     surfaces, so light carries the brand hex verbatim. Claude's #d97757
+     manages 2.69:1 here and fails 1.4.11 outright, so light takes the same
+     colour darkened: H 14.8 and S 63% are the brand's, L moves 59.6% to 40%.
+
+     Worst case over four fills x seven templates, composited with the meta
+     line's 0.82: Claude 3.75:1, OpenAI 5.89:1. The dark block above carries
+     the full argument and the floors. */
+  --vam-brand-claude: #a64526;
+  --vam-brand-openai: #412991;
 
   --vam-running: #166534;
   /* Light's running green is a DEEP one -- it has to read as text on white --
