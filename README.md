@@ -4,7 +4,7 @@ A keyboard-first ADE for coding agents: every Claude Code and Codex session you
 have running, on one screen, coloured by which one needs you, driven with vim
 keys instead of a mouse.
 
-![platform: macOS, Linux, Windows](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-262626)
+![platform: macOS, Linux](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-262626)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-262626)](LICENSE)
 
 ![vam, dark theme: sessions as tabs, grouped by project in the sidebar, one session's IN/OUT on the right](docs/images/hero-dark.png)
@@ -108,11 +108,15 @@ pnpm install
 pnpm run dist   # electron-vite build + the web build + electron-builder
 ```
 
-That produces a `.dmg`/`.zip` on macOS, an AppImage on Linux, and an NSIS
-installer on Windows. **Nothing is code-signed**, so the first launch is
-interrupted: on macOS, right-click → **Open** or `xattr -cr /path/to/vam.app`;
-on Windows, SmartScreen → **More info** → **Run anyway**; on Linux, `chmod +x`
-the AppImage. [docs/signing.md](docs/signing.md) is what signing would take.
+That produces a `.dmg`/`.zip` on macOS and an AppImage on Linux. **Nothing is
+code-signed**, so the first launch is interrupted: on macOS, right-click →
+**Open** or `xattr -cr /path/to/vam.app`; on Linux, `chmod +x` the AppImage.
+[docs/signing.md](docs/signing.md) is what signing would take.
+
+electron-builder is still configured to emit an NSIS installer, and it builds
+— but nothing in `src/main/sources/tmux/` has a Windows path, and desktop mode
+runs every session through tmux. Treat that target as unfinished rather than
+supported.
 
 Desktop mode needs the `claude` CLI on `PATH`, and `tmux` — vam starts each
 session in its own tmux pane and types your prompts into it. Codex threads are
@@ -129,8 +133,11 @@ pnpm run typecheck       # tsc --noEmit  (see also :node, :web, :test)
 pnpm run test            # vitest run
 ```
 
-The Playwright suites in `e2e/` need a one-time manual setup and are hand-run
-only, excluded from every automated gate — `e2e/README.md` says why.
+`e2e/` installs its own Playwright, outside the root lockfile. Three of CI's
+four jobs run from it on every push — the web guards in real Chromium, the
+desktop and 390px phone suites, and one test against an actual packaged
+Electron app — so a green `vitest` is not a green gate. The one harness that
+is hand-run is the SSE-drop spec, and `e2e/README.md` is about that one.
 
 ## Keyboard
 
