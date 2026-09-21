@@ -154,6 +154,54 @@ vam can **read** a session it did not start. It can never type into one. A
 toggle that reveals them for reading is the whole of what vam can offer, and an
 "adopt" button would be a control that cannot act.
 
+### 5. Closing, which is three things and not one
+
+The operator asked how closing works under this model. Three different acts are
+called "close" today, and the mistake available here is one button that means
+all three.
+
+**Close the tab** is the view and nothing else. The pane keeps running, the
+session stays in the list, reopening the tab finds it where it was. Unchanged.
+
+**End the agent, keep the pane** is new, and the model gives it away: the agent
+exits, the pane survives, and the row falls back to the state of §3 with the
+provider picker on it. It is the common case — finished with this conversation,
+same directory, next one — and today it can only be had by closing the session
+and creating another.
+
+**Close the session** kills the vam tmux session. The row leaves the live list.
+
+**None of the three deletes the conversation**, and that is what ties this
+design to the one before it. The transcript and the thread are on disk and are
+not touched; a closed session moves behind the history toggle, and #431's
+reopen brings it back as a new pane vam owns. Close and Reopen are inverses,
+and the toggle is where a closed session waits. `stop.ts` already quotes the
+CLI making the same promise: "Stop a background session. Its conversation is
+kept; resume it later."
+
+**This gets smaller, not bigger.** `stop.ts` today carries four routes:
+`claude stop` for a background session, the tmux route for a pane it can prove
+is its own, a REFUSAL for an interactive row whose ownership it cannot prove,
+and a confirmed `force` that signals the raw pid — the last because, in its own
+words, "the nearest thing to it is closing their own window out from under
+them". Once every row in the default list is provably vam's, the refusal and
+the force stop being paths the operator meets. And the toggle's rows get **no
+Close control at all**: vam can read a session it did not start and can never
+type into one, so a close button there is a control that cannot do what it
+offers.
+
+**Gentle before forceful.** Killing the tmux session cuts the agent off at
+whatever it was doing, which may be a partial write into an append-only
+transcript. Whether that truncation actually happens here is NOT measured; what
+is certain is that it would be permanent — nothing rewrites a line in a file
+that is only ever appended to, and every later reader inherits it. Letting the
+agent exit on its own first, with a timeout before the kill, costs almost
+nothing against a failure that cannot be undone.
+
+**Confirm only when the agent is mid-turn.** A session sitting idle is closed
+without a question; one that is `running` is worth asking about, because the
+work in flight is the thing the operator cannot get back by reopening.
+
 ## Traps this design must not walk into
 
 Each of these has already cost something once.
