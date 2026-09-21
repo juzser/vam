@@ -139,6 +139,16 @@ A row in it:
 This is the row the operator's second sentence is about, and it exists the
 instant the pane does.
 
+**DECIDED: a pane whose agent exited KEEPS ITS ROW**, until the operator closes
+the session. This was the first Open question and the operator has answered it.
+The row does not disappear the way a Claude Code row does today, because the
+thing the row stands for has not gone: the pane is still vam's, the Terminal
+view still works and still shows what the agent left on screen, and typing
+`claude` into that pane starts the next conversation in the same place — same
+directory, same row, no second session created to get it. A row that vanished
+on exit would take a live pane off the list and leave the operator to find it
+in tmux.
+
 ### 4. The toggle is what #431 already built
 
 Sessions vam did not start are not deleted from vam's knowledge. They move
@@ -168,6 +178,12 @@ exits, the pane survives, and the row falls back to the state of §3 with the
 provider picker on it. It is the common case — finished with this conversation,
 same directory, next one — and today it can only be had by closing the session
 and creating another.
+
+That is also what an agent exiting on its own does, decided in §3: the row
+stays. This act and that accident land in the same place deliberately — the
+operator should not have to remember which of the two produced the row in front
+of them, and "the pane is vam's until vam is told to close it" is the whole
+rule. Only **Close the session** below takes a row off the live list.
 
 **Close the session** kills the vam tmux session. The row leaves the live list.
 
@@ -278,10 +294,6 @@ directory five seconds apart bind to their own threads and not to each other's.
 
 ## Open
 
-- Whether a vam pane whose agent exited should keep its row until the operator
-  closes it, or disappear the way a Claude Code row does today. This design
-  assumes it keeps the row — the pane is still vam's, and the Terminal view
-  still works — but that is a decision, not a derivation.
 - Whether `@vam-session` should also be written for Claude Code fresh starts.
   Its published pane file already binds `sessionId` to a tmux target, so the
   write buys nothing there today; it is one line if a future Claude Code stops
