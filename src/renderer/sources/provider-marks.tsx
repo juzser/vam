@@ -1,38 +1,82 @@
 /**
- * Provider marks: the brand glyph for a session source vam recognises.
+ * Provider marks: WHICH AGENT RAN THIS SESSION, as one glyph.
  *
- * WHERE THESE CAME FROM, and under what licence. Every path below is the
- * outline from Simple Icons (https://github.com/simple-icons/simple-icons),
- * whose icon files are released under CC0 1.0 Universal -- a full waiver of
- * copyright, which is why the shapes can be carried here rather than pulled in
- * as a dependency. The path data is copied verbatim from that project; nothing
- * here is vam's own drawing, and claiming otherwise would be the actual problem
- * in a public repository.
+ * Read by the sidebar row (`panels/SessionList.tsx`) and by the status bar
+ * (`canvas/Canvas.tsx`, `SourceGlyph`). ONE table and ONE resolver, because
+ * the worst outcome here is two surfaces of one application drawing two
+ * different marks for one source -- an operator would reasonably read that as
+ * two different sources.
+ *
+ * ── THREE REGISTERS, IN ORDER, AND THE ORDER IS THE POINT ─────────────────
+ *
+ *   brand   -- the provider's own mark, verbatim from a public icon set.
+ *   native  -- a lucide glyph in vam's own visual language, for a source vam
+ *              knows but whose mark it may not redistribute, and for vam's
+ *              own non-company sources.
+ *   neutral -- the generic box, for a source nobody here has drawn. NOT an
+ *              error: a third source will arrive, and this is what it gets
+ *              until somebody decides otherwise. Never blank, and never
+ *              another provider's logo, which would be a confident claim
+ *              about who ran the session.
+ *
+ * ── WHERE THE BRAND PATHS CAME FROM, and under what licence ───────────────
+ *
+ * Every path in `PROVIDER_MARKS` is the outline from Simple Icons
+ * (https://github.com/simple-icons/simple-icons) at version 16.32.0, file
+ * `icons/<slug>.svg`, whose icon files are released under CC0 1.0 Universal --
+ * a full waiver of copyright, which is why the shapes can be carried here
+ * rather than pulled in as a dependency. The path data is copied verbatim
+ * from that project; nothing here is vam's own drawing, and claiming
+ * otherwise would be the actual problem in a public repository. The version
+ * is pinned rather than remembered: `test/sources/provider-marks.test.tsx`
+ * records the exact `d` string each mark was taken with, so a hand edit to
+ * "make it fit" -- the one thing that would turn a verbatim copy into an
+ * approximation -- fails the suite.
  *
  * CC0 waives copyright, NOT trademark -- Simple Icons says so itself, and so
- * does clause 4(a) of CC0. That is not a blocker here, and the reasoning is
- * recorded so nobody has to re-open it: vam draws a provider's mark to identify
- * that provider's own product, beside its own name, as the label on a session
- * that really did come from it. That is nominative use, the same thing every
- * client application does. vam does not use these marks as its own brand and
- * does not imply any endorsement.
+ * does clause 4(a) of CC0. Each mark is the trademark of its owner. That is
+ * not a blocker here, and the reasoning is recorded so nobody has to re-open
+ * it: vam draws a provider's mark to identify that provider's own product,
+ * beside its own name, as the label on a session that really did come from
+ * it. That is nominative use, the same thing every client application does.
+ * vam does not use these marks as its own brand and does not imply any
+ * endorsement.
  *
- * Two marks vam deliberately does NOT carry:
- *   - Orca's. Its repository is MIT, but MIT licenses Lovecast's CODE, not its
- *     logo, and a licence cannot pass on a brand its author does not own. The
- *     `orca` source gets the neutral glyph and its name in words.
- *   - vam's own sources (`factory`, `bundled-sample`). These are concepts,
+ * ── THE MARKS VAM DELIBERATELY DOES NOT CARRY ─────────────────────────────
+ *
+ *   - OPENAI'S, so the `codex` source draws a lucide glyph. This was looked
+ *     for and the answer is a fact rather than a shrug: Simple Icons REMOVED
+ *     the OpenAI icon in its 16.0.0 release (2025-11-30), PR 13944, closing
+ *     issue 12739. The maintainers' recorded reason is that the usage terms
+ *     at https://openai.com/brand/ grant a NON-TRANSFERABLE permission, so
+ *     they could not redistribute the mark under CC0. Lifting the path out of
+ *     the 15.x tag anyway would be redistributing exactly what its custodians
+ *     concluded they may not redistribute, in a public repository. Drawing a
+ *     four-petal flower that looks about right would be worse still: an
+ *     almost-correct logo is a wrong claim about a company, not a rough edge.
+ *     So `codex` takes the `native` register, which says "a CLI agent vam
+ *     reads" in vam's own iconography and claims nothing about OpenAI. If
+ *     permission is ever obtained, the fix is one row in `PROVIDER_MARKS`.
+ *   - ORCA'S. Its repository is MIT, but MIT licenses Lovecast's CODE, not
+ *     its logo, and a licence cannot pass on a brand its author does not own.
+ *     The `orca` source gets the neutral glyph and its name in words.
+ *   - VAM'S OWN SOURCES (`factory`, `bundled-sample`). These are concepts,
  *     not companies; they keep their lucide glyphs, which is the app's own
  *     visual language and the right register for them.
  *
- * The paths are drawn in `currentColor` with the brand fill stripped. Two
- * reasons, both binding: vam has a light and a dark theme, and a baked brand
- * colour is invisible in one of them; and a literal hex anywhere under `src/`
- * outside `styles.css` fails the standing colour constraint (13.1). A mark that
- * is a shape rather than a colour is also the one that survives being rendered
- * at eleven pixels in a status bar.
+ * ── COLOUR IS NEVER THE SIGNAL ────────────────────────────────────────────
+ *
+ * The paths are drawn in `currentColor` with the brand fill stripped. Three
+ * reasons, all binding: vam has a light and a dark theme, and a baked brand
+ * colour is invisible in one of them; a literal hex anywhere under `src/`
+ * outside `styles.css` fails the standing colour constraint (13.1); and hue
+ * is the channel that is missing for somebody (WCAG 1.4.1), which is the
+ * rule `status-mark.tsx` already lives by. Two sources must therefore be
+ * told apart by SHAPE -- a radial burst against a framed terminal -- and the
+ * ink they share is the row's own.
  */
 
+import { Box, Factory, FlaskConical, type LucideIcon, SquareTerminal } from 'lucide-react';
 import type { JSX } from 'react';
 
 /** Every mark renders at the caller's size; the viewBox does the scaling. */
@@ -87,3 +131,92 @@ export const PROVIDER_MARKS: Readonly<Record<string, ProviderMark>> = {
   ),
   opencode: markFrom('OpenCode', 'M22 24H2V0h20zM17 4.8H7v14.4h10z'),
 };
+
+/**
+ * THE `native` REGISTER: vam's own glyph for a source that gets no brand mark.
+ *
+ * Two different situations share one register, and the comment has to keep
+ * them apart because the next reader will otherwise "fix" one into the other:
+ *
+ *   `codex`   -- a real company's product, whose mark vam MAY NOT CARRY (the
+ *                header records the receipt: Simple Icons removed it, and
+ *                why). `SquareTerminal` is the honest thing left to say about
+ *                it, and it is not an approximation of anything OpenAI draws:
+ *                Codex reaches vam as a command-line agent read at arm's
+ *                length -- rollout files on disk and one write through
+ *                `codex queue` -- never a pane vam owns. A terminal inside a
+ *                frame is that sentence as a shape. The FRAME is load-bearing
+ *                rather than decoration: it gives the glyph a closed
+ *                silhouette, which is what holds up beside the Claude mark's
+ *                solid radial mass at eleven pixels; the bare `Terminal`
+ *                glyph is two thin strokes and would have read, down a column
+ *                of alternating rows, as "marked" against "nearly nothing".
+ *   `factory`,
+ *   `bundled-sample`
+ *             -- concepts rather than companies, which have no brand to
+ *                borrow and never wanted one.
+ *
+ * Moved here from `Canvas.tsx`, where it was module-private and therefore
+ * invisible to the sidebar. That is not tidying: the day the sidebar drew its
+ * own table, one source would have had two marks in one application.
+ */
+const NATIVE_GLYPHS: Readonly<Record<string, LucideIcon>> = {
+  codex: SquareTerminal,
+  factory: Factory,
+  'bundled-sample': FlaskConical,
+};
+
+/** Which of the three registers answered. Recorded in the DOM by every caller
+ *  (`data-source-mark`) so the fallback is an assertable outcome rather than
+ *  an invisible default. */
+export type MarkRegister = 'brand' | 'native' | 'neutral';
+
+/**
+ * The register for a source id, stated once for every surface that draws one.
+ *
+ * TOTAL over `string`, deliberately: `SourceId` is a free string that a source
+ * adapter mints (`domain/model.ts`), so "an id nobody here has drawn" is the
+ * normal case and not an error. It answers `neutral`.
+ */
+export function markRegisterOf(source: string): MarkRegister {
+  if (PROVIDER_MARKS[source] !== undefined) return 'brand';
+  if (NATIVE_GLYPHS[source] !== undefined) return 'native';
+  return 'neutral';
+}
+
+/**
+ * One source's mark, drawn -- the glyph alone, with no wrapper and no label.
+ *
+ * NO WRAPPER ON PURPOSE. The two callers need different boxes around the same
+ * ink: the status bar's is a focusable, labelled `role="img"` with a tooltip,
+ * because there it is ONE glyph standing for the one session the keyboard is
+ * on; the sidebar's is an `aria-hidden` lane repeated down every row, where
+ * the same label would be read aloud before every title. Sharing the wrapper
+ * would have forced one of those two to be wrong. What IS shared is the thing
+ * that must never differ: which glyph.
+ *
+ * `lane` IS THE BOX, NOT THE INK, and the two are not the same number for the
+ * two registers -- which is the `HEADING_GLYPH_PX` lesson in `SessionList.tsx`
+ * applied here rather than re-learnt: the eye reads the ink. A lucide glyph is
+ * drawn on a 24-unit viewBox with about two units of margin inside it, so it
+ * paints a little under its `size`; a Simple Icons path fills its 24 units
+ * edge to edge, so it paints its `size` exactly. Handed the same number the
+ * brand mark is the visibly bigger and heavier of the two. One pixel off the
+ * brand mark is what puts the two inks on the same footing, and
+ * `e2e/provider-mark-shots.mjs` measures the painted result rather than
+ * trusting this paragraph.
+ */
+export function SourceMark({
+  source,
+  lane = 12,
+}: {
+  readonly source: string;
+  readonly lane?: number;
+}): JSX.Element {
+  const mark = PROVIDER_MARKS[source];
+  if (mark !== undefined) {
+    return <mark.Glyph size={lane - 1} />;
+  }
+  const Glyph = NATIVE_GLYPHS[source] ?? Box;
+  return <Glyph size={lane} strokeWidth={1.6} aria-hidden="true" />;
+}

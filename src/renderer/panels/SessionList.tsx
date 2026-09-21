@@ -54,6 +54,7 @@ import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filte
 import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
+import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { IconMark, parseIcon } from './icon-value.js';
@@ -202,6 +203,39 @@ export const SIDEBAR_STEP = 10;
  */
 export const HEADING_SLOT_PX = 20;
 export const HEADING_GLYPH_PX = HEADING_SLOT_PX - 4;
+
+/**
+ * The lane the PROVIDER mark sits in, in px — which agent ran this session.
+ *
+ * TWELVE, and it is `MARK_LANE_PX` less two for a stated reason rather than
+ * for symmetry: the status mark is the louder of the pair and has to stay so.
+ * A status changes under the operator's eyes and is the thing they are
+ * scanning for; a provider is a constant property of the row that answers a
+ * question asked once. Drawn at the same size the two would compete, and the
+ * column would read as two status columns. Twelve is also `TAB_MARK_LANE_PX`
+ * in `Canvas.tsx`, which reaches the same number from the other end (a tab
+ * label's own 12px), so the app has one size for "a small mark beside a
+ * label" rather than three.
+ *
+ * WHAT IT COSTS THE TITLE, because space here is not free and the row already
+ * carries a status lane, a truncating title, and hover controls. The mark
+ * sits INSIDE the pair `gap-1.5` rather than as a third child of the row's
+ * `gap-2`, so the bill is one six-pixel gap plus this lane — 18px, measured
+ * in `e2e/provider-mark-shots.mjs` against the painted title box at
+ * `SIDEBAR_MIN`, not estimated here. At the 200px minimum that is about three
+ * characters of a title that was already truncating; at the 264px default it
+ * is the same 18px out of a wider box.
+ *
+ * IT IS NOT CONDITIONAL ON THE LIST HOLDING TWO SOURCES, which was the
+ * obvious way to make an operator with one source pay nothing — and is the
+ * shape of `CAN_CHOOSE_PROVIDER` in `shared/providers.ts`. It was rejected on
+ * the one thing that argument does not cover: the sidebar FILTERS. A filter
+ * that hid the last Codex row would take the mark off every Claude row with
+ * it, so every title in the column would jump 18px on a keystroke, and come
+ * back on the next. A lane that is sometimes there is worse than a lane that
+ * costs 18px, which is the whole of `status-mark.tsx`'s "THE LANE IS FIXED".
+ */
+export const PROVIDER_LANE_PX = MARK_LANE_PX - 2;
 
 /**
  * A branch name split so the END survives a narrow column.
@@ -2609,6 +2643,15 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       // source of truth -- there is no second pending state here.
                       const closing = pendingAction === session.id;
                       const closingLabel = `Stopping “${session.title}”…`;
+                      // WHICH SOURCE THIS ROW BELONGS TO, in the same order
+                      // the status bar's glyph reads it (`Canvas.tsx`,
+                      // `sourceKeyOf`): the session's own stamp first, its
+                      // project's second, because the two are written by
+                      // different readers and the narrower one is the one
+                      // about THIS row. `null` is an entry that names neither
+                      // -- a fixture, or a model assembled before sources
+                      // existed -- and it draws the lane with nothing in it.
+                      const rowSource = session.source ?? section.project.source ?? null;
 
                       return (
                         <div key={session.id}>
@@ -2754,7 +2797,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 )}
 
                                 <span className="flex items-center gap-2">
-                                  {/* A MARK, not a dot. Five statuses drawn as
+                                  {/* THE TWO MARKS, PAIRED. `gap-1.5` between
+                                    them and the row's own `gap-2` after, so
+                                    they read as two marks about this row
+                                    rather than as one smear or as two
+                                    separate columns -- and so the whole
+                                    ornament costs the title one gap, not two.
+                                    What each says is different in kind: the
+                                    status changes under the operator's eyes,
+                                    the provider never changes at all. */}
+                                  <span className="flex flex-none items-center gap-1.5">
+                                    {/* A MARK, not a dot. Five statuses drawn as
                                     five circles differing only in hue is the
                                     reading the operator called samey -- and
                                     hue is the one channel that is missing for
@@ -2771,16 +2824,66 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                     prints the status as visible text there,
                                     and a second invisible copy is read
                                     twice. */}
-                                  <StatusMark status={session.status} announce={!phone} />
-                                  {/* No session icon here. The row drew one --
-                                    the shared chain, always occupying its slot
-                                    -- and the operator removed it: an icon per
-                                    project heading groups the list, and a
-                                    second one on every row under it repeated
-                                    the same mark down a narrow column and took
-                                    width from the title. The tab strip is
-                                    now the only surface that draws it, and
-                                    the `s` chord still picks it. */}
+                                    <StatusMark status={session.status} announce={!phone} />
+                                    {/* WHICH AGENT RAN THIS. The operator's
+                                    words, once vam had a second source: "there
+                                    needs to be an icon before each session to
+                                    tell the providers apart in the sidebar."
+                                    Nothing else on the row answers it -- two
+                                    checkouts of one directory read by two
+                                    sources are two project headings with the
+                                    same basename on them.
+
+                                    NOT THE SESSION ICON COMING BACK. That one
+                                    (removed just above, and pinned by
+                                    `SessionList.icon.test.tsx`) repeated the
+                                    project heading's own mark down the column
+                                    and said nothing new. This says a thing no
+                                    other part of the row says.
+
+                                    DECORATIVE, and that is a decision rather
+                                    than an omission. Every row under one
+                                    heading has the same source, so an
+                                    announced mark would read the provider
+                                    aloud before each of a project's twelve
+                                    titles -- the ornament with the highest
+                                    cost and the least to say, which is the
+                                    argument the tab strip's own status mark
+                                    already makes for itself. The fact is not
+                                    lost to a screen reader: the status bar's
+                                    `SourceGlyph` names the FOCUSED session's
+                                    source, once, in a labelled `role="img"`
+                                    that takes a tab stop and carries a
+                                    tooltip.
+
+                                    THE LANE IS DRAWN EVEN WHEN EMPTY, on
+                                    `status-mark.tsx`'s rule: a lane that
+                                    collapses to its content moves the title
+                                    of every row beside it. A model that names
+                                    no source at all -- possible, the field is
+                                    optional -- pays the width and draws
+                                    nothing in it rather than claiming a
+                                    provider vam cannot name. */}
+                                    <span
+                                      data-row-source={rowSource ?? ''}
+                                      {...(rowSource === null
+                                        ? {}
+                                        : { 'data-source-mark': markRegisterOf(rowSource) })}
+                                      aria-hidden="true"
+                                      /* An inline style, not `w-[12px]`:
+                                       Tailwind's scanner reads source text, so
+                                       a class assembled from a constant is one
+                                       it never generates and the lane would
+                                       collapse -- the trap `StatusMark` and
+                                       `BRANCH_TAIL_MAX_CHARS` both record. */
+                                      style={{ width: PROVIDER_LANE_PX, height: PROVIDER_LANE_PX }}
+                                      className="flex flex-none items-center justify-center text-ink-faint"
+                                    >
+                                      {rowSource !== null && (
+                                        <SourceMark source={rowSource} lane={PROVIDER_LANE_PX} />
+                                      )}
+                                    </span>
+                                  </span>
                                   <span
                                     data-row-title
                                     className={[
