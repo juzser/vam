@@ -168,10 +168,11 @@ export function applePlatform(): boolean {
  *   Alt-<digit>        bound to nothing, since the view row left it
  *
  * `Mod-` KEEPS ITS SPELLING, deliberately. `Mod-0`..`Mod-9` and `Mod-[` are
- * written into README rows, into `panels/files-tree.ts`'s key lists and into
- * `DetailPanel`'s own `onKeyDown`, and none of those readers has any business
- * learning a new token because one row's MEANING narrowed. What changed here
- * is which physical key produces it, not what the string is called.
+ * written into `docs/keyboard.md` rows, into `panels/files-tree.ts`'s key
+ * lists and into `DetailPanel`'s own `onKeyDown`, and none of those readers
+ * has any business learning a new token because one row's MEANING narrowed.
+ * What changed here is which physical key produces it, not what the string
+ * is called.
  *
  * ONE RULE, COVERING EVERY PLATFORM vam SHIPS (`electron-builder.config.cjs`
  * builds dmg/zip, AppImage and nsis/zip): CONTROL SPELLS `Ctrl-` WHEN IT IS
@@ -204,8 +205,8 @@ export function applePlatform(): boolean {
  * THE BRACKET PAIR IS NOT HERE, AND STAYS FOLDED. It sits in `POSITION_CODES`
  * for the same reason the digits do — a modifier changes the character it
  * produces — but Ctrl and Cmd still mean one intent on it, and `Ctrl-[` is
- * vim's own way out of insert mode, promised by name in the README and
- * answered by `DetailPanel` and `FilesTab`. The fold is lifted exactly where
+ * vim's own way out of insert mode, promised by name in `docs/keyboard.md`
+ * and answered by `DetailPanel` and `FilesTab`. The fold is lifted exactly where
  * the two modifiers stopped agreeing, and nowhere else.
  */
 /**
@@ -283,7 +284,7 @@ function digitChord(event: KeyEventLike, position: string, mac: boolean): string
  *   transcript rather than commands.
  *
  * WHAT IS STILL FOLDED IS THE BRACKET PAIR, and only it: `Ctrl-[` is vim's own
- * way out of insert mode, the README promises it by name, and the bracket
+ * way out of insert mode, `docs/keyboard.md` promises it by name, and the bracket
  * chords mean one intent under either modifier. So `Mod-[`, `Mod-Shift-[` and
  * `Mod-Alt-[` answer Ctrl and Cmd alike, everywhere.
  *
@@ -921,7 +922,7 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // either Ctrl or Cmd, on every platform, because the operator separated the
   // two modifiers on the DIGITS and nowhere else. `digitChord` argues where
   // that line falls; the short of it is that `Ctrl-[` is vim's own way out of
-  // insert mode and the README promises it by name.
+  // insert mode and `docs/keyboard.md` promises it by name.
   'Mod-Alt-[': { kind: 'stepSplit', delta: -1 },
   'Mod-Alt-]': { kind: 'stepSplit', delta: 1 },
   // The response pane's four views, by name. The same digit row under a

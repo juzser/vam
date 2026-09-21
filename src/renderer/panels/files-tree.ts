@@ -176,9 +176,9 @@ function firstChildRowIndex(rows: readonly FileTreeRow[], index: number): number
  * `FilesTab.tsx`'s own editor handler each answer a key only if it is in
  * theirs, so a key removed from a list stops working and a key added to one
  * without a branch does nothing. That is what makes
- * `test/keyboard/files-tab.readme.test.ts` mean something when it holds them
- * against the README's own table, the same bargain `chords.ts` and
- * `test/keyboard/chords.readme.test.ts` already have for the app-wide
+ * `test/keyboard/files-tab.keyboard-doc.test.ts` mean something when it holds
+ * them against `docs/keyboard.md`'s own table, the same bargain `chords.ts`
+ * and `test/keyboard/chords.keyboard-doc.test.ts` already have for the app-wide
  * grammar: an undocumented binding is a bug in this repo, and `Mod-s` was one
  * for a whole release because nothing checked.
  *
@@ -291,7 +291,7 @@ export function resolveTreeKey({
   readonly expanded: ReadonlySet<string>;
 }): TreeKeyStep {
   // NOT OURS, AND SAID FIRST. `TREE_KEYS` is the list, and it is the same
-  // list the README's table is held against.
+  // list `docs/keyboard.md`'s table is held against.
   if (!TREE_KEYS.includes(key)) return null;
 
   // THE THREE WAYS OUT COME NEXT, and are answered whether or not there is a

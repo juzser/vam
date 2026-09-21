@@ -335,8 +335,8 @@ export function PairingPanel(props: PairingPanelProps) {
         </p>
       </div>
 
-      {/* THE SEQUENCE, ON THE SCREEN WHERE IT HAPPENS. The README explains all
-          of this; what it cannot do is be in front of somebody standing there
+      {/* THE SEQUENCE, ON THE SCREEN WHERE IT HAPPENS. The docs explain all
+          of this; what they cannot do is be in front of somebody standing there
           with a phone in one hand. Five steps, in order, and the three vam can
           SEE the state of say so.
           

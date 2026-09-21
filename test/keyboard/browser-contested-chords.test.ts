@@ -13,7 +13,7 @@
  * it only about Electron: "vam owns its application menu since then and that
  * menu has no `viewMenu` at all, so nothing native answers the key". True, and
  * about one deployment. In a browser tab `Cmd/Ctrl+0` is zoom reset, and the
- * README promises `H` / `Mod-0` unconditionally.
+ * keyboard reference promised `H` / `Mod-0` unconditionally.
  *
  * ── WHAT THIS FILE IS, AND WHAT IT IS HONESTLY NOT ────────────────────────
  * The left-hand side is MEASURED: `BINDING_TABLES` is vam's own grammar and
@@ -99,14 +99,19 @@ function boundModChords(): string[] {
   return [...found].sort();
 }
 
-const README = readFileSync(resolve(process.cwd(), 'README.md'), 'utf8');
+/**
+ * THE CAVEAT MOVED WITH THE REFERENCE. It lived in `README.md` until the
+ * README was cut to ~150 lines; `docs/keyboard.md` is the whole keyboard
+ * reference now, this section included, and only the file read here changed.
+ */
+const KEYBOARD_DOC = readFileSync(resolve(process.cwd(), 'docs/keyboard.md'), 'utf8');
 
-/** The section the README keeps this in, read as data rather than trusted as
+/** The section the doc keeps this in, read as data rather than trusted as
  *  prose: the heading, then everything up to the next heading. */
-function readmeSection(heading: string): string {
-  const at = README.indexOf(heading);
-  if (at === -1) throw new Error(`README has no "${heading}" section`);
-  const rest = README.slice(at + heading.length);
+function docSection(heading: string): string {
+  const at = KEYBOARD_DOC.indexOf(heading);
+  if (at === -1) throw new Error(`docs/keyboard.md has no "${heading}" section`);
+  const rest = KEYBOARD_DOC.slice(at + heading.length);
   const end = rest.search(/\n#{1,6} /);
   return end === -1 ? rest : rest.slice(0, end);
 }
@@ -144,16 +149,16 @@ describe('the chords a browser also wants', () => {
     ]);
   });
 
-  it('names every one of them in the README, and names no chord it does not bind', () => {
-    // THE CLAIM AND THE CODE, HELD TOGETHER. The README is where an operator
-    // is told what a key does, and until now it promised all fifteen of these
-    // with no mention that one of vam's two deployments has to share them. The
-    // section is parsed rather than eyeballed, BOTH WAYS: a chord that joins
-    // the list above and is not documented reddens, and a chord documented
-    // here that vam does not actually bind reddens too -- the second is how a
-    // caveat outlives the binding it was written for, which is the same defect
-    // as a hint that outlives its behaviour.
-    const section = readmeSection('#### In a browser tab');
+  it('names every one of them in the doc, and names no chord it does not bind', () => {
+    // THE CLAIM AND THE CODE, HELD TOGETHER. `docs/keyboard.md` is where an
+    // operator is told what a key does, and the reference once promised all
+    // fifteen of these with no mention that one of vam's two deployments has
+    // to share them. The section is parsed rather than eyeballed, BOTH WAYS: a
+    // chord that joins the list above and is not documented reddens, and a
+    // chord documented here that vam does not actually bind reddens too -- the
+    // second is how a caveat outlives the binding it was written for, which is
+    // the same defect as a hint that outlives its behaviour.
+    const section = docSection('## In a browser tab');
     const named = [...section.matchAll(/`(Mod-[A-Za-z0-9[\]-]*)`/g)].map((m) => m[1] as string);
     const reserved = boundModChords().filter((key) => CONTESTED[key] === 'reserved');
     expect([...new Set(named)].sort()).toEqual(reserved);
@@ -163,7 +168,7 @@ describe('the chords a browser also wants', () => {
     // A caveat that did not name Electron would read as "these keys are
     // unreliable", and they are not: vam owns that menu and removed the four
     // items that used to claim them.
-    const section = readmeSection('#### In a browser tab');
+    const section = docSection('## In a browser tab');
     expect(section).toMatch(/Electron|desktop app/);
   });
 });
