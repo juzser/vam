@@ -16,9 +16,14 @@
  *  - the focused tab wears a different opacity AND an accent border-bottom,
  *    with the inactive tabs' text held above 4.5:1 while dimmed;
  *  - the `+` sits next to the last tab rather than at the far right;
- *  - a resting tab draws NO mark and a busy one draws the sidebar's own glyph
- *    (sections 8-10): the status dot every tab wore is gone, the row is still
- *    36px, and an unsent draft puts a named pencil after the title.
+ *  - a resting tab draws NO status mark and a busy one draws the sidebar's own
+ *    glyph (sections 8-10): the status dot every tab wore is gone, the row is
+ *    still 36px, and an unsent draft puts a named pencil after the title;
+ *  - every tab carries its PROVIDER glyph between that mark and the title,
+ *    and no tab carries a session icon any more ("put the provider glyph
+ *    after the indicator, on the tab name. Remove the session icon from the
+ *    tab"). Both halves are measured, because a guard that only looked for
+ *    the new glyph would stay green with the old one still beside it.
  *
  * WHY A REAL BROWSER: `opacity`, `pointer-events`, `:focus-visible` and a
  * computed contrast ratio are all resolved styles over Tailwind utilities
@@ -417,8 +422,15 @@ await narrow.mouse.move(stripBox.x + stripBox.width / 2, stripBox.y + 300);
 await narrow.waitForTimeout(150);
 /**
  * Every tab as the browser paints it, for whichever project is active: its
- * status (off the tab itself now, not off a dot), its box, and every
- * `data-tab-mark` it draws with the glyph's painted ink.
+ * status (off the tab itself now, not off a dot), its box, every
+ * `data-tab-mark` it draws with the glyph's painted ink, and the PROVIDER
+ * glyph that now stands between the mark and the title.
+ *
+ * The provider is read separately from `marks` rather than folded into them
+ * because it is not an indicator and must not be counted as one: the status
+ * checks below ask "exactly one status mark" and "the idle tab draws none",
+ * and a provider wearing a `data-tab-mark` would have quietly joined those
+ * sums. Same fields, so `checkStatusMark`'s measurements can be reused on it.
  */
 const readTabs = () =>
   narrow.evaluate(() => {
@@ -434,8 +446,7 @@ const readTabs = () =>
       );
       const select = tab.querySelector('[data-tab-select]');
       const title = select.getBoundingClientRect();
-      const marks = [...tab.querySelectorAll('[data-tab-mark]')].map((mark) => {
-        const id = mark.getAttribute('data-tab-mark');
+      const read = (mark, id) => {
         const b = mark.getBoundingClientRect();
         // The glyph whose ink is painted: for the spinner that is the
         // turning body, not the ring `prefers-reduced-motion` would swap in.
@@ -457,7 +468,21 @@ const readTabs = () =>
           ariaHidden: mark.getAttribute('aria-hidden'),
           name: mark.getAttribute('aria-label'),
         };
-      });
+      };
+      const marks = [...tab.querySelectorAll('[data-tab-mark]')].map((mark) =>
+        read(mark, mark.getAttribute('data-tab-mark')),
+      );
+      const providerEl = tab.querySelector('[data-tab-source]');
+      const provider =
+        providerEl === null
+          ? null
+          : {
+              ...read(providerEl, providerEl.getAttribute('data-tab-source')),
+              register: providerEl.getAttribute('data-source-mark'),
+              // Inside the select button the glyph would go into a long
+              // title's ellipsis; a sibling cannot.
+              insideTitle: select.contains(providerEl),
+            };
       return {
         title: tab.querySelector('[data-tab-select]').textContent.trim(),
         active: tab.getAttribute('data-active') === 'true',
@@ -474,11 +499,19 @@ const readTabs = () =>
         // plus whatever is drawn before it. A reserved empty lane would show
         // up here as an idle tab with the same offset as a marked one.
         titleOffset: title.left - r.left,
-        // Is the title the FIRST thing in the tab? On a resting tab it must
-        // be: a dot put back, a lane reserved, anything at all before the
-        // title is the clutter the operator asked to be rid of.
-        firstIsTitle: tab.firstElementChild === select,
+        // What the tab OPENS with. A resting tab may open with its provider
+        // glyph -- a constant of the tab, which the operator asked to be
+        // there -- and with nothing else: a status dot put back, or a lane
+        // reserved for a mark it is not wearing, is the clutter they asked to
+        // be rid of, and both would show up here.
+        opensWith:
+          tab.firstElementChild === select
+            ? 'title'
+            : tab.firstElementChild?.hasAttribute('data-tab-source') === true
+              ? 'provider'
+              : (tab.firstElementChild?.getAttribute('data-tab-mark') ?? 'something else'),
         marks,
+        provider,
       };
     });
   });
@@ -544,8 +577,89 @@ function checkStatusMark(tab, expectGlyph) {
   }
 }
 
+/**
+ * WHICH AGENT RAN THIS TAB, measured where the session icon used to be.
+ *
+ * The operator asked for two things in one sentence -- "put the provider
+ * glyph after the indicator, on the tab name. Remove the session icon from
+ * the tab" -- and both halves are here, because a guard that only found the
+ * new glyph would stay green with the old one still drawn beside it.
+ *
+ * "AFTER THE INDICATOR" AND "ON THE TAB NAME" ARE RECTANGLES. DOM order is a
+ * proxy -- `order-last` moves a flex item and leaves the markup alone, which
+ * is how the sidebar's own unit test was falsified once -- so the glyph's box
+ * is compared with the status mark's and the title's. And it must be OUTSIDE
+ * the title button: inside, a long title's `truncate` takes it into the
+ * ellipsis, on exactly the tabs whose names are hardest to tell apart.
+ */
+function checkProvider(tab) {
+  if (tab.provider === null) {
+    throw new Error(
+      `the ${tab.status} tab "${tab.title}" draws no provider glyph, on a fixture whose every ` +
+        'project names a source',
+    );
+  }
+  const mark = tab.provider;
+  if (mark.insideTitle) {
+    throw new Error('the provider glyph is inside the title button, where a long title clips it');
+  }
+  if (mark.fromTitle >= 0) {
+    throw new Error(`the provider glyph sits after the title (${mark.fromTitle}px), not before it`);
+  }
+  const status = tab.marks.find((m) => m.status);
+  if (status !== undefined && mark.fromTitle <= status.fromTitle) {
+    throw new Error(
+      'the provider glyph is drawn before the status mark, not after it: the operator asked for ' +
+        `it "after the indicator" (provider ${mark.fromTitle}px from the title, status ${status.fromTitle})`,
+    );
+  }
+  // THE LANE LESS ONE, for a brand mark, and that is `SourceMark`'s own
+  // deliberate pixel: a Simple Icons path fills its 24-unit viewBox edge to
+  // edge while a lucide glyph keeps about two units of margin inside its own,
+  // so handed the same number the brand mark is the visibly heavier of the
+  // two. Measured on this strip: 12x12 for `factory`'s lucide glyph, 11x11
+  // for `claude-code`'s brand path. A floor of `LANE_PX` exactly would have
+  // failed the register the operator actually uses most.
+  if (mark.width < LANE_PX - 1.5 || mark.height > tab.lineHeight + 0.5) {
+    throw new Error(
+      `a ${mark.width}x${mark.height} provider glyph against a ${LANE_PX}px lane on a ` +
+        `${tab.lineHeight}px line -- it is not sized for the tab`,
+    );
+  }
+  if (mark.ariaHidden !== 'true' || mark.name !== null) {
+    throw new Error(
+      'the provider glyph is announced: one per tab reads the source aloud before every title',
+    );
+  }
+  if (!['brand', 'native', 'neutral'].includes(mark.register)) {
+    throw new Error(`the provider glyph records no register (data-source-mark=${mark.register})`);
+  }
+  if (mark.ink === null) throw new Error('the provider glyph has no painted svg to measure');
+  const ratio = markContrast(mark, tab);
+  console.log(
+    `${tab.active ? 'active' : 'dimmed'} provider: ${mark.id} (${mark.register}), ` +
+      `${mark.width}x${mark.height}, contrast ${ratio.toFixed(2)}:1 at opacity ${tab.opacity}`,
+  );
+  if (ratio < 3) {
+    throw new Error(
+      `the provider glyph lands at ${ratio.toFixed(2)}:1 against the strip once dimmed, under the ` +
+        '3:1 floor for a non-text indicator',
+    );
+  }
+}
+
+/** AND THE SESSION ICON IS GONE, from every tab of every project on screen.
+ *  The fixture seeds emoji icons on five of its sessions, so this is a corpus
+ *  and not an empty sweep -- `tree-icon-shots.mjs` names them. */
+async function checkNoSessionIcon(on) {
+  const drawn = await on.evaluate(() => document.querySelectorAll('[data-session-icon]').length);
+  if (drawn > 0) {
+    throw new Error(`${drawn} tab(s) still draw a session icon the operator removed`);
+  }
+}
+
 const busy = await readTabs();
-console.log('the factory strip:', JSON.stringify(busy.map((t) => ({ title: t.title, status: t.status, active: t.active, marks: t.marks.map((m) => m.id) }))));
+console.log('the factory strip:', JSON.stringify(busy.map((t) => ({ title: t.title, status: t.status, active: t.active, marks: t.marks.map((m) => m.id), provider: t.provider?.id ?? null }))));
 if (busy.length < 2) throw new Error('need more than one tab to prove the inactive ones are marked');
 if (busy.some((t) => t.status === null)) {
   throw new Error('a tab reports no status — `data-tab-status` has to live on the tab now that idle draws nothing');
@@ -578,7 +692,9 @@ for (const tab of busy) {
   if (tab.rowHeight !== ROW_HEIGHT_PX) {
     throw new Error(`the strip's row is ${tab.rowHeight}px, not the ${ROW_HEIGHT_PX} it was before the dot went`);
   }
+  checkProvider(tab);
 }
+await checkNoSessionIcon(narrow);
 console.log(`the strip's row is ${busy[0].rowHeight}px; tabs are ${[...new Set(busy.map((t) => t.height))].join('/')}px`);
 await narrow.screenshot({ path: `${outDir}/tab-strip-status-marks.png` });
 console.log(`${outDir}/tab-strip-status-marks.png`);
@@ -627,20 +743,38 @@ if (idleStatusMarks.length !== 0) {
 if (idleTab.marks.some((m) => m.id === 'draft')) {
   throw new Error('the idle tab shows a draft pencil before anything was typed into it');
 }
-if (!idleTab.firstIsTitle) {
+if (idleTab.opensWith !== 'provider' && idleTab.opensWith !== 'title') {
   throw new Error(
-    'something is drawn before the idle tab\'s title — a dot put back, or a lane kept for a mark ' +
+    `the idle tab opens with ${idleTab.opensWith} — a dot put back, or a lane kept for a mark ` +
       'it is not wearing',
+  );
+}
+// And the provider IS what it opens with on this strip, rather than the
+// weaker "one of the two allowed things". `notes` is a `claude-code` project
+// in the demo fixture, so a tab here without a provider glyph is the glyph
+// having gone missing, not a sourceless model.
+if (idleTab.opensWith !== 'provider') {
+  throw new Error(
+    'the idle tab of a project that HAS a source does not open with its provider glyph',
   );
 }
 checkStatusMark(quietWaiting, 'lucide-bell');
 checkStatusMark(quietFailed, 'lucide-triangle-alert');
 checkStatusMark(quietRunning, 'lucide-loader-circle');
-// The icon is INSIDE the title button, so it is not part of this offset:
-// what stands between a tab's left edge and its title is the padding, and
-// the status lane with its gap when there is one. Measured: 10px on the
-// idle tab, 28 on the marked ones -- the lane (12) and the strip's `gap-1.5`
-// (6) on top of `px-2.5`.
+// The provider on THIS strip too, the resting tab included: a glyph that only
+// appeared beside a status mark would be a glyph most of a working day's tabs
+// never draw.
+for (const tab of quiet) checkProvider(tab);
+await checkNoSessionIcon(narrow);
+// Both tabs carry the provider glyph, so it cancels out of this difference:
+// what stands between a tab's left edge and its title is the padding, the
+// provider lane with its gap, and the status lane with ITS gap when there is
+// one. Measured on this strip: 27px on the idle tab, 45 on the marked ones --
+// `px-2.5` (10), the provider glyph (11 here, a brand path drawn one pixel
+// inside its 12px lane) and the strip's `gap-1.5` (6), plus the status lane
+// (12) and a second gap where a mark is drawn. (The session icon used to ride
+// INSIDE the title button and was never part of this offset at all; the
+// provider glyph that replaced it is a sibling and is.)
 console.log(
   `title offsets: idle ${idleTab.titleOffset.toFixed(1)}px, running ${quietRunning.titleOffset.toFixed(1)}px, ` +
     `waiting ${quietWaiting.titleOffset.toFixed(1)}px`,
@@ -729,13 +863,21 @@ const shot = await wide.evaluate(() => {
   const tabs = [...document.querySelectorAll('[data-session-tab]')].map((t) => ({
     status: t.getAttribute('data-tab-status'),
     marks: [...t.querySelectorAll('[data-tab-mark]')].map((m) => m.getAttribute('data-tab-mark')),
+    provider: t.querySelector('[data-tab-source]')?.getAttribute('data-tab-source') ?? null,
   }));
   return { x: row.x, y: row.y, width: plus.right - row.x + 8, height: row.height, tabs };
 });
 console.log('the documented strip:', JSON.stringify(shot.tabs));
-if (!shot.tabs.some((t) => t.status === 'idle' && !t.marks.some((m) => m !== 'icon')) ||
+// A BARE idle tab is one with no indicator at all now: the `icon` this used to
+// forgive is off the list, so forgiving it would be forgiving something that
+// can no longer be drawn. The provider glyph is not an indicator and is
+// expected on every tab, which is asserted separately below.
+if (!shot.tabs.some((t) => t.status === 'idle' && t.marks.length === 0) ||
     !shot.tabs.some((t) => t.marks.includes('draft'))) {
   throw new Error('the documentation shot does not hold a bare idle tab and a drafted one');
+}
+if (!shot.tabs.every((t) => t.provider !== null)) {
+  throw new Error('the documentation shot has a tab with no provider glyph on it');
 }
 await wide.screenshot({
   path: `${outDir}/tab-indicators.png`,
