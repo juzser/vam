@@ -197,6 +197,104 @@ describe('an unconfirmed banner is still closable', () => {
   });
 });
 
+describe('the test banner: the same path, with the verdict handed back', () => {
+  /**
+   * The settings button (`src/renderer/settings/NotifyTest.tsx`) needs the
+   * verdict INLINE, which `show` does not return -- a real banner's verdict is
+   * for the error log. So `test()` goes through the same `raise` and resolves
+   * with what the OS said, while the log still gets exactly what a real
+   * banner's failure would have written.
+   */
+  it('creates one banner titled vam whose body says it is a test, through `create`', async () => {
+    const { notifier, created } = harness();
+    const verdict = notifier.test();
+    expect(created).toHaveLength(1);
+    expect(created[0]?.options.title).toBe('vam');
+    expect(created[0]?.options.body.toLowerCase()).toContain('test');
+    expect(created[0]?.notification.shown).toBe(1);
+    created[0]?.notification.emit('show');
+    expect(await verdict).toEqual({ kind: 'sent' });
+    expect(mainFailures()).toEqual([]);
+  });
+
+  it('resolves `failed` with the OS text verbatim AND records it like a real banner', async () => {
+    const { notifier, created } = harness();
+    const verdict = notifier.test();
+    created[0]?.notification.emit(
+      'failed',
+      {},
+      'Notifications are not allowed for this application',
+    );
+    expect(await verdict).toEqual({
+      kind: 'failed',
+      reason: 'Notifications are not allowed for this application',
+    });
+    // The instrument is not bypassed: the log line is the one a real banner
+    // would have produced, field for field.
+    const [failure] = mainFailures();
+    expect(failure?.action).toBe('show a notification');
+    expect(failure?.code).toBe('notification-failed');
+    expect(failure?.message).toBe('Notifications are not allowed for this application');
+  });
+
+  it('writes the SAME log line a real banner’s failure writes, field for field', async () => {
+    // The instrument is what the button exists to exercise. A real `show`
+    // and a `test` that both meet the same `failed` must leave records that
+    // differ only in the id and the clock.
+    const { notifier, created } = harness();
+    notifier.show({ ...target, title: 'a', body: 'b' });
+    created[0]?.notification.emit('failed', {}, 'UNErrorDomain error 1');
+    const verdict = notifier.test();
+    created[1]?.notification.emit('failed', {}, 'UNErrorDomain error 1');
+    await verdict;
+    const [real, test] = mainFailures();
+    expect(test).toBeDefined();
+    const { id: _a, at: _b, ...realFields } = real ?? { id: 0, at: '' };
+    const { id: _c, at: _d, ...testFields } = test ?? { id: 0, at: '' };
+    expect(testFields).toEqual(realFields);
+  });
+
+  it('resolves `unconfirmed` when the OS says neither in time, and records that too', async () => {
+    const { notifier } = harness();
+    const verdict = notifier.test();
+    vi.advanceTimersByTime(NOTIFY_VERDICT_TIMEOUT_MS + 1);
+    expect(await verdict).toEqual({ kind: 'unconfirmed' });
+    expect(mainFailures()[0]?.code).toBe('notification-unconfirmed');
+  });
+
+  it('resolves `failed` when the constructor throws, with the throw’s text', async () => {
+    const notifier = createNotifier({
+      create: () => {
+        throw new Error('no notification centre here');
+      },
+      onActivate: () => {},
+    });
+    expect(await notifier.test()).toEqual({
+      kind: 'failed',
+      reason: 'no notification centre here',
+    });
+    expect(mainFailures()[0]?.code).toBe('notification-failed');
+  });
+
+  it('resolves exactly once: a `failed` after a `show` changes nothing', async () => {
+    const { notifier, created } = harness();
+    const verdict = notifier.test();
+    created[0]?.notification.emit('show');
+    created[0]?.notification.emit('failed', {}, 'late');
+    expect(await verdict).toEqual({ kind: 'sent' });
+  });
+
+  it('a second test while the first is pending settles the first as unconfirmed', async () => {
+    const { notifier, created } = harness();
+    const first = notifier.test();
+    const second = notifier.test();
+    expect(created[0]?.notification.closed).toBe(1);
+    expect(await first).toEqual({ kind: 'unconfirmed' });
+    created[1]?.notification.emit('show');
+    expect(await second).toEqual({ kind: 'sent' });
+  });
+});
+
 describe('truncateBody', () => {
   it('leaves a short body alone', () => {
     expect(truncateBody('needs you — vam')).toBe('needs you — vam');

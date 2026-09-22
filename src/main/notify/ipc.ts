@@ -12,6 +12,7 @@
  * handler needs THIS window's `webContents` to push `notifyActivated` to.
  */
 
+import type { NotifyVerdict } from '../../shared/notify.js';
 import type { IpcMainLike, WebContentsLike } from '../errors/ipc.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { Notifier, NotifyRequest, NotifyTarget } from './notify.js';
@@ -76,5 +77,12 @@ export function registerNotifyIpc(ipcMain: IpcMainLike, notifier: Notifier): voi
     const [target] = args;
     if (args.length !== 1 || !isTarget(target)) return;
     notifier.close({ sourceId: target.sourceId, sessionId: target.sessionId });
+  });
+  // The settings button. Nothing is read from the renderer -- title and body
+  // are main's -- and an argument anyway is refused with the verdict a banner
+  // that was never raised deserves, rather than reaching the OS.
+  ipcMain.handle(CHANNELS.notifyTest, (_event, ...args: unknown[]): Promise<NotifyVerdict> => {
+    if (args.length !== 0) return Promise.resolve({ kind: 'unconfirmed' });
+    return notifier.test();
   });
 }

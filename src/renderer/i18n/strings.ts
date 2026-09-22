@@ -226,13 +226,31 @@ const EN = {
   // hint names the one status it is about in the application's own phrase
   // for it ("needs you", the sidebar's word for `waiting`). The note is a
   // disclosure and keeps its three facts (`SettingsOverlay.tsx` says which).
-  'settings.behaviour.notifyWaiting.label': 'desktop notifications',
-  'settings.behaviour.notifyWaiting.hint':
+  // THE NOTIFICATIONS SECTION. The switch's five strings moved here from
+  // `settings.behaviour.*` with the row (the key names the screen a string is
+  // read on, which is the one thing the naming scheme is for); the words are
+  // unchanged. The rest is the Test notification button: one hint, and one
+  // sentence per verdict main can answer (`src/shared/notify.ts`). `failed`
+  // prints the OS's text VERBATIM after the colon -- it is the diagnosis.
+  'settings.notifications.hint':
+    'a system notification when a session starts needing you — and a way to check one gets through',
+  'settings.notifications.waiting.label': 'desktop notifications',
+  'settings.notifications.waiting.hint':
     'a system notification when a session starts needing you; click it to go there',
-  'settings.behaviour.notifyWaiting.on': 'on',
-  'settings.behaviour.notifyWaiting.off': 'off',
-  'settings.behaviour.notifyWaiting.note':
+  'settings.notifications.waiting.on': 'on',
+  'settings.notifications.waiting.off': 'off',
+  'settings.notifications.waiting.note':
     'this device only. Nothing is raised for the session you are looking at. If macOS refuses to show one, the reason is in the error log (E), verbatim.',
+  'settings.notifications.test.label': 'delivery check',
+  'settings.notifications.test.hint': 'raises one now and says here what the OS did with it',
+  'settings.notifications.test.button': 'test notification',
+  'settings.notifications.test.pending': 'waiting for the OS…',
+  'settings.notifications.test.sent':
+    'sent. If nothing appeared, look in System Settings → Notifications → vam.',
+  'settings.notifications.test.failed': 'the OS refused it: {reason}',
+  'settings.notifications.test.unconfirmed':
+    'the OS answered neither way in 10 s — vam cannot tell whether it appeared.',
+  'settings.notifications.test.browser': 'only the desktop app can send one',
   'settings.behaviour.editorIndent.label': 'file editor indent',
   // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
   // the text, so the caption says it rather than leaving "indent" to be read

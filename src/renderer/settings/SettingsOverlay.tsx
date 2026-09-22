@@ -92,6 +92,7 @@ import {
   terminalThemesFor,
 } from '../prefs/terminal-scheme.js';
 import type { SourceDeclines } from '../sources/port.js';
+import { desktopNotifyApi, NotifyTest } from './NotifyTest.js';
 import { RemoteLimits } from './RemoteLimits.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
@@ -1030,39 +1031,6 @@ export function SettingsOverlay({
                 </p>
               </Block>
 
-              {/* DESKTOP NOTIFICATIONS -- a thing vam DOES, so it is here and
-                  not in Appearance (`sections.ts`'s rule). ONE SWITCH, and the
-                  list of what it deliberately is not lives with the default
-                  (`prefs/notify.ts`): no per-session mute, no per-status pick,
-                  no sound, no quiet hours -- the OS owns the last two.
-
-                  THE NOTE CARRIES THREE FACTS the operator cannot guess. That
-                  the switch is per device (prefs are this browser's storage,
-                  so a phone with the page open has its own -- and both notify
-                  if both are on). That it is quiet for the session they are
-                  looking at, which is the difference between a feature and a
-                  nuisance. And WHERE TO READ WHY A BANNER DID NOT COME: main
-                  writes the OS's refusal into the error log verbatim
-                  (`main/notify/notify.ts`), so "nothing happened" is never
-                  the whole story. */}
-              <Block
-                name="notify-waiting"
-                label={t('settings.behaviour.notifyWaiting.label')}
-                hint={t('settings.behaviour.notifyWaiting.hint')}
-              >
-                <Switch
-                  name="notify-waiting"
-                  label={t('settings.behaviour.notifyWaiting.label')}
-                  checked={prefs.notifyWaiting}
-                  onChange={(next) => onChange(setNotifyWaiting(prefs, next))}
-                  on={t('settings.behaviour.notifyWaiting.on')}
-                  off={t('settings.behaviour.notifyWaiting.off')}
-                />
-                <p data-notify-waiting-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                  {t('settings.behaviour.notifyWaiting.note')}
-                </p>
-              </Block>
-
               {/* THE INDENT, LAST, and it is the one row here whose subject is
                   a FILE rather than a pane. It reaches two places, which is
                   why it is worth a row at all: it is what `Tab` inserts in the
@@ -1086,6 +1054,65 @@ export function SettingsOverlay({
                   unit="spaces"
                   onCommit={(next) => onChange(setEditorIndent(prefs, next))}
                 />
+              </Block>
+            </Panel>
+
+            {/* NOTIFICATIONS. Operator: "add a setting for notifications in the
+                desktop app. Include a test-notification button too." The
+                switch shipped as a Behaviour row (PR 440); the button is the
+                reason it is a section now -- a row and a button that exist to
+                be found together. `sections.ts` carries the position and why
+                a phone never sees it; `NotifyTest.tsx` carries the button. */}
+            <Panel
+              id="notifications"
+              active={section === 'notifications'}
+              hint={t('settings.notifications.hint')}
+              phone={phone}
+            >
+              {/* ONE SWITCH, and the list of what it deliberately is not lives
+                  with the default (`prefs/notify.ts`): no per-session mute, no
+                  per-status pick, no sound, no quiet hours -- the OS owns the
+                  last two.
+
+                  THE NOTE CARRIES THREE FACTS the operator cannot guess. That
+                  the switch is per device (prefs are this browser's storage,
+                  so a phone with the page open has its own -- and both notify
+                  if both are on). That it is quiet for the session they are
+                  looking at, which is the difference between a feature and a
+                  nuisance. And WHERE TO READ WHY A BANNER DID NOT COME: main
+                  writes the OS's refusal into the error log verbatim
+                  (`main/notify/notify.ts`), so "nothing happened" is never
+                  the whole story. */}
+              <Block
+                name="notify-waiting"
+                label={t('settings.notifications.waiting.label')}
+                hint={t('settings.notifications.waiting.hint')}
+              >
+                <Switch
+                  name="notify-waiting"
+                  label={t('settings.notifications.waiting.label')}
+                  checked={prefs.notifyWaiting}
+                  onChange={(next) => onChange(setNotifyWaiting(prefs, next))}
+                  on={t('settings.notifications.waiting.on')}
+                  off={t('settings.notifications.waiting.off')}
+                />
+                <p data-notify-waiting-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  {t('settings.notifications.waiting.note')}
+                </p>
+              </Block>
+
+              {/* THE BUTTON, and the outcome beside it. A banner the OS refuses
+                  is a line in the error log for a REAL banner, which is right
+                  for a thing nobody asked for and wrong for a button somebody
+                  just pressed: the answer goes where the finger is. Same main
+                  path as a real banner (`main/notify/notify.ts`, `test()`), so
+                  the log still gets its line as well. */}
+              <Block
+                name="notify-test"
+                label={t('settings.notifications.test.label')}
+                hint={t('settings.notifications.test.hint')}
+              >
+                <NotifyTest api={desktopNotifyApi()} />
               </Block>
             </Panel>
 
