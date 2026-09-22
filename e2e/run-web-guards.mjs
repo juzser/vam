@@ -254,6 +254,15 @@ const GUARDS = [
   // `ambiguous` refusal for a pane-row id -- none of which a unit environment
   // measures. Its three shots are `docs/ui/start-screen-*.png`.
   'start-screen-shots',
+  // PER-KEYSTROKE TYPING LATENCY, against a REAL tmux, a REAL `claude`
+  // fullscreen TUI and the real renderer bundle -- the operator's third
+  // report of "still a noticeable delay when typing". No unit environment
+  // spawns a process or measures a `performance.now()` gap across an
+  // Electron-shaped IPC boundary, so this is the only guard that can catch a
+  // keystroke chain regressing back to a spawn per key
+  // (`terminal-typing-latency-shots.mjs`'s own header holds the measured
+  // before/after and the bound this asserts).
+  'terminal-typing-latency-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

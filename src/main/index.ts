@@ -60,7 +60,7 @@ import { projectIdOf } from './sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { defaultCodexSource } from './sources/codex/source.js';
 import type { MainSource } from './sources/source.js';
-import { createTmuxRunner } from './sources/tmux/spawn.js';
+import { createControlTmuxRunner } from './sources/tmux/control.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
@@ -281,6 +281,14 @@ function registerContentSecurityPolicy(): void {
     });
   });
 }
+
+/**
+ * The Terminal tab's persistent tmux connection, so `before-quit` below can
+ * close it. `null` until `app.whenReady()` creates it (`registerTerminalIpc`'s
+ * own call site) -- a quit before then has nothing to dispose of, which
+ * `?.dispose()` already says without a second check.
+ */
+let terminalTmuxRunner: ReturnType<typeof createControlTmuxRunner> | null = null;
 
 /**
  * THE GUARD ON CMD-Q, and the one piece of renderer state main keeps a copy of.
@@ -741,7 +749,19 @@ void app.whenReady().then(async () => {
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.
-  registerTerminalIpc(ipcMain, createTmuxRunner());
+  //
+  // A CONTROL-MODE RUNNER, NOT A PLAIN `createTmuxRunner()`, since the
+  // typing-latency measurement this file's own history records: two
+  // `execFile` spawns per keystroke (`sendToPane`, `readAimedPane`) were over
+  // 90% of a steady keystroke's own keydown-to-painted cost. `control.ts`'s
+  // runner is a drop-in `TmuxRun` -- everything downstream is unchanged -- and
+  // degrades to exactly the spawn this replaced whenever its persistent
+  // connection is not available, so this line can never make the Terminal tab
+  // WORSE than it was, only faster when tmux is reachable. Assigned to the
+  // module-level `terminalTmuxRunner` so `before-quit` below can close its
+  // connection cleanly; nothing else in the app depends on that happening.
+  terminalTmuxRunner = createControlTmuxRunner();
+  registerTerminalIpc(ipcMain, terminalTmuxRunner);
   // The directory picker behind "new project". Only main can open one, and
   // only the operator's click gets a path out of it. See `./dialog/ipc.ts`.
   // Wrapped rather than passed: electron's `showOpenDialog` is an overload
@@ -837,6 +857,12 @@ void app.whenReady().then(async () => {
  */
 app.on('before-quit', (event) => {
   quitGuard.beforeQuit(event);
+  // Best-effort only, and never awaited: the veto above is what may still
+  // stop the quit, and a persistent tmux client left running one more
+  // instant is an idle process, not a correctness problem. A tab reopened
+  // before the app actually exits just reconnects (`control.ts`'s own
+  // degrade-and-retry).
+  terminalTmuxRunner?.dispose();
 });
 
 app.on('window-all-closed', () => {

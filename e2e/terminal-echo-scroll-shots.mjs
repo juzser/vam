@@ -46,6 +46,17 @@
  * bytes the app's renderer gets; keys and wheel reports land in the same
  * pane the app would send them to.
  *
+ * THE RUNNER IS `createControlTmuxRunner`, NOT `createTmuxRunner` -- the
+ * SAME persistent control-mode client `main/index.ts` actually wires the
+ * Terminal tab to (`sources/tmux/control.ts`). This guard exists to catch
+ * exactly the class of regression a runner swap could cause -- the wheel
+ * report and Shift+Enter's literal newline both ride the `-H` hex rewrite
+ * `control-protocol.ts` gives every `send-keys -l --` call, and a guard that
+ * exercised the plain `execFile` path here would never notice if that
+ * rewrite broke either one. `terminal-typing-latency-shots.mjs` measures
+ * the LATENCY difference the two runners make; this one measures that the
+ * behaviour is unchanged.
+ *
  * NEEDS `tmux` ON PATH. Without one the guard prints a loud SKIP and exits
  * 0 -- honestly: a stub that satisfies the property under test is what let
  * the broken build ship, and there is no faithful stand-in for tmux. A CI
@@ -135,9 +146,11 @@ const bundleOf = async (entry) => {
 const { readSessionPane, readAimedPane, resizeSessionPane, sendToPane } = await bundleOf(
   'src/main/terminal/pane.ts',
 );
-const { createTmuxRunner } = await bundleOf('src/main/sources/tmux/spawn.ts');
+const { createControlTmuxRunner } = await bundleOf('src/main/sources/tmux/control.ts');
 
-const real = createTmuxRunner('tmux');
+// The runner `main/index.ts` actually wires the Terminal tab to -- see the
+// module note above. `.dispose()`d in `finally`, below.
+const real = createControlTmuxRunner('tmux');
 /** The app's runner, aimed at the private socket. Same argv otherwise. */
 const run = (argv) => real(['-L', SOCKET, ...argv]);
 
@@ -544,6 +557,7 @@ try {
   );
 } finally {
   await browser.close();
+  real.dispose();
   killServer();
   rmSync(bundleDir, { recursive: true, force: true });
 }
