@@ -143,6 +143,10 @@ describe('a screen-shaped answer is put back on top of the history', () => {
 
 describe('the tab really applies it', () => {
   it('keeps every line of the scrollback drawn across a keystroke echo', async () => {
+    // FAKE TIMERS: `REFRESH_MS` on the real clock lets a `poll` land inside
+    // this test's window on a slow runner. Frozen, the interval cannot fire,
+    // and the reads recorded are exactly the ones the keystroke caused.
+    vi.useFakeTimers();
     // THE WIRING, and the one assertion happy-dom can make about this defect:
     // what is in the DOM. The e2e guard makes the one it cannot -- that the
     // pane still overflows its box.

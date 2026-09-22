@@ -165,6 +165,12 @@ describe('a keystroke echo asks for no scrollback while the view is at the live 
 
 describe("a screen-shaped answer is drawn in the windowed answer's own coordinates", () => {
   it('keeps the operator at the live end across the flip, and keeps the scrollback drawn', async () => {
+    // FAKE TIMERS, or this test races `REFRESH_MS`. With the real clock a
+    // `poll` can land between the keystroke and the assertions and redraw
+    // `old` over `screen`; CI produced exactly `expected [] to have a length
+    // of 40` that way, on a test that had never failed locally. The interval
+    // never fires unless advanced, so what is drawn is what the echo drew.
+    vi.useFakeTimers();
     /**
      * THE WAY THIS CHANGE COULD CORRUPT THE PIN -- and the way it DID, which
      * `TerminalTab.echo-splice.test.tsx` records. An echo read at the bottom
@@ -213,6 +219,8 @@ describe("a screen-shaped answer is drawn in the windowed answer's own coordinat
   });
 
   it('bails out of an echo answer identical to the screen already drawn', async () => {
+    // Same clock discipline as the test above, for the same reason.
+    vi.useFakeTimers();
     // THE OTHER HALF, and it used to be asserted the other way round: the two
     // shapes were two coordinate systems that could never be compared, so a
     // screen-only answer was ALWAYS drawn. `composeScreen` puts it into the
