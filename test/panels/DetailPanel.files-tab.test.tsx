@@ -12,7 +12,7 @@
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   FileListResult,
   FileReadResult,
@@ -30,7 +30,30 @@ import {
   DEFAULT_EDITOR_INDENT,
   setActiveEditorSettings,
 } from '../../src/renderer/prefs/editor.js';
+import {
+  DEFAULT_FILES_MARKDOWN_VIEW,
+  setActiveFilesMarkdownView,
+} from '../../src/renderer/prefs/files-markdown-view.js';
 import { onBothPlatformsAsync } from '../support/platform.js';
+
+/**
+ * THE AMBIENT DEFAULT, PINNED TO RAW FOR EVERY TEST IN THIS FILE THAT DOES
+ * NOT SAY OTHERWISE.
+ *
+ * `activeFilesMarkdownView()` is module-wide state (`files-markdown-view.ts`
+ * carries why it has no per-test lifecycle of its own), and this whole file
+ * predates the device default changing to `'preview'`. Every test below that
+ * opens a `.md` file and asserts on the RAW editor — the gutter, the
+ * formatter, the keyboard model, `Mod-Shift-m` FROM the editor INTO the
+ * preview — was written against the OLD default and is about something
+ * other than what that default is. Pinning it here, once, keeps every one
+ * of those bodies unchanged; the one `describe` that is actually ABOUT the
+ * new default (`the default view for a freshly opened .md file`) restores
+ * the real default explicitly before it draws anything.
+ */
+beforeEach(() => {
+  setActiveFilesMarkdownView('raw');
+});
 
 const DECISION: Decision = {
   id: 'd1',
@@ -1973,11 +1996,24 @@ describe('the tooltips on the two buttons the operator named', () => {
  * leaves for another file and comes back.
  * ====================================================================== */
 
-const pressPreview = async () => {
+/**
+ * TOGGLES THE SEGMENTED CONTROL — presses whichever of the two buttons is
+ * NOT currently selected, which is what every existing caller below means by
+ * "press preview": the single-button toggle this replaced had only one
+ * thing to click. `pressPreviewOption` presses a named side directly, for a
+ * test that wants to press the button already showing (a no-op) or state
+ * which side it means regardless of where the control started.
+ */
+const pressPreviewOption = async (option: 'preview' | 'raw') => {
   await act(async () => {
-    q<HTMLButtonElement>('[data-files-preview]')?.click();
+    q<HTMLButtonElement>(`[data-files-preview-option="${option}"]`)?.click();
     await Promise.resolve();
   });
+};
+
+const pressPreview = async () => {
+  const state = q('[data-files-preview]')?.getAttribute('data-files-preview-state');
+  await pressPreviewOption(state === 'preview' ? 'raw' : 'preview');
 };
 
 const MD = ['# Title', '', 'Some **bold** prose.', '', '- one', '- two', ''].join('\n');
@@ -2223,12 +2259,176 @@ describe('the markdown preview', () => {
       cleanup();
     });
     await openFile('/work/atlas/README.md', MD);
-    const toggle = () => q('[data-files-preview]');
-    expect(toggle()?.getAttribute('data-files-preview-state')).toBe('raw');
-    expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
+    const group = () => q('[data-files-preview]');
+    const previewButton = () => q('[data-files-preview-option="preview"]');
+    const rawButton = () => q('[data-files-preview-option="raw"]');
+    expect(group()?.getAttribute('data-files-preview-state')).toBe('raw');
+    expect(previewButton()?.getAttribute('aria-pressed')).toBe('false');
+    expect(rawButton()?.getAttribute('aria-pressed')).toBe('true');
     await pressPreview();
-    expect(toggle()?.getAttribute('data-files-preview-state')).toBe('preview');
-    expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
+    expect(group()?.getAttribute('data-files-preview-state')).toBe('preview');
+    expect(previewButton()?.getAttribute('aria-pressed')).toBe('true');
+    expect(rawButton()?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('shows both labels of the segmented control, in words, not only as icons', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    expect(q('[data-files-preview-option="preview"]')?.textContent).toContain('Preview');
+    expect(q('[data-files-preview-option="raw"]')?.textContent).toContain('Raw');
+  });
+});
+
+/* =========================================================================
+ * THE DEFAULT — the operator's actual complaint. Translated: ".md files
+ * need to be previewed GitHub-style, and there must be a button to switch
+ * between preview mode and raw mode." The button already existed; nobody
+ * found it, because it opened onto raw text every time. This is the one
+ * behaviour that changed, and it is pinned here rather than left to the
+ * `beforeEach` above, which exists PRECISELY so every other test in this
+ * file can stay ignorant of it.
+ * ====================================================================== */
+describe('the default view for a freshly opened .md file', () => {
+  /** `openFile`'s own body, minus the assertion that an editor exists — the
+   *  one thing that assertion cannot survive when preview really is the
+   *  default. Returns nothing; every test below reads the DOM itself. */
+  async function openReadme(content: string) {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+  }
+
+  it('is preview, with the device default left untouched', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    await openReadme(MD);
+    expect(q('[data-files-preview-view]')).not.toBeNull();
+    expect(q('[data-files-editor]')).toBeNull();
+    expect(q('[data-files-preview]')?.getAttribute('data-files-preview-state')).toBe('preview');
+    expect(q('[data-files-preview-option="preview"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('is raw when the operator’s own last choice on this device was raw', async () => {
+    setActiveFilesMarkdownView('raw');
+    await openReadme(MD);
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+    expect(q('[data-files-preview]')?.getAttribute('data-files-preview-state')).toBe('raw');
+  });
+
+  it('is one click away either way — raw remains reachable from the new default', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    await openReadme(MD);
+    await pressPreviewOption('raw');
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+  });
+});
+
+/* =========================================================================
+ * PERSISTENCE — the operator's last choice, per device, survives past this
+ * one mount. `FilesTab` itself never touches `localStorage`; it calls
+ * `onFilesMarkdownView`, the same way `onFilesTreeWidth` already does for
+ * the tree's width, and `Canvas.tsx` is the one place that ever writes it
+ * for real (`prefs.ts`'s `setFilesMarkdownView`, covered on its own in
+ * `test/prefs/prefs.files-markdown-view.test.ts`). What belongs here is only
+ * the CALLBACK CONTRACT: which value it is handed, and when.
+ * ====================================================================== */
+describe('persisting the choice — the callback out to `Canvas.tsx`', () => {
+  it('calls back with the mode just entered, on the button and on the chord alike', async () => {
+    const onFilesMarkdownView = vi.fn();
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true, onFilesMarkdownView });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    // The ambient default in this file is raw (this file's own `beforeEach`),
+    // so the mode actually CHANGES on the way to preview, and changes back on
+    // the way to raw — each press below is a real flip, not the side already
+    // selected.
+    onFilesMarkdownView.mockClear();
+    await pressPreviewOption('preview');
+    expect(onFilesMarkdownView).toHaveBeenCalledWith('preview');
+    await pressPreviewOption('raw');
+    expect(onFilesMarkdownView).toHaveBeenCalledWith('raw');
+  });
+
+  it('is never called by pressing the side already selected', async () => {
+    const onFilesMarkdownView = vi.fn();
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true, onFilesMarkdownView });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    // The default is raw in this file (the module-wide `beforeEach` above);
+    // pressing "raw" again presses the side already showing.
+    onFilesMarkdownView.mockClear();
+    await pressPreviewOption('raw');
+    expect(onFilesMarkdownView).not.toHaveBeenCalled();
+  });
+
+  it('withdraws quietly with no callback wired — the tab still toggles on its own state', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    await expect(pressPreview()).resolves.toBeUndefined();
+    expect(q('[data-files-preview-view]')).not.toBeNull();
+  });
+});
+
+/* =========================================================================
+ * THE GITHUB SCOPE — one marker, on the Files preview's own wrapper, that
+ * `OUT_MARKDOWN`'s tree never carries. `test/panels/files-markdown.test.tsx`
+ * holds the component map itself; this is the one integration point that
+ * proves `FilesTab.tsx` really reaches for `FILES_MARKDOWN` rather than
+ * `OUT_MARKDOWN` at the one call site that matters.
+ * ====================================================================== */
+describe('the Files preview carries its own GitHub-scoped wrapper', () => {
+  it('marks the rendered document, and nothing about the raw editor', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    const view = q('[data-files-preview-view]');
+    expect(view?.querySelector('[data-files-markdown-github]')).not.toBeNull();
+    await pressPreviewOption('raw');
+    expect(q('[data-files-markdown-github]')).toBeNull();
   });
 });
 

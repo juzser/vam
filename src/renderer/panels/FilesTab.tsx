@@ -166,6 +166,7 @@ import type {
 import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
 import { answeringKeys, insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { activeEditorSettings, subscribeEditorSettings } from '../prefs/editor.js';
+import { activeFilesMarkdownView, type FilesMarkdownView } from '../prefs/files-markdown-view.js';
 import {
   renderedTreeWidth,
   TREE_WIDTH_DEFAULT,
@@ -179,11 +180,11 @@ import { applyTab, isMarkdownPath, lineStartOffset, relativeLabel } from './file
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
+import { FILES_MARKDOWN, FILES_MARKDOWN_URL_TRANSFORM } from './files-markdown.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
 import { OverlayScroll } from './OverlayScroll.js';
-import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { type PointerDragHandlers, RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 import {
   encodeUnsaved,
@@ -385,6 +386,18 @@ export type FilesTabProps = {
    */
   readonly onFilesTreeWidth: ((width: number) => void) | undefined;
   /**
+   * Persists the operator's raw/preview choice, or `undefined` for a caller
+   * with nowhere to put it -- `onFilesTreeWidth`'s own rule, ABSENT rather
+   * than a no-op default: this tab keeps working from its own device default
+   * either way (`activeFilesMarkdownView()`), the same way a drag handle with
+   * no `onFilesTreeWidth` still drags, it only fails to remember.
+   *
+   * Called once per TOGGLE -- the click, or `Mod-Shift-m` -- never on a
+   * render, for `onFilesTreeWidth`'s own reason: a preference written on
+   * every paint is not a preference, it is a write amplifier.
+   */
+  readonly onFilesMarkdownView?: (view: FilesMarkdownView) => void;
+  /**
    * A file to open, named by something outside this tab -- today, a
    * `path:line` control in an agent's own answer (`out-markdown.tsx`).
    * `null` at rest, and `undefined` from any caller that cannot produce one.
@@ -438,6 +451,7 @@ export function FilesTab({
   reserveCornerHeight,
   filesTreeWidth,
   onFilesTreeWidth,
+  onFilesMarkdownView,
   openRequest = null,
 }: FilesTabProps) {
   const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
@@ -471,8 +485,15 @@ export function FilesTab({
    * keep in step with `buffers`, entries for files that are no longer open,
    * and a rule about what a file not in the map inherits. One keystroke is a
    * cheaper answer to the case it serves.
+   *
+   * SEEDED FROM THE DEVICE DEFAULT, ONCE. `activeFilesMarkdownView()` is
+   * `'preview'` unless the operator's own last toggle stored `'raw'`
+   * (`prefs/files-markdown-view.ts`) -- read here exactly the way `settings`
+   * below reads `activeEditorSettings()`, except taken only at MOUNT rather
+   * than subscribed to: this flag is this tab's own state for the rest of its
+   * life, and `togglePreview` is the only thing that ever moves it again.
    */
-  const [preview, setPreview] = useState(false);
+  const [preview, setPreview] = useState<boolean>(() => activeFilesMarkdownView() !== 'raw');
   /**
    * WHAT THE LAST KEYSTROKE REFUSED, in words, or null at rest. The house
    * rule this tab is held to: a control that cannot act says so rather than
@@ -1226,12 +1247,34 @@ export function FilesTab({
    * IT TOUCHES NO BUFFER. That is not incidental -- a view toggle that lost an
    * edit would be worse than no toggle at all, and `buffers` is the only thing
    * holding the operator's unsaved text.
+   *
+   * `setPreviewMode` IS THE ACT; `togglePreview` IS ONE SHAPE OF IT. The
+   * segmented control's two buttons know which state they each ask for and
+   * call `setPreviewMode` directly -- pressing the one already selected is
+   * therefore a no-op rather than a flip back off -- while the keyboard chord
+   * and the old single-button callers, which only ever know "the other one",
+   * keep calling `togglePreview`. Both persist the choice the same way: a
+   * call to `onFilesMarkdownView`, `Canvas.tsx`'s own way back into
+   * `prefs.filesMarkdownView` (`onFilesTreeWidth`'s own shape).
    */
+  const setPreviewMode = useCallback(
+    (next: boolean) => {
+      // A REAL NO-OP, not merely a redundant write: pressing the segment
+      // already selected must neither steal the keyboard back to the
+      // editor/preview it is already in nor tell `onFilesMarkdownView` about
+      // a "change" that never happened -- see this callback's own header.
+      if (next === preview) return;
+      setNote(null);
+      setPreview(next);
+      onFilesMarkdownView?.(next ? 'preview' : 'raw');
+      wantEditorFocus.current = true;
+    },
+    [preview, onFilesMarkdownView],
+  );
+
   const togglePreview = useCallback(() => {
-    setNote(null);
-    setPreview((prev) => !prev);
-    wantEditorFocus.current = true;
-  }, []);
+    setPreviewMode(!preview);
+  }, [preview, setPreviewMode]);
 
   /**
    * FIND A FILE — the one act, and the one code path every surface in this tab
@@ -1592,7 +1635,11 @@ export function FilesTab({
           `e2e/files-tab-keyboard-shots.mjs`. */}
       <div
         data-files-header
-        className="flex flex-none items-center gap-1.5"
+        // `@container`: the segmented control's two WORDS have their own
+        // width budget, measured against THIS ROW'S OWN box rather than the
+        // viewport -- see the label spans below for why a viewport
+        // breakpoint (`sm:`) cannot be the tool here at all.
+        className="@container flex flex-none items-center gap-0.5 @min-[380px]:gap-1.5"
         style={{
           ...(reserveCorner > 0 ? { paddingRight: reserveCorner } : {}),
           ...(reserveCornerHeight > 0 ? { minHeight: reserveCornerHeight } : {}),
@@ -1629,9 +1676,9 @@ export function FilesTab({
                 own reservation, and at the 320px floor the path has to keep
                 something to truncate. */}
             {/* RENDERED OR RAW, NEXT TO THE FORMATTER — the operator's own
-                placement: one toggle button beside the formatter at the top.
-                It sits BEFORE Format rather than after, so the row reads as
-                one view control followed by the two that change the file.
+                placement: one toggle beside the formatter at the top. It
+                sits BEFORE Format rather than after, so the row reads as one
+                view control followed by the two that change the file.
 
                 DRAWN ONLY FOR A FILE THAT HAS A PREVIEW, which is the
                 opposite of the rule the Format button next to it follows,
@@ -1640,26 +1687,98 @@ export function FilesTab({
                 format .ts files" is an answer. A preview toggle on a `.ts`
                 would have no second state to show, so a control that is
                 simply absent is the truer surface. The KEY still answers
-                from anywhere (`onEditorKeyDown`), and says why. */}
+                from anywhere (`onEditorKeyDown`), and says why.
+
+                A TWO-SEGMENT CONTROL, NOT AN ICON-ONLY BUTTON — the operator
+                found the single toggle unreadably small and never noticed it
+                was there at all, which is the whole reason preview is now
+                the default rather than something to discover. Two labelled
+                buttons in one well, `bg-segment-on` marking the one in
+                force: the same shape `SettingsOverlay.tsx`'s own section
+                switcher wears (`bg-well` / `border-line-loud` / `p-[3px]`),
+                MINUS its `role="tablist"`/`role="tab"` pair — that shape
+                exists for genuine tab NAVIGATION with `aria-controls`
+                pointing at a mounted panel and roving arrow-key focus
+                (`SectionRail`'s own comment: "never `role=\"tab\"`, which
+                would be a third orphaned tablist"), and a two-way SWITCH is
+                not that: pressing either button acts immediately, each is
+                its own stop in the Tab order, and `aria-pressed` says which
+                one is on — the same vocabulary `PhoneShell.tsx`'s own
+                `ViewIcons`/`SessionTabStrip` segmented rows already use for
+                an identical "which of a few mutually exclusive states" job.
+
+                `data-files-preview` AND `data-files-preview-state` STAY ON
+                THE OUTER WELL, exactly where they sat on the single button
+                before: any guard that only reads the state attribute keeps
+                matching unchanged. Each segment carries its own
+                `data-files-preview-option` for a guard or a test that wants
+                to press ONE side directly rather than toggle.
+
+                THE WORDS THEMSELVES HIDE, AND THE PADDING TIGHTENS, BELOW
+                `@min-[380px]` -- MEASURED AGAINST THIS ROW, NOT THE VIEWPORT.
+                `reserveCorner` pads this row so its content never sits under
+                the floating view-icon pill (this file's own header, "THE
+                CORNER, RESERVED BY MEASUREMENT") -- and at vam's narrowest
+                legal pane the row's own usable width in front of that
+                padding is ~149px, measured in Chromium. Two LABELLED
+                buttons plus Format plus Save need roughly 240px there, which
+                no amount of trimming buys back; even two ICON-ONLY buttons
+                at their normal padding measured 143px and still clipped
+                Save by a few pixels, because a second bordered, padded
+                button is not free the way a single icon-only toggle was.
+                Both folds are therefore container-scoped together --
+                `@min-[380px]:inline` on the words, `@min-[380px]:px-1.5
+                @min-[380px]:py-1` widening the padding back out once there
+                is room to spend -- and `sm:`/`md:` are VIEWPORT breakpoints
+                that cannot see a pane narrowed by a SPLIT rather than by the
+                window itself (`SettingsOverlay.tsx`'s `SectionStrip` argues
+                the identical point for its own narrow form). `@container`
+                on `data-files-header` above is what makes a CONTAINER query
+                possible here at all. The icon and `aria-label` stay full
+                size and present either way -- what folds is only the second
+                thing the eye reads once it already has the first, and the
+                control is never fewer than two real, independently pressable
+                buttons at any width. */}
             {canPreview && (
               <Note
                 text={`Switch between the rendered document and the raw text (${chordSymbols('Mod-Shift-m')}). Rendered is read-only; your unsaved edits survive either way.`}
               >
-                <button
-                  type="button"
+                <div
                   data-files-preview
                   data-files-preview-state={showingPreview ? 'preview' : 'raw'}
-                  aria-pressed={showingPreview}
-                  onClick={togglePreview}
-                  aria-label={showingPreview ? 'show the raw markdown' : 'preview this markdown'}
-                  className="vam-tap flex flex-none cursor-pointer items-center rounded-[6px] border border-line px-1.5 py-1 text-ink-dim hover:border-line-strong hover:text-ink aria-pressed:border-line-strong aria-pressed:text-ink"
+                  className="flex flex-none items-center gap-px rounded-[7px] border border-line-loud bg-well p-px @min-[380px]:gap-0.5 @min-[380px]:p-[2px]"
                 >
-                  {showingPreview ? (
-                    <Code size={12} strokeWidth={1.8} />
-                  ) : (
+                  <button
+                    type="button"
+                    data-files-preview-option="preview"
+                    aria-pressed={showingPreview}
+                    onClick={() => setPreviewMode(true)}
+                    aria-label="preview this markdown"
+                    className={`vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 py-0.5 text-control @min-[380px]:px-1.5 @min-[380px]:py-1 ${
+                      showingPreview
+                        ? 'bg-segment-on font-medium text-ink'
+                        : 'text-ink-dim hover:text-ink'
+                    }`}
+                  >
                     <Eye size={12} strokeWidth={1.8} />
-                  )}
-                </button>
+                    <span className="hidden @min-[380px]:inline">Preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-files-preview-option="raw"
+                    aria-pressed={!showingPreview}
+                    onClick={() => setPreviewMode(false)}
+                    aria-label="show the raw markdown"
+                    className={`vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 py-0.5 text-control @min-[380px]:px-1.5 @min-[380px]:py-1 ${
+                      !showingPreview
+                        ? 'bg-segment-on font-medium text-ink'
+                        : 'text-ink-dim hover:text-ink'
+                    }`}
+                  >
+                    <Code size={12} strokeWidth={1.8} />
+                    <span className="hidden @min-[380px]:inline">Raw</span>
+                  </button>
+                </div>
               </Note>
             )}
             {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
@@ -1969,16 +2088,19 @@ const EDITOR_TEXT_STYLE = { whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 
 /**
  * THE FILE, RENDERED — the other shape the middle column takes.
  *
- * `OUT_MARKDOWN` IS THE WHOLE OF THE STYLING, and reusing it is the decision
- * rather than a saving. It is the component map the transcript already dresses
- * an agent's answer with, which means (a) this preview looks like the rest of
- * vam without a second set of type-scale and colour choices to keep in step,
- * and (b) the security posture is the SAME posture rather than a second one
- * that has to be re-derived. `out-markdown.tsx`'s header carries the argument:
- * no `rehype-raw`, nothing handed to `innerHTML`, and `a`/`img` printed rather
- * than fetched or navigated. A file in a session's working directory is very
- * often an agent's own output one step removed, so it earns exactly the same
- * caution the transcript does.
+ * `FILES_MARKDOWN` IS ITS OWN COMPONENT MAP, not `OUT_MARKDOWN` restyled.
+ * `files-markdown.tsx`'s own header carries the full argument; the short
+ * version is that a `.md` file read close to its own width wants GitHub's
+ * own reading shape (a real heading ladder with a rule, 16px prose, a
+ * capped and centred column) while the TRANSCRIPT'S 12px chat styling stays
+ * exactly what it was — the two are different surfaces with different jobs,
+ * and `test/panels/DetailPanel.transcript-flow.test.tsx` and its neighbours
+ * pin the transcript's own rendering byte for byte. What the two maps DO
+ * share is imported, not copied: the highlighter, the link-safety wall and
+ * the refusal wording all come from `out-markdown.tsx`'s own exports, for
+ * the reason its header gives — a file in a session's working directory is
+ * very often an agent's own output one step removed, so it earns exactly
+ * the same caution an agent's own answer does.
  *
  * READ-ONLY, and the toolbar above says so. There is no in-preview editing to
  * write back, which is why the toggle can be free of every question a WYSIWYG
@@ -1994,6 +2116,16 @@ const EDITOR_TEXT_STYLE = { whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 
  * on a tree row means "open it and put me in it". `tabIndex={0}` on a
  * scrollable region is also what lets it be scrolled with the keyboard at all.
  * It is NOT an insert scope -- see the call site.
+ *
+ * CAPPED AND CENTRED, like GitHub's own file view — `max-w-[1012px]`, the
+ * width `github.com` itself renders a README at, `mx-auto` so a pane wider
+ * than that leaves the prose centred rather than stretched edge to edge
+ * (GitHub's own reading measure argument: a very wide line is a hard one to
+ * track back to its start). Below that width the column simply fills the
+ * pane, which is the common case at vam's own default widths. The inner
+ * `data-files-markdown-github` div is what a guard or a test scopes to —
+ * nothing outside it, and nothing in `OUT_MARKDOWN`'s own tree, ever carries
+ * that attribute.
  */
 function MarkdownPreview({
   content,
@@ -2017,18 +2149,24 @@ function MarkdownPreview({
       tabIndex={0}
       aria-label={`preview of ${label}`}
       onKeyDown={onKeyDown}
-      className="vam-no-scrollbar flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto rounded-[9px] border border-line bg-panel px-3 py-2 break-words focus-visible:border-line-strong focus-visible:outline-none"
+      className="vam-no-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto rounded-[9px] border border-line bg-panel focus-visible:border-line-strong focus-visible:outline-none"
     >
-      {/* The same `urlTransform` the transcript uses, for the same reason:
-          one scheme list, vam's own, strictly narrower than react-markdown's
-          default. See `OUT_URL_TRANSFORM`. */}
-      <Markdown
-        remarkPlugins={[remarkGfm]}
-        components={OUT_MARKDOWN}
-        urlTransform={OUT_URL_TRANSFORM}
+      <div
+        data-files-markdown-github
+        className="mx-auto w-full max-w-[1012px] break-words px-6 py-6"
       >
-        {content}
-      </Markdown>
+        {/* The same shape of `urlTransform` the transcript uses, for the
+            same reason: the real gate is in the component overrides below,
+            not in react-markdown's own scheme list. See
+            `FILES_MARKDOWN_URL_TRANSFORM`. */}
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={FILES_MARKDOWN}
+          urlTransform={FILES_MARKDOWN_URL_TRANSFORM}
+        >
+          {content}
+        </Markdown>
+      </div>
     </section>
   );
 }

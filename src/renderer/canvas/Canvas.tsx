@@ -145,6 +145,7 @@ import {
   renameGroup,
   setDefaultProvider,
   setDetailTab,
+  setFilesMarkdownView,
   setFilesTreeWidth,
   setFocusView,
   setGroupCollapsed,
@@ -6333,6 +6334,17 @@ function CanvasInner({
         // `prefs/files-tree-width.ts` exists to hold.
         filesTreeWidth: prefs.filesTreeWidth,
         onFilesTreeWidth: (width: number) => savePrefs(setFilesTreeWidth(prefs, width)),
+        // The Files tab's raw/preview choice, written back but never read
+        // FORWARD as a prop -- unlike `filesTreeWidth` above it, `FilesTab`
+        // reads its own device default once, at mount, off
+        // `activeFilesMarkdownView()` (`prefs/files-markdown-view.ts`), the
+        // module `activatePrefs` below already puts `prefs.filesMarkdownView`
+        // into force on every read AND every write. This is only the way
+        // BACK out: the one call that persists a toggle for the NEXT tab
+        // that mounts, which is what makes `prefs.filesMarkdownView` a field
+        // some module outside this store actually writes.
+        onFilesMarkdownView: (view: 'preview' | 'raw') =>
+          savePrefs(setFilesMarkdownView(prefs, view)),
         sending: paneWriting,
         // The refusal is the focused pane's too, and for the same reason:
         // a background pane cannot have answered the key it would be
