@@ -24,7 +24,7 @@
  *     which is the one failure mode `files-tree-width.ts`'s header is about.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   FileListResult,
@@ -133,6 +133,19 @@ const openFiles = async () => {
 async function openTree(over: Partial<DetailPanelProps> = {}) {
   withBridge();
   render(<DetailPanel {...props(over)} />);
+  // `FilesTab` mounts behind a `React.lazy` + `Suspense` boundary now
+  // (`DetailPanel.tsx`'s own `LazyFilesTab`), so `[data-view="files"]`'s
+  // click target below is not there the instant `render` returns -- wait
+  // for FilesTab's own root marker (present in all three of its return
+  // branches) before doing anything else. `waitFor` (real timers, its
+  // default) rather than the two-`Promise.resolve()` shape this used to
+  // rely on: that shape assumed a bare microtask, and resolving a real
+  // dynamic `import()` goes through Vite's own module transform instead
+  // (`DetailPanel.file-ref.test.tsx`'s own lazy-chunk wait is the
+  // precedent for this exact distinction).
+  await waitFor(() => {
+    if (!document.querySelector('[data-files]')) throw new Error('still pending');
+  });
   await openFiles();
   await act(async () => {
     await Promise.resolve();

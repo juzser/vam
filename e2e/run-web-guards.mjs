@@ -263,6 +263,18 @@ const GUARDS = [
   // (`terminal-typing-latency-shots.mjs`'s own header holds the measured
   // before/after and the bound this asserts).
   'terminal-typing-latency-shots',
+  // WHETHER A REAL `visibilitychange` REACHES `useVisibilityInterval`'S OWN
+  // LISTENER AT ALL -- the perf pass that gated three background polls on
+  // document visibility. jsdom/happy-dom let a unit test hand `visibilityState`
+  // a value and call a handler by hand; neither can say whether the app's own
+  // listener is wired to the right property at all, which this repo has
+  // already been burned by in visibility-driven code before. Stubs
+  // `window.api` (`?demo=1`'s own fixture never calls it, so it gives no hook
+  // to count against) and proves the load poller goes quiet over a real 3s
+  // hidden window and fires one immediate call on return
+  // (`attention-shots.mjs`'s own header holds the cadence math and the one
+  // poller this guard could not reach, and why).
+  'attention-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

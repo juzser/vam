@@ -10,7 +10,7 @@
  * settings pane and a settings pane that lies.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -204,10 +204,16 @@ describe('the colours section edits the theme in force', () => {
 });
 
 describe('the override reaches the document', () => {
-  it('puts the operator’s colour on the root, and reset takes it off again', () => {
+  it('puts the operator’s colour on the root, and reset takes it off again', async () => {
     render(<Canvas model={MODEL} />);
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
+    });
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`, unlike `open()`'s direct render above), so
+    // its DOM resolves a render tick or two after the keydown, not on it.
+    await waitFor(() => {
+      expect(document.querySelector('[data-settings-overlay]')).not.toBeNull();
     });
     fireEvent.change(swatch('dark'), { target: { value: BLUE } });
     expect(document.documentElement.style.getPropertyValue(FIRST.token)).toBe(BLUE);

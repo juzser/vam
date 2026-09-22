@@ -11,7 +11,7 @@
  * the `waiting` state impossible to miss, that is the whole purpose lost.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasModel, Project } from '../../src/renderer/domain/model.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
@@ -198,6 +198,157 @@ describe('useSourceModel', () => {
       await act(async () => pending[0]?.reject(new Error('claude went away')));
       expect(latest()?.loading).toBe(false);
       expect(latest()?.error).toMatch(/claude went away/);
+    });
+  });
+
+  /**
+   * VISIBILITY GATING AND THE UNCHANGED-STREAK BACKOFF -- this poller is
+   * `notify/waiting.ts`'s only source of a `waiting` transition, so it may
+   * slow down while hidden but never stop outright (`useVisibilityInterval`,
+   * wired with `{ slowBy: 4 }`, never `'pause'`). See this file's own header
+   * for the full argument, including why hidden must never STACK with the
+   * backoff below.
+   */
+  describe('while hidden, and the unchanged-streak backoff', () => {
+    /** Visible by default; the test flips it with `.mockReturnValue`. */
+    const visibilitySpy = () =>
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+
+    const changeVisibility = async () => {
+      await act(async () => {
+        fireEvent(document, new Event('visibilitychange'));
+      });
+    };
+
+    it('slows to 40s while hidden, and never fully stops', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      const visibility = visibilitySpy();
+      const { source, pending } = gatedSource();
+      mount(source);
+      expect(pending).toHaveLength(1); // the immediate load on mount
+      // Resolved so the in-flight guard does not itself block the next poll
+      // -- a SEPARATE, already-covered behaviour ("does not stack polls
+      // while one is still in flight", above) that this test is not about.
+      await act(async () => pending[0]?.resolve(projects('zero prior loads')));
+
+      visibility.mockReturnValue('hidden');
+      await changeVisibility();
+
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 4 - 1); // 39_999ms
+      });
+      expect(pending).toHaveLength(1); // nothing at the old 10s cadence
+
+      await act(async () => {
+        vi.advanceTimersByTime(1); // reaches 40_000ms
+      });
+      expect(pending).toHaveLength(2); // still alive, just four times slower
+    });
+
+    it('reloads immediately the moment the window is visible again', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      const visibility = visibilitySpy();
+      const { source, pending } = gatedSource();
+      mount(source);
+      expect(pending).toHaveLength(1);
+      await act(async () => pending[0]?.resolve(projects('first'))); // release the in-flight guard
+
+      visibility.mockReturnValue('hidden');
+      await changeVisibility();
+
+      visibility.mockReturnValue('visible');
+      await changeVisibility();
+      expect(pending).toHaveLength(2); // the immediate reload, unasked
+    });
+
+    it('slows the visible cadence to 20s after three identical loads in a row', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      visibilitySpy();
+      const { source, pending } = gatedSource();
+      mount(source);
+      await act(async () => pending[0]?.resolve(projects('same'))); // load #1
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // -> load #2, t=10s
+      });
+      await act(async () => pending[1]?.resolve(projects('same'))); // unchanged, streak 2
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // -> load #3, t=20s
+      });
+      await act(async () => pending[2]?.resolve(projects('same'))); // unchanged, streak 3 -> backs off NOW
+
+      // The NEXT tick moves from t=30s (the old cadence) to t=40s.
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // t=30s
+      });
+      expect(pending).toHaveLength(3); // nothing yet -- the old schedule would have fired here
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS); // t=40s
+      });
+      expect(pending).toHaveLength(4); // arrives at the backed-off cadence
+    });
+
+    it('resets to the 10s base the instant a load reads differently', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      visibilitySpy();
+      const { source, pending } = gatedSource();
+      mount(source);
+      // Back off to 20s first, the same three-load dance as above.
+      await act(async () => pending[0]?.resolve(projects('same')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[1]?.resolve(projects('same')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[2]?.resolve(projects('same')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // t=40s, backed-off tick, load #4
+      });
+      expect(pending).toHaveLength(4);
+
+      // A DIFFERENT answer resets the streak and the cadence immediately.
+      await act(async () => pending[3]?.resolve(projects('different')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS - 1);
+      });
+      expect(pending).toHaveLength(4); // not yet -- back at the 10s base, not 20s
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(pending).toHaveLength(5); // arrives at 10s, the reset cadence
+    });
+
+    it('lets hidden override a standing backoff -- the next tick is +40s, not +20s or +80s', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: false });
+      const visibility = visibilitySpy();
+      const { source, pending } = gatedSource();
+      mount(source);
+      await act(async () => pending[0]?.resolve(projects('same')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[1]?.resolve(projects('same')));
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+      });
+      await act(async () => pending[2]?.resolve(projects('same'))); // backed off to 20s as of now
+
+      visibility.mockReturnValue('hidden');
+      await changeVisibility(); // the hide moment
+
+      // NOT the standing 20s backoff:
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // +20s from the hide moment
+      });
+      expect(pending).toHaveLength(3); // nothing yet -- 20s alone is not the rate
+
+      // NOT 20s stacked with the 4x hidden multiplier (80s) either -- lands
+      // at exactly +40s from the hide moment.
+      await act(async () => {
+        vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS * 2); // +40s from the hide moment
+      });
+      expect(pending).toHaveLength(4);
     });
   });
 });

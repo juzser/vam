@@ -34,8 +34,10 @@
 import { Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
+  lazy,
   type DragEvent as ReactDragEvent,
   type ReactNode,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -166,7 +168,6 @@ import {
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
 import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
-import { SettingsOverlay } from '../settings/SettingsOverlay.js';
 import type { SectionId } from '../settings/sections.js';
 import { capabilitiesFor } from '../sources/members.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
@@ -200,6 +201,19 @@ import {
   splitSizes,
   stepPane,
 } from './split.js';
+
+// `SettingsOverlay`, in its own lazy chunk -- the same `React.lazy` +
+// `Suspense` split `LazyMarkdown.tsx` already does for the markdown stack,
+// at the boundary this repo's bundle-budget guard measures. It is a window
+// overlay (`SettingsOverlay.tsx`'s own root: `absolute inset-0`, over
+// everything, reflowing nothing beside it) that exists only once `settingsOpen`
+// is true, so a `null` Suspense fallback costs this layout nothing while the
+// chunk is in flight -- the space it would occupy is not shared with any
+// other content, and after the first open the chunk is cached for the rest
+// of the app's life.
+const SettingsOverlay = lazy(() =>
+  import('../settings/SettingsOverlay.js').then((m) => ({ default: m.SettingsOverlay })),
+);
 
 /** `model.groups ?? []` on every render is a fresh reference each keystroke,
  *  defeating `SessionList`'s memo -- a module-level constant keeps this a
@@ -6679,23 +6693,29 @@ function CanvasInner({
       {errorLogOpen && <ErrorLogPanel onClose={() => setErrorLogOpen(false)} />}
 
       {/* Same reason again: settings is a window overlay, so it sits with the
-          palette and the sheet rather than inside the canvas column. */}
+          palette and the sheet rather than inside the canvas column.
+          `Suspense` with a `null` fallback: `SettingsOverlay` is its own lazy
+          chunk (see its declaration above), and it is a window overlay that
+          exists only while this branch is true, so nothing else on screen is
+          sharing the space a fallback would need to hold. */}
       {settingsOpen && (
-        <SettingsOverlay
-          prefs={prefs}
-          theme={effective}
-          onChange={savePrefs}
-          onClose={() => setSettingsOpen(false)}
-          initialSection={settingsSection}
-          /* WHAT THIS CONNECTION CANNOT DO, in the source's own words. It used
-             to be a band above the transcript on the phone's session screen,
-             where it cost 45px of every session on every real phone; it is a
-             standing fact about the CONNECTION, so it belongs in the one
-             section whose subject is the desktop rather than the device
-             holding it. `{}` for a source that is not a session source: there
-             is nothing to decline. */
-          declines={source.kind === 'session' ? source.source.declines : {}}
-        />
+        <Suspense fallback={null}>
+          <SettingsOverlay
+            prefs={prefs}
+            theme={effective}
+            onChange={savePrefs}
+            onClose={() => setSettingsOpen(false)}
+            initialSection={settingsSection}
+            /* WHAT THIS CONNECTION CANNOT DO, in the source's own words. It used
+               to be a band above the transcript on the phone's session screen,
+               where it cost 45px of every session on every real phone; it is a
+               standing fact about the CONNECTION, so it belongs in the one
+               section whose subject is the desktop rather than the device
+               holding it. `{}` for a source that is not a session source: there
+               is nothing to decline. */
+            declines={source.kind === 'session' ? source.source.declines : {}}
+          />
+        </Suspense>
       )}
 
       {paletteOpen && (

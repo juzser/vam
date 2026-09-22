@@ -15,7 +15,7 @@
  * sidebar, tab strip and detail panel all follow the same single focus.
  */
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
@@ -939,14 +939,19 @@ describe('the sidebar', () => {
     expect(screen.getByText(/factory has no new-session command/)).toBeTruthy();
   });
 
-  it('pins settings at the bottom, and it opens the overlay', () => {
+  it('pins settings at the bottom, and it opens the overlay', async () => {
     // It used to answer "settings not built yet". The refusal is gone from the
     // tree; the gear and `,` reach one overlay (test/canvas/Canvas.settings).
     render(<Canvas model={MODEL} />);
     act(() => {
       screen.getByLabelText('settings').click();
     });
-    expect(document.querySelector('[data-settings-overlay]')).toBeTruthy();
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`), so its DOM resolves a render tick or two
+    // after the click, not on it.
+    await waitFor(() => {
+      expect(document.querySelector('[data-settings-overlay]')).toBeTruthy();
+    });
   });
 });
 

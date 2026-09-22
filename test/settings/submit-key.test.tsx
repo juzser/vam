@@ -11,7 +11,7 @@
  * Every hop between those two is a place the choice can be dropped in silence.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
@@ -158,7 +158,7 @@ describe('the sessions section offers the two keys', () => {
 });
 
 describe('picking a key changes the composer, not only the store', () => {
-  it('moves the send key end to end, and moves it back', () => {
+  it('moves the send key end to end, and moves it back', async () => {
     // THROUGH THE WHOLE SEAM: overlay → prefs → `writePrefs` → `activatePrefs`
     // → the module store → the box's subscription. A test that stopped at
     // `onChange` would pass over every one of those.
@@ -190,6 +190,14 @@ describe('picking a key changes the composer, not only the store', () => {
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
     });
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`), so `option(...)` is not there the instant
+    // the keystroke lands the first time -- `waitFor` (real timers, its
+    // default) rather than a fixed `Promise.resolve()` count. The chunk is
+    // cached after this first open, so the second open below needs no wait.
+    await waitFor(() => {
+      if (!option('shift-enter')) throw new Error('still pending');
+    });
     fireEvent.click(option('shift-enter') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
     fireEvent.change(box, { target: { value: 'ship it' } });
@@ -207,7 +215,7 @@ describe('picking a key changes the composer, not only the store', () => {
     expect(fireEvent.keyDown(box, { key: 'Enter', shiftKey: true })).toBe(true);
   });
 
-  it('makes the swapped key the one that actually submits', () => {
+  it('makes the swapped key the one that actually submits', async () => {
     // The caption above is a report; this is the behaviour it reports on. A
     // cancelable event is the only kind `preventDefault` is observable
     // through, and `fireEvent` builds one.
@@ -217,6 +225,10 @@ describe('picking a key changes the composer, not only the store', () => {
     });
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
+    });
+    // See the sibling test above: `SettingsOverlay`'s own lazy chunk.
+    await waitFor(() => {
+      if (!option('shift-enter')) throw new Error('still pending');
     });
     fireEvent.click(option('shift-enter') as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
