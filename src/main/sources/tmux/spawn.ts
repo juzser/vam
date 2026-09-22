@@ -272,7 +272,13 @@ export type TmuxSessions =
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 export type TmuxText =
-  | { readonly kind: 'ok'; readonly text: string; readonly cursor: PaneCursor }
+  | {
+      readonly kind: 'ok';
+      readonly text: string;
+      readonly cursor: PaneCursor;
+      /** Whether the pane's program asked for the mouse; absent when tmux did not say. */
+      readonly mouse?: boolean;
+    }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 /**
@@ -293,7 +299,12 @@ const MAX_CURSOR_CELL = 99_999;
  * forget where the cursor is; it is a reason not to be able to PLACE it, and
  * only when history was asked for (`readPane`).
  */
-type PaneMark = { readonly cursor: PaneCursor; readonly depth: number | null };
+type PaneMark = {
+  readonly cursor: PaneCursor;
+  readonly depth: number | null;
+  /** `#{mouse_any_flag}`, or `null` for a line that did not carry it. */
+  readonly mouse: boolean | null;
+};
 
 /**
  * tmux's one-line answer about the cursor, or the honest absence of one.
@@ -310,36 +321,41 @@ type PaneMark = { readonly cursor: PaneCursor; readonly depth: number | null };
  * false and would slip through a `>=` guard the wrong way round. The shape is
  * matched whole, by pattern, and anything else is `unreadable`.
  *
- * THREE FIELDS OR FOUR. The format asks for four (`argv.ts`, `CURSOR_FORMAT`),
- * and the fourth is the history depth. Three is still read as a cursor rather
+ * THREE FIELDS, FOUR OR FIVE. The format asks for five (`argv.ts`,
+ * `CURSOR_FORMAT`): the fourth is the history depth, the fifth whether the
+ * pane's program asked for the mouse. Three is still read as a cursor rather
  * than refused, because the many stubbed runners in this repo's own suite --
  * and any tmux old enough to have dropped the key entirely -- answer with
  * three, and every one of them is a screen-only read where the depth is not
- * needed.
+ * needed; four is every stub written before the mouse was asked about. A
+ * field that is not there is `null`, never `false`: "tmux did not say" and
+ * "the program declined the mouse" send a wheel to different places.
  */
 export function readCursorLine(line: string): PaneMark {
-  const nothing: PaneMark = { cursor: { kind: 'unreadable' }, depth: null };
+  const nothing: PaneMark = { cursor: { kind: 'unreadable' }, depth: null, mouse: null };
   const marked = `${VAM_CURSOR_MARK} `;
   if (!line.startsWith(marked)) return nothing;
   const fields = line.slice(marked.length).split(' ');
-  const [flag, x, y, history] = fields;
-  if (fields.length !== 3 && fields.length !== 4) return nothing;
+  const [flag, x, y, history, mouseFlag] = fields;
+  if (fields.length < 3 || fields.length > 5) return nothing;
   // `#{history_size}` is a count and never negative, so anything that is not
   // a run of digits is tmux having said nothing vam can use.
   const depth = history !== undefined && /^\d+$/.test(history) ? Number(history) : null;
+  // Only its two values are believed, for the reason `cursor_flag` gives.
+  const mouse = mouseFlag === '1' ? true : mouseFlag === '0' ? false : null;
   // The flag can VETO, so it is read before the coordinates and only two
   // values mean anything: a `cursor_flag` that is neither 0 nor 1 is a tmux
   // this parse does not understand, not a cursor to guess about.
-  if (flag === '0') return { cursor: { kind: 'hidden' }, depth };
-  if (flag !== '1') return { ...nothing, depth };
+  if (flag === '0') return { cursor: { kind: 'hidden' }, depth, mouse };
+  if (flag !== '1') return { ...nothing, depth, mouse };
   if (x === undefined || y === undefined || !/^\d+$/.test(x) || !/^\d+$/.test(y)) {
-    return { ...nothing, depth };
+    return { ...nothing, depth, mouse };
   }
   const column = Number(x);
   const row = Number(y);
   return column > MAX_CURSOR_CELL || row > MAX_CURSOR_CELL
-    ? { ...nothing, depth }
-    : { cursor: { kind: 'at', column, row }, depth };
+    ? { ...nothing, depth, mouse }
+    : { cursor: { kind: 'at', column, row }, depth, mouse };
 }
 
 /**
@@ -369,7 +385,10 @@ export function readCursorLine(line: string): PaneMark {
  * a position -- and it costs nothing on the screen-only path, where no offset
  * is needed and none is looked for.
  */
-function splitCursor(stdout: string, history: number): { text: string; cursor: PaneCursor } {
+function splitCursor(
+  stdout: string,
+  history: number,
+): { text: string; cursor: PaneCursor; mouse?: boolean } {
   const end = stdout.indexOf('\n');
   const marked = stdout.startsWith(`${VAM_CURSOR_MARK} `);
   const line = end === -1 ? stdout : stdout.slice(0, end);
@@ -379,11 +398,14 @@ function splitCursor(stdout: string, history: number): { text: string; cursor: P
     const above = mark.depth === null ? null : Math.min(mark.depth, Math.floor(history));
     return above === null ? { kind: 'unreadable' } : { ...cursor, row: above + cursor.row };
   };
-  if (end === -1) return { text: stdout, cursor: place(mark.cursor) };
+  // The flag is only SAID when tmux said it: an absent field stays absent,
+  // so a consumer reading `mouse === false` is reading a program's answer.
+  const said = mark.mouse === null ? {} : { mouse: mark.mouse };
+  if (end === -1) return { text: stdout, cursor: place(mark.cursor), ...said };
   return mark.cursor.kind === 'unreadable' && !marked
     ? // No cursor line at all: every byte is screen.
       { text: stdout, cursor: mark.cursor }
-    : { text: stdout.slice(end + 1), cursor: place(mark.cursor) };
+    : { text: stdout.slice(end + 1), cursor: place(mark.cursor), ...said };
 }
 
 /**

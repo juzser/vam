@@ -37,6 +37,7 @@ import {
   sendEnterArgv,
   sendEscapeArgv,
   sendTextArgv,
+  sendWheelArgv,
 } from '../sources/tmux/argv.js';
 import {
   listVamSessions,
@@ -256,7 +257,16 @@ export async function readAimedPane(
     // reconstructed downstream: it is a position in THIS capture, at this
     // moment, and a value kept across two reads would be one screen's caret
     // drawn on another's (`shared/terminal.ts`, `PaneCursor`).
-    return { kind: 'ok', name, text: pane.text, cursor: pane.cursor };
+    return {
+      kind: 'ok',
+      name,
+      text: pane.text,
+      cursor: pane.cursor,
+      // Whether the program asked for the mouse travels with the screen for
+      // the same reason the cursor does: it is a fact about THIS capture, and
+      // it is what decides where the next wheel goes (`shared/terminal.ts`).
+      ...(pane.mouse === undefined ? {} : { mouse: pane.mouse }),
+    };
   }
   return pane.error.code === 'no-such-session'
     ? { kind: 'gone' }
@@ -430,6 +440,13 @@ export async function sendToPane(
                 // the wrong pane is a bigger mistake than a letter in it and
                 // never a smaller one.
                 sendControlArgv(match.name, key.letter)
-              : sendTextArgv(match.name, key.text);
+              : key.kind === 'wheel'
+                ? // The one key that is neither pressed nor typed by the
+                  // operator: a mouse report the program in the pane asked
+                  // for, and aimed by the same guard as everything else --
+                  // a wheel that scrolls somebody else's pager is a smaller
+                  // mistake than a chord, and still one.
+                  sendWheelArgv(match.name, key)
+                : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

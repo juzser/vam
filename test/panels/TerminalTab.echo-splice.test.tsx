@@ -36,6 +36,8 @@
  * the wiring: the splice itself, and that the tab really applies it.
  */
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { composeScreen, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
@@ -138,6 +140,42 @@ describe('a screen-shaped answer is put back on top of the history', () => {
     // it, so there is nothing to keep.
     expect(composeScreen(ok('a\nb'), screen, 'echo')).toBe(screen);
     expect(composeScreen(ok('a\nb'), ok('S0\nS1\nS2'), 'echo')).toEqual(ok('S0\nS1\nS2'));
+  });
+});
+
+describe('against the bytes tmux really answers', () => {
+  // Real captures from a private tmux 3.7b socket: a Claude Code 2.1.278
+  // pane at its prompt, in the alternate screen, with 288 lines of shell
+  // output above it. The screen read and the window read, as `readPane`
+  // delivers them (cursor line already split off). The invariant: an echo
+  // read never shrinks the drawn content below what the last window read
+  // drew, and what it draws at the bottom is exactly the echo's screen.
+  // From the repo root: happy-dom rewrites `import.meta.url` to its own origin.
+  const fixture = (name: string) =>
+    readFileSync(join(process.cwd(), 'test', 'fixtures', 'terminal', `${name}.ansi`), 'utf8');
+  const SCREEN = fixture('claude-fullscreen-screen');
+  const WINDOW = fixture('claude-fullscreen-window');
+
+  it('keeps every line of the window and ends in the echo screen', () => {
+    const composed = composeScreen(ok(WINDOW), ok(SCREEN), 'echo');
+    expect(composed.kind).toBe('ok');
+    if (composed.kind !== 'ok') return;
+    const drawn = composed.text.split('\n');
+    expect(drawn).toHaveLength(WINDOW.split('\n').length);
+    expect(drawn.slice(-SCREEN.split('\n').length).join('\n')).toBe(SCREEN);
+    // And the premise #439 rested on holds for these bytes: the screen IS
+    // the window's tail, so the splice changed nothing but the caret.
+    expect(WINDOW.endsWith(SCREEN)).toBe(true);
+  });
+
+  it('draws one screen when the window IS one screen -- the fullscreen case', () => {
+    // A session started straight into `claude` has `history_size` 0: the
+    // window read answers with the screen. Nothing above it to keep, and
+    // nothing lost either -- the operator's report is not this splice.
+    const composed = composeScreen(ok(SCREEN), ok(SCREEN), 'echo');
+    expect(composed.kind === 'ok' && composed.text.split('\n').length).toBe(
+      SCREEN.split('\n').length,
+    );
   });
 });
 

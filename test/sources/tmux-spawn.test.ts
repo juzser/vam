@@ -481,7 +481,7 @@ describe('readPane', () => {
         '-t',
         '=vam-demo-a1b2c3:',
         '-F',
-        '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+        '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
         ';',
         'capture-pane',
         '-p',
