@@ -741,14 +741,29 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
 
 /**
  * Every session on the server: the project vam recorded on it, a TAB, the pid
- * vam recorded on it, a second TAB, and the session name. The filtering to
- * vam's own happens after the read, in `spawn.ts`: tmux's `-f` filter language
- * is another string to get wrong, and the rows are already in hand.
+ * vam recorded on it, a second TAB, the session name, a third TAB, and the
+ * name of the process in the FOREGROUND of the pane. The filtering to vam's
+ * own happens after the read, in `spawn.ts`: tmux's `-f` filter language is
+ * another string to get wrong, and the rows are already in hand.
+ *
+ * THE FOURTH FIELD IS WHAT A SHELL-FIRST PANE MADE NECESSARY. Since Stage 2
+ * of `docs/design/vam-owns-the-session.md` a vam pane starts as a shell, and
+ * an agent is in it only once one has been typed there -- so "is anything
+ * running in this pane" became a question with two answers, and
+ * `pane_current_command` is tmux's own: measured on 3.7b over a private
+ * socket, `zsh` on a fresh pane and `sleep` two seconds after `sleep 30` was
+ * typed into it. `paneForRow` (`claude-code/reply.ts`) reads it to refuse
+ * handing a pane that holds only a shell to an agent that published nothing,
+ * and `pane-row.ts` reads it to tell an empty pane from an occupied one. It
+ * comes LAST so the three fields before it keep their positions for every
+ * reader and every stub, and a line without it still parses.
  *
  * Tabs separate them because a session name cannot contain one -- tmux rejects
  * it (measured, 3.7b: `invalid session name`; a space or a `:` it accepts) --
- * a project id is a digest (`project-id.ts`), and a pid is digits only
- * (`PANE_PID_FORMAT`), so no field can swallow another. An unset option
+ * a project id is a digest (`project-id.ts`), a pid is digits only
+ * (`PANE_PID_FORMAT`), and a process name is a `comm`, which the kernel
+ * bounds and never puts whitespace of that kind in; so no field can swallow
+ * another. An unset option
  * arrives as an empty field, which is precisely the answer "vam did not
  * record this" -- "did not start this one" for the project field, "an older
  * vam, or the tag call itself failed" for the pid field (`createVamSession`
@@ -766,7 +781,11 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
  * argv test counts it.
  */
 export function listSessionsArgv(): readonly string[] {
-  return ['list-sessions', '-F', `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`];
+  return [
+    'list-sessions',
+    '-F',
+    `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}`,
+  ];
 }
 
 /**

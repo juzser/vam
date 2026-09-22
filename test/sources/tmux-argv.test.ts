@@ -188,14 +188,16 @@ describe('tmux argv', () => {
     ]);
   });
 
-  it('asks the listing for the recorded project id and pid beside each name', () => {
+  it('asks the listing for the recorded project id and pid beside each name, then the foreground command', () => {
     // Without the options in the format there is nothing to pair on, and the
     // matcher is back to guessing from a truncated slug (project) or counting
-    // live rows (pid).
+    // live rows (pid). The command is what tells an empty shell pane from one
+    // with an agent in it (`tmux/shell.ts`, `isShellCommand`), and it comes
+    // LAST so the three fields before it keep their positions.
     expect(listSessionsArgv()).toEqual([
       'list-sessions',
       '-F',
-      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}`,
+      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}`,
     ]);
   });
 

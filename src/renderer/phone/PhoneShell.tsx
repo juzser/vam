@@ -234,6 +234,8 @@ const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
   running: 'bg-running',
   waiting: 'bg-waiting',
   idle: 'bg-idle',
+  // The neutral `idle` shares: an empty pane is the absence of news too.
+  unstarted: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };

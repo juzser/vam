@@ -85,6 +85,7 @@ import {
   Mic,
   NotepadText,
   Paperclip,
+  Play,
   Sparkles,
   SquareTerminal,
   TriangleAlert,
@@ -932,6 +933,20 @@ export type DetailPanelProps = {
    * where the operator is already looking.
    */
   readonly onSetDefaultProvider?: (id: ProviderId) => void;
+  /**
+   * START SESSION, for a row whose pane has nothing in it (`status:
+   * 'unstarted'`, `model.ts`). Called with the provider the operator chose
+   * on the start screen; the CALLER resolves that id to a command and types
+   * it into the pane through `recordPrompt` (`Canvas.tsx`, `startSessionIn`)
+   * -- the same keystrokes the Terminal view would take by hand, and nothing
+   * spawned. An ID rather than a command crosses this boundary so a renderer
+   * cannot send main a word its provider table never listed.
+   *
+   * Optional, and ABSENT withdraws the button on the same rule as
+   * `onSetDefaultProvider`: the screen still says what the row is and how to
+   * start something in it (the Terminal view), it just cannot do it from here.
+   */
+  readonly onStartSession?: (id: ProviderId) => void;
   /**
    * `prefs.filesTreeWidth` — the width the operator last dragged the Files
    * tab's tree to, or `null`/absent for "never dragged", which draws the
@@ -2622,6 +2637,113 @@ function AgentDetail({
         </button>
       )}
       {body()}
+    </div>
+  );
+}
+
+/**
+ * THE START SCREEN: the Response view of a pane with nothing started in it.
+ *
+ * `docs/design/vam-owns-the-session.md` §3, and the operator's own words,
+ * twice: "the Response view needs a provider picker and a Start session
+ * button -- or the user can switch to the terminal view and start a session
+ * by typing `claude`, `codex`, and so on." Both routes end in the same pane
+ * with the same keystrokes, so this screen says so rather than pretending
+ * the button is the only door.
+ *
+ * ONE ACT, AND IT IS NOT A PROMPT. No composer is drawn under this (see
+ * `composerHidden`): the pane holds a shell, and the only thing worth typing
+ * into a shell from here is the provider's own command. `onStart` hands the
+ * caller the chosen ID; the caller resolves it and types it. Absent, the
+ * button is withdrawn and the Terminal sentence carries the whole of what can
+ * be done -- the same absent-not-disabled rule every optional write in this
+ * file follows.
+ *
+ * A SEGMENTED PICKER, NOT THE COMPOSER'S POPOVER -- the same `aria-pressed`
+ * row the settings section draws, because it is the same kind of choice.
+ * That popover changes the GLOBAL default for the next session created; this
+ * chooses what THIS pane runs now, and a control that looked like the other
+ * while meaning something else is the confusion `onSetDefaultProvider`'s
+ * comment spends a paragraph on. The stored default is where the picker
+ * STARTS, which is the one honest link between them: it is what the operator
+ * said they usually want.
+ *
+ * THE PANE IS NAMED. It is the row's title (`pane-row.ts`) and the only
+ * thing that tells two empty panes in one project apart; saying it here is
+ * what lets the operator check they are starting in the one they meant.
+ */
+function StartSession({
+  paneName,
+  defaultProvider,
+  onStart,
+}: {
+  readonly paneName: string;
+  readonly defaultProvider: ProviderId | undefined;
+  readonly onStart: ((id: ProviderId) => void) | undefined;
+}) {
+  const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  return (
+    <div
+      data-start-session
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+    >
+      <div className="flex flex-col gap-1">
+        <p className="text-control text-ink">Nothing is running in this pane yet.</p>
+        <p className="text-meta text-ink-quiet">
+          <span className="font-mono">{paneName}</span>
+          {' — a shell, in this project’s directory'}
+        </p>
+      </div>
+      {onStart !== undefined && (
+        <>
+          <fieldset
+            data-start-providers
+            aria-label="which agent to start"
+            className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1"
+          >
+            {PROVIDERS.map((provider) => {
+              const selected = provider.id === chosen;
+              const mark = PROVIDER_MARKS[provider.id];
+              return (
+                <button
+                  key={provider.id}
+                  type="button"
+                  aria-pressed={selected}
+                  data-start-provider={provider.id}
+                  onClick={() => setChosen(provider.id)}
+                  className={[
+                    'vam-tap flex cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-control',
+                    selected
+                      ? 'bg-line-strong text-ink'
+                      : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+                  ].join(' ')}
+                >
+                  {mark === undefined ? (
+                    <Box size={12} strokeWidth={1.7} />
+                  ) : (
+                    <mark.Glyph size={12} />
+                  )}
+                  {provider.label}
+                </button>
+              );
+            })}
+          </fieldset>
+          <button
+            type="button"
+            data-start-session-button
+            onClick={() => onStart(chosen)}
+            className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90"
+          >
+            <Play size={12} strokeWidth={2} />
+            Start session
+          </button>
+        </>
+      )}
+      <p className="max-w-[36ch] text-meta text-ink-quiet">
+        {onStart === undefined
+          ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
+          : 'Or switch to the Terminal view and type the command yourself; either way it runs in this same pane.'}
+      </p>
     </div>
   );
 }
@@ -4864,6 +4986,7 @@ export function DetailPanel(props: DetailPanelProps) {
     phone = false,
     defaultProvider,
     onSetDefaultProvider,
+    onStartSession,
     paneFocused = true,
   } = props;
 
@@ -6450,7 +6573,15 @@ export function DetailPanel(props: DetailPanelProps) {
    * this box to a session — and now takes the same road.
    */
   const composerHidden =
-    entry === null || records === false || (openQuestion && chattingAbout !== setId);
+    entry === null ||
+    records === false ||
+    // A PANE WITH NOTHING IN IT HAS NO ONE TO PROMPT. Text sent to it would
+    // run as a shell command, and a prompt box promises an answer that no
+    // agent is there to give. The start screen (`StartSession` below) is the
+    // whole Response view for this status; the Terminal view is the other
+    // way in.
+    entry.session.status === 'unstarted' ||
+    (openQuestion && chattingAbout !== setId);
   /**
    * Is the corner overlay on screen?
    *
@@ -7268,7 +7399,13 @@ export function DetailPanel(props: DetailPanelProps) {
         // see its own comment for why. This slot contributes nothing so the
         // Response-column branches below it never run for a tab that is not
         // Response.
-        null : orderedTurns.length === 0 ? (
+        null : entry !== null && entry.session.status === 'unstarted' ? (
+          <StartSession
+            paneName={entry.session.pane ?? entry.session.title}
+            defaultProvider={defaultProvider}
+            onStart={onStartSession}
+          />
+        ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
           // pick one from the sidebar". This line said the same thing in

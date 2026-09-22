@@ -690,6 +690,37 @@ export const DEMO_MODEL: CanvasModel = {
             },
           ],
         },
+        {
+          // UNSTARTED: a pane vam opened with nothing in it yet -- the sixth
+          // status (`model.ts`), and the row the operator's own words are
+          // about: "the Response view needs a provider picker and a Start
+          // session button". Without this row the start screen
+          // (`DetailPanel.tsx`, `StartSession`) and the hollow status dot
+          // (`status-mark.tsx`) were outside the reach of every non-unit gate
+          // in the repo, which is the fourth rule above playing out a fifth
+          // time. `e2e/start-screen-shots.mjs` measures both, and
+          // `docs/ui/start-screen-*.png` are its pictures.
+          //
+          // SHAPED EXACTLY AS `pane-row.ts` REPORTS ONE. The id is the tmux
+          // name under the pane prefix, the title IS the tmux name (vam knows
+          // nothing else about it yet), `pane` names the same session, there
+          // are no turns, no branch and no age, and `vamControlled` is true
+          // by the only proof there is -- it is in vam's own listing. Beside
+          // `notes-1..4` on purpose, so the mark is measured in a column of
+          // the other five.
+          vamControlled: true,
+          id: 'pane:vam-notes-k3f9zq',
+          title: 'vam-notes-k3f9zq',
+          pane: 'vam-notes-k3f9zq',
+          epic: null,
+          branch: null,
+          status: 'unstarted',
+          runningAgents: 0,
+          activity: null,
+          age: null,
+          decisions: [],
+          source: 'claude-code',
+        },
       ],
     },
   ],

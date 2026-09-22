@@ -256,6 +256,14 @@ export type TmuxSession = {
    */
   readonly pid?: string;
   readonly name: string;
+  /**
+   * What is in the FOREGROUND of the pane, as tmux names the process
+   * (`pane_current_command` -- `zsh`, `claude`, `codex`, `sleep`). OPTIONAL
+   * for the reason `pid` is: the fixtures that predate it answer three
+   * fields, and absence means "the listing did not say", never "a shell".
+   * `tmux/shell.ts`'s `isShellCommand` is the one reader that interprets it.
+   */
+  readonly command?: string;
 };
 
 /** Either the thing, or why vam could not get it -- never one standing in for the other. */
@@ -432,12 +440,22 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
         },
       };
     }
-    const name = line.slice(secondTab + 1).trim();
+    // The THIRD tab is optional -- what follows it is the foreground command
+    // (`listSessionsArgv`), and a line without it is the older three-field
+    // shape every stubbed runner in this suite still answers with. The name
+    // is what sits between the second tab and the third, or to the end.
+    const thirdTab = line.indexOf('\t', secondTab + 1);
+    const name = (
+      thirdTab === -1 ? line.slice(secondTab + 1) : line.slice(secondTab + 1, thirdTab)
+    ).trim();
     if (!isVamSession(name)) continue;
+    const command = thirdTab === -1 ? '' : line.slice(thirdTab + 1).trim();
     sessions.push({
       project: line.slice(0, firstTab).trim(),
       pid: line.slice(firstTab + 1, secondTab).trim(),
       name,
+      // Absent, not `''`, when the listing did not carry it -- see the field.
+      ...(command === '' ? {} : { command }),
     });
   }
   return { kind: 'ok', sessions };

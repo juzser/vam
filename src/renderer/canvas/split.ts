@@ -730,6 +730,37 @@ export function paneHolding(tree: SplitTree, sessionId: string): string | null {
 }
 
 /**
+ * A tab's session changed IDENTITY and the tab keeps its place.
+ *
+ * WHY A SESSION CAN DO THAT. A vam pane with nothing in it is a row keyed by
+ * its tmux name (`main/sources/claude-code/pane-row.ts`); the moment an agent
+ * registers in it, the source reports a row keyed by the AGENT instead, and
+ * the two ids share nothing. Without this step `pruneClosedTabs` would read
+ * the first as closed -- at exactly the moment the operator pressed Start and
+ * is watching the pane -- and drop the tab, then the adoption effect would
+ * append the new row at the END of some pane's strip. Same pane, new id, same
+ * tab, same place: that is what the operator sees, because it is what is
+ * true. `Session.pane` (`model.ts`) is how the caller knows `from` and `to`
+ * are one pane.
+ *
+ * In place, in every leaf that held `from`: the front tab stays in front, a
+ * background tab stays in the background. When `to` is already held (a race
+ * with adoption), `from` is simply dropped rather than duplicated. The SAME
+ * tree comes back when nothing held `from`, so an effect can call this on
+ * every model without churning the render.
+ */
+export function renameTab(tree: SplitTree, from: string, to: string): SplitTree {
+  return mapEveryLeaf(tree, (leaf) => {
+    if (!leaf.sessionIds.includes(from)) return leaf;
+    const sessionIds = leaf.sessionIds.includes(to)
+      ? leaf.sessionIds.filter((id) => id !== from)
+      : leaf.sessionIds.map((id) => (id === from ? to : id));
+    const sessionId = leaf.sessionId === from ? to : leaf.sessionId;
+    return { ...leaf, sessionIds, sessionId };
+  });
+}
+
+/**
  * Drop every tab whose session is no longer open, wherever it sits.
  *
  * A session can be closed from four places (the sidebar row's `×`, a tab's

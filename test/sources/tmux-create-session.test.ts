@@ -21,8 +21,9 @@ import {
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
+import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
-import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
+import { DEFAULT_PROVIDER_ID, PROVIDERS, resolveProvider } from '../../src/shared/providers.js';
 
 function recordingTmux(stderr = ''): TmuxRun & { calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
@@ -106,7 +107,11 @@ describe('o, on a source that cannot create', () => {
 });
 
 describe('o, on the Claude Code source', () => {
-  it('starts a detached tmux session running claude in the project’s cwd', async () => {
+  it('starts a detached tmux session running a SHELL in the project’s cwd', async () => {
+    // Stage 2 of `docs/design/vam-owns-the-session.md`: the pane is a shell,
+    // real from its first frame, and the provider is typed into it later
+    // (`start-in-pane.ts`). The shell is injected so the assertion is by
+    // value; `tmux-shell.test.ts` pins what the default resolves to.
     const run = recordingTmux();
     const failure = await createSessionInProject({
       agents: [agent('/w/demo')],
@@ -114,6 +119,7 @@ describe('o, on the Claude Code source', () => {
       title: 'new work',
       run,
       name: 'vam-new-work-a1b2c3',
+      shell: ['/bin/zsh', '-l'],
     });
 
     expect(failure).toBeNull();
@@ -128,7 +134,8 @@ describe('o, on the Claude Code source', () => {
         'vam-new-work-a1b2c3',
         '-c',
         '/w/demo',
-        'claude',
+        '/bin/zsh',
+        '-l',
       ],
       // The id the Terminal tab will ask by -- the SAME id `createSession` was
       // called with, not a slug re-derived from the title. The title reaches
@@ -268,16 +275,16 @@ describe('the provider the session is started with', () => {
 
   it('falls back to the default provider for an id nothing answers to', async () => {
     const run = recordingTmux();
-    const failure = await createSessionInProject({
-      agents: [agent('/w/demo')],
-      projectId: projectIdOf('/w/demo'),
-      title: 'new work',
+    const orchard = tempRepo();
+    const failure = await createSessionInDirectory({
+      cwd: orchard,
+      title: 'orchard',
       run,
-      name: 'vam-new-work-a1b2c3',
+      name: 'vam-orchard-a1b2c3',
       // A provider a later vam may add, stored by a browser that has been
       // through a downgrade -- or simply hand-edited. The session must still
       // start.
-      provider: 'codex-cli',
+      provider: 'cursor-cli',
     });
 
     expect(failure).toBeNull();
@@ -288,11 +295,58 @@ describe('the provider the session is started with', () => {
       '-F',
       '#{pane_pid}',
       '-s',
-      'vam-new-work-a1b2c3',
+      'vam-orchard-a1b2c3',
       '-c',
-      '/w/demo',
+      orchard,
       ...resolveProvider(DEFAULT_PROVIDER_ID).command,
     ]);
+  });
+
+  /**
+   * THE PROJECT PATH DOES NOT SPEND THE PROVIDER AT ALL. It runs a shell
+   * (`tmux/shell.ts`) and the provider's command is typed into that shell
+   * afterwards, by the Start button or by hand -- asserted by value in
+   * `claude-code-start-in-pane.test.ts`. What is asserted here is the
+   * negative: naming a provider, or an id nothing answers to, changes NOTHING
+   * about what tmux is handed on this path, and no provider's command is in
+   * it. The chosen-directory path above is the exception, and
+   * `create-session.ts`'s header says why.
+   */
+  it('does not reach the project path’s spawn: that pane runs the shell whatever was named', async () => {
+    const spawnWith = async (provider?: string) => {
+      const run = recordingTmux();
+      await createSessionInProject({
+        agents: [agent('/w/demo')],
+        projectId: projectIdOf('/w/demo'),
+        title: 'new work',
+        run,
+        name: 'vam-new-work-a1b2c3',
+        provider,
+        shell: ['/bin/zsh', '-l'],
+      });
+      return run.calls;
+    };
+    const named = await spawnWith('codex');
+    const unnamed = await spawnWith();
+    const unknown = await spawnWith('cursor-cli');
+    expect(named[0]).toEqual(unnamed[0]);
+    expect(unknown[0]).toEqual(unnamed[0]);
+    expect(unnamed[0]?.slice(-2)).toEqual(['/bin/zsh', '-l']);
+    for (const provider of PROVIDERS) {
+      expect(named.flat()).not.toContain(provider.command[0]);
+    }
+  });
+
+  it('runs the login shell `tmux/shell.ts` resolves when none is injected', async () => {
+    const run = recordingTmux();
+    await createSessionInProject({
+      agents: [agent('/w/demo')],
+      projectId: projectIdOf('/w/demo'),
+      title: 'new work',
+      run,
+      name: 'vam-new-work-a1b2c3',
+    });
+    expect(run.calls[0]?.slice(-2)).toEqual(loginShellCommand());
   });
 
   it('carries the renderer’s choice across the IPC boundary, and defaults without one', async () => {
