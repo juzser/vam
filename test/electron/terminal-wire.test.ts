@@ -67,7 +67,7 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
 
   it('carries Return and Backspace as the interpreted keys they are', async () => {
     const { api, argvs } = wire(TWO, new Map([[ATLAS, 'vam-atlas-a1b2c3']]));
-    await api.send(ATLAS, { kind: 'enter' }, ATLAS);
+    await api.send(ATLAS, { kind: 'enter', shift: false }, ATLAS);
     await api.send(ATLAS, { kind: 'backspace' }, ATLAS);
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
     // The SECOND key costs one spawn, not two: the pairing proven for the
@@ -76,6 +76,17 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
     // bridge.
     expect(argvs[2]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'BSpace']);
     expect(argvs.map((argv) => argv[0])).toEqual(['list-sessions', 'send-keys', 'send-keys']);
+  });
+
+  it('carries Shift+Enter as a literal newline, never the interpreted Return', async () => {
+    // End to end across the same seam #66-79 above pins: the preload's
+    // argument order, the real main handler, and the real argv builder.
+    // `shift: true` is what the Terminal tab now sends for Shift+Enter
+    // (`TerminalTab.tsx`'s `strokeFor`); this is the proof that a session
+    // vam started reads a typed `\n` rather than a pressed `Enter` for it.
+    const { api, argvs } = wire(TWO, new Map([[ATLAS, 'vam-atlas-a1b2c3']]));
+    await api.send(ATLAS, { kind: 'enter', shift: true }, ATLAS);
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', '\n']);
   });
 
   it('sends without a row too, where the project alone can answer', async () => {

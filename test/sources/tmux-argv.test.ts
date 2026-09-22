@@ -27,6 +27,7 @@ import {
   sendBackTabArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNewlineArgv,
   sendTextArgv,
   tagPidArgv,
   tagSessionArgv,
@@ -171,6 +172,24 @@ describe('tmux argv', () => {
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('-l');
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('S-Tab');
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('Tab');
+  });
+
+  it('sends Shift+Enter as a literal LF, never the interpreted Return', () => {
+    // vam/shift-enter. MEASURED on a private `-L` socket, tmux 3.7b: a single
+    // `\n` typed with `-l` (never a tmux key name -- `-l` is what makes this
+    // a byte, not a lookup) lands as an inserted line rather than a submit in
+    // BOTH Claude Code 2.1.278 and Codex 0.153.2. This is `sendTextArgv`'s own
+    // shape, spelled out under its own name (`sendNewlineArgv`) so
+    // `sendToPane`'s switch reads as a table of keys.
+    expect(sendNewlineArgv('vam-a1b2c3')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '-l',
+      '--',
+      '\n',
+    ]);
+    expect(sendNewlineArgv('vam-a1b2c3')).not.toEqual(sendEnterArgv('vam-a1b2c3'));
   });
 
   it('types text tmux would otherwise read as a key or as an option', () => {
