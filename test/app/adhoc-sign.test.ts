@@ -111,7 +111,10 @@ describe('the config', () => {
     // in app-builder-lib's `platformPackager.doPack`), so the day a Developer
     // ID is configured, its signature lands on top of this one and wins. An
     // `afterSign` hook would do the opposite and clobber the real signature.
-    const config = require(CONFIG) as { readonly afterPack: unknown; readonly mac: { identity: unknown } };
+    const config = require(CONFIG) as {
+      readonly afterPack: unknown;
+      readonly mac: { identity: unknown };
+    };
     expect(config.afterPack).toBe(hook.afterPack);
     expect(config.mac.identity).toBeNull();
   });
