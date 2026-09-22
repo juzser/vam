@@ -3760,7 +3760,17 @@ function QuestionCard({
     target?.focus();
   }, [landing, showingTaken, firstOptionRef]);
 
-  const send = async () => {
+  /**
+   * `marksOverride` exists for ONE caller: Enter marking the last unmarked
+   * option and sending in the same keystroke. `setMarks` is async, so a
+   * `send()` invoked right after it inside the same handler would still read
+   * the marks from BEFORE this keystroke — every step but the one just marked
+   * would be right, and that one would come up empty and trip the guard two
+   * lines down, so the operator's last Enter would look like it did nothing.
+   * Defaults to the component's own state, so every other caller (the Submit
+   * button, `Mod-Enter`) is unchanged.
+   */
+  const send = async (marksOverride: Readonly<Record<string, readonly string[]>> = marks) => {
     // The marks IN THE ORDER THEY ARE DRAWN, not the order they were clicked:
     // the review screen on the other side names them in the picker's own
     // order, and an answer that reads back in a different one would look like
@@ -3773,7 +3783,7 @@ function QuestionCard({
       question: one.question,
       labels: one.options
         .map((option) => option.label)
-        .filter((label) => (marks[one.id] ?? []).includes(label)),
+        .filter((label) => (marksOverride[one.id] ?? []).includes(label)),
       multiSelect: one.multiSelect,
     }));
     if (onAnswer === null || sending || steps.length === 0) return;
@@ -3808,6 +3818,22 @@ function QuestionCard({
     setLanding(at);
   };
 
+  /**
+   * SUBMIT'S OWN DECISION, whoever asks for it: send if every pending step
+   * carries a mark, else name and go to the first one that does not. The
+   * button's `onClick` used to inline this; `Mod-Enter` needed the identical
+   * rule from a second place, so it is a function now rather than a second
+   * copy that could drift from the first.
+   */
+  const trySend = () => {
+    const short = unmarked[0];
+    if (short === undefined) {
+      void send();
+      return;
+    }
+    refuse(short);
+  };
+
   const toggle = (label: string, viaPointer = false) => {
     // The refusal named a missing mark. Marking anything is the operator
     // answering it, so it stops being on screen -- a refusal that outlives
@@ -3833,6 +3859,43 @@ function QuestionCard({
             : [label],
       };
     });
+  };
+
+  /**
+   * ENTER'S OWN PICK — a CLI picker's Enter, not a form's, and the reason it
+   * is not `toggle` twice over.
+   *
+   * NEVER AN UNMARK. `toggle` flips a held option off on a second press;
+   * Enter must not, because the second half of this function reads what the
+   * cursor is ON as "answered" and would walk the operator PAST a step whose
+   * only mark it had just taken away — an Enter that silently unpicked its
+   * own row.
+   *
+   * THE MARK AND THE DECISION ARE ONE COMPUTATION, not `toggle()` followed by
+   * a read of `marks` — `setMarks` is async, so a read straight back would
+   * still see the value from before this keystroke for the option just
+   * marked, exactly the trap `send`'s `marksOverride` comment states. Working
+   * out `nextMarks` here once, and handing it to both `setMarks` and `send`,
+   * is what keeps the write and the decision from disagreeing about what this
+   * keystroke did.
+   */
+  const confirm = (option: { readonly label: string }) => {
+    if (question === undefined) return;
+    setRefusal(null);
+    const already = picked.includes(option.label);
+    const nextMarks: Readonly<Record<string, readonly string[]>> = already
+      ? marks
+      : {
+          ...marks,
+          [question.id]: question.multiSelect ? [...picked, option.label] : [option.label],
+        };
+    if (!already) setMarks(nextMarks);
+    const short = pending.find((one) => (nextMarks[one.id] ?? []).length === 0);
+    if (short === undefined) {
+      void send(nextMarks);
+      return;
+    }
+    refuse(short);
   };
 
   /**
@@ -3939,16 +4002,16 @@ function QuestionCard({
     const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (at === -1 || buttons.length === 0) return;
     /**
-     * ENTER SELECTS THE OPTION UNDER THE CURSOR, and it is handled here rather
-     * than left to the button's native activation for a reason worth stating:
-     * Enter also means something in this pane. The canvas grammar's `open`
-     * fires on Enter while the keyboard is in the right pane and raises the
-     * composer, and the pull request numbered one hundred and eleven is the
-     * record of what happens when a cursor and an
+     * SPACE AND ENTER BOTH SELECT THE OPTION UNDER THE CURSOR, and both are
+     * handled here rather than left to the button's native activation for a
+     * reason worth stating: Enter also means something in this pane. The
+     * canvas grammar's `open` fires on Enter while the keyboard is in the
+     * right pane and raises the composer, and the pull request numbered one
+     * hundred and eleven is the record of what happens when a cursor and an
      * Enter disagree about what they are pointing at. Handling it here and
      * calling `preventDefault` gives Enter ONE meaning while the keyboard is
-     * in the list — mark this option — because the canvas listener stands
-     * aside for a key that has already been answered.
+     * in the list — because the canvas listener stands aside for a key that
+     * has already been answered.
      */
     if (action.kind === 'toggle') {
       const option = question?.options[at];
@@ -3957,6 +4020,23 @@ function QuestionCard({
       toggle(option.label);
       return;
     }
+    // ENTER — MARK THEN ADVANCE, never a second copy of `toggle`'s unmark.
+    // `confirm` decides submit-or-walk itself; see its own comment for why
+    // that decision cannot be made by reading `marks` back after the mark.
+    if (action.kind === 'confirm') {
+      const option = question?.options[at];
+      if (option === undefined) return;
+      event.preventDefault();
+      confirm(option);
+      return;
+    }
+    // `Mod-Enter` IS NOT THIS LISTENER'S — it acts on the whole card, not on
+    // whichever option the cursor happens to sit on, so it is handled once,
+    // on the outer `data-question` container below. Returning here (not
+    // `preventDefault`) lets the same keydown keep bubbling to it, the same
+    // way `walkStep` on the step strip and everything else this listener does
+    // not claim already does.
+    if (action.kind === 'submit') return;
     event.preventDefault();
     buttons[(at + action.delta + buttons.length) % buttons.length]?.focus();
   };
@@ -3964,11 +4044,38 @@ function QuestionCard({
   if (question === undefined) return null;
 
   return (
+    // `Mod-Enter` is a SHORTCUT to an act that already has a real,
+    // keyboard-reachable control: the Submit `<button>` below, drawn under
+    // the identical condition this listener checks (`open && pending.length
+    // > 0 && onAnswer !== null`) and operable on its own by Tab plus a bare
+    // Enter or Space. Nothing here is the ONLY route to the act, which is
+    // what the rule exists to guarantee — this listener only makes the same
+    // act reachable without first tabbing to that button (see the two
+    // rulings this file already carries, above the `in` block's own
+    // `onContextMenu`, for the same argument made in full).
+    // biome-ignore lint/a11y/noStaticElementInteractions: see above.
     <div
       data-question
       data-question-open={open ? 'true' : undefined}
       data-question-select={question.multiSelect ? 'multi' : 'single'}
       data-question-waiting={waiting ? 'true' : undefined}
+      /**
+       * `Mod-Enter` SENDS FROM ANYWHERE ON THE CARD, whatever has the cursor —
+       * an option, the step strip, "Chat about this", the fold's own "change"
+       * button, or Submit itself (where it is a second way to press the same
+       * control, and native activation already does the same thing on a bare
+       * Enter). One listener rather than one per surface, because the act does
+       * not depend on WHERE the keyboard is, only on whether the set can be
+       * sent — `onKeys` below deliberately lets a `submit` keydown bubble past
+       * it rather than claim it a second time.
+       */
+      onKeyDown={(event) => {
+        const action = resolveQuestionKey(normalizeKey(event));
+        if (action?.kind !== 'submit') return;
+        if (!open || pending.length === 0 || onAnswer === null) return;
+        event.preventDefault();
+        trySend();
+      }}
       className={[
         'flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
         waiting ? 'border-waiting' : 'border-line-strong',
@@ -4211,14 +4318,7 @@ function QuestionCard({
                colour, for anything that has to check the state without
                reading a sentence. */
             data-question-short={unmarked.length > 0 ? 'true' : undefined}
-            onClick={() => {
-              const short = unmarked[0];
-              if (short === undefined) {
-                void send();
-                return;
-              }
-              refuse(short);
-            }}
+            onClick={trySend}
             className={[
               'rounded-[6px] border px-1.5 py-1 text-control',
               sending
@@ -4232,15 +4332,20 @@ function QuestionCard({
               several. This was `questions.length > 1`, so the commonest call
               there is -- a single question -- had a faint Submit above a
               sentence about marking and nothing saying the mark was what it
-              was waiting for. Silent once the set is complete: at that point
-              the button says everything. */}
-          {(pending.length > 1 || unmarked.length > 0) && (
-            <span data-question-progress className="text-meta text-ink-faint">
-              {pending.length > 1
+              was waiting for. USED TO be silent once the set was complete --
+              that silence was two different facts wearing one blank line: for
+              years there was nothing to report, and now there is a route
+              nobody had said out loud, so the line stays lit rather than going
+              quiet at the one moment it has something to say. */}
+          <span data-question-progress className="text-meta text-ink-faint">
+            {pending.length > 1
+              ? unmarked.length > 0
                 ? `${pending.length - unmarked.length} of ${pending.length} marked`
-                : 'not marked yet — pick an option above'}
-            </span>
-          )}
+                : 'Enter submits'
+              : unmarked.length > 0
+                ? 'not marked yet — pick an option above'
+                : 'Enter submits'}
+          </span>
         </div>
       )}
       {refusal !== null && (

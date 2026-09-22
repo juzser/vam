@@ -94,10 +94,31 @@ describe('resolveQuestionKey — one resolution, in one vocabulary', () => {
     expect(at({ key: 'ArrowRight' })).toEqual({ kind: 'walkStep', delta: 1 });
   });
 
-  it('marks by number, and takes Enter and Space as the pick', () => {
+  it('marks by number, and takes Space as the pick', () => {
     expect(at({ key: '3' })).toEqual({ kind: 'mark', at: 2 });
-    expect(at({ key: 'Enter' })).toEqual({ kind: 'toggle' });
     expect(at({ key: ' ' })).toEqual({ kind: 'toggle' });
+  });
+
+  /**
+   * ENTER IS NOT SPACE, any more — it used to be the same `toggle` action, and
+   * that is exactly the ambiguity the operator asked out: a CLI picker's Enter
+   * both picks AND moves on, so this card's Enter marks-then-advances (or
+   * sends, once nothing is left to mark) while Space stays the bare toggle it
+   * always was. `Mod-Enter` is new: send from anywhere on the card, whatever
+   * has the cursor.
+   */
+  it('takes Enter as confirm and Mod-Enter as submit, distinct from Space', () => {
+    expect(at({ key: 'Enter' })).toEqual({ kind: 'confirm' });
+    // `metaKey`, not `ctrlKey` — platform-independent the way `Mod-j` is
+    // tested above: `normalizeKey` only folds a bare Ctrl into `Mod-` off a
+    // Mac, and this file's `at` helper reads the HOST platform when none is
+    // given, which is exactly the trap its own comment warns against.
+    expect(at({ key: 'Enter', metaKey: true })).toEqual({ kind: 'submit' });
+  });
+
+  it('gives the operator’s rebound motion Enter too, exactly as it does every other built-in', () => {
+    const moved = { 'move:down': ['Enter'] };
+    expect(at({ key: 'Enter' }, moved)).toEqual({ kind: 'walkOption', delta: 1 });
   });
 
   it('leaves the picker for prose on `c`', () => {

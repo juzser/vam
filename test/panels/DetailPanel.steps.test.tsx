@@ -182,6 +182,44 @@ describe('walking between steps', () => {
   });
 });
 
+/**
+ * ENTER MARKS AND WALKS — one keystroke per question, so a multi-step call
+ * never needs the mouse at all. "Enter to submit... never a missed
+ * selection" is the operator's own wording: each Enter marks the option the
+ * cursor sits on, then either moves to the next open step or, once nothing
+ * is left, sends the whole call.
+ */
+describe('Enter marks the focused option and walks to the next unmarked step', () => {
+  it('marks the first step and lands the cursor on the second, unmarked', () => {
+    draw([COLOUR, FRUIT]);
+    options()[0]?.focus();
+    fireEvent.keyDown(listbox(), { key: 'Enter' });
+    // The walk already redrew the list with FRUIT's options, so the mark is
+    // read off the STEP TAB rather than off `options()[0]`, which now names a
+    // different button (Apple, not the Crimson Enter just marked).
+    expect(steps()[0]?.getAttribute('data-marked')).toBe('true');
+    expect(text()).toContain('Which fruit do you prefer?');
+    expect(steps()[1]?.getAttribute('data-current')).toBe('true');
+  });
+
+  it('sends the call on the step that completes it, from the last Enter alone', async () => {
+    const answer = answering({ kind: 'sent', answer: 'Crimson, Apple' });
+    draw([COLOUR, FRUIT], { answer });
+    options()[0]?.focus();
+    fireEvent.keyDown(listbox(), { key: 'Enter' });
+    // The walk landed the cursor on step two's first option — the same
+    // `landing` channel `h`/`l` already use.
+    fireEvent.keyDown(listbox(), { key: 'Enter' });
+    await waitFor(() => expect(answer).toHaveBeenCalledTimes(1));
+    expect(answer.mock.calls[0]?.[1]).toEqual({
+      steps: [
+        { question: 'Which colour do you prefer?', labels: ['Crimson'], multiSelect: false },
+        { question: 'Which fruit do you prefer?', labels: ['Apple'], multiSelect: false },
+      ],
+    });
+  });
+});
+
 describe('one Submit, for the set', () => {
   it('draws exactly one Submit however many steps there are', () => {
     draw([COLOUR, FRUIT]);

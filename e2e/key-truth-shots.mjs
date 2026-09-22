@@ -1322,6 +1322,175 @@ if (inBox) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// OPERATOR REQUEST: "Enter to submit, Space to select" — measured against a
+// REAL Submit, which `?demo=1` cannot draw at all. `DetailPanel.submit.js`
+// only offers the button where `window.api.terminal.answer` exists, and the
+// browser build has none — every guard above this line that opens a question
+// (`ASKING_SESSION`, `vam-build-1`) is deliberately `vamControlled: false`
+// and gets none either (its own comment in `fixtures/demo.ts` says so). So
+// this section stubs `window.api` itself, the way `terminal-ime-shots.mjs`
+// and `start-screen-shots.mjs` already do for the same reason, and drives a
+// session that CAN answer.
+//
+// WHAT ONLY THIS CAN PROVE, that `DetailPanel.question-enter.test.tsx`
+// cannot: that a REAL Enter keydown, cancelable and dispatched by Chromium
+// rather than assembled by `fireEvent`, reaches `onKeys` before the button's
+// own native activation and before the canvas grammar's `open` binding —
+// exactly the `defaultPrevented`-on-a-real-event class this whole file exists
+// for (see the header). The mark, the walk-or-send decision and the recorded
+// call are read off the SHIPPED BUNDLE, not off a component rendered in
+// isolation.
+console.log('\n=== Enter marks and submits, against a real Submit');
+
+/** Every call the stub's own `answer` received, so "the submit happened" is
+ *  read off a recording rather than inferred from the DOM alone. */
+const answered = [];
+
+await page.addInitScript(() => {
+  globalThis.window.__answered = [];
+  globalThis.window.api = {
+    describe: async () => ({
+      id: 'stub',
+      label: 'Stub',
+      capabilities: {
+        liveUpdates: false,
+        recordPrompt: false,
+        // THE ONE FLAG THIS SECTION IS ABOUT: without it `delivers` is false
+        // and Submit is withheld exactly as it is for every demo session.
+        deliverPrompt: true,
+        promptAttachments: false,
+        slashCommands: false,
+        renameSession: false,
+        closeSession: false,
+        createSession: false,
+        governance: false,
+        pullRequests: false,
+        terminal: true,
+        agentRoster: false,
+        resumeSession: false,
+      },
+      declines: {},
+      viewerScope: 'operator',
+    }),
+    load: async () => [
+      {
+        id: 'p1',
+        name: 'stub project',
+        sessions: [
+          {
+            // vam started this one — the one fact `vam-build-1` deliberately
+            // does not carry, and the reason Submit never draws there.
+            vamControlled: true,
+            id: 'asking-1',
+            title: 'asking-1',
+            epic: null,
+            branch: null,
+            status: 'waiting',
+            runningAgents: 0,
+            activity: null,
+            age: '1m',
+            questions: [
+              {
+                id: 'toolu_e2e:0',
+                header: 'Colours',
+                question: 'Which colour do you prefer?',
+                multiSelect: false,
+                options: [
+                  { label: 'Crimson', description: null },
+                  { label: 'Cobalt', description: null },
+                ],
+                answer: null,
+              },
+            ],
+            decisions: [
+              { id: 'd1', label: 'plan', input: 'ask me', output: 'asked', commands: [] },
+            ],
+          },
+        ],
+      },
+    ],
+    subscribe: () => () => {},
+    recordPrompt: async () => {},
+    renameSession: async () => {},
+    closeSession: async () => {},
+    createSession: async () => {},
+    createSessionIn: async () => {},
+    pickImageAttachment: async () => null,
+    history: async () => ({ kind: 'unavailable' }),
+    agentWork: async () => ({ kind: 'unavailable' }),
+    applyWaivers: async () => {},
+    transitionLesson: async () => {},
+    usage: { get: async () => ({ kind: 'unavailable' }) },
+    terminal: {
+      read: async () => ({ kind: 'unavailable' }),
+      resize: async () => true,
+      send: async () => 'sent',
+      // RECORDED, and answered as a real picker read-back would be: the
+      // outcome names the labels the card sent, so a wrong or missing mark
+      // shows up in the sentence on screen rather than only in this array.
+      answer: async (projectId, request, rowId) => {
+        globalThis.window.__answered.push({ projectId, request, rowId });
+        return { kind: 'sent', answer: request.steps.map((s) => s.labels.join(', ')).join('; ') };
+      },
+      prompt: async () => ({ kind: 'unavailable' }),
+    },
+  };
+});
+
+await page.goto(origin, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-session-row]');
+await page.locator('[data-session-row="asking-1"]').click();
+await page.waitForSelector('[data-question-option]', { timeout: 4000 });
+
+const submitBefore = await page.evaluate(
+  () => document.querySelector('[data-question-submit]') !== null,
+);
+check('a real answer bridge really draws Submit', submitBefore);
+
+// Cobalt — the SECOND option, so a defect that always reads "the first
+// option" cannot pass this by accident.
+await page.locator('[data-question-option]').nth(1).focus();
+await page.keyboard.press('Enter');
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-question-option]')[1]?.getAttribute('data-picked') === 'true',
+  undefined,
+  { timeout: 4000 },
+);
+const marked = await page.evaluate(
+  () => document.querySelectorAll('[data-question-option]')[1]?.getAttribute('data-picked'),
+);
+check('Enter marked the option under the cursor', marked === 'true', `data-picked="${marked}"`);
+
+await page.waitForFunction(() => globalThis.window.__answered.length === 1, undefined, {
+  timeout: 4000,
+});
+answered.push(...(await page.evaluate(() => globalThis.window.__answered)));
+console.log('recorded answer call:', JSON.stringify(answered[0]));
+check(
+  'the SAME Enter sent the call — one keystroke, not a second Submit press',
+  answered.length === 1,
+  `${answered.length} calls`,
+);
+check(
+  'carrying the marked label and no other',
+  JSON.stringify(answered[0]?.request?.steps?.[0]?.labels) === JSON.stringify(['Cobalt']),
+  JSON.stringify(answered[0]?.request),
+);
+check('and the session row this pane is actually on', answered[0]?.rowId === 'asking-1');
+
+const outcome = await page.evaluate(
+  () => document.querySelector('[data-question-outcome]')?.textContent ?? '',
+);
+console.log('outcome drawn on screen:', JSON.stringify(outcome));
+check(
+  'the outcome on screen reads back what the stub confirmed',
+  outcome.includes('the picker now reads Cobalt'),
+  outcome,
+);
+await page.screenshot({ path: `${outDir}/key-truth-question-enter-submits.png` });
+console.log(`${outDir}/key-truth-question-enter-submits.png`);
+
 await browser.close();
 
 if (failures.length > 0) {
