@@ -4705,41 +4705,54 @@ const TurnBlock = memo(function TurnBlock({
           data-turn-unfold={decision.id}
           onClick={() => onUnfold(decision.id)}
           aria-label={`show this turn's working — ${decision.label}`}
-          /* OUT OF FLOW, AND THAT IS THE WHOLE DESIGN RATHER THAN A DETAIL.
-             vam folds ONE line per turn, so a way back that takes a row of its
-             own gives the row straight back and the setting buys nothing --
-             measured, and `e2e/transcript-column-shots.mjs` caught exactly
-             that: "collapsed 959px vs shown 959px". So it is absolutely
-             positioned in the turn's own top-right corner (the `article` is
-             already `relative` for the sticky block) and costs no height at
-             all. Right rather than left: the prompt bubble and the answer both
-             start at the left edge, and `reserveCorner` only applies to the
-             newest turn, which focus view never folds.
+          /* IN FLOW, WHERE THE WORKING WAS -- and that is a reversal, so the
+             history is kept. The first cut put this OUT of flow, absolutely
+             positioned in the article's top-right corner, so that it cost no
+             height: vam then folded ONE line per turn, and a way back that
+             took a row of its own gave the row straight back
+             (`e2e/transcript-column-shots.mjs` caught exactly that:
+             "collapsed 959px vs shown 959px"). The operator's report on that
+             corner: "the three-dot mark for expanding progress steps is out
+             of place." Measured: a 24px box at x 1032..1056 with its top 4px
+             ABOVE its own article -- over the sticky prompt bubble, which a
+             reader takes for the PREVIOUS turn's corner, and nowhere near the
+             rows the fold removed.
 
-             A REAL 24x24 BOX RATHER THAN `vam-hit-24`, and the difference is
-             load-bearing here: that utility sets `position: relative` on the
-             element it grows, and being an unlayered rule it beats Tailwind's
-             layered `absolute` -- measured, the button came back
-             `position: relative` and the fold saved nothing. Out of flow, the
-             box costs no height anyway, so the hit area can simply BE the
-             element and the drawn mark stays small inside it.
+             SO IT STANDS EXACTLY WHERE THE PROGRESS REGION STANDS when it is
+             back: between the prompt block and the answer, flush with the
+             answer's left edge. An ellipsis means "something is elided HERE";
+             drawn there, the click replaces the mark with the working in
+             place rather than inserting rows somewhere else on the page.
+             Document order was already this (the button precedes the region,
+             `test/panels/DetailPanel.turn-progress.test.tsx` pins it); only
+             the paint disagreed.
+
+             AND IT STILL BUYS THE FOLD ITS HEIGHT. The 24px box wears
+             `-my-1.5`, which absorbs the column's 6px gap on each side: the
+             box runs from the prompt block's bottom to the answer's top and
+             costs 24px where the region it stands in for costs 28 -- a 16px
+             line and its 6px gap on either side -- plus every step row on
+             top of that. Measured: a stepless turn is 98.8px open and 94.8px
+             folded, so it still folds shorter, by 4px; a turn with twenty
+             calls folds a screen shorter. `e2e/transcript-column-shots.mjs` keeps
+             `collapsed < shown`, and `e2e/turn-steps-shots.mjs` measures the
+             rectangle: below its own prompt, above its own answer, at the
+             answer's left, 24 square, ink at 3:1 or better.
+
+             A REAL 24x24 BOX RATHER THAN `vam-hit-24`: that utility grows the
+             hit area with a pseudo-element, and in flow the box can simply
+             BE the element, the drawn mark small inside it.
 
              `ink-quiet`, not `ink-ghost` -- issue 201 ruled `ghost` out of
              anything that has to be READ, and on a folded turn this is the
-             only thing there is to read. */
+             only thing there is to read. Measured at 7.25:1 on the pane, the
+             same ink the step rows wear; the corner, not the ink, was what
+             made it hard to find. */
           /* `vam-tap` grows this to the phone's 44 (`styles.css`), which is a
              floor 24 does not meet -- five of these draw on one folded
              screen, and this is the ONLY route back to a folded turn's
-             working. Out of flow, so the extra box costs no height.
-
-             IT GROWS INWARD, AND THAT IS THE POINT. Anchored at `right-0`,
-             the 44 box ends where the 24 one did -- flush against the
-             `data-out-to-top` chevron's own 44px column at x=346, with no
-             overlap. Re-anchoring it outward to keep the mark still was
-             tried and measured: x=312..356 against a chevron at 346..390, so
-             two different actions shared 10px of hit area. A mark that moves
-             10px is a smaller cost than a tap that does the wrong thing. */
-          className={`vam-tap -top-1 absolute right-0 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
+             working. In flow, the same `-my-1.5` makes that 32px net. */
+          className={`vam-tap -my-1.5 flex h-6 w-6 flex-none cursor-pointer items-center justify-center self-start rounded font-mono text-ink-quiet text-meta leading-none hover:text-ink ${FOCUS_RING}`}
         >
           {/* The phone's other half: hit 44, PAINT 30, the pattern the view
               icons and the keystroke strip already use. On the desktop this
@@ -6798,11 +6811,15 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const proseMaxWidth = narrowViews ? narrowProseMaxWidth(proseAdvance) : undefined;
   /**
-   * The body's own, which is the same cap minus the two views that are not in
-   * it: the Terminal caps itself in `ch` (`narrowsAsProse`), and `FilesTab` is
+   * The body's own, which is the same cap minus the three views that are not
+   * in it: the Terminal caps itself in `ch` (`narrowsAsProse`), `FilesTab` is
    * a CHILD of the body, so a cap left on for it would narrow a tree the
-   * operator drags the width of themselves. The composer and the question card
-   * need no such test — both are already withdrawn on those two views.
+   * operator drags the width of themselves, and the Agents navigator is two
+   * panes that need the whole width. The composer needs no such test — it is
+   * drawn on Response only (`drawsComposer`). The question card DOES: it is
+   * drawn on Agents too, so it takes this value rather than `proseMaxWidth`,
+   * or a full-width navigator would sit over a capped card — the "column on
+   * top of chrome" mismatch the operator rejected on the first cut, inverted.
    */
   const bodyMaxWidth = narrowsAsProse(current) ? proseMaxWidth : undefined;
   /**
@@ -7200,12 +7217,14 @@ export function DetailPanel(props: DetailPanelProps) {
 
           A MAXIMUM AND NOTHING ELSE. `narrowsAsProse` decides which views it
           reaches: the Terminal caps itself in `ch` because eighty of its
-          characters is a COLUMN COUNT, and `FilesTab` — a child of this very
+          characters is a COLUMN COUNT, `FilesTab` — a child of this very
           element, always mounted and merely `hidden` — is not in the ask and
-          is the one view a second opinion about width would harm. The cap is
-          therefore keyed to the CURRENT view rather than put on unconditionally:
-          leaving it on while Files is up would narrow a tree the operator
-          drags the width of themselves.
+          is the one view a second opinion about width would harm, and the
+          Agents navigator is two panes side by side that the operator asked
+          to have the whole width. The cap is therefore keyed to the CURRENT
+          view rather than put on unconditionally: leaving it on while Files
+          is up would narrow a tree the operator drags the width of
+          themselves.
 
           `mx-auto` CENTRES IT, which is a choice and not a default. The cap
           exists to shorten the eye's return sweep; pinning the column against
@@ -8012,11 +8031,16 @@ export function DetailPanel(props: DetailPanelProps) {
              symmetry: `border-t` above draws the rule between the answer and
              the question, and a rule spanning the whole pane under a 470px
              column is a line pointing at nothing. Capped here, it is the
-             column's own seam. */
+             column's own seam.
+
+             THE BODY'S CAP, NOT THE FLAG'S. This card is also drawn on the
+             Agents view, which the flag does not cap (`narrowsAsProse`), and
+             the seam argument runs the other way there: a 890px card under a
+             1336px navigator is the same line pointing at nothing. */
           className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
-            proseMaxWidth === undefined ? '' : 'mx-auto w-full'
+            bodyMaxWidth === undefined ? '' : 'mx-auto w-full'
           }`}
-          style={proseMaxWidth === undefined ? undefined : { maxWidth: proseMaxWidth }}
+          style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
         >
           {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it

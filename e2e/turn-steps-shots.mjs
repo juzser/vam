@@ -257,6 +257,105 @@ console.log(`  after zf: ${folded.rows} rows, ${folded.unfolds} ways back`);
 check('focus view puts every call away', folded.rows === 0, `${folded.rows} left`);
 check('and leaves a way back on the turns it folded', folded.unfolds > 0);
 
+// ── 5b. AND THE WAY BACK IS DRAWN WHERE THE WORKING WAS ──────────────────
+// Operator: "the three-dot mark for expanding progress steps in the Response
+// view is out of place." Measured before the fix: the `···` was absolutely
+// positioned in its article's top-right corner, 24px boxes at x 1032..1056
+// with their top 4px ABOVE the article -- over the sticky prompt bubble, which
+// a reader takes for the PREVIOUS turn's corner, and nowhere near the place
+// the folded lines come back to. This guard ran green on that state because
+// it never asked where the control was. Now it does: the box has to sit
+// between its own turn's prompt block and its own answer -- the exact rows
+// the progress region occupies when it is back -- flush with the answer's
+// left edge, and its ink has to clear 3:1 on the ground it is composited
+// over (WCAG 1.4.11, the floor for a control's visible boundary).
+//
+// EACH TURN IS SCROLLED INTO VIEW FIRST. The prompt block is `position:
+// sticky`, so on a turn scrolled off the top its rectangle is the STUCK one,
+// pinned at the article's bottom -- measured: prompt bottom -206 under an
+// answer top of -227 -- and "below the prompt, above the answer" would be
+// unsatisfiable there whatever the control did. And left TWO PIXELS SHORT of
+// the column's top: `scrollIntoView` lands on a whole scroll offset while the
+// article sits on a fraction, so the prompt was pinned 1.02px past its natural
+// bottom on one turn out of five and the 0.5px tolerance below called that a
+// misplaced control. Unstuck, the prompt's bottom is the layout's own.
+const unfoldIds = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-turn-unfold]')].map((el) => el.getAttribute('data-turn-unfold')),
+);
+const placement = [];
+for (const id of unfoldIds) {
+  await page.evaluate((turnId) => {
+    document.querySelector(`[data-column-turn="${turnId}"]`)?.scrollIntoView({ block: 'start' });
+    const col = document.querySelector('[data-detail-column]');
+    if (col !== null) col.scrollTop -= 2;
+  }, id);
+  await page.waitForTimeout(100);
+  placement.push(
+    await page.evaluate((turnId) => {
+      const { opaque, ratio, ground } = window.vamSteps;
+      const turns = [...document.querySelectorAll('[data-column-turn]')];
+      const turn = document.querySelector(`[data-column-turn="${turnId}"]`);
+      const el = turn.querySelector('[data-turn-unfold]');
+      const next = turns[turns.indexOf(turn) + 1] ?? null;
+      const box = el.getBoundingClientRect();
+      const prompt = turn.querySelector('[data-detail-block="in"]').getBoundingClientRect();
+      const answer = turn.querySelector('[data-detail-block="out"]').getBoundingClientRect();
+      const colour = getComputedStyle(el).color;
+      const bg = ground(el);
+      return {
+        id: turnId,
+        box: { x: box.left, y: box.top, w: box.width, h: box.height, b: box.bottom },
+        promptBottom: prompt.bottom,
+        answerTop: answer.top,
+        answerLeft: answer.left,
+        nextTop: next === null ? null : next.getBoundingClientRect().top,
+        colour,
+        bg,
+        contrast: opaque(colour) && bg !== null ? ratio(colour, bg) : 0,
+      };
+    }, id),
+  );
+}
+check('there is a placement to measure', placement.length >= 2, `${placement.length} controls`);
+for (const p of placement) {
+  const at = `${p.id}: box x=${p.box.x.toFixed(0)} y=${p.box.y.toFixed(0)} ${p.box.w.toFixed(0)}x${p.box.h.toFixed(0)}`;
+  console.log(
+    `  ${at}; prompt ends ${p.promptBottom.toFixed(0)}, answer starts ${p.answerTop.toFixed(0)} at x=${p.answerLeft.toFixed(0)}, next turn ${p.nextTop === null ? '-' : p.nextTop.toFixed(0)}; ink ${p.colour} on ${p.bg} = ${p.contrast.toFixed(2)}:1`,
+  );
+  check(
+    `${p.id}: the way back sits below its own prompt`,
+    p.box.y >= p.promptBottom - 0.5,
+    `${at} vs prompt bottom ${p.promptBottom.toFixed(0)}`,
+  );
+  check(
+    `${p.id}: and above its own answer, where the folded lines come back`,
+    p.box.b <= p.answerTop + 0.5,
+    `${at} vs answer top ${p.answerTop.toFixed(0)}`,
+  );
+  if (p.nextTop !== null) {
+    check(
+      `${p.id}: and clear of the next turn`,
+      p.box.b <= p.nextTop + 0.5,
+      `${at} vs next turn top ${p.nextTop.toFixed(0)}`,
+    );
+  }
+  check(
+    `${p.id}: flush with the answer's left edge, not parked in a corner`,
+    Math.abs(p.box.x - p.answerLeft) <= 0.5,
+    `${at} vs answer left ${p.answerLeft.toFixed(0)}`,
+  );
+  check(
+    `${p.id}: a 24px box, the desktop AA floor`,
+    p.box.w >= 24 && p.box.h >= 24,
+    at,
+  );
+  check(
+    `${p.id}: its ink clears 3:1 on the ground it is composited over`,
+    p.contrast >= 3,
+    `${p.colour} on ${p.bg} = ${p.contrast.toFixed(2)}:1`,
+  );
+}
+
 // AND THE WAY BACK HAS TO BE PRESSED ON A TURN THAT MADE CALLS, which is not
 // the first one on screen and was not, when this was written: focus view keeps
 // the newest turn's line (it has a present to report) and a failing turn's
@@ -292,6 +391,14 @@ if (foldedTurn !== null) {
     `${restored} rows on ${foldedTurn}`,
   );
 }
+// Framed on the turn just restored, with its folded neighbours and their
+// marks around it: the placement sweep above scrolled turn by turn and the
+// shot should show the fold, not wherever the sweep stopped.
+await page.evaluate((id) => {
+  const turn = id === null ? null : document.querySelector(`[data-column-turn="${id}"]`);
+  (turn ?? document.querySelector('[data-column-turn]'))?.scrollIntoView({ block: 'center' });
+}, foldedTurn);
+await page.waitForTimeout(150);
 await page.screenshot({ path: `${outDir}/turn-steps-folded.png` });
 
 await page.keyboard.press('z');
