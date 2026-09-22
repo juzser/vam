@@ -165,6 +165,12 @@ describe('a keystroke echo asks for no scrollback while the view is at the live 
 
 describe("a screen-shaped answer is drawn in the windowed answer's own coordinates", () => {
   it('keeps the operator at the live end across the flip, and keeps the scrollback drawn', async () => {
+    // FAKE TIMERS, or this test races `REFRESH_MS`. With the real clock a
+    // `poll` can land between the keystroke and the assertions and redraw
+    // `old` over `screen`; CI produced exactly `expected [] to have a length
+    // of 40` that way, on a test that had never failed locally. The interval
+    // never fires unless advanced, so what is drawn is what the echo drew.
+    vi.useFakeTimers();
     /**
      * THE WAY THIS CHANGE COULD CORRUPT THE PIN -- and the way it DID, which
      * `TerminalTab.echo-splice.test.tsx` records. An echo read at the bottom
@@ -190,13 +196,19 @@ describe("a screen-shaped answer is drawn in the windowed answer's own coordinat
     await settle();
     // The window view: 8000px of content in a 200px box, at the bottom.
     const el = box({ scrollHeight: 8000, clientHeight: 200, scrollTop: 7800 });
+    const before = read.mock.calls.length;
     await act(async () => {
       fireEvent.keyDown(el, { key: 'x' });
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
+    // AMONG the reads since the key, not the last one: `REFRESH_MS` runs on
+    // the real clock here, and a slow runner lets a `poll` land after the
+    // echo inside this window. CI saw `expected 'poll' to be 'echo'` twice
+    // across two files for exactly that. The property is that the key asked
+    // for the cheap read; the tick firing as well is the runner's business.
+    expect(read.mock.calls.slice(before).map((call) => call[2])).toContain('echo');
     // Still at the live end, with the history still above it and the screen
     // the echo answered in place of the one the poll had drawn.
     expect(el.scrollTop).toBe(8000);
@@ -207,6 +219,8 @@ describe("a screen-shaped answer is drawn in the windowed answer's own coordinat
   });
 
   it('bails out of an echo answer identical to the screen already drawn', async () => {
+    // Same clock discipline as the test above, for the same reason.
+    vi.useFakeTimers();
     // THE OTHER HALF, and it used to be asserted the other way round: the two
     // shapes were two coordinate systems that could never be compared, so a
     // screen-only answer was ALWAYS drawn. `composeScreen` puts it into the
@@ -237,13 +251,16 @@ describe("a screen-shaped answer is drawn in the windowed answer's own coordinat
     );
     await settle();
     const el = box({ scrollHeight: 800, clientHeight: 200, scrollTop: 600 });
+    const before = read.mock.calls.length;
     await act(async () => {
       fireEvent.keyDown(el, { key: 'x' });
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
+    // Same rule as above: an echo among the reads since the key, whatever
+    // the interval did alongside it.
+    expect(read.mock.calls.slice(before).map((call) => call[2])).toContain('echo');
     // Dropped, not drawn: the pin never ran, so the box's own number stands.
     expect(el.scrollTop).toBe(600);
   });
