@@ -63,6 +63,7 @@ import {
   setFocusView,
   setKeyBindings,
   setNarrowViews,
+  setNotifyWaiting,
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
@@ -1026,6 +1027,39 @@ export function SettingsOverlay({
                   <code className="text-ink">/clear</code> or a compaction empties it and vam cannot
                   tell — turn this off and on again to re-ask. Turning it off stops the asking, not
                   what a session was already told.
+                </p>
+              </Block>
+
+              {/* DESKTOP NOTIFICATIONS -- a thing vam DOES, so it is here and
+                  not in Appearance (`sections.ts`'s rule). ONE SWITCH, and the
+                  list of what it deliberately is not lives with the default
+                  (`prefs/notify.ts`): no per-session mute, no per-status pick,
+                  no sound, no quiet hours -- the OS owns the last two.
+
+                  THE NOTE CARRIES THREE FACTS the operator cannot guess. That
+                  the switch is per device (prefs are this browser's storage,
+                  so a phone with the page open has its own -- and both notify
+                  if both are on). That it is quiet for the session they are
+                  looking at, which is the difference between a feature and a
+                  nuisance. And WHERE TO READ WHY A BANNER DID NOT COME: main
+                  writes the OS's refusal into the error log verbatim
+                  (`main/notify/notify.ts`), so "nothing happened" is never
+                  the whole story. */}
+              <Block
+                name="notify-waiting"
+                label={t('settings.behaviour.notifyWaiting.label')}
+                hint={t('settings.behaviour.notifyWaiting.hint')}
+              >
+                <Switch
+                  name="notify-waiting"
+                  label={t('settings.behaviour.notifyWaiting.label')}
+                  checked={prefs.notifyWaiting}
+                  onChange={(next) => onChange(setNotifyWaiting(prefs, next))}
+                  on={t('settings.behaviour.notifyWaiting.on')}
+                  off={t('settings.behaviour.notifyWaiting.off')}
+                />
+                <p data-notify-waiting-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  {t('settings.behaviour.notifyWaiting.note')}
                 </p>
               </Block>
 

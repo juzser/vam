@@ -109,9 +109,23 @@ pnpm run dist   # electron-vite build + the web build + electron-builder
 ```
 
 That produces a `.dmg`/`.zip` on macOS and an AppImage on Linux. **Nothing is
-code-signed**, so the first launch is interrupted: on macOS, right-click →
-**Open** or `xattr -cr /path/to/vam.app`; on Linux, `chmod +x` the AppImage.
-[docs/signing.md](docs/signing.md) is what signing would take.
+notarised and there is no Developer ID**, so the first launch is interrupted:
+on macOS, right-click → **Open** or `xattr -cr /path/to/vam.app`; on Linux,
+`chmod +x` the AppImage. The macOS bundle does carry an *ad-hoc* signature
+under its own identifier (`com.vam.app`) — free, certificate-less, and only
+there so macOS can tell vam apart from other Electron apps, which desktop
+notifications need. [docs/signing.md](docs/signing.md) is what real signing
+would take.
+
+**Desktop notifications.** When a session crosses into *needs you* while you
+are not looking at it, vam raises a system notification; click it to jump to
+that session. One switch, Settings → Behaviour → *desktop notifications*, per
+device. Whether macOS actually delivers one to an ad-hoc-signed app is
+something vam *measures* rather than assumes: if the system refuses, the
+refusal is written to the error log (`E`) verbatim, so the answer is always
+readable. A phone with the page open has no such switch yet; if it ever
+does, both devices would notify independently — there is no shared state
+between them.
 
 electron-builder is still configured to emit an NSIS installer, and it builds
 — but nothing in `src/main/sources/tmux/` has a Windows path, and desktop mode
