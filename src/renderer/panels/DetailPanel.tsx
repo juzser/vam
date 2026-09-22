@@ -965,6 +965,14 @@ export type DetailPanelProps = {
    * re-make on every split is stored once.
    */
   readonly onFilesTreeWidth?: (width: number) => void;
+  /**
+   * Persists the operator's raw/preview choice for `.md` files, or
+   * `undefined` to withdraw the write — `onFilesTreeWidth`'s own rule, one
+   * field up. Read here only to hand on to `FilesTab`; this panel has no
+   * opinion about which mode a document opens in, only `prefs.ts` and
+   * `FilesTab.tsx`'s own `activeFilesMarkdownView()` do.
+   */
+  readonly onFilesMarkdownView?: (view: 'preview' | 'raw') => void;
 };
 
 /**
@@ -7996,6 +8004,7 @@ export function DetailPanel(props: DetailPanelProps) {
             // own comments above.
             filesTreeWidth={props.filesTreeWidth ?? null}
             onFilesTreeWidth={props.onFilesTreeWidth}
+            onFilesMarkdownView={props.onFilesMarkdownView}
             // "Open this file, at this line" -- from a `path:line` control in
             // an agent's own answer, already resolved and authorised in main.
             // See `outActions.openFileRef` above and `FileOpenRequest`.

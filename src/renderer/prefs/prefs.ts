@@ -34,6 +34,12 @@ import {
   readEditorHighlight,
   setActiveEditorSettings,
 } from './editor.js';
+import {
+  DEFAULT_FILES_MARKDOWN_VIEW,
+  type FilesMarkdownView,
+  readFilesMarkdownView,
+  setActiveFilesMarkdownView,
+} from './files-markdown-view.js';
 import { clampStoredTreeWidth } from './files-tree-width.js';
 import { DEFAULT_NOTIFY_WAITING, readNotifyWaiting } from './notify.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
@@ -619,6 +625,23 @@ export type Prefs = {
    * like `conciseOutput`, for the same reason.
    */
   readonly notifyWaiting: boolean;
+  /**
+   * Which face a `.md` file opens wearing in the Files tab: the rendered
+   * document, or the raw text. `prefs/files-markdown-view.ts` carries the
+   * default and the direction it is normalised in; this is the one field
+   * whose default MOVES everyone's file on upgrade, on purpose -- the
+   * operator's whole ask was that the old default (raw) was never found.
+   *
+   * GLOBAL and per device, for the reason `filesTreeWidth` beside it is:
+   * `Canvas.tsx` mounts one `FilesTab` per split leaf and `PhoneShell`
+   * mounts another, so per pane it would be an arrangement to re-make on
+   * every split. Read ONCE, at mount, by `FilesTab.tsx`'s own
+   * `activeFilesMarkdownView()` -- unlike `filesTreeWidth`, it is not
+   * threaded down as a value prop, because nothing outside the tab that
+   * owns it ever needs to react to it changing live; `onFilesMarkdownView`
+   * (`Canvas.tsx`) is the one-way street back out to this field.
+   */
+  readonly filesMarkdownView: FilesMarkdownView;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -649,6 +672,7 @@ export const EMPTY_PREFS: Prefs = {
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
   notifyWaiting: DEFAULT_NOTIFY_WAITING,
+  filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
 };
 
 /**
@@ -900,6 +924,14 @@ function parsePrefs(
     // Per field like every line above it; a boolean is a choice and anything
     // else is the default, which is ON (`./notify.ts` says why).
     notifyWaiting: readNotifyWaiting((parsed as { notifyWaiting?: unknown }).notifyWaiting),
+    // Per field like every line above it, and normalised in the direction
+    // `files-markdown-view.ts` argues at length: unlike every sibling here,
+    // the safe default for an UNREADABLE value is the NEW behaviour
+    // (`'preview'`), because shipping this setting is the fix for an
+    // operator who never found the old one.
+    filesMarkdownView: readFilesMarkdownView(
+      (parsed as { filesMarkdownView?: unknown }).filesMarkdownView,
+    ),
   };
 }
 
@@ -1368,6 +1400,14 @@ export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
  *  banner, and a switch that is off makes no call at all. */
 export function setNotifyWaiting(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, notifyWaiting: readNotifyWaiting(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it. The one caller is `Canvas.tsx`'s `onFilesMarkdownView`, itself
+ *  called from `FilesTab.tsx`'s own toggle -- the only place this preference
+ *  is ever changed. */
+export function setFilesMarkdownView(prefs: Prefs, view: unknown): Prefs {
+  return { ...prefs, filesMarkdownView: readFilesMarkdownView(view) };
 }
 
 /**
@@ -2323,6 +2363,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   // an appearance, and there is no scheme chosen against it.
   setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
   setActiveNarrowViews(prefs.narrowViews);
+  setActiveFilesMarkdownView(prefs.filesMarkdownView);
   /**
    * AND TWO PREFERENCES CROSS INTO MAIN, because the thing each one changes
    * happens there: `gh` is spawned by `main/sources/claude-code/source.ts`,
