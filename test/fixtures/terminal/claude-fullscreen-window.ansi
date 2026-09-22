@@ -1,0 +1,338 @@
+i=1; while [ $i -le 300 ]; do printf "\033[3$((i%7+1))m line %03d some coloured text \033[0m trailing   \n" $i; i=$((i+1)); done; claude
+sh-3.2$ i=1; while [ $i -le 300 ]; do printf "\033[3$((i%7+1))m line %03d some coloured text \033[0m trailing   \n" $i; i=$((i+1)); done; claude
+[32m line 001 some coloured text [39m trailing
+[33m line 002 some coloured text [39m trailing
+[34m line 003 some coloured text [39m trailing
+[35m line 004 some coloured text [39m trailing
+[36m line 005 some coloured text [39m trailing
+[37m line 006 some coloured text [39m trailing
+[31m line 007 some coloured text [39m trailing
+[32m line 008 some coloured text [39m trailing
+[33m line 009 some coloured text [39m trailing
+[34m line 010 some coloured text [39m trailing
+[35m line 011 some coloured text [39m trailing
+[36m line 012 some coloured text [39m trailing
+[37m line 013 some coloured text [39m trailing
+[31m line 014 some coloured text [39m trailing
+[32m line 015 some coloured text [39m trailing
+[33m line 016 some coloured text [39m trailing
+[34m line 017 some coloured text [39m trailing
+[35m line 018 some coloured text [39m trailing
+[36m line 019 some coloured text [39m trailing
+[37m line 020 some coloured text [39m trailing
+[31m line 021 some coloured text [39m trailing
+[32m line 022 some coloured text [39m trailing
+[33m line 023 some coloured text [39m trailing
+[34m line 024 some coloured text [39m trailing
+[35m line 025 some coloured text [39m trailing
+[36m line 026 some coloured text [39m trailing
+[37m line 027 some coloured text [39m trailing
+[31m line 028 some coloured text [39m trailing
+[32m line 029 some coloured text [39m trailing
+[33m line 030 some coloured text [39m trailing
+[34m line 031 some coloured text [39m trailing
+[35m line 032 some coloured text [39m trailing
+[36m line 033 some coloured text [39m trailing
+[37m line 034 some coloured text [39m trailing
+[31m line 035 some coloured text [39m trailing
+[32m line 036 some coloured text [39m trailing
+[33m line 037 some coloured text [39m trailing
+[34m line 038 some coloured text [39m trailing
+[35m line 039 some coloured text [39m trailing
+[36m line 040 some coloured text [39m trailing
+[37m line 041 some coloured text [39m trailing
+[31m line 042 some coloured text [39m trailing
+[32m line 043 some coloured text [39m trailing
+[33m line 044 some coloured text [39m trailing
+[34m line 045 some coloured text [39m trailing
+[35m line 046 some coloured text [39m trailing
+[36m line 047 some coloured text [39m trailing
+[37m line 048 some coloured text [39m trailing
+[31m line 049 some coloured text [39m trailing
+[32m line 050 some coloured text [39m trailing
+[33m line 051 some coloured text [39m trailing
+[34m line 052 some coloured text [39m trailing
+[35m line 053 some coloured text [39m trailing
+[36m line 054 some coloured text [39m trailing
+[37m line 055 some coloured text [39m trailing
+[31m line 056 some coloured text [39m trailing
+[32m line 057 some coloured text [39m trailing
+[33m line 058 some coloured text [39m trailing
+[34m line 059 some coloured text [39m trailing
+[35m line 060 some coloured text [39m trailing
+[36m line 061 some coloured text [39m trailing
+[37m line 062 some coloured text [39m trailing
+[31m line 063 some coloured text [39m trailing
+[32m line 064 some coloured text [39m trailing
+[33m line 065 some coloured text [39m trailing
+[34m line 066 some coloured text [39m trailing
+[35m line 067 some coloured text [39m trailing
+[36m line 068 some coloured text [39m trailing
+[37m line 069 some coloured text [39m trailing
+[31m line 070 some coloured text [39m trailing
+[32m line 071 some coloured text [39m trailing
+[33m line 072 some coloured text [39m trailing
+[34m line 073 some coloured text [39m trailing
+[35m line 074 some coloured text [39m trailing
+[36m line 075 some coloured text [39m trailing
+[37m line 076 some coloured text [39m trailing
+[31m line 077 some coloured text [39m trailing
+[32m line 078 some coloured text [39m trailing
+[33m line 079 some coloured text [39m trailing
+[34m line 080 some coloured text [39m trailing
+[35m line 081 some coloured text [39m trailing
+[36m line 082 some coloured text [39m trailing
+[37m line 083 some coloured text [39m trailing
+[31m line 084 some coloured text [39m trailing
+[32m line 085 some coloured text [39m trailing
+[33m line 086 some coloured text [39m trailing
+[34m line 087 some coloured text [39m trailing
+[35m line 088 some coloured text [39m trailing
+[36m line 089 some coloured text [39m trailing
+[37m line 090 some coloured text [39m trailing
+[31m line 091 some coloured text [39m trailing
+[32m line 092 some coloured text [39m trailing
+[33m line 093 some coloured text [39m trailing
+[34m line 094 some coloured text [39m trailing
+[35m line 095 some coloured text [39m trailing
+[36m line 096 some coloured text [39m trailing
+[37m line 097 some coloured text [39m trailing
+[31m line 098 some coloured text [39m trailing
+[32m line 099 some coloured text [39m trailing
+[33m line 100 some coloured text [39m trailing
+[34m line 101 some coloured text [39m trailing
+[35m line 102 some coloured text [39m trailing
+[36m line 103 some coloured text [39m trailing
+[37m line 104 some coloured text [39m trailing
+[31m line 105 some coloured text [39m trailing
+[32m line 106 some coloured text [39m trailing
+[33m line 107 some coloured text [39m trailing
+[34m line 108 some coloured text [39m trailing
+[35m line 109 some coloured text [39m trailing
+[36m line 110 some coloured text [39m trailing
+[37m line 111 some coloured text [39m trailing
+[31m line 112 some coloured text [39m trailing
+[32m line 113 some coloured text [39m trailing
+[33m line 114 some coloured text [39m trailing
+[34m line 115 some coloured text [39m trailing
+[35m line 116 some coloured text [39m trailing
+[36m line 117 some coloured text [39m trailing
+[37m line 118 some coloured text [39m trailing
+[31m line 119 some coloured text [39m trailing
+[32m line 120 some coloured text [39m trailing
+[33m line 121 some coloured text [39m trailing
+[34m line 122 some coloured text [39m trailing
+[35m line 123 some coloured text [39m trailing
+[36m line 124 some coloured text [39m trailing
+[37m line 125 some coloured text [39m trailing
+[31m line 126 some coloured text [39m trailing
+[32m line 127 some coloured text [39m trailing
+[33m line 128 some coloured text [39m trailing
+[34m line 129 some coloured text [39m trailing
+[35m line 130 some coloured text [39m trailing
+[36m line 131 some coloured text [39m trailing
+[37m line 132 some coloured text [39m trailing
+[31m line 133 some coloured text [39m trailing
+[32m line 134 some coloured text [39m trailing
+[33m line 135 some coloured text [39m trailing
+[34m line 136 some coloured text [39m trailing
+[35m line 137 some coloured text [39m trailing
+[36m line 138 some coloured text [39m trailing
+[37m line 139 some coloured text [39m trailing
+[31m line 140 some coloured text [39m trailing
+[32m line 141 some coloured text [39m trailing
+[33m line 142 some coloured text [39m trailing
+[34m line 143 some coloured text [39m trailing
+[35m line 144 some coloured text [39m trailing
+[36m line 145 some coloured text [39m trailing
+[37m line 146 some coloured text [39m trailing
+[31m line 147 some coloured text [39m trailing
+[32m line 148 some coloured text [39m trailing
+[33m line 149 some coloured text [39m trailing
+[34m line 150 some coloured text [39m trailing
+[35m line 151 some coloured text [39m trailing
+[36m line 152 some coloured text [39m trailing
+[37m line 153 some coloured text [39m trailing
+[31m line 154 some coloured text [39m trailing
+[32m line 155 some coloured text [39m trailing
+[33m line 156 some coloured text [39m trailing
+[34m line 157 some coloured text [39m trailing
+[35m line 158 some coloured text [39m trailing
+[36m line 159 some coloured text [39m trailing
+[37m line 160 some coloured text [39m trailing
+[31m line 161 some coloured text [39m trailing
+[32m line 162 some coloured text [39m trailing
+[33m line 163 some coloured text [39m trailing
+[34m line 164 some coloured text [39m trailing
+[35m line 165 some coloured text [39m trailing
+[36m line 166 some coloured text [39m trailing
+[37m line 167 some coloured text [39m trailing
+[31m line 168 some coloured text [39m trailing
+[32m line 169 some coloured text [39m trailing
+[33m line 170 some coloured text [39m trailing
+[34m line 171 some coloured text [39m trailing
+[35m line 172 some coloured text [39m trailing
+[36m line 173 some coloured text [39m trailing
+[37m line 174 some coloured text [39m trailing
+[31m line 175 some coloured text [39m trailing
+[32m line 176 some coloured text [39m trailing
+[33m line 177 some coloured text [39m trailing
+[34m line 178 some coloured text [39m trailing
+[35m line 179 some coloured text [39m trailing
+[36m line 180 some coloured text [39m trailing
+[37m line 181 some coloured text [39m trailing
+[31m line 182 some coloured text [39m trailing
+[32m line 183 some coloured text [39m trailing
+[33m line 184 some coloured text [39m trailing
+[34m line 185 some coloured text [39m trailing
+[35m line 186 some coloured text [39m trailing
+[36m line 187 some coloured text [39m trailing
+[37m line 188 some coloured text [39m trailing
+[31m line 189 some coloured text [39m trailing
+[32m line 190 some coloured text [39m trailing
+[33m line 191 some coloured text [39m trailing
+[34m line 192 some coloured text [39m trailing
+[35m line 193 some coloured text [39m trailing
+[36m line 194 some coloured text [39m trailing
+[37m line 195 some coloured text [39m trailing
+[31m line 196 some coloured text [39m trailing
+[32m line 197 some coloured text [39m trailing
+[33m line 198 some coloured text [39m trailing
+[34m line 199 some coloured text [39m trailing
+[35m line 200 some coloured text [39m trailing
+[36m line 201 some coloured text [39m trailing
+[37m line 202 some coloured text [39m trailing
+[31m line 203 some coloured text [39m trailing
+[32m line 204 some coloured text [39m trailing
+[33m line 205 some coloured text [39m trailing
+[34m line 206 some coloured text [39m trailing
+[35m line 207 some coloured text [39m trailing
+[36m line 208 some coloured text [39m trailing
+[37m line 209 some coloured text [39m trailing
+[31m line 210 some coloured text [39m trailing
+[32m line 211 some coloured text [39m trailing
+[33m line 212 some coloured text [39m trailing
+[34m line 213 some coloured text [39m trailing
+[35m line 214 some coloured text [39m trailing
+[36m line 215 some coloured text [39m trailing
+[37m line 216 some coloured text [39m trailing
+[31m line 217 some coloured text [39m trailing
+[32m line 218 some coloured text [39m trailing
+[33m line 219 some coloured text [39m trailing
+[34m line 220 some coloured text [39m trailing
+[35m line 221 some coloured text [39m trailing
+[36m line 222 some coloured text [39m trailing
+[37m line 223 some coloured text [39m trailing
+[31m line 224 some coloured text [39m trailing
+[32m line 225 some coloured text [39m trailing
+[33m line 226 some coloured text [39m trailing
+[34m line 227 some coloured text [39m trailing
+[35m line 228 some coloured text [39m trailing
+[36m line 229 some coloured text [39m trailing
+[37m line 230 some coloured text [39m trailing
+[31m line 231 some coloured text [39m trailing
+[32m line 232 some coloured text [39m trailing
+[33m line 233 some coloured text [39m trailing
+[34m line 234 some coloured text [39m trailing
+[35m line 235 some coloured text [39m trailing
+[36m line 236 some coloured text [39m trailing
+[37m line 237 some coloured text [39m trailing
+[31m line 238 some coloured text [39m trailing
+[32m line 239 some coloured text [39m trailing
+[33m line 240 some coloured text [39m trailing
+[34m line 241 some coloured text [39m trailing
+[35m line 242 some coloured text [39m trailing
+[36m line 243 some coloured text [39m trailing
+[37m line 244 some coloured text [39m trailing
+[31m line 245 some coloured text [39m trailing
+[32m line 246 some coloured text [39m trailing
+[33m line 247 some coloured text [39m trailing
+[34m line 248 some coloured text [39m trailing
+[35m line 249 some coloured text [39m trailing
+[36m line 250 some coloured text [39m trailing
+[37m line 251 some coloured text [39m trailing
+[31m line 252 some coloured text [39m trailing
+[32m line 253 some coloured text [39m trailing
+[33m line 254 some coloured text [39m trailing
+[34m line 255 some coloured text [39m trailing
+[35m line 256 some coloured text [39m trailing
+[36m line 257 some coloured text [39m trailing
+[37m line 258 some coloured text [39m trailing
+[31m line 259 some coloured text [39m trailing
+[32m line 260 some coloured text [39m trailing
+[33m line 261 some coloured text [39m trailing
+[34m line 262 some coloured text [39m trailing
+[35m line 263 some coloured text [39m trailing
+[36m line 264 some coloured text [39m trailing
+[37m line 265 some coloured text [39m trailing
+[31m line 266 some coloured text [39m trailing
+[32m line 267 some coloured text [39m trailing
+[33m line 268 some coloured text [39m trailing
+[34m line 269 some coloured text [39m trailing
+[35m line 270 some coloured text [39m trailing
+[36m line 271 some coloured text [39m trailing
+[37m line 272 some coloured text [39m trailing
+[31m line 273 some coloured text [39m trailing
+[32m line 274 some coloured text [39m trailing
+[33m line 275 some coloured text [39m trailing
+[34m line 276 some coloured text [39m trailing
+[35m line 277 some coloured text [39m trailing
+[36m line 278 some coloured text [39m trailing
+[37m line 279 some coloured text [39m trailing
+[31m line 280 some coloured text [39m trailing
+[32m line 281 some coloured text [39m trailing
+[33m line 282 some coloured text [39m trailing
+[34m line 283 some coloured text [39m trailing
+[35m line 284 some coloured text [39m trailing
+[36m line 285 some coloured text [39m trailing
+[37m line 286 some coloured text [39m trailing
+
+[91m ▐[40m▛███▛█[39m[49m   [1mClaude Code[0m [37mv2.1.278[39m
+[91m▝▜[40m█████[49m█▀[39m  [37mOpus 5 with medium effort · Claude Max[39m
+[91m  ▝▝ ▝▝  [39m  [37m/private/tmp/claude-501/-Users-ser-scatola-jobs-projects-maestro/e1050e44-2c79-4ece-ba1c-b28dc4ae87c7/scratchpad/claude-cwd[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                       [93mYou've used 93% of your weekly limit · resets 1pm (Asia/Saigon)[39m
+[37m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m❯ hello there
+[37m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [36mclaude-cwd[37m [2mOpus 5[0m[37m [2min:0 out:0[0m
+  [93m⏵⏵ auto mode on[37m (shift+tab to cycle)[39m

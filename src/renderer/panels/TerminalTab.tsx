@@ -70,7 +70,7 @@ import type {
   PaneSize,
   PaneView,
 } from '../../shared/terminal.js';
-import { isControlLetter } from '../../shared/terminal.js';
+import { isControlLetter, MAX_COLUMNS, MAX_ROWS, MAX_WHEEL_TICKS } from '../../shared/terminal.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import {
   activeTerminalFontSize,
@@ -532,6 +532,77 @@ export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
 }
 
 /**
+ * How many whole rows a wheel event is worth, and what is left over.
+ *
+ * ── THE DEFECT THIS EXISTS FOR ───────────────────────────────────────────
+ * The operator's report on the build carrying PR 439, translated: "still can't
+ * scroll in the terminal". MEASURED on a private tmux socket (3.7b) against
+ * Claude Code 2.1.278 started the way vam starts it -- straight into
+ * `claude`, with `"tui": "fullscreen"` in the operator's settings:
+ *
+ *   alternate_on=1  history_size=0  mouse_any_flag=1
+ *
+ * steady from three seconds on, and `capture-pane -S -500` answers with
+ * exactly the pane's rows. The program draws in the ALTERNATE SCREEN, for
+ * which tmux keeps no scrollback: the window read is the screen, the pane
+ * holds one boxful, and a wheel over it has nothing to move. The scrollback
+ * is inside Claude Code, which asked the terminal for mouse reports so that
+ * it could scroll its own viewport -- and every terminal honours that: a
+ * wheel over a program that owns the mouse is DELIVERED to it, not spent on
+ * the terminal's history. (PR 439's splice was fixing a collapse that never
+ * happened here; its premise was measured intact on the same session.)
+ *
+ * So, while the pane's program has the mouse (`PaneView.mouse`), a wheel
+ * over the pane becomes `wheel` keys (`shared/terminal.ts`) instead of a
+ * scroll of the DOM. Main spells them as SGR mouse reports; measured, three
+ * reports moved Claude Code's viewport three lines.
+ *
+ * ── THE ARITHMETIC ───────────────────────────────────────────────────────
+ * A wheel in LINE units (`deltaMode` 1) is already notches. In PIXELS (a
+ * trackpad, and Chromium's default) it is divided by the row the ruler
+ * measures, and the remainder is CARRIED to the next event rather than
+ * dropped or rounded up: a slow drag of a few pixels per frame would
+ * otherwise either never scroll or scroll a row per frame. Page units are
+ * read as a page of rows. The sign is kept; the caller reads it as the
+ * direction and takes the size.
+ */
+export function wheelNotches(
+  carry: number,
+  delta: { readonly deltaY: number; readonly deltaMode: number },
+  row: { readonly px: number; readonly perPage: number },
+): { readonly ticks: number; readonly carry: number } {
+  if (delta.deltaMode === 1) return { ticks: Math.trunc(delta.deltaY), carry };
+  const px = delta.deltaMode === 2 ? delta.deltaY * row.perPage * row.px : delta.deltaY;
+  const total = carry + px;
+  const ticks = Math.trunc(total / row.px);
+  return { ticks, carry: total - ticks * row.px };
+}
+
+/**
+ * The cell under the pointer, 1-based as the mouse protocol counts, in the
+ * SCREEN the program drew rather than in the text the tab drew: with history
+ * above the screen the tab's first line is not the program's first row, so
+ * the row is taken from the bottom. A pointer above the screen, or a ruler
+ * with no layout yet, names the first cell -- a wheel is not a click, and
+ * the program reads the position, if at all, only to pick a region.
+ */
+export function cellUnder(
+  pointer: { readonly x: number; readonly y: number },
+  screen: { readonly left: number; readonly top: number },
+  advance: { readonly width: number; readonly height: number },
+  size: { readonly columns: number; readonly rows: number },
+  drawnRows: number,
+): { readonly column: number; readonly row: number } {
+  const clamp = (value: number, max: number): number =>
+    Number.isFinite(value) ? Math.min(Math.max(1, value), max) : 1;
+  const column = advance.width > 0 ? Math.floor((pointer.x - screen.left) / advance.width) + 1 : 1;
+  const above = Math.max(0, drawnRows - size.rows);
+  const row =
+    advance.height > 0 ? Math.floor((pointer.y - screen.top) / advance.height) + 1 - above : 1;
+  return { column: clamp(column, size.columns), row: clamp(row, size.rows) };
+}
+
+/**
  * THE SCREEN AN ECHO READ ANSWERED WITH, PUT BACK ON TOP OF THE HISTORY THE
  * OPERATOR CAN STILL SCROLL INTO.
  *
@@ -553,6 +624,13 @@ export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
  * MEASURED in Chromium against the real bundle: `scrollHeight` collapsed
  * 10401 -> 714 against a `clientHeight` of 714 the moment typing began, and a
  * wheel over the pane moved `scrollTop` by 0 for as long as it lasted.
+ * * THAT MEASUREMENT WAS AGAINST A STUB `read`, and the build carrying this
+ * splice was still reported as "can't scroll": the operator's pane runs a
+ * program that owns the alternate screen and the mouse, where there is no
+ * scrollback for this to keep and the wheel has to reach the program instead
+ * (`wheelNotches`). The splice is kept because its own defect is real for a
+ * pane with history; against real bytes it is pinned by the fixtures in
+ * `TerminalTab.echo-splice.test.tsx` and phase A of the e2e guard.
  *
  * ── WHY SPLICING IS SOUND ────────────────────────────────────────────────
  * The screen is a SUFFIX of the window -- `capture-pane` with no `-S` returns
@@ -598,12 +676,18 @@ export function composeScreen(
     text: [...drawn.slice(0, above), ...screen].join('\n'),
     cursor:
       next.cursor.kind === 'at' ? { ...next.cursor, row: next.cursor.row + above } : next.cursor,
+    // A fact about the capture the screen came from, like the caret: the
+    // program may have asked for the mouse since the last window read.
+    ...(next.mouse === undefined ? {} : { mouse: next.mouse }),
   };
 }
 
 export function sameScreen(previous: PaneView | null, next: PaneView): boolean {
   if (previous === null || previous.kind !== 'ok' || next.kind !== 'ok') return false;
   if (previous.name !== next.name || previous.text !== next.text) return false;
+  // The program taking or releasing the mouse IS a change of screen for the
+  // one reader that cares: it decides where the next wheel goes.
+  if (previous.mouse !== next.mouse) return false;
   const a = previous.cursor;
   const b = next.cursor;
   if (a.kind !== b.kind) return false;
@@ -953,6 +1037,8 @@ export function TerminalTab({
    * reflow a terminal belonging to work vam has nothing to do with.
    */
   const showing = view !== null && view.kind === 'ok';
+  /** How many lines are drawn, for the wheel listener that must not re-subscribe per read. */
+  const drawnRows = useRef(0);
 
   /**
    * The screen, parsed once per screen rather than once per render. The tab
@@ -972,6 +1058,7 @@ export function TerminalTab({
       ),
     [view],
   );
+  drawnRows.current = lines.length;
 
   /**
    * How tall the pane's content was the last time this ran. `null` until the
@@ -1490,6 +1577,66 @@ export function TerminalTab({
     },
     [queue],
   );
+
+  /**
+   * WHILE THE PROGRAM HAS THE MOUSE, THE WHEEL IS ITS. See `wheelNotches` for
+   * the measurement this rests on.
+   *
+   * A NATIVE LISTENER, NOT `onWheel`: React registers its wheel handlers as
+   * passive, so a `preventDefault` inside one is ignored with a warning and
+   * the pane would scroll (or try to) as well as sending the report. The
+   * listener is attached only while the program has the mouse, so a pane
+   * whose program has not asked -- and every pane read by a tmux that did not
+   * say -- keeps the browser's own scrolling, untouched.
+   *
+   * The report is queued through the same chain as a keystroke, so it cannot
+   * interleave with a syllable being typed, and a delivered one asks for the
+   * echo read the way a key does: the viewport the program scrolled is on
+   * screen within `ECHO_MS`.
+   */
+  const wheelCarry = useRef(0);
+  const mouseWanted = view !== null && view.kind === 'ok' && view.mouse === true;
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (pane === null || !mouseWanted) return;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const measured = rulerRef.current?.getBoundingClientRect();
+      const advance =
+        measured !== undefined && measured.height > 0
+          ? { width: measured.width / RULER_TEXT.length, height: measured.height }
+          : // No layout to measure (a hidden pane, a test): the row the type
+            // would have, so pixels still mean something rather than nothing.
+            { width: 0, height: fontSize * TERMINAL_LINE_HEIGHT };
+      const size = sent.current ?? { columns: MAX_COLUMNS, rows: MAX_ROWS };
+      const { ticks, carry } = wheelNotches(
+        wheelCarry.current,
+        { deltaY: event.deltaY, deltaMode: event.deltaMode },
+        { px: advance.height, perPage: size.rows },
+      );
+      wheelCarry.current = carry;
+      if (ticks === 0) return;
+      const screen = pane.querySelector('pre')?.getBoundingClientRect() ?? { left: 0, top: 0 };
+      const cell = cellUnder(
+        { x: event.clientX, y: event.clientY },
+        screen,
+        advance,
+        size,
+        drawnRows.current,
+      );
+      queue([
+        {
+          kind: 'wheel',
+          direction: ticks < 0 ? 'up' : 'down',
+          ticks: Math.min(Math.abs(ticks), MAX_WHEEL_TICKS),
+          column: cell.column,
+          row: cell.row,
+        },
+      ]);
+    };
+    pane.addEventListener('wheel', onWheel, { passive: false });
+    return () => pane.removeEventListener('wheel', onWheel);
+  }, [mouseWanted, queue, fontSize]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `fontSize` is not read by this effect, it is read by the LAYOUT this effect measures -- `measurePane` divides the pane box by the advance of a character rendered AT that size, so the value is what makes a measurement stale, and the rule cannot see a dependency that reaches the DOM rather than the closure
   useEffect(() => {

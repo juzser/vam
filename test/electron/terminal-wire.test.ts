@@ -120,7 +120,7 @@ describe('the preload terminal bridge reaches the handlers it names', () => {
       '-t',
       '=vam-atlas-g7h8i9:',
       '-F',
-      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
       ';',
       'capture-pane',
       '-p',

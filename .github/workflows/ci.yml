@@ -220,6 +220,13 @@ jobs:
       # assertion that throws — each script's own message reaches this log
       # unedited. Screenshots go to the runner's temp dir, never docs/ui: CI
       # must not produce a repo diff.
+      # `terminal-echo-scroll-shots.mjs` reads a REAL tmux pane on a private
+      # socket through the app's own read path -- a stub read is what let a
+      # broken scroll fix ship (#439). Without tmux the guard SKIPS, loudly,
+      # and exits 0; this step is what makes it assert here.
+      - name: tmux, for the terminal guard
+        run: sudo apt-get install -y tmux
+
       - name: web guards (real Chromium)
         env:
           VAM_E2E_OUT: ${{ runner.temp }}/web-guard-shots
