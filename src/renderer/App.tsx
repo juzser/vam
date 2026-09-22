@@ -23,6 +23,7 @@ import type {
   IssueApi,
   LinkApi,
   MainErrorsApi,
+  NotifyApi,
   PrsApi,
   TerminalApi,
   UpdateApi,
@@ -111,6 +112,14 @@ declare global {
        * through `bridgeMainErrors`.
        */
       readonly mainErrors: MainErrorsApi;
+      /**
+       * DESKTOP NOTIFICATIONS, write side: `Canvas` asks main to raise a
+       * banner when a session crosses into `waiting`, and hears which one was
+       * clicked. OPTIONAL in the type for the reason `prefs` is: the hook
+       * that calls it runs in the browser build too, where there is no
+       * bridge, and must be able to see that.
+       */
+      readonly notify?: NotifyApi;
       /**
        * PREFERENCES MAIN NEEDS A COPY OF -- two: where to ask GitHub from, per
        * project, and whether vam asks the agent for a shorter answer before it

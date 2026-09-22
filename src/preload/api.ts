@@ -710,6 +710,46 @@ export function createMainErrorsApi(ipc: InvokerLike & ListenerLike): MainErrors
   };
 }
 
+/** Which session a banner is about. Mirrors `src/main/notify/notify.ts`'s target. */
+export type NotifyTarget = {
+  readonly sourceId: string;
+  readonly sessionId: string;
+};
+
+/**
+ * The bridge's notification member: raise a banner, take one down, and hear
+ * which one was clicked. Desktop-only by construction -- these channels are
+ * not on the remote server's route table (`CHANNELS.notifyShow`'s header).
+ */
+export type NotifyApi = {
+  /** `true` when main handed the banner to the OS. What the OS did with it is
+   *  reported through `mainErrors`, never here. */
+  show(request: NotifyTarget & { readonly title: string; readonly body: string }): Promise<boolean>;
+  close(target: NotifyTarget): Promise<void>;
+  /** A click on a banner: focus has already been brought to vam by main. */
+  onActivated(listener: (target: NotifyTarget) => void): () => void;
+};
+
+/**
+ * `show` and `close` forward bare, like `clipboard.writeText` -- there is no
+ * envelope to unwrap (`src/main/notify/ipc.ts`). `onActivated` keeps the
+ * closure-identity rule `createMainErrorsApi.subscribe` keeps: the reference
+ * given to `on` is the one given to `removeListener`.
+ */
+export function createNotifyApi(ipc: InvokerLike & ListenerLike): NotifyApi {
+  return {
+    show: (request) => ipc.invoke(CHANNELS.notifyShow, request) as Promise<boolean>,
+    close: (target) => ipc.invoke(CHANNELS.notifyClose, target) as Promise<void>,
+    onActivated: (listener) => {
+      const wrapped = (_event: unknown, target: unknown) => listener(target as NotifyTarget);
+      ipc.on(CHANNELS.notifyActivated, wrapped);
+      return () => {
+        ipc.removeListener(CHANNELS.notifyActivated, wrapped);
+      };
+    },
+  };
+}
+
 /**
  * The bridge's pairing member: the desktop half of remote access.
  *

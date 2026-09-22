@@ -99,6 +99,7 @@ import {
 } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
 import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
+import { useWaitingNotifications } from '../notify/useWaitingNotifications.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
 import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
@@ -3420,6 +3421,56 @@ function CanvasInner({
     },
     [setFocusedSessionId],
   );
+
+  /**
+   * DESKTOP NOTIFICATIONS: a session crossing into `waiting` while the
+   * operator is not looking at it. HERE, in the one component that holds
+   * both the model as it arrives and where the cursor is -- `notify/waiting.ts`
+   * says why the crossing can only be seen where a previous model is held,
+   * and `prefs/notify.ts` why there is exactly one switch.
+   *
+   * `allEntries`, never the filtered `entries`: a filter hides a row from the
+   * sidebar, it does not make the session stop needing somebody. The titles
+   * carry the operator's renames because `model` has them applied. The
+   * project name rides in the body so a banner about `s1` says which `s1`.
+   */
+  const notifiable = useMemo(
+    () =>
+      allEntries.map((e) => ({
+        sourceId: sourceKeyOf(e),
+        sessionId: e.session.id,
+        status: e.session.status,
+        title: e.session.title,
+        project: e.project.name,
+      })),
+    [allEntries],
+  );
+  // Keyed on the two strings, not the entry: a fresh `focusedEntry` object
+  // arrives with every poll, and the cursor has not moved.
+  const focusedSource = focusedEntry === null ? null : sourceKeyOf(focusedEntry);
+  const notifyFocus = useMemo(
+    () =>
+      focusedSource === null || focusedSessionId === null
+        ? null
+        : { sourceId: focusedSource, sessionId: focusedSessionId },
+    [focusedSource, focusedSessionId],
+  );
+  const onNotificationActivated = useCallback(
+    (target: { readonly sourceId: string; readonly sessionId: string }) => {
+      // Main has already brought the window forward. A banner about a session
+      // that has since ended points at nothing, and moving the cursor to
+      // nothing is the state the focus-landing effect exists to prevent.
+      if (entriesByIdRef.current.has(target.sessionId)) focusSession(target.sessionId);
+    },
+    [focusSession],
+  );
+  useWaitingNotifications({
+    sessions: notifiable,
+    enabled: prefs.notifyWaiting,
+    focused: notifyFocus,
+    api: window.api?.notify,
+    onActivate: onNotificationActivated,
+  });
 
   // Incremental-search focus: move the cursor to the first match, but only
   // for the keystroke that changed the filter query (`filterKeystrokeQuery`

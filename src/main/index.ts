@@ -13,7 +13,16 @@ import { readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/pr
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  Notification,
+  session,
+  shell,
+} from 'electron';
 import { registerClipboardIpc } from './clipboard/ipc.js';
 import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
@@ -29,6 +38,8 @@ import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { registerLinkIpc } from './link/ipc.js';
 import { applyApplicationMenu } from './menu.js';
+import { notifyActivationRoute, registerNotifyIpc } from './notify/ipc.js';
+import { createNotifier } from './notify/notify.js';
 import { isSameOrigin } from './origin.js';
 import { registerPrIpc } from './pr/ipc.js';
 import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
@@ -372,6 +383,25 @@ function createWindow(): void {
   // a remote-endpoint failure recorded there is exactly the case this
   // ordering has to survive.
   registerMainErrorIpc(ipcMain, window.webContents);
+  // DESKTOP NOTIFICATIONS -- same reason again: a click on a banner has to
+  // reach THIS window. `Notification.isSupported()` is deliberately not
+  // consulted: it answers `true` on a machine where delivery is impossible,
+  // and the only honest signal is the `failed` event, which the notifier
+  // writes into the failure buffer above (`./notify/notify.js`).
+  registerNotifyIpc(
+    ipcMain,
+    createNotifier({
+      create: (options) => new Notification(options),
+      onActivate: notifyActivationRoute(window.webContents, () => {
+        // `steal: true` because the operator just clicked a banner ABOUT vam:
+        // that is the one gesture macOS treats as consent to bring an app
+        // forward over whatever they were in.
+        if (window.isMinimized()) window.restore();
+        window.show();
+        app.focus({ steal: true });
+      }),
+    }),
+  );
 
   if (devServerUrl === undefined) {
     void window.loadFile(rendererHtml);

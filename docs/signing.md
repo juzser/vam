@@ -1,8 +1,19 @@
 # Signing a vam build
 
-vam's builds are not code-signed, and this is what changing that would take. It
-is the shape of the work, not a recipe that has been run: there is no
-certificate in this repo to test any of it with.
+vam's builds carry no Developer ID and are not notarised, and this is what
+changing that would take. It is the shape of the work, not a recipe that has
+been run: there is no certificate in this repo to test any of it with.
+
+What the macOS bundle *does* carry is an **ad-hoc signature** under the app's
+own identifier, applied by `scripts/adhoc-sign-mac.cjs` as electron-builder's
+`afterPack` hook (`codesign --force --deep --sign - --identifier com.vam.app`).
+Without it the bundle ships with Electron's linker signature —
+`Identifier=Electron`, no sealed resources — and macOS's notification centre,
+which identifies an app by its signature rather than its `Info.plist`, has no
+identity to grant anything to. Ad-hoc signing is free and needs no account. It
+changes nothing about Gatekeeper: the first launch is interrupted exactly as
+described below. Whether notifications are then delivered is measured by the
+app itself — a refusal lands in the error log, verbatim.
 
 **This is the GitHub-release path, not the App Store one**, and they are
 different pieces of work that are easy to confuse. Shipping a `.dmg` from a
@@ -23,7 +34,9 @@ certificate authority yet.
 unset, electron-builder signs with whatever identity happens to be in the
 building machine's keychain, so the same commit produces a different artifact
 on a different machine. Signing is therefore an explicit, local change rather
-than something that happens by accident.
+than something that happens by accident. The ad-hoc hook runs in `afterPack`,
+*before* electron-builder's own signing pass, so a real identity configured
+later lands on top of it and wins — nothing needs removing.
 
 ## macOS
 

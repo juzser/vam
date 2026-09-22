@@ -222,6 +222,17 @@ const EN = {
     'ask the agent for shorter, clearer answers — vam types the request into the session, it never rewrites what it draws',
   'settings.behaviour.conciseOutput.on': 'on',
   'settings.behaviour.conciseOutput.off': 'off',
+  // DESKTOP NOTIFICATIONS. The label names the thing, not the mechanism; the
+  // hint names the one status it is about in the application's own phrase
+  // for it ("needs you", the sidebar's word for `waiting`). The note is a
+  // disclosure and keeps its three facts (`SettingsOverlay.tsx` says which).
+  'settings.behaviour.notifyWaiting.label': 'desktop notifications',
+  'settings.behaviour.notifyWaiting.hint':
+    'a system notification when a session starts needing you; click it to go there',
+  'settings.behaviour.notifyWaiting.on': 'on',
+  'settings.behaviour.notifyWaiting.off': 'off',
+  'settings.behaviour.notifyWaiting.note':
+    'this device only. Nothing is raised for the session you are looking at. If macOS refuses to show one, the reason is in the error log (E), verbatim.',
   'settings.behaviour.editorIndent.label': 'file editor indent',
   // SPACES IS NOT A DETAIL: it is what keeps the line-number gutter level with
   // the text, so the caption says it rather than leaving "indent" to be read

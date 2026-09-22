@@ -35,6 +35,7 @@ import {
   setActiveEditorSettings,
 } from './editor.js';
 import { clampStoredTreeWidth } from './files-tree-width.js';
+import { DEFAULT_NOTIFY_WAITING, readNotifyWaiting } from './notify.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
 import {
@@ -608,6 +609,16 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly conciseOutput: boolean;
+  /**
+   * Whether THIS DEVICE raises a desktop notification when a session crosses
+   * into `waiting`. `prefs/notify.ts` carries the default and the list of
+   * switches it deliberately is not; `notify/waiting.ts` is its one reader.
+   *
+   * GLOBAL and per device, which is the same fact seen twice: it describes
+   * the machine that is looking, not a session. Exempt from the icon TTL
+   * like `conciseOutput`, for the same reason.
+   */
+  readonly notifyWaiting: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -637,6 +648,7 @@ export const EMPTY_PREFS: Prefs = {
   terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
+  notifyWaiting: DEFAULT_NOTIFY_WAITING,
 };
 
 /**
@@ -885,6 +897,9 @@ function parsePrefs(
     // this is the one preference whose "on" position TYPES SOMETHING INTO A
     // RUNNING AGENT. A payload vam cannot read must not do that.
     conciseOutput: readConciseOutput((parsed as { conciseOutput?: unknown }).conciseOutput),
+    // Per field like every line above it; a boolean is a choice and anything
+    // else is the default, which is ON (`./notify.ts` says why).
+    notifyWaiting: readNotifyWaiting((parsed as { notifyWaiting?: unknown }).notifyWaiting),
   };
 }
 
@@ -1345,6 +1360,14 @@ export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
  *  own into a pane somebody's agent is reading. */
 export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, conciseOutput: readConciseOutput(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it. Read in the renderer alone (`notify/waiting.ts`), so there is no
+ *  crossing into main to make in `activatePrefs` -- the OS call is made per
+ *  banner, and a switch that is off makes no call at all. */
+export function setNotifyWaiting(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, notifyWaiting: readNotifyWaiting(on) };
 }
 
 /**

@@ -91,7 +91,11 @@ const words = (text: string) => text.split(/\s+/).filter((word) => word.length >
 /** id, the fewest paragraphs it may draw, the most words they may add up to. */
 const BUDGET: readonly (readonly [string, number, number])[] = [
   ['appearance', 10, 180],
-  ['behaviour', 6, 210],
+  // 210 was the seven-row panel with a quarter cut off. The desktop
+  // notifications row (a hint and a three-fact note, 41 words) took it to 244
+  // measured; the ceiling moves by one row's worth and the floor by one row,
+  // so the row's presence is counted and a tenth paragraph is still refused.
+  ['behaviour', 8, 255],
 ];
 
 describe('a settings panel says what a row does without arguing for it', () => {

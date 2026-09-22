@@ -508,6 +508,25 @@ export const CHANNELS = {
    */
   mainErrorsGet: 'vam:errors:get',
   mainErrorsChanged: 'vam:errors:changed',
+  /**
+   * DESKTOP NOTIFICATIONS. The renderer decides WHEN (it is the only process
+   * holding a previous model, `src/renderer/notify/waiting.ts`); main makes
+   * the OS call (`src/main/notify/notify.ts`) because the renderer's own
+   * `Notification` sits behind the permission policy this app denies.
+   *
+   * `show` and `close` answer bare -- a boolean and nothing -- like
+   * `clipboardWrite`: there is no source to refuse in the words of, and what
+   * went wrong is not the caller's to render. It is written to main's failure
+   * buffer (`mainErrorsGet` above) with the OS's text verbatim, which is the
+   * whole instrument. `activated` is a PUSH, `{sourceId, sessionId}`, sent
+   * when a banner is clicked, so the renderer can go to that session.
+   *
+   * NOT MEMBERS OF `PreloadSourceApi`, for the reason `setConciseOutput` is
+   * not: a paired phone must not be able to raise a banner on the desktop.
+   */
+  notifyShow: 'vam:notify:show',
+  notifyClose: 'vam:notify:close',
+  notifyActivated: 'vam:notify:activated',
 } as const;
 
 /**

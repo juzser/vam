@@ -19,6 +19,7 @@ import {
   createIssueApi,
   createLinkApi,
   createMainErrorsApi,
+  createNotifyApi,
   createPrefsBridge,
   createPreloadApi,
   createPrsApi,
@@ -66,6 +67,10 @@ contextBridge.exposeInMainWorld('api', {
   // Main's own failure buffer (`src/main/errors/log.ts`), read side. See
   // `src/renderer/errors/main-errors-bridge.ts` for the one caller.
   mainErrors: createMainErrorsApi(ipcRenderer),
+  // Desktop notifications: the renderer decides when, main makes the OS
+  // call, and what the OS answered lands in `mainErrors` above -- see
+  // `src/main/notify/notify.ts` for why that is the whole point.
+  notify: createNotifyApi(ipcRenderer),
   // Preferences main needs a copy of. Exactly one today: where to ask GitHub
   // from, per project. Desktop-only by construction -- it is not a member of
   // the source API a phone implements over HTTP.
