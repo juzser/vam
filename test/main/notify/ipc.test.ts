@@ -15,6 +15,7 @@ function harness() {
   const handlers = new Map<string, Handler>();
   const shown: NotifyRequest[] = [];
   const closed: NotifyTarget[] = [];
+  const tested: number[] = [];
   const sent: { channel: string; args: unknown[] }[] = [];
   const focus: string[] = [];
   const deps = {
@@ -25,6 +26,10 @@ function harness() {
       },
       close: (target: NotifyTarget) => {
         closed.push(target);
+      },
+      test: async () => {
+        tested.push(1);
+        return { kind: 'sent' as const };
       },
     },
   };
@@ -44,7 +49,7 @@ function harness() {
   registerNotifyIpc(ipcMain, deps.notifier);
   const activate = notifyActivationRoute(webContents, focusWindow);
   const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)?.({}, ...args);
-  return { invoke, shown, closed, sent, focus, activate };
+  return { invoke, shown, closed, tested, sent, focus, activate };
 }
 
 beforeEach(() => clearMainFailures());
@@ -95,6 +100,21 @@ describe('close', () => {
     invoke(CHANNELS.notifyClose, { sourceId: 'claude-code' });
     invoke(CHANNELS.notifyClose, 'nope');
     expect(closed).toEqual([]);
+  });
+});
+
+describe('test', () => {
+  it('reaches the notifier’s test path, not show, and answers its verdict', async () => {
+    const { invoke, shown, tested } = harness();
+    expect(await invoke(CHANNELS.notifyTest)).toEqual({ kind: 'sent' });
+    expect(tested).toEqual([1]);
+    expect(shown).toEqual([]);
+  });
+
+  it('takes no argument: the renderer chooses neither title nor body', async () => {
+    const { invoke, tested } = harness();
+    expect(await invoke(CHANNELS.notifyTest, { title: 'x' })).toEqual({ kind: 'unconfirmed' });
+    expect(tested).toEqual([]);
   });
 });
 

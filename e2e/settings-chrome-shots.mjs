@@ -59,6 +59,7 @@ function ratio(a, b) {
 const SECTIONS = [
   ['appearance', 'Appearance'],
   ['behaviour', 'Behaviour'],
+  ['notifications', 'Notifications'],
   ['sessions', 'Sessions'],
   ['remote', 'Remote'],
   ['keyboard', 'Keyboard'],
@@ -177,8 +178,14 @@ for (const width of STRIP_WIDTHS) {
   // section that lands in a gap the previous count already paid for. The
   // budget below is not: it is measured in pixels against the viewport, and it
   // is the assertion that actually protects the operator.
+  //
+  // THE SEVENTH (Notifications) DID REDDEN IT, as the first paragraph
+  // promised: seven over two narrow tracks is four rows where six was three.
+  // Wide, seven over four tracks is still two. The pixel budget below is
+  // what decided the fourth row was acceptable: 121px, 14% of an
+  // 844px viewport at 520px, under the quarter it is held to.
   const rows = new Set(geometry.map((item) => item.top)).size;
-  const expected = width < 640 ? 3 : 2;
+  const expected = width < 640 ? 4 : 2;
   console.log(`${width}px: ${names.join(' ')} rows=${rows} over ${geometry.length} sections`);
   if (rows !== expected) {
     throw new Error(

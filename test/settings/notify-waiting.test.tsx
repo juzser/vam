@@ -3,11 +3,13 @@
 /**
  * THE NOTIFICATION SWITCH, at the surface the operator touches.
  *
- * One row, one switch, in Behaviour -- a notification is something vam DOES
- * (`sections.ts`'s rule), not how it looks. What this file can hold: that the
- * control exists, where, what it writes, and what it tells the operator. It
- * cannot hold that a banner appears; that is the OS's, and main's `failed`
- * instrument is what says otherwise (`test/main/notify/notify.test.ts`).
+ * One row, one switch. It shipped in Behaviour (#440) and moved to a
+ * Notifications section of its own when the Test notification button arrived
+ * beside it (`test/settings/notifications-section.test.tsx`). What this file
+ * can hold: that the control exists, where, what it writes, and what it tells
+ * the operator. It cannot hold that a banner appears; that is the OS's, and
+ * main's `failed` instrument is what says otherwise
+ * (`test/main/notify/notify.test.ts`).
  */
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
@@ -57,10 +59,12 @@ function changed(onChange: { mock: { calls: unknown[][] } }, index = 0): Prefs {
 }
 
 describe('the control', () => {
-  it('is a switch in the Behaviour panel', () => {
+  it('is a switch in the Notifications panel', () => {
     open();
     expect(
-      document.querySelector('[data-settings-panel="behaviour"] [data-switch="notify-waiting"]'),
+      document.querySelector(
+        '[data-settings-panel="notifications"] [data-switch="notify-waiting"]',
+      ),
     ).not.toBeNull();
   });
 

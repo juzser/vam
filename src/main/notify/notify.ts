@@ -53,6 +53,7 @@
  * same session replaces the first rather than stacking.
  */
 
+import type { NotifyVerdict } from '../../shared/notify.js';
 import { recordMainFailure } from '../errors/log.js';
 import { truncateBody } from './body.js';
 
@@ -91,6 +92,13 @@ export type Notifier = {
   show(request: NotifyRequest): boolean;
   /** Take down the banner for that session, if one is held. */
   close(target: NotifyTarget): void;
+  /**
+   * The settings button's banner. THE SAME PATH AS `show` -- same `create`,
+   * same instrument, same three records -- with the verdict also handed back,
+   * so the panel can say inline what a real banner only says in the error
+   * log. A test that took a shorter path would be testing the shorter path.
+   */
+  test(): Promise<NotifyVerdict>;
 };
 
 /**
@@ -104,6 +112,15 @@ export const NOTIFY_VERDICT_TIMEOUT_MS = 10_000;
 
 const ACTION = 'show a notification';
 
+/**
+ * The test banner's identity: a session no source will ever mint, so it
+ * replaces only itself. Exported for the IPC test, which checks the channel
+ * reaches this and not `show`.
+ */
+export const TEST_TARGET: NotifyTarget = { sourceId: 'vam', sessionId: 'test-notification' };
+const TEST_TITLE = 'vam';
+const TEST_BODY = 'this is a test notification';
+
 function keyOf(target: NotifyTarget): string {
   return `${target.sourceId} ${target.sessionId}`;
 }
@@ -112,8 +129,25 @@ function textOf(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
 }
 
+type Report = (verdict: NotifyVerdict) => void;
+
+/** Told once, whatever settles the banner first. */
+function once(report: Report): Report {
+  let told = false;
+  return (verdict) => {
+    if (told) return;
+    told = true;
+    report(verdict);
+  };
+}
+
+const NOBODY: Report = () => {};
+
 export function createNotifier(deps: NotifierDeps): Notifier {
-  const held = new Map<string, { notification: NotificationLike; verdict: NodeJS.Timeout }>();
+  const held = new Map<
+    string,
+    { notification: NotificationLike; verdict: NodeJS.Timeout; report: Report }
+  >();
 
   const forget = (key: string): void => {
     const entry = held.get(key);
@@ -122,65 +156,88 @@ export function createNotifier(deps: NotifierDeps): Notifier {
     held.delete(key);
   };
 
+  /**
+   * THE ONE PATH. Every banner, real or test, goes through here, so the three
+   * records in the header are written by one piece of code and the test
+   * button cannot drift from the thing it claims to test. `report` hears the
+   * same verdict the log does; `show` hands in `NOBODY`.
+   */
+  const raise = (request: NotifyRequest, report: Report): boolean => {
+    const key = keyOf(request);
+    const target = { sourceId: request.sourceId, sessionId: request.sessionId };
+    // Replace, never stack: the banner is ABOUT the session, and two banners
+    // about one session say the same thing twice. The replaced one never got
+    // its answer, and that is what its report is told.
+    const previous = held.get(key);
+    if (previous !== undefined) {
+      forget(key);
+      previous.notification.close();
+      previous.report({ kind: 'unconfirmed' });
+    }
+
+    let notification: NotificationLike;
+    try {
+      notification = deps.create({ title: request.title, body: truncateBody(request.body) });
+    } catch (reason: unknown) {
+      recordMainFailure(ACTION, 'notification-failed', textOf(reason));
+      report({ kind: 'failed', reason: textOf(reason) });
+      return false;
+    }
+
+    // Records only. The handle stays held: a banner the OS never confirmed
+    // may still be on screen, and the renderer's `close` must still reach it.
+    const verdict = setTimeout(() => {
+      recordMainFailure(
+        ACTION,
+        'notification-unconfirmed',
+        `the OS answered neither \`show\` nor \`failed\` within ${NOTIFY_VERDICT_TIMEOUT_MS / 1000}s for "${request.title}" — vam cannot tell whether it was delivered`,
+      );
+      report({ kind: 'unconfirmed' });
+    }, NOTIFY_VERDICT_TIMEOUT_MS);
+    held.set(key, { notification, verdict, report });
+
+    const delivered = (): void => {
+      const entry = held.get(key);
+      if (entry?.notification === notification) clearTimeout(entry.verdict);
+      report({ kind: 'sent' });
+    };
+    notification.on('show', delivered);
+    notification.on('click', () => {
+      delivered();
+      deps.onActivate(target);
+    });
+    notification.on('close', () => {
+      // The OS or the operator dismissed it; the handle is dead. Only forget
+      // it if it is still the one held -- a replacement may already be in.
+      if (held.get(key)?.notification === notification) forget(key);
+    });
+    notification.on('failed', (_event: unknown, error: string) => {
+      // The text is what matters and it is written VERBATIM. See the header.
+      if (held.get(key)?.notification === notification) forget(key);
+      recordMainFailure(ACTION, 'notification-failed', textOf(error));
+      report({ kind: 'failed', reason: textOf(error) });
+    });
+
+    try {
+      notification.show();
+    } catch (reason: unknown) {
+      forget(key);
+      recordMainFailure(ACTION, 'notification-failed', textOf(reason));
+      report({ kind: 'failed', reason: textOf(reason) });
+      return false;
+    }
+    return true;
+  };
+
   return {
     show(request) {
-      const key = keyOf(request);
-      const target = { sourceId: request.sourceId, sessionId: request.sessionId };
-      // Replace, never stack: the banner is ABOUT the session, and two banners
-      // about one session say the same thing twice.
-      const previous = held.get(key);
-      if (previous !== undefined) {
-        forget(key);
-        previous.notification.close();
-      }
+      return raise(request, NOBODY);
+    },
 
-      let notification: NotificationLike;
-      try {
-        notification = deps.create({ title: request.title, body: truncateBody(request.body) });
-      } catch (reason: unknown) {
-        recordMainFailure(ACTION, 'notification-failed', textOf(reason));
-        return false;
-      }
-
-      // Records only. The handle stays held: a banner the OS never confirmed
-      // may still be on screen, and the renderer's `close` must still reach it.
-      const verdict = setTimeout(() => {
-        recordMainFailure(
-          ACTION,
-          'notification-unconfirmed',
-          `the OS answered neither \`show\` nor \`failed\` within ${NOTIFY_VERDICT_TIMEOUT_MS / 1000}s for "${request.title}" — vam cannot tell whether it was delivered`,
-        );
-      }, NOTIFY_VERDICT_TIMEOUT_MS);
-      held.set(key, { notification, verdict });
-
-      const delivered = (): void => {
-        const entry = held.get(key);
-        if (entry?.notification === notification) clearTimeout(entry.verdict);
-      };
-      notification.on('show', delivered);
-      notification.on('click', () => {
-        delivered();
-        deps.onActivate(target);
+    test() {
+      return new Promise((resolve) => {
+        raise({ ...TEST_TARGET, title: TEST_TITLE, body: TEST_BODY }, once(resolve));
       });
-      notification.on('close', () => {
-        // The OS or the operator dismissed it; the handle is dead. Only forget
-        // it if it is still the one held -- a replacement may already be in.
-        if (held.get(key)?.notification === notification) forget(key);
-      });
-      notification.on('failed', (_event: unknown, error: string) => {
-        // The text is what matters and it is written VERBATIM. See the header.
-        if (held.get(key)?.notification === notification) forget(key);
-        recordMainFailure(ACTION, 'notification-failed', textOf(error));
-      });
-
-      try {
-        notification.show();
-      } catch (reason: unknown) {
-        forget(key);
-        recordMainFailure(ACTION, 'notification-failed', textOf(reason));
-        return false;
-      }
-      return true;
     },
 
     close(target) {
