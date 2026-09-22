@@ -43,6 +43,13 @@ describe('createNotifyApi', () => {
     });
   });
 
+  it('test asks vam:notify:test with no argument and answers the verdict', async () => {
+    const ipc = fakeIpc();
+    ipc.invoke.mockResolvedValueOnce({ kind: 'failed', reason: 'no' });
+    expect(await createNotifyApi(ipc).test()).toEqual({ kind: 'failed', reason: 'no' });
+    expect(ipc.invoke).toHaveBeenCalledWith(CHANNELS.notifyTest);
+  });
+
   it('onActivated delivers the target and unsubscribes with the same reference', () => {
     const ipc = fakeIpc();
     const seen = vi.fn();
