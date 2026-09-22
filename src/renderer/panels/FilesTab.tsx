@@ -146,6 +146,8 @@
 import { AlignLeft, Code, Eye, FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
 import {
   type KeyboardEvent,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useId,
@@ -155,8 +157,6 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type {
   FileListResult,
   FileReadResult,
@@ -265,6 +265,11 @@ export type ListFiles = (sessionId: string) => Promise<FileListResult>;
  *      see `files-tree-width.ts`'s header, which is entirely about that.
  */
 const TREE_WIDTH = 'w-[38%] min-w-[7.5rem] max-w-[13.5rem]';
+
+// `react-markdown` + `remark-gfm`, in their own lazy chunk: see
+// `LazyMarkdown.tsx`'s own header for the measured cost and why the split
+// sits at this boundary rather than inside `files-markdown.tsx`.
+const LazyMarkdown = lazy(() => import('./LazyMarkdown.js'));
 
 /** A Shift-held arrow moves further than a bare one -- the WAI-ARIA APG
  *  slider pattern, and the same multiplier `PaneResizer` uses so the two
@@ -2180,13 +2185,13 @@ function MarkdownPreview({
             same reason: the real gate is in the component overrides below,
             not in react-markdown's own scheme list. See
             `FILES_MARKDOWN_URL_TRANSFORM`. */}
-        <Markdown
-          remarkPlugins={[remarkGfm]}
-          components={FILES_MARKDOWN}
-          urlTransform={FILES_MARKDOWN_URL_TRANSFORM}
+        <Suspense
+          fallback={<div className="whitespace-pre-wrap font-mono text-ink-dim">{content}</div>}
         >
-          {content}
-        </Markdown>
+          <LazyMarkdown components={FILES_MARKDOWN} urlTransform={FILES_MARKDOWN_URL_TRANSFORM}>
+            {content}
+          </LazyMarkdown>
+        </Suspense>
       </div>
     </section>
   );

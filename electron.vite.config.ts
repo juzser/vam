@@ -69,6 +69,28 @@ export default defineConfig({
     envDir: '../..',
     build: {
       minify,
+      // Report-only; does not change what ships. `vite build`'s own gzip-size
+      // report (what the CLI prints per-chunk after a build) computes and
+      // discards one gzip pass per chunk purely to print the number in the
+      // build's own console output. Turned off here for build SPEED, not
+      // bundle size -- see `test/renderer/bundle-budget.test.ts`, which
+      // computes gzip size itself (via `node:zlib`) for the one chunk it
+      // actually asserts on, independent of this flag either way.
+      //
+      // Two other candidates were measured and dropped rather than added
+      // here: `build.target: 'chrome152'` (Electron 44.1.1's own Chromium,
+      // via `ELECTRON_RUN_AS_NODE=1 electron -e
+      // "console.log(process.versions)"`) and `build.modulePreload.polyfill:
+      // false`. Both produced a byte-for-byte IDENTICAL entry chunk --
+      // esbuild's default target already lowers nothing this codebase uses,
+      // and the polyfill is only ever injected for a STATIC `<link
+      // rel="modulepreload">` the built HTML would need to guard, which
+      // this single-entry-script renderer never emits in the first place.
+      // (Vite's internal dynamic-`import()` preloading helper, unrelated to
+      // that flag and required for every lazy chunk this turn added, is the
+      // `relList`/`supports("modulepreload")` code actually visible in the
+      // chunk -- checked before assuming either candidate did anything.)
+      reportCompressedSize: false,
       rollupOptions: { input: { index: 'src/renderer/index.html' } },
     },
     plugins: [react(), tailwindcss()],

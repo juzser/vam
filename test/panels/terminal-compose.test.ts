@@ -99,4 +99,38 @@ describe('a committed composition becomes keystrokes the channel accepts', () =>
     const family = '👨‍👩‍👧‍👦';
     expect(texts(composedStrokes(family, 2)).join('')).toBe(family);
   });
+
+  /**
+   * NFC, NOT WHATEVER CODE POINTS THE SOURCE HANDED OVER.
+   *
+   * `TerminalTab.openkey.test.tsx` carries the report and the measurement this
+   * answers: OpenKey (github.com/tuyenvm/OpenKey), the Vietnamese input
+   * utility behind it, builds its own replacement string from a hardcoded
+   * combining-mark table rather than calling either of Foundation's
+   * `precomposedStringWithCanonicalMapping` / `decomposedStringWithCanonicalMapping`
+   * -- so whether a correction lands on the wire precomposed (`ố`, one code
+   * point) or decomposed (`o` + a combining circumflex + a combining acute,
+   * three) is the SOURCE's habit, not a contract this channel can trust. tmux
+   * and the agents vam starts both draw a decomposed sequence as a base letter
+   * with a mark floating over the NEXT cell rather than one accented glyph, so
+   * a piece handed over exactly as it arrived can be byte-correct and still
+   * look wrong on screen. Composing into NFC before the bound is measured is
+   * what a real input method's own commit already is in the common case, and
+   * what this function is now the one place responsible for when the source
+   * is not.
+   */
+  it('normalises a decomposed commit to NFC before it is chunked', () => {
+    // 'ố' spelled the long way: 'o' + COMBINING CIRCUMFLEX ACCENT (U+0302) +
+    // COMBINING ACUTE ACCENT (U+0301) -- three code points for one glyph.
+    const decomposed = 'tiếng';
+    expect(decomposed).not.toBe('tiếng');
+    expect(composedStrokes(decomposed)).toEqual([{ kind: 'text', text: 'tiếng' }]);
+  });
+
+  it('normalises before it bounds, so a decomposed commit is not chopped into more pieces than its NFC form needs', () => {
+    // Three code points of input for one of output: chunking the RAW string at
+    // a bound of one would split what NFC turns into a single-character piece.
+    const decomposed = 'ố'; // 'ố', decomposed
+    expect(texts(composedStrokes(decomposed, 1))).toEqual(['ố']);
+  });
 });
