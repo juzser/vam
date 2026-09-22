@@ -91,6 +91,14 @@ export async function createSourceFromPreload(api: PreloadSourceApi): Promise<Se
     // being absent, so leaving it off here would hide a working surface behind
     // a check no descriptor makes.
     history: (sessionId, cursor) => api.history(sessionId, cursor),
+    // ASSIGNED UNCONDITIONALLY, exactly like `history` immediately above --
+    // `port.ts`'s own doc comment says so verbatim ("OPTIONAL AND
+    // ANSWER-GATED, exactly like `history` above"). A source that cannot look
+    // inside an agent answers through `AgentWork`'s own `unavailable` arm, not
+    // through this member's absence; leaving it off here (as this factory
+    // used to) stranded `AgentWorkReaderProvider` on `null` for every source,
+    // so `useAgentWork`'s poll never started at all.
+    agentWork: (sessionId, agentId) => api.agentWork(sessionId, agentId),
   };
 
   // THE CONSTITUENTS, when main is serving more than one source. Copied

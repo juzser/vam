@@ -33,35 +33,26 @@
  * `files-tab-keyboard-shots.mjs` already use for a bridge `?demo=1` cannot
  * reach.
  *
- * WHAT THIS GUARD DOES NOT PROVE, AND WHY -- A FINDING OF ITS OWN. Item 1's
- * brief asked for a counting wrapper around `useAgentWork`'s `read` too, on
- * the assumption that picking an agent through this same stub would start
- * that poll. It does not, and the reason is not this guard: `useAgentWork`'s
- * `read` argument comes from `useAgentWorkReader()`
- * (`sources/agent-work-reader.ts`), whose only producer on this path is
- * `source.agentWork` -- and `sources/preload-factory.ts`'s
- * `createSourceFromPreload` never assigns that member. Compare its `history`
- * neighbour, wired unconditionally two lines above it
- * (`history: (sessionId, cursor) => api.history(sessionId, cursor)`), which
- * `port.ts`'s own doc comment says `agentWork` should follow "exactly like":
- * "OPTIONAL AND ANSWER-GATED, exactly like `history` above". It does not.
- * `AgentWorkReaderProvider` therefore always publishes `null` on
- * `DesktopCanvas` (and on `BrowserCanvas`, which reaches the same factory
- * through `http-factory.ts`), `useAgentWork`'s `read` is always `undefined`,
- * and its own `useVisibilityInterval(agentId !== null && read !== undefined,
- * ...)` never starts a timer at all -- there is no live poll here for a
- * `visibilitychange` to pause or resume. `DemoCanvas` is the ONE place
- * `useAgentWork` ever actually polls (it wires `agentWork.demoAgentWork` in
- * directly, `App.tsx`'s own `DemoCanvasLoaded`), and that path never touches
- * `window.api`, so it offers no call to count either. `window.__attn.agentWork`
- * below is still wired end to end through the stub, in case a future fix
- * closes this gap and a later pass wants to extend this guard's assertions
- * onto it without re-deriving the stub -- but nothing here asserts on it, and
- * this guard's real, provable claim is `useSourceModel`'s load poller alone,
- * which is exactly the fallback item 5's own brief names for this situation.
- * This gap predates phase 3b entirely (`preload-factory.ts` carries no
- * visibility-gating change and is not part of this branch's diff) and fixing
- * it is out of this guard's scope.
+ * THE GAP THIS GUARD ONCE DOCUMENTED IS NOW CLOSED. This header used to
+ * record a finding of its own: picking an agent through this same stub never
+ * started `useAgentWork`'s poll, because `sources/preload-factory.ts`'s
+ * `createSourceFromPreload` never assigned `agentWork` onto the `SessionSource`
+ * it built, although `port.ts`'s own doc comment says it must be "OPTIONAL AND
+ * ANSWER-GATED, exactly like `history` above" -- and `history` was wired
+ * unconditionally two lines above it. `AgentWorkReaderProvider` therefore
+ * always published `null` on `DesktopCanvas` (and on `BrowserCanvas`, which
+ * reaches the same factory through `http-factory.ts`), so `useAgentWork`'s
+ * `read` was always `undefined` and its own
+ * `useVisibilityInterval(agentId !== null && read !== undefined, ...)` never
+ * started a timer at all. `createSourceFromPreload` now assigns `agentWork`
+ * the same way `history` is assigned, unconditionally, and the section below
+ * headed "THE AGENTS TAB REACHES THE BRIDGE" proves it in this same real
+ * browser: picking the stub's one agent increments `window.__attn.agentWork`
+ * and the pane renders the exact turn text the stub answered with, not the
+ * no-surface refusal. `DemoCanvas` remains a SEPARATE path (it wires
+ * `agentWork.demoAgentWork` in directly and never touches `window.api`), so it
+ * still offers no call to count -- but it no longer matters, because the
+ * bridge path this guard exercises now works too.
  *
  * `document.hidden` VS `document.visibilityState`. A first draft of this file
  * overrode `document.hidden` on `Object.defineProperty`, following a common
@@ -116,14 +107,21 @@ function check(label, ok, detail) {
   failures.push(label);
 }
 
+/** The one row the Agents tab has to pick, for the section below headed
+ *  "THE AGENTS TAB REACHES THE BRIDGE". A unique string in `input` is what
+ *  that section greps the rendered pane for -- proof the pane painted THIS
+ *  answer and not a cached or a demo one. */
+const AGENT_ID = 'attn-agent-1';
+const WORK_MARKER = 'ATTENTION_GUARD_AGENT_WORK_MARKER';
+
 /**
- * A COMPLETE `PreloadSourceApi` stub -- one project, one session, every
- * capability false -- with `load` and `agentWork` wrapped in counters. See
- * this file's own header for why the shape must be complete (a partial one
- * reddens the whole page with "e.describe is not a function" before a single
- * check here ever runs) and why `agentWork`'s counter is wired but unused.
+ * A COMPLETE `PreloadSourceApi` stub -- one project, one session with one
+ * running agent, every capability false -- with `load` and `agentWork`
+ * wrapped in counters. See this file's own header for why the shape must be
+ * complete (a partial one reddens the whole page with "e.describe is not a
+ * function" before a single check here ever runs).
  */
-const install = () => {
+const install = ({ agentId, marker }) => {
   globalThis.window.__attn = { load: 0, agentWork: 0 };
   globalThis.window.api = {
     describe: async () => ({
@@ -160,10 +158,13 @@ const install = () => {
               epic: null,
               branch: null,
               status: 'waiting',
-              runningAgents: 0,
+              runningAgents: 1,
               activity: null,
               age: '2m',
               decisions: [],
+              agents: [
+                { id: agentId, type: 'stub', description: 'answers the attention guard', running: true },
+              ],
             },
           ],
         },
@@ -184,8 +185,20 @@ const install = () => {
     agentWork: async () => {
       globalThis.window.__attn.agentWork += 1;
       return {
-        kind: 'unavailable',
-        error: { kind: 'unreachable', code: 'stub', message: 'not wired on this path — see header' },
+        kind: 'work',
+        whole: true,
+        brief: null,
+        turns: [
+          {
+            id: `${agentId}:t1`,
+            label: 'brief',
+            input: marker,
+            output: 'the bridge answered',
+            commands: [],
+            errorCount: 0,
+            steps: [],
+          },
+        ],
       };
     },
     applyWaivers: async () => {},
@@ -214,7 +227,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
 page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 
-await page.addInitScript(install);
+await page.addInitScript(install, { agentId: AGENT_ID, marker: WORK_MARKER });
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-session-row]', { timeout: 10_000 });
 
@@ -273,6 +286,49 @@ check(
   resumed !== null && resumed.ms <= 500 && resumed.counts.load === beforeShow.load + 1,
   resumed === null ? 'no call landed within 800ms' : JSON.stringify(resumed),
 );
+
+// ------------------------------------------- THE AGENTS TAB REACHES THE BRIDGE
+// This is the section this file's own header names: proof that
+// `preload-factory.ts` assigning `agentWork` actually reaches the Agents pane
+// through `window.api`, not merely that `createSourceFromPreload` returns an
+// object with the member (`test/sources/preload-factory.test.ts` already
+// proves that in isolation). Opening the session row and picking the stub's
+// one agent is the only way anything in this app calls `window.api.agentWork`
+// at all -- so a real click is what this section drives, on the same stub
+// `window.__attn` above already counts through.
+await page.locator('[data-session-row="s1"]').first().click();
+await page.waitForSelector('[data-view="agents"]', { timeout: 5_000 });
+await page.locator('[data-view="agents"]').click();
+await page.waitForSelector('[data-agent-row]', { timeout: 5_000 });
+
+const beforePick = await counts(page);
+check(
+  'picking nobody yet asks the bridge for nothing',
+  beforePick.agentWork === 0,
+  `agentWork=${beforePick.agentWork}`,
+);
+
+await page.locator(`[data-agent-pick="${AGENT_ID}"]`).click();
+await page.waitForSelector('[data-agent-turn]', { timeout: 5_000 }).catch(() => {});
+
+const afterPick = await counts(page);
+console.log(`  after picking the one agent: agentWork=${afterPick.agentWork}`);
+check(
+  'picking the agent asks the bridge for its work',
+  afterPick.agentWork >= 1,
+  `agentWork=${afterPick.agentWork}`,
+);
+
+const detailText = await page.evaluate(
+  () => document.querySelector('[data-agent-detail]')?.textContent ?? '',
+);
+check(
+  'the pane renders what the bridge actually answered, not the no-surface refusal',
+  detailText.includes(WORK_MARKER) && !/cannot report/i.test(detailText),
+  JSON.stringify(detailText).slice(0, 160),
+);
+
+await page.screenshot({ path: `${outDir}/attention-agent-work.png` });
 
 await browser.close();
 
