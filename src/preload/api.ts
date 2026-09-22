@@ -44,6 +44,7 @@ import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
+import type { NotifyVerdict } from '../shared/notify.js';
 import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
 import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
@@ -726,6 +727,10 @@ export type NotifyApi = {
    *  reported through `mainErrors`, never here. */
   show(request: NotifyTarget & { readonly title: string; readonly body: string }): Promise<boolean>;
   close(target: NotifyTarget): Promise<void>;
+  /** The settings button: raise vam's own test banner and hear what the OS
+   *  said -- the one call here whose verdict comes back inline. It resolves
+   *  when the OS answers, or after main's 10 s verdict timeout. */
+  test(): Promise<NotifyVerdict>;
   /** A click on a banner: focus has already been brought to vam by main. */
   onActivated(listener: (target: NotifyTarget) => void): () => void;
 };
@@ -740,6 +745,7 @@ export function createNotifyApi(ipc: InvokerLike & ListenerLike): NotifyApi {
   return {
     show: (request) => ipc.invoke(CHANNELS.notifyShow, request) as Promise<boolean>,
     close: (target) => ipc.invoke(CHANNELS.notifyClose, target) as Promise<void>,
+    test: () => ipc.invoke(CHANNELS.notifyTest) as Promise<NotifyVerdict>,
     onActivated: (listener) => {
       const wrapped = (_event: unknown, target: unknown) => listener(target as NotifyTarget);
       ipc.on(CHANNELS.notifyActivated, wrapped);

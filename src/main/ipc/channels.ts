@@ -523,9 +523,16 @@ export const CHANNELS = {
    *
    * NOT MEMBERS OF `PreloadSourceApi`, for the reason `setConciseOutput` is
    * not: a paired phone must not be able to raise a banner on the desktop.
+   *
+   * `test` is the settings button. No argument -- main chooses the title and
+   * the body -- and it answers a `NotifyVerdict` (`src/shared/notify.ts`)
+   * rather than a boolean, because the button exists to say inline what the
+   * OS did with the banner. Same notifier path, so the error log still gets
+   * what a real banner's failure would have written.
    */
   notifyShow: 'vam:notify:show',
   notifyClose: 'vam:notify:close',
+  notifyTest: 'vam:notify:test',
   notifyActivated: 'vam:notify:activated',
 } as const;
 

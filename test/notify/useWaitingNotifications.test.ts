@@ -30,6 +30,7 @@ function fakeApi() {
   const api: NotifyApi = {
     show,
     close,
+    test: vi.fn().mockResolvedValue({ kind: 'sent' }),
     onActivated: (listener) => {
       activated = listener;
       return () => {
