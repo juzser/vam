@@ -84,6 +84,21 @@ export type PaneView =
        * `row` is an index into THAT text, scrollback and all; see `PaneCursor`.
        */
       readonly cursor: PaneCursor;
+      /**
+       * WHETHER THE PROGRAM IN THE PANE ASKED THE TERMINAL FOR THE MOUSE
+       * (`#{mouse_any_flag}`), because that decides where a wheel over the
+       * pane goes. Claude Code's fullscreen renderer draws in the alternate
+       * screen -- for which tmux keeps NO scrollback, so the window read is
+       * the screen and the DOM has nothing to scroll -- and asks for mouse
+       * reports so that it can scroll its own viewport. A terminal that has
+       * been asked delivers the wheel to the program; one that has not spends
+       * it on its own history. ABSENT when tmux did not say (an older tmux, a
+       * stubbed runner, every producer written before the field existed):
+       * not knowing is drawn as the old behaviour, never as a program that
+       * declined -- which is why this is the one field of `ok` that is
+       * optional rather than spelled out like `cursor`.
+       */
+      readonly mouse?: boolean;
     }
   | { readonly kind: 'not-vam' }
   | { readonly kind: 'gone' }
@@ -368,7 +383,27 @@ export type PaneKey =
   /** Escape, `Escape` to tmux -- the key every TUI cancels on. */
   | { readonly kind: 'escape' }
   /** One Ctrl chord -- `C-u` to tmux, and its twenty-five siblings. */
-  | { readonly kind: 'control'; readonly letter: ControlLetter };
+  | { readonly kind: 'control'; readonly letter: ControlLetter }
+  /**
+   * The wheel, for a pane whose program asked for the mouse (`PaneView.mouse`).
+   * Delivered as `ticks` SGR mouse reports at the cell under the pointer,
+   * 1-based as the protocol counts (`tmux/argv.ts`, `sendWheelArgv`). Main
+   * spells the report; the renderer only says which way and where.
+   */
+  | {
+      readonly kind: 'wheel';
+      readonly direction: 'up' | 'down';
+      readonly ticks: number;
+      readonly column: number;
+      readonly row: number;
+    };
+
+/**
+ * The most notches one wheel key may carry. A trackpad fling accumulates
+ * many rows between two frames; a bound keeps one bridge call from turning
+ * into an unbounded run of reports into a program vam does not control.
+ */
+export const MAX_WHEEL_TICKS = 40;
 
 /**
  * THE WHOLE ALLOWLIST OF CHORDS, written out rather than derived.
@@ -478,7 +513,15 @@ export type PaneSendResult = 'sent' | 'unaimed' | 'unavailable' | 'mispaired' | 
 /** Whether a value off the bridge is a keystroke vam will send. */
 export function isPaneKey(value: unknown): value is PaneKey {
   if (typeof value !== 'object' || value === null) return false;
-  const key = value as { kind?: unknown; text?: unknown; letter?: unknown };
+  const key = value as {
+    kind?: unknown;
+    text?: unknown;
+    letter?: unknown;
+    direction?: unknown;
+    ticks?: unknown;
+    column?: unknown;
+    row?: unknown;
+  };
   if (
     key.kind === 'enter' ||
     key.kind === 'backspace' ||
@@ -491,6 +534,19 @@ export function isPaneKey(value: unknown): value is PaneKey {
   // only one whose field is checked against a closed list rather than bounded
   // in length: `letter` is looked up, never spliced.
   if (key.kind === 'control') return isControlLetter(key.letter);
+  // Every number a report carries is bounded here and only here, so main can
+  // format them without a clamp of its own: a clamp is a value invented for
+  // a caller that sent one main would not have.
+  if (key.kind === 'wheel') {
+    const within = (value: unknown, min: number, max: number): boolean =>
+      typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+    return (
+      (key.direction === 'up' || key.direction === 'down') &&
+      within(key.ticks, 1, MAX_WHEEL_TICKS) &&
+      within(key.column, 1, MAX_COLUMNS) &&
+      within(key.row, 1, MAX_ROWS)
+    );
+  }
   return (
     key.kind === 'text' &&
     typeof key.text === 'string' &&

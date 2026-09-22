@@ -117,7 +117,7 @@ describe('an echo read asks for the screen and nothing above it', () => {
       '-t',
       `=${NAME}:`,
       '-F',
-      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}',
+      '@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}',
       ';',
       'capture-pane',
       '-p',

@@ -52,9 +52,15 @@
  *      full-pane and narrowed at 1600px; the body must land on two thirds of
  *      the pane, and the characters on a line — measured off the prose the
  *      page really drew — must fall by the same two thirds.
- *   2. ONE COLUMN. PRs and Agents, the composer and the question card must all
- *      land on the identical rectangle, on the operator's own instruction after
- *      the first screenshots. Compared to each other rather than to a number.
+ *   2. ONE COLUMN. PRs, the composer and the question card must all land on
+ *      the identical rectangle, on the operator's own instruction after the
+ *      first screenshots. Compared to each other rather than to a number.
+ *      AGENTS IS THE EXCEPTION, on a later instruction from a later
+ *      screenshot: "the Agents view in narrow mode also needs full width." It
+ *      is a two-pane navigator, and it gets the Terminal's answer: with the
+ *      flag on, its content box spans the pane less the pane's own padding,
+ *      the question card under it spans the same, and the Response view in
+ *      the same page state still gets the column.
  *   3. THE STEP, AND WHAT IT FOLLOWS. The window is bisected to the narrowest
  *      pane at which the narrowed body is not the whole pane: one pixel of
  *      window below it the body must BE the whole pane, at it the body must be
@@ -141,7 +147,10 @@
  *     instead of trusting one.
  *   - take the cap off the composer -> `narrowed, the composer bar is the same
  *     column the transcript is` reddens.
- *   - drop `Agents` from `narrowsAsProse` -> the agents rectangle check reddens.
+ *   - put `Agents` back into `narrowsAsProse` -> `narrowed, the agents
+ *     navigator spans the pane less the pane's own padding` reddens
+ *     (861.98px against a 1335px pane less 28px of padding) and `and the
+ *     question card under it spans it too` (889.98px under a 1335px pane).
  *   - delete the `[data-reading-pane]` block, drop `--text-control` from it,
  *     or take the attribute off the pane -> `at out 15 the option label is
  *     scaled by its own share` reddens.
@@ -426,7 +435,7 @@ await narrowPage.screenshot({ path: `${outDir}/view-width-narrow.png` });
 console.log(`${outDir}/view-width-narrow.png`);
 
 const perView = { Response: narrow.boxWidth };
-for (const view of ['prs', 'agents']) {
+for (const view of ['prs']) {
   await openView(narrowPage, view);
   const seen = await narrowPage.evaluate(
     () => document.querySelector('[data-detail-body]').getBoundingClientRect().width,
@@ -438,6 +447,56 @@ for (const view of ['prs', 'agents']) {
     `${seen}px against the response view's ${narrow.boxWidth}px`,
   );
 }
+// AGENTS, THE EXCEPTION. Measured before the fix, in this very page state:
+// `[data-agents]` at x 502..1363 (862px) in a pane at 264..1600, the roster
+// and the picked agent's In/Out confined to the prose column with a dead
+// gutter either side. The claim is about the NAVIGATOR's content box, not the
+// body's `max-width`: the body could be uncapped and the navigator still
+// narrowed by a cap of its own, and a class-name reading would not know.
+await openView(narrowPage, 'agents');
+const agents = await narrowPage.evaluate(() => {
+  const body = document.querySelector('[data-detail-body]');
+  const pane = body.parentElement;
+  const px = (value) => Number.parseFloat(value) || 0;
+  const style = getComputedStyle(body);
+  const nav = document.querySelector('[data-agents]');
+  const box = (el) => (el === null ? null : el.getBoundingClientRect());
+  return {
+    paneWidth: pane.clientWidth,
+    paneLeft: pane.getBoundingClientRect().left,
+    paneRight: pane.getBoundingClientRect().right,
+    padding: px(style.paddingLeft) + px(style.paddingRight),
+    nav: nav === null ? null : { left: box(nav).left, right: box(nav).right, width: box(nav).width },
+    question: box(document.querySelector('[data-question-bar]'))?.width ?? null,
+  };
+});
+perView.agents = agents.nav?.width ?? null;
+console.log('agents narrowed:', JSON.stringify(agents));
+check('the agents view drew its navigator at all, so the next check is not vacuous', agents.nav !== null);
+check(
+  'narrowed, the agents navigator spans the pane less the pane’s own padding',
+  agents.nav !== null && near(agents.nav.width, agents.paneWidth - agents.padding, 1),
+  `${agents.nav?.width}px against a ${agents.paneWidth}px pane less ${agents.padding}px of padding`,
+);
+check(
+  'and the question card under it spans it too — one rectangle, not a column on a full pane',
+  agents.question !== null && near(agents.question, agents.paneWidth, 1),
+  `${agents.question}px under a ${agents.paneWidth}px pane`,
+);
+// AND THE RESPONSE VIEW, IN THE SAME PAGE STATE, STILL GETS THE COLUMN — the
+// opt-out is one name's, not the flag's. Measured back, not remembered from
+// above: a regression that uncapped everything would leave `narrow.boxWidth`
+// as it was and only this re-reading would notice.
+await openView(narrowPage, 'response');
+const responseAgain = await narrowPage.evaluate(
+  () => document.querySelector('[data-detail-body]').getBoundingClientRect().width,
+);
+check(
+  'while the response view, in the same state, is still the column',
+  near(responseAgain, narrow.paneWidth * FRACTION, 1) && responseAgain < agents.paneWidth - 100,
+  `${responseAgain}px in a ${agents.paneWidth}px pane`,
+);
+await openView(narrowPage, 'agents');
 console.log('narrowed body width per view:', JSON.stringify(perView));
 await narrowPage.screenshot({ path: `${outDir}/view-width-narrow-agents.png` });
 console.log(`${outDir}/view-width-narrow-agents.png`);

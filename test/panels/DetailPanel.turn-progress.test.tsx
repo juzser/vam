@@ -318,6 +318,31 @@ describe('folded activity stays one click away', () => {
     });
   });
 
+  it('stands where the working stood: after the prompt, before the answer', () => {
+    // THE OPERATOR'S REPORT: "the three-dot mark for expanding progress steps
+    // is out of place." It was drawn out of flow in the turn's top-right
+    // corner, over the prompt bubble -- which reads as the PREVIOUS turn's
+    // corner, and put the way back where nothing folded had ever been. An
+    // ellipsis means "something is elided HERE", so it goes exactly where the
+    // progress region goes when it is back: between the prompt and its
+    // answer, in document order -- which is also the order a screen reader
+    // announces the turn in. `e2e/turn-steps-shots.mjs` measures the
+    // rectangle; this holds the order.
+    inMode('collapsed', () => {
+      draw([turn('a'), turn('b')]);
+      for (const control of unfolds()) {
+        const article = control.closest('[data-column-turn]') as HTMLElement;
+        const prompt = article.querySelector('[data-detail-block="in"]') as HTMLElement;
+        const answer = article.querySelector('[data-detail-block="out"]') as HTMLElement;
+        const follows = (a: Element, b: Element) =>
+          (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+        expect(follows(prompt, control), 'the way back comes after the prompt').toBe(true);
+        expect(follows(control, answer), 'and before the answer').toBe(true);
+      }
+      expect(unfolds()).toHaveLength(2);
+    });
+  });
+
   it('takes its own control away once the working is back', () => {
     // A control offering to restore something already on screen is a control
     // that does nothing -- the same defect as one that cannot act.

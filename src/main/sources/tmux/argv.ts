@@ -297,11 +297,24 @@ export const VAM_CURSOR_MARK = '@vam-cursor';
  * `display-message` would be a second answer to reconcile with the first, and
  * this one is already read, already marked, and already free.
  *
- * MEASURED on tmux 3.7b: all four keys exist and expand, and a key tmux does
+ * `mouse_any_flag` IS THE FIFTH, and it is not about the cursor either: it
+ * is 1 while the program in the pane has asked the terminal for mouse
+ * reports, and it decides where a wheel over the Terminal tab goes
+ * (`shared/terminal.ts`, `PaneView.mouse`; `sendWheelArgv` below). Claude
+ * Code's fullscreen renderer sets it, draws in the alternate screen, and
+ * scrolls its own viewport on the reports -- a screen tmux keeps no history
+ * for, so the tab's own scrollback is empty and the wheel has to reach the
+ * program or reach nothing. Measured on tmux 3.7b, a vam-shaped session
+ * (straight into `claude`, `"tui": "fullscreen"`): `alternate_on=1
+ * history_size=0 mouse_any_flag=1`, steady from three seconds on.
+ *
+ * MEASURED on tmux 3.7b: all five keys exist and expand, and a key tmux does
  * not know expands to the EMPTY STRING rather than failing -- which is what
  * makes an older tmux read as `unreadable` instead of as a crash.
+ *
+ * Exported for the test that pins the fifth field is asked for.
  */
-const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size}`;
+export const CURSOR_FORMAT = `${VAM_CURSOR_MARK} #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}`;
 
 /**
  * HOW FAR BACK THE TERMINAL TAB CAN SCROLL: five hundred lines above the
@@ -634,6 +647,31 @@ export function sendBackTabArgv(name: string): readonly string[] {
  */
 export function sendEscapeArgv(name: string): readonly string[] {
   return ['send-keys', '-t', paneTarget(name), 'Escape'];
+}
+
+/**
+ * The wheel, as the SGR mouse report the pane's program asked for.
+ *
+ * `ESC [ < button ; column ; row M` -- button 64 is a notch up and 65 a
+ * notch down, the cell is 1-based -- is what any terminal in SGR mouse mode
+ * (DECSET 1006, the mode tmux reports as `mouse_sgr_flag`) writes to the
+ * program for one wheel notch, and it is typed LITERALLY with `-l` because
+ * these bytes are for the program, not for tmux: tmux's own mouse path
+ * (`send-keys -M`) only exists inside a mouse binding. MEASURED on tmux 3.7b
+ * against Claude Code 2.1.278's fullscreen renderer: three reports of 64
+ * moved its viewport three lines up, three of 65 moved it back.
+ *
+ * `ticks` reports in ONE argument, so a fling is one spawn and not forty;
+ * `isPaneKey` bounds every number before it gets here (`MAX_WHEEL_TICKS`),
+ * so nothing is clamped or repaired in the formatting.
+ */
+export function sendWheelArgv(
+  name: string,
+  wheel: { direction: 'up' | 'down'; ticks: number; column: number; row: number },
+): readonly string[] {
+  const button = wheel.direction === 'up' ? 64 : 65;
+  const report = `\u001b[<${button};${wheel.column};${wheel.row}M`;
+  return ['send-keys', '-t', paneTarget(name), '-l', '--', report.repeat(wheel.ticks)];
 }
 
 /**
