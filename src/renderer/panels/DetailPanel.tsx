@@ -451,17 +451,32 @@ export const MAX_BANG_ROWS = 8;
  * to complete, Record button and all. `e2e/prompt-suggest-shots.mjs` measures
  * exactly that now, on both lists.
  *
- * A BOUNDED HEIGHT WAS TRIED HERE AND TAKEN OUT AGAIN, which is worth
- * recording so it is not re-added on the same reasoning. `max-h-[30vh]` plus a
- * scrolling row container plus a `scrollIntoView` on the selected row: three
- * moving parts, and nothing could falsify them. With the row cap at eight and
- * the layer floating, the list fits above the composer at 800px AND at 480px
- * -- and below 480 this pane's own blocks already overflow with no popover
- * open at all, so a guard there would have been measuring somebody else's
- * defect. Deleting the bound changed no measurement, so it is not here: the
- * row cap bounds the list and this floats it, and both of those a guard can
- * see go red.
+ * A BOUNDED HEIGHT WAS TRIED HERE AND TAKEN OUT AGAIN, ONCE. `max-h-[30vh]`
+ * plus a scrolling row container plus a `scrollIntoView` on the selected row:
+ * three moving parts, and nothing could falsify them. With the row cap at
+ * eight and the layer floating, the list fit above the composer at 800px AND
+ * at 480px, with no card sitting on a preview panel yet -- so a static bound
+ * would have been a number with no measurement behind it, exactly the thing
+ * that comment warned against.
+ *
+ * THE PREVIEW PANEL CHANGED WHAT "FITS" MEANS. `QuestionCard`'s panel can now
+ * add real height to a card that used to be a fixed size, which moves the
+ * composer -- and therefore this layer's `bottom-full` anchor -- lower than
+ * this file's own measurements assumed. `e2e/prompt-suggest-shots.mjs`
+ * caught it: at 480px, `popoverTop` went to -18. So the bound is back, and it
+ * is not a repeat of the deleted one -- it is MEASURED rather than guessed,
+ * every render, off the one thing that actually determines how much room
+ * there is: this layer's own `getBoundingClientRect().bottom`, which
+ * `bottom-full` fixes at the composer's top regardless of the layer's own
+ * height. `suggestMaxHeight` below is `bottom - SUGGEST_EDGE_GUTTER`, so the
+ * layer's top can never go above the viewport -- at any card height, any
+ * window height -- and `overflow-y-auto` (`vam-no-scrollbar` hides the bar,
+ * matching every other scroller in this app) is what a list longer than that
+ * does instead of running off the top.
  */
+/** Kept off the very top edge, so a clamped list never looks like it is
+ *  falling out of frame. */
+const SUGGEST_EDGE_GUTTER = 8;
 /**
  * WHERE THE TYPEAHEADS ARE PAINTED, and this is a correction with a
  * measurement behind it.
@@ -488,8 +503,18 @@ export const MAX_BANG_ROWS = 8;
  */
 const SUGGEST_LAYER = 'absolute inset-x-3.5 bottom-full z-20 mb-2 flex flex-col gap-1.5';
 
+/**
+ * `vam-no-scrollbar overflow-y-auto`: EACH BOX, not `SUGGEST_LAYER` around
+ * them. The layer only ANCHORS the boxes (`bottom-full`); overflow on IT
+ * clips paint but the CSS box model does not shrink a child to fit a
+ * scrolling ancestor just because the ancestor clips -- `[data-bang-suggest]`
+ * and `[data-slash-suggest]` are what `e2e/prompt-suggest-shots.mjs` actually
+ * measures, and a clamp on their common ancestor left THEIR OWN rect at full,
+ * unclamped height, `popoverBottom` still past the composer's top. Learned by
+ * measuring it, not reasoned to: `suggestMaxHeight`'s own comment.
+ */
 const SUGGEST_BOX =
-  'flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5';
+  'vam-no-scrollbar flex flex-col gap-0.5 overflow-y-auto rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5';
 
 /**
  * EVERY COMMAND THE COLUMN CARRIES, in the order they should be offered.
@@ -6563,6 +6588,39 @@ export function DetailPanel(props: DetailPanelProps) {
     setDismissed(true);
   };
   /**
+   * HOW TALL THE OPEN BOX (`[data-bang-suggest]` or `[data-slash-suggest]`)
+   * IS ALLOWED TO BE, measured rather than assumed -- see `SUGGEST_BOX`'s own
+   * comment for why it is applied THERE and not to `SUGGEST_LAYER`, the
+   * element it is actually measured off. `null` while nothing is open, which
+   * draws no `style` at all and costs the common case (no popover) nothing.
+   */
+  const suggestLayerRef = useRef<HTMLDivElement>(null);
+  const [suggestMaxHeight, setSuggestMaxHeight] = useState<number | null>(null);
+  const suggestOpen = suggesting || slashSuggesting || slashGapNote !== null;
+  useLayoutEffect(() => {
+    if (!suggestOpen) {
+      setSuggestMaxHeight(null);
+      return;
+    }
+    const layer = suggestLayerRef.current;
+    if (layer === null) return;
+    const measure = () => {
+      // `bottom-full` fixes this layer's BOTTOM edge at the composer's top
+      // regardless of the layer's own height -- so `.bottom` here is the one
+      // measurement that answers "how much room is there", whatever already
+      // constrains it from a previous render.
+      const bottom = layer.getBoundingClientRect().bottom;
+      const next = Math.max(0, bottom - SUGGEST_EDGE_GUTTER);
+      // Only a real move, for `proseAdvance`'s own reason above: the initial
+      // call and a resize handler can both land on the same number, and an
+      // identical value written back is a render for nothing.
+      setSuggestMaxHeight((previous) => (previous === next ? previous : next));
+    };
+    measure();
+    globalThis.addEventListener('resize', measure);
+    return () => globalThis.removeEventListener('resize', measure);
+  }, [suggestOpen]);
+  /**
    * The question the card draws: the newest OPEN one, and only if there is
    * none, the newest answered one -- what is still being asked outranks what
    * was already settled, and an absent list (a source with no such surface)
@@ -8402,10 +8460,14 @@ export function DetailPanel(props: DetailPanelProps) {
               ))}
             </nav>
           )}
-          {(suggesting || slashSuggesting || slashGapNote !== null) && (
-            <div data-suggest-layer className={SUGGEST_LAYER}>
+          {suggestOpen && (
+            <div data-suggest-layer ref={suggestLayerRef} className={SUGGEST_LAYER}>
               {suggesting && (
-                <div data-bang-suggest className={SUGGEST_BOX}>
+                <div
+                  data-bang-suggest
+                  className={SUGGEST_BOX}
+                  style={suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }}
+                >
                   <p className="px-1.5 pb-0.5 text-control text-ink-faint">
                     the agent proposed these — vam does not run them; Enter picks one, Esc keeps
                     what you typed
@@ -8445,7 +8507,11 @@ export function DetailPanel(props: DetailPanelProps) {
                 </div>
               )}
               {slashSuggesting && (
-                <div data-slash-suggest className={SUGGEST_BOX}>
+                <div
+                  data-slash-suggest
+                  className={SUGGEST_BOX}
+                  style={suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }}
+                >
                   <p className="px-1.5 pb-0.5 text-control text-ink-faint">
                     the provider's own commands — Enter picks one, Esc keeps what you typed
                   </p>
