@@ -120,6 +120,15 @@ describe('a screen-shaped answer is put back on top of the history', () => {
     expect(composeScreen(ok(WINDOW), whole, 'echo-scrollback')).toBe(whole);
   });
 
+  it('splices a `poll-live` answer exactly as it splices an `echo` one', () => {
+    // `poll-live` is the interval tick asked while pinned to the live end: it
+    // asks for the screen alone, exactly as `echo` does, and needs exactly
+    // the same splice onto the history already drawn -- it is the SAME shape
+    // of answer, not a third one.
+    const composed = composeScreen(ok(WINDOW), ok('S0\nS1'), 'poll-live');
+    expect(composed).toEqual(ok('h0\nh1\nh2\nS0\nS1'));
+  });
+
   it('never invents history it has not got', () => {
     const screen = ok('S0\nS1');
     // Nothing drawn yet.
