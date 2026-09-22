@@ -312,15 +312,83 @@ function strokeFor(key: string, shiftKey: boolean): PaneKey | null {
   // so an accented character arrives already composed and a named key
   // (`ArrowUp`, `F5`) never matches.
   //
-  // `key.length` IS A CODE-UNIT COUNT, AND THAT IS LEFT ALONE DELIBERATELY.
-  // It rejects anything outside the BMP -- an emoji is two units -- which
-  // sounds like a bug and is not reachable as one: no keyboard produces a
-  // non-BMP `event.key`, because nothing is one keystroke there. An emoji
-  // arrives from the picker, dictation or a paste, all of which are
-  // INSERTIONS into the box below rather than keydowns, and never pass
-  // through here at all. Widening this to count code points would change the
-  // behaviour of exactly no input anyone has.
+  // `key.length` IS A CODE-UNIT COUNT, AND THAT USED TO BE LEFT ALONE ON THE
+  // ARGUMENT THAT NO KEYBOARD PRODUCES A LONGER ONE -- WHICH WAS WRONG.
+  // `composedKeydownStrokes`, right below, is the correction: OpenKey (the
+  // Vietnamese input utility -- see its own note) posts a synthetic keydown
+  // whose `key` is a WHOLE corrected syllable, routinely more than one code
+  // unit, through exactly this path (not composing, no modifier held) --
+  // this function still answers `null` for it and the caller falls back to
+  // the wider rule. What is still true here: an EMOJI never reaches this
+  // function as a keydown -- the picker, dictation and a paste are all
+  // INSERTIONS into the box below, never keydowns -- so `key.length === 1`
+  // remains the right first answer for the common case, and is cheap besides.
   return key.length === 1 ? { kind: 'text', text: key } : null;
+}
+
+/**
+ * WHAT `strokeFor` DECLINED, RECONSIDERED AS A WHOLE STRING RATHER THAN AS
+ * NO KEYSTROKE AT ALL.
+ *
+ * THE REPORT, translated: "When typing Vietnamese in tmux (the Terminal
+ * tab), some special letters like ố, ồ … get lost, and then as I keep
+ * typing, characters keep getting deleted one after another." The operator
+ * runs OpenKey (github.com/tuyenvm/OpenKey), a `CGEventTap`-based Telex
+ * engine rather than a standard input method: it holds no marked-text
+ * session with Chromium at all, so a correction never sets
+ * `isComposing`. When a later keystroke changes an earlier letter (`toois`
+ * settling on `tối`), it posts one synthetic Backspace keyDown/keyUp pair
+ * per character to erase (`SendBackspace`, `Sources/OpenKey/macOS/ModernKey
+ * /OpenKey.mm`) and then ONE keyDown/keyUp pair carrying the WHOLE corrected
+ * string via `CGEventKeyboardSetUnicodeString` (`SendNewCharString`, same
+ * file) -- not the single changed letter, and not one character at a time.
+ * Neither event opens a composition, so this codebase's own measured
+ * precedent for a synchronous, non-composing, multi-character keydown
+ * applies (`onKeyDown`'s note on `Option+e`'s dead-key result): the
+ * replacement arrives as an ordinary keydown, `isComposing: false`, whose
+ * `key` is the whole corrected string.
+ *
+ * `strokeFor` answered `null` for every one of those, and the caller's
+ * `stroke === null` branch returned before `preventDefault` -- so the
+ * keystroke was not merely unsent, it fell through to the browser's own
+ * default handling of that same event, landed in the hidden box's `onInput`,
+ * and was dropped there as "arrived without a composition". THE ACCENTED
+ * LETTER WAS LOST, exactly as reported -- and the Backspace that preceded it
+ * in the SAME correction had already reached the pane and deleted a real
+ * character, so the pane fell behind OpenKey's own idea of what it had typed
+ * by however many code points the dropped string carried. THE NEXT
+ * correction computes its backspace count against OpenKey's own buffer, not
+ * against the pane, so it deletes into whatever the pane actually has at
+ * that position -- which is "characters keep getting deleted one after
+ * another" as the operator keeps typing and the drift compounds.
+ *
+ * A NAMED KEY IS NOT TEXT, HOWEVER MANY CHARACTERS SPELL ITS NAME. Every
+ * value the DOM hands out for a key that produced no character --
+ * `ArrowLeft`, `Shift`, `F5`, `Tab`, `Dead`, `Unidentified` -- is plain ASCII;
+ * that is the UI Events spec's own definition of a Named Key Attribute
+ * Value. A correction OpenKey ever has reason to send carries at least one
+ * character OUTSIDE ASCII, because the only reason it corrects anything at
+ * all is to apply a diacritic -- so "contains a non-ASCII code point" is the
+ * one check this function needs, and it can never mistake a modifier or a
+ * navigation key for one. A bare control character is declined too, on the
+ * same footing `strokeFor`'s own three special cases already stand on: this
+ * function's business is a REPLACEMENT SYLLABLE, not an escape sequence.
+ *
+ * NFC AND THE BOUND ARE `composedStrokes`'s, reused rather than repeated --
+ * `terminal-compose.ts` carries why a commit is normalised before it is
+ * counted, and `MAX_KEY_TEXT`'s note is unchanged by having a second caller.
+ */
+function composedKeydownStrokes(key: string): readonly PaneKey[] | null {
+  let sawNonAscii = false;
+  for (const point of key) {
+    const code = point.codePointAt(0) ?? 0;
+    // A control character is never a syllable a person typed; declining it
+    // costs nothing a real correction would ever have sent.
+    if (code < 0x20) return null;
+    if (code > 0x7f) sawNonAscii = true;
+  }
+  if (!sawNonAscii) return null;
+  return composedStrokes(key);
 }
 
 /**
@@ -1159,12 +1227,14 @@ export function TerminalTab({
    * composition, and hands over the committed string, which the pane then
    * sends as TEXT rather than as the keystrokes it was built from.
    *
-   * IT IS A STAGING AREA AND NOT A VALUE. Nothing here is ever read except
-   * `compositionend`'s own data; anything else that lands in it (a paste, a
-   * drop, the emoji picker) is emptied and dropped, which is precisely what
-   * happened to those before the box existed -- this surface types keystrokes,
-   * and `MAX_KEY_TEXT` exists so that it can never become a paste into a
-   * running agent.
+   * IT IS A STAGING AREA AND NOT A VALUE. What is ever read is
+   * `compositionend`'s own data, and -- since the OpenKey report,
+   * `TerminalTab.openkey.test.tsx` carries why -- an `input` whose
+   * `inputType` says a keystroke wrote it (`'insertText'`) rather than a
+   * paste or a drop. Anything else that lands in it is emptied and dropped,
+   * which is precisely what happened to those before the box existed -- this
+   * surface types keystrokes, and `MAX_KEY_TEXT` exists so that it can never
+   * become a paste into a running agent.
    */
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1543,7 +1613,14 @@ export function TerminalTab({
         return;
       }
       const stroke = strokeFor(event.key, event.shiftKey);
-      if (stroke === null) return;
+      // `composedKeydownStrokes` IS THE FALLBACK, NOT THE FIRST ASK -- see its
+      // own note for why. `strokeFor` answers every ordinary keystroke by
+      // itself and is cheaper; this only runs for the `key`s it declined,
+      // which is every named key in the DOM's vocabulary (`null`, stays
+      // declined) and OpenKey's whole-syllable replacement (a list of one or
+      // more `text` strokes, chunked and NFC-normalised by `composedStrokes`).
+      const strokes = stroke !== null ? [stroke] : composedKeydownStrokes(event.key);
+      if (strokes === null || strokes.length === 0) return;
       // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
       // bridge behind it -- the browser one -- consumed every printable key,
       // Return and Backspace and delivered none of them, which left vam's own
@@ -1555,7 +1632,7 @@ export function TerminalTab({
       event.stopPropagation();
       // Return is NOT sent behind the text: each keystroke is one call, so
       // submitting is the operator pressing Return and never vam adding one.
-      queue([stroke]);
+      queue(strokes);
     },
     [send, projectId, queue, takeKeyboard],
   );
@@ -2082,16 +2159,64 @@ export function TerminalTab({
           }
           onCompositionEnd={onCompositionEnd}
           onInput={(event) => {
-            // TEXT THAT ARRIVED WITHOUT A COMPOSITION IS DROPPED, and the ref
-            // rather than the state is what decides (see `composingNow`). A
-            // paste, a drop, the emoji picker and an Option-chord's own
-            // character all land here; none of them is a keystroke, this
-            // channel is bounded at sixteen characters precisely so that it
-            // cannot become a paste into a running agent, and every one of
-            // them typed nothing before this box existed. Emptying it is what
-            // keeps that true -- and keeps a hidden box from quietly
-            // accumulating the operator's clipboard.
+            // TEXT THAT ARRIVED WITHOUT A COMPOSITION IS DROPPED BY DEFAULT,
+            // and the ref rather than the state is what decides (see
+            // `composingNow`). A paste and a drop land here; neither is a
+            // keystroke, and this channel is bounded precisely so that it
+            // cannot become one.
             if (composingNow.current) return;
+            /**
+             * `inputType: 'insertText'` IS THE ONE EXCEPTION, and it is
+             * OpenKey's -- the Vietnamese input utility behind the report
+             * this box exists to answer a second time (`TerminalTab.openkey
+             * .test.tsx` carries it in full). OpenKey holds no marked-text
+             * session with Chromium, so a correction longer than one
+             * character never reaches `onKeyDown` as a usable `keydown` at
+             * all: MEASURED over CDP against a real Chromium, a synthetic
+             * multi-character key event produces no `keydown` whose `key`
+             * survives, only `beforeinput`/`input` with `isComposing: false`
+             * and `inputType: 'insertText'`, carrying the whole replacement
+             * as `data`/`value`. Read literally, THIS handler's own comment
+             * -- "none of them is a keystroke" -- stopped being true the
+             * moment that became reachable, because to this guard OpenKey's
+             * insertion looks exactly like a paste.
+             *
+             * `'insertText'` IS WHAT A REAL PASTE NEVER CARRIES. MEASURED
+             * against a real OS clipboard and a real Cmd+V in the same probe:
+             * `inputType` there is `'insertFromPaste'`, and a drop is
+             * `'insertFromDrop'` -- the W3C `InputEvent` spec's own split
+             * between text a person or an input method actually typed and
+             * text that arrived from somewhere else. Every OTHER value,
+             * including no value at all (an engine, or a test, that supplies
+             * none), is still declined below: this is a widening of WHICH
+             * insertions the guard treats as a keystroke, not a loosening of
+             * the guard itself, and `MAX_KEY_TEXT`'s promise -- through
+             * `composedStrokes`, the same chunking and NFC normalisation the
+             * composition-commit path already uses -- is exactly as intact as
+             * it was.
+             */
+            const native = event.nativeEvent as InputEvent;
+            if (native.inputType === 'insertText') {
+              const text = event.currentTarget.value;
+              event.currentTarget.value = '';
+              queue(composedStrokes(text));
+              return;
+            }
+            // EVERYTHING ELSE IS STILL DROPPED: a paste (`insertFromPaste`,
+            // MEASURED against a real Cmd+V) and a drop (`insertFromDrop`,
+            // spelled the same way by the same spec), plus anything an
+            // engine or a test reports no `inputType` for at all. What this
+            // comment no longer claims, because it was never measured rather
+            // than because it is now false, is that the emoji picker and an
+            // Option-chord's own character are among the dropped: on macOS
+            // both insert through Cocoa's `insertText:`, the SAME call
+            // OpenKey's replacement makes, so there is a real chance
+            // `inputType` reads `insertText` for them too and they now reach
+            // the agent the way a real keystroke does. Left unverified on
+            // purpose rather than guessed at -- see this file's own header --
+            // and not a hazard either way: `MAX_KEY_TEXT` still bounds every
+            // piece, and an operator who opened the system emoji picker while
+            // this pane held the keyboard typed something on purpose.
             event.currentTarget.value = '';
           }}
           className="sr-only"

@@ -20,6 +20,19 @@
  *    storage, reads what the sheet PAINTS for the dead half, and then presses
  *    the key to see which action it really reaches.
  *
+ *  - THE PREVIEW PANEL. Operator, translated: "when Claude offers options
+ *    described with a diagram, the options go on one side and the diagram on
+ *    the other — today, when the diagram goes with the option, the display
+ *    breaks." `options[].preview` used to be drawn `truncate`d to one line
+ *    INSIDE the option row; a multi-line ASCII diagram collapsed to that is
+ *    the break. happy-dom lays nothing out, so "beside" and "below" are both
+ *    RECTANGLES no unit test can compare — measured here at 1100px (a card
+ *    comfortably past the panel's own 720px container-query threshold) and at
+ *    390px (the phone shell, well under it), against `vam-preview-1`'s own
+ *    `Transport` question in the demo fixture: a real multi-line preview, a
+ *    one-line one and an option with none, on a session of its own rather
+ *    than `vam-build-1` (see `PREVIEW_SESSION`'s own comment for why).
+ *
  * WHY A REAL BROWSER, for the second one especially. The quiet case and the
  * loud one are told apart by `event.defaultPrevented`: the options list of an
  * open question answers `j` itself and calls `preventDefault`, and the window
@@ -47,6 +60,16 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const ASKING_SESSION = 'vam-build-1';
 /** A session with none, where Insert's own cursor has one stop: the prompt. */
 const QUIET_SESSION = 'notes-1';
+/**
+ * THE PREVIEW PANEL'S OWN SESSION — not `ASKING_SESSION`. `vam-build-1`'s
+ * card shares its pane with `e2e/prompt-suggest-shots.mjs`'s composer
+ * typeahead checks at a window as short as 480px, and a panel drawn by
+ * default (`QuestionCard`'s `activeOption` fallback) costs the card real
+ * height even at its shortest — measured, enough to leave that guard's `/`
+ * popover a few pixels short of the floor. See `vam-preview-1`'s own
+ * comment in `fixtures/demo.ts`.
+ */
+const PREVIEW_SESSION = 'vam-preview-1';
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1200, height: 760 } });
@@ -1490,6 +1513,156 @@ check(
 );
 await page.screenshot({ path: `${outDir}/key-truth-question-enter-submits.png` });
 console.log(`${outDir}/key-truth-question-enter-submits.png`);
+
+/**
+ * THE PREVIEW PANEL — see the header. Its own pages, not the shared `page`
+ * above: the wide case needs a card past the panel's 720px container-query
+ * threshold (1100px of window comfortably clears it, measured — the sidebar
+ * and the pane's own padding eat the rest) and the narrow case needs the
+ * phone shell's own 390px, neither of which the rest of this file's 1200x760
+ * checks should be resized around.
+ */
+{
+  const wide = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  await wide.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await wide.waitForSelector('[data-session-row]');
+  await wide.locator(`[data-session-row="${PREVIEW_SESSION}"]`).click();
+  await wide.waitForSelector('[data-question-preview-panel]', { timeout: 4000 });
+
+  const rects = await wide.evaluate(() => {
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+    };
+    return {
+      list: rect(document.querySelector('[role="listbox"]')),
+      panel: rect(document.querySelector('[data-question-preview-panel]')),
+    };
+  });
+  check(
+    'at 1100px the panel sits BESIDE the list, never under it',
+    rects.panel.left >= rects.list.right,
+    `list.right=${rects.list.right} panel.left=${rects.panel.left}`,
+  );
+
+  // ROW HEIGHT PARITY, within the SAME step: `Transport`'s own third option
+  // carries no preview at all, so comparing it against the first two (which
+  // do) needs no second question and no different content to confound it —
+  // a taller or shorter LABEL would move this number for a reason that has
+  // nothing to do with the marker.
+  const rowHeights = await wide.$$eval('[data-question-option]', (els) =>
+    els.map((el) => Math.round(el.getBoundingClientRect().height)),
+  );
+  check(
+    'an option row is the same height with a preview marker as without one',
+    rowHeights.length === 3 && rowHeights.every((h) => h === rowHeights[0]),
+    JSON.stringify(rowHeights),
+  );
+
+  // WALKING (`j`, the #449 key work) MOVES THE PANEL. Real DOM focus, not a
+  // click — the panel follows `document.activeElement`, the same cursor the
+  // listbox has always had.
+  await wide.locator('[data-question-option]').first().focus();
+  await wide.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '0',
+  );
+  await wide.keyboard.press('j');
+  await wide.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+  );
+  await wide.keyboard.press('j');
+  const walked = await wide.evaluate(() =>
+    document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for'),
+  );
+  check('walking with j moved the panel a second time, to the third option', walked === '2', walked);
+
+  const allRowsText = (
+    await Promise.all(
+      (await wide.locator('[data-question-option]').all()).map((row) => row.innerText()),
+    )
+  ).join('\n---\n');
+  check(
+    'no option row ever prints the multi-line preview text itself, only the quiet marker',
+    !allRowsText.includes('fetch() awaits it') && !allRowsText.includes('held up to 30s'),
+    allRowsText,
+  );
+
+  // Land the screenshot on the multi-line diagram (`Long poll`, option 1) --
+  // the walk above ended on option 2, which has no preview and would
+  // screenshot the empty-panel state instead of the feature this file is for.
+  await wide.locator('[data-question-option]').nth(1).focus();
+  await wide.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+  );
+  await wide.screenshot({ path: `${outDir}/question-preview-wide.png` });
+  console.log(`${outDir}/question-preview-wide.png`);
+  await wide.close();
+}
+
+{
+  const narrow = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await narrow.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await narrow.waitForSelector('[data-phone-shell] [data-session-row]');
+  await narrow.locator(`[data-phone-shell] [data-session-row="${PREVIEW_SESSION}"]`).click();
+  await narrow.waitForSelector('[data-question-preview-panel]', { timeout: 4000 });
+
+  // Focus alone moves the panel, same as the wide page above -- landed on
+  // `Long poll` (option 1), the multi-line one, so the two checks below are
+  // against a preview that actually HAS a long line to scroll, not the
+  // default one-liner (`Server-sent events`, kept short precisely so the
+  // card does not crowd the composer -- see its own comment in the fixture).
+  await narrow.locator('[data-question-option]').nth(1).focus();
+  await narrow.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+  );
+
+  const narrowRects = await narrow.evaluate(() => {
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+    };
+    const card = document.querySelector('[data-question]');
+    return {
+      list: rect(document.querySelector('[role="listbox"]')),
+      panel: rect(document.querySelector('[data-question-preview-panel]')),
+      cardScrollWidth: card.scrollWidth,
+      cardClientWidth: card.clientWidth,
+    };
+  });
+  check(
+    'at 390px the panel sits BELOW the list, never beside it',
+    narrowRects.panel.top >= narrowRects.list.bottom,
+    `list.bottom=${narrowRects.list.bottom} panel.top=${narrowRects.panel.top}`,
+  );
+  check(
+    // `vam-no-scrollbar` hides the panel's OWN horizontal scrollbar (a long
+    // diagram line is allowed to scroll inside it), so this measures the
+    // CARD, not the panel — the rectangle the phone screen actually has.
+    'the card itself never scrolls sideways, whatever a long preview line does inside its own panel',
+    narrowRects.cardScrollWidth <= narrowRects.cardClientWidth,
+    `scrollWidth=${narrowRects.cardScrollWidth} clientWidth=${narrowRects.cardClientWidth}`,
+  );
+
+  await narrow.screenshot({ path: `${outDir}/question-preview-narrow.png` });
+  console.log(`${outDir}/question-preview-narrow.png`);
+
+  // `Web socket` (option 2) is the option the fixture deliberately left
+  // without a preview -- checked last, after the screenshot, so the
+  // committed picture shows the feature (a real diagram) rather than its
+  // empty state.
+  await narrow.locator('[data-question-option]').nth(2).focus();
+  await narrow.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '2',
+  );
+  const empty = await narrow.locator('[data-question-preview-panel]').innerText();
+  check(
+    'an option with no preview shows the quiet fallback line, not a blank panel',
+    empty.includes('no preview for this option'),
+    empty,
+  );
+
+  await narrow.close();
+}
 
 await browser.close();
 

@@ -552,7 +552,7 @@ describe('the question block draws only when there is a question', () => {
 });
 
 describe('an option that carries a preview', () => {
-  it('draws it under the description, and draws nothing when there is none', () => {
+  it('marks the row quietly and draws the full text in the panel instead, never inline', () => {
     draw([
       {
         ...QUESTION,
@@ -562,8 +562,13 @@ describe('an option that carries a preview', () => {
         ],
       },
     ]);
-    const previews = all('[data-question-preview]');
-    expect(previews).toHaveLength(1);
-    expect(previews[0]?.textContent).toBe('rgb(143, 29, 44)');
+    // ONE marker, on the option that carries one — see
+    // `DetailPanel.question-preview.test.tsx` for the panel's own rules.
+    const hints = all('[data-question-preview-hint]');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]?.textContent).not.toContain('rgb(143, 29, 44)');
+    const panel = q('[data-question-preview-panel]');
+    expect(panel).not.toBeNull();
+    expect(panel?.textContent).toContain('rgb(143, 29, 44)');
   });
 });
