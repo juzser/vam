@@ -138,6 +138,13 @@ describe('pressing a path:line reference an agent wrote', () => {
     expect(resolve).toHaveBeenCalledWith('s1', 'src/index.ts:3');
     // The tab really changed -- not merely a request recorded somewhere.
     expect(q<HTMLElement>('[data-view="files"]')?.getAttribute('aria-pressed')).toBe('true');
+    // `FilesTab` IS A LAZY CHUNK NOW, like the markdown stack above it, so the
+    // editor is not in the tree on the tick the tab flips -- the dynamic
+    // import resolves a turn later. Polled rather than tick-counted, for the
+    // reason the `waitFor` in `draw` already gives.
+    await waitFor(() => {
+      expect(q<HTMLTextAreaElement>('[data-files-editor]')).not.toBeNull();
+    });
     const editor = q<HTMLTextAreaElement>('[data-files-editor]');
     expect(editor?.value).toBe(CONTENT);
     // Line 3 starts after "const a = 1\nconst b = 2\n" -- 24 characters.
