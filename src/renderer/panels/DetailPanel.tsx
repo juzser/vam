@@ -94,10 +94,12 @@ import {
 } from 'lucide-react';
 import {
   type KeyboardEvent,
+  lazy,
   memo,
   type ReactElement,
   type ReactNode,
   type RefObject,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -106,8 +108,6 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
 import type { PrAction } from '../../shared/pr-action.js';
@@ -204,6 +204,11 @@ import {
   RESTING_PAGER,
   walkOlder,
 } from './transcript-history.js';
+
+// `react-markdown` + `remark-gfm`, in their own lazy chunk: see
+// `LazyMarkdown.tsx`'s own header for the measured cost and why the split
+// sits at this boundary rather than inside `out-markdown.tsx`.
+const LazyMarkdown = lazy(() => import('./LazyMarkdown.js'));
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -3184,13 +3189,17 @@ function OutText({ output }: { readonly output: string }) {
                   blanks four schemes and admits four others, which left this
                   pane with two disagreeing lists and a refusal that could not
                   name what it refused. */}
-              <Markdown
-                remarkPlugins={[remarkGfm]}
-                components={OUT_MARKDOWN}
-                urlTransform={OUT_URL_TRANSFORM}
-              >
-                {body}
-              </Markdown>
+              {/* The fallback is the answer's own raw text, unstyled -- not a
+                  spinner or an empty box. `LazyMarkdown`'s chunk is local
+                  (built into the app / served from the same origin), so on
+                  every render after the first it is already cached and this
+                  fallback never paints at all; the one render it can paint is
+                  strictly more readable than a blank pane. */}
+              <Suspense fallback={<div className="whitespace-pre-wrap text-ink-dim">{body}</div>}>
+                <LazyMarkdown components={OUT_MARKDOWN} urlTransform={OUT_URL_TRANSFORM}>
+                  {body}
+                </LazyMarkdown>
+              </Suspense>
             </div>
           </div>
         );
