@@ -166,7 +166,19 @@ describe('a keystroke in the pane reaches tmux, exactly once', () => {
     const send = await open();
     fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' });
     await settle();
-    expect(keys(send)).toEqual([{ kind: 'enter' }]);
+    expect(keys(send)).toEqual([{ kind: 'enter', shift: false }]);
+  });
+
+  it('sends Shift+Enter as a literal newline, so it inserts a line instead of submitting', async () => {
+    // The operator's report: Shift+Enter submits in the Terminal tab instead
+    // of inserting a line the way it does in a real terminal. `shift` rides
+    // on the SAME `enter` kind (`shared/terminal.ts`) rather than a kind of
+    // its own -- main is what turns it into a different tmux command
+    // (`sendNewlineArgv`, measured against Claude Code and Codex both).
+    const send = await open();
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter', shiftKey: true });
+    await settle();
+    expect(keys(send)).toEqual([{ kind: 'enter', shift: true }]);
   });
 
   it('sends Backspace as a key, because a terminal you cannot correct is not usable', async () => {
@@ -467,7 +479,7 @@ describe('keys reach the pane in the order they were typed', () => {
     expect(pending.map((call) => call.key)).toEqual([
       { kind: 'text', text: 'n' },
       { kind: 'text', text: 'o' },
-      { kind: 'enter' },
+      { kind: 'enter', shift: false },
     ]);
   });
 

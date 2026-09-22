@@ -291,9 +291,18 @@ function measurePane(pane: HTMLElement, ruler: HTMLElement): PaneSize | null {
  * `null` for every other named key -- the arrows, the Page keys, Home/End --
  * which is what leaves the browser scrolling a region whose scrollbar is
  * hidden, the reason this element takes focus at all.
+ *
+ * `shiftKey` IS ASKED ABOUT FOR EXACTLY ONE KEY. The operator's report was
+ * that Shift+Enter submits in here instead of inserting a line, which is
+ * `onKeyDown` calling this with the key name alone and nothing this function
+ * could have answered differently with. The modifier now rides along on
+ * `PaneKey.enter.shift` (`shared/terminal.ts` has the measurement main's
+ * `sendNewlineArgv` acts on); every other branch below is unaffected because
+ * a modified letter already arrives pre-shifted in `key` itself (`Shift+a` is
+ * `'A'`), so there is nothing else for a modifier parameter to change.
  */
-function strokeFor(key: string): PaneKey | null {
-  if (key === 'Enter') return { kind: 'enter' };
+function strokeFor(key: string, shiftKey: boolean): PaneKey | null {
+  if (key === 'Enter') return { kind: 'enter', shift: shiftKey };
   if (key === 'Escape') return { kind: 'escape' };
   // Correcting a typo is part of typing: a pane that takes characters and
   // cannot take them back strands the operator on a wrong line. It is a KEY,
@@ -1533,7 +1542,7 @@ export function TerminalTab({
         scrollPane(pane, scroll, rulerRef.current?.getBoundingClientRect().height ?? 0);
         return;
       }
-      const stroke = strokeFor(event.key);
+      const stroke = strokeFor(event.key, event.shiftKey);
       if (stroke === null) return;
       // THE GUARD COMES BEFORE THE CANCELLING, and it did not. A build with no
       // bridge behind it -- the browser one -- consumed every printable key,

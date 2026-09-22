@@ -62,9 +62,19 @@ describe('typing into the session vam started for a project', () => {
 
   it('sends the interpreted Return for Enter, and nothing literal', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'enter' })).toBe('sent');
+    expect(await sendSessionKey(run, ATLAS, { kind: 'enter', shift: false })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
     expect(argvs[1]).not.toContain('-l');
+  });
+
+  it('sends Shift+Enter as a literal newline, so it inserts a line instead of submitting', async () => {
+    // MEASURED (`tmux/argv.ts`'s `sendNewlineArgv`): a bare `\n` is what both
+    // Claude Code and Codex read as an inserted line rather than a submit, on
+    // a private socket. `-l` is the whole of why: without it tmux would look
+    // the argument up as a key name instead of typing the byte.
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'enter', shift: true })).toBe('sent');
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', '\n']);
   });
 
   it('sends Backspace as the interpreted key, so a typo can be corrected', async () => {
@@ -321,8 +331,12 @@ describe('the send channel refuses what the renderer may not ask', () => {
     ['text that is not a string', [ATLAS, { kind: 'text', text: 7 }]],
     ['a paste wearing a keystroke’s clothes', [ATLAS, { kind: 'text', text: 'x'.repeat(64) }]],
     ['an empty keystroke', [ATLAS, { kind: 'text', text: '' }]],
-    ['a row id that is not a string', [ATLAS, { kind: 'enter' }, 42]],
-    ['one argument too many', [ATLAS, { kind: 'enter' }, ATLAS, 'extra']],
+    // A missing `shift` is refused rather than read as `false`: the renderer
+    // is the least trusted process in the app, and `isPaneKey` checks the
+    // field rather than defaulting it (`shared/terminal.ts`).
+    ['an Enter with no shift field', [ATLAS, { kind: 'enter' }]],
+    ['a row id that is not a string', [ATLAS, { kind: 'enter', shift: false }, 42]],
+    ['one argument too many', [ATLAS, { kind: 'enter', shift: false }, ATLAS, 'extra']],
   ])('refuses %s without running tmux', async (_why, args) => {
     const { send, argvs } = handler();
     expect(await send({}, ...args)).toBe('unaimed');

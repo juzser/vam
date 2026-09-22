@@ -347,6 +347,29 @@ export function isPaneSize(size: PaneSize): boolean {
  * a terminal that eats it is not a terminal. It was vam's way out of the
  * surface until they said it should be the pane's, and they were right.
  *
+ * `enter` CARRIES `shift`, AND IT IS A REQUIRED FIELD RATHER THAN A SIXTH
+ * KIND, for the reason `wheel`'s fields are checked rather than trusted: the
+ * renderer is the least trusted process in the app, and a field `isPaneKey`
+ * can leave unchecked is a field a malformed ask can omit and have answered
+ * as `false` by default. THE OPERATOR'S REPORT was that Shift+Enter submits
+ * in the Terminal tab instead of inserting a newline -- Claude Code's own
+ * TUI does the latter, in the pty it is actually driving, and vam's pane
+ * dropped the modifier on the floor. MEASURED on a private `-L` socket
+ * against Claude Code 2.1.278 and Codex 0.153.2, both started the way vam
+ * starts them: a single literal LF byte (`send-keys -l -- '\n'`, `tmux/argv.ts`'s
+ * `sendNewlineArgv`) inserts a line in the composer and submits nothing, in
+ * both REPLs, from a raw keystroke indistinguishable from the one every
+ * keyboard sends for Ctrl+J -- which is almost certainly what each REPL is
+ * actually binding, this being far more portable than a Shift+Enter chord
+ * itself is. The Kitty-protocol form (`ESC[13;2u`) and the Option/Alt-Enter
+ * form (`ESC` then CR) both did the same in both REPLs, so either would have
+ * worked too; LF was chosen for needing no escape-sequence parser on either
+ * end and no tmux `extended-keys` negotiation, which a bare byte send
+ * (`-l`, exactly as `text` already sends one) sidesteps entirely. The xterm
+ * `modifyOtherKeys` form (`ESC[27;2;13~`) was tried and dropped: Codex read
+ * it as nothing rather than a newline, so it is not the cross-agent answer
+ * the other three are. See `sendNewlineArgv` for the full note.
+ *
  * `control` IS THE THIRD, AND IT IS THE LARGEST ONE THIS TYPE WILL EVER TAKE.
  * The operator's report was that Ctrl+U would not kill the line "or any other
  * terminal shortcut", and they were exactly right: `TerminalTab.tsx` returned
@@ -376,7 +399,14 @@ export function isPaneSize(size: PaneSize): boolean {
  */
 export type PaneKey =
   | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'enter' }
+  /**
+   * Return, plain or Shift-held -- `shift: false` presses the interpreted
+   * Enter (`sendEnterArgv`, tmux's own `Enter`, CR); `shift: true` sends a
+   * literal LF (`sendNewlineArgv`), which Claude Code and Codex both read as
+   * an inserted line rather than a submit. See the type doc above for the
+   * measurement.
+   */
+  | { readonly kind: 'enter'; readonly shift: boolean }
   | { readonly kind: 'backspace' }
   /** Shift-Tab, `BTab` to tmux -- the session's own cycle-the-mode chord. */
   | { readonly kind: 'back-tab' }
@@ -521,15 +551,16 @@ export function isPaneKey(value: unknown): value is PaneKey {
     ticks?: unknown;
     column?: unknown;
     row?: unknown;
+    shift?: unknown;
   };
-  if (
-    key.kind === 'enter' ||
-    key.kind === 'backspace' ||
-    key.kind === 'back-tab' ||
-    key.kind === 'escape'
-  ) {
+  if (key.kind === 'backspace' || key.kind === 'back-tab' || key.kind === 'escape') {
     return true;
   }
+  // `shift` REQUIRED AND CHECKED, not read with a `?? false`: a malformed ask
+  // that left it out must be refused rather than answered as a plain Return,
+  // for the same reason `wheel`'s numbers are bounded here rather than
+  // trusted -- the renderer is the least trusted process in the app.
+  if (key.kind === 'enter') return key.shift === true || key.shift === false;
   // The only kind that carries a field main turns into a tmux KEY, and so the
   // only one whose field is checked against a closed list rather than bounded
   // in length: `letter` is looked up, never spliced.
