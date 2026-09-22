@@ -721,6 +721,78 @@ export const DEMO_MODEL: CanvasModel = {
           decisions: [],
           source: 'claude-code',
         },
+        {
+          // A SESSION DEDICATED TO THE PREVIEW PANEL -- not another question
+          // tacked onto `vam-build-1` (`vam` project, above). Two guards
+          // depend on the exact session count of the project a demo row
+          // lives in -- `split-panes-shots.mjs` needs `vam` holding exactly
+          // one tab to empty a pane with, `factory`'s own count is pinned in
+          // its own comment -- and `vam-build-1`'s card already shares its
+          // pane with `e2e/prompt-suggest-shots.mjs`'s composer typeahead
+          // checks at a window as short as 480px (bumped to 580px there: a
+          // panel drawn by default, see `QuestionCard`'s `activeOption`
+          // fallback, costs a card real height even at its shortest). `notes`
+          // has grown from two sessions to six already ("A PROJECT OF QUIET
+          // SESSIONS", above) without needing a guard's assertion rewritten,
+          // which is the whole reason it is the safe place to grow it again.
+          //
+          // THE MIX A REAL CALL HAS: `AskUserQuestion`'s `preview` is
+          // free-form, and the operator's own transcripts hold ASCII diagrams
+          // several rows deep (31 of the operator's own session files carry
+          // one, `grep -l '"preview"' ~/.claude/projects/*/*.jsonl`). This is
+          // a NEUTRAL mockup of that shape -- box-drawing, ~8 rows, no real
+          // project text, path or session id -- beside a short one-line
+          // preview and an option with none, because a panel that only ever
+          // had one shape to draw would not be much of a guard.
+          id: 'vam-preview-1',
+          title: 'vam-preview-1',
+          epic: null,
+          branch: null,
+          status: 'waiting',
+          runningAgents: 0,
+          activity: null,
+          age: '5m',
+          vamControlled: true,
+          questions: [
+            {
+              id: 'toolu_demo_preview:0',
+              header: 'Transport',
+              question: 'How should the canvas receive updates while a run is live?',
+              multiSelect: false,
+              options: [
+                {
+                  label: 'Server-sent events',
+                  description: 'one long-lived GET, the server pushes',
+                  preview: 'GET /events  →  text/event-stream',
+                },
+                {
+                  label: 'Long poll',
+                  description: 'a request per change, simplest to serve',
+                  preview:
+                    '┌─ browser ─────────────┐                 ┌─ server ────────────────────────┐\n' +
+                    '│ GET /changes?since=41  │──held up to 30s─▶│ holds the request open           │\n' +
+                    '│  fetch() awaits it     │◀──────────────── │  replies the moment something    │\n' +
+                    '└────────────────────────┘                  │  changes, or after 30s with none │\n' +
+                    '                                             └───────────────────────────────────┘\n' +
+                    '\n' +
+                    'Every reply -- empty or not -- starts the NEXT request straight away, so the\n' +
+                    'client is blocked on a GET almost the whole time, one request at a time.',
+                },
+                {
+                  label: 'Web socket',
+                  description: 'two-way, and vam needs one way',
+                  // NO PREVIEW, on purpose: the panel's own fallback line
+                  // ("no preview for this option") needs a real option here
+                  // to be driven against, the same way the phone fixture
+                  // (`e2e/phone-core-loop.pw.ts`) already carries one.
+                  preview: null,
+                },
+              ],
+              answer: null,
+            },
+          ],
+          decisions: [],
+        },
       ],
     },
   ],

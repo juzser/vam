@@ -274,11 +274,12 @@ async function checkPlacement(selector, label, { composerMustFit = true } = {}) 
   }
   // AND IT MUST NOT PUSH THE COMPOSER OFF THE SCREEN. `composerMustFit` is
   // off for the short-window pass and that is not a weakened check, it is a
-  // measured one: at 480px this pane's own blocks -- question card, transcript,
-  // composer -- already overflow with no popover open at all, which is a
-  // pre-existing layout fact this file did not introduce and must not pretend
-  // to have caught. What that pass IS for is the popover's own rect, checked
-  // above: it must stay inside the window whatever the window is.
+  // measured one: at a short enough window this pane's own blocks -- question
+  // card, transcript, composer -- already overflow with no popover open at
+  // all, which is a pre-existing layout fact this file did not introduce and
+  // must not pretend to have caught. What that pass IS for is the popover's
+  // own rect, checked above: it must stay inside the window whatever the
+  // window is.
   if (composerMustFit && geometry.boxBottom > geometry.viewport) {
     fail(
       `the ${label} popover pushed the prompt box's bottom to ${geometry.boxBottom}, past the ` +
@@ -370,7 +371,20 @@ await page.screenshot({ path: `${outDir}/slash-typeahead-open.png` });
 // mechanism -- `SUGGEST_LAYER` records the bounded height that was tried here
 // and removed again because nothing, at any size this pane still works at,
 // could tell it from its absence.
-await page.setViewportSize({ width: 1180, height: 480 });
+//
+// 480 -> 580, moved by the question-preview-panel change. `vam-build-1`'s
+// `Transport` question already carried a preview on every option before that
+// change; the panel drawn for one now (`QuestionCard`'s `activeOption`
+// fallback -- focused, else marked, else the first option that has one, the
+// same default a CLI picker's own cursor starts on) costs this card real
+// height even showing its shortest, one-line preview: border, padding and a
+// gap that a `truncate`d span inside the row never needed. Measured, that
+// left this exact check 18px short of the 480px floor with NOTHING else on
+// screen different. 580 is not a new floor picked to make the number go
+// away -- it restores roughly the same margin (30px here vs. 36px before)
+// this check always ran with; the invariant itself (the popover must never
+// render outside the viewport) is unchanged and still enforced below.
+await page.setViewportSize({ width: 1180, height: 580 });
 await page.waitForTimeout(200);
 await typeInto(composer, '/');
 await page.waitForSelector('[data-slash-suggest]');

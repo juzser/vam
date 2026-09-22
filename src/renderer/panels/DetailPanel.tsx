@@ -3723,6 +3723,31 @@ function QuestionCard({
   const [foldedStep, setFoldedStep] = useState<string | null>(null);
   const [landing, setLanding] = useState<number | null>(null);
   const stepTabRef = useRef<HTMLButtonElement>(null);
+  /**
+   * WHICH OPTION THE PREVIEW PANEL FOLLOWS -- the operator's own cursor, read
+   * off real DOM focus rather than re-derived, because focus is already the
+   * one true cursor this listbox has (`landing`'s own comment). `null` while
+   * nothing in this step has been focused yet, which the panel below reads as
+   * "fall back to the marked option, else the first one that has a preview at
+   * all" rather than as "show nothing".
+   *
+   * RESET ON A STEP CHANGE. A label that recurs across steps is the same
+   * hazard `landing`'s comment names for the DOM cursor -- "Cobalt" seen in
+   * both -- and this is a second value with the same failure mode, so it gets
+   * the same discipline: cleared the instant the step itself changes, before
+   * the landing effect below puts real focus (and therefore a real value)
+   * back onto it.
+   */
+  const [focusedLabel, setFocusedLabel] = useState<string | null>(null);
+  // `question?.id` -- `questions` can be empty before the early `return null`
+  // below, and `folded`/`showingTaken` beside this guard the same way. The
+  // body reads nothing off `question`: the dependency is deliberate, WHEN
+  // this fires is what matters (a fresh step means the DOM buttons carrying
+  // the label are fresh too), not what it reads.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
+  useEffect(() => {
+    setFocusedLabel(null);
+  }, [question?.id]);
   /** Whether it moved. The caller needs the answer: a step that clamped is a
    *  keystroke the card did not use, and `h` means something else when it is
    *  not walking (see `onKeys`). */
@@ -3751,6 +3776,32 @@ function QuestionCard({
   /** This step's options are folded away behind its own mark — see
    *  `foldedStep`. Never with nothing marked: there would be nothing to fold. */
   const folded = question !== undefined && foldedStep === question.id && picked.length > 0;
+  /**
+   * THE PREVIEW PANEL'S OWN INPUTS -- see its render below for the shape.
+   *
+   * `hasPreview` gates the panel's existence: at least one option of THIS
+   * step carries one, or there is nothing to split the card over and it
+   * draws exactly as it always has. `activeOption` is the panel's content --
+   * the focused option, else the marked one, else the first option that
+   * carries a preview at all, so the panel is never blank while `hasPreview`
+   * is true. `sideBySide` is single-select only: Claude Code's own picker
+   * shows a preview column beside a single-select list and never beside a
+   * multi-select one (multiple marks would leave several previews wanting
+   * the same column), so a multi-select question with previews gets the
+   * panel BELOW the list, at every width.
+   */
+  const hasPreview = question?.options.some((one) => (one.preview ?? null) !== null) ?? false;
+  const sideBySide = hasPreview && question?.multiSelect === false;
+  const activeOption =
+    question === undefined
+      ? undefined
+      : ((focusedLabel === null
+          ? undefined
+          : question.options.find((one) => one.label === focusedLabel)) ??
+        (picked[0] === undefined
+          ? undefined
+          : question.options.find((one) => one.label === picked[0])) ??
+        question.options.find((one) => (one.preview ?? null) !== null));
   useEffect(() => {
     if (landing === null) return;
     setLanding(null);
@@ -4076,8 +4127,17 @@ function QuestionCard({
         event.preventDefault();
         trySend();
       }}
+      /* `@container`: the preview panel's `@min-[720px]:flex-row` measures
+         THIS element's own width, not the viewport's -- the card can be
+         narrow inside a wide window (a split pane, a narrowed reading
+         column), and a container query is the only rule that reads the
+         rectangle it is actually drawn in. Declared here and consumed lower
+         (the two-column wrapper, the listbox's width, the panel itself, the
+         row's own marker) rather than on any of THOSE elements: a container
+         query never applies to the element that declares the container
+         (`AgentsTab`'s `data-pr-row` carries the same comment). */
       className={[
-        'flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
+        '@container flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
         waiting ? 'border-waiting' : 'border-line-strong',
       ].join(' ')}
     >
@@ -4202,61 +4262,127 @@ function QuestionCard({
           ) : (
             /* A listbox, not a form control: nothing here is submitted, and
               `aria-multiselectable` is the one honest way to say that several
-              may be marked. */
+              may be marked.
+
+              WHAT PICKING AN OPTION WOULD PRODUCE never prints IN this row any
+              more -- a diagram this size is`GET /events\nkeeps ONE socket
+              open\nfor the life of the run`-shaped, and a multi-line preview
+              `truncate`d to one line inside the row is the break the operator
+              reported ("when the graph goes with the option, the display
+              breaks"). The row carries only a quiet marker now
+              (`data-question-preview-hint`, right of the label so it costs the
+              row no height); the full text is `activeOption`'s, drawn once
+              below rather than once per option. */
             <div
-              role="listbox"
-              aria-multiselectable={question.multiSelect}
-              aria-label="the options this question offers"
-              onKeyDown={onKeys}
-              className="flex flex-col gap-1"
+              className={
+                hasPreview
+                  ? [
+                      'flex flex-col gap-1.5',
+                      sideBySide
+                        ? '@min-[720px]:flex-row @min-[720px]:items-start @min-[720px]:gap-3'
+                        : '',
+                    ].join(' ')
+                  : undefined
+              }
             >
-              {question.options.map((option, index) => (
-                <button
-                  key={option.label}
-                  ref={index === 0 ? firstOptionRef : undefined}
-                  type="button"
-                  role="option"
-                  aria-selected={picked.includes(option.label)}
-                  data-question-option
-                  data-question-number={NUMBERED_OPTIONS[index]}
-                  data-picked={picked.includes(option.label) ? 'true' : undefined}
-                  onClick={(event) => toggle(option.label, event.detail > 0)}
-                  className={[
-                    // `group` is what lets the quiet spans below hear about a
-                    // hover on this button -- see `OPTION_QUIET_INK`.
-                    'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
-                    picked.includes(option.label)
-                      ? `border-running ${OPTION_FILL}`
-                      : `border-line hover:${OPTION_FILL}`,
-                  ].join(' ')}
-                >
-                  <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
-                    {NUMBERED_OPTIONS[index] !== undefined && (
-                      <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
-                        {NUMBERED_OPTIONS[index]}
+              <div
+                role="listbox"
+                aria-multiselectable={question.multiSelect}
+                aria-label="the options this question offers"
+                onKeyDown={onKeys}
+                className={
+                  sideBySide
+                    ? 'flex flex-col gap-1 @min-[720px]:w-[40%] @min-[720px]:min-w-[240px] @min-[720px]:flex-none'
+                    : 'flex flex-col gap-1'
+                }
+              >
+                {question.options.map((option, index) => (
+                  <button
+                    key={option.label}
+                    ref={index === 0 ? firstOptionRef : undefined}
+                    type="button"
+                    role="option"
+                    aria-selected={picked.includes(option.label)}
+                    data-question-option
+                    data-question-number={NUMBERED_OPTIONS[index]}
+                    data-picked={picked.includes(option.label) ? 'true' : undefined}
+                    onClick={(event) => toggle(option.label, event.detail > 0)}
+                    onFocus={() => setFocusedLabel(option.label)}
+                    className={[
+                      // `group` is what lets the quiet spans below hear about a
+                      // hover on this button -- see `OPTION_QUIET_INK`.
+                      'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                      picked.includes(option.label)
+                        ? `border-running ${OPTION_FILL}`
+                        : `border-line hover:${OPTION_FILL}`,
+                    ].join(' ')}
+                  >
+                    <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
+                      {NUMBERED_OPTIONS[index] !== undefined && (
+                        <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+                          {NUMBERED_OPTIONS[index]}
+                        </span>
+                      )}
+                      <span className="min-w-0">{option.label}</span>
+                      {(option.preview ?? null) !== null && (
+                        <span
+                          data-question-preview-hint
+                          className={`ml-auto flex-none text-meta ${OPTION_QUIET_INK}`}
+                        >
+                          {sideBySide ? (
+                            <>
+                              <span className="hidden @min-[720px]:inline">preview →</span>
+                              <span className="@min-[720px]:hidden">preview ↓</span>
+                            </>
+                          ) : (
+                            'preview ↓'
+                          )}
+                        </span>
+                      )}
+                    </span>
+                    {option.description !== null && (
+                      <span data-question-description className="max-w-full text-meta text-ink-dim">
+                        {option.description}
                       </span>
                     )}
-                    <span className="min-w-0">{option.label}</span>
-                  </span>
-                  {option.description !== null && (
-                    <span data-question-description className="max-w-full text-meta text-ink-dim">
-                      {option.description}
+                  </button>
+                ))}
+              </div>
+              {/* THE PANEL: the FULL preview of `activeOption` -- focused,
+                  else marked, else the first option that has one -- never the
+                  truncated fragment the row used to carry. `whitespace-pre`
+                  for real pre semantics (`white-space: pre`, so the diagram's
+                  own spacing survives) -- a literal `<pre>` was the first
+                  cut, but its implicit ARIA role is `generic`, which
+                  (correctly) accepts no accessible name at all, so
+                  `aria-label` cannot sit on one. `<section>` gains the role
+                  `region` the moment it HAS a name, which is exactly this
+                  case. The surface is the transcript's own fenced code block
+                  (`Fenced`, `out-markdown.tsx`'s `pre` rule), reused rather
+                  than restyled. No `aria-live`: it changes on every walk,
+                  which is exactly the chatter a live region should not
+                  announce -- `aria-label` names WHICH option it is showing
+                  instead, which is what actually needs to be read once the
+                  operator asks for it. */}
+              {hasPreview && activeOption !== undefined && (
+                <section
+                  data-question-preview-panel
+                  data-for={question.options.indexOf(activeOption)}
+                  aria-label={`preview of ${activeOption.label}`}
+                  className={[
+                    'vam-no-scrollbar min-w-0 max-h-[40vh] overflow-auto whitespace-pre rounded-[7px] border border-line bg-ground px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55]',
+                    sideBySide ? '@min-[720px]:flex-1' : '',
+                  ].join(' ')}
+                >
+                  {(activeOption.preview ?? null) !== null ? (
+                    activeOption.preview
+                  ) : (
+                    <span data-question-preview-empty className={OPTION_QUIET_INK}>
+                      no preview for this option
                     </span>
                   )}
-                  {/* WHAT PICKING IT WOULD PRODUCE, under the reason for picking
-                  it and set in mono because that is usually what it is -- a
-                  colour, a path, a line of the thing that would be written. It
-                  was in the record all along and drawn nowhere. */}
-                  {(option.preview ?? null) !== null && (
-                    <span
-                      data-question-preview
-                      className={`max-w-full truncate font-mono text-meta ${OPTION_QUIET_INK}`}
-                    >
-                      {option.preview}
-                    </span>
-                  )}
-                </button>
-              ))}
+                </section>
+              )}
             </div>
           )}
           {/* Not in the transcript: `AskUserQuestion`'s tool_use records the
