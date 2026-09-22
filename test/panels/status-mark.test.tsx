@@ -60,10 +60,12 @@ function glyphs(mark: Element): string[] {
 
 describe('the status mark', () => {
   it('covers every status the model has, derived from the table and not retyped', () => {
-    // The guard against the two lists drifting: five is what the union spells
-    // today, and the moment it spells six this fails until a mark exists.
+    // The guard against the two lists drifting: six is what the union spells
+    // today -- `unstarted` is the sixth, an open pane with nothing in it
+    // (`model.ts`) -- and the moment it spells seven this fails until a mark
+    // exists.
     expect([...SESSION_STATUSES].sort()).toEqual(
-      ['done', 'failed', 'idle', 'running', 'waiting'].sort(),
+      ['done', 'failed', 'idle', 'running', 'unstarted', 'waiting'].sort(),
     );
     for (const status of SESSION_STATUSES) {
       expect(markFor(status)).not.toBeNull();

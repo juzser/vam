@@ -198,6 +198,45 @@ describe('listVamSessions', () => {
     });
   });
 
+  /**
+   * THE FOURTH FIELD: what is in the FOREGROUND of the pane, as tmux names
+   * it. A vam pane is a shell first (`tmux/shell.ts`) and an agent only once
+   * something has been typed into it, so `zsh` here is "nothing has been
+   * started" and `claude` is "something has". Measured on tmux 3.7b over a
+   * private socket: `zsh` on a fresh pane, `sleep` two seconds after
+   * `sleep 30` was typed into it. It comes LAST so the three fields every
+   * older stub in this suite answers with keep their positions, and a line
+   * without it still parses -- `command` is then simply absent.
+   */
+  it('reads the foreground command as a fourth field, and does without it', async () => {
+    const run = fakeTmux(() => ({
+      stdout: [
+        'claude-code:demo-11111111\t4242\tvam-demo-a1b2c3\tzsh',
+        'claude-code:demo-11111111\t4243\tvam-demo-d4e5f6\tclaude',
+        'claude-code:demo-11111111\t4244\tvam-demo-g7h8i9',
+        '',
+      ].join('\n'),
+    }));
+    await expect(listVamSessions(run)).resolves.toEqual({
+      kind: 'ok',
+      sessions: [
+        {
+          project: 'claude-code:demo-11111111',
+          pid: '4242',
+          name: 'vam-demo-a1b2c3',
+          command: 'zsh',
+        },
+        {
+          project: 'claude-code:demo-11111111',
+          pid: '4243',
+          name: 'vam-demo-d4e5f6',
+          command: 'claude',
+        },
+        { project: 'claude-code:demo-11111111', pid: '4244', name: 'vam-demo-g7h8i9' },
+      ],
+    });
+  });
+
   it('reports an untagged vam session as tagged with nothing, not as tagged with its name', async () => {
     // A session started by an older vam, or one whose `set-option` failed. The
     // empty fields are what an unset user option formats as (measured), and

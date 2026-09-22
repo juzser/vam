@@ -2093,12 +2093,18 @@ describe('A15.4: the default-provider picker, and why it is not on screen', () =
    * ONE. `DetailPanel.provider-double.test.tsx` is what tells them apart: it
    * mocks a two-row table and every behaviour that used to be asserted here
    * is asserted there, against a picker that has something to pick.
+   *
+   * AND THEN THE TABLE GREW ITS SECOND ROW (`codex`, Stage 2 of
+   * `docs/design/vam-owns-the-session.md`). The paragraph above is kept as
+   * the record of why the control is conditional; what is asserted now is
+   * the other side of the same rule -- over a two-row table the toggle IS
+   * drawn for a two-way caller, with no edit at this call site, exactly as
+   * `providers.ts` promised. The one-way caller's absence above still holds.
    */
-  it('is absent with a two-way caller too, while the table has one row', () => {
+  it('is present with a two-way caller, now that the table has two rows', () => {
     draw({ defaultProvider: 'claude-code', onSetDefaultProvider: () => {} });
-    expect(PROVIDERS).toHaveLength(1);
-    expect(q('[data-provider-picker-toggle]')).toBeNull();
-    expect(q('[data-provider-picker]')).toBeNull();
+    expect(PROVIDERS.length).toBeGreaterThan(1);
+    expect(q('[data-provider-picker-toggle]')).not.toBeNull();
   });
 });
 

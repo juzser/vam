@@ -44,6 +44,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { type ProviderId, resolveProvider } from '../../shared/providers.js';
 import {
   describeUsage,
   POLL_INTERVAL_MS,
@@ -187,6 +188,7 @@ import {
   paneHolding,
   pruneClosedTabs,
   removeTab,
+  renameTab,
   resizeSplit,
   restoreLayout,
   type SplitOrientation,
@@ -899,6 +901,7 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   running: 'text-running',
   waiting: 'text-waiting',
   idle: 'text-idle',
+  unstarted: 'text-idle',
   done: 'text-done',
   failed: 'text-failed',
 };
@@ -965,9 +968,9 @@ type TabStatusMark = Extract<TabIndicatorId, SessionStatus>;
 
 /** Which status mark, if any, this session's tab draws under these switches.
  *  `null` for idle whatever the switches say, and for a status whose switch
- *  is off. */
+ *  is off. `unstarted` is idle's case exactly: a quiet tab, nothing to mark. */
 function tabStatusMark(status: SessionStatus): TabStatusMark | null {
-  if (status === 'idle') return null;
+  if (status === 'idle' || status === 'unstarted') return null;
   return isTabIndicatorOn(status) ? status : null;
 }
 
@@ -1965,6 +1968,15 @@ function CanvasInner({
    *  the same reason: it must stay a stably-identified callback. */
   const panesRef = useRef<SplitTree>(panes);
   /**
+   * Which vam pane each session was in, as of the LAST model the prune
+   * effect reconciled -- session id to `Session.pane`. Written at the end of
+   * that effect and read at the start of the next, so a row that changed
+   * identity between two models can be matched to its successor by the one
+   * thing the two ids share. Not a render-phase mirror like the refs above:
+   * a mirror would already hold the new model by the time the effect ran.
+   */
+  const lastPaneOfSession = useRef<ReadonlyMap<string, string>>(new Map());
+  /**
    * A15.7 — ONE REMEMBERED LAYOUT PER PROJECT, and which pane in it had the
    * keyboard. Written when the operator leaves a project, read when they come
    * back (`restoreLayout` reconciles it against what is still open). A ref
@@ -2853,6 +2865,7 @@ function CanvasInner({
       running: of('running'),
       waiting: of('waiting'),
       idle: of('idle'),
+      unstarted: of('unstarted'),
       done: of('done'),
       failed: of('failed'),
     };
@@ -3132,9 +3145,47 @@ function CanvasInner({
       return;
     }
     const open = new Set(allEntries.map((entry) => entry.session.id));
-    const before = panesRef.current;
+    /**
+     * BEFORE THE PRUNE, THE RENAME. A row can change identity without its
+     * pane changing at all: a vam pane with nothing in it is a row keyed by
+     * its tmux name, and the moment an agent registers there the source keys
+     * the row by the agent (`Session.pane`, `model.ts`; `renameTab`,
+     * `split.ts`). To the prune those are one id closed and one id new, and
+     * the tab the operator just pressed Start in would vanish. So each held
+     * id that is no longer open is looked up in the PREVIOUS model's pane
+     * map -- the last model this effect saw, not the one being read now --
+     * and where an open row now carries that same pane, the tab is renamed
+     * in place and its view goes with it. Nothing is parsed off an id.
+     */
+    const wasPaneOf = lastPaneOfSession.current;
+    const nowByPane = new Map(
+      allEntries.flatMap((entry) =>
+        entry.session.pane === undefined ? [] : [[entry.session.pane, entry.session.id] as const],
+      ),
+    );
+    let before = panesRef.current;
+    for (const leaf of leaves(before)) {
+      for (const held of leaf.sessionIds) {
+        if (open.has(held)) continue;
+        const pane = wasPaneOf.get(held);
+        const successor = pane === undefined ? undefined : nowByPane.get(pane);
+        if (successor === undefined || successor === held) continue;
+        before = renameTab(before, held, successor);
+        setViewBySession((current) => {
+          const view = current[held];
+          if (view === undefined) return current;
+          const { [held]: _dropped, ...rest } = current;
+          return { ...rest, [successor]: view };
+        });
+      }
+    }
+    lastPaneOfSession.current = new Map(
+      allEntries.flatMap((entry) =>
+        entry.session.pane === undefined ? [] : [[entry.session.id, entry.session.pane] as const],
+      ),
+    );
     const pruned = pruneClosedTabs(before, (id) => open.has(id));
-    if (pruned === before) {
+    if (pruned === panesRef.current) {
       return;
     }
     setPanes(pruned);
@@ -4182,6 +4233,63 @@ function CanvasInner({
       }
     },
     [source, pendingAction],
+  );
+
+  /**
+   * START AN AGENT IN A PANE THAT HAS NONE.
+   *
+   * `docs/design/vam-owns-the-session.md` Stage 2: "Start types the
+   * provider's command into the pane it already owns." This is the button on
+   * the start screen (`DetailPanel.tsx`, `StartSession`); the Terminal view
+   * and the operator's own hands are the other door to the same pane.
+   *
+   * THROUGH `recordPrompt`, NOT A CHANNEL OF ITS OWN. The row is a pane with
+   * a shell in it, and what a pane with a shell does with text is run it --
+   * so the source's existing write is exactly the right verb, and main proves
+   * the pane is vam's own before typing (`start-in-pane.ts`). NOT through
+   * `sendPromptFor`: that paints the words as a pending TURN, and a command
+   * to a shell is not a turn of any conversation. No paint, no draft, no
+   * repeat guard -- one write and a sentence in the status bar, like
+   * `reopenSession` below. The command is resolved HERE from the id the
+   * screen handed over, so main only ever sees words its own table lists.
+   *
+   * WHAT VAM CAN HONESTLY SAY AFTER: the command was typed. The agent
+   * registers on its own schedule, and the row changes identity when it does
+   * -- the tab follows (`renameTab`); the sentence says "started" of the
+   * typing and "will appear" of the rest, the same split `createSession`
+   * makes.
+   */
+  const startSessionIn = useCallback(
+    async (entry: SessionEntry, providerId: ProviderId): Promise<void> => {
+      const provider = resolveProvider(providerId);
+      const title = entry.session.title;
+      if (source.kind !== 'session') {
+        setStatus(`nothing can be started in "${title}" from here — no source is connected`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource)) {
+        setStatus(`${sessionSource.label} cannot be written to — "${title}" was not started`);
+        return;
+      }
+      if (writingBySession[entry.session.id] ?? false) {
+        return;
+      }
+      setWritingFor(entry.session.id, true);
+      setStatus(`starting ${provider.label} in "${title}"…`);
+      try {
+        await sessionSource.write.recordPrompt(entry.session.id, provider.command.join(' '));
+        setStatus(
+          `started ${provider.label} in "${title}" — its session appears here once it registers`,
+        );
+        source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure(`start ${provider.label}`, cause));
+      } finally {
+        setWritingFor(entry.session.id, false);
+      }
+    },
+    [source, writingBySession, setWritingFor],
   );
 
   /**
@@ -6211,6 +6319,11 @@ function CanvasInner({
         // every pane rather than per-session.
         defaultProvider: prefs.defaultProvider,
         onSetDefaultProvider: (id) => savePrefs(setDefaultProvider(prefs, id)),
+        // THIS PANE'S ROW, when it is a pane with nothing in it: the start
+        // screen's one act. Withdrawn (absent) where there is no session to
+        // start in, so the screen says "use the Terminal view" instead of
+        // drawing a button that cannot type.
+        onStartSession: entry === null ? undefined : (id) => void startSessionIn(entry, id),
         // The Files tab's tree width, and the way back. GLOBAL for the same
         // reason `defaultProvider` above it is passed identically to every
         // pane: one `FilesTab` per split leaf, and an arrangement the
@@ -6302,6 +6415,7 @@ function CanvasInner({
       setDraftFor,
       setComposingFor,
       sendPromptFor,
+      startSessionIn,
       setViewFor,
       mode,
     ],

@@ -53,12 +53,24 @@ export type SourceId = string;
  * Its colour is a neutral, deliberately: `idle` is the absence of news, and
  * the four hues stay spent on states that are news.
  *
+ * `unstarted` IS THE SIXTH, and it is not a synonym for any of the five: a
+ * pane is open and NOTHING has been started in it. `docs/design/vam-owns-the-
+ * session.md` §3 -- a new session is a shell in a tmux pane vam owns, real
+ * from the first frame, and the provider is chosen afterwards. Such a row has
+ * no transcript, no turn and no agent; it has a Terminal view that works and a
+ * Response view whose whole content is the provider picker and Start. The
+ * row is the tmux session's (`main/sources/claude-code/pane-row.ts`) and it
+ * lives exactly as long as that does -- it is never a paint on a timer. It
+ * is never `idle` (which is an AGENT between turns), never `done` (nothing
+ * ended), and never `waiting` (nothing asked). Its colour is the neutral
+ * `idle` shares, because it too is the absence of news.
+ *
  * Every surface that paints a status keys a `Record<SessionStatus, …>` off
  * this union — the tab ink and dot, the sidebar dot, the phone dot, the rank
  * order, the filter tally. That is the guard against this list growing again
- * behind someone's back: add a member and the four maps stop compiling.
+ * behind someone's back: add a member and the maps stop compiling.
  */
-export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed';
+export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed' | 'unstarted';
 
 /**
  * One round trip between you and a session: your words in, its answer out.
@@ -674,6 +686,24 @@ export type Session = {
    * one is not a licence to offer a control that will refuse.
    */
   readonly vamControlled?: boolean;
+  /**
+   * WHICH vam tmux session this row is proven to be in -- the pane's name --
+   * when `vamControlled` is `true`; absent otherwise.
+   *
+   * THE ONE THING A PANE'S TWO ROWS SHARE. A pane starts life as an
+   * `unstarted` row keyed by its own name (`pane-row.ts`), and the moment an
+   * agent registers in it the source reports a session row keyed by the
+   * agent's identity instead. The two ids have nothing in common, and a tab
+   * holding the first would be pruned as closed at exactly the moment the
+   * operator is watching it. This field is how the canvas follows the pane
+   * across that moment (`renameTab` in `canvas/split.ts`): same pane, new
+   * row, same tab.
+   *
+   * A pairing HINT for the renderer's own bookkeeping, never a row key and
+   * never an address anything writes to -- every write still resolves its
+   * pane in main, by the rule `reply.ts` documents.
+   */
+  readonly pane?: string;
   /**
    * THE MODEL THIS SESSION IS ON, when its SOURCE holds that fact -- never
    * read off a screen, and never what vam last asked for.

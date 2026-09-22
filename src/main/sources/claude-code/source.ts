@@ -64,6 +64,7 @@ import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { readTranscriptHistory } from './history.js';
+import { paneNameOf, paneRow, unclaimedPanes } from './pane-row.js';
 import { prRepoOverride } from './pr-repos.js';
 import { projectIdOf } from './project-id.js';
 import {
@@ -81,6 +82,7 @@ import {
   mergeSlashCommands,
   readUserSlashCommands,
 } from './slash-commands.js';
+import { killOwnPane, typeIntoOwnPane } from './start-in-pane.js';
 import {
   killPidViaSignal,
   pidHasClaudeSessionFile,
@@ -335,8 +337,14 @@ export async function loadClaudeCodeProjects(
   }
 
   const grouped = new Map<string, { cwd: string; sessions: Session[] }>();
+  // Every pane a LIVE row was proven to be in this load -- the set the empty
+  // panes are subtracted from below. Filled as the rows are built, so the
+  // pairing is computed once per row and read twice.
+  const claimed = new Set<string>();
   for (const agent of agents) {
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
+    const pane = tmuxSessions === null ? null : paneForRow(tmuxSessions, agents, agent, panes);
+    if (pane !== null) claimed.add(pane);
     // Per row, because a row is a process: the age below and the waiting
     // state come out of the same file and are read together. Looked up
     // rather than re-read -- `readPublishedPanesAndProcessFacts` above
@@ -472,14 +480,29 @@ export async function loadClaudeCodeProjects(
       // reads one answer: one tagged tmux session for this project, one live
       // row in it. Anything ambiguous is `false` -- vam asked and cannot prove
       // this row is that pane, which is exactly the case where acting on it
-      // would act on the wrong one.
-      ...(tmuxSessions === null
-        ? {}
-        : { vamControlled: paneForRow(tmuxSessions, agents, agent, panes) !== null }),
+      // would act on the wrong one. The pane itself rides along as `pane`
+      // when there is one (`model.ts` says what the renderer does with it),
+      // and is what `claimed` below subtracts.
+      ...(pane === null ? {} : { pane }),
+      ...(tmuxSessions === null ? {} : { vamControlled: pane !== null }),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
     grouped.set(agent.cwd, group);
+  }
+
+  // SOURCE ROWS, PLUS EVERY VAM PANE NO SOURCE ROW IS PAIRED TO (`pane-row.ts`
+  // carries the argument). Filed under the project whose digest the pane
+  // recorded, which is only findable for a project some live row already
+  // names: a digest cannot be turned back into a directory, so a pane in a
+  // brand-new project has no section until something runs there.
+  if (tmuxSessions !== null) {
+    const byProjectId = new Map(
+      [...grouped.entries()].map(([cwd, group]) => [projectIdOf(cwd), group] as const),
+    );
+    for (const empty of unclaimedPanes(tmuxSessions, claimed)) {
+      byProjectId.get(empty.project)?.sessions.push(paneRow(empty));
+    }
   }
 
   return [...grouped.values()].map((group) => ({
@@ -684,6 +707,15 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * a session that is already gone.
    */
   recordPrompt: async (sessionId, prompt) => {
+    // A PANE ROW has no agent to pair, so the agent list is not asked at
+    // all: the row names its tmux session, and `start-in-pane.ts` re-proves
+    // that name against vam's own listing before typing. This is Start
+    // session's route -- the renderer sends the provider's command as the
+    // "prompt" -- and it is also what the composer would do here, which is
+    // right: a pane holding a shell IS a terminal, and text sent to it runs.
+    const pane = paneNameOf(sessionId);
+    if (pane !== null)
+      return typeIntoOwnPane({ run: createTmuxRunner(), name: pane, text: prompt });
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
     return replyToSession({
@@ -703,6 +735,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * process now.
    */
   closeSession: async (sessionId, force = false) => {
+    // A PANE ROW: §5's "Close the session" for a pane with nothing in it.
+    // `force` is not read -- there is no unverifiable process to signal; the
+    // pane is either provably vam's own and killed, or refused by name.
+    const pane = paneNameOf(sessionId);
+    if (pane !== null) return killOwnPane({ run: createTmuxRunner(), name: pane });
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
     return stopSession(

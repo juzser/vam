@@ -36,6 +36,7 @@
 import type { SourceError } from '../../ipc/channels.js';
 import { withConciseLead } from '../../terminal/concise.js';
 import { promptKeystrokes, sendEnterArgv } from '../tmux/argv.js';
+import { isShellCommand } from '../tmux/shell.js';
 import {
   classifyTmuxFailure,
   listVamSessions,
@@ -196,7 +197,18 @@ export function paneForRow(
   // let two tagged sessions minus one claim look like a single confident
   // candidate; see the header, and `matchVamSession`, which orders it the same
   // way for the same reason.
-  return claimedPanes(panes).has(only.name) ? null : only.name;
+  //
+  // AND A SECOND VETO OF THE SAME SHAPE: a pane whose foreground is a SHELL
+  // has nothing running in it, so it cannot be the pane this row is in --
+  // whatever the count said. This tier was written when a vam pane always
+  // held an agent from its first frame; since a new session is a shell
+  // (`tmux/shell.ts`), the one live row in a project may be an agent in the
+  // operator's own terminal and the one tagged pane an empty shell vam just
+  // opened beside it, and the old inference would have typed the next reply
+  // into a shell prompt. Applied LAST and only ever to `null`, like the claim
+  // above; silence (no `command` in the listing) vetoes nothing.
+  if (claimedPanes(panes).has(only.name)) return null;
+  return isShellCommand(only.command) ? null : only.name;
 }
 
 /**

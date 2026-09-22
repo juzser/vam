@@ -1111,7 +1111,17 @@ export function SettingsOverlay({
                             : 'border-line text-ink-dim'
                         }`}
                       >
-                        {provider.label}
+                        {/* A PROPER NAME, printed as its author wrote it --
+                            `data-verbatim`, the same rank the terminal theme
+                            chips hold (`e2e/settings-chrome-shots.mjs`). Not
+                            `capitalize`: "Claude Code" and "Codex" are names,
+                            and the guard holds a name to the opposite rule
+                            from a control named in prose. These buttons were
+                            dormant while the table had one row, which is why
+                            the guard first met them with the `codex` row. */}
+                        <span data-verbatim className="normal-case">
+                          {provider.label}
+                        </span>
                       </button>
                     ))}
                   </div>

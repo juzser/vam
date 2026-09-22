@@ -148,6 +148,18 @@ const GLYPH: Readonly<Record<SessionStatus, (phase: number, size: number) => Rea
   /** The mark for "nothing is happening": the dot the row always had, at the
    *  size it always was, alone in a lane the others fill. */
   idle: () => <span className="h-[7px] w-[7px] flex-none rounded-full bg-idle" />,
+  /**
+   * An open pane with nothing started in it (`model.ts`): idle's dot, HOLLOW.
+   * Same size, same lane, same neutral ink -- it is the same quiet -- and the
+   * ring rather than the fill is what says "nothing is in here yet" to an eye
+   * that has learnt idle's dot means "an agent, resting". A distinct shape
+   * for a distinct status, as every other row of this table is; the outline
+   * is drawn with the token as a border so the row's ink and this mark cannot
+   * disagree about the colour.
+   */
+  unstarted: () => (
+    <span className="h-[7px] w-[7px] flex-none rounded-full border border-idle bg-transparent" />
+  ),
   /** A tick, not a circled one: the circled check draws a second ring into a
    *  column that already has one turning in it. A hair more stroke than its
    *  neighbours because a tick is two strokes and nothing else, and at 12px it

@@ -357,11 +357,23 @@ const marks = await page.evaluate(() =>
   [...document.querySelectorAll('[data-session-row] [data-status-mark]')].map((mark) => {
     const box = mark.getBoundingClientRect();
     const glyph = mark.querySelector('svg:not([data-mark-motion="rest"])');
+    // A NON-SVG MARK IS A DOT OR A RING, and the two are told apart by paint
+    // rather than by class: `idle` fills its circle and `unstarted` draws only
+    // its border (`status-mark.tsx`). Reading the border width is what keeps
+    // "each status draws its own glyph" from being vacuous across the two.
+    const circle = glyph === null ? mark.firstElementChild : null;
+    const ring =
+      circle !== null && Number.parseFloat(getComputedStyle(circle).borderTopWidth) > 0;
     return {
       status: mark.getAttribute('data-status-mark'),
       w: Math.round(box.width),
       h: Math.round(box.height),
-      glyph: glyph === null ? 'dot' : [...glyph.classList].find((c) => c.startsWith('lucide-')),
+      glyph:
+        glyph === null
+          ? ring
+            ? 'ring'
+            : 'dot'
+          : [...glyph.classList].find((c) => c.startsWith('lucide-')),
       // The row's own accessible text says the status too: the mark is the
       // only place a desktop row carries it at all.
       said: mark.textContent.trim(),
@@ -371,8 +383,8 @@ const marks = await page.evaluate(() =>
 console.log('status marks:', JSON.stringify(marks));
 
 check(
-  'every status the model has is on screen, so the screenshot shows all five',
-  new Set(marks.map((m) => m.status)).size === 5,
+  'every status the model has is on screen, so the screenshot shows all six',
+  new Set(marks.map((m) => m.status)).size === 6,
   JSON.stringify([...new Set(marks.map((m) => m.status))]),
 );
 check(
@@ -389,6 +401,7 @@ check(
       done: 'lucide-check',
       failed: 'lucide-triangle-alert',
       idle: 'dot',
+      unstarted: 'ring',
     })[m.status] === m.glyph,
   ),
   JSON.stringify(marks.map((m) => [m.status, m.glyph])),

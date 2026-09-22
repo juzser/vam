@@ -247,6 +247,13 @@ const GUARDS = [
   // so the operator's actual pair is measured rather than argued from a
   // fixture that contains neither.
   'provider-mark-shots',
+  // THE START SCREEN of a pane with nothing in it, on the desktop and at
+  // 390px, plus the Terminal view of that row. Every claim is painted: the
+  // hollow status dot's lane and size beside the other five marks, the Start
+  // button inside the pane's fold, and a pane drawn rather than an
+  // `ambiguous` refusal for a pane-row id -- none of which a unit environment
+  // measures. Its three shots are `docs/ui/start-screen-*.png`.
+  'start-screen-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

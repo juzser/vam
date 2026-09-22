@@ -132,13 +132,17 @@ describe('the requested provider is what runs, not merely what the default alrea
   });
 
   it('still falls back to the default for an id nothing answers to', async () => {
+    // On the CHOSEN-DIRECTORY path, which is the one that still spends the
+    // provider at spawn (`create-session.ts`'s header on why). The project
+    // path runs a shell whatever id it is handed -- pinned in
+    // `tmux-create-session.test.ts`, not here.
     const run = recordingTmux();
-    const failure = await createSessionInProject({
-      agents: [agent('/w/demo')],
-      projectId: projectIdOf('/w/demo'),
-      title: 'new work',
+    const orchard = tempRepo();
+    const failure = await createSessionInDirectory({
+      cwd: orchard,
+      title: 'orchard',
       run,
-      name: 'vam-new-work-a1b2c3',
+      name: 'vam-orchard-a1b2c3',
       provider: 'nonesuch',
     });
 
@@ -150,10 +154,25 @@ describe('the requested provider is what runs, not merely what the default alrea
       '-F',
       '#{pane_pid}',
       '-s',
-      'vam-new-work-a1b2c3',
+      'vam-orchard-a1b2c3',
       '-c',
-      '/w/demo',
+      orchard,
       ...resolveProvider(DEFAULT_PROVIDER_ID).command,
     ]);
+  });
+
+  it('is NOT what the project path runs: a shell there, whichever provider is named', async () => {
+    const run = recordingTmux();
+    await createSessionInProject({
+      agents: [agent('/w/demo')],
+      projectId: projectIdOf('/w/demo'),
+      title: 'new work',
+      run,
+      name: 'vam-new-work-a1b2c3',
+      provider: SECOND_PROVIDER_ID,
+      shell: ['/bin/zsh', '-l'],
+    });
+    expect(run.calls[0]?.slice(-2)).toEqual(['/bin/zsh', '-l']);
+    expect(run.calls.flat()).not.toContain('vam-test-second-provider-cmd');
   });
 });

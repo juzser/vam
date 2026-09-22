@@ -288,3 +288,52 @@ describe('paneForRow proves a row by its OWN pid, without counting', () => {
     expect(paneForRow(twoTaggedByPid, [ALPHA_PID, BETA_PID], ALPHA_PID, ended)).toBeNull();
   });
 });
+
+/**
+ * A PANE WITH ONLY A SHELL IN IT IS NOBODY'S. Since Stage 2 of
+ * `docs/design/vam-owns-the-session.md` a vam pane starts as a shell and an
+ * agent is in it only once one has been typed there. The project-tag
+ * fallback was written when a vam pane always held an agent -- so "one tagged
+ * session, one live row" was a sound inference. It is not any more: the one
+ * live row may be an agent in the operator's OWN terminal (publishing
+ * nothing, because it is not under tmux) and the one tagged session an empty
+ * shell vam just opened for them. Handing that pane to that row types the
+ * next reply into a shell prompt and lets Close kill the empty pane as if it
+ * were the agent's. The listing's fourth field (`pane_current_command`) is
+ * what says so, and it VETOES -- it never narrows.
+ */
+describe('paneForRow refuses a pane whose foreground is a shell', () => {
+  const shellPane: readonly TmuxSession[] = [{ project, name: 'vam-atlas-aa11bb', command: 'zsh' }];
+  const agentPane: readonly TmuxSession[] = [
+    { project, name: 'vam-atlas-aa11bb', command: 'claude' },
+  ];
+
+  it('is null for the project’s one unpublished row when the one tagged pane holds a shell', () => {
+    expect(paneForRow(shellPane, [ALPHA], ALPHA, new Map())).toBeNull();
+  });
+
+  it('still answers the same row when the pane’s foreground is an agent', () => {
+    expect(paneForRow(agentPane, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+  });
+
+  it('still answers when the listing carried no command at all -- absence is not a shell', () => {
+    expect(paneForRow(one, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+  });
+
+  it('never turns two tagged panes into one by dropping the shell -- a veto, not a filter', () => {
+    const mixed: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', command: 'zsh' },
+      { project, name: 'vam-atlas-cc22dd', command: 'claude' },
+    ];
+    expect(paneForRow(mixed, [ALPHA], ALPHA, new Map())).toBeNull();
+  });
+
+  it('does not veto a PUBLISHED pairing: the row said where it is', () => {
+    // A row that publishes a pane whose foreground reads as a shell is a
+    // row mid-transition (the agent forked, the shell is briefly in front
+    // again) or a stale listing; either way the row's own word outranks a
+    // guess about a process name.
+    const panes = new Map([['sess-alpha#7', 'vam-atlas-aa11bb']]);
+    expect(paneForRow(shellPane, [ALPHA], ALPHA, panes)).toBe('vam-atlas-aa11bb');
+  });
+});

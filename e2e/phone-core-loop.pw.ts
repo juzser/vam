@@ -933,16 +933,58 @@ test.describe('what the session screen no longer spends room on', () => {
     );
   });
 
-  test('the composer draws no provider picker while there is one provider', async ({ page }) => {
+  /**
+   * THE PROVIDER PICKER IS BACK, AND WHAT IS MEASURED IS WHAT IT NOW HOLDS.
+   * While `PROVIDERS` had one row this test held the control absent; the
+   * `codex` row returned it (Stage 2 of `docs/design/vam-owns-the-session.md`).
+   * Of the two things measured wrong with it at 390px before the withdrawal,
+   * the hit box is fixed (`vam-tap` was added while it was dormant) and is
+   * proven here: 44 on the toggle, 44 on each row.
+   *
+   * THE OTHER ONE IS NOT FIXED AND IS NOT CLAIMED. The popover still opens
+   * `bottom-full` off the tools row, which on a phone puts it over the
+   * textarea -- measured here at 50px below the textarea's top. That is the
+   * SAME placement the model and mode popovers beside it have had all along,
+   * unguarded; a fix is a composer-layout decision for all three, not this
+   * control's alone, and a guard that asserted the property for one of the
+   * three would be asserting something its neighbours fail. What is held is
+   * that the popover is on screen whole, not clipped by the shell.
+   */
+  test('the composer draws the provider picker, 44px to the touch, with its popover on screen', async ({
+    page,
+  }) => {
     await page.setViewportSize({ width: 390, height: SHELL_H });
     await stubRemote(page);
     await openWaiting(page);
     await intoTheBox(page);
-    await expect(
-      page.locator('[data-provider-picker-toggle]'),
-      'a control whose list has one row cannot act, so it is not drawn as one',
-    ).toHaveCount(0);
-    await expect(page.locator('[data-provider-picker]')).toHaveCount(0);
+    const toggle = page.locator('[data-phone-shell] [data-provider-picker-toggle]');
+    await expect(toggle, 'a two-row table is a choice, so the control is drawn').toHaveCount(1);
+    const hit = await toggle.boundingBox();
+    expect(Math.round(hit?.width ?? 0), 'the hit box, not the skin').toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+    expect(Math.round(hit?.height ?? 0)).toBeGreaterThanOrEqual(TOUCH_MIN);
+    await toggle.click();
+    const layer = page.locator('[data-phone-shell] [data-provider-picker]');
+    await expect(layer).toBeVisible();
+    const popover = await layer.boundingBox();
+    const shell = await page.locator('[data-phone-shell]').boundingBox();
+    expect(Math.round(popover?.x ?? -1), 'the popover is inside the shell').toBeGreaterThanOrEqual(
+      Math.round(shell?.x ?? 0),
+    );
+    expect(Math.round(popover?.y ?? -1)).toBeGreaterThanOrEqual(Math.round(shell?.y ?? 0));
+    expect(
+      Math.round((popover?.x ?? 0) + (popover?.width ?? 0)),
+      'and not clipped on the right',
+    ).toBeLessThanOrEqual(Math.round((shell?.x ?? 0) + (shell?.width ?? 0)));
+    const options = layer.locator('[data-provider-option]');
+    await expect(options).toHaveCount(2);
+    for (const option of await options.all()) {
+      const r = await option.boundingBox();
+      expect(Math.round(r?.height ?? 0), 'each row is a touch target').toBeGreaterThanOrEqual(
+        TOUCH_MIN,
+      );
+    }
   });
 
   test('the session strip is tabs and nothing else, and every tab fits', async ({ page }) => {

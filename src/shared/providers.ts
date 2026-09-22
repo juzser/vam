@@ -2,26 +2,34 @@
  * The agent providers vam can start a session with.
  *
  * ONE TABLE, READ FROM BOTH PROCESSES. The renderer needs the labels to draw a
- * picker; main needs the command to hand tmux. Splitting those into two lists
- * is how a provider comes to be offered in settings that nothing can actually
+ * picker; main needs the command to run. Splitting those into two lists is
+ * how a provider comes to be offered in settings that nothing can actually
  * run, so both come from here.
  *
- * TODAY THE TABLE HAS ONE ROW, AND THAT IS THE HONEST STATE. Codex CLI and
- * Cursor CLI are on the roadmap and neither is implemented: vam's only session
- * source reads Claude Code's own state directory, and a provider is not merely
- * a command to spawn -- it is a source that can read back what that command is
- * doing. A settings control offering a provider that cannot start is worse
- * than one offering a single honest choice, so nothing is listed here until
- * its source exists. What a second row needs is exactly this: an id, a label,
- * the command tmux should run, and a source in main that can see its sessions.
+ * TWO ROWS, AND EACH HAS A SOURCE BEHIND IT. The rule that kept this table at
+ * one row still holds: a provider is not merely a command to spawn, it is a
+ * source in main that can read back what that command is doing. Claude Code's
+ * source reads its state directory; Codex's (`main/sources/codex/`) reads its
+ * thread store. Cursor CLI has no source and is not listed. What a further
+ * row needs is exactly this: an id, a label, the command to run, and a source
+ * in main that can see its sessions.
  *
- * The id is vam's own source id where one exists -- `claude-code` is the same
- * string `PROVIDER_MARKS` is keyed by and the adapter stamps on a row -- so a
- * provider and the glyph that stands for it cannot drift apart.
+ * WHERE THE COMMAND IS SPENT changed with Stage 2 of
+ * `docs/design/vam-owns-the-session.md`: a new session in a project vam
+ * already draws no longer runs the provider at spawn -- it runs a shell
+ * (`main/sources/tmux/shell.ts`) -- and the command is TYPED into that shell
+ * afterwards, by the Start session button
+ * (`main/sources/claude-code/start-in-pane.ts`) or by hand. The "new
+ * project" path still hands it to tmux at spawn, and
+ * `main/sources/claude-code/create-session.ts` says why.
+ *
+ * The id is vam's own source id -- `claude-code` and `codex` are the same
+ * strings `PROVIDER_MARKS` is keyed by and each adapter stamps on a row -- so
+ * a provider and the glyph that stands for it cannot drift apart.
  */
 
 /** Narrow on purpose: an id that is not in the table fails to compile. */
-export type ProviderId = 'claude-code';
+export type ProviderId = 'claude-code' | 'codex';
 
 export type Provider = {
   readonly id: ProviderId;
@@ -41,6 +49,7 @@ export const DEFAULT_PROVIDER_ID: ProviderId = 'claude-code';
 
 export const PROVIDERS: readonly Provider[] = [
   { id: 'claude-code', label: 'Claude Code', command: ['claude'] },
+  { id: 'codex', label: 'Codex', command: ['codex'] },
 ];
 
 /**
@@ -61,9 +70,11 @@ export const PROVIDERS: readonly Provider[] = [
  * SO THE CONTROLS ARE CONDITIONAL, NOT DELETED, and the condition lives here
  * rather than in either of them: the day a second source exists in main this is
  * `true` and both come back unchanged, with no edit at either call site.
- * `test/settings/provider-double.test.tsx` mocks this module and proves it for
- * the settings copy; `test/panels/DetailPanel.provider-picker.test.tsx` does
- * the same for the composer's.
+ * That day was the `codex` row above. `test/settings/provider-double.test.tsx`
+ * mocks this module and proves it for the settings copy;
+ * `test/panels/DetailPanel.provider-picker.test.tsx` does the same for the
+ * composer's; and `test/shared/providers.test.ts` pins that the shipped table
+ * really does derive to `true`.
  *
  * WITHDRAWING THE CONTROL IS NOT WITHDRAWING THE ANSWER: the settings section
  * still names the provider and the command it runs, which is what the operator

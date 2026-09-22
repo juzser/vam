@@ -32,6 +32,7 @@ import {
   paneHolding,
   pruneClosedTabs,
   removeTab,
+  renameTab,
   restoreLayout,
   type Split,
   type SplitTree,
@@ -804,5 +805,50 @@ describe('joinPane — a tab moves into an existing pane, and the layout shrinks
     const joined = joinPane(twoPanes(), 'pane-1', 'pane-2', 's2');
     const held = leaves(joined).flatMap((leaf) => leaf.sessionIds);
     expect(new Set(held).size).toBe(held.length);
+  });
+});
+
+/**
+ * A PANE ROW BECOMES AN AGENT ROW, AND THE TAB MUST FOLLOW. A vam pane with
+ * nothing in it is a row keyed by its own name; the moment an agent registers
+ * in it the source reports a row keyed by the agent instead (`Session.pane`,
+ * `model.ts`). The two ids share nothing, and `pruneClosedTabs` would drop
+ * the first as closed at exactly the moment the operator is watching it
+ * start. `renameTab` is the step before the prune: same pane, new id, same
+ * tab in the same place.
+ */
+describe('renameTab — a tab keeps its place when its session changes identity', () => {
+  it('replaces the id in place, in every leaf that held it, and keeps it in front', () => {
+    const tree = splitPane(singlePane('s1', 'pane-1'), 'pane-1', 'right', 'pane:vam-a', 'pane-2');
+    const renamed = renameTab(tree, 'pane:vam-a', 'sess-a#7');
+    expect(leaves(renamed).map((leaf) => [leaf.sessionId, leaf.sessionIds])).toEqual([
+      ['s1', ['s1']],
+      ['sess-a#7', ['sess-a#7']],
+    ]);
+  });
+
+  it('keeps the tab’s POSITION among its siblings, and a background tab stays in the background', () => {
+    let tree = singlePane('s1', 'pane-1');
+    tree = setPaneSession(tree, 'pane-1', 'pane:vam-a');
+    tree = setPaneSession(tree, 'pane-1', 's3');
+    const renamed = renameTab(tree, 'pane:vam-a', 'sess-a#7');
+    expect(findLeaf(renamed, 'pane-1')).toEqual({
+      kind: 'leaf',
+      id: 'pane-1',
+      sessionId: 's3',
+      sessionIds: ['s1', 'sess-a#7', 's3'],
+    });
+  });
+
+  it('is the SAME tree when nothing held the old id -- no churn for the effect that calls it', () => {
+    const tree = singlePane('s1', 'pane-1');
+    expect(renameTab(tree, 'pane:vam-zz', 'sess-z#1')).toBe(tree);
+  });
+
+  it('does not duplicate a tab when the new id is already held', () => {
+    let tree = singlePane('pane:vam-a', 'pane-1');
+    tree = setPaneSession(tree, 'pane-1', 'sess-a#7');
+    const renamed = renameTab(tree, 'pane:vam-a', 'sess-a#7');
+    expect(findLeaf(renamed, 'pane-1')?.sessionIds).toEqual(['sess-a#7']);
   });
 });

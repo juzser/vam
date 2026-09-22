@@ -155,6 +155,10 @@ const STATUS_RANK: Readonly<Record<Session['status'], number>> = {
   waiting: 0,
   running: 1,
   idle: 2,
+  // An open pane with nothing started in it: alive, typeable, asking for
+  // nothing. Beside `idle`, whose quiet it shares -- and never in front of
+  // it, because a pane you have not started cannot be the one that needs you.
+  unstarted: 2,
   done: 3,
   failed: 3,
 };

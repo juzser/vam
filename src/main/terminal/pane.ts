@@ -27,6 +27,7 @@
  */
 
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
+import { paneNameOf } from '../sources/claude-code/pane-row.js';
 import { claimedPanes } from '../sources/claude-code/session-pane.js';
 import {
   PANE_HISTORY_LINES,
@@ -128,6 +129,21 @@ export function targetSession(
   rowId: string | undefined,
   panes: ReadonlyMap<string, string> | undefined,
 ): SessionMatch {
+  // A PANE ROW IS ITS OWN PROOF. A vam pane with nothing in it is a row keyed
+  // by its tmux name (`claude-code/pane-row.ts`), and the Terminal view is
+  // what such a row is FOR -- the operator types `claude` into it. Its
+  // project very often holds a second vam pane, the one with an agent in it,
+  // so the tag count below would answer `ambiguous` for exactly the row that
+  // most needs a screen. The name is checked against the listing and the
+  // project the way a published pane is: `none` when the pane has ended, and
+  // never a fall-through to a guess at some other pane.
+  const own = rowId === undefined ? null : paneNameOf(rowId);
+  if (own !== null) {
+    return projectId !== '' &&
+      sessions.some((session) => session.name === own && session.project === projectId)
+      ? { kind: 'one', name: own }
+      : { kind: 'none' };
+  }
   // `rowId` IS ALREADY the row key (`<sessionId>#<pid>`, `deliver.ts`), and
   // `panes` is keyed the same way (`session-pane.ts`) precisely so two
   // processes resuming one session -- each with its own pid and its own

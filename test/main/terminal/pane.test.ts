@@ -157,7 +157,7 @@ describe('reading the pane', () => {
     expect(argvs[0]).toEqual([
       'list-sessions',
       '-F',
-      '#{@vam-project}\t#{@vam-pid}\t#{session_name}',
+      '#{@vam-project}\t#{@vam-pid}\t#{session_name}\t#{pane_current_command}',
     ]);
     // Exact targeting: `-t vam-atlas-a1` would reach `vam-atlas-a1b2c3` by
     // tmux's own prefix resolution, and on send-keys that is someone else's
@@ -300,6 +300,43 @@ describe('the terminal channel', () => {
       // These stubs answer the capture and say nothing about the cursor,
       // which is exactly what `unreadable` means (`shared/terminal.ts`).
       cursor: { kind: 'unreadable' },
+    });
+  });
+});
+
+/**
+ * A PANE ROW NAMES ITS OWN PANE. A vam pane with nothing in it is a row keyed
+ * by its tmux name (`claude-code/pane-row.ts`), and the Terminal view is the
+ * whole point of such a row -- "the user can switch to the terminal view and
+ * start a session by typing `claude`". Its project very often holds a second
+ * vam pane (the one with an agent in it), and the project tag alone would
+ * answer `ambiguous` for exactly the row that most needs a screen. So the
+ * row's own name is the first proof here, checked against vam's listing and
+ * the project like a published pane is.
+ */
+describe('targetSession for a pane row', () => {
+  const two = [
+    { project: ATLAS, name: 'vam-atlas-aa0000', command: 'claude' },
+    { project: ATLAS, name: 'vam-atlas-zz0000', command: 'zsh' },
+  ];
+
+  it('resolves the pane the row IS, where the project alone is ambiguous', () => {
+    expect(targetSession(two, ATLAS, 'pane:vam-atlas-zz0000', new Map())).toEqual({
+      kind: 'one',
+      name: 'vam-atlas-zz0000',
+    });
+    expect(matchVamSession(two, ATLAS).kind).toBe('ambiguous');
+  });
+
+  it('is gone once the pane has ended -- never a guess at the other one', () => {
+    expect(targetSession(two, ATLAS, 'pane:vam-atlas-gone00', new Map())).toEqual({
+      kind: 'none',
+    });
+  });
+
+  it('never crosses projects: a pane row of another project is nobody’s here', () => {
+    expect(targetSession(two, BEACON, 'pane:vam-atlas-zz0000', new Map())).toEqual({
+      kind: 'none',
     });
   });
 });
