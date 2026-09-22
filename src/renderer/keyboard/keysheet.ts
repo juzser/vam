@@ -279,12 +279,23 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // mode to split by. "open the focused step" there would tell an operator
   // whose key collided with `Enter` that Select opens something, which it
   // never has since the strip left. The base has to be true standing alone.
+  //
+  // THE INSERT HALF GREW A THIRD CLAUSE — operator: "Enter to submit... a
+  // keyboard shortcut for submitting" against having to reach for Submit with
+  // every option. `question-keys.ts`'s `resolveQuestionKey` still claims this
+  // key first over the card, so what changed is what it does with it: mark
+  // then advance rather than mark alone. `Space` and `Mod-Enter` are not
+  // `chords.ts` bindings — they are local to the card, so they have no row of
+  // their own here and are named in this caption instead, the same way `c`
+  // (chat) is never a row either.
   open: {
     group: 'session',
-    label: () => 'nothing to open in Select; marks the option or opens the prompt in Insert',
+    label: () =>
+      'nothing to open in Select; marks the option and advances the call in Insert, or opens the prompt',
     byMode: () => ({
       select: 'nothing to open — the whole detail is already in the right pane',
-      insert: 'mark the option under the cursor, or open the prompt box',
+      insert:
+        'mark the option under the cursor and, once nothing is left unmarked, send the call — Space marks without sending, Mod-Enter sends from anywhere on the card. With no question on screen, opens the prompt box instead',
     }),
   },
   // NAMES WHAT IS THERE, NOT A CHOICE THAT DOES NOT EXIST. The pane holds one
