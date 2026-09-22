@@ -176,7 +176,7 @@ describe('a keystroke that belongs to an input method is not typed into the agen
     expect(send).not.toHaveBeenCalled();
     fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' });
     await settle();
-    expect(keys(send)).toEqual([{ kind: 'enter' }]);
+    expect(keys(send)).toEqual([{ kind: 'enter', shift: false }]);
   });
 });
 

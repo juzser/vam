@@ -36,6 +36,7 @@ import {
   sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNewlineArgv,
   sendTextArgv,
   sendWheelArgv,
 } from '../sources/tmux/argv.js';
@@ -419,9 +420,21 @@ export async function sendToPane(
   // by accident -- and this switch is where that holds: a `kind` off the bridge
   // selects one of five fixed argvs, or one of twenty-six constants in a table
   // it can only INDEX, and only `text` carries anything the operator wrote.
+  // `enter` alone answers TWO of the five, by `shift` -- the one field this
+  // switch reads off a kind rather than dispatching on, because Shift+Return
+  // is typed (`-l`, a literal LF) rather than pressed and still is not text
+  // the operator wrote: it is vam's own answer to a modifier, exactly as
+  // `sendEscapeArgv` is vam's own answer to `escape` carrying nothing to read.
   const argv =
     key.kind === 'enter'
-      ? sendEnterArgv(match.name)
+      ? // Plain Return is PRESSED, interpreted; Shift+Return is a literal LF
+        // TYPED, so the program in the pane reads it as an inserted line
+        // rather than a submit -- see `sendNewlineArgv` for the measurement
+        // this rests on. `shift` is required on the bridge (`isPaneKey`), so
+        // there is no third answer to fall through to.
+        key.shift
+        ? sendNewlineArgv(match.name)
+        : sendEnterArgv(match.name)
       : key.kind === 'backspace'
         ? sendBackspaceArgv(match.name)
         : key.kind === 'back-tab'
