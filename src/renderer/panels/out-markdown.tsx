@@ -139,7 +139,10 @@ import { useOutActions } from './out-actions.js';
  * working directory (`src/main/files/resolve-ipc.ts`). `src/shared/file-ref.ts`
  * owns what counts as one and why the rules are so narrow.
  */
-const DIFF_CLASS: Record<DiffKind, string> = {
+/** Exported so `files-markdown.tsx` can draw a diff fence in its OWN colours
+ *  without re-deriving which line is which -- `diffLineKind` is the one
+ *  decision, this is only its paint. */
+export const DIFF_CLASS: Record<DiffKind, string> = {
   plain: '',
   add: 'text-diff-add',
   del: 'text-diff-del',
@@ -155,7 +158,11 @@ const DIFF_CLASS: Record<DiffKind, string> = {
  * string a fence produces — a fence whose content is anything else is rendered
  * exactly as it was.
  */
-function readFence(
+/** Exported so `files-markdown.tsx` can read the same fence shape and draw
+ *  it in its OWN container -- the PARSING is the shared decision, not the
+ *  paint. See this file's header for why the two surfaces share one set of
+ *  decisions about untrusted text rather than re-deriving a second one. */
+export function readFence(
   children: ReactNode,
 ): { readonly code: string; readonly lang: string | null } | null {
   const only = Array.isArray(children) && children.length === 1 ? children[0] : children;
@@ -179,7 +186,11 @@ function readFence(
  * DOM here as the characters of a `<script>`, as it did before there was any
  * colour at all.
  */
-function Fence({ code, lang }: { readonly code: string; readonly lang: HighlightLang }) {
+/** Exported so `files-markdown.tsx` can draw the SAME coloured spans inside
+ *  its own `<pre>` -- this component paints nothing of the container, only
+ *  the `<code>` and its spans, so it is already free of any styling decision
+ *  the two surfaces would need to agree on separately. */
+export function Fence({ code, lang }: { readonly code: string; readonly lang: HighlightLang }) {
   // Keyed by BYTE OFFSET, not by list index: offsets are unique even when the
   // same line or the same token repeats, which in a patch they constantly do.
   let at = 0;
@@ -256,7 +267,10 @@ export const OUT_URL_TRANSFORM = (url: string): string => url;
  * path with nothing to distinguish it. The provider is set on the WHOLE `pre`
  * rather than on the fallback alone, so the two paths cannot drift.
  */
-const Fenced = createContext(false);
+/** Exported so `files-markdown.tsx`'s own `pre`/`code` pair can share the
+ *  same "is this a fence?" signal rather than inventing a second one that
+ *  could disagree with it. */
+export const Fenced = createContext(false);
 
 /**
  * What a refusal looks like when the operator presses something that cannot
@@ -267,7 +281,10 @@ const Fenced = createContext(false);
  * makes: it appears immediately after the key or click the operator made, and
  * assertive would interrupt a screen reader to repeat something they just did.
  */
-function Refusal({ text }: { readonly text: string }) {
+/** Exported so `files-markdown.tsx`'s own link draws the same refusal in the
+ *  same words and the same ink -- "a control that can only refuse says so"
+ *  is a house rule, not a decision either surface owns on its own. */
+export function Refusal({ text }: { readonly text: string }) {
   return (
     <span role="status" className="font-mono text-[0.875em] text-failed">
       {' '}
@@ -289,8 +306,10 @@ function plainText(children: ReactNode): string | null {
   return null;
 }
 
-/** What a link with no href at all is refused with -- `checkLink`'s own words. */
-const NO_ADDRESS = 'vam was given no address to open.';
+/** What a link with no href at all is refused with -- `checkLink`'s own
+ *  words. Exported for `files-markdown.tsx`'s own link, for the same reason
+ *  `Refusal` is. */
+export const NO_ADDRESS = 'vam was given no address to open.';
 
 /**
  * A LINK AN AGENT WROTE, as a button and never as an anchor -- drawn as ONE
