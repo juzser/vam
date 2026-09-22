@@ -106,7 +106,13 @@ tmux(
   '-t',
   `=${TMUX_SESSION}:`,
   '-l',
-  'i=1; while [ $i -le 300 ]; do printf "\\033[3$((i%7+1))m line %03d some coloured text \\033[0m trailing   \\n" $i; i=$((i+1)); done; clear; i=1; while [ $i -le 8 ]; do printf "\\033[3$((i%7+1))m after clear %03d\\033[0m\\n" $i; i=$((i+1)); done\n',
+  // NOT `clear`: on Linux ncurses its terminfo `clear` carries `E3`
+  // (`ESC [ 3 J`, "erase scrollback"), which tmux honours by DROPPING THE
+  // HISTORY -- measured: `history_size` 103 -> 0 on tmux 3.7b, and the same
+  // on the CI runner's 3.4, where this phase reddened with "714 vs 714, of
+  // 0" while the fill had visibly landed. macOS's terminfo has no `E3`, so
+  // the laptop never saw it. `ESC [ H ESC [ 2 J` clears the screen alone.
+  'i=1; while [ $i -le 300 ]; do printf "\\033[3$((i%7+1))m line %03d some coloured text \\033[0m trailing   \\n" $i; i=$((i+1)); done; printf "\\033[H\\033[2J"; i=1; while [ $i -le 8 ]; do printf "\\033[3$((i%7+1))m after clear %03d\\033[0m\\n" $i; i=$((i+1)); done\n',
 );
 
 /* ── the app's own read path, bundled from source ───────────────────────── */
@@ -135,14 +141,24 @@ const real = createTmuxRunner('tmux');
 /** The app's runner, aimed at the private socket. Same argv otherwise. */
 const run = (argv) => real(['-L', SOCKET, ...argv]);
 
-// Wait for the fill to land: the shell has to start and print 300 lines.
+// Wait for the MEASURED condition, not a sleep: the last line of the fill
+// is on screen AND tmux holds the scrollback above it (the 300 lines, less
+// the screen that scrolled off, is at least 250). A runner is far slower
+// than a laptop, and a fill that printed but left no history is exactly the
+// silent state this phase exists to catch (see the `clear` note above).
 {
-  const until = Date.now() + 10_000;
+  const until = Date.now() + 30_000;
   for (;;) {
     const view = await readSessionPane(run, PROJECT, undefined, undefined, HISTORY);
-    if (view.kind === 'ok' && view.text.includes('after clear 008')) break;
+    const depth = Number(
+      tmux('display-message', '-p', '-t', `=${TMUX_SESSION}:`, '#{history_size}').trim(),
+    );
+    if (view.kind === 'ok' && view.text.includes('after clear 008') && depth >= 250) break;
     if (Date.now() > until) {
-      console.error('FAIL  the private tmux session never printed its fill:', JSON.stringify(view));
+      console.error(
+        `FAIL  the private tmux session never printed its fill with scrollback (history_size ${depth}):`,
+        JSON.stringify(view).slice(0, 300),
+      );
       killServer();
       process.exit(1);
     }
