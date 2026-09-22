@@ -1946,7 +1946,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   )
                 }
                 className={[
-                  'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
+                  // `py-1`, not `py-1.5`: this popover is excluded from the
+                  // phone sheet rules (`FILTER_POPOVER_FOOT`'s own note) and
+                  // caps itself to whatever the viewport leaves below its
+                  // anchor, which on a covered iOS keyboard is a fixed, small
+                  // band -- `e2e/phone-shell.pw.ts`'s "fits above an iOS
+                  // keyboard" measured it at 390x844 with all four origin
+                  // rows drawn. None of the 44x44 sweeps cover this popover
+                  // (`phone-core-loop.pw.ts`'s census opens the provider and
+                  // model pickers, not this one), so the four points saved
+                  // here cost no touch target its floor.
+                  'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1 text-left text-control',
                   on
                     ? 'border-line-loud bg-raised text-ink'
                     : 'border-line text-ink-dim hover:border-line-strong',

@@ -1580,6 +1580,13 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
   });
 
   test('the keystroke strip is absent for a session vam did not start', async ({ page }) => {
+    // `beta-one` is `vamControlled: false`, which is also what the new
+    // `hideForeign` default (`session-filter.ts`) hides by default -- this
+    // test is about the keystroke strip, not the sidebar, so it turns the
+    // filter off rather than asserting a row that would otherwise never draw.
+    await page.addInitScript(() => {
+      localStorage.setItem('vam.prefs.v1', JSON.stringify({ filters: { hideForeign: false } }));
+    });
     await stubSource(page);
     // `beta-one` is the second project's only session -- `vamControlled: false`.
     const row = page.locator('[data-phone-shell] [data-session-row]', {
