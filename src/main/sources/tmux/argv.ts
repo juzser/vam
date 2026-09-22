@@ -503,6 +503,56 @@ export function sendEnterArgv(name: string): readonly string[] {
 }
 
 /**
+ * Shift+Enter in the Terminal tab: a newline INSIDE THE PANE'S OWN PROGRAM,
+ * never a submit. `sendTextArgv`'s builder, not a new primitive -- a single
+ * `\n` typed `-l` is exactly what this needs to be, and giving it a name of
+ * its own is the whole of the change (`shared/terminal.ts`'s `PaneKey.enter`
+ * carries `shift` for the reason this function exists).
+ *
+ * THE OPERATOR'S REPORT: Shift+Enter did nothing distinguishable from a bare
+ * Enter, because `TerminalTab.tsx` dropped Shift on the floor before this
+ * file ever saw a keystroke -- a real terminal only manages the trick with a
+ * protocol tmux was never asked to negotiate (Kitty's CSI-u, or a
+ * `/terminal-setup` iTerm2/VS Code profile), neither of which vam's pane had.
+ *
+ * MEASURED on a private `-L` socket, tmux 3.7b, both REPLs started the way
+ * vam starts one (`createVamSession`, straight into the CLI, no shell in
+ * front of it): a single literal LF byte (`send-keys -l -- '\n'`, delivered
+ * as one 0x0a to the pty) landed as an inserted line and submitted nothing,
+ * in BOTH Claude Code 2.1.278 and Codex 0.153.2. Two escape-sequence forms
+ * did the same in both -- Kitty's `CSI 13;2u` and the Option/Alt-Enter
+ * spelling `ESC` then CR -- so LF was not the only candidate that worked; it
+ * was chosen because
+ * it needs no escape parser on either end and no tmux `extended-keys`
+ * negotiation (`show -g extended-keys`, off by default and irrelevant here
+ * regardless -- this sends a raw byte via `-l`, never a tmux KEY NAME, so
+ * tmux's own translation of `S-Enter` is never asked to run). A fourth form,
+ * xterm's `modifyOtherKeys` (`CSI 27;2;13~`), was tried and DROPPED: Codex
+ * read it as nothing at all rather than a newline, so it is not the answer
+ * that holds for both agents vam ships a Terminal tab for.
+ *
+ * THE OTHER DIRECTION WAS CHECKED TOO, because this repo already trusted an
+ * adjacent claim that turned out stale: `promptKeystrokes`'s own note above
+ * says CR and a bare LF both submit, measured against an EARLIER Claude Code.
+ * Re-measured here against 2.1.278, a bare LF no longer does -- which reads
+ * as the REPL having grown an explicit newline binding on the byte every
+ * keyboard sends for Ctrl+J, since Ctrl+J is reachable from every terminal
+ * where Shift+Enter and Option+Enter are not. That drift is `reply.ts`'s
+ * business, not this function's: `promptKeystrokes` answers a different
+ * question (a WHOLE multi-line prompt, typed and self-escaping) and touching
+ * it is out of scope for a Terminal-tab keystroke fix.
+ *
+ * NOT `sendTextArgv(name, '\n')` inline at the call site, and NOT reused for
+ * `promptKeystrokes`'s internal newlines either -- a named builder is what
+ * lets `sendToPane`'s switch (`main/terminal/pane.ts`) read as a table of
+ * keys rather than a table of keys plus one special case, matching
+ * `sendEnterArgv`, `sendEscapeArgv` and the rest.
+ */
+export function sendNewlineArgv(name: string): readonly string[] {
+  return sendTextArgv(name, '\n');
+}
+
+/**
  * Type a WHOLE prompt into the pane, with its internal newlines intact -- the
  * ordered keystrokes to enter the text, but NOT the submit that follows it.
  *

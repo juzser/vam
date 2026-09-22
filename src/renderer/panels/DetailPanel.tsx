@@ -3522,7 +3522,7 @@ const KEY_STRIP: readonly {
   },
   {
     id: 'enter',
-    key: { kind: 'enter' },
+    key: { kind: 'enter', shift: false },
     caption: '⏎ → agent',
     ariaLabel: 'press Enter in the session',
   },

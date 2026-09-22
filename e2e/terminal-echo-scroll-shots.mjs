@@ -489,6 +489,59 @@ try {
     after !== null && back !== null && back > after,
     `first line ${after} -> ${back}`,
   );
+
+  /* ── PHASE C: SHIFT+ENTER IS A NEWLINE IN THE PANE, NEVER A SUBMIT ──────── */
+
+  // vam/shift-enter. The operator's report: Shift+Enter submits in the
+  // Terminal tab instead of inserting a line, because `TerminalTab.tsx`
+  // dropped Shift on the floor before a keystroke ever reached tmux. This
+  // phase drives a REAL Shift+Enter over a REAL pane and reads what a REAL
+  // program on the other end of the pty actually got -- asserting only that
+  // vam's own `send` bridge was CALLED with the right `PaneKey` would still
+  // pass if tmux declined the byte, or if `-l` had typed the word `Enter`
+  // instead of pressing it (both real ways for that gap to open, and both
+  // measured against directly in `tmux/argv.ts`'s own note).
+  // `e2e/fixtures/key-echo.cjs` is the fixture: raw mode, one hex-dumped
+  // line per chunk of stdin it reads, so a lone `\n` shows as `0a` and a
+  // real Enter as `0d` -- distinguishable by an exact string match, not by
+  // eye.
+  const echo = new URL('./fixtures/key-echo.cjs', import.meta.url).pathname;
+  tmux('kill-session', '-t', `=${TMUX_SESSION}:`);
+  tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'node', echo);
+  tmux('set-option', '-t', `=${TMUX_SESSION}:`, '@vam-project', PROJECT);
+  aimed = null;
+  sent.length = 0;
+  await page.waitForTimeout(1_000);
+
+  await page.locator('[data-terminal-pane]').click();
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Shift+Enter');
+  await page.waitForTimeout(400);
+  const afterShiftEnter = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+  check(
+    'vam’s own send bridge carries Shift+Enter as `{ kind: "enter", shift: true }`',
+    sent.some((s) => s.key.kind === 'enter' && s.key.shift === true && s.landed === 'sent'),
+    JSON.stringify(sent),
+  );
+  check(
+    'the real program in the pane reads Shift+Enter as a bare LF (0x0a), not a Return (0x0d)',
+    /chunk \d+: 0a$/m.test(afterShiftEnter.trimEnd()),
+    JSON.stringify(afterShiftEnter),
+  );
+  check(
+    'and NOT as the interpreted Return -- the byte a submit would have sent',
+    !afterShiftEnter.includes('0d'),
+    JSON.stringify(afterShiftEnter),
+  );
+
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(400);
+  const afterPlainEnter = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+  check(
+    'a PLAIN Enter right after still presses the interpreted Return (0x0d), so the two keys stay distinct',
+    /chunk \d+: 0d$/m.test(afterPlainEnter.trimEnd()),
+    JSON.stringify(afterPlainEnter),
+  );
 } finally {
   await browser.close();
   killServer();
