@@ -20,6 +20,7 @@ import {
   sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNewlineArgv,
   sendTextArgv,
   sendWheelArgv,
 } from '../../src/main/sources/tmux/argv.js';
@@ -106,6 +107,18 @@ describe('encodeControlLine', () => {
     expect(encodeControlLine(sendTextArgv('vam-a1b2c3', 'é'))?.line).toBe(
       'send-keys -t =vam-a1b2c3: -H c3 a9',
     );
+  });
+
+  it('routes Shift+Enter’s literal newline (#446, sendNewlineArgv) through the SAME -H rewrite', () => {
+    // `sendNewlineArgv` is `sendTextArgv(name, '\n')` -- argv.ts's own
+    // builder, not a shape this file invented -- so it already matches the
+    // six-token `send-keys -t <target> -l -- <text>` special case above.
+    // Asserted against the real builder, not a hand-typed argv, so a future
+    // change to that builder's shape is what this test would actually catch.
+    expect(encodeControlLine(sendNewlineArgv('vam-a1b2c3'))).toEqual({
+      line: 'send-keys -t =vam-a1b2c3: -H 0a',
+      blocks: 1,
+    });
   });
 
   it('hex-encodes text carrying tmux/shell metacharacters -- the exact case a quoted string could not survive', () => {
