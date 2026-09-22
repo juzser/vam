@@ -163,20 +163,25 @@ describe('a keystroke echo asks for no scrollback while the view is at the live 
   });
 });
 
-describe('the two shapes are not mistaken for one another', () => {
-  it('keeps the operator at the live end across the flip, both ways', async () => {
+describe("a screen-shaped answer is drawn in the windowed answer's own coordinates", () => {
+  it('keeps the operator at the live end across the flip, and keeps the scrollback drawn', async () => {
     /**
-     * THE WAY THIS CHANGE COULD CORRUPT THE PIN. An echo read at the bottom
+     * THE WAY THIS CHANGE COULD CORRUPT THE PIN -- and the way it DID, which
+     * `TerminalTab.echo-splice.test.tsx` records. An echo read at the bottom
      * answers with ~50 lines; the tick a moment later answers with ~550. The
-     * pane's content height therefore changes four times a second while
-     * somebody types, and the operator must not be able to see it: the screen
-     * is the SAME rectangle in both, and a suffix of the longer one
-     * (measured -- tmux returns exactly the window's rows for a capture with
-     * no `-S`, so a screen-only view is precisely one boxful and has nothing
-     * to scroll).
+     * first cut put the shorter answer on screen as the whole view, on the
+     * argument that the operator could not see it: the screen is the SAME
+     * rectangle in both, and a suffix of the longer one (measured -- tmux
+     * returns exactly the window's rows for a capture with no `-S`). What
+     * they could see was that the pane had nothing left to scroll. Now the
+     * shorter answer is spliced onto the history already drawn
+     * (`composeScreen`), so the content height does not move at all and the
+     * pin has nothing to correct.
      */
     const read = vi.fn(async (_p: string, _r?: string, mode?: PaneReadMode) =>
-      ok(mode === 'echo' ? 'screen\n'.repeat(40) : 'history\n'.repeat(500)),
+      ok(
+        mode === 'echo' ? 'screen\n'.repeat(40) : `${'history\n'.repeat(500)}${'old\n'.repeat(40)}`,
+      ),
     );
     const send = vi.fn(async () => 'sent' as PaneSendResult);
     render(
@@ -191,22 +196,25 @@ describe('the two shapes are not mistaken for one another', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    // The screen-only answer arrived and the box is now one boxful tall. The
-    // pin ran against the height the operator WAS scrolling in and put them
-    // at the bottom of the new content, which is the same rectangle.
     expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
+    // Still at the live end, with the history still above it and the screen
+    // the echo answered in place of the one the poll had drawn.
     expect(el.scrollTop).toBe(8000);
+    const drawn = (el.querySelector('pre')?.textContent ?? '').split('\n');
+    expect(drawn.filter((line) => line === 'history')).toHaveLength(500);
+    expect(drawn.filter((line) => line === 'screen')).toHaveLength(40);
+    expect(drawn.filter((line) => line === 'old')).toHaveLength(0);
   });
 
-  it('never bails out of drawing a screen-only answer over a windowed one', async () => {
-    // THE OTHER HALF, and the one that would be silent: `sameScreen` drops an
-    // answer identical to the one on screen. The two shapes answer DIFFERENT
-    // questions -- `PaneCursor.row` is an index into whichever text arrived
-    // with it -- so an answer to one may never be compared against an answer
-    // to the other. Here both answers carry the same forty lines, which is
-    // what a session with no scrollback yet really looks like: the comparison
-    // must still not be made, or the tab would keep showing the shape it was
-    // no longer asking for.
+  it('bails out of an echo answer identical to the screen already drawn', async () => {
+    // THE OTHER HALF, and it used to be asserted the other way round: the two
+    // shapes were two coordinate systems that could never be compared, so a
+    // screen-only answer was ALWAYS drawn. `composeScreen` puts it into the
+    // drawn answer's coordinates first, so `sameScreen` is sound across the
+    // flip -- and it matters, because an echo read fires up to thirty times a
+    // second and most of those answers are the same screen as the last. Here
+    // the session has no scrollback yet, so both questions really do return
+    // the same forty lines.
     // WHAT IS OBSERVED, and the obvious assertion cannot be it: two identical
     // texts leave identical DOM whether the answer was drawn or dropped, so
     // reading the screen back would pass against either build. The pin is what
@@ -216,11 +224,10 @@ describe('the two shapes are not mistaken for one another', () => {
     // A FRESH OBJECT PER CALL for the reason that file states: a shared
     // reference would make React bail out on its own.
     const read = vi.fn(async (_p: string, _r?: string, mode?: PaneReadMode) => {
-      // THE BOX GROWS WHILE THE READ IS IN FLIGHT, which is how the pin's own
-      // write becomes visible: it is issued AFTER the tab has decided which
-      // question to ask (so the mode below is still `echo`) and BEFORE the
-      // answer is applied. A drawn answer pins to the new height; a dropped
-      // one never runs the pin at all.
+      // THE BOX GROWS WHILE THE READ IS IN FLIGHT: it is issued AFTER the tab
+      // has decided which question to ask (so the mode below is still `echo`)
+      // and BEFORE the answer is applied. A drawn answer would pin to the new
+      // height; a dropped one never runs the pin at all.
       if (mode === 'echo') box({ scrollHeight: 1500, clientHeight: 200, scrollTop: 600 });
       return ok('same\n'.repeat(40));
     });
@@ -237,8 +244,8 @@ describe('the two shapes are not mistaken for one another', () => {
       await Promise.resolve();
     });
     expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
-    // Drawn, not dropped: the pin ran and followed the taller box down.
-    expect(el.scrollTop).toBe(1500);
+    // Dropped, not drawn: the pin never ran, so the box's own number stands.
+    expect(el.scrollTop).toBe(600);
   });
 });
 

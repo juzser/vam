@@ -112,9 +112,12 @@ export type PaneView =
  * the live end. It rides the pairing the last `poll` proved
  * (`main/terminal/ipc.ts`, `AIM_TTL_MS`) and asks for the screen only, because
  * a view at the bottom is showing no scrollback: nobody is looking at the 500
- * lines it would cost ~5ms and 78KB to fetch and ten times the React work to
- * draw. This is the one mode allowed to prove nothing, and the poll's own
- * proof is what bounds it.
+ * lines it would cost ~5ms and 78KB to fetch. The renderer keeps those lines
+ * in the DOM all the same -- it splices the screen onto the history it already
+ * has (`panels/TerminalTab.tsx`, `composeScreen`), because a pane holding one
+ * screen has nothing to scroll, and an operator who cannot leave the live end
+ * can never be asked the mode below. This is the one mode allowed to prove
+ * nothing, and the poll's own proof is what bounds it.
  *
  * `echo-scrollback` -- the same read with the operator SCROLLED UP. It rides
  * the aim too, but it asks for the whole window: serving the screen alone
