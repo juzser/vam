@@ -555,6 +555,135 @@ try {
     /chunk \d+: 0d$/m.test(afterPlainEnter.trimEnd()),
     JSON.stringify(afterPlainEnter),
   );
+
+  /* ── PHASE D: OPENKEY'S WHOLE-SYLLABLE REPLACEMENT REACHES THE PANE ─────── */
+
+  // vam/vi-ime. The operator's report, translated: "When typing Vietnamese in
+  // tmux (the Terminal tab), some special letters like ố, ồ … get lost, and
+  // then as I keep typing, characters keep getting deleted one after
+  // another." The operator runs OpenKey (github.com/tuyenvm/OpenKey), which
+  // is not a standard input method: it holds no marked-text session with
+  // Chromium at all. Correcting an earlier letter (doubling `o` into `ô`, a
+  // tone key moving a mark) it posts one synthetic Backspace keyDown/keyUp
+  // pair PER CHARACTER to erase (`SendBackspace`,
+  // `Sources/OpenKey/macOS/ModernKey/OpenKey.mm`) and then ONE keyDown/keyUp
+  // pair carrying the WHOLE corrected string via
+  // `CGEventKeyboardSetUnicodeString` (`SendNewCharString`, same file) --
+  // never the single changed letter alone, and never one character at a
+  // time.
+  //
+  // MEASURED AGAINST A REAL CHROMIUM, NEITHER EVENT IS A `keydown` A HANDLER
+  // CAN READ. `TerminalTab.openkey.test.tsx` carries the probe in full: CDP
+  // `Input.dispatchKeyEvent({ type: 'keyDown', key: 'ối', ... })` -- more than
+  // one code unit -- produces a `keydown` whose `key` is the EMPTY STRING;
+  // `Input.insertText` and a raw `type: 'char'` event, with no prior
+  // `Input.imeSetComposition` call, produce no `keydown` at all, only
+  // `beforeinput`/`input`, `isComposing: false`, `inputType: 'insertText'`.
+  // `Input.insertText` IS THE INSTRUMENT here for exactly that reason, and
+  // NOT `Input.imeSetComposition`: OpenKey never opens a composition, so
+  // driving the IME-composition API would measure a mechanism the operator's
+  // report is not about, and dispatching a fake multi-character `keydown`
+  // would measure a `key` value Chromium never actually produces (an earlier
+  // cut of this phase did exactly that and passed for the wrong reason --
+  // `sent` never carried the replacement at all, backspaces included, because
+  // `composedKeydownStrokes` correctly declined the empty string CDP handed
+  // it). This phase asserts what `Input.insertText` and two real Backspace
+  // `keydown`s do against a REAL program on a REAL pty: asserting only that
+  // vam's own `send` bridge was CALLED with the right `PaneKey`s would still
+  // pass if tmux declined a delivery or delivered the backspaces after the
+  // replacement instead of before it -- both real ways for the operator's
+  // report to reappear with this guard green.
+  //
+  // ACCESSIBILITY AUTOMATION COULD NOT DRIVE THE REAL OpenKey PROCESS in the
+  // environment this guard was written in -- `osascript`'s `System Events`
+  // answered "Not authorized to send Apple events to System Events (-1743)"
+  // -- so nothing below is OpenKey itself; the event shapes are reasoned from
+  // its own source and measured against Chromium directly. What IS measured
+  // here is real: whether Chromium, given exactly that shape, really turns it
+  // into the `PaneKey`s the operator's report needs, and whether a real tmux
+  // pane really receives them in order.
+  aimed = null;
+  sent.length = 0;
+  tmux('kill-session', '-t', `=${TMUX_SESSION}:`);
+  tmux(
+    'new-session',
+    '-d',
+    '-s',
+    TMUX_SESSION,
+    '-x',
+    String(COLUMNS),
+    '-y',
+    String(ROWS),
+    'node',
+    echo,
+  );
+  tmux('set-option', '-t', `=${TMUX_SESSION}:`, '@vam-project', PROJECT);
+  await page.waitForTimeout(1_000);
+
+  await page.locator('[data-terminal-pane]').click();
+  await page.waitForTimeout(200);
+
+  // CDP, not `page.keyboard` -- Playwright's own keyboard API presses a named
+  // KEY and has no way to fire the shape below at all.
+  const cdp = await page.context().newCDPSession(page);
+
+  /** A real Backspace keydown -- what `SendBackspace` posts, one pair per
+   *  character OpenKey means to erase. */
+  const backspaceKeyDown = () =>
+    cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: 'Backspace',
+      code: 'Backspace',
+      windowsVirtualKeyCode: 8,
+      nativeVirtualKeyCode: 8,
+    });
+  /** A plain ASCII letter, keydown then keyup -- ordinary typing, unrelated
+   *  to OpenKey's own mechanism, and what builds the raw Telex skeleton. */
+  const letterKeyDown = (letter) =>
+    cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: letter,
+      code: `Key${letter.toUpperCase()}`,
+      windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
+      nativeVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
+    });
+
+  for (const letter of 'toi') await letterKeyDown(letter);
+  await page.waitForTimeout(150);
+
+  // THE CORRECTION: OpenKey deletes the last two characters it typed ("o"
+  // and "i") with two real Backspace keydowns, and then posts ONE event
+  // carrying the tone-marked replacement whole -- `Input.insertText`, with NO
+  // prior `Input.imeSetComposition` call, is what MEASURED as the shape that
+  // produces (`isComposing: false`, `inputType: 'insertText'`, no `keydown`
+  // at all). The pane should read "tối" once this lands -- not "t" with the
+  // rest of the syllable silently gone, which is the operator's report typed
+  // out literally.
+  await backspaceKeyDown();
+  await backspaceKeyDown();
+  await cdp.send('Input.insertText', { text: 'ối' });
+  await page.waitForTimeout(400);
+
+  const afterCorrection = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+  const hexOf = (text) => Buffer.from(text, 'utf8').toString('hex').match(/../g).join(' ');
+  check(
+    'vam’s own send bridge carries the two backspaces before the replacement text, in order',
+    sent.filter((s) => s.key.kind === 'backspace').length === 2 &&
+      sent.some((s) => s.key.kind === 'text' && s.key.text === 'ối') &&
+      sent.findLastIndex((s) => s.key.kind === 'backspace') <
+        sent.findIndex((s) => s.key.kind === 'text' && s.key.text === 'ối'),
+    JSON.stringify(sent),
+  );
+  check(
+    'the real program in the pane receives both backspaces as real bytes (0x7f or 0x08), not the six characters "Backspace"',
+    (afterCorrection.match(/chunk \d+: (?:7f|08)$/gm) ?? []).length === 2,
+    JSON.stringify(afterCorrection),
+  );
+  check(
+    'and the tone-marked replacement really reaches it whole, as the UTF-8 bytes of "ối" — not lost the way the operator’s report describes',
+    afterCorrection.includes(hexOf('ối')),
+    `expected a chunk of "${hexOf('ối')}" in:\n${afterCorrection}`,
+  );
 } finally {
   await browser.close();
   real.dispose();
