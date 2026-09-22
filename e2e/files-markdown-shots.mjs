@@ -52,6 +52,12 @@
  *     `display: none` label satisfying a `textContent` check), and the
  *     control still fitting inside the pane at vam's 320px floor, where the
  *     icon-only button it replaced never had to.
+ *  7. WHETHER A LINK IS READABLE AS A LINK AT REST. `text-chip` on the
+ *     button is a class-name fact a unit test can read; whether that class
+ *     names a rule that paints a colour a reader could tell apart from the
+ *     paragraph around it is a `getComputedStyle` fact only a real cascade
+ *     answers, which is what the comparison against a real `<p>`'s own
+ *     colour is for.
  *
  *   node e2e/files-markdown-shots.mjs http://localhost:5520 e2e/test-results
  */
@@ -141,8 +147,81 @@ await page.addInitScript(() => {
     '',
   ].join('\n');
 
+  /**
+   * A SECOND FILE, FOR THE SAME REASON README.md's OWN NEIGHBOURS ARE SEPARATE
+   * FILES RATHER THAN MORE OF ITS BODY: adding these cases into README.md
+   * would move `items`, `tableHeaders` and every other count section 4 already
+   * pins. Operator report, translated: "the md preview has a bug with the code
+   * block style" — reported against the SHIPPED build, with no fence
+   * reproduced, so this is every shape real markdown puts in front of a fence
+   * that the fixture above never exercised: no infostring, an infostring
+   * nothing recognises, one it does, CommonMark's OTHER code-block syntax (4
+   * spaces, no fence at all), a fence nested inside a list item rather than at
+   * the top level, a line long enough that wrapping it would be worse than
+   * scrolling it, content that LOOKS like other constructs (`#`, `>`, a tab)
+   * but is quoted text inside a fence, and the `~~~` delimiter CommonMark
+   * accepts beside `` ``` ``.
+   */
+  const CODE = [
+    '# Code blocks',
+    '',
+    'No language:',
+    '',
+    '```',
+    'plain fenced text',
+    'no info string at all',
+    '```',
+    '',
+    'Unknown language:',
+    '',
+    '```mermaid',
+    'graph TD; A-->B;',
+    '```',
+    '',
+    'A recognised language, for contrast with the one above:',
+    '',
+    '```shell',
+    'echo hello',
+    '```',
+    '',
+    'Indented (4-space) code block, not a fence at all:',
+    '',
+    '    indented block line one',
+    '    indented block line two',
+    '',
+    'A fence inside a list item:',
+    '',
+    '- item one',
+    '  ```ts',
+    '  const nested = true;',
+    '  ```',
+    '- item two',
+    '',
+    'A line long enough that it must scroll, not wrap or overflow the pane:',
+    '',
+    '```',
+    'x'.repeat(220),
+    '```',
+    '',
+    'Content that looks like other constructs, and a real tab:',
+    '',
+    '```',
+    '# not a heading',
+    '> not a quote',
+    '\tindented with a real tab',
+    '```',
+    '',
+    'A `~~~` fence:',
+    '',
+    '~~~',
+    'tilde fenced content',
+    '~~~',
+    '',
+  ].join('\n');
+
   const files = new Map([
     ['/work/demo/README.md', { content: README, rev: 0 }],
+    ['/work/demo/CODE.md', { content: CODE, rev: 0 }],
     ['/work/demo/.env', { content: '# service\nPORT=8787\n', rev: 0 }],
     ['/work/demo/package.json', { content: '{\n  "name": "atlas"\n}\n', rev: 0 }],
     ['/work/demo/Makefile', { content: 'build:\n\techo build\n', rev: 0 }],
@@ -560,6 +639,8 @@ const rendered = await page.evaluate(() => {
   const checkedBox = [...view.querySelectorAll('input[type="checkbox"]')].find((b) => b.checked);
   const cell = view.querySelector('td');
   const img = view.querySelector('[data-files-markdown-image]');
+  const link = view.querySelector('[data-files-markdown-link]');
+  const paragraph = view.querySelector('p');
   return {
     h1: h1?.textContent ?? null,
     h2: h2?.textContent ?? null,
@@ -570,11 +651,18 @@ const rendered = await page.evaluate(() => {
     struck: view.querySelector('del')?.textContent ?? null,
     fenceColours: [...colours],
     // GITHUB'S OWN SIZE LADDER, MEASURED, NOT READ OFF THE STYLESHEET — a
-    // `text-[32px]` class that named no real rule would still pass a grep of
+    // `text-[2em]` class that named no real rule would still pass a grep of
     // this file's own source, which is exactly what a unit test cannot see
     // past (happy-dom applies no stylesheet at all) and what this real
-    // Chromium page is for.
+    // Chromium page is for. Measured as a RATIO against the paragraph's own
+    // size rather than a hardcoded pixel floor, because the root the ladder
+    // scales off is now `--vam-out-font-size` (the operator's own Response
+    // view setting, see `FilesTab.tsx`'s `[data-files-markdown-github]`
+    // header) — a fixed floor tuned for GitHub's old 16px root would go stale
+    // the moment that setting differs from its default, which is the exact
+    // failure a ratio cannot have.
     h1FontSize: h1 === null ? null : Number.parseFloat(getComputedStyle(h1).fontSize),
+    paragraphFontSize: paragraph === null ? null : Number.parseFloat(getComputedStyle(paragraph).fontSize),
     h1BorderBottom: h1 === null ? null : Number.parseFloat(getComputedStyle(h1).borderBottomWidth),
     h2BorderBottom: h2 === null ? null : Number.parseFloat(getComputedStyle(h2).borderBottomWidth),
     h3BorderBottom: h3 === null ? null : Number.parseFloat(getComputedStyle(h3).borderBottomWidth),
@@ -596,6 +684,16 @@ const rendered = await page.evaluate(() => {
     imageBorderWidth:
       img === null ? null : Number.parseFloat(getComputedStyle(img).borderTopWidth),
     imageShowsAddress: (img?.textContent ?? '').includes('https://example.test/arch.png'),
+    // THE LINK'S RESTING COLOUR — GitHub paints a link in its accent colour
+    // ALWAYS, underline only on hover; a link that reads as the same ink as
+    // the sentence around it is not readable as a link until the pointer
+    // happens to be over it. Measured against a REAL paragraph's computed
+    // colour rather than assumed equal to `text-ink-dim`'s own value, so a
+    // token that resolved to the identical colour by coincidence could not
+    // pass this the way a class-name grep could.
+    linkColor: link === null ? null : getComputedStyle(link).color,
+    paragraphColor: paragraph === null ? null : getComputedStyle(paragraph).color,
+    linkHasGlyph: link === null ? null : link.querySelector('svg') !== null,
     // The wall, half one: raw HTML in the file must reach the DOM as
     // CHARACTERS. Both halves are read back off the rendered tree AND off the
     // page's own globals, because a payload that ran is the only proof that
@@ -643,10 +741,26 @@ check(
   (rendered?.fenceColours.length ?? 0) >= 2,
   JSON.stringify(rendered?.fenceColours),
 );
+/**
+ * Operator report, translated: "the font size in preview mode is small — use
+ * the same font size as the Response view." Measured against the SAME
+ * paragraph the font-size check below reads, in the same real Chromium page:
+ * `getComputedStyle` is the only thing that reads what actually reached the
+ * box, and a `text-[2em]` class that named no real rule (a typo in the
+ * bracket, a stray character) would still read back from `h1.className` in a
+ * unit test.
+ */
 check(
-  'GitHub’s own size ladder: h1 is at least 28px, real paint, not a class name',
-  (rendered?.h1FontSize ?? 0) >= 28,
-  `h1 is ${rendered?.h1FontSize}px`,
+  'the body paragraph really is the Response view’s own size (13px by default), not GitHub’s fixed 16px',
+  rendered?.paragraphFontSize === 13,
+  `paragraph is ${rendered?.paragraphFontSize}px`,
+);
+check(
+  'GitHub’s own size ladder: h1 is real paint at exactly 2em of that same root, not a class name',
+  rendered?.h1FontSize !== null &&
+    rendered?.paragraphFontSize !== null &&
+    rendered?.h1FontSize === rendered?.paragraphFontSize * 2,
+  `h1 is ${rendered?.h1FontSize}px, paragraph is ${rendered?.paragraphFontSize}px`,
 );
 check(
   'and h1/h2 carry a real bottom rule, which h3 does not',
@@ -726,6 +840,25 @@ check(
     rawSyntax: rendered?.showsRawSyntax,
   }),
 );
+/**
+ * THE LINK IS READABLE AS A LINK AT REST, not only once a pointer happens to
+ * be over it — GitHub's own convention, and the one thing an underline-only
+ * hover state cannot do on its own. Measured as a real computed `color`
+ * against a real paragraph's, in real Chromium: happy-dom applies no
+ * stylesheet at all, so a unit test can tell `text-chip` was WRITTEN but not
+ * that it PAINTED something a reader could tell apart from body text.
+ */
+check(
+  'the link is painted in a colour distinct from the paragraph around it, at rest',
+  rendered?.linkColor !== null &&
+    rendered?.paragraphColor !== null &&
+    rendered?.linkColor !== rendered?.paragraphColor,
+  JSON.stringify({ link: rendered?.linkColor, paragraph: rendered?.paragraphColor }),
+);
+check(
+  'and it still carries the external-link glyph — colour alone is a WCAG 1.4.1 failure',
+  rendered?.linkHasGlyph === true,
+);
 check(
   'the raw editor is UNMOUNTED, so the tab has no insert stop while a document is being read',
   rendered?.editors === 0 && rendered?.insertStops === 0,
@@ -750,6 +883,123 @@ check(
 
 await page.screenshot({ path: `${outDir}/files-md-preview.png` });
 console.log(`${outDir}/files-md-preview.png`);
+
+// ---------------------------------------------------------------------------
+// 4.5 CODE BLOCKS, AUDITED AGAINST REAL MARKDOWN — operator report, translated:
+// "the md preview has a bug with the code block style." No fence was
+// reproduced, so this opens every shape a fence takes in real prose (see
+// `CODE`'s own comment above) and measures the properties that would go quiet
+// in a class-name grep: whether an unfamiliar infostring still gets the same
+// card `Fence` draws for one it recognises rather than leaking `readFence`'s
+// fallback unstyled, whether CommonMark's OTHER code-block syntax (4-space
+// indent, no fence) reaches a `<pre>` at all rather than falling through to a
+// paragraph, whether a fence nested inside a list item is still found, and
+// whether a long line really scrolls sideways rather than wrapping or
+// overflowing the pane — none of which a unit test can answer, because
+// happy-dom applies no stylesheet and computes no scrollbar.
+
+await treeRow('/work/demo/CODE.md').click();
+await page.waitForSelector('[data-files-preview-view]', { timeout: 5_000 });
+
+const code = await page.evaluate(() => {
+  const view = document.querySelector('[data-files-preview-view]');
+  const pageBg = getComputedStyle(document.body).backgroundColor;
+  const pres = [...view.querySelectorAll('pre')].map((pre) => {
+    const cs = getComputedStyle(pre);
+    return {
+      text: pre.textContent ?? '',
+      overflowX: cs.overflowX,
+      whiteSpace: cs.whiteSpace,
+      background: cs.backgroundColor,
+      scrollWidth: pre.scrollWidth,
+      clientWidth: pre.clientWidth,
+      colouredSpans: pre.querySelectorAll('code span').length,
+      parentTag: pre.parentElement?.tagName ?? null,
+    };
+  });
+  return { pageBg, pres, indented: view.textContent?.includes('indented block line one') };
+});
+
+check(
+  'every shape of fenced or indented code in the fixture really became its own <pre>',
+  code.pres.length === 8,
+  `found ${code.pres.length} <pre> elements: ${JSON.stringify(code.pres.map((p) => p.text.slice(0, 24)))}`,
+);
+
+const noLang = code.pres.find((p) => p.text.includes('plain fenced text'));
+const unknownLang = code.pres.find((p) => p.text.includes('graph TD'));
+const knownLang = code.pres.find((p) => p.text.includes('echo hello'));
+const indented = code.pres.find((p) => p.text.includes('indented block line one'));
+const inList = code.pres.find((p) => p.text.includes('const nested'));
+const longLine = code.pres.find((p) => p.text.includes('xxxxxxxxxx'));
+const lookalikes = code.pres.find((p) => p.text.includes('not a heading'));
+const tilde = code.pres.find((p) => p.text.includes('tilde fenced content'));
+
+check(
+  'CommonMark’s 4-space indented block reaches a real <pre>, not a paragraph',
+  indented !== undefined,
+  JSON.stringify(code.indented),
+);
+check(
+  'a fence nested inside a list item is still found, inside its own <li>',
+  inList !== undefined && inList.parentTag === 'LI' && inList.colouredSpans > 0,
+  JSON.stringify(inList),
+);
+check(
+  'an unfamiliar infostring still draws the SAME card — no info string and an unknown one both do',
+  noLang !== undefined &&
+    unknownLang !== undefined &&
+    noLang.background === unknownLang.background &&
+    noLang.background === (knownLang?.background ?? noLang.background),
+  JSON.stringify({ noLang: noLang?.background, unknownLang: unknownLang?.background, knownLang: knownLang?.background }),
+);
+check(
+  'a recognised language is still coloured inside this preview’s own <pre>, and an unrecognised one is not lying about it',
+  (knownLang?.colouredSpans ?? 0) > 0 && (unknownLang?.colouredSpans ?? 0) === 0,
+  JSON.stringify({ known: knownLang?.colouredSpans, unknown: unknownLang?.colouredSpans }),
+);
+check(
+  'a `~~~` fence is drawn exactly as a ``` fence is',
+  tilde !== undefined && tilde.background === noLang?.background,
+  JSON.stringify(tilde),
+);
+check(
+  'content that looks like a heading, a quote or a tab stays literal text inside the fence',
+  lookalikes !== undefined && lookalikes.text.includes('# not a heading') && lookalikes.text.includes('> not a quote'),
+  JSON.stringify(lookalikes?.text),
+);
+check(
+  'a long line really overflows its own box, so it CAN scroll',
+  (longLine?.scrollWidth ?? 0) > (longLine?.clientWidth ?? 0),
+  JSON.stringify({ scrollWidth: longLine?.scrollWidth, clientWidth: longLine?.clientWidth }),
+);
+check(
+  'and it is not wrapped to get there — overflow-x allows a scrollbar, white-space is `pre`',
+  longLine?.overflowX !== 'visible' && longLine?.whiteSpace === 'pre',
+  JSON.stringify({ overflowX: longLine?.overflowX, whiteSpace: longLine?.whiteSpace }),
+);
+check(
+  'and the pane itself never grew to fit it — the OUTER preview region stayed put',
+  (await page.evaluate(() => {
+    const v = document.querySelector('[data-files-preview-view]');
+    return v ? v.scrollWidth - v.clientWidth : null;
+  })) <= 4,
+);
+check(
+  'every fenced block reads as a distinct surface from the page behind it',
+  code.pres.every((p) => p.background !== code.pageBg),
+  JSON.stringify({ pageBg: code.pageBg, blocks: [...new Set(code.pres.map((p) => p.background))] }),
+);
+
+// Back to README.md, in preview, so sections 5 onward see the file they were
+// written against.
+await treeRow('/work/demo/README.md').click();
+await page.waitForSelector('[data-files-preview-view]', { timeout: 5_000 });
+await page.waitForFunction(
+  () => document.querySelector('[data-files-preview-view] h1')?.textContent === 'Atlas',
+  null,
+  { timeout: 5_000 },
+);
 
 // ---------------------------------------------------------------------------
 // 5. THE PREVIEW IS NOT AN INSERT SCOPE — the mode chip, not a class name.

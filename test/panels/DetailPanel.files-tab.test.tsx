@@ -2430,6 +2430,34 @@ describe('the Files preview carries its own GitHub-scoped wrapper', () => {
     await pressPreviewOption('raw');
     expect(q('[data-files-markdown-github]')).toBeNull();
   });
+
+  /**
+   * Operator report, translated: "the font size in preview mode is small —
+   * use the same font size as the Response view." The wrapper is the ROOT
+   * every size in `files-markdown.tsx`'s ladder is `em`-relative to (see
+   * that file's own `HEADING_SIZE` comment), and it has to be the SAME
+   * property the transcript's own `[data-detail-scroll="out"]` sets
+   * (`--vam-out-font-size`) rather than a second, unrelated number, or the
+   * two surfaces would only agree by coincidence at one setting.
+   */
+  it('pins its root to the same font-size property the transcript’s own out pane sets', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    expect(q('[data-files-markdown-github]')?.className).toContain('--vam-out-font-size');
+  });
 });
 
 describe('the preview’s keyboard — a control reachable only by mouse is not finished here', () => {

@@ -124,61 +124,6 @@ const EXCEPTIONS: ReadonlyArray<{
       'direction: a multiplication sign fills its em box where a chevron does ' +
       'not.',
   },
-  {
-    file: 'panels/files-markdown.tsx',
-    size: '32',
-    count: 1,
-    why:
-      'h1 of GitHub\u2019s own size ladder (2em of a 16px body), the operator\u2019s ' +
-      'own ask: ".md files need to be previewed GitHub-style." This scale is ' +
-      'NOT vam\u2019s four-step chrome scale above \u2014 it is a second, deliberately ' +
-      'separate one, for a second surface (a rendered document, not a control ' +
-      'or a label), with its own root (16px, fixed, not the operator\u2019s ' +
-      'adjustable OUT stepper) and its own six rungs. Reaching for `text-body` ' +
-      'or `text-heading` here would size a `.md` file\u2019s h1 identically to a ' +
-      'settings label, which is the fragmentation this file exists to avoid on ' +
-      'the OTHER side of the same argument.',
-  },
-  {
-    file: 'panels/files-markdown.tsx',
-    size: '24',
-    count: 1,
-    why: 'h2 of the same ladder (1.5em) \u2014 see the h1 entry just above for the whole argument.',
-  },
-  {
-    file: 'panels/files-markdown.tsx',
-    size: '20',
-    count: 1,
-    why: 'h3 of the same ladder (1.25em) \u2014 see the h1 entry above.',
-  },
-  {
-    file: 'panels/files-markdown.tsx',
-    size: '16',
-    count: 5,
-    why:
-      'The ladder\u2019s OWN root, spelled six times rather than left to inherit: ' +
-      'h4 (1em) and the five block elements that fix themselves to GitHub\u2019s ' +
-      '16px body regardless of anything an ancestor sets \u2014 a paragraph, a ' +
-      'bullet list, a numbered list and a blockquote, each pinned so nesting a ' +
-      'quote inside a list (or either inside a table cell, which is its own ' +
-      '14px step) cannot silently shrink the prose.',
-  },
-  {
-    file: 'panels/files-markdown.tsx',
-    size: '14',
-    count: 2,
-    why:
-      'h5 (0.875em) and GitHub\u2019s own table size, which the real site sets a ' +
-      'step under body text so a dense grid of cells reads as data rather than ' +
-      'as prose \u2014 the same 14px both times is what makes it ONE decision ' +
-      'rather than two coincidentally equal literals.',
-  },
-  {
-    file: 'panels/files-markdown.tsx',
-    size: '13.6',
-    count: 1,
-    why: 'h6 of the same ladder (0.85em, GitHub\u2019s own smallest heading rung) \u2014 see the h1 entry above.',
-  },
 ];
 
 function sources(dir: string): string[] {

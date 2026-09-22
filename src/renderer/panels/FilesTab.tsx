@@ -2126,6 +2126,27 @@ const EDITOR_TEXT_STYLE = { whiteSpace: 'pre', overflowWrap: 'normal', tabSize: 
  * `data-files-markdown-github` div is what a guard or a test scopes to —
  * nothing outside it, and nothing in `OUT_MARKDOWN`'s own tree, ever carries
  * that attribute.
+ *
+ * THE ROOT OF `files-markdown.tsx`'s WHOLE SIZE LADDER LIVES HERE, ON PURPOSE.
+ * Operator report, translated: "the font size in preview mode is small — use
+ * the same font size as the Response view." Measured on a real transcript
+ * paragraph in the demo: `[data-detail-scroll="out"]` sets
+ * `font-size: var(--vam-out-font-size, 12px)` directly, resolving to 13px at
+ * the operator's default — the SAME property, not merely the same number by
+ * coincidence, is what `text-[length:var(--vam-out-font-size,13px)]` below
+ * reaches for (`13px` as ITS OWN fallback rather than the transcript's own
+ * `12px`, because 13 is what the property actually resolves to once
+ * `applyOutFontSize` has run, and a second stale fallback number is worth
+ * avoiding). Every size in `FILES_MARKDOWN`'s own ladder (`files-markdown.tsx`'s
+ * `HEADING_SIZE` and its `p`/`ul`/`ol`/`blockquote`/table/code rules) is an
+ * `em`/`%` relative to THIS element, exactly as `github-markdown-css` itself
+ * sets one root and scales everything else off it — so raising the operator's
+ * OUT setting raises this preview identically to the Response view, at every
+ * setting, not only at the default the two happened to share before. This is
+ * deliberately NOT `text-body` (vam's own 4-step chrome scale, `styles.css`'s
+ * `--text-body`): that scale sizes controls and labels, is fixed regardless of
+ * the OUT setting, and using it here would make the Files preview agree with
+ * the Response view only when the operator has never touched that stepper.
  */
 function MarkdownPreview({
   content,
@@ -2153,7 +2174,7 @@ function MarkdownPreview({
     >
       <div
         data-files-markdown-github
-        className="mx-auto w-full max-w-[1012px] break-words px-6 py-6"
+        className="mx-auto w-full max-w-[1012px] break-words px-6 py-6 text-[length:var(--vam-out-font-size,13px)]"
       >
         {/* The same shape of `urlTransform` the transcript uses, for the
             same reason: the real gate is in the component overrides below,

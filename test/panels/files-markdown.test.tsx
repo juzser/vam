@@ -75,19 +75,36 @@ describe('headings — GitHub’s own size ladder, with a rule under the top two
     expect(screen.getByRole('heading', { level: 3 }).className).not.toContain('border-b');
   });
 
-  it('sizes h1 at 32px (2em of a 16px root) and steps down from there', () => {
+  /**
+   * `em`, NOT a literal pixel size — GitHub's own ratios (2em, 1.5em, 1.25em)
+   * resolved against whatever the SURROUNDING container's font-size is,
+   * which is `FilesTab.tsx`'s `[data-files-markdown-github]` wrapper, itself
+   * pinned to the Response view's own size (see the "matches the Response
+   * view's own body size" describe block below). A literal px here would be
+   * the same "GitHub's own fixed 16px" the operator's own report named.
+   */
+  it('sizes h1 at 2em and steps down from there, relative to the preview’s own root', () => {
     draw(['# one', '## two', '### three', ''].join('\n'));
-    expect(screen.getByRole('heading', { level: 1 }).className).toContain('text-[32px]');
-    expect(screen.getByRole('heading', { level: 2 }).className).toContain('text-[24px]');
-    expect(screen.getByRole('heading', { level: 3 }).className).toContain('text-[20px]');
+    expect(screen.getByRole('heading', { level: 1 }).className).toContain('text-[2em]');
+    expect(screen.getByRole('heading', { level: 2 }).className).toContain('text-[1.5em]');
+    expect(screen.getByRole('heading', { level: 3 }).className).toContain('text-[1.25em]');
   });
 });
 
 describe('paragraphs and the body scale', () => {
-  it('sets the 16px/1.5 body GitHub ships', () => {
+  /**
+   * Operator report, translated: "the font size in preview mode is small —
+   * use the same font size as the Response view." `1em` (rather than a
+   * literal `16px`) is what makes that true at every setting, not only by
+   * coincidence at one: the root itself lives on `FilesTab.tsx`'s wrapper,
+   * pinned to `--vam-out-font-size` — the same property
+   * `[data-detail-scroll="out"]` sets on the transcript — so raising the
+   * operator's own reading size raises this preview identically.
+   */
+  it('sets 1em/1.5 leading, relative to the preview’s own root rather than a fixed 16px', () => {
     draw('Some prose.\n');
     const p = document.querySelector('p') as HTMLElement;
-    expect(p.className).toContain('text-[16px]');
+    expect(p.className).toContain('text-[1em]');
     expect(p.className).toContain('leading-[1.5]');
   });
 });
@@ -163,11 +180,43 @@ describe('a link — never a real anchor, underlined on hover, and still openabl
     expect(openLink).toHaveBeenCalledWith('https://example.test/runbook');
   });
 
+  /**
+   * GITHUB PAINTS A LINK IN ITS ACCENT COLOUR AT REST, underline on hover
+   * only — a link that is the same ink as the paragraph around it is not
+   * readable AS a link until the pointer happens to be over it. `text-chip`
+   * is an EXISTING token (`styles.css`'s own "a symbol or a path lifted out
+   * of prose: the inline code chip... a label, not a sentence" — the same
+   * ink this file's own inline-code chip already wears), not a new colour
+   * invented for this control.
+   */
+  it('is painted in the chip accent at rest, not the paragraph’s own ink', async () => {
+    draw('See the [runbook](https://example.test/runbook) before deploying.');
+    const control = screen.getByRole('button', { name: /runbook/ });
+    expect(control.className).toContain('text-chip');
+    expect(control.className).not.toContain('text-inherit');
+  });
+
+  it('carries the same external-link glyph the transcript draws for an http(s) address', async () => {
+    draw('[runbook](https://example.test/runbook)');
+    const control = screen.getByRole('button', { name: /runbook/ });
+    expect(control.querySelector('svg')).not.toBeNull();
+  });
+
   it('refuses a scheme it does not open, in words, without asking main', async () => {
     const { openLink } = draw('[bad](javascript:alert(1))');
     await userEvent.click(screen.getByRole('button', { name: /bad/ }));
     expect(openLink).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('javascript');
+  });
+
+  it('marks a refused link in the ink of its own refusal, not the chip accent', async () => {
+    draw('[bad](javascript:alert(1))');
+    const control = screen.getByRole('button', { name: /bad/ });
+    expect(control.className).toContain('text-failed');
+    expect(control.className).not.toContain('text-chip');
+    // Still carries A glyph (Ban, not ExternalLink) — a control that can
+    // only refuse still looks like a control.
+    expect(control.querySelector('svg')).not.toBeNull();
   });
 });
 

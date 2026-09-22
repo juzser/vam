@@ -37,9 +37,16 @@
  *     the transcript's own controls ask (`DetailPanel.tsx` publishes one
  *     provider over the whole pane, transcript and Files tab alike). What
  *     changes is only the paint: GitHub's own convention is an inline link,
- *     underlined on hover, not a pill with a host and a glyph -- the pill
- *     earns its shape from the transcript's narrower column and this preview
- *     does not inherit that argument.
+ *     coloured in its accent AT REST and underlined only on hover, not a
+ *     pill with a host inside it -- the pill earns its shape from the
+ *     transcript's narrower column and this preview does not inherit that
+ *     argument. `text-chip` carries the resting colour: an EXISTING token
+ *     ("a symbol or a path lifted out of prose... a label, not a sentence"),
+ *     the same ink this file's own inline-code chip already wears, not a new
+ *     colour invented for a link. The `ExternalLink`/`Ban` glyph is the one
+ *     piece of `OutLink`'s own paint that DOES carry over unchanged -- a link
+ *     that is only a colour is a WCAG 1.4.1 failure the transcript's own pill
+ *     was built to avoid, and colour alone is no less a failure here.
  *   - THE REFUSAL WORDING. `Refusal` and `NO_ADDRESS` are the house rule
  *     ("a control that can only refuse says so") stated once.
  *
@@ -66,7 +73,7 @@
  * file, checked the same way the rest of `src/` is.
  */
 
-import { ImageOff } from 'lucide-react';
+import { Ban, ExternalLink, ImageOff } from 'lucide-react';
 import { type ReactNode, useContext, useState } from 'react';
 import type { Components } from 'react-markdown';
 import { checkLink } from '../../shared/link.js';
@@ -90,16 +97,20 @@ import { Fence, Fenced, NO_ADDRESS, Refusal, readFence } from './out-markdown.js
 export const FILES_MARKDOWN_URL_TRANSFORM = (url: string): string => url;
 
 /**
- * A LINK, DRAWN AS GITHUB DRAWS ONE -- inline, underlined on hover, never a
- * pill -- and NEVER A REAL ANCHOR. See this file's header for why the button
+ * A LINK, DRAWN AS GITHUB DRAWS ONE -- inline, in the chip accent at rest,
+ * underlined on hover, carrying the same glyph the transcript's own link
+ * does -- and NEVER A REAL ANCHOR. See this file's header for why the button
  * is not optional and why `openLink` is the transcript's own act.
  */
 function FilesLink({ href, children }: { readonly href?: string; readonly children: ReactNode }) {
   const { openLink } = useOutActions();
   const [note, setNote] = useState<string | null>(null);
   const checked = href === undefined ? null : checkLink(href);
-  const hint =
-    checked?.ok === true ? `opens ${checked.url} in the browser` : (checked?.reason ?? NO_ADDRESS);
+  const ok = checked?.ok === true;
+  const hint = ok ? `opens ${checked.url} in the browser` : (checked?.reason ?? NO_ADDRESS);
+  // `Ban` for a refused address, exactly as `OutLink` draws it -- a control
+  // that can only refuse still looks like a control, not like plain prose.
+  const Glyph = ok ? ExternalLink : Ban;
   return (
     <>
       <Note text={hint}>
@@ -107,7 +118,17 @@ function FilesLink({ href, children }: { readonly href?: string; readonly childr
           type="button"
           data-files-markdown-link
           data-files-markdown-link-refused={checked?.ok === false ? 'true' : undefined}
-          className="cursor-pointer text-inherit underline-offset-2 hover:underline"
+          className={[
+            // `items-baseline` + the glyph's own `self-center`: the same
+            // pairing `OutLink` uses, and for the same reason -- the text
+            // and the glyph have to share the paragraph's baseline, and an
+            // SVG has no baseline of its own to stand on.
+            'inline-flex cursor-pointer items-baseline gap-0.5 align-baseline underline-offset-2 hover:underline',
+            // THE REFUSED ONE IN THE INK OF ITS OWN REFUSAL, exactly as
+            // `OutLink`'s does -- "this one is not like the others" is what
+            // it has to say, and the chip accent would say the opposite.
+            ok ? 'text-chip' : 'text-failed',
+          ].join(' ')}
           onClick={() => {
             if (checked === null || !checked.ok) {
               setNote(checked?.reason ?? NO_ADDRESS);
@@ -120,6 +141,11 @@ function FilesLink({ href, children }: { readonly href?: string; readonly childr
           }}
         >
           {children}
+          <Glyph
+            aria-hidden="true"
+            className="h-[0.8em] w-[0.8em] flex-none self-center"
+            strokeWidth={1.8}
+          />
           <span className="sr-only">, {hint}</span>
         </button>
       </Note>
@@ -189,19 +215,23 @@ function FilesListItem({
 
 /**
  * GitHub's own size ladder (h1 2em, h2 1.5em, h3 1.25em, h4 1em, h5 0.875em,
- * h6 0.85em) resolved against the 16px body this map fixes everything else
- * to -- a literal pixel per rung rather than `em`, so a heading's size does
- * not also move if it is ever nested inside something with a different
- * computed size. h1 and h2 alone carry the bottom rule GitHub draws under
- * the top two levels only.
+ * h6 0.85em) -- `em`, resolved against `FilesTab.tsx`'s own
+ * `[data-files-markdown-github]` wrapper, which is where the ROOT this ladder
+ * scales off actually lives (see that component's own header for why it is
+ * pinned to `--vam-out-font-size`, the Response view's own property, rather
+ * than a literal 16px or vam's separate `text-body` chrome scale). `em`
+ * rather than a literal pixel per rung is what makes "the same font size as
+ * the Response view" survive the operator raising or lowering that setting,
+ * not merely match it at one. h1 and h2 alone carry the bottom rule GitHub
+ * draws under the top two levels only.
  */
 const HEADING_SIZE: Readonly<Record<1 | 2 | 3 | 4 | 5 | 6, string>> = {
-  1: 'text-[32px]',
-  2: 'text-[24px]',
-  3: 'text-[20px]',
-  4: 'text-[16px]',
-  5: 'text-[14px]',
-  6: 'text-[13.6px]',
+  1: 'text-[2em]',
+  2: 'text-[1.5em]',
+  3: 'text-[1.25em]',
+  4: 'text-[1em]',
+  5: 'text-[0.875em]',
+  6: 'text-[0.85em]',
 };
 
 function heading(level: 1 | 2 | 3 | 4 | 5 | 6) {
@@ -223,14 +253,14 @@ export const FILES_MARKDOWN: Components = {
   h4: heading(4),
   h5: heading(5),
   h6: heading(6),
-  p: ({ children }) => <p className="mb-4 text-[16px] text-ink-dim leading-[1.5]">{children}</p>,
+  p: ({ children }) => <p className="mb-4 text-[1em] text-ink-dim leading-[1.5]">{children}</p>,
   ul: ({ children }) => (
-    <ul className="mb-4 flex list-disc flex-col gap-1 pl-8 text-[16px] text-ink-dim leading-[1.5]">
+    <ul className="mb-4 flex list-disc flex-col gap-1 pl-8 text-[1em] text-ink-dim leading-[1.5]">
       {children}
     </ul>
   ),
   ol: ({ children }) => (
-    <ol className="mb-4 flex list-decimal flex-col gap-1 pl-8 text-[16px] text-ink-dim leading-[1.5]">
+    <ol className="mb-4 flex list-decimal flex-col gap-1 pl-8 text-[1em] text-ink-dim leading-[1.5]">
       {children}
     </ol>
   ),
@@ -240,7 +270,7 @@ export const FILES_MARKDOWN: Components = {
   del: ({ children }) => <del className="text-ink-faint line-through">{children}</del>,
   hr: () => <hr className="my-6 border-line border-t" />,
   blockquote: ({ children }) => (
-    <blockquote className="mb-4 border-quote border-l-[4px] pl-4 text-[16px] text-quote leading-[1.5]">
+    <blockquote className="mb-4 border-quote border-l-[4px] pl-4 text-[1em] text-quote leading-[1.5]">
       {children}
     </blockquote>
   ),
@@ -258,7 +288,7 @@ export const FILES_MARKDOWN: Components = {
   },
   table: ({ children }) => (
     <div className="vam-no-scrollbar mb-4 overflow-x-auto">
-      <table className="w-full border-collapse text-[14px] text-ink-dim [&_tbody_tr:nth-child(even)]:bg-well">
+      <table className="w-full border-collapse text-[0.875em] text-ink-dim [&_tbody_tr:nth-child(even)]:bg-well">
         {children}
       </table>
     </div>
