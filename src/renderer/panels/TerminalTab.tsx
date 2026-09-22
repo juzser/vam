@@ -163,6 +163,32 @@ export const REFRESH_MS = 250;
 export const ECHO_MS = 33;
 
 /**
+ * How many consecutive `poll-live` ticks the interval may take before it
+ * forces one real `poll` -- the whole window -- regardless of where the
+ * operator is scrolled to.
+ *
+ * A CORRECTNESS BOUND, not a taste. `composeScreen` splices a screen-shaped
+ * answer onto the history already drawn on the assumption that the screen is
+ * still a suffix of that same window (its own note) -- true between two
+ * nearby reads of a STABLE program, false the moment the program in the pane
+ * changes shape: a shell exits into a fullscreen TUI, or a session ends and
+ * another is created under the exact same name. Before `poll-live` existed
+ * this healed itself for free, because the interval's OWN read never
+ * spliced -- `paneShape('poll')` is always `'window'` -- so whatever drifted
+ * onto an `echo` answer between two polls was overwritten with ground truth
+ * within `REFRESH_MS`. Making the interval itself splice removed that free
+ * correction, and it was FALSIFIED directly: with no resync, phase B of
+ * `e2e/terminal-echo-scroll-shots.mjs` drew 340 lines of a dead session's
+ * shell history glued onto a 50-line alternate-screen program that has none.
+ * Forcing a resync at least this often puts the ceiling back: at most
+ * `POLL_LIVE_RESYNC_TICKS * REFRESH_MS` (1 second, at the current constants)
+ * before the interval reads the window for real again and overwrites any bad
+ * splice with ground truth -- the same one second the whole tab polled at,
+ * unquestioned, before `REFRESH_MS` was ever cut to a quarter of one.
+ */
+export const POLL_LIVE_RESYNC_TICKS = 4;
+
+/**
  * The reader the tab is given: `window.api.terminal.read`, or nothing.
  *
  * It is asked by PROJECT ID, not by title. The pairing between a session and
@@ -596,16 +622,18 @@ export function atBottom(
  * WHICH QUESTION A READ ASKED -- "the screen", or "the screen and the 500
  * lines above it".
  *
- * A MIRROR OF `main/terminal/ipc.ts`'s own `mode === 'echo' ? 0 :
- * PANE_HISTORY_LINES`, and it is written as its own function so that the
- * mirror has a name rather than being an expression buried in a comparison.
- * Two modes ask the same question: the interval read and an echo read for an
- * operator who has scrolled up both want the whole window.
+ * A MIRROR OF `main/terminal/ipc.ts`'s own `mode === 'echo' || mode ===
+ * 'poll-live' ? 0 : PANE_HISTORY_LINES`, and it is written as its own
+ * function so that the mirror has a name rather than being an expression
+ * buried in a comparison. Two modes ask the SCREEN alone -- `echo` and
+ * `poll-live`, both asked while the operator is at the live end -- and two
+ * ask the whole window: `poll` (scrolled away, or nothing drawn yet) and
+ * `echo-scrollback` (an echo for an operator who has scrolled up).
  *
  * It exists for `composeScreen`'s sake -- see the call site in `poll`.
  */
 export function paneShape(mode: PaneReadMode): 'screen' | 'window' {
-  return mode === 'echo' ? 'screen' : 'window';
+  return mode === 'echo' || mode === 'poll-live' ? 'screen' : 'window';
 }
 
 /**
@@ -1029,6 +1057,14 @@ export function TerminalTab({
       const seq = issued;
       poll(mode, () => !cancelled && seq === issued);
     };
+    /**
+     * How many `poll-live` ticks have run since the interval last read the
+     * whole window. Reset to `0` by every `poll` this effect issues, forced
+     * or not, so a naturally full tick (the operator has scrolled away) is
+     * itself a resync and does not leave one owed on top of it
+     * (`POLL_LIVE_RESYNC_TICKS`).
+     */
+    let ticksSinceFullPoll = 0;
     const start = () => {
       if (timer !== undefined) return;
       // Published only while a poll is actually running, so `echo` cannot ask
@@ -1037,11 +1073,32 @@ export function TerminalTab({
       // pairing it rides is re-proven by the interval below, and the two stop
       // together (`main/terminal/ipc.ts`).
       readNow.current = tick;
+      // ALWAYS THE FULL WINDOW, ON THIS ONE CALL. `shown` is `null` the first
+      // time a session is ever drawn (mount, or a switch of `projectId` --
+      // see `shownFor` above), and `composeScreen` has nothing to splice a
+      // screen-shaped answer onto: asking `poll-live` here would draw one
+      // screen with nothing above it and nothing left to ever re-fetch the
+      // history it never asked for (`shared/terminal.ts`'s own note on the
+      // chicken-and-egg an all-screen echo used to lock into).
       tick('poll');
-      // `() => tick('poll')` rather than `tick`: a timer that handed its own
-      // arguments to the callback would be issuing some other read entirely,
-      // and the interval is the one read that must always prove the pairing.
-      timer = window.setInterval(() => tick('poll'), REFRESH_MS);
+      timer = window.setInterval(() => {
+        // FORCED, EVERY `POLL_LIVE_RESYNC_TICKS`th TICK, WHATEVER THE SCROLL
+        // POSITION IS -- see that constant for why a splice-only interval is
+        // unsound without it. Otherwise `poll-live` INSTEAD OF `poll` once
+        // pinned, decided AT FIRE TIME, the same as `echo` decides `echo` vs
+        // `echo-scrollback`: the operator may have scrolled between two
+        // ticks. Still never an `echo`: this is the read that re-proves the
+        // pairing, and it must keep doing that on every tick regardless of
+        // where the view is scrolled to (`main/terminal/ipc.ts`'s own note on
+        // `poll`/`poll-live` both proving).
+        if (ticksSinceFullPoll >= POLL_LIVE_RESYNC_TICKS - 1 || !atLiveEnd()) {
+          ticksSinceFullPoll = 0;
+          tick('poll');
+          return;
+        }
+        ticksSinceFullPoll += 1;
+        tick('poll-live');
+      }, REFRESH_MS);
     };
     const stop = () => {
       if (timer === undefined) return;
@@ -1064,7 +1121,7 @@ export function TerminalTab({
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [poll, read, projectId]);
+  }, [poll, read, projectId, atLiveEnd]);
 
   /**
    * THE SIZE THE SCREEN IS DRAWN AT, read from the store rather than taken as

@@ -189,45 +189,50 @@ export function registerTerminalIpc(
     const key = aimKey(projectId, rowId);
     /**
      * HOW MUCH SCROLLBACK, and it is the renderer's situation that decides.
-     * An `echo` is a read for a view stuck to the live end, where the 500
-     * lines above the screen are not on anybody's screen: measured on tmux
-     * 3.7b, asking for them costs 78KB and ~4.8ms more per read, and ten
-     * times the React work to draw (`shared/terminal.ts`, `PaneReadMode`).
-     * Every other situation -- the interval, and an echo for an operator who
-     * has SCROLLED UP -- gets the whole window, because the scrollback has to
-     * be in the DOM for there to be anything to scroll.
+     * `echo` and `poll-live` are both a read for a view stuck to the live
+     * end, where the 500 lines above the screen are not on anybody's screen:
+     * measured on tmux 3.7b, asking for them costs 78KB and ~4.8ms more per
+     * read even through the control-mode runner's own cheaper connection
+     * (`shared/terminal.ts`, `PaneReadMode`, which carries both the original
+     * and the re-measured numbers). Every other situation -- `poll` (an
+     * operator scrolled away, or nothing drawn yet) and `echo-scrollback` --
+     * gets the whole window, because the scrollback has to be in the DOM for
+     * there to be anything to scroll.
      */
-    const history = mode === 'echo' ? 0 : PANE_HISTORY_LINES;
+    const history = mode === 'echo' || mode === 'poll-live' ? 0 : PANE_HISTORY_LINES;
     /**
      * WHICH READ PROVES WHAT, written out because this is the one place in vam
      * where a read is allowed to aim at a tmux session without proving it may.
      *
-     * A `poll` PROVES: it lists the sessions, matches the recorded
-     * `@vam-project` and the row's published pane by `targetSession`, and the
-     * pairing it establishes is what refreshes the aim below. Every refusal
-     * vam has -- `not-vam`, `gone`, `ambiguous`, `mispaired` -- is minted
-     * there and nowhere else.
+     * `poll` AND `poll-live` BOTH PROVE: same tick, same `list-sessions`, same
+     * match against the recorded `@vam-project` and the row's published pane
+     * by `targetSession` -- `poll-live` only ever changes how much of the
+     * SCREEN is asked for (`history` above), never whether the pairing is
+     * re-checked. The pairing either establishes is what refreshes the aim
+     * below. Every refusal vam has -- `not-vam`, `gone`, `ambiguous`,
+     * `mispaired` -- is minted there and nowhere else.
      *
-     * An `echo` RIDES that proof: one `capture-pane` spawn aimed at the name
-     * the aim holds, with no `list-sessions` (~5ms) and no `readdir` of the
-     * published panes (~0.4ms) in front of it. It is the hot path of somebody
-     * typing, which asks about 30 times a second.
+     * An `echo`/`echo-scrollback` RIDES that proof: one `capture-pane` spawn
+     * aimed at the name the aim holds, with no `list-sessions` (~5ms) and no
+     * `readdir` of the published panes (~0.4ms) in front of it. It is the hot
+     * path of somebody typing, which asks about 30 times a second.
      *
      * THE WORST CASE, stated rather than implied: if the row is re-paired to a
      * different pane between two proofs -- a session ends and the row
      * republishes itself, say -- an echo read draws the OLD pane's screen
-     * until the next `poll`. That is a stale SCREEN, never a keystroke in the
-     * wrong place: this channel only reads, and `terminalSend` does its own
-     * aiming. The window is bounded three ways. The tab polls four times a
-     * second while it is visible (`REFRESH_MS`), and stops polling AND echoing
-     * together when it is not, so an echo read cannot outlive the poll that
-     * backs it. `AIM_TTL_MS` is the backstop when the polls themselves are
-     * slow. And an echo read may not EXTEND either bound: it deliberately does
-     * not refresh `at`, so a typing run cannot keep an unproven pairing alive
-     * by typing. If tmux cannot find the pane the aim names, the aim is
-     * dropped here exactly as a failed send drops it.
+     * until the next `poll`/`poll-live`. That is a stale SCREEN, never a
+     * keystroke in the wrong place: this channel only reads, and
+     * `terminalSend` does its own aiming. The window is bounded three ways.
+     * The tab polls four times a second while it is visible (`REFRESH_MS`),
+     * and stops polling AND echoing together when it is not, so an echo read
+     * cannot outlive the poll that backs it. `AIM_TTL_MS` is the backstop
+     * when the polls themselves are slow. And an echo read may not EXTEND
+     * either bound: it deliberately does not refresh `at`, so a typing run
+     * cannot keep an unproven pairing alive by typing. If tmux cannot find the
+     * pane the aim names, the aim is dropped here exactly as a failed send
+     * drops it.
      */
-    const aimed = mode === 'poll' ? undefined : aims.get(key);
+    const aimed = mode === 'poll' || mode === 'poll-live' ? undefined : aims.get(key);
     if (aimed !== undefined && now() - aimed.at < AIM_TTL_MS) {
       const echoed = await readAimedPane(run, aimed.name, history);
       // Not `aims.set`: see above. Only a proof may set the timestamp, and

@@ -111,20 +111,38 @@ export type PaneView =
  * one screen. Here rather than in main because the renderer is what knows the
  * answer, and the preload carries the word across.
  *
- * THE THREE ARE THREE SITUATIONS, not three optimisation levels, and the
- * difference between them is measured. On this machine (tmux 3.7b, a 200x50
- * pane with 1600 lines of coloured scrollback, private `-L` socket, n=30, load
- * ~8): a capture with `-S -500` is 86,260 bytes and 10.30ms median, the same
- * capture of the screen alone is 7,760 bytes and 5.55ms, and the
- * `list-sessions` in front of it is another ~5ms.
+ * FOUR ANSWERS, not four optimisation levels, and the difference between them
+ * is measured. On a 200x50 pane with 1600 lines of coloured scrollback,
+ * private `-L` socket, n=30, load ~8 (the numbers `echo` and `echo-scrollback`
+ * were first argued from): a capture with `-S -500` is 86,260 bytes and
+ * 10.30ms median, the same capture of the screen alone is 7,760 bytes and
+ * 5.55ms, and the `list-sessions` in front of it is another ~5ms. Those figures
+ * predate the control-mode runner (`sources/tmux/control.ts`), which removed
+ * the `execFile` spawn under both; re-measured through it, on a 137x41 pane
+ * with 600 lines of coloured scrollback (tmux 3.7b, private socket, n=60): a
+ * window read is 35,068 bytes at a 1.88ms median, the screen alone is 2,608
+ * bytes at 0.33ms. The ratio is the same story on a cheaper connection --
+ * roughly 13x the bytes for roughly 6x the time -- which is what `poll-live`
+ * below exists to stop paying four times a second for a tab nobody has
+ * scrolled.
  *
- * `poll` -- the tab's own interval (`panels/TerminalTab.tsx`, `REFRESH_MS`).
- * It PROVES the pairing between the row and the tmux session vam started for
- * it, and it asks for the whole window: the scrollback has to be in the DOM
- * for the operator to be able to scroll into it at all.
+ * `poll` -- the tab's own interval (`panels/TerminalTab.tsx`, `REFRESH_MS`),
+ * asked while the operator has scrolled away from the live end, or on the
+ * very first tick of a tab (nothing drawn yet, so nothing to splice a screen
+ * onto). It PROVES the pairing between the row and the tmux session vam
+ * started for it, and it asks for the whole window: the scrollback has to be
+ * in the DOM for the operator to be able to scroll into it at all.
+ *
+ * `poll-live` -- THE SAME TICK, asked instead once the operator IS at the
+ * live end and something has already been drawn. It proves the pairing
+ * exactly as `poll` does -- this is still the interval read, so it may never
+ * ride an aim someone else proved -- but it asks for the screen alone and
+ * relies on the same splice `echo` does (`panels/TerminalTab.tsx`,
+ * `composeScreen`) to keep the scrollback already drawn in the DOM rather
+ * than re-fetching it every quarter of a second for nobody to look at.
  *
  * `echo` -- the read right after a keystroke landed, with the view stuck to
- * the live end. It rides the pairing the last `poll` proved
+ * the live end. It rides the pairing the last `poll`/`poll-live` proved
  * (`main/terminal/ipc.ts`, `AIM_TTL_MS`) and asks for the screen only, because
  * a view at the bottom is showing no scrollback: nobody is looking at the 500
  * lines it would cost ~5ms and 78KB to fetch. The renderer keeps those lines
@@ -141,7 +159,7 @@ export type PaneView =
  * Absent means `poll`. A caller that does not say which situation it is in
  * gets the one that assumes nothing.
  */
-export type PaneReadMode = 'poll' | 'echo' | 'echo-scrollback';
+export type PaneReadMode = 'poll' | 'poll-live' | 'echo' | 'echo-scrollback';
 
 /**
  * Checked rather than trusted, for the reason `isPaneKey` and `isPaneSize` are
@@ -150,7 +168,9 @@ export type PaneReadMode = 'poll' | 'echo' | 'echo-scrollback';
  * Anything unrecognised is a malformed ask, never a default.
  */
 export function isPaneReadMode(value: unknown): value is PaneReadMode {
-  return value === 'poll' || value === 'echo' || value === 'echo-scrollback';
+  return (
+    value === 'poll' || value === 'poll-live' || value === 'echo' || value === 'echo-scrollback'
+  );
 }
 
 /**

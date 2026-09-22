@@ -17,7 +17,12 @@
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ECHO_MS, REFRESH_MS, TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import {
+  ECHO_MS,
+  POLL_LIVE_RESYNC_TICKS,
+  REFRESH_MS,
+  TerminalTab,
+} from '../../src/renderer/panels/TerminalTab.js';
 import type { PaneKey, PaneReadMode, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 const ATLAS = 'claude-code:atlas-11111111';
@@ -123,10 +128,50 @@ describe('a keystroke echo asks for no scrollback while the view is at the live 
     expect(tab.modes().at(-1)).toBe('echo');
   });
 
-  it('asks as `poll` on its own interval, whatever the scroll position is', async () => {
+  it('asks as `poll-live` on its own interval once pinned to the live end', async () => {
     // The tick is the read that re-proves the pairing AND the one that keeps
-    // the scrollback in the DOM, so it is never an echo -- not even for an
-    // operator sitting at the bottom who has just typed.
+    // the scrollback in the DOM, so it is never an `echo`/`echo-scrollback`
+    // -- not even for an operator sitting at the bottom who has just typed.
+    // It IS allowed to become the cheaper `poll-live` once something is drawn
+    // and the operator has not scrolled away: the splice
+    // (`composeScreen`/`paneShape`) is what keeps the history in the DOM
+    // without re-fetching it every tick.
+    vi.useFakeTimers();
+    const read = vi.fn(async (_p: string, _r?: string, _mode?: PaneReadMode) => ok());
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId={ATLAS}
+        read={read}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // THE FIRST TICK, ABOVE, RAN BEFORE THIS: nothing was drawn yet, so it
+    // asked as `poll` -- there was no history on screen to splice a screen
+    // answer onto (`composeScreen`'s own `shown === null` rule).
+    expect(read.mock.calls.map((call) => call[2])).toEqual(['poll']);
+    box({ scrollHeight: 800, clientHeight: 200, scrollTop: 600 });
+    await act(async () => {
+      vi.advanceTimersByTime(REFRESH_MS);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Pinned to the live end for THIS tick: the interval asks for the screen
+    // alone rather than the whole window it no longer needs to re-fetch.
+    expect(read.mock.calls.map((call) => call[2])).toEqual(['poll', 'poll-live']);
+  });
+
+  it('forces a real `poll` every `POLL_LIVE_RESYNC_TICKS`th tick, even while pinned', async () => {
+    // THE BOUND `composeScreen`'s splice needs to stay sound: a `poll-live`
+    // interval never re-fetches the window, so a drifted splice (a program
+    // switching into the alternate screen, say) would never self-correct
+    // without this. FALSIFIED against a real pane in
+    // `e2e/terminal-echo-scroll-shots.mjs` phase B before this existed --
+    // see `POLL_LIVE_RESYNC_TICKS`'s own note.
     vi.useFakeTimers();
     const read = vi.fn(async (_p: string, _r?: string, _mode?: PaneReadMode) => ok());
     render(
@@ -142,15 +187,48 @@ describe('a keystroke echo asks for no scrollback while the view is at the live 
       await Promise.resolve();
     });
     box({ scrollHeight: 800, clientHeight: 200, scrollTop: 600 });
+    for (let i = 0; i < POLL_LIVE_RESYNC_TICKS; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(REFRESH_MS);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+    // The mount tick, `POLL_LIVE_RESYNC_TICKS - 1` live ticks, then one
+    // forced full `poll` -- and pinned throughout, so nothing but the resync
+    // bound explains that last one.
+    const modes = read.mock.calls.map((call) => call[2]);
+    expect(modes[0]).toBe('poll');
+    expect(modes.slice(1, POLL_LIVE_RESYNC_TICKS - 1 + 1)).toEqual(
+      Array.from({ length: POLL_LIVE_RESYNC_TICKS - 1 }, () => 'poll-live'),
+    );
+    expect(modes.at(-1)).toBe('poll');
+  });
+
+  it('asks as `poll`, never `poll-live`, on the interval while scrolled away from the live end', async () => {
+    // The interval NEVER trades away the scrollback for an operator actually
+    // reading it: `poll-live` only ever fires while pinned.
+    vi.useFakeTimers();
+    const read = vi.fn(async (_p: string, _r?: string, _mode?: PaneReadMode) => ok());
+    render(
+      <TerminalTab
+        projectId={ATLAS}
+        rowId={ATLAS}
+        read={read}
+        resize={undefined}
+        send={undefined}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    box({ scrollHeight: 800, clientHeight: 200, scrollTop: 120 });
     await act(async () => {
       vi.advanceTimersByTime(REFRESH_MS);
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(read.mock.calls.length).toBeGreaterThan(1);
-    expect(read.mock.calls.map((call) => call[2])).toEqual(
-      read.mock.calls.map(() => 'poll' as const),
-    );
+    expect(read.mock.calls.map((call) => call[2])).toEqual(['poll', 'poll']);
   });
 
   it('asks as `echo` before anything has been drawn, and never for scrollback it has not got', async () => {
