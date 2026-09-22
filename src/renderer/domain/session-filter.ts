@@ -51,6 +51,22 @@ export type SessionFilters = {
    * this one ships on.
    */
   readonly hideEnded: boolean;
+  /**
+   * SESSIONS VAM DID NOT START, hidden by default.
+   *
+   * `docs/design/vam-owns-the-session.md`, the operator's own ask distilled:
+   * "it should only show the sessions that vam creates." A session outside
+   * vam's tmux prefix is not deleted from vam's knowledge -- vam can still
+   * read it, and this toggle is the honest place for it, one click away,
+   * exactly as `hideEnded` already is for a finished conversation.
+   *
+   * NOT `hideEnded`. `isHiddenByEndedFilter`'s own test file names the trap
+   * this avoids: one boolean standing for two claims is the mistake
+   * `vamControlled` already made once. A live session the operator started
+   * by hand, in their own terminal, has not ENDED -- no source measured
+   * that -- but it is not vam's either, and only this rule can say so.
+   */
+  readonly hideForeign: boolean;
 };
 
 /**
@@ -66,6 +82,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
   hideAgentStarted: true,
   onlyPrompted: false,
   hideEnded: true,
+  hideForeign: true,
 };
 
 /**
@@ -194,4 +211,33 @@ export function isHiddenByEndedFilter(
   if (!filters.hideEnded) return false;
   if (status !== 'all') return false;
   return isEnded(session);
+}
+
+/**
+ * Toggle D's predicate. Only a session a source POSITIVELY MEASURED it did
+ * NOT start -- `vamControlled === false`, not merely absent. The same
+ * direction every rule in this file takes: a session vam never classified,
+ * or could not ask tmux about at all, survives.
+ *
+ * `docs/design/vam-owns-the-session.md`'s own trap, restated as code: absence
+ * is what "vam could not ask" looks like -- no tmux, no server, a source with
+ * no such surface -- and reading it as "not vam's" would hide every row on a
+ * machine with no tmux server. Only a session vam actually asked tmux about,
+ * and did not find, is foreign.
+ */
+export function isForeign(session: Session): boolean {
+  return session.vamControlled === false;
+}
+
+/**
+ * Does the foreign rule remove this session from the list?
+ *
+ * UNLIKE `isHiddenByEndedFilter`, this never stands down for an explicit
+ * status pill: there is no "foreign" status to select instead, so nothing in
+ * the popover can fight it the way `Done` fights `hideEnded`. A foreign
+ * session hides at any status -- `running`, `waiting`, whatever it is doing,
+ * it is still not vam's to show by default.
+ */
+export function isHiddenByForeignFilter(session: Session, filters: SessionFilters): boolean {
+  return filters.hideForeign && isForeign(session);
 }

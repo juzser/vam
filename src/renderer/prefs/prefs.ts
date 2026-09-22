@@ -1202,9 +1202,14 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted, hideEnded } = (
+  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign } = (
     typeof raw === 'object' && raw !== null ? raw : {}
-  ) as { hideAgentStarted?: unknown; onlyPrompted?: unknown; hideEnded?: unknown };
+  ) as {
+    hideAgentStarted?: unknown;
+    onlyPrompted?: unknown;
+    hideEnded?: unknown;
+    hideForeign?: unknown;
+  };
   return {
     hideAgentStarted:
       typeof hideAgentStarted === 'boolean'
@@ -1216,6 +1221,11 @@ function readFilters(raw: unknown): SessionFilters {
     // default, which is the state the operator asked for — so a vam that has
     // never seen the toggle behaves as though it had been left alone.
     hideEnded: typeof hideEnded === 'boolean' ? hideEnded : DEFAULT_SESSION_FILTERS.hideEnded,
+    // Same per-field fallback, for the same reason: every store predating
+    // Stage 1's toggle has no such key, and reads back as the shipped
+    // default rather than as "off".
+    hideForeign:
+      typeof hideForeign === 'boolean' ? hideForeign : DEFAULT_SESSION_FILTERS.hideForeign,
   };
 }
 

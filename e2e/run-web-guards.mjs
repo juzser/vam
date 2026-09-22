@@ -275,6 +275,16 @@ const GUARDS = [
   // (`attention-shots.mjs`'s own header holds the cadence math and the one
   // poller this guard could not reach, and why).
   'attention-shots',
+  // STAGE 1 OF `docs/design/vam-owns-the-session.md`: only vam's own
+  // sessions show by default, the toggle that reveals the rest, the sidebar
+  // that never goes empty when tmux itself cannot be read, and the row a
+  // bare `tmux new-session -s vam-x` earns with nothing started in it yet.
+  // Stubs `window.api` for the same reason `attention-shots.mjs` and
+  // `prs-tab-shots.mjs` both do, and measures four DOM states no unit test
+  // drives end to end: a real click on the popover's toggle, and a real
+  // reading of the reason text a degraded load leaves on screen
+  // (`sidebar-ownership-shots.mjs`'s own header holds the falsifications).
+  'sidebar-ownership-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

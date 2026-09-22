@@ -634,7 +634,18 @@ export type SessionListProps = {
     readonly agent: number;
     readonly unprompted: number;
     readonly ended: number;
+    readonly foreign: number;
   };
+  /**
+   * WHY THE FOREIGN AND ENDED RULES ARE STANDING DOWN RIGHT NOW, or `null` on
+   * every ordinary poll. `docs/design/vam-owns-the-session.md`'s own trap:
+   * "an unreadable tmux listing must not empty the sidebar" -- once a source's
+   * own tmux read fails, neither rule can trust what it would otherwise hide
+   * (`Canvas.tsx`'s `entries` memo is what actually stands them down; this is
+   * the words for why, so the popover can say so rather than silently
+   * narrowing less than the operator expects).
+   */
+  readonly vamListingGap?: string | null;
   readonly renamingId: string | null;
   readonly renameDraft: string;
   readonly onRenameChange: (value: string) => void;
@@ -880,6 +891,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     originFilters,
     onOriginFilters,
     hiddenCounts,
+    vamListingGap = null,
     renamingId,
     renameDraft,
     onRenameChange,
@@ -1331,7 +1343,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     (statusFilter === 'all' ? 0 : 1) +
     applied('hideAgentStarted') +
     applied('onlyPrompted') +
-    applied('hideEnded');
+    applied('hideEnded') +
+    applied('hideForeign');
 
   /**
    * Whether ANY rule is narrowing the list, default or not — what the toggle's
@@ -1348,7 +1361,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     activeFilters > 0 ||
     originFilters.hideAgentStarted ||
     originFilters.onlyPrompted ||
-    originFilters.hideEnded;
+    originFilters.hideEnded ||
+    originFilters.hideForeign;
 
   // Sized against the column when there is one. With no width the pane fills
   // its host, and the popover opens at its full 288 -- which still clears the
@@ -1900,6 +1914,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   hiddenCounts.ended,
                   DEFAULT_SESSION_FILTERS.hideEnded,
                 ],
+                // THE FOURTH ROW: `docs/design/vam-owns-the-session.md`, the
+                // operator's own ask distilled -- "it should only show the
+                // sessions that vam creates." ON BY DEFAULT for the same
+                // reason `ended` is: the count beside it is what keeps a
+                // hidden session from being indistinguishable from one that
+                // does not exist.
+                [
+                  'foreign',
+                  'Hide sessions vam did not start',
+                  originFilters.hideForeign,
+                  hiddenCounts.foreign,
+                  DEFAULT_SESSION_FILTERS.hideForeign,
+                ],
               ] as const
             ).map(([key, label, on, hides, byDefault]) => (
               <button
@@ -1913,7 +1940,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       ? { ...originFilters, hideAgentStarted: !on }
                       : key === 'ended'
                         ? { ...originFilters, hideEnded: !on }
-                        : { ...originFilters, onlyPrompted: !on },
+                        : key === 'foreign'
+                          ? { ...originFilters, hideForeign: !on }
+                          : { ...originFilters, onlyPrompted: !on },
                   )
                 }
                 className={[
@@ -1946,6 +1975,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <span className="flex-none font-mono text-meta text-ink-faint">−{hides}</span>
               </button>
             ))}
+
+            {/* WHY "ended" AND "foreign" JUST STOPPED NARROWING, if they did.
+                `docs/design/vam-owns-the-session.md`'s own trap: "an
+                unreadable tmux listing must not empty the sidebar." Both
+                rules read a fact vam's own tmux spine has to answer for --
+                whether a row is vam's at all -- and `Canvas.tsx` stands them
+                both down the instant that spine could not be read, showing
+                every row rather than trusting a default it cannot back up.
+                This says why, in the one place an operator would otherwise
+                read the toggles as simply not working. */}
+            {vamListingGap !== null && (
+              <span
+                data-vam-listing-gap
+                className="rounded-[7px] border border-failed bg-card px-2 py-1.5 text-control text-failed"
+              >
+                {vamListingGap}
+              </span>
+            )}
 
             {/* A15.3: the UNTIMED twin of the restore strip below. That strip
                 shows for a while and then goes; a project it named does not

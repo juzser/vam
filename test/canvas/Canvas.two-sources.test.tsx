@@ -15,7 +15,7 @@
  */
 
 import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import type { SessionSource, SourceCapabilities } from '../../src/renderer/sources/port.js';
@@ -128,6 +128,15 @@ beforeAll(() => {
 });
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  // The Codex row below is deliberately `vamControlled: false` -- the whole
+  // point of this file is a row vam did not start -- so Stage 1's new
+  // default (`hideForeign`, `session-filter.ts`) would hide it from every
+  // test that navigates onto it. Turned off here, the same way an operator
+  // would turn it off to look at exactly this kind of row.
+  localStorage.setItem('vam.prefs.v1', JSON.stringify({ filters: { hideForeign: false } }));
+});
 
 describe('a canvas serving two sources', () => {
   it('draws the Terminal view for a row whose source has a pane', () => {
