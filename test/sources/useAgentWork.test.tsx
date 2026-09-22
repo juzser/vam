@@ -19,7 +19,7 @@
  * to end.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_WORK_POLL_MS, useAgentWork } from '../../src/renderer/sources/useAgentWork.js';
 import type { AgentWork } from '../../src/shared/agent-work.js';
@@ -169,6 +169,65 @@ describe('useAgentWork', () => {
       });
       const last = seen[seen.length - 1];
       expect(last?.work?.kind === 'work' && last.work.turns[0]?.input).toBe('the fast one');
+    });
+  });
+
+  /**
+   * VISIBILITY GATING -- `hidden: 'pause'`, unlike `useSourceModel`'s own
+   * `slowBy`. This pane's `agentId !== null` gate already withdraws the
+   * poll once nobody has it open, and `notify/waiting.ts` never reads this
+   * hook's answer (its own header names `useSourceModel` as the app's one
+   * transition-detection loop) -- so a hidden window may stop this poll
+   * outright with nothing lost. See this file's own header for why the
+   * IMMEDIATE ask on a newly picked agent stays independent of this.
+   */
+  describe('visibility gating', () => {
+    const visibilitySpy = () =>
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+
+    const changeVisibility = async () => {
+      await act(async () => {
+        fireEvent(document, new Event('visibilitychange'));
+      });
+    };
+
+    it('stops polling outright once the window is hidden', async () => {
+      vi.useFakeTimers();
+      const visibility = visibilitySpy();
+      const read = vi.fn(async () => work('the brief'));
+      harness('agent-a', read);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const before = read.mock.calls.length;
+
+      visibility.mockReturnValue('hidden');
+      await changeVisibility();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AGENT_WORK_POLL_MS * 3);
+      });
+      expect(read.mock.calls.length).toBe(before);
+      visibility.mockRestore();
+    });
+
+    it('resumes with one immediate tick the moment the window is visible again', async () => {
+      vi.useFakeTimers();
+      const visibility = visibilitySpy();
+      const read = vi.fn(async () => work('the brief'));
+      harness('agent-a', read);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      visibility.mockReturnValue('hidden');
+      await changeVisibility();
+      const beforeReturn = read.mock.calls.length;
+
+      visibility.mockReturnValue('visible');
+      await changeVisibility();
+      expect(read.mock.calls.length).toBeGreaterThan(beforeReturn);
+      visibility.mockRestore();
     });
   });
 });

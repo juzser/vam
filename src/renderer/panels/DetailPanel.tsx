@@ -170,6 +170,7 @@ import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure, type SourceError } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { useAgentWork } from '../sources/useAgentWork.js';
+import { useVisibilityInterval } from '../useVisibilityInterval.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
 import { ConfirmPrAction } from './ConfirmPrAction.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
@@ -6499,29 +6500,62 @@ export function DetailPanel(props: DetailPanelProps) {
   const [paneAsk, setPaneAsk] = useState<PanePrompt | null>(null);
   const projectId = entry?.project.id ?? '';
   const rowId = entry?.session.id ?? '';
+  /** Bumped on every call and in the reset effect's own cleanup, below --
+   *  `useSourceModel`'s own `issued`/`seq` idiom, replacing the per-effect
+   *  `live` closure a hook-managed poll can no longer hold onto: only the
+   *  most recently ISSUED read may write, which matters once
+   *  `useVisibilityInterval` can release a burst of queued ticks on return
+   *  from a hidden window. */
+  const promptGeneration = useRef(0);
+  /** True while THIS effect's own previous run was already polling --
+   *  see this ref's twin (`wasModelReadable`) below for why an "already
+   *  polling, just a different row" transition needs its own immediate
+   *  ask instead of `useVisibilityInterval`'s. */
+  const wasPromptReadable = useRef(false);
+  const lookPrompt = useCallback(async () => {
+    if (!readable || prompt === undefined) return;
+    promptGeneration.current += 1;
+    const mine = promptGeneration.current;
+    const view = await prompt(projectId, rowId);
+    if (mine !== promptGeneration.current) return;
+    // ONLY A PROMPT IS DRAWN. Every other answer -- no picker, an
+    // unreadable pane, a pairing vam refused -- leaves the card absent and
+    // the waiting note standing, which already names the reach state. A
+    // card built out of a refusal would be a control that cannot act.
+    setPaneAsk(view.kind === 'prompt' ? view.prompt : null);
+  }, [readable, prompt, projectId, rowId]);
   useEffect(() => {
     if (!readable || prompt === undefined) {
       setPaneAsk(null);
+      wasPromptReadable.current = false;
       return;
     }
-    let live = true;
-    const look = async () => {
-      const view = await prompt(projectId, rowId);
-      // ONLY A PROMPT IS DRAWN. Every other answer -- no picker, an
-      // unreadable pane, a pairing vam refused -- leaves the card absent and
-      // the waiting note standing, which already names the reach state. A
-      // card built out of a refusal would be a control that cannot act.
-      if (live) setPaneAsk(view.kind === 'prompt' ? view.prompt : null);
-    };
-    void look();
-    // The prompt is a SCREEN, not a record: it appears and disappears without
-    // anything telling vam, so it is re-read while the row is waiting.
-    const timer = setInterval(() => void look(), PROMPT_POLL_MS);
+    // NEW ROW, NEW SCREEN: asked once right away, same as before this was
+    // split out of one effect -- the cadence below is the RECURRING half.
+    // SKIPPED on the very first tick this becomes readable at all:
+    // `useVisibilityInterval`'s own OFF -> ON immediate call already covers
+    // that edge, and asking twice would be a second, needless read of the
+    // same pane. `wasPromptReadable` is what tells the two edges apart.
+    if (wasPromptReadable.current) void lookPrompt();
+    wasPromptReadable.current = true;
     return () => {
-      live = false;
-      clearInterval(timer);
+      promptGeneration.current += 1;
     };
-  }, [readable, prompt, projectId, rowId]);
+    // `projectId`/`rowId` are not read directly here -- `lookPrompt` already
+    // carries them, and its own identity is what re-runs this effect.
+  }, [readable, prompt, lookPrompt]);
+  // The prompt is a SCREEN, not a record: it appears and disappears without
+  // anything telling vam, so it is re-read while the row is waiting --
+  // paused outright while the window is hidden (`hidden: 'pause'`), since
+  // nothing downstream of this card depends on it the way
+  // `notify/waiting.ts` depends on `useSourceModel`; resumed with one
+  // immediate tick, same as `TerminalTab`'s own refresh.
+  useVisibilityInterval(
+    readable && prompt !== undefined,
+    PROMPT_POLL_MS,
+    'pause',
+    () => void lookPrompt(),
+  );
   /**
    * WHICH MODEL THIS SESSION IS RUNNING -- the name the CLI paints on its own
    * status line, read back out of the pane, or `null` for "vam cannot tell".
@@ -6555,49 +6589,69 @@ export function DetailPanel(props: DetailPanelProps) {
   /** Published only while the poll below is live; see `sendModel`. */
   const lookForModel = useRef<(() => void) | null>(null);
   const modelReadable = modelControl === 'picker' && model !== undefined;
+  /** True while THIS effect's own previous run was already polling -- see
+   *  its use below for why an "already polling, just a different row"
+   *  transition needs its own immediate ask instead of
+   *  `useVisibilityInterval`'s (which only fires on OFF -> ON). */
+  const wasModelReadable = useRef(false);
+  /**
+   * WHICH READ'S ANSWER IS STILL WANTED. Bumped on every call, so two reads
+   * in flight at once -- a hidden window's throttled interval releases a
+   * burst when it comes back -- can never have an older one answering last
+   * paint a model the session had seconds ago. `TerminalTab`'s own poll
+   * makes exactly this argument; only the most recently ISSUED read may
+   * write. Also bumped by the reset effect's own cleanup below, so a read
+   * left over from the PREVIOUS row cannot land under this one's title
+   * either -- the `live` closure this replaces covered both cases at once;
+   * a hook-managed poll can no longer hold one open across ticks.
+   */
+  const modelGeneration = useRef(0);
+  const lookModel = useCallback(async () => {
+    if (!modelReadable || model === undefined) return;
+    modelGeneration.current += 1;
+    const mine = modelGeneration.current;
+    const view = await model(projectId, rowId);
+    if (mine !== modelGeneration.current) return;
+    // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
+    // tell -- a question over the status line, a cut pane, a pairing it
+    // refused, AND a transcript with no answered turn in it -- lands on the
+    // word the button wore before, because the one thing worse than an
+    // unlabelled button is a label that has quietly stopped being true.
+    //
+    // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
+    // CLI's painted footer and `last-turn` out of the session's transcript;
+    // both put the same word on the button, and only one of them can be
+    // called "running" in the words around it (`modelRunningClause`).
+    setRunning(view.kind === 'unknown' ? null : view);
+  }, [modelReadable, model, projectId, rowId]);
   useEffect(() => {
     if (!modelReadable || model === undefined) {
       // A row change lands here first, and this line is what stops the last
       // session's model being drawn under this one's title for one frame.
       setRunning(null);
+      lookForModel.current = null;
+      wasModelReadable.current = false;
       return;
     }
-    let live = true;
-    /**
-     * WHICH READ'S ANSWER IS STILL WANTED. `live` alone covers unmount, but
-     * two reads can be in flight at once -- a hidden window's throttled
-     * interval releases a burst when it comes back -- and an older one
-     * answering last would paint a model the session had seconds ago.
-     * `TerminalTab`'s own poll makes exactly this argument; only the most
-     * recently ISSUED read may write.
-     */
-    let issued = 0;
-    const look = async () => {
-      issued += 1;
-      const mine = issued;
-      const view = await model(projectId, rowId);
-      if (!live || mine !== issued) return;
-      // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
-      // tell -- a question over the status line, a cut pane, a pairing it
-      // refused, AND a transcript with no answered turn in it -- lands on the
-      // word the button wore before, because the one thing worse than an
-      // unlabelled button is a label that has quietly stopped being true.
-      //
-      // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
-      // CLI's painted footer and `last-turn` out of the session's transcript;
-      // both put the same word on the button, and only one of them can be
-      // called "running" in the words around it (`modelRunningClause`).
-      setRunning(view.kind === 'unknown' ? null : view);
-    };
-    lookForModel.current = () => void look();
-    void look();
-    const timer = setInterval(() => void look(), MODEL_POLL_MS);
+    lookForModel.current = () => void lookModel();
+    // SKIPPED on the very first tick this becomes readable at all --
+    // `useVisibilityInterval`'s own OFF -> ON immediate call already covers
+    // that edge; asking twice would be a second, needless tmux read.
+    if (wasModelReadable.current) void lookModel();
+    wasModelReadable.current = true;
     return () => {
-      live = false;
       lookForModel.current = null;
-      clearInterval(timer);
+      modelGeneration.current += 1;
     };
-  }, [modelReadable, model, projectId, rowId]);
+    // `projectId`/`rowId` are not read directly here -- `lookModel` already
+    // carries them, and its own identity is what re-runs this effect.
+  }, [modelReadable, model, lookModel]);
+  // READ ON THE ROW, ON THE INTERVAL, AND ON DEMAND -- see this control's own
+  // header above. Paused outright while the window is hidden (`hidden:
+  // 'pause'`): nothing downstream of this button depends on it the way
+  // `notify/waiting.ts` depends on `useSourceModel`, and it resumes with one
+  // immediate tick the moment the window is visible again.
+  useVisibilityInterval(modelReadable, MODEL_POLL_MS, 'pause', () => void lookModel());
   /**
    * The rows the answer marks; two when the name cannot separate them.
    *
