@@ -160,6 +160,7 @@ describe('the tab really applies it', () => {
     expect(drawn()).toHaveLength(540);
 
     const el = box({ scrollHeight: 8000, clientHeight: 200, scrollTop: 7800 });
+    const before = read.mock.calls.length;
     await act(async () => {
       fireEvent.keyDown(el, { key: 'x' });
       await Promise.resolve();
@@ -168,7 +169,16 @@ describe('the tab really applies it', () => {
     });
     // The cheap read really was the one asked for -- the win of the echo read
     // is untouched -- and the expensive thing it used to cost is not.
-    expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
+    //
+    // "AMONG the reads since the key", not "the last read". The component's
+    // `REFRESH_MS` interval runs on the real clock here, and on a slow runner
+    // a `poll` lands after the echo inside this same window: CI saw exactly
+    // that -- `expected 'poll' to be 'echo'` -- on a branch that had passed
+    // this test three times locally and twice on CI. The property is that a
+    // keystroke asks for the cheap read; whether the tick also fired is the
+    // runner's business, not this test's.
+    const modesSinceKey = read.mock.calls.slice(before).map((call) => call[2]);
+    expect(modesSinceKey).toContain('echo');
     expect(drawn()).toHaveLength(540);
     expect(drawn()[0]).toBe('history 0');
   });
