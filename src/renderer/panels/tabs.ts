@@ -48,8 +48,8 @@ export type Tab = (typeof TABS)[number];
  * to `TABS` has to be classified once, here, instead of silently inheriting
  * whichever answer the `!==` chain at the call site happened to give it.
  *
- * TWO NAMES SAY NO, FOR TWO DIFFERENT REASONS, and neither of them is "it is
- * not prose":
+ * THREE NAMES SAY NO, FOR THREE DIFFERENT REASONS, and none of them is "it
+ * is not prose":
  *
  *  - `Terminal` IS covered by the same setting -- one flag, one promise of
  *    eighty characters a line (`prefs/view-width.ts`) -- but it caps ITSELF,
@@ -61,9 +61,21 @@ export type Tab = (typeof TABS)[number];
  *    share of the pane and its editor's column is the operator's own drag.
  *    It also shares the capped element (always mounted, merely `hidden`), so
  *    a cap left on for it would narrow a tree nobody asked to narrow.
+ *  - `Agents` was in the capped set, and the operator reversed it on a
+ *    screenshot: "the Agents view in narrow mode also needs full width." It
+ *    is a two-pane navigator -- the roster on the left, the picked agent's
+ *    In/Out on the right (`AGENT_SPLIT_PX`) -- and a cap meant to shorten a
+ *    line of prose was confining both panes to a 890px column in a 1336px
+ *    pane, with a dead gutter either side. The cap answers "how long should
+ *    a line be"; this view's question is "how much room do two panes get",
+ *    which is the Terminal's question, and it gets the Terminal's answer:
+ *    the whole pane. The question card follows the body here
+ *    (`DetailPanel`'s `bodyMaxWidth`), so a card still capped under a
+ *    full-width navigator cannot recreate the mismatch the operator
+ *    rejected on the first cut.
  */
 export function narrowsAsProse(tab: Tab): boolean {
-  return tab !== 'Terminal' && tab !== 'Files';
+  return tab !== 'Terminal' && tab !== 'Files' && tab !== 'Agents';
 }
 
 /**
