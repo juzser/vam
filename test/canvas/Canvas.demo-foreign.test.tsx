@@ -21,7 +21,7 @@
  * already proves the predicate does.
  */
 
-import { act, cleanup, render } from '@testing-library/react';
+import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -70,7 +70,10 @@ const modelWith = (over: Partial<Session> = {}): CanvasModel => ({
   ],
 });
 
-const rows = () => [...document.querySelectorAll('[data-session-row]')].map((el) => el.getAttribute('data-session-row'));
+const rows = () =>
+  [...document.querySelectorAll('[data-session-row]')].map((el) =>
+    el.getAttribute('data-session-row'),
+  );
 
 beforeAll(() => {
   window.matchMedia ??= (() => ({
