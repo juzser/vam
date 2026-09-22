@@ -136,5 +136,9 @@ export async function resumeClaudeSession(input: {
     cwd: row.cwd,
     command,
     projectId: projectIdOf(row.cwd),
+    // `docs/design/vam-owns-the-session.md` §2, step 1: the id is already in
+    // hand -- it is what `command` was just built from -- so it is written
+    // now, for free, rather than guessed later.
+    sessionId: row.sessionId,
   });
 }

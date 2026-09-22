@@ -493,15 +493,33 @@ export async function loadClaudeCodeProjects(
 
   // SOURCE ROWS, PLUS EVERY VAM PANE NO SOURCE ROW IS PAIRED TO (`pane-row.ts`
   // carries the argument). Filed under the project whose digest the pane
-  // recorded, which is only findable for a project some live row already
-  // names: a digest cannot be turned back into a directory, so a pane in a
-  // brand-new project has no section until something runs there.
+  // recorded, when it has one; a TAGGED pane with no live row for its digest
+  // still has nowhere to go, because a digest cannot be turned back into a
+  // directory. An UNTAGGED pane -- `unclaimedPanes` now lets one through when
+  // tmux told us its real cwd -- gets a brand-new project bucket instead,
+  // built from that cwd exactly as a live agent row's own project is: this is
+  // the only way a bare `tmux new-session -s vam-x`, never handed to
+  // `createVamSession` at all, still becomes a row.
   if (tmuxSessions !== null) {
     const byProjectId = new Map(
       [...grouped.entries()].map(([cwd, group]) => [projectIdOf(cwd), group] as const),
     );
     for (const empty of unclaimedPanes(tmuxSessions, claimed)) {
-      byProjectId.get(empty.project)?.sessions.push(paneRow(empty));
+      const cwd = empty.cwd !== undefined && empty.cwd !== '' ? empty.cwd : null;
+      const projectId =
+        empty.project !== '' ? empty.project : cwd !== null ? projectIdOf(cwd) : null;
+      if (projectId === null) continue;
+      let bucket = byProjectId.get(projectId);
+      if (bucket === undefined) {
+        // Only reachable via the cwd fallback: a TAGGED project with no live
+        // row still has no cwd to build a section from, and is skipped below
+        // exactly as before this change.
+        if (cwd === null) continue;
+        bucket = { cwd, sessions: [] };
+        grouped.set(cwd, bucket);
+        byProjectId.set(projectId, bucket);
+      }
+      bucket.sessions.push(paneRow(empty));
     }
   }
 

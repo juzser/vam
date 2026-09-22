@@ -131,6 +131,41 @@ export const VAM_PROJECT_OPTION = '@vam-project';
  */
 export const VAM_PID_OPTION = '@vam-pid';
 
+/**
+ * THE THIRD PAIRING: the native id of whatever vam started in this pane --
+ * the Claude Code session id, or the Codex thread uuid -- written once vam
+ * actually knows it. `docs/design/vam-owns-the-session.md` §2.
+ *
+ * WHY IT IS NOT WRITTEN AT CREATION, unlike the two options above. Both
+ * providers mint their own id AFTER tmux returns from `new-session`: `claude`
+ * writes its session id to `~/.claude/sessions/<pid>.json` only once it has
+ * started, and `codex` mints its thread uuid the same way. There is nothing
+ * to record in the one `new-session` call the other two options ride along
+ * with.
+ *
+ * WHERE IT IS WRITTEN INSTEAD. A RESUME already holds the id in its hand --
+ * `claudeResumeCommand(row.sessionId)` and `codexResumeCommand(threadId)` are
+ * given it as an argument -- so `createVamSession`'s caller passes it along
+ * and this is set in the same run of calls that writes the other two. A
+ * FRESH start has no id yet at this point in the design (§2's step 2, watch
+ * the source's store for a first-seen entry, is Stage 2's problem, not this
+ * one's), so nothing here writes it for that path.
+ *
+ * WHAT IT IS NOT. A row key -- `<sessionId>#<pid>` is a Claude Code row's key
+ * because one session id can have two live processes (see `VAM_PID_OPTION`'s
+ * own header and `agents.ts`), and keying on the bare id this option holds
+ * would collapse two rows into one, the exact bug that once made Close kill
+ * the wrong tmux session. Reading this back is therefore a pairing HINT --
+ * "does any vam session already carry this row's native id" -- never an
+ * address.
+ *
+ * ABSENT, NOT MATCHED ON EMPTY, on the same rule `VAM_PROJECT_OPTION` and
+ * `VAM_PID_OPTION` both state: an option nobody set formats as the empty
+ * string, and a reader that matched on `''` would pair every unwritten
+ * session with every row whose id vam also could not read.
+ */
+export const VAM_SESSION_OPTION = '@vam-session';
+
 /** Characters tmux itself dislikes in a session name (`.` and `:` are targets). */
 const UNSAFE_NAME = /[^A-Za-z0-9_-]+/g;
 
@@ -867,12 +902,30 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
  * it, so if it ever does the answer is "could not ask", not "no sessions".
  * This is the ONE format here that leans on a control character, and the
  * argv test counts it.
+ *
+ * THE FIFTH AND SIXTH FIELDS, ADDED FOR THE SPINE INVERSION
+ * (`docs/design/vam-owns-the-session.md` §1/§2). `@vam-session` is read back
+ * exactly like the two options before it -- an option nobody set is the
+ * empty string, never an error, and `listVamSessions` refuses to match on
+ * that emptiness for the same reason it already refuses to on an unset
+ * project. `pane_current_path` is not an option at all; it is tmux's own
+ * answer for what directory the pane is running in RIGHT NOW, and it is what
+ * lets an untagged `vam-`-prefixed session -- one nobody ever ran
+ * `createVamSession` for, `@vam-project` unset -- still be filed under a real
+ * project instead of nowhere: a digest can never be turned back into a
+ * directory, but tmux itself always knows the live one.
+ *
+ * BOTH ARE LAST, AND IN THIS ORDER, so a shorter listing -- an older tmux, or
+ * any stub in this suite that predates one or both fields -- still parses:
+ * `listVamSessions` treats a missing trailing field as "the listing did not
+ * say", never as a session with an empty foreground command or an empty
+ * cwd.
  */
 export function listSessionsArgv(): readonly string[] {
   return [
     'list-sessions',
     '-F',
-    `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}`,
+    `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`,
   ];
 }
 
@@ -901,6 +954,17 @@ export function tagSessionArgv(name: string, projectId: string): readonly string
  */
 export function tagPidArgv(name: string, pid: string): readonly string[] {
   return setOptionArgv(name, VAM_PID_OPTION, pid);
+}
+
+/**
+ * Record the native id vam has just learned for this session -- `tagSessionArgv`
+ * and `tagPidArgv`'s twin, and the same bare-target argument applies: this
+ * runs in the same short run of calls `createVamSession` already makes at
+ * creation (for a resume, immediately after), so there is still nothing for a
+ * prefix or an fnmatch to fall through to by the time it runs.
+ */
+export function tagVamSessionArgv(name: string, sessionId: string): readonly string[] {
+  return setOptionArgv(name, VAM_SESSION_OPTION, sessionId);
 }
 
 /** The one shape both tag calls share -- a bare-target `set-option`, see `tagSessionArgv`. */

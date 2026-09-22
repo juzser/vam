@@ -58,7 +58,7 @@
  * speed up. They stay on `execFile`, exactly as before this file existed.
  */
 
-import { CURSOR_FORMAT, VAM_PID_OPTION, VAM_PROJECT_OPTION } from './argv.js';
+import { CURSOR_FORMAT, VAM_PID_OPTION, VAM_PROJECT_OPTION, VAM_SESSION_OPTION } from './argv.js';
 import type { SpawnFailure, TmuxRunResult } from './spawn.js';
 
 /**
@@ -81,7 +81,7 @@ export const CONTROL_SESSION_NAME = 'vamctl';
  * it fresh each call (`===` on two calls' return value is not guaranteed to
  * hold for a template literal recomputed twice, even though it would in
  * practice; recognising the LITERAL keeps the check honest either way). */
-const LIST_SESSIONS_FORMAT = `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}`;
+const LIST_SESSIONS_FORMAT = `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`;
 
 /** A vam session target, exactly as `target()`/`paneTarget()` in `argv.ts` build it. */
 const SAFE_TARGET_RE = /^=vam-[A-Za-z0-9_-]+:?$/;

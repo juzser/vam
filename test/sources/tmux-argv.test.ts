@@ -31,8 +31,10 @@ import {
   sendTextArgv,
   tagPidArgv,
   tagSessionArgv,
+  tagVamSessionArgv,
   VAM_PID_OPTION,
   VAM_PROJECT_OPTION,
+  VAM_SESSION_OPTION,
   VAM_SESSION_PREFIX,
   vamSessionName,
 } from '../../src/main/sources/tmux/argv.js';
@@ -212,11 +214,15 @@ describe('tmux argv', () => {
     // matcher is back to guessing from a truncated slug (project) or counting
     // live rows (pid). The command is what tells an empty shell pane from one
     // with an agent in it (`tmux/shell.ts`, `isShellCommand`), and it comes
-    // LAST so the three fields before it keep their positions.
+    // right after the three fields every older stub in this suite answers
+    // with, so their positions do not move. `@vam-session` and the pane's
+    // real cwd come LAST, in that order -- see `listVamSessions` for why each
+    // is optional and why the order lets an older, shorter listing still
+    // parse.
     expect(listSessionsArgv()).toEqual([
       'list-sessions',
       '-F',
-      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}`,
+      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`,
     ]);
   });
 
@@ -363,6 +369,31 @@ describe('the @vam-pid boundary', () => {
       'vam-a1b2c3',
       '@vam-pid',
       '14709',
+    ]);
+  });
+});
+
+/**
+ * THE THIRD BOUNDARY, frozen the same way as the two above and for the same
+ * reason: `docs/design/vam-owns-the-session.md` §2. Written once, on resume,
+ * while vam already holds the native id in its hand; never guessed, never
+ * re-derived from a name.
+ */
+describe('the @vam-session boundary', () => {
+  it('is the literal `@vam-session`', () => {
+    expect(VAM_SESSION_OPTION).toBe('@vam-session');
+  });
+
+  it('tags a session with exactly that option and nothing else, the same bare-target shape', () => {
+    // Same reasoning as `tagSessionArgv`/`tagPidArgv`: this only ever runs
+    // immediately after the `new-session` that just created the exact name,
+    // so a bare `-t` has nothing else to resolve onto by prefix or fnmatch.
+    expect(tagVamSessionArgv('vam-a1b2c3', 'a1b2c3d4-e5f6-4789-a012-3456789abcde')).toEqual([
+      'set-option',
+      '-t',
+      'vam-a1b2c3',
+      '@vam-session',
+      'a1b2c3d4-e5f6-4789-a012-3456789abcde',
     ]);
   });
 });

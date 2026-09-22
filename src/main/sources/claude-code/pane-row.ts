@@ -79,13 +79,24 @@ export function paneNameOf(rowId: string): string | null {
  * pairing of a row that is actually on screen.
  *
  * An empty project id is refused for the reason every other reader refuses
- * it: an unset option reads back as `''`.
+ * it: an unset option reads back as `''` -- UNLESS tmux itself said where the
+ * pane actually is. `@vam-project` is vam's own digest, written only by
+ * `createVamSession`; a session under vam's prefix that nobody ever ran that
+ * for -- `tmux new-session -s vam-x`, typed by hand -- carries no digest to
+ * refuse or match, but tmux still knows its real cwd
+ * (`TmuxSession.cwd`, `#{pane_current_path}`), and that is enough to place the
+ * row honestly. `source.ts` is what turns a known cwd into a brand-new
+ * project; this only has to stop refusing the session that has one.
  */
 export function unclaimedPanes(
   sessions: readonly TmuxSession[],
   claimed: ReadonlySet<string>,
 ): readonly TmuxSession[] {
-  return sessions.filter((session) => session.project !== '' && !claimed.has(session.name));
+  return sessions.filter(
+    (session) =>
+      !claimed.has(session.name) &&
+      (session.project !== '' || (session.cwd !== undefined && session.cwd !== '')),
+  );
 }
 
 /**

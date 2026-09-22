@@ -80,7 +80,7 @@ import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { fileTranscriptSource } from '../claude-code/window.js';
 import type { MainSource } from '../source.js';
-import { createTmuxRunner, type TmuxRun } from '../tmux/spawn.js';
+import { createTmuxRunner, listVamSessions, type TmuxRun } from '../tmux/spawn.js';
 import { type Liveness, livenessOf, type ProbeLock, probeLockViaOpen } from './liveness.js';
 import { queueMessage, type RunCodex, runCodexViaCli } from './queue.js';
 import { resumeThread } from './resume.js';
@@ -331,7 +331,21 @@ const descriptorFor = (store: StoreRead | null, livenessReadable: boolean): Sour
  * One thread, as a row. Every field is either read from the store, read from
  * the rollout, or a documented absence.
  */
-async function sessionFor(row: ThreadRow, nowMs: number, liveness: Liveness): Promise<Session> {
+async function sessionFor(
+  row: ThreadRow,
+  nowMs: number,
+  liveness: Liveness,
+  // `null` is "vam could not ask tmux at all" -- see `vamControlled` below.
+  // The default is an EMPTY set rather than `null`, deliberately: a caller
+  // that passes nothing is the shape every fixture in this suite predates,
+  // and it must read as "vam asked and found no match" (`false`), not as "vam
+  // could not ask" (absent) -- the same distinction `TmuxSession.pid`'s own
+  // header draws between an unset option and one nobody could read at all.
+  vamSessionIds: ReadonlySet<string> | null = new Set(),
+  // Stamped onto the row verbatim when the caller's own tmux read failed this
+  // load -- see `Session.vamListingGap`. `null` is the ordinary case.
+  vamListingGap: { readonly code: string; readonly message: string } | null = null,
+): Promise<Session> {
   let facts: Awaited<ReturnType<typeof readRolloutTail>> | null = null;
   try {
     facts = await readRolloutTail(fileTranscriptSource(row.rolloutPath), `codex-${row.id}`);
@@ -374,18 +388,24 @@ async function sessionFor(row: ThreadRow, nowMs: number, liveness: Liveness): Pr
     // looked and found none; this source cannot look.
     // (no `agents` key, deliberately)
     //
-    // FALSE, AND IT IS A POSITIVE FACT RATHER THAN A SHRUG: vam starts nothing
-    // on Codex today, so vam did not start this. That is the claim the mode
-    // chip, the model picker, the keystroke strip and `remove-project.ts` all
-    // read -- "vam holds this session's pane" -- and it is false for every
-    // Codex row. It is NOT the other claim the same flag used to stand for:
-    // whether vam can REACH the session, which is `deliverPrompt` above and is
-    // true.
-    vamControlled: false,
+    // A REAL PAIRING NOW, not the old unconditional `false`.
+    // `docs/design/vam-owns-the-session.md` Stage 1: a resume writes
+    // `@vam-session` with the thread's own uuid the moment it has one
+    // (`resume.ts`), so a thread whose id vam finds among the ids currently
+    // recorded on its own tmux sessions is one vam started and can still
+    // reach a pane for. THREE STATES, the shape `vamControlled` itself
+    // documents: `true` is a proven pairing, `false` is vam having asked
+    // tmux and found no match, and ABSENT -- `vamSessionIds === null` --
+    // is vam not being able to ask tmux at all, which must never collapse
+    // into `false`. This is NOT the other claim the same flag used to stand
+    // for: whether vam can REACH the session, which is `deliverPrompt` above
+    // and is true regardless.
+    ...(vamSessionIds === null ? {} : { vamControlled: vamSessionIds.has(row.id) }),
     // WHAT MODEL THIS THREAD IS ON, from `threads.model` -- a fact the store
     // holds, so vam does not have to read a status line to find it and cannot
     // offer to change it.
     model: row.model,
+    ...(vamListingGap === null ? {} : { vamListingGap }),
   };
 }
 
@@ -400,11 +420,14 @@ export async function projectsFrom(
   threads: readonly ThreadRow[],
   nowMs: number,
   liveness: (threadId: string) => Liveness = () => 'unknown',
+  // See `sessionFor`'s own doc for the three states this carries through.
+  vamSessionIds: ReadonlySet<string> | null = new Set(),
+  vamListingGap: { readonly code: string; readonly message: string } | null = null,
 ): Promise<readonly Project[]> {
   const byProject = new Map<string, { cwd: string; sessions: Session[] }>();
   const order: string[] = [];
   const sessions = await Promise.all(
-    threads.map((row) => sessionFor(row, nowMs, liveness(row.id))),
+    threads.map((row) => sessionFor(row, nowMs, liveness(row.id), vamSessionIds, vamListingGap)),
   );
   threads.forEach((row, index) => {
     const id = codexProjectId(row.cwd);
@@ -498,7 +521,22 @@ export function createCodexSource(input: {
         return fresh;
       };
       const chosen = selectThreads({ threads: read.threads, liveness });
-      return await projectsFrom(chosen.drawn, now(), liveness);
+      // WHICH OF VAM'S OWN TMUX SESSIONS THIS THREAD'S UUID IS RECORDED ON --
+      // `docs/design/vam-owns-the-session.md` Stage 1's own line: "Codex rows
+      // get a real vamControlled." Asked once per load, exactly as the
+      // Claude Code source already does for its own pairing.
+      const listed = await listVamSessions(input.runTmux ?? createTmuxRunner());
+      const vamSessionIds =
+        listed.kind === 'ok'
+          ? new Set(
+              listed.sessions
+                .map((s) => s.vamSessionId)
+                .filter((id): id is string => id !== undefined && id !== ''),
+            )
+          : null;
+      const vamListingGap =
+        listed.kind === 'ok' ? null : { code: listed.error.code, message: listed.error.message };
+      return await projectsFrom(chosen.drawn, now(), liveness, vamSessionIds, vamListingGap);
     },
     recordPrompt: async (sessionId, prompt) => {
       if (!descriptor.capabilities.recordPrompt) {

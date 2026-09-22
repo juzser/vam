@@ -99,6 +99,18 @@ describe('resumeClaudeSession', () => {
     expect(tag[tag.length - 1]).toMatch(/^claude-code:a-repo-[0-9a-f]{8}$/);
   });
 
+  /**
+   * `docs/design/vam-owns-the-session.md` §2, step 1: a resume already holds
+   * the native id in its hand -- `claudeResumeCommand(row.sessionId)` is
+   * given exactly it -- so vam writes `@vam-session` for free, in the same
+   * run of calls, rather than guessing it later.
+   */
+  it('writes @vam-session with the id it is resuming, in the same run of calls', async () => {
+    const { calls } = await attempt();
+    const tag = calls.find((argv) => argv.includes('@vam-session'));
+    expect(tag).toEqual(['set-option', '-t', 'vam-fixed-name', '@vam-session', SESSION]);
+  });
+
   it('refuses a row that is still running', async () => {
     const { failure, calls } = await attempt({
       agents: async () => ({ kind: 'ok', agents: [agent({ status: 'running' })] }),

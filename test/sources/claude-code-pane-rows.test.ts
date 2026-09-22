@@ -200,10 +200,55 @@ describe('a vam pane no source row is paired to', () => {
   it('draws nothing for an untagged session, and nothing when tmux could not be asked', async () => {
     // An unset option reads back as `''`, which would match every project
     // that failed to record one. Refused, as every other reader refuses it.
+    // No `cwd` here either -- the shape every fixture in this suite predates
+    // -- so there is nowhere honest to file the row; see the next test for
+    // the case where tmux DOES say where the pane is.
     const [untagged] = await load([agent()], [{ project: '', pid: '9', name: 'vam-x-000001' }]);
     expect(untagged?.sessions).toHaveLength(1);
     const [unasked] = await load([agent()], null);
     expect(unasked?.sessions).toHaveLength(1);
+  });
+
+  /**
+   * THE BARE `tmux new-session -s vam-x` CASE -- `docs/design/vam-owns-the-
+   * session.md`'s own Stage 1 acceptance line. Nobody ran `createVamSession`
+   * for this pane, so `@vam-project` is unset, but tmux itself always knows
+   * the pane's real cwd (`pane_current_path`) and that is enough to file the
+   * row under a brand-new project, exactly as a tagged pane would be -- a
+   * digest cannot be reversed into a directory, but the REAL path needs no
+   * reversing.
+   */
+  it('makes a project out of a bare, untagged vam- session that only tmux’s own cwd can place', async () => {
+    const BETA = '/w/beta';
+    const projects = await load(
+      [agent()],
+      [{ project: '', pid: '', name: 'vam-x-000001', cwd: BETA }],
+    );
+    const beta = projects.find((p) => p.id === projectIdOf(BETA));
+    expect(beta).toMatchObject({ id: projectIdOf(BETA), name: 'beta' });
+    expect(beta?.sessions).toMatchObject([
+      { id: paneRowId('vam-x-000001'), status: 'unstarted', vamControlled: true },
+    ]);
+    // Alpha's own row is untouched by the new project's arrival.
+    const alpha = projects.find((p) => p.id === ALPHA_ID);
+    expect(alpha?.sessions.map((s) => s.id)).toEqual(['sess-1#100']);
+  });
+
+  it('reuses the same brand-new project for two untagged panes in the one directory', async () => {
+    const BETA = '/w/beta';
+    const projects = await load(
+      [agent()],
+      [
+        { project: '', pid: '', name: 'vam-x-000001', cwd: BETA },
+        { project: '', pid: '', name: 'vam-x-000002', cwd: BETA },
+      ],
+    );
+    const matches = projects.filter((p) => p.id === projectIdOf(BETA));
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.sessions.map((s) => s.id)).toEqual([
+      paneRowId('vam-x-000001'),
+      paneRowId('vam-x-000002'),
+    ]);
   });
 
   it('is the tmux session’s row for as long as the tmux session exists, whatever the clock says', async () => {

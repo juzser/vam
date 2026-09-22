@@ -237,6 +237,63 @@ describe('listVamSessions', () => {
     });
   });
 
+  /**
+   * THE FIFTH AND SIXTH FIELDS: the native id vam wrote once it learned it,
+   * and the pane's REAL cwd, straight from tmux rather than from vam's own
+   * `@vam-project` tag. Both are optional in the same shape `command` is,
+   * and for the same reason -- every shorter stub in this suite, including
+   * the ones just above, must keep parsing.
+   */
+  it('reads the vam-session id and the real cwd as a fifth and sixth field', async () => {
+    const run = fakeTmux(() => ({
+      stdout: [
+        [
+          'claude-code:demo-11111111',
+          '4242',
+          'vam-demo-a1b2c3',
+          'claude',
+          'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+          '/w/demo',
+        ].join('\t'),
+        '',
+      ].join('\n'),
+    }));
+    await expect(listVamSessions(run)).resolves.toEqual({
+      kind: 'ok',
+      sessions: [
+        {
+          project: 'claude-code:demo-11111111',
+          pid: '4242',
+          name: 'vam-demo-a1b2c3',
+          command: 'claude',
+          vamSessionId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+          cwd: '/w/demo',
+        },
+      ],
+    });
+  });
+
+  it('reports a session with no vam-session id yet as carrying neither trailing field', async () => {
+    // Unset options read back as the empty string, and a fresh pane has not
+    // been paired with a native id yet -- both must stay absent, the same
+    // rule `command` already follows.
+    const run = fakeTmux(() => ({
+      stdout: ['claude-code:demo-11111111\t4242\tvam-demo-a1b2c3\tzsh\t\t/w/demo', ''].join('\n'),
+    }));
+    await expect(listVamSessions(run)).resolves.toEqual({
+      kind: 'ok',
+      sessions: [
+        {
+          project: 'claude-code:demo-11111111',
+          pid: '4242',
+          name: 'vam-demo-a1b2c3',
+          command: 'zsh',
+          cwd: '/w/demo',
+        },
+      ],
+    });
+  });
+
   it('reports an untagged vam session as tagged with nothing, not as tagged with its name', async () => {
     // A session started by an older vam, or one whose `set-option` failed. The
     // empty fields are what an unset user option formats as (measured), and
@@ -458,6 +515,84 @@ describe('createVamSession', () => {
         projectId: 'claude-code:demo-11111111',
       });
       expect(run.calls.some((argv) => argv.includes('@vam-pid'))).toBe(false);
+    });
+  });
+
+  /**
+   * THE VAM-SESSION TAG: a resume already holds the native id in its hand
+   * (`docs/design/vam-owns-the-session.md` §2, step 1), so `createVamSession`
+   * writes it in the same run of calls as the other two, when it is given
+   * one at all.
+   */
+  describe('the vam-session tag', () => {
+    it('records the native id as a fourth call, after the project and pid tags', async () => {
+      const run = fakeTmux((argv) => (argv[0] === 'new-session' ? { stdout: '14709\n' } : {}));
+      const created = await createVamSession(run, {
+        name: 'vam-demo-a1b2c3',
+        cwd: '/w/demo',
+        command: ['claude', '--resume', 'a1b2c3d4-e5f6-4789-a012-3456789abcde'],
+        projectId: 'claude-code:demo-11111111',
+        sessionId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      });
+      expect(created).toBeNull();
+      expect(run.calls.map((argv) => argv[0])).toEqual([
+        'new-session',
+        'set-option',
+        'set-option',
+        'set-option',
+      ]);
+      expect(run.calls[3]).toEqual([
+        'set-option',
+        '-t',
+        'vam-demo-a1b2c3',
+        '@vam-session',
+        'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      ]);
+    });
+
+    it('writes nothing when the caller has no id yet -- a fresh start', async () => {
+      const run = fakeTmux(ok);
+      await createVamSession(run, {
+        name: 'vam-demo-a1b2c3',
+        cwd: '/w/demo',
+        command: ['claude'],
+        projectId: 'claude-code:demo-11111111',
+      });
+      expect(run.calls.some((argv) => argv.includes('@vam-session'))).toBe(false);
+    });
+
+    it('refuses to write an empty id rather than match every unwritten session on it', async () => {
+      const run = fakeTmux(ok);
+      await createVamSession(run, {
+        name: 'vam-demo-a1b2c3',
+        cwd: '/w/demo',
+        command: ['claude'],
+        projectId: 'claude-code:demo-11111111',
+        sessionId: '',
+      });
+      expect(run.calls.some((argv) => argv.includes('@vam-session'))).toBe(false);
+    });
+
+    /**
+     * DEGRADES SILENTLY, THE SAME SEVERITY AS THE PID TAG. The session the
+     * project tag already recorded is still findable by the older fallback
+     * with or without this; a bonus proof that failed to write is not a
+     * reason to report a session that DID start as a failure.
+     */
+    it('starts the session successfully when the vam-session tag call itself fails', async () => {
+      const run = fakeTmux((argv) =>
+        argv.includes('@vam-session')
+          ? { failure: { message: 'exit 1' }, stderr: 'unknown option: @vam-session' }
+          : {},
+      );
+      const created = await createVamSession(run, {
+        name: 'vam-demo-a1b2c3',
+        cwd: '/w/demo',
+        command: ['claude'],
+        projectId: 'claude-code:demo-11111111',
+        sessionId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+      });
+      expect(created).toBeNull();
     });
   });
 });
