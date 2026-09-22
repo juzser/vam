@@ -38,7 +38,7 @@
  * an ordinary character still typing an ordinary character.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -157,6 +157,13 @@ async function openFilter(): Promise<HTMLInputElement> {
   await act(async () => {
     q<HTMLButtonElement>('[data-view="files"]')?.click();
     await Promise.resolve();
+  });
+  // `FilesTab` mounts behind a `React.lazy` + `Suspense` boundary now
+  // (`DetailPanel.tsx`'s own `LazyFilesTab`), so `filterBox()` is not there
+  // the instant the click above returns -- wait for FilesTab's own root
+  // marker (present on all three of its return branches) first.
+  await waitFor(() => {
+    if (!q('[data-files]')) throw new Error('still pending');
   });
   const box = filterBox();
   expect(box).not.toBeNull();
@@ -282,6 +289,10 @@ describe('the new-file box is the same box by construction', () => {
     await act(async () => {
       q<HTMLButtonElement>('[data-view="files"]')?.click();
       await Promise.resolve();
+    });
+    // See `openFilter`'s own comment: `FilesTab`'s lazy chunk.
+    await waitFor(() => {
+      if (!q('[data-files]')) throw new Error('still pending');
     });
     const box = q<HTMLInputElement>('[data-files-new] input');
     expect(box).not.toBeNull();

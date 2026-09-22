@@ -49,11 +49,38 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *     entry gzip, before  262,428 B
  *     entry gzip, after   217,432 B
  *
- * `ENTRY_BUDGET_BYTES` (800,000) and `ENTRY_GZIP_BUDGET_BYTES` (240,000)
- * both sit ~10% above the "after" figures -- enough to absorb an ordinary
- * dependency bump without flapping, but a reverted lazy split (putting
- * `react-markdown` back on a static import path) adds the ~154 KB chunk
- * straight back into the entry and fails both budgets outright.
+ * A THIRD REGRESSION THIS FILE NOW ALSO GUARDS: `SettingsOverlay` and
+ * `FilesTab` both sat in the eager entry too, for the same reason the
+ * markdown stack did -- a static import at the one call site each,
+ * reachable from the entry the moment the canvas has a single pane.
+ * `Canvas.tsx` now imports `SettingsOverlay` behind a `React.lazy` +
+ * `Suspense` boundary (fallback `null`: it is a window overlay, drawn only
+ * once `settingsOpen` is true, over everything and reflowing nothing beside
+ * it); `DetailPanel.tsx` does the same for `FilesTab` (`LazyFilesTab`,
+ * fallback `null`: its own `hidden` prop already paints nothing whenever
+ * the Files tab is not the open one, which is the common case, so the
+ * fallback is indistinguishable from the resolved-but-hidden component
+ * there). `FilesTab.tsx` is 2,700+ lines and drags `files-highlight.ts` and
+ * the hand-rolled tokenizer `highlight.ts` in behind it; `SettingsOverlay`
+ * carries every settings section, including the icons and controls only it
+ * uses.
+ *
+ * Measured, `electron-vite build`, same code and chunks both times:
+ *
+ *     entry, before this split   719,146 B  (218,206 B gzip)
+ *     entry, after this split    624,969 B  (191,941 B gzip)
+ *
+ * a ~94 KB / ~13% drop in the eagerly-parsed script, ~26 KB / ~12% gzipped
+ * -- `SettingsOverlay-*.js` and `FilesTab-*.js` now carry that weight as
+ * their own chunks, fetched on first open rather than parsed before the
+ * canvas draws anything.
+ *
+ * `ENTRY_BUDGET_BYTES` (690,000) and `ENTRY_GZIP_BUDGET_BYTES` (212,000)
+ * both sit ~10% above THESE "after" figures, the same headroom policy the
+ * markdown split above already established -- enough to absorb an ordinary
+ * dependency bump without flapping, but a reverted lazy split on either
+ * component puts its chunk straight back into the entry and fails both
+ * budgets outright.
  *
  * The entry chunk is found by parsing the renderer's own emitted
  * `index.html` for its `<script type="module">` tag -- the same thing a
@@ -73,8 +100,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 800_000;
-const ENTRY_GZIP_BUDGET_BYTES = 240_000;
+const ENTRY_BUDGET_BYTES = 690_000;
+const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name
@@ -87,6 +114,23 @@ const ENTRY_GZIP_BUDGET_BYTES = 240_000;
 // minification renaming a function or a variable the way a symbol-name
 // grep would not be.
 const MARKDOWN_STACK_MARKER = 'gfmTable';
+
+// `SettingsOverlay`'s own root DOM attribute -- a bare JSX attribute name
+// survives minification verbatim (it has to keep matching the real DOM
+// attribute), and this one is written nowhere else (verified: `grep -rn
+// data-settings-overlay src` outside `SettingsOverlay.tsx` finds nothing,
+// and `grep -rl data-settings-overlay node_modules` finds nothing).
+const SETTINGS_OVERLAY_MARKER = 'data-settings-overlay';
+
+// The editor's own attribute, ONE LEVEL IN from `FilesTab`'s bare
+// `data-files` root: that shorter string is also a PREFIX several sibling
+// attributes share (`data-files-row`, `data-files-tree-resize`, …), so a
+// substring match on it inside ~700 KB of minified JS risks matching one of
+// those instead of proving the component itself shipped. `data-files-editor`
+// is exact. Verified unique the same way as the two markers above: `grep -rn
+// data-files-editor src` outside `FilesTab.tsx` finds nothing, and
+// `grep -rl data-files-editor node_modules` finds nothing.
+const FILES_TAB_MARKER = 'data-files-editor';
 
 describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
   let outDir: string;
@@ -195,6 +239,32 @@ describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
     // marker disappearing because the code was deleted or tree-shaken away
     // entirely, not because it moved to a lazy boundary.
     expect(otherAssetTexts.some((text) => text.includes(MARKDOWN_STACK_MARKER))).toBe(true);
+  });
+
+  it('SettingsOverlay is not in the eager entry chunk', () => {
+    // Falsify by making `Canvas.tsx` import `SettingsOverlay` from
+    // `../settings/SettingsOverlay.js` directly again instead of through
+    // its own `lazy(() => import(...))` -- this line goes red:
+    //   expect(entryText.includes('data-settings-overlay')).toBe(false)
+    //   AssertionError: expected true to be false
+    expect(entryText.includes(SETTINGS_OVERLAY_MARKER)).toBe(false);
+  });
+
+  it('SettingsOverlay still ships, in a lazy chunk', () => {
+    expect(otherAssetTexts.some((text) => text.includes(SETTINGS_OVERLAY_MARKER))).toBe(true);
+  });
+
+  it('FilesTab is not in the eager entry chunk', () => {
+    // Falsify by making `DetailPanel.tsx` import `FilesTab` from
+    // `./FilesTab.js` directly again instead of through `LazyFilesTab`'s
+    // `lazy(() => import(...).then(...))` -- this line goes red:
+    //   expect(entryText.includes('data-files-editor')).toBe(false)
+    //   AssertionError: expected true to be false
+    expect(entryText.includes(FILES_TAB_MARKER)).toBe(false);
+  });
+
+  it('FilesTab still ships, in a lazy chunk', () => {
+    expect(otherAssetTexts.some((text) => text.includes(FILES_TAB_MARKER))).toBe(true);
   });
 });
 

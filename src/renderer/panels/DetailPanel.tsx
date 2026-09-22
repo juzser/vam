@@ -177,7 +177,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
-import { type FileOpenRequest, FilesTab } from './FilesTab.js';
+import type { FileOpenRequest } from './FilesTab.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
@@ -210,6 +210,15 @@ import {
 // `LazyMarkdown.tsx`'s own header for the measured cost and why the split
 // sits at this boundary rather than inside `out-markdown.tsx`.
 const LazyMarkdown = lazy(() => import('./LazyMarkdown.js'));
+
+// `FilesTab`, in its own lazy chunk -- the same `React.lazy` + `Suspense`
+// split as `LazyMarkdown` above, at the same boundary this repo's
+// bundle-budget guard measures. `FilesTab.tsx` is 2,700+ lines and drags in
+// `files-highlight.ts` and the hand-rolled tokenizer `highlight.ts` behind
+// it, none of which a session with the Files tab withdrawn (`files` prop
+// absent/false) ever needs. `FileOpenRequest` stays a TYPE-ONLY import
+// above -- only the component VALUE needs to move behind `lazy()`.
+const LazyFilesTab = lazy(() => import('./FilesTab.js').then((m) => ({ default: m.FilesTab })));
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -8134,50 +8143,62 @@ export function DetailPanel(props: DetailPanelProps) {
             state survives, nothing currently on screen shows it, and it costs
             no timer and no IPC while hidden -- `FilesTab` itself polls
             nothing, unlike Terminal's `capture-pane`. */}
+        {/* `Suspense` with a `null` fallback: `FilesTab` is its own lazy
+            chunk now (see `LazyFilesTab`'s declaration above). Its own
+            `hidden` prop already renders NOTHING visible whenever
+            `current !== 'Files'` -- the common case, since a fresh
+            session opens on Response -- so the fallback is indistinguishable
+            from the resolved, hidden component in that case. The one case
+            it is not free is a session that opens straight onto the Files
+            tab, where the chunk (already cached after the first open in the
+            app's life) resolves a render tick or two after mount rather
+            than painting synchronously. */}
         {files === true && (
-          <FilesTab
-            hidden={current !== 'Files'}
-            // The same claim `Alt+<digit>` is gated on, passed one layer
-            // further down: this tab answers `Mod-p` on the WINDOW, so every
-            // mounted instance hears every keystroke and only the pane holding
-            // the keyboard may act on one. See `FilesTab`'s own prop comment.
-            paneFocused={paneFocused}
-            sessionId={entry?.session.id ?? null}
-            list={globalThis.window?.api?.files?.list}
-            read={globalThis.window?.api?.files?.read}
-            write={globalThis.window?.api?.files?.write}
-            // The quit guard's half of the same bridge. `beforeunload` (armed
-            // inside `FilesTab`, off the SAME derivation) covers the window
-            // closing; this covers Cmd-Q, which reaches `app.on('before-quit')`
-            // in main and never reaches the page at all. Absent in the browser
-            // build, which has no application to quit. See
-            // `src/main/quit/guard.ts`.
-            reportUnsaved={globalThis.window?.api?.files?.reportUnsaved}
-            // The view-icon corner overlay (`data-view-overlay`, further down
-            // this file) floats ABOVE this tab's own content at `top-2
-            // right-2.5`, real clicks and all -- measured directly: the Save
-            // button sat under the Agents icon until this was threaded
-            // through -- and `6rem` was not enough once this tab's own icon
-            // widened the pill, so it is the MEASURED `cornerReserve` rather
-            // than a constant. See its own comment above.
-            reserveCorner={cornerReserve}
-            // And the pill's VERTICAL footprint, which this tab needs now
-            // that its right-hand column IS the corner. See
-            // `cornerReserveHeight`'s own comment above.
-            reserveCornerHeight={cornerReserveHeight}
-            // The dragged tree width and the way to store a new one. Both
-            // come from the shell that owns `prefs`; `undefined` here draws
-            // the share and no handle, which is what the browser build and
-            // every test that has not wired a store get. See the two props'
-            // own comments above.
-            filesTreeWidth={props.filesTreeWidth ?? null}
-            onFilesTreeWidth={props.onFilesTreeWidth}
-            onFilesMarkdownView={props.onFilesMarkdownView}
-            // "Open this file, at this line" -- from a `path:line` control in
-            // an agent's own answer, already resolved and authorised in main.
-            // See `outActions.openFileRef` above and `FileOpenRequest`.
-            openRequest={fileOpenRequest}
-          />
+          <Suspense fallback={null}>
+            <LazyFilesTab
+              hidden={current !== 'Files'}
+              // The same claim `Alt+<digit>` is gated on, passed one layer
+              // further down: this tab answers `Mod-p` on the WINDOW, so every
+              // mounted instance hears every keystroke and only the pane holding
+              // the keyboard may act on one. See `FilesTab`'s own prop comment.
+              paneFocused={paneFocused}
+              sessionId={entry?.session.id ?? null}
+              list={globalThis.window?.api?.files?.list}
+              read={globalThis.window?.api?.files?.read}
+              write={globalThis.window?.api?.files?.write}
+              // The quit guard's half of the same bridge. `beforeunload` (armed
+              // inside `FilesTab`, off the SAME derivation) covers the window
+              // closing; this covers Cmd-Q, which reaches `app.on('before-quit')`
+              // in main and never reaches the page at all. Absent in the browser
+              // build, which has no application to quit. See
+              // `src/main/quit/guard.ts`.
+              reportUnsaved={globalThis.window?.api?.files?.reportUnsaved}
+              // The view-icon corner overlay (`data-view-overlay`, further down
+              // this file) floats ABOVE this tab's own content at `top-2
+              // right-2.5`, real clicks and all -- measured directly: the Save
+              // button sat under the Agents icon until this was threaded
+              // through -- and `6rem` was not enough once this tab's own icon
+              // widened the pill, so it is the MEASURED `cornerReserve` rather
+              // than a constant. See its own comment above.
+              reserveCorner={cornerReserve}
+              // And the pill's VERTICAL footprint, which this tab needs now
+              // that its right-hand column IS the corner. See
+              // `cornerReserveHeight`'s own comment above.
+              reserveCornerHeight={cornerReserveHeight}
+              // The dragged tree width and the way to store a new one. Both
+              // come from the shell that owns `prefs`; `undefined` here draws
+              // the share and no handle, which is what the browser build and
+              // every test that has not wired a store get. See the two props'
+              // own comments above.
+              filesTreeWidth={props.filesTreeWidth ?? null}
+              onFilesTreeWidth={props.onFilesTreeWidth}
+              onFilesMarkdownView={props.onFilesMarkdownView}
+              // "Open this file, at this line" -- from a `path:line` control in
+              // an agent's own answer, already resolved and authorised in main.
+              // See `outActions.openFileRef` above and `FileOpenRequest`.
+              openRequest={fileOpenRequest}
+            />
+          </Suspense>
         )}
       </div>
 

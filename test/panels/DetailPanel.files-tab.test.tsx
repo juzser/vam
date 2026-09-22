@@ -11,7 +11,7 @@
  * `DetailPanel.test.tsx`'s own `mode control` tests.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   FileListResult,
@@ -140,7 +140,7 @@ afterEach(() => {
   resetUnsavedRegistry();
 });
 
-function draw(over: Partial<DetailPanelProps> = {}) {
+async function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
     decision: DECISION,
@@ -158,6 +158,21 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     ...over,
   };
   render(<DetailPanel {...props} />);
+  // `FilesTab` mounts behind a `React.lazy` + `Suspense` boundary now
+  // (`DetailPanel.tsx`'s own `LazyFilesTab` -- see its declaration's header
+  // for the measured cost), so its DOM is not there the instant `render`
+  // returns. `[data-files]` is FilesTab's own root marker in every one of
+  // its three return branches (`data-files-empty`/`data-files-unavailable`/
+  // `data-files-view`), so its arrival is exactly the signal "the lazy chunk
+  // resolved and rendered" -- `DetailPanel.file-ref.test.tsx`'s own
+  // `LazyMarkdown` wait is the precedent for this shape. Skipped when
+  // `files` does not resolve `true`: FilesTab never mounts at all then, and
+  // this would wait forever.
+  if (props.files === true) {
+    await waitFor(() => {
+      if (!document.querySelector('[data-files]')) throw new Error('still pending');
+    });
+  }
 }
 
 const openFiles = async () => {
@@ -168,19 +183,19 @@ const openFiles = async () => {
 };
 
 describe('the Files tab is withdrawn until a caller confirms the desktop bridge', () => {
-  it('draws no Files icon when the files prop is absent', () => {
-    draw({ files: undefined });
+  it('draws no Files icon when the files prop is absent', async () => {
+    await draw({ files: undefined });
     expect(q('[data-view="files"]')).toBeNull();
   });
 
-  it('draws no Files icon when files is explicitly false', () => {
-    draw({ files: false });
+  it('draws no Files icon when files is explicitly false', async () => {
+    await draw({ files: false });
     expect(q('[data-view="files"]')).toBeNull();
   });
 
-  it('draws the Files icon once a caller has confirmed the bridge', () => {
+  it('draws the Files icon once a caller has confirmed the bridge', async () => {
     withBridge({});
-    draw({ files: true });
+    await draw({ files: true });
     expect(q('[data-view="files"]')).not.toBeNull();
   });
 });
@@ -188,7 +203,7 @@ describe('the Files tab is withdrawn until a caller confirms the desktop bridge'
 describe('no session focused', () => {
   it('says so, plainly, rather than showing an empty list', async () => {
     withBridge({});
-    draw({ entry: null, files: true });
+    await draw({ entry: null, files: true });
     await openFiles();
     expect(q('[data-files-empty]')?.textContent).toContain('No session selected');
   });
@@ -205,7 +220,7 @@ describe('the file tree', () => {
       };
     });
     withBridge({ list });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     // Two rows, not two files: `src` is one collapsed directory, and `.env`
@@ -228,7 +243,7 @@ describe('the file tree', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(q('[data-files-tree]')).not.toBeNull();
     await act(async () => {
@@ -252,7 +267,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(rowPaths()).toEqual(['/work/atlas/src']);
     expect(row('/work/atlas/src')?.getAttribute('data-files-row-open')).toBe('false');
@@ -294,7 +309,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const icon = (path: string) =>
@@ -324,7 +339,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const ink = (path: string) =>
@@ -343,7 +358,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
@@ -374,7 +389,7 @@ describe('the file tree', () => {
     withBridge({
       list: async () => Promise.reject(refusal('unknown-session', 'vam has no live session s1')),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     const note = q('[data-files-refusal="unknown-session"]');
     expect(note?.textContent).toContain('vam has no live session s1');
@@ -391,7 +406,7 @@ describe('opening a file — the read side of all seven refusals', () => {
       }),
       read: async () => ({ content: '', isBinary: true, signature: SIGNATURE({ size: 48_231 }) }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -415,7 +430,7 @@ describe('opening a file — the read side of all seven refusals', () => {
           refusal('too-large', '/work/atlas/huge.log is 78643200 bytes, over the ceiling'),
         ),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -437,7 +452,7 @@ describe('opening a file — the read side of all seven refusals', () => {
           ),
         ),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -455,7 +470,7 @@ describe('opening a file — the read side of all seven refusals', () => {
       list: async () => ({ root: '/work/atlas', files: [], truncated: false }),
       read: async () => Promise.reject(refusal('not-found', '/work/atlas/.env does not exist')),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       fireEvent.change(
@@ -488,7 +503,7 @@ describe('changed-on-disk — the refusal that must not look like a failure', ()
       read,
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -538,7 +553,7 @@ describe('dirty state', () => {
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -578,7 +593,7 @@ describe('dirty state', () => {
         signature: SIGNATURE(),
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const openRow = async (path: string) => {
@@ -611,7 +626,7 @@ describe('the line-number gutter', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await act(async () => {
       q<HTMLButtonElement>('[data-view="files"]')?.click();
       await Promise.resolve();
@@ -694,7 +709,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -708,7 +723,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -730,7 +745,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -748,7 +763,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -771,7 +786,7 @@ describe('the keyboard model', () => {
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -812,7 +827,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -888,7 +903,7 @@ describe('walking the tree from the keyboard', () => {
 
   const openTree = async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
   };
 
@@ -1157,7 +1172,7 @@ describe('walking the tree from the keyboard', () => {
       }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/src')?.click(); // open it
@@ -1262,7 +1277,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
   /** MUTATION TARGET: drop the tab's own window listener and this reddens. */
   it('reaches the filter box, and claims the key', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(q('[data-files-filter]')).not.toBe(document.activeElement);
 
@@ -1281,7 +1296,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('does nothing at all once another tab is showing', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLButtonElement>('[data-view="response"]')?.click();
@@ -1302,7 +1317,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('does nothing in a pane that does not hold the keyboard', async () => {
     withBridge(TREE);
-    draw({ files: true, paneFocused: false, tabRequest: { tab: 'Files' } });
+    await draw({ files: true, paneFocused: false, tabRequest: { tab: 'Files' } });
     await act(async () => {
       await Promise.resolve();
     });
@@ -1323,7 +1338,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('stands down while a caret outside this tab is answering the keys', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const elsewhere = document.createElement('input');
@@ -1355,7 +1370,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('claims Mod-p and nothing else', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     // NOT `Control+p`: its SPELLING is platform-dependent (`CTRL_GESTURES`),
@@ -1394,7 +1409,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -1416,7 +1431,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
         signature: SIGNATURE(),
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1445,7 +1460,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -1500,14 +1515,14 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('says "nothing" on mount — which is what corrects main after a reload', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
   });
 
   it('NAMES the file, and counts it, the moment the buffer is dirty', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1524,7 +1539,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('counts TWO as two and names both — a count fixed at one would be a lie in a modal', async () => {
     const reportUnsaved = withReporter(['/work/atlas/.env', '/work/atlas/README.md']);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     for (const path of ['/work/atlas/.env', '/work/atlas/README.md']) {
       await act(async () => {
@@ -1541,7 +1556,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('says "nothing" again once the buffer is saved', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1564,7 +1579,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
     // every key typed into the editor. The set is what main needs, so the set
     // is what the effect watches.
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1586,7 +1601,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('stops speaking for a tab that has been unmounted', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1609,7 +1624,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1642,7 +1657,7 @@ async function openFile(path: string, content: string): Promise<HTMLTextAreaElem
     list: async () => ({ root: '/work/atlas', files: [path], truncated: false }),
     read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
   });
-  draw({ files: true });
+  await draw({ files: true });
   await openFiles();
   await act(async () => {
     row(path)?.click();
@@ -2192,7 +2207,7 @@ describe('the markdown preview', () => {
       read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2226,7 +2241,7 @@ describe('the markdown preview', () => {
         signature: SIGNATURE(),
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2300,7 +2315,7 @@ describe('the default view for a freshly opened .md file', () => {
       }),
       read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2354,7 +2369,7 @@ describe('persisting the choice — the callback out to `Canvas.tsx`', () => {
       }),
       read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true, onFilesMarkdownView });
+    await draw({ files: true, onFilesMarkdownView });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2381,7 +2396,7 @@ describe('persisting the choice — the callback out to `Canvas.tsx`', () => {
       }),
       read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true, onFilesMarkdownView });
+    await draw({ files: true, onFilesMarkdownView });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2419,7 +2434,7 @@ describe('the Files preview carries its own GitHub-scoped wrapper', () => {
       }),
       read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2450,7 +2465,7 @@ describe('the Files preview carries its own GitHub-scoped wrapper', () => {
       }),
       read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2558,7 +2573,7 @@ describe('the preview’s keyboard — a control reachable only by mouse is not 
       }),
       read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
