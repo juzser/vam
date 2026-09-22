@@ -190,13 +190,19 @@ describe("a screen-shaped answer is drawn in the windowed answer's own coordinat
     await settle();
     // The window view: 8000px of content in a 200px box, at the bottom.
     const el = box({ scrollHeight: 8000, clientHeight: 200, scrollTop: 7800 });
+    const before = read.mock.calls.length;
     await act(async () => {
       fireEvent.keyDown(el, { key: 'x' });
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
+    // AMONG the reads since the key, not the last one: `REFRESH_MS` runs on
+    // the real clock here, and a slow runner lets a `poll` land after the
+    // echo inside this window. CI saw `expected 'poll' to be 'echo'` twice
+    // across two files for exactly that. The property is that the key asked
+    // for the cheap read; the tick firing as well is the runner's business.
+    expect(read.mock.calls.slice(before).map((call) => call[2])).toContain('echo');
     // Still at the live end, with the history still above it and the screen
     // the echo answered in place of the one the poll had drawn.
     expect(el.scrollTop).toBe(8000);
@@ -237,13 +243,16 @@ describe("a screen-shaped answer is drawn in the windowed answer's own coordinat
     );
     await settle();
     const el = box({ scrollHeight: 800, clientHeight: 200, scrollTop: 600 });
+    const before = read.mock.calls.length;
     await act(async () => {
       fireEvent.keyDown(el, { key: 'x' });
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(read.mock.calls.at(-1)?.[2]).toBe('echo');
+    // Same rule as above: an echo among the reads since the key, whatever
+    // the interval did alongside it.
+    expect(read.mock.calls.slice(before).map((call) => call[2])).toContain('echo');
     // Dropped, not drawn: the pin never ran, so the box's own number stands.
     expect(el.scrollTop).toBe(600);
   });
