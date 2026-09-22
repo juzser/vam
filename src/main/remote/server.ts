@@ -35,6 +35,7 @@ import { resolve } from 'node:path';
 import type { SourceCapabilities } from '../../renderer/sources/port.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
+import { isDirectoryPath, isOptionalText, isPromptText, isText } from '../ipc/validators.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
 import {
@@ -53,8 +54,6 @@ export const LOOPBACK = '127.0.0.1';
 
 /** Far above any real payload; `recordPrompt` accepts a pasted prompt. */
 const MAX_BODY_BYTES = 2_000_000;
-const MAX_TEXT_LENGTH = 10_000;
-const MAX_PROMPT_LENGTH = 1_000_000;
 
 export type RemoteServerOptions = {
   readonly port: number;
@@ -174,15 +173,6 @@ type Route = (
   response: ServerResponse,
   context: { readonly identity: Identity; readonly body: Record<string, unknown> },
 ) => Promise<void> | void;
-
-const isText = (value: unknown): value is string =>
-  typeof value === 'string' && value.length > 0 && value.length <= MAX_TEXT_LENGTH;
-const isPrompt = (value: unknown): value is string =>
-  typeof value === 'string' && value.length > 0 && value.length <= MAX_PROMPT_LENGTH;
-const isDirectory = (value: unknown): value is string =>
-  isText(value) && value.startsWith('/') && !value.includes('\0');
-const isOptionalText = (value: unknown): value is string | undefined =>
-  value === undefined || isText(value);
 
 function send(response: ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
@@ -567,7 +557,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     [
       '/api/record-prompt',
       'recordPrompt',
-      (b) => isText(b.sessionId) && isPrompt(b.prompt),
+      (b) => isText(b.sessionId) && isPromptText(b.prompt),
       (s, b) => s.recordPrompt?.(b.sessionId as string, b.prompt as string) ?? null,
     ],
     [
@@ -590,7 +580,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     [
       '/api/create-session-in',
       'createSessionIn',
-      (b) => isDirectory(b.cwd) && isText(b.title) && isOptionalText(b.provider),
+      (b) => isDirectoryPath(b.cwd) && isText(b.title) && isOptionalText(b.provider),
       (s, b) =>
         s.createSessionInDirectory?.(
           b.cwd as string,
