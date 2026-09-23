@@ -1,13 +1,13 @@
 # vam — VIM Agent Management
 
-A keyboard-first window onto the Claude Code and Codex sessions already running on your machine — one list, coloured by which one needs you, driven with vim keys instead of a mouse.
+A keyboard-first manager for Claude Code and Codex sessions — one list, coloured by which one needs you, driven with vim keys instead of a mouse.
 
 ![platform: macOS, Linux](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-262626)
 [![licence: MIT](https://img.shields.io/badge/licence-MIT-262626)](LICENSE)
 
 ![vam, dark theme: sessions as tabs, grouped by project in the sidebar, one session's IN/OUT on the right](docs/images/hero-dark.png)
 
-vam does not run or orchestrate agents — it reads their transcripts, surfaces the one that stalled, and types your reply into the pane it runs in.
+Every session is a real tmux pane that starts as a shell. vam types into that pane and reads the transcript back — Ctrl+C drops you to the shell, never out of the session.
 
 ## Features
 
