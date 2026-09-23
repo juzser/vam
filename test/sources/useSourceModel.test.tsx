@@ -97,6 +97,49 @@ describe('useSourceModel', () => {
     expect(pending).toHaveLength(1);
   });
 
+  it('does not drop a write’s reload when a background poll is already in flight -- it runs once that one clears', async () => {
+    // The close race: `Canvas.tsx`'s `closeSession` awaits the write (which
+    // kills the pane), then calls `source.onWrote()` -- literally this
+    // hook's own `reload`, the same function the periodic timer calls. If a
+    // periodic poll is ALREADY in flight at that moment (reading a tmux
+    // listing from BEFORE the kill), the old code dropped the reload outright
+    // (the `inFlight` guard's early return) and the operator was left staring
+    // at the in-flight poll's stale, pre-kill answer -- with nothing to
+    // correct it before the next scheduled tick, up to 40s away while
+    // hidden. The fix: a reload that arrives while one is in flight is
+    // QUEUED, not dropped, and runs the instant the in-flight one clears --
+    // still never two in flight at once, which the test above still pins.
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    const { source, pending } = gatedSource();
+    const { latest } = mount(source);
+    await act(async () => pending[0]?.resolve(projects('first')));
+
+    // The periodic tick issues the poll that will answer STALE.
+    await act(async () => {
+      vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+    });
+    expect(pending).toHaveLength(2);
+
+    // The write's own reload lands while that poll is still in flight --
+    // queued, not a third concurrent request.
+    await act(async () => {
+      latest()?.reload();
+    });
+    expect(pending).toHaveLength(2);
+
+    // The in-flight poll answers with data read BEFORE the write (a real
+    // close, or create, resolves only once its own effect has happened, but
+    // an overlapping background poll may have started its OWN read earlier
+    // still). The queued reload fires the moment this one clears.
+    await act(async () => pending[1]?.resolve(projects('stale')));
+    expect(latest()?.model.projects[0]?.name).toBe('stale');
+    expect(pending).toHaveLength(3);
+
+    // The queued reload corrects it, with no further click and no 10s wait.
+    await act(async () => pending[2]?.resolve(projects('fresh')));
+    expect(latest()?.model.projects[0]?.name).toBe('fresh');
+  });
+
   it('lets the newest load win when an older one answers late', async () => {
     // The same defect the usage poll had: whichever resolved last used to win.
     vi.useFakeTimers({ shouldAdvanceTime: false });

@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createSessionInDirectory } from '../../src/main/sources/claude-code/create-session.js';
 import { repoRootOf, whyNotARepository } from '../../src/main/sources/repo.js';
 import { newSessionArgv } from '../../src/main/sources/tmux/argv.js';
+import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
 
@@ -87,7 +88,7 @@ describe('which chosen directories count as a repository', () => {
 });
 
 describe('starting a session in a directory the operator chose', () => {
-  it('starts it when the directory is a repository, running the STORED provider’s command', async () => {
+  it('starts a SHELL and types NOTHING into it -- Start session on the row types the provider now', async () => {
     const repo = tempRepo();
     const run = recordingTmux();
 
@@ -100,9 +101,6 @@ describe('starting a session in a directory the operator chose', () => {
     });
 
     expect(failure).toBeNull();
-    // Asserted BY VALUE, not by re-deriving it from the same call the code
-    // makes: a hardcoded command would pass an identity assertion.
-    expect(resolveProvider(DEFAULT_PROVIDER_ID).command).toEqual(['claude']);
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
@@ -113,8 +111,15 @@ describe('starting a session in a directory the operator chose', () => {
       'vam-orchard-a1b2c3',
       '-c',
       repo,
-      'claude',
+      ...loginShellCommand(),
     ]);
+    // NOTHING TYPED -- spawn, then `@vam-project`, and no third call. This
+    // used to type the STORED provider's command right here, racing the
+    // start screen the row (drawn `unstarted`, same as any other empty pane)
+    // shows for exactly the same pane -- `create-session.ts`'s header carries
+    // the operator's report and the fix.
+    expect(run.calls).toHaveLength(2);
+    expect(run.calls.flat()).not.toContain(resolveProvider(DEFAULT_PROVIDER_ID).command[0]);
   });
 
   it('refuses a directory that is not a repository, and SPAWNS NOTHING', async () => {

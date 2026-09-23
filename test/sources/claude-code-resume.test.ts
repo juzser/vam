@@ -24,6 +24,7 @@ import {
   claudeResumeCommand,
   resumeClaudeSession,
 } from '../../src/main/sources/claude-code/resume.js';
+import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const SESSION = '00000000-1111-2222-3333-444444444444';
@@ -83,13 +84,29 @@ describe('claudeResumeCommand', () => {
 });
 
 describe('resumeClaudeSession', () => {
-  it('starts `claude --resume` in the session’s own directory', async () => {
+  it('starts a SHELL in the session’s own directory, then types `claude --resume` into it', async () => {
+    // Not a direct spawn any more -- see the module header for the measured
+    // reason (Ctrl+C used to end the whole tmux session, not just Claude).
     const { failure, calls } = await attempt();
     expect(failure).toBeNull();
-    const argv = calls[0] ?? [];
-    expect(argv).toContain('new-session');
-    expect(argv.slice(-3)).toEqual(['claude', '--resume', SESSION]);
-    expect(argv[argv.indexOf('-c') + 1]).toBe(CWD);
+    const spawnArgv = calls[0] ?? [];
+    expect(spawnArgv).toContain('new-session');
+    expect(spawnArgv.slice(-2)).toEqual(loginShellCommand());
+    expect(spawnArgv[spawnArgv.indexOf('-c') + 1]).toBe(CWD);
+    expect(calls).toContainEqual([
+      'send-keys',
+      '-t',
+      '=vam-fixed-name:',
+      '-l',
+      '--',
+      `claude --resume ${SESSION}`,
+    ]);
+    expect(calls).toContainEqual(['send-keys', '-t', '=vam-fixed-name:', 'Enter']);
+    // TYPED AFTER THE PANE EXISTS: the send-keys calls come after new-session,
+    // never before it.
+    expect(calls.findIndex((argv) => argv[0] === 'send-keys')).toBeGreaterThan(
+      calls.findIndex((argv) => argv[0] === 'new-session'),
+    );
   });
 
   it('tags it exactly as a session vam created, so discovery finds it', async () => {
