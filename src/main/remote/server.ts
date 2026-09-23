@@ -205,12 +205,32 @@ function isProjectMatch(
  * `guard` parameter this feeds.
  *
  * ORDER MATTERS, AND IS PART OF THE CONTRACT. The capability check runs
- * FIRST, before `load()` is even awaited: a route that cannot spawn must not
- * read the operator's project list at all. Canonicalisation happens EXACTLY
- * ONCE -- `fs.realpath`, matching `src/main/files/authorize.ts`'s own
- * ordering -- and the id it produces is the only thing this function ever
- * returns on success; the caller's `cwd`, raw or canonicalised, is not
- * returned and must never reach a `source.*` call.
+ * FIRST, before `load()` or `realpath()` runs at all: a route that cannot
+ * spawn must not read the operator's project list, and must not do the
+ * canonicalisation work either, because capability-absent is a constant
+ * property of the server -- identical for every `cwd` -- so its shorter path
+ * teaches a remote caller nothing about any path.
+ *
+ * PAST THE CAPABILITY CHECK, EVERY PATH-DEPENDENT CAUSE DOES THE SAME COUNT
+ * OF AWAITED WORK: exactly one `realpath(body.cwd)` and exactly one
+ * `source.load()`, both started together and both awaited to settlement
+ * before the guard decides -- `Promise.allSettled`, not `Promise.all`, so a
+ * rejection on one side never abandons the other. A `cwd` that does not
+ * exist, one that is not a git repository, one the operator never added, one
+ * behind a permission wall, and the member repository itself on the success
+ * path all reach the verdict only after both promises have settled. This
+ * equalises the COUNT and KIND of awaited operations across those causes,
+ * not their DURATION: a single `realpath` can still take different wall-clock
+ * time on a missing path than on an existing one, the membership scan itself
+ * is a synchronous branch and not an awaited operation, and this function
+ * cannot make itself immune to filesystem or `load()` implementation timing
+ * -- see task-12's Result for the residuals this leaves open.
+ *
+ * Canonicalisation happens EXACTLY ONCE -- `fs.realpath`, matching
+ * `src/main/files/authorize.ts`'s own ordering -- and the id it produces is
+ * the only thing this function ever returns on success; the caller's `cwd`,
+ * raw or canonicalised, is not returned and must never reach a `source.*`
+ * call.
  *
  * FAIL CLOSED throughout: an unreadable path, an unreadable project list, or
  * an absent `createSession` capability all resolve the same refusal as a
@@ -223,20 +243,15 @@ async function confineToProjectSet(
   if (source.createSession === undefined) {
     return UNAUTHORIZED_DIRECTORY;
   }
-  let canonical: string;
-  try {
-    canonical = await realpath(body.cwd as string);
-  } catch {
+  const [canonicalOutcome, projectsOutcome] = await Promise.allSettled([
+    realpath(body.cwd as string),
+    source.load(),
+  ]);
+  if (canonicalOutcome.status === 'rejected' || projectsOutcome.status === 'rejected') {
     return UNAUTHORIZED_DIRECTORY;
   }
-  const projectId = projectIdOf(canonical);
-  let projects: readonly { readonly id: string }[];
-  try {
-    projects = await source.load();
-  } catch {
-    return UNAUTHORIZED_DIRECTORY;
-  }
-  return projects.some((project) => project.id === projectId)
+  const projectId = projectIdOf(canonicalOutcome.value);
+  return projectsOutcome.value.some((project) => project.id === projectId)
     ? { projectId }
     : UNAUTHORIZED_DIRECTORY;
 }
