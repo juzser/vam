@@ -130,6 +130,26 @@ export type IconChoice = { readonly icon: string; readonly at: string };
 export type RenameChoice = { readonly title: string; readonly at: string };
 
 /**
+ * A row Close could not make go away, so the operator asked vam to stop
+ * showing it instead. `docs/design/vam-owns-the-session.md` §5: dismissing
+ * never touches the process -- it is the "safe fallback" for a row vam may
+ * not or cannot close (not its pane, ownership ambiguous, tmux unreachable),
+ * and the one already-open case too (a background job the source itself
+ * reports `done`/`failed`, which `stop.ts`'s `already-finished` refuses
+ * forever with nothing left to stop).
+ *
+ * `activity` IS THE UNDO CLOCK. `Session.activity` is the one line a source
+ * already reports that changes when a session does something, so it is what
+ * this compares against on every later read (`isSessionDismissed`): a row
+ * whose activity has moved on from what vam saw at dismissal time has shown
+ * the operator did not mean "gone for good" -- a resumed session is not the
+ * one that was hidden, and it returns on its own. `null` is recorded
+ * honestly when the source had nothing to say, and a LATER `null` never lifts
+ * a dismissal by itself: silence is not news, only a new line is.
+ */
+export type DismissChoice = { readonly at: string; readonly activity: string | null };
+
+/**
  * Which of the mockup's two artboards you are looking at.
  *
  * Stored, not sniffed. `prefers-color-scheme` answers a question about the
@@ -327,6 +347,26 @@ export type Prefs = {
    * decision the operator made, not a session that has stopped existing.
    */
   readonly hiddenProjects: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Source id → row id → when, and with what last known activity, the
+   * operator dismissed that row from the sidebar -- `DismissChoice`'s own
+   * doc carries the whole rule.
+   *
+   * KEYED BY THE ROW, same two levels as `renames` and for the same reason:
+   * a session id is unique only within its source, AND -- the part this
+   * field cannot skip -- a Claude Code row's own id is already
+   * `<sessionId>#<pid>` (`agents.ts`), never the bare session id, because one
+   * session id can have two live processes. Storing this under anything
+   * coarser would dismiss one process's row and silently take the other's
+   * down with it, which is the exact shape of bug that once made Close kill
+   * the wrong tmux session.
+   *
+   * NOT PRUNED BY THE ICON TTL, for `hiddenProjects`' reason one field above:
+   * this records a decision the operator made about a specific row, not a
+   * position that goes stale on its own. `isSessionDismissed`'s activity
+   * check is what actually retires an entry, on its own schedule.
+   */
+  readonly dismissedSessions: Readonly<Record<string, Readonly<Record<string, DismissChoice>>>>;
   /**
    * Source id → the groups the operator made in that source, in the order
    * they were made. UI "project"; see the vocabulary table in
@@ -653,6 +693,7 @@ export const EMPTY_PREFS: Prefs = {
   filters: DEFAULT_SESSION_FILTERS,
   collapsedProjects: {},
   hiddenProjects: {},
+  dismissedSessions: {},
   groups: {},
   collapsedGroups: {},
   renames: {},
@@ -744,6 +785,7 @@ function parsePrefs(
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
+    dismissedSessions?: unknown;
     groups?: unknown;
     collapsedGroups?: unknown;
     renames?: unknown;
@@ -813,6 +855,16 @@ function parsePrefs(
       LEGACY_HTTP_SOURCE_ID,
       migrateSource,
       mergeIdLists,
+    ),
+    // Same shape and TTL exemption as `renames` -- see the field's own
+    // comment for why the row key (not the bare session id) is load-bearing
+    // here. `mergeTimestamped` merges an old-id payload the same way renames
+    // does: per row, the newer dismissal wins.
+    dismissedSessions: migrateSourceKey(
+      readBuckets(record.dismissedSessions, readDismissChoice),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+      mergeTimestamped,
     ),
     // Per field and per source again, and NOT pruned by the TTL: every store
     // in existence predates the group layer and has neither key, which reads
@@ -1021,6 +1073,82 @@ export function setProjectHidden(
     ...prefs,
     hiddenProjects: withIdBySource(prefs.hiddenProjects, source, projectId, hidden),
   };
+}
+
+/**
+ * Is this row hidden from the sidebar because the operator dismissed it, and
+ * has it not shown newer activity since?
+ *
+ * `currentActivity` is `Session.activity` as of THIS read, never a value
+ * cached from the moment of dismissal -- a caller that read it once and kept
+ * reusing it would never see a row lift itself. See `DismissChoice` for the
+ * whole rule this applies: a row with no recorded dismissal is never
+ * dismissed; one with a recorded dismissal stays dismissed while
+ * `currentActivity` is `null` (silence is not news) or unchanged from what
+ * was recorded, and lifts the moment it differs from that and is not `null`.
+ */
+export function isSessionDismissed(
+  prefs: Prefs,
+  source: string,
+  sessionId: string,
+  currentActivity: string | null,
+): boolean {
+  const entry = prefs.dismissedSessions[source]?.[sessionId];
+  if (entry === undefined) return false;
+  if (currentActivity !== null && currentActivity !== entry.activity) return false;
+  return true;
+}
+
+/**
+ * Dismiss a row, or undo that -- `setRename`'s shape, one field over: `on`
+ * chooses which, rather than a boolean tacked onto an otherwise write-only
+ * call, because the undo is exactly as real an act as the dismissal and reads
+ * clearer named at the call site than inferred from an absent argument.
+ *
+ * `activity`/`at` are only consulted when dismissing; undoing simply drops
+ * the entry, so nothing here has to reason about what an undo would even mean
+ * for a clock that no longer applies.
+ */
+export function setSessionDismissed(
+  prefs: Prefs,
+  source: string,
+  sessionId: string,
+  on: boolean,
+  activity: string | null = null,
+  at: Date = new Date(),
+): Prefs {
+  const bucket = prefs.dismissedSessions[source] ?? emptyMap<DismissChoice>();
+  const nextBucket = on
+    ? withEntry(bucket, sessionId, { at: at.toISOString(), activity })
+    : withoutEntry(bucket, sessionId);
+  const dismissedSessions =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.dismissedSessions, source, nextBucket)
+      : withoutEntry(prefs.dismissedSessions, source);
+  return { ...prefs, dismissedSessions };
+}
+
+/** How many rows are dismissed right now, across every source -- the count
+ *  the status bar shows beside the control that undoes all of them. */
+export function countDismissedSessions(prefs: Prefs): number {
+  let total = 0;
+  for (const bucket of Object.values(prefs.dismissedSessions)) {
+    total += Object.keys(bucket).length;
+  }
+  return total;
+}
+
+/**
+ * Undo every dismissal at once -- the whole of the undo affordance this
+ * feature ships with. Deliberately not "undo the last one": a dismissal
+ * carries no order across sources (two levels of a keyed map, not a list),
+ * and inventing one to support a single-step undo would be a second piece of
+ * state to keep in sync with the first for a control the operator reaches
+ * for rarely enough that "bring everything back" is the whole answer they
+ * need.
+ */
+export function restoreAllDismissedSessions(prefs: Prefs): Prefs {
+  return { ...prefs, dismissedSessions: {} };
 }
 
 /**
@@ -1906,6 +2034,23 @@ function readRename(entry: unknown): RenameChoice | null {
     return null;
   }
   return { title, at };
+}
+
+function readDismissChoice(entry: unknown): DismissChoice | null {
+  if (typeof entry !== 'object' || entry === null) {
+    return null;
+  }
+  const { at, activity } = entry as { at?: unknown; activity?: unknown };
+  if (typeof at !== 'string') {
+    return null;
+  }
+  // `null` is a real, storable value here (see `DismissChoice`'s own doc),
+  // so anything that is not a string OR `null` is what gets dropped -- a
+  // hand-edited number, an array, `undefined` read back from JSON as absent.
+  if (activity !== null && typeof activity !== 'string') {
+    return null;
+  }
+  return { at, activity: activity ?? null };
 }
 
 function readIcon(entry: unknown): IconChoice | null {

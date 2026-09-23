@@ -133,18 +133,21 @@ import {
   applyRenames,
   applyTheme,
   browserStorage,
+  countDismissedSessions,
   createGroup,
   deleteGroup,
   type EffectiveTheme,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
+  isSessionDismissed,
   type Prefs,
   paletteFor,
   prRepoFor,
   readPrefs,
   removeProjectFromGroup,
   renameGroup,
+  restoreAllDismissedSessions,
   setDefaultProvider,
   setDetailTab,
   setFilesMarkdownView,
@@ -160,6 +163,7 @@ import {
   setProjectPrRepo,
   setProjectRename,
   setRename,
+  setSessionDismissed,
   setSessionFilters,
   setTheme,
   type Theme,
@@ -170,7 +174,12 @@ import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.j
 import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import type { SectionId } from '../settings/sections.js';
 import { capabilitiesFor } from '../sources/members.js';
-import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
+import {
+  canWriteTo,
+  describeFailure,
+  type SessionSource,
+  type SourceWrites,
+} from '../sources/port.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
 import {
@@ -669,6 +678,25 @@ function isForcible(cause: unknown): boolean {
     'forcible' in cause &&
     (cause as { forcible?: unknown }).forcible === true
   );
+}
+
+/**
+ * A refusal that is not a failure at all -- `stop.ts`'s `already-finished`
+ * (an interactive row the source itself already reports `done`/`failed`) and
+ * `session-gone` (the CLI's own "No job matching", a background job that
+ * ended). Both mean Close was asked for a goal that was ALREADY TRUE: there
+ * is no running job left to stop, nothing was lost, the conversation is kept
+ * either way. `closeSession` still has to dismiss the row -- the source keeps
+ * reporting a `done`/`failed` background job for `agents.ts`'s own retention
+ * window regardless of what this call returns, so nothing but a dismissal
+ * makes it leave the sidebar -- but recording that as a `failure` would be a
+ * false alarm in the operator's error log for the one outcome that IS the
+ * success case. See `recordRefusal`, the log's own "no, not an error" entry.
+ */
+function isGracefulCloseRefusal(cause: unknown): boolean {
+  if (typeof cause !== 'object' || cause === null || !('code' in cause)) return false;
+  const code = (cause as { code?: unknown }).code;
+  return code === 'already-finished' || code === 'session-gone';
 }
 
 /** Neither `window.api` nor its `usage` member exists in the browser build. */
@@ -2140,6 +2168,10 @@ function CanvasInner({
   const [confirmForceClose, setConfirmForceClose] = useState<{
     sessionId: string;
     title: string;
+    /** The refusal that opened this prompt, carried along so declining it
+     *  (`onCancel`) can dismiss the row with the SAME reason rather than a
+     *  second, disconnected one -- see `closeSession`'s own dismissal path. */
+    reason: string;
   } | null>(null);
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
@@ -2206,6 +2238,13 @@ function CanvasInner({
    */
   const events = useSyncExternalStore(subscribeEvents, loggedEvents, loggedEvents);
   const failureCount = events.filter((event) => event.kind === 'failure').length;
+  /**
+   * How many rows are currently dismissed -- the whole of the undo
+   * affordance this feature ships with (`dismissSession`, `entries`'s own
+   * filter, above). Hidden entirely at zero, like `failureCount`: a
+   * permanent "0 dismissed" is exactly the noise that comment argues against.
+   */
+  const dismissedCount = countDismissedSessions(prefs);
   /**
    * Composer state, KEYED BY SESSION — the load-bearing change a tab shell
    * makes here, and the reason A15.1's split panes cost this file almost
@@ -2850,8 +2889,31 @@ function CanvasInner({
     // filter here and not the third palette group
     // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
     // by this array and so would be empty in exactly the state it exists for.
-    return byOrigin.filter((e) => !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter));
-  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs.filters]);
+    const byEnded = byOrigin.filter(
+      (e) => !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter),
+    );
+    // LAST, AND FOR A DIFFERENT REASON THAN EVERY FILTER ABOVE IT: those all
+    // narrow a view the operator is choosing between: this one hides a row
+    // Close could not get rid of any other way (`docs/design/vam-owns-the-
+    // session.md` §5, "Dismiss is the safe fallback" -- see `closeSession`
+    // below, and `prefs.ts`'s `DismissChoice`). `isSessionDismissed` reads
+    // `session.activity` FRESH on every entry, which is what lifts a
+    // dismissal the moment a resumed session shows activity newer than what
+    // vam saw when it was hidden -- never a snapshot taken once and reused.
+    return byEnded.filter(
+      (e) =>
+        !isSessionDismissed(
+          prefs,
+          e.session.source ?? e.project.source ?? 'unknown',
+          e.session.id,
+          e.session.activity,
+        ),
+    );
+    // `prefs` itself, not only `prefs.filters`/`prefs.dismissedSessions`
+    // separately: `isSessionDismissed` reads `prefs.dismissedSessions`, and a
+    // dependency array naming a nested field the memo does not otherwise use
+    // is a staleness bug waiting for the next field this filter chain grows.
+  }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs]);
 
   /**
    * What each origin rule takes away, counted over the WHOLE workspace and
@@ -4194,6 +4256,45 @@ function CanvasInner({
    * instead. `removeProject` did exactly that, and told the operator it had
    * ended sessions that were still running.
    */
+  /**
+   * THE SAFE FALLBACK, for a row `closeSession` below could not get rid of
+   * any other way. `docs/design/vam-owns-the-session.md` §5: "Dismiss is the
+   * safe fallback" -- never a kill, never a claim of success, only the row
+   * leaving the sidebar and the palette (`entries`'s own filter, above) while
+   * whatever it names is left exactly where Close found it.
+   *
+   * `reason` is text already produced by the caller (`noteFailure`'s return,
+   * or a decline sentence built by hand) -- this never invents its own
+   * account of what happened, only appends what dismissing means on top of
+   * it, so the operator reads ONE explanation rather than two that might
+   * disagree.
+   *
+   * THE ACTIVITY SNAPSHOT is read off `allEntries` -- the UNFILTERED list,
+   * on purpose: a row already hidden by an origin or status filter can still
+   * be the one just refused a close (the operator reached it through the
+   * command palette, or a tab), and `setSessionDismissed` needs its current
+   * `activity` regardless of whether today's view happens to be showing it.
+   */
+  const dismissSession = useCallback(
+    (sessionId: string, title: string, reason: string): void => {
+      const entry = allEntries.find((e) => e.session.id === sessionId);
+      const sourceId = entry?.session.source ?? entry?.project.source ?? 'unknown';
+      savePrefs(
+        setSessionDismissed(prefs, sourceId, sessionId, true, entry?.session.activity ?? null),
+      );
+      // `reason` CARRIES ITS OWN TITLE where one matters to a caller's
+      // wording -- see the two call sites -- because `StatusCell` truncates
+      // at 72 characters (`truncateStatus`) and a title appended only HERE,
+      // after an already-long `reason`, would be the one thing this status
+      // reliably cuts off. What is fixed here is never the account of what
+      // happened, only what dismissing means on top of it.
+      setStatus(
+        `${reason} — vam removed it from your list here; it returns if it shows new activity.`,
+      );
+    },
+    [allEntries, prefs, savePrefs],
+  );
+
   const closeSession = useCallback(
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (pendingAction !== null) {
@@ -4213,10 +4314,17 @@ function CanvasInner({
       }
       const sessionSource = source.source;
       if (!canWriteTo(sessionSource) || sessionSource.write.closeSession === undefined) {
-        setStatus(
-          `${sessionSource.label} cannot close a session — ${
+        // NOTHING CAN EVER CLOSE THIS ROW THROUGH VAM -- the whole app, not
+        // merely this session, carries no verb for it -- so there is no
+        // "try again in a moment" here the way `pendingAction` above has one.
+        // Dismissed like every other refusal below: the row leaves the list,
+        // never the process.
+        dismissSession(
+          sessionId,
+          title,
+          `${sessionSource.label} cannot close a session ("${title}") — ${
             sessionSource.declines.closeSession ?? 'it advertises no way to'
-          }; "${title}" is still here`,
+          }`,
         );
         return false;
       }
@@ -4232,13 +4340,33 @@ function CanvasInner({
         source.onWrote();
         return true;
       } catch (cause) {
-        setStatus(noteFailure('close session', cause));
         // A SECOND, DELIBERATE STEP -- never offered again on a force call
         // that itself failed, and never on anything but the source's own
         // `forcible: true`: the close key alone must never reach a kill.
+        // Offering to force is not the SAME thing as leaving the row on
+        // screen forever, either: the operator still sees the prompt, and
+        // declining it (`onCancel`, below) dismisses the row with this same
+        // `reason` -- there is nothing else left to try at that point.
         if (!force && isForcible(cause)) {
-          setConfirmForceClose({ sessionId, title });
+          const reason = noteFailure('close session', cause);
+          setStatus(reason);
+          setConfirmForceClose({ sessionId, title, reason });
+          return false;
         }
+        // `already-finished`/`session-gone` ARE NOT FAILURES -- see
+        // `isGracefulCloseRefusal`: the goal Close asked for was already
+        // true, so this is `recordRefusal`'s "no, not an error" rather than
+        // `noteFailure`'s failure count and error-log entry. Every other
+        // refusal, forced or not, has nothing further to offer, so this is
+        // where "never leaves an undismissable row" is actually kept.
+        let reason: string;
+        if (isGracefulCloseRefusal(cause)) {
+          reason = describeFailure(cause);
+          recordRefusal('close session', reason);
+        } else {
+          reason = noteFailure('close session', cause);
+        }
+        dismissSession(sessionId, title, reason);
         return false;
       } finally {
         // EVERY path, and that is the whole of this `finally`. A spinner still
@@ -4247,7 +4375,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, dismissSession],
   );
 
   /**
@@ -6737,7 +6865,16 @@ function CanvasInner({
             setConfirmForceClose(null);
             void closeSession(target.sessionId, target.title, true);
           }}
-          onCancel={() => setConfirmForceClose(null)}
+          // DECLINING TO FORCE IS NOT "DO NOTHING": vam already showed the
+          // operator everything it can offer for this row (verify, or force),
+          // and they chose neither. There is no third path left to try, so
+          // this is the same dismissal `closeSession`'s own catch falls back
+          // to -- see `dismissSession`.
+          onCancel={() => {
+            const target = confirmForceClose;
+            setConfirmForceClose(null);
+            dismissSession(target.sessionId, target.title, target.reason);
+          }}
         />
       )}
 
@@ -6976,6 +7113,30 @@ function CanvasInner({
                 {failureCount} {failureCount === 1 ? 'failure' : 'failures'}
               </button>
             </ShortcutTip>
+          )}
+
+          {/* THE WHOLE OF DISMISS'S UNDO -- `docs/design/vam-owns-the-
+              session.md` §5: a row Close removed from the list rather than
+              killed is always reversible. One click brings EVERY dismissed
+              row back at once (`restoreAllDismissedSessions`) rather than a
+              picker over which ones -- see that function's own doc for why
+              a single-step "undo all" is the whole answer this control needs
+              to give. Hidden entirely at zero, exactly like the failure
+              badge beside it. */}
+          {dismissedCount > 0 && (
+            <button
+              type="button"
+              data-restore-dismissed
+              onClick={() => {
+                savePrefs(restoreAllDismissedSessions(prefs));
+                setStatus(
+                  `restored ${dismissedCount} dismissed ${dismissedCount === 1 ? 'session' : 'sessions'} — back on the list`,
+                );
+              }}
+              className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
+            >
+              {dismissedCount} dismissed — restore
+            </button>
           )}
 
           <span className="flex-1" />
