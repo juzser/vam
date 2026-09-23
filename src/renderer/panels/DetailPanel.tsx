@@ -178,7 +178,12 @@ import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
 import type { FileOpenRequest } from './FilesTab.js';
-import { GettingStarted, type GettingStartedProps, StartShortcuts } from './GettingStarted.js';
+import {
+  GettingStarted,
+  type GettingStartedProps,
+  StartShortcuts,
+  TERMINAL_ONLY_SHORTCUT_ROWS,
+} from './GettingStarted.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
@@ -2926,7 +2931,7 @@ function TerminalOnlyStart({
           {' — its agent isn’t running here now; this pane is at a shell prompt.'}
         </p>
       </div>
-      <StartShortcuts testId="terminal-only-shortcuts" />
+      <StartShortcuts testId="terminal-only-shortcuts" rows={TERMINAL_ONLY_SHORTCUT_ROWS} />
       {onStart !== undefined && (
         <ProviderStartControls defaultProvider={defaultProvider} onStart={onStart} />
       )}

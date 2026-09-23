@@ -4,13 +4,20 @@
  * anywhere: first launch, or every row hidden by `hideForeign` (PR 456).
  * `DetailPanel.getting-started.test.tsx` and `Canvas.getting-started.
  * test.tsx` hold the DOM and the write path; what they cannot hold is
- * anything PAINTED -- whether the mark, the info line, the three shortcuts
- * and the primary button all fit inside a real 1280px detail pane and a
- * real 390px phone screen without sliding off the fold, whether New project
- * actually reaches `window.api.dialog.chooseDirectory` and
- * `write.createSessionIn` through the REAL preload contract shape (not a
- * mocked callback), and whether the phone's own Show control clears the
- * 44px floor `vam-tap` promises.
+ * anything PAINTED -- whether the mark, the info line, the two shortcut rows
+ * and the primary button all fit inside a real 1280px detail pane without
+ * sliding off the fold, whether New project actually reaches
+ * `window.api.dialog.chooseDirectory` and `write.createSessionIn` through
+ * the REAL preload contract shape (not a mocked callback), and whether the
+ * phone's own Show control clears the 44px floor `vam-tap` promises.
+ *
+ * ROW COUNT AND WORDING WERE BOTH WRONG ONCE, and both were caught by eye on
+ * the first committed screenshot rather than by a check: the desktop's list
+ * read "New session · o" on a screen where `o` starts a PROJECT, not a
+ * session (`Canvas.tsx`'s `case 'newSession'` falls back to `newProject()`
+ * here), and the phone's shortcut rows drew three bare words with no chip
+ * beside any of them (`InlineChord` paints nothing on a phone). Fixed and
+ * pinned below.
  *
  * ONE FULLY-STUBBED SOURCE, the shape `terminal-only-shots.mjs`'s own header
  * explains is required: `App.tsx` takes the page off `?demo=1` the moment
@@ -142,9 +149,13 @@ const browser = await chromium.launch();
     const pane = screenEl?.closest('[data-split-pane]');
     const button = document.querySelector('[data-getting-started-new-project]');
     const shortcuts = [...document.querySelectorAll('[data-getting-started-shortcuts] li')].map(
-      (li) => ({ text: li.textContent, chip: li.querySelector('[data-inline-chord]')?.textContent ?? null }),
+      (li) => ({
+        text: li.textContent,
+        chips: [...li.querySelectorAll('[data-inline-chord]')].map((c) => c.textContent),
+      }),
     );
     const sidebarAdd = document.querySelector('[data-sidebar-add]');
+    const strip = document.querySelector('[data-tab-strip]');
     return {
       screenBox: r2(screenEl),
       paneBox: r2(pane),
@@ -153,18 +164,40 @@ const browser = await chromium.launch();
       shortcuts,
       hidden: document.querySelector('[data-getting-started-hidden]'),
       sidebarAddLabel: sidebarAdd?.textContent ?? null,
-      noSessionsLine: document.body.textContent?.includes('no sessions open'),
+      stripText: strip?.textContent ?? null,
     };
   });
   console.log('getting-started desktop (case a):', JSON.stringify(shape));
   check('the screen is in the focused pane', shape.paneBox !== null && shape.screenBox !== null);
   check('it carries vam’s own mark', shape.hasMark);
+  // TWO ROWS, NEVER "New session" -- `o` falls back to New project on this
+  // screen (`Canvas.tsx`'s own `case 'newSession'`), so a row naming "New
+  // session" beside one naming "New project" would claim two keys do two
+  // different things when both do the identical one. New project carries
+  // BOTH its chords (`o`, and `⇧⌘P` if still bound); Command palette keeps
+  // its own.
+  check('exactly two shortcut rows -- New session is not one of them', shape.shortcuts.length === 2, JSON.stringify(shape.shortcuts));
   check(
-    'three shortcuts, each with a chord chip',
-    shape.shortcuts.length === 3 && shape.shortcuts.every((s) => s.chip !== null && s.chip !== ''),
+    'row 0 is New project, carrying at least the `o` chip',
+    shape.shortcuts[0]?.text?.includes('New project') && (shape.shortcuts[0]?.chips.length ?? 0) >= 1,
+    JSON.stringify(shape.shortcuts[0]),
+  );
+  check(
+    'row 1 is Command palette, with its own chip',
+    shape.shortcuts[1]?.text?.includes('Command palette') && shape.shortcuts[1]?.chips.length === 1,
+    JSON.stringify(shape.shortcuts[1]),
+  );
+  check(
+    'the screen never says "New session" -- the operator’s own contradiction finding',
+    !(shape.shortcuts.map((s) => s.text).join(' ').includes('New session')),
     JSON.stringify(shape.shortcuts),
   );
   check('no hidden-count line -- nothing is hidden yet', shape.hidden === null);
+  check(
+    'the tab strip says "no sessions yet", never "pick one from the sidebar" -- there is nothing to pick',
+    shape.stripText === 'no sessions yet',
+    shape.stripText ?? 'null',
+  );
   check(
     'a New project button is drawn, inside the pane',
     shape.button !== null &&
@@ -357,11 +390,21 @@ const browser = await chromium.launch();
       show: r2(show),
       sidebarFootDrawn: document.querySelector('[data-sidebar-add]') !== null,
       standaloneHiddenStrips: document.querySelectorAll('[data-foreign-hidden]').length,
+      shortcutsDrawn: document.querySelector('[data-getting-started-shortcuts]') !== null,
     };
   });
   console.log('getting-started phone (case b, no picker):', JSON.stringify(phone));
   check('no New project button -- the browser/phone build has no picker', phone.button === null);
-  check('says plainly what needs the desktop app', phone.decline !== null && /desktop app/.test(phone.decline), phone.decline ?? 'null');
+  // NO BARE-WORD SHORTCUT ROWS. `InlineChord` draws no chip at all on a
+  // phone (`styles.css`), so a list of "New project"/"Command palette" with
+  // nothing beside them named keys a touch operator has no way to press --
+  // caught by eye on the first screenshot.
+  check('the shortcut rows are withdrawn -- a touch screen cannot press a chord', phone.shortcutsDrawn === false);
+  check(
+    'says plainly what needs the desktop app, in words that fit a PHONE -- not "the browser build"',
+    phone.decline !== null && /desktop app/.test(phone.decline) && !/browser build/.test(phone.decline),
+    phone.decline ?? 'null',
+  );
   check(
     'Show clears the 44px floor',
     phone.show !== null && phone.show.h >= 44,

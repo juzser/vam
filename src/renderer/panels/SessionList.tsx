@@ -3840,6 +3840,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           hasDirectoryPicker={hasDirectoryPicker}
           foreignHiddenCount={foreignHiddenCount}
           onShowForeign={() => onOriginFilters({ ...originFilters, hideForeign: false })}
+          phone
         />
       )}
     </aside>

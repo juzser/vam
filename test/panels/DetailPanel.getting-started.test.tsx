@@ -152,7 +152,18 @@ describe('the getting-started screen -- vam has no session to show anywhere', ()
     );
   });
 
-  it('lists New session, New project and the command palette, each with ITS OWN current chord', () => {
+  /**
+   * NEVER "New session" ON THIS SCREEN. There is no focused project for `o`
+   * to add a session to here -- `Canvas.tsx`'s own `case 'newSession'` falls
+   * back to `newProject()` in exactly this state -- so a row reading "New
+   * session · o" beside one reading "New project · ⇧⌘P" would tell the
+   * operator two different keys do two different things when both do the
+   * identical one. This screen collapses them into ONE "New project" row
+   * carrying both chords (asserted per chip, not as flattened text, so a
+   * chip silently going missing cannot hide behind the label still being on
+   * screen).
+   */
+  it('lists New project (carrying BOTH its chords) and the command palette -- never New session', () => {
     draw({
       gettingStarted: {
         onNewProject: () => {},
@@ -164,17 +175,28 @@ describe('the getting-started screen -- vam has no session to show anywhere', ()
     });
     const list = q('[data-getting-started-shortcuts]');
     expect(list).not.toBeNull();
+    expect(list?.textContent).not.toContain('New session');
     const rows = [...(list?.querySelectorAll('li') ?? [])];
-    const actions = [{ kind: 'newSession' }, { kind: 'newProject' }, { kind: 'palette' }] as const;
-    expect(rows).toHaveLength(actions.length);
-    actions.forEach((action, index) => {
-      const chord = primaryChord(action);
-      expect(chord, `${action.kind} must be bound for this to test anything`).not.toBeNull();
-      const chip = rows[index]?.querySelector('[data-inline-chord]');
-      expect(chip?.textContent, `row ${index} (${action.kind})`).toBe(
-        chordSymbols(chord as string),
-      );
-    });
+    expect(rows).toHaveLength(2);
+
+    const [newProjectRow, paletteRow] = rows;
+    expect(newProjectRow?.textContent).toContain('New project');
+    const newSessionChord = primaryChord({ kind: 'newSession' });
+    const newProjectChord = primaryChord({ kind: 'newProject' });
+    expect(newSessionChord, 'newSession must be bound for this to test anything').not.toBeNull();
+    const chips = [...(newProjectRow?.querySelectorAll('[data-inline-chord]') ?? [])].map(
+      (c) => c.textContent,
+    );
+    const expectedChips = [chordSymbols(newSessionChord as string)];
+    if (newProjectChord !== null) expectedChips.push(chordSymbols(newProjectChord));
+    expect(chips).toEqual(expectedChips);
+
+    expect(paletteRow?.textContent).toContain('Command palette');
+    const paletteChord = primaryChord({ kind: 'palette' });
+    expect(paletteChord, 'palette must be bound for this to test anything').not.toBeNull();
+    expect(paletteRow?.querySelector('[data-inline-chord]')?.textContent).toBe(
+      chordSymbols(paletteChord as string),
+    );
   });
 
   it('says nothing about hidden sessions when none are hidden', () => {

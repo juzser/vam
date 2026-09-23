@@ -137,6 +137,25 @@ describe('the getting-started screen, wired from Canvas', () => {
     expect(document.querySelector('[data-getting-started-hidden]')).toBeNull();
   });
 
+  /**
+   * "PICK ONE FROM THE SIDEBAR" IS A LIE WITH NOTHING TO PICK. The strip's
+   * own empty-state sentence is right for a pane a split emptied while
+   * OTHER sessions sit in the sidebar (`Canvas.pane-tabs.test.tsx`); it
+   * contradicted the getting-started screen 40px below it the moment the
+   * whole app was empty -- the operator's own finding, reading the first
+   * screenshot. `entries.length === 0` is the SAME signal `gettingStarted`
+   * reads, so the two can never disagree about whether there is a sidebar
+   * row to point at.
+   */
+  it('the tab strip says "no sessions yet", never "pick one from the sidebar", with nothing to pick', () => {
+    const { source } = sourceWith(true);
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={EMPTY_MODEL} source={source} />);
+    const strip = document.querySelector('[data-tab-strip]');
+    expect(strip?.textContent).toBe('no sessions yet');
+    expect(strip?.textContent).not.toContain('pick one from the sidebar');
+  });
+
   it('shows, with the hidden-count line, when every session is foreign', () => {
     const { source } = sourceWith(true);
     withDialog(async () => CHOSEN);

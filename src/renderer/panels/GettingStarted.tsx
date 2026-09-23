@@ -1,27 +1,63 @@
 /**
- * TWO SCREENS, ONE SHORTCUT LIST. `TerminalOnlyStart` (`DetailPanel.tsx`) is
- * one PANE's own getting-started screen -- a `terminal` row whose agent
- * exited but whose conversation vam still knows. `GettingStarted` below is
- * the WHOLE APP's -- vam has no session to show anywhere, on first launch or
- * with every row hidden by `hideForeign` (PR 456's own origin filter). Both
- * end the same three-row sentence ("here is how you make something"), and
- * `StartShortcuts` is the one place that sentence is written, read live off
- * the chord table (`InlineChord`, `chords.ts`'s `primaryChord`) so a rebind
- * cannot leave either screen naming a key that does nothing. Copying the
- * `<ul>` a second time was the alternative, and it is exactly the drift this
- * file exists to make impossible: a change to the three actions, or to their
- * order, would then have to land twice to stay true on both screens, and
- * nothing would fail if it only landed on one.
+ * TWO SCREENS, ONE SHORTCUT-ROW RENDERER. `TerminalOnlyStart` (`DetailPanel.
+ * tsx`) is one PANE's own getting-started screen -- a `terminal` row whose
+ * agent exited but whose conversation vam still knows. `GettingStarted`
+ * below is the WHOLE APP's -- vam has no session to show anywhere, on first
+ * launch or with every row hidden by `hideForeign` (PR 456's own origin
+ * filter). Both draw a short list of "here is how you make something" rows
+ * read live off the chord table (`InlineChord`, `chords.ts`'s
+ * `primaryChord`), through the ONE `StartShortcuts` renderer, so a rebind
+ * cannot leave either screen naming a key that does nothing.
+ *
+ * THE ROWS ARE NOT THE SAME LIST. `TerminalOnlyStart`'s row is a real
+ * session's own pane: `o`/`Mod-n` starts a SECOND session in that project,
+ * genuinely distinct from `newProject`'s own `Mod-Shift-p`, so it keeps its
+ * own three rows -- New session, New project, Command palette -- unchanged.
+ * `GettingStarted`'s row is not a session at all: `Canvas.tsx`'s own
+ * `case 'newSession'` falls back to `newProject()` here because there is no
+ * focused project to add a session TO, so `o` and `Mod-Shift-p` do the
+ * IDENTICAL act on THIS screen. A row reading "New session · o" beside one
+ * reading "New project · ⇧⌘P" would have told the operator two different
+ * things happen on two different keys when only one thing does -- the
+ * operator's own finding, reading the first screenshot. So this screen
+ * collapses both chords onto one "New project" row and drops the session
+ * row entirely; `StartShortcuts` takes a row's actions as a LIST for exactly
+ * this, and a second, now-unbound chord simply draws no chip
+ * (`InlineChord`'s own absent-not-disabled rule) rather than needing a
+ * second component.
  */
 
 import { FolderPlus } from 'lucide-react';
 import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord } from '../keyboard/ShortcutTip.js';
 
-const START_SHORTCUTS: readonly { readonly label: string; readonly action: KeyAction }[] = [
-  { label: 'New session', action: { kind: 'newSession' } },
-  { label: 'New project', action: { kind: 'newProject' } },
-  { label: 'Command palette', action: { kind: 'palette' } },
+export type StartShortcutRow = {
+  readonly label: string;
+  /**
+   * One chip per action, in order. Usually one action; `GettingStarted`'s
+   * own "New project" row is two, because `o` and `Mod-Shift-p` both reach
+   * it from this screen and neither chord deserves to be left unmentioned.
+   * An action with no current binding draws no chip at all (`InlineChord`),
+   * so a row can shrink to nothing wider than its label without this
+   * component needing to know why.
+   */
+  readonly actions: readonly KeyAction[];
+};
+
+/** `TerminalOnlyStart`'s three rows, unchanged since before this file
+ *  existed -- a real session's own pane, where New session genuinely
+ *  differs from New project. */
+export const TERMINAL_ONLY_SHORTCUT_ROWS: readonly StartShortcutRow[] = [
+  { label: 'New session', actions: [{ kind: 'newSession' }] },
+  { label: 'New project', actions: [{ kind: 'newProject' }] },
+  { label: 'Command palette', actions: [{ kind: 'palette' }] },
+];
+
+/** `GettingStarted`'s two rows -- see this file's own header for why New
+ *  session is not one of them here, and why New project carries two chips. */
+export const GETTING_STARTED_SHORTCUT_ROWS: readonly StartShortcutRow[] = [
+  { label: 'New project', actions: [{ kind: 'newSession' }, { kind: 'newProject' }] },
+  { label: 'Command palette', actions: [{ kind: 'palette' }] },
 ];
 
 /**
@@ -31,16 +67,25 @@ const START_SHORTCUTS: readonly { readonly label: string; readonly action: KeyAc
  * expects -- `DetailPanel.terminal-only.test.tsx` predates this file and its
  * selector is untouched.
  */
-export function StartShortcuts({ testId }: { readonly testId: string }) {
+export function StartShortcuts({
+  rows,
+  testId,
+}: {
+  readonly rows: readonly StartShortcutRow[];
+  readonly testId: string;
+}) {
   return (
     <ul {...{ [`data-${testId}`]: '' }} className="flex flex-col gap-1 text-meta text-ink-quiet">
-      {START_SHORTCUTS.map((item) => (
-        <li key={item.action.kind} className="flex items-center justify-center gap-2">
-          <span>{item.label}</span>
-          <InlineChord
-            action={item.action}
-            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
-          />
+      {rows.map((row) => (
+        <li key={row.label} className="flex items-center justify-center gap-2">
+          <span>{row.label}</span>
+          {row.actions.map((action) => (
+            <InlineChord
+              key={action.kind}
+              action={action}
+              className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
+            />
+          ))}
         </li>
       ))}
     </ul>
@@ -83,6 +128,27 @@ export type GettingStartedProps = {
   readonly foreignHiddenCount: number;
   /** The SAME pref the sidebar's own "Show" flips -- `hideForeign: false`. */
   readonly onShowForeign: () => void;
+  /**
+   * True only for `SessionList.tsx`'s own phone instance of this screen --
+   * absent (falsy) for the desktop's, which is what `DetailPanel.tsx` mounts
+   * and never sets it. Two consequences, both about what a touchscreen
+   * cannot use:
+   *
+   *  1. THE SHORTCUT ROWS ARE WITHDRAWN. `InlineChord` draws nothing on a
+   *     phone at all (`styles.css`'s `.vam-phone [data-inline-chord]`), so
+   *     `StartShortcuts` on a phone was three or four bare words -- "New
+   *     project", "Command palette" -- naming keys a touch operator has no
+   *     way to press. A hint with no hint in it is not a smaller hint, it is
+   *     noise, so the whole list is absent rather than drawn empty-handed.
+   *  2. NO DIRECTORY PICKER MEANS SOMETHING DIFFERENT HERE. The desktop's
+   *     "the browser build has no picker" is a fact about THIS build; a
+   *     phone reaches vam over Tailscale Serve (`docs/design/...`, the
+   *     operator's own mobile rule) -- a browser build BY DEFINITION, so the
+   *     sentence would be true but point nowhere an operator holding a phone
+   *     can act on. The phone's own copy says what DOES exist instead: the
+   *     desktop app, on the machine this phone is connected to.
+   */
+  readonly phone?: boolean;
 };
 
 /**
@@ -107,6 +173,7 @@ export function GettingStarted({
   hasDirectoryPicker,
   foreignHiddenCount,
   onShowForeign,
+  phone = false,
 }: GettingStartedProps) {
   const canCreate = newProjectDecline === null && hasDirectoryPicker;
   return (
@@ -127,7 +194,11 @@ export function GettingStarted({
           one place.
         </p>
       </div>
-      <StartShortcuts testId="getting-started-shortcuts" />
+      {/* WITHDRAWN ON A PHONE -- see `phone`'s own comment: a touch screen
+          cannot press a chord, so a list of bare labels is noise, not help. */}
+      {!phone && (
+        <StartShortcuts testId="getting-started-shortcuts" rows={GETTING_STARTED_SHORTCUT_ROWS} />
+      )}
       {canCreate ? (
         <button
           type="button"
@@ -142,12 +213,15 @@ export function GettingStarted({
         // ABSENT, NOT DISABLED (`onStartSession`'s own rule, `DetailPanel.tsx`):
         // a control that cannot act is withdrawn, and the sentence that
         // replaces it says what DOES work here. `newProjectDecline` -- a
-        // source-level refusal -- takes priority in its own words; the
-        // picker's absence is the one case this screen has anything of its
-        // own to say, because `newSessionRoute` never learned about it.
+        // source-level refusal -- takes priority in its own words, on either
+        // surface; the picker's absence is the one case this screen has
+        // anything of its OWN to say, and what it says depends on which
+        // surface is asking -- see `phone`'s own comment.
         <p data-getting-started-decline className="max-w-[36ch] text-meta text-ink-quiet">
           {newProjectDecline ??
-            'Choosing a directory needs the desktop app — the browser build has no picker.'}
+            (phone
+              ? 'New project needs the desktop app — open vam on the machine you’re connected to.'
+              : 'Choosing a directory needs the desktop app — the browser build has no picker.')}
         </p>
       )}
       {foreignHiddenCount > 0 && (

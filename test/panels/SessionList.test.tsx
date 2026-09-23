@@ -1072,6 +1072,30 @@ describe('the foreign-hidden quiet line', () => {
   });
 });
 
+/**
+ * TWO THINGS A PHONE'S OWN GETTING-STARTED SCREEN GETS WRONG IF IT JUST
+ * COPIES THE DESKTOP'S: a shortcut list naming keys nothing on a touch
+ * screen can press, and a "the browser build has no picker" sentence that
+ * is true of EVERY phone (a phone is a browser build, always) and points
+ * nowhere an operator holding one can act. Both were caught by eye on the
+ * committed screenshot (`docs/ui/getting-started-phone.png`) before being
+ * pinned here.
+ */
+describe('the phone’s own getting-started screen', () => {
+  it('withdraws the shortcut rows -- a touch screen cannot press a chord', () => {
+    const { container } = mountWith([], { phone: true, hasDirectoryPicker: true });
+    expect(container.querySelector('[data-getting-started]')).not.toBeNull();
+    expect(container.querySelector('[data-getting-started-shortcuts]')).toBeNull();
+  });
+
+  it('says the phone-accurate sentence when there is no picker, not the desktop’s "browser build" one', () => {
+    const { container } = mountWith([], { phone: true, hasDirectoryPicker: false });
+    const decline = container.querySelector('[data-getting-started-decline]');
+    expect(decline?.textContent).toContain('desktop app');
+    expect(decline?.textContent).not.toContain('browser build');
+  });
+});
+
 describe('the filter badge yellow, in styles.css', () => {
   const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
   const block = (selector: string) => {

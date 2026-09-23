@@ -1044,6 +1044,7 @@ function TabStrip({
   onTabContextMenu,
   onTabDragStart,
   onTabDragEnd,
+  emptyText = 'no sessions open — pick one from the sidebar',
 }: {
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
@@ -1105,6 +1106,19 @@ function TabStrip({
     sessionId: string,
   ) => (event: ReactDragEvent<HTMLButtonElement>) => void;
   readonly onTabDragEnd?: () => void;
+  /**
+   * WHAT THE STRIP SAYS WITH NOTHING OPEN, when there is something else on
+   * screen to point at — "no sessions open — pick one from the sidebar" is
+   * only honest while the sidebar actually HAS a row to pick, which is every
+   * caller but one: the getting-started screen's own empty app, where
+   * `Canvas.tsx` overrides this to "no sessions yet" (the sidebar's own
+   * words for the identical fact, `SessionList.tsx`'s empty-state `<li>`) --
+   * pointing the operator at a sidebar that has nothing either would be the
+   * same false lead the detail pane's plain "no session" text was pulled for
+   * (audit F9). Optional and defaulted so every existing caller keeps its
+   * own sentence unchanged.
+   */
+  readonly emptyText?: string;
 }) {
   /** One right-click handler per tab, shared by its two buttons so they cannot
    *  drift, and `undefined` when the caller offered no menu -- which leaves the
@@ -1194,7 +1208,7 @@ function TabStrip({
         data-orientation={orientation}
         className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-control text-ink-faint"
       >
-        no sessions open — pick one from the sidebar
+        {emptyText}
       </div>
     );
   }
@@ -6883,6 +6897,13 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
+              // See `emptyText`'s own comment: "pick one from the sidebar" is
+              // only true while the sidebar has a row to pick. `entries` is
+              // the SAME filtered set `gettingStarted`'s own condition reads
+              // a few hundred lines below -- the operator's own finding,
+              // reading the first screenshot, was this line contradicting
+              // that screen's "no sessions yet" 40px below it.
+              emptyText={entries.length === 0 ? 'no sessions yet' : undefined}
               onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
@@ -6946,6 +6967,7 @@ function CanvasInner({
       focusedPaneId,
       focusedEntry,
       allEntries,
+      entries,
       entriesById,
       activeProjectId,
       buildDetailProps,
