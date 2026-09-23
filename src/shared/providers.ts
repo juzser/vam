@@ -15,13 +15,16 @@
  * in main that can see its sessions.
  *
  * WHERE THE COMMAND IS SPENT changed with Stage 2 of
- * `docs/design/vam-owns-the-session.md`: a new session in a project vam
- * already draws no longer runs the provider at spawn -- it runs a shell
- * (`main/sources/tmux/shell.ts`) -- and the command is TYPED into that shell
- * afterwards, by the Start session button
- * (`main/sources/claude-code/start-in-pane.ts`) or by hand. The "new
- * project" path still hands it to tmux at spawn, and
- * `main/sources/claude-code/create-session.ts` says why.
+ * `docs/design/vam-owns-the-session.md`: a new session no longer runs the
+ * provider at spawn -- it runs a shell (`main/sources/tmux/shell.ts`) -- and
+ * the command is TYPED into that shell afterwards: by the Start session
+ * button (`main/sources/claude-code/start-in-pane.ts`) or by hand for a
+ * project vam already draws, immediately by `create-session.ts` itself for a
+ * brand-new one, and immediately by `resume.ts` (both sources) for a
+ * reopened session or thread. A direct spawn shut the whole tmux session down
+ * the moment Ctrl+C ended the provider -- `remain-on-exit` is off, and the
+ * pane was the process -- which is why every path types now instead;
+ * `main/sources/claude-code/create-session.ts` carries the measurement.
  *
  * The id is vam's own source id -- `claude-code` and `codex` are the same
  * strings `PROVIDER_MARKS` is keyed by and each adapter stamps on a row -- so

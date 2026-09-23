@@ -321,6 +321,19 @@ const GUARDS = [
   // removal rather than a failure, and that the undo control brings it back.
   // `close-dismiss-shots.mjs`'s own header holds the falsification.
   'close-dismiss-shots',
+  // THE OPERATOR'S REPORT: "Ctrl+C in the terminal shuts the session down
+  // entirely." Drives no browser at all -- the bug and the fix are both in
+  // MAIN, so there is nothing here for Chromium to add -- and ignores the
+  // `origin`/`outDir` argv every other guard in this list is called with.
+  // Spawns through the REAL `createSessionInDirectory` and `resumeClaudeSession`
+  // against a REAL private tmux, presses Ctrl-C twice through the real
+  // `send-keys` path, and asserts the tmux session survives with the shell
+  // in its pane's foreground -- then falsifies itself by spawning the
+  // identical fixture DIRECTLY, the shape both paths used to have, and
+  // asserts THAT one dies with the agent. `shell-first-ctrlc-survives.mjs`'s
+  // own header holds the measurement and why `codex/resume.ts` is not a
+  // fourth phase.
+  'shell-first-ctrlc-survives',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
