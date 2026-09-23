@@ -46,6 +46,31 @@ export type SessionEntry = {
 };
 
 /**
+ * Two `Project` objects are the SAME CHECKOUT when this returns the same
+ * string, whatever source reported either of them.
+ *
+ * `Project.id` cannot answer that question: `claude-code`'s
+ * `projectIdOf(cwd)` and `codex`'s `codex:${basename(cwd)}-${hash(cwd)}`
+ * (`main/sources/codex/source.ts`) never agree on one id for one directory,
+ * by design — `combine.ts` routes a write by which source's id a session
+ * carries, and two id schemes that could collide would make that routing
+ * ambiguous. So a checkout two sources both read arrives as two `Project`
+ * objects, same `name`, different `id`, and a caller comparing `id` sees two
+ * projects where the operator has one.
+ *
+ * `name` IS THE ROOT PATH, as far as the renderer can tell: every adapter
+ * sets it to `basename(cwd)` and neither the combined descriptor nor
+ * `CanvasModel` carries the raw path any further than that. It is therefore
+ * the merge key here, not a full path — two unrelated checkouts that happen
+ * to share a basename will read as one, which is the same ambiguity the
+ * sidebar's own headings already live with (a heading is a name, not a
+ * path) and not a new one this function introduces.
+ */
+export function projectMergeKey(project: Project): string {
+  return project.name;
+}
+
+/**
  * Every session on the canvas, flattened but still carrying its project.
  *
  * `hjkl` moves between sessions regardless of which group they sit in — the

@@ -13,6 +13,7 @@
  */
 const path = require('node:path');
 const { app, BrowserWindow, Menu, clipboard } = require('electron');
+const { ensureHarnessRemotePort } = require('./free-port.cjs');
 
 const MAIN = path.join(__dirname, '..', '..', 'out', 'main', 'index.cjs');
 const OFF_ORIGIN = 'https://example.invalid/';
@@ -53,7 +54,36 @@ async function waitForWindow() {
   throw new Error('probe: no BrowserWindow finished loading within 10s');
 }
 
+/**
+ * Polls for a selector rather than trusting a fixed sleep after the reload
+ * below -- a FRESH, throwaway `userData` (see `src/main/index.ts`'s
+ * `VAM_USER_DATA_DIR`) pays Chromium's own cold-start cost on every single
+ * launch: first-ever `Local Storage`/`Preferences`/GPU-cache creation on
+ * disk, which the old SHARED, long-lived profile this repo used to leak into
+ * had already paid once and amortised across every run since. Measured: a
+ * fixed 300ms margin here was comfortably enough against that warm, reused
+ * profile and not enough against a genuinely cold one -- the row this
+ * function waits for simply had not rendered yet when the click fired, and
+ * `?.click()` on a still-`null` `querySelector` throws nothing, so the
+ * failure only ever surfaced three lines later as "no <img> was on screen".
+ */
+async function waitForSelector(run, selector, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await run(`document.querySelector(${JSON.stringify(selector)}) !== null`);
+    if (found) return;
+    await sleep(50);
+  }
+  throw new Error(`probe: ${selector} did not appear within ${timeoutMs}ms`);
+}
+
 async function main() {
+  // MUST RUN BEFORE `require(MAIN)`: `startRemoteTransport()` reads
+  // `VAM_REMOTE_PORT` at `whenReady`, and `VAM_USER_DATA_DIR` above isolates
+  // storage only -- see `free-port.cjs`'s own header for why a probe run
+  // directly, with no caller to pass a port, must never fall through to the
+  // operator's own live `DEFAULT_REMOTE_PORT`.
+  await ensureHarnessRemotePort();
   require(MAIN);
   await app.whenReady();
   const win = await waitForWindow();
@@ -335,6 +365,53 @@ async function main() {
     // A clipboard this could not restore is not a reason to lose the run.
   }
 
+  // EVERY <img> ON SCREEN LOADED -- the ONLY check in this whole harness that
+  // can see the difference between a document-relative `src` and a root-
+  // absolute one, because it is the only one running against the REAL
+  // `file://` document `loadFile` opens (`src/main/index.ts`). A web build or
+  // a unit environment serves the app from an HTTP root, where the two
+  // spellings resolve to the same URL and the defect is invisible; under
+  // `file://` a root-absolute `src="/favicon.png"` reads as the filesystem
+  // root and the `<img>` never loads at all.
+  //
+  // `LAUNCH_FIXTURE_PROJECTS`'s second project (`launch-fixture.ts`) is a
+  // `status: 'terminal'` row for exactly this: `TerminalOnlyStart`
+  // (`DetailPanel.tsx`) is the one screen in this app that draws an `<img>`
+  // at all (measured: `grep -rn '<img' src/renderer` finds one), so it is
+  // clicked here before the check runs -- an app-wide corpus of ONE row is
+  // not a coincidence to work around, it is the whole surface this guards.
+  //
+  // HERE, BEFORE THE RELOAD BELOW -- NOT AFTER IT, WHICH IS WHERE THIS USED
+  // TO SIT. `waitForSelector`'s own header already explains why a fixed sleep
+  // could not stand in for this poll on a FRESH profile; what it does not
+  // say is that the poll's fixed budget (5s) was being spent against the
+  // WRONG render. Moved after the zoom section's `contents.reload()`, this
+  // wait was timing a SECOND cold-ish boot -- a full page reload re-parses
+  // and re-executes the whole bundle and redoes the `window.api.load()` IPC
+  // round trip from scratch, same as the first -- except that one starts
+  // 10+ seconds into the run, after every other step above has already spent
+  // wall clock and, on the shared machine this harness runs on, whatever
+  // contention arrived in the meantime. Measured: this file's own
+  // `VAM_SMOKE_ERROR probe: [...] did not appear within 5000ms` reproduced
+  // reliably while the box's load average sat around 80 on 10 cores, and
+  // vanished once it dropped back under 45 -- the row itself was never
+  // missing (`document.querySelectorAll('[data-session-row]')` already named
+  // it moments before the poll even started, on every capture taken), only
+  // late relative to a budget the reload-after-everything-else position gave
+  // it no slack for. The `<img>` this assertion cares about has nothing to
+  // do with zoom or reload; checking it here, right after the FIRST render
+  // (which gets `waitForWindow`'s own 10s and none of the later steps'
+  // accumulated cost) removes the dependency instead of widening the number
+  // that was never the actual bug.
+  await waitForSelector(run, '[data-session-row="pane:launch-fixture-terminal-1"]');
+  await run(
+    "document.querySelector('[data-session-row=\"pane:launch-fixture-terminal-1\"]')?.click(); undefined",
+  );
+  await sleep(300);
+  result.images = await run(
+    "Array.from(document.images).map((img) => ({ src: img.getAttribute('src'), naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, complete: img.complete }))",
+  );
+
   // ZOOM, ROUTE BY ROUTE, on the real webContents.
   //
   // (a) the resting state, after `lockZoom` ran at `web-contents-created`.
@@ -384,59 +461,21 @@ async function main() {
 
   // (d) a zoom level PERSISTED from an earlier session. Chromium stores it
   // per origin and re-applies it on navigation, so it survives a reload -- and
-  // a relaunch, which is how it was found: the harness left 2.5 behind and the
-  // next launch came up at zoom factor 1.577.
+  // used to survive a relaunch too, which is how it was found: the harness
+  // left 2.5 behind and the next launch came up at zoom factor 1.577. Now
+  // moot for the NEXT launch specifically -- `launch.test.ts` hands every
+  // launch its own fresh `userData` dir (`VAM_USER_DATA_DIR`, see
+  // `src/main/index.ts`), so there is no "next launch" left to inherit
+  // anything from this one -- but the reset that used to follow this
+  // assertion is not restored: nothing after this line in THIS process reads
+  // the zoom level again, so leaving it at 2.5 for the remainder of this run
+  // changes nothing this harness checks.
   contents.setZoomLevel(2.5);
   await contents.reload();
   await new Promise((resolve) => contents.once('did-finish-load', resolve));
   await sleep(300);
   result.zoomLevelAfterReload = contents.getZoomLevel();
   result.zoomFactorAfterReload = contents.getZoomFactor();
-  // Leave nothing behind for the next launch to inherit.
-  contents.setZoomLevel(0);
-
-  // EVERY <img> ON SCREEN LOADED -- the ONLY check in this whole harness that
-  // can see the difference between a document-relative `src` and a root-
-  // absolute one, because it is the only one running against the REAL
-  // `file://` document `loadFile` opens (`src/main/index.ts`). A web build or
-  // a unit environment serves the app from an HTTP root, where the two
-  // spellings resolve to the same URL and the defect is invisible; under
-  // `file://` a root-absolute `src="/favicon.png"` reads as the filesystem
-  // root and the `<img>` never loads at all.
-  //
-  // `LAUNCH_FIXTURE_PROJECTS`'s second project (`launch-fixture.ts`) is a
-  // `status: 'terminal'` row for exactly this: `TerminalOnlyStart`
-  // (`DetailPanel.tsx`) is the one screen in this app that draws an `<img>`
-  // at all (measured: `grep -rn '<img' src/renderer` finds one), so it is
-  // clicked here before the check runs -- an app-wide corpus of ONE row is
-  // not a coincidence to work around, it is the whole surface this guards.
-  //
-  // THE CLICK WRITES `lastFocus` INTO THE SAME SHARED, PERSISTENT
-  // `localStorage` THE ZOOM NOTE ABOVE ALREADY NAMES -- this probe sets no
-  // `userData` override, so `prefs/prefs.ts`'s `vam.prefs.v1` key outlives
-  // this process exactly the way the zoom factor did. Measured the same way
-  // that regression was: an unrelated assertion ("denies its own
-  // microphone, and therefore draws no button to use it", which reads
-  // `sendControls` off the FIRST session's composer) started failing on the
-  // launch AFTER this click first ran, because the NEXT launch's own "land
-  // focus on something real" effect (`Canvas.tsx`) read the persisted
-  // pointer back and opened the terminal-only row instead of the waiting
-  // one, whose composer this harness's own earlier assertion needs on
-  // screen. Saved and restored around the click, the same "leave nothing
-  // behind for the next launch to inherit" rule as the zoom reset above.
-  const prefsBeforeClick = await run("window.localStorage.getItem('vam.prefs.v1')");
-  await run(
-    "document.querySelector('[data-session-row=\"pane:launch-fixture-terminal-1\"]')?.click(); undefined",
-  );
-  await sleep(300);
-  result.images = await run(
-    "Array.from(document.images).map((img) => ({ src: img.getAttribute('src'), naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, complete: img.complete }))",
-  );
-  await run(
-    prefsBeforeClick === null
-      ? "window.localStorage.removeItem('vam.prefs.v1'); undefined"
-      : `window.localStorage.setItem('vam.prefs.v1', ${JSON.stringify(prefsBeforeClick)}); undefined`,
-  );
 
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
   app.exit(0);

@@ -12,7 +12,7 @@
  */
 
 import { Command } from 'cmdk';
-import type { SessionEntry } from '../domain/selectors.js';
+import { projectMergeKey, type SessionEntry } from '../domain/selectors.js';
 
 export type PaletteProps = {
   readonly entries: readonly SessionEntry[];
@@ -23,6 +23,24 @@ export type PaletteProps = {
 export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
   const waiting = entries.filter(({ session }) => session.status === 'waiting');
   const rest = entries.filter(({ session }) => session.status !== 'waiting');
+
+  // ONE LABEL PER CHECKOUT, ACROSS BOTH GROUPS. Two sources reading the same
+  // directory hand the palette two `Project` objects with the same name
+  // (`projectMergeKey`'s own doc comment has the id schemes that disagree) —
+  // printed on every row the way this used to, the operator sees `vam/`
+  // twice with nothing to say it is the same checkout underneath. `seen` is
+  // built once, in draw order (`needs you` before `all sessions`, matching
+  // the layout below), so the SECOND row for a merge key never repeats the
+  // label a row above it already showed.
+  const seen = new Set<string>();
+  const shouldLabel = (entry: SessionEntry): boolean => {
+    const key = projectMergeKey(entry.project);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
+  const waitingLabels = waiting.map(shouldLabel);
+  const restLabels = rest.map(shouldLabel);
 
   return (
     <div className="absolute inset-0 z-50 flex items-start justify-center pt-24">
@@ -73,15 +91,25 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
 
           {waiting.length > 0 && (
             <Command.Group heading="needs you" className="px-1 text-ink-faint text-meta">
-              {waiting.map((entry) => (
-                <PaletteRow key={entry.session.id} entry={entry} onPick={onPick} />
+              {waiting.map((entry, i) => (
+                <PaletteRow
+                  key={entry.session.id}
+                  entry={entry}
+                  onPick={onPick}
+                  showProjectName={waitingLabels[i] ?? true}
+                />
               ))}
             </Command.Group>
           )}
 
           <Command.Group heading="all sessions" className="px-1 text-ink-faint text-meta">
-            {rest.map((entry) => (
-              <PaletteRow key={entry.session.id} entry={entry} onPick={onPick} />
+            {rest.map((entry, i) => (
+              <PaletteRow
+                key={entry.session.id}
+                entry={entry}
+                onPick={onPick}
+                showProjectName={restLabels[i] ?? true}
+              />
             ))}
           </Command.Group>
         </Command.List>
@@ -93,20 +121,35 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
 function PaletteRow({
   entry,
   onPick,
+  showProjectName,
 }: {
   readonly entry: SessionEntry;
   readonly onPick: (sessionId: string) => void;
+  /**
+   * Whether THIS row is the one that names its checkout. `false` for every
+   * row after the first with the same `projectMergeKey` — the operator has
+   * already read `vam/` once by the time a second `codex` row for the same
+   * directory scrolls by, and a second label would be the duplicate project
+   * entry this component used to draw.
+   */
+  readonly showProjectName: boolean;
 }) {
   const { project, session } = entry;
   return (
     <Command.Item
       // cmdk filters on this string, so it must carry everything a person might
-      // type — the project name included, not just the session's own title.
+      // type — the project name included, not just the session's own title —
+      // REGARDLESS of `showProjectName`: a row that does not print its
+      // project's name still belongs to it as far as search is concerned.
       value={`${project.name} ${session.title} ${session.epic ?? ''} ${session.id}`}
       onSelect={() => onPick(session.id)}
       className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[selected=true]:bg-raised"
     >
-      <span className="text-ink-faint">{project.name}/</span>
+      {showProjectName && (
+        <span data-palette-project className="text-ink-faint">
+          {project.name}/
+        </span>
+      )}
       <span>{session.title}</span>
       {session.status === 'waiting' && <span className="text-waiting">⏸</span>}
       {session.runningAgents > 0 && (

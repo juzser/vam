@@ -538,6 +538,34 @@ const SUGGEST_BOX =
   'vam-no-scrollbar flex flex-col gap-0.5 overflow-y-auto rounded-[10px] border border-line-strong bg-card px-1.5 py-1.5';
 
 /**
+ * `provider`/`model`/`mode`: three short option lists, each opened off its
+ * own small toggle in `data-prompt-tools` -- the row directly under the
+ * textarea. `bottom-full left-0` used to resolve against that toggle's own
+ * `position: relative` wrapper, so a popover of any real height grew upward
+ * into the textarea it sits a `gap-2.5` above (`src/shared/providers.ts`'s
+ * own measurement: "99x34 overlapping the textarea by 28px"). Their wrapper
+ * no longer carries `position: relative` (search `data-popover-root`), so
+ * `bottom-full` here resolves against `data-composer-bar` instead -- the
+ * same ancestor `SUGGEST_LAYER` floats against -- and the popover clears the
+ * WHOLE composer rather than only the toggle it hangs off.
+ *
+ * `left-0` still means "this popover's own containing block", which moved
+ * with the rest of it: today that reads as the composer's own left padding
+ * edge rather than the toggle's, which is the one visible trade-off this
+ * takes -- a provider/model/mode popover no longer opens flush against its
+ * own button. `SUGGEST_LAYER`'s boxes have drawn from that same left edge
+ * all along, so this is not a new idiom, only a third and fourth control
+ * joining the first two.
+ *
+ * `vam-no-scrollbar overflow-y-auto` plus a measured `maxHeight`
+ * (`suggestMaxHeight`) are what `SUGGEST_BOX` already does for the typeahead
+ * lists -- the same cap, so a table that outgrows the room above the
+ * composer scrolls instead of pushing past the top of the screen.
+ */
+const COMPOSER_POPOVER_MENU =
+  'absolute bottom-full left-0 z-10 mb-2 flex flex-col gap-0.5 overflow-y-auto rounded-[10px] border border-line-strong bg-card p-1 shadow-sm vam-no-scrollbar';
+
+/**
  * EVERY COMMAND THE COLUMN CARRIES, in the order they should be offered.
  *
  * WHY THIS IS NOT JUST THE FOCUSED TURN, which is what it used to be. The
@@ -6810,29 +6838,46 @@ export function DetailPanel(props: DetailPanelProps) {
     setDismissed(true);
   };
   /**
-   * HOW TALL THE OPEN BOX (`[data-bang-suggest]` or `[data-slash-suggest]`)
-   * IS ALLOWED TO BE, measured rather than assumed -- see `SUGGEST_BOX`'s own
-   * comment for why it is applied THERE and not to `SUGGEST_LAYER`, the
-   * element it is actually measured off. `null` while nothing is open, which
-   * draws no `style` at all and costs the common case (no popover) nothing.
+   * HOW TALL A LAYER FLOATING ABOVE THE COMPOSER IS ALLOWED TO BE, measured
+   * rather than assumed -- see `SUGGEST_BOX`'s own comment for why it is
+   * applied to each BOX and not to the layer itself.
+   *
+   * ONE MEASUREMENT FOR EVERY COMPOSER POPOVER, not one per popover. It used
+   * to be taken off `suggestLayerRef`'s own `.bottom` -- correct only because
+   * `bottom-full` pins that layer's bottom edge to `data-composer-bar`'s top,
+   * so the two numbers were always equal and `composerBarRef.top` says the
+   * same thing without requiring the SUGGEST layer to be the one open. That
+   * substitution is what let `provider`/`model`/`mode` join this cap: three
+   * `absolute bottom-full` popovers that used to anchor to their OWN small
+   * toggle -- a wrapper sitting in `data-prompt-tools`, directly under the
+   * textarea with only a `gap-2.5` between them -- and grew upward into
+   * exactly the box they hang off (`src/shared/providers.ts`'s own
+   * measurement: "99x34 overlapping the textarea by 28px"). Un-anchoring
+   * their wrapper's own `position: relative` (search `data-popover-root`
+   * below) lets their `absolute` resolve against `data-composer-bar`
+   * instead, the same ancestor `SUGGEST_LAYER` already floats against.
+   *
+   * `null` while nothing is open, which draws no `style` at all and costs the
+   * common case (no popover) nothing.
    */
-  const suggestLayerRef = useRef<HTMLDivElement>(null);
+  const composerBarRef = useRef<HTMLDivElement>(null);
   const [suggestMaxHeight, setSuggestMaxHeight] = useState<number | null>(null);
   const suggestOpen = suggesting || slashSuggesting || slashGapNote !== null;
+  const composerPopoverOpen =
+    suggestOpen || providerPickerOpen || modelPickerOpen || modePickerOpen;
   useLayoutEffect(() => {
-    if (!suggestOpen) {
+    if (!composerPopoverOpen) {
       setSuggestMaxHeight(null);
       return;
     }
-    const layer = suggestLayerRef.current;
-    if (layer === null) return;
+    const bar = composerBarRef.current;
+    if (bar === null) return;
     const measure = () => {
-      // `bottom-full` fixes this layer's BOTTOM edge at the composer's top
-      // regardless of the layer's own height -- so `.bottom` here is the one
-      // measurement that answers "how much room is there", whatever already
-      // constrains it from a previous render.
-      const bottom = layer.getBoundingClientRect().bottom;
-      const next = Math.max(0, bottom - SUGGEST_EDGE_GUTTER);
+      // The composer bar's own TOP, not a floating layer's bottom: every
+      // popover this cap serves is pinned there by `bottom-full`, whether or
+      // not the suggest layer itself is the one currently open.
+      const top = bar.getBoundingClientRect().top;
+      const next = Math.max(0, top - SUGGEST_EDGE_GUTTER);
       // Only a real move, for `proseAdvance`'s own reason above: the initial
       // call and a resize handler can both land on the same number, and an
       // identical value written back is a render for nothing.
@@ -6841,7 +6886,7 @@ export function DetailPanel(props: DetailPanelProps) {
     measure();
     globalThis.addEventListener('resize', measure);
     return () => globalThis.removeEventListener('resize', measure);
-  }, [suggestOpen]);
+  }, [composerPopoverOpen]);
   /**
    * The question the card draws: the newest OPEN one, and only if there is
    * none, the newest answered one -- what is still being asked outranks what
@@ -8713,6 +8758,7 @@ export function DetailPanel(props: DetailPanelProps) {
       {drawsComposer(current) && !composerHidden && (
         <div
           data-composer-bar
+          ref={composerBarRef}
           // The other insert scope, and the common one: with no question open
           // this block is the whole of Insert. See the question bar above.
           {...insertScopeMark}
@@ -8773,7 +8819,7 @@ export function DetailPanel(props: DetailPanelProps) {
             </nav>
           )}
           {suggestOpen && (
-            <div data-suggest-layer ref={suggestLayerRef} className={SUGGEST_LAYER}>
+            <div data-suggest-layer className={SUGGEST_LAYER}>
               {suggesting && (
                 <div
                   data-bang-suggest
@@ -9370,7 +9416,7 @@ export function DetailPanel(props: DetailPanelProps) {
                    layer that floats out of it -- and a boundary drawn round
                    only one of them would dismiss on a press inside the very
                    thing being pressed. */
-                <div data-popover-root="provider" className="relative flex-none">
+                <div data-popover-root="provider" className="flex-none">
                   <Note text="the agent NEW sessions start with — not this one, which is already running">
                     <button
                       type="button"
@@ -9404,7 +9450,10 @@ export function DetailPanel(props: DetailPanelProps) {
                       role="listbox"
                       onKeyDown={dismissPopoverOnEscape}
                       aria-label="default provider for new sessions"
-                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                      className={COMPOSER_POPOVER_MENU}
+                      style={
+                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
+                      }
                     >
                       {PROVIDERS.map((provider) => {
                         const selected = provider.id === currentProvider.id;
@@ -9545,8 +9594,17 @@ export function DetailPanel(props: DetailPanelProps) {
                      inside -- while the control was visibly on top of its
                      neighbour. A flex wrapper makes the button an item that
                      shrinks WITH it, and the guard now measures the button
-                     against its wrapper rather than trusting the row. */
-                  className="relative flex min-w-0 shrink"
+                     against its wrapper rather than trusting the row.
+
+                     NOT `relative` ANY MORE: it was this wrapper's own
+                     positioning context for `[data-model-picker-menu]`'s
+                     `absolute bottom-full`, which is what grew the popover
+                     upward into the textarea (`COMPOSER_POPOVER_MENU`'s own
+                     comment). Removing it does not touch the shrink fix
+                     above -- `position` plays no part in that measurement --
+                     and lets the popover resolve against `data-composer-bar`
+                     instead. */
+                  className="flex min-w-0 shrink"
                 >
                   {/* THE NOTE SAYS WHAT THE ONE ROUTE COSTS, which is nothing
                       beyond this session. An ALIAS is walked onto the CLI's own
@@ -9670,7 +9728,10 @@ export function DetailPanel(props: DetailPanelProps) {
                   {modelPickerOpen && (
                     <div
                       data-model-picker-menu
-                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                      className={COMPOSER_POPOVER_MENU}
+                      style={
+                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
+                      }
                     >
                       {/* THE FIVE, as a listbox of their own rather than the
                           popover being one. That began as a necessity -- a
@@ -9969,7 +10030,7 @@ export function DetailPanel(props: DetailPanelProps) {
               on every render, never mirrored in state, because a mirror is a
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
-                <div data-popover-root="mode" className="relative flex-none">
+                <div data-popover-root="mode" className="flex-none">
                   <Note
                     text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ⇧Tab cycles the session’s own.`}
                   >
@@ -10004,7 +10065,10 @@ export function DetailPanel(props: DetailPanelProps) {
                       role="listbox"
                       onKeyDown={dismissPopoverOnEscape}
                       aria-label="mode for this prompt"
-                      className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
+                      className={COMPOSER_POPOVER_MENU}
+                      style={
+                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
+                      }
                     >
                       {MODES.map((mode) => {
                         const selected = mode === currentMode;

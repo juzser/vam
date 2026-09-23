@@ -327,11 +327,25 @@ const GUARDS = [
   // `window.api`, and is the first guard to stub `window.api.dialog` too,
   // so New project reaches a REAL `createSessionIn` through a real click
   // rather than merely not throwing. Measures what no unit test can: the
-  // mark, three shortcuts and the primary button all fit inside a real
-  // 1280px pane and a real 390px phone, the phone's own Show control clears
-  // the 44px floor, and the browser/phone state (no `dialog` at all) draws
-  // no dead button. `getting-started-shots.mjs`'s own header holds the rest.
+  // mark, two shortcut rows and the primary button all fit inside a real
+  // 1280px pane, the phone's own Show control clears the 44px floor with
+  // its shortcut rows withdrawn, and the browser/phone state (no `dialog`
+  // at all) draws no dead button and no bare-word shortcut list.
+  // `getting-started-shots.mjs`'s own header holds the rest.
   'getting-started-shots',
+  // THE OPERATOR'S REPORT: "Ctrl+C in the terminal shuts the session down
+  // entirely." Drives no browser at all -- the bug and the fix are both in
+  // MAIN, so there is nothing here for Chromium to add -- and ignores the
+  // `origin`/`outDir` argv every other guard in this list is called with.
+  // Spawns through the REAL `createSessionInDirectory` and `resumeClaudeSession`
+  // against a REAL private tmux, presses Ctrl-C twice through the real
+  // `send-keys` path, and asserts the tmux session survives with the shell
+  // in its pane's foreground -- then falsifies itself by spawning the
+  // identical fixture DIRECTLY, the shape both paths used to have, and
+  // asserts THAT one dies with the agent. `shell-first-ctrlc-survives.mjs`'s
+  // own header holds the measurement and why `codex/resume.ts` is not a
+  // fourth phase.
+  'shell-first-ctrlc-survives',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

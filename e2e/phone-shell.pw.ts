@@ -1852,3 +1852,156 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
     expect(await page.locator('[data-getting-started]').count()).toBe(0);
   });
 });
+
+/**
+ * THE COMPOSER'S OWN POPOVERS AGAINST THE BOX THEY HANG OFF.
+ *
+ * `src/shared/providers.ts`'s own header names the defect and the exact
+ * measurement: with a one-row `PROVIDERS` table the picker was withdrawn
+ * rather than fixed, and the withdrawn comment records what it withdrew --
+ * "the popover also opened INSIDE the prompt box it hangs off, 99x34
+ * overlapping the textarea by 28px". `PROVIDERS` now has two rows
+ * (`codex` joined `claude-code`), so `CAN_CHOOSE_PROVIDER` is `true` and the
+ * control -- and the defect behind it -- is back.
+ *
+ * WHY THE TEXTAREA, SPECIFICALLY. `provider`, `model` and `mode` are three
+ * `data-popover-root`s in the same `data-prompt-tools` row, each still
+ * positioned `absolute bottom-full` against ITS OWN small toggle wrapper
+ * rather than against `data-composer-bar` the way `SUGGEST_LAYER` (the `/`
+ * and `!` typeahead, PR 452) is. The toggle row sits directly under the
+ * textarea with only a `gap-2.5` between them, so a popover of any real
+ * height grows upward into exactly the box it hangs off.
+ */
+test.describe("the composer's popovers at 390px", () => {
+  /**
+   * `notes-1`, not the fixture's first row: the first row the phone list
+   * shows (`factory-sse-1`) is `waiting` on an open tool-approval question,
+   * which withdraws the whole composer block (`data-composer-bar`'s own
+   * comment) — there would be no popover to open at all. `notes-1` is
+   * `idle`, with no question open, which is the ordinary "typing a reply"
+   * shape this bug is about.
+   */
+  async function openComposer(page: Page): Promise<void> {
+    await openDemo(page);
+    // `.tap()`, not `touchscreen.tap()` at a computed offset: `notes-1` sits
+    // below the fold at 390x844 and this locator auto-scrolls it into view
+    // first, the way every other row tap in this file already works.
+    await page
+      .locator('[data-phone-shell] [data-session-row]')
+      .filter({ hasText: 'notes-1' })
+      .tap();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+    await expect(page.locator('[data-phone-shell] [data-provider-picker-toggle]')).toBeVisible();
+  }
+
+  test('the provider picker does not cover the textarea being typed into', async ({ page }) => {
+    await openComposer(page);
+    const textareaBefore = await page
+      .locator('[data-phone-shell] textarea[aria-label="prompt to session"]')
+      .boundingBox();
+    expect(textareaBefore, 'the textarea has a box before the popover opens').not.toBeNull();
+
+    await page.locator('[data-phone-shell] [data-provider-picker-toggle]').tap();
+    const popover = page.locator('[data-phone-shell] [data-provider-picker]');
+    await expect(popover).toBeVisible();
+
+    const popoverBox = await popover.boundingBox();
+    const textareaBox = await page
+      .locator('[data-phone-shell] textarea[aria-label="prompt to session"]')
+      .boundingBox();
+    expect(popoverBox, 'the open popover has a box').not.toBeNull();
+    expect(textareaBox, 'the textarea still has a box with the popover open').not.toBeNull();
+    if (popoverBox === null || textareaBox === null) return;
+
+    // RECTANGLES, NOT A SINGLE EDGE: the popover overlaps the textarea when
+    // it is neither entirely above it nor entirely below it, so both ends
+    // are checked the way `e2e/tooltip-shots.mjs` checks a union rather than
+    // trusting one corner.
+    const intersects =
+      popoverBox.y < textareaBox.y + textareaBox.height &&
+      popoverBox.y + popoverBox.height > textareaBox.y &&
+      popoverBox.x < textareaBox.x + textareaBox.width &&
+      popoverBox.x + popoverBox.width > textareaBox.x;
+    expect(
+      intersects,
+      `popover ${JSON.stringify(popoverBox)} against textarea ${JSON.stringify(textareaBox)}`,
+    ).toBe(false);
+  });
+
+  /**
+   * A REAL SHRINK, the Android case `phone-shell.pw.ts`'s filter-popover
+   * tests already exercise this way (`setViewportSize` after opening): the
+   * layout viewport genuinely shrinks and `resize` fires, so this is the one
+   * keyboard shape `suggestMaxHeight`'s `resize` listener can actually learn
+   * about.
+   *
+   * WHY NOT THE IOS BAND `IOS_KEYBOARD_CSS_PX` SIMULATES FOR THE FILTER
+   * POPOVER. That popover opens near the TOP of the sidebar, well clear of
+   * where a keyboard would sit, so shrinking the band only eats room the
+   * popover was already borrowing. This one opens off a toggle a `gap-2.5`
+   * BELOW the textarea it must not cover -- the whole composer sits in the
+   * band a keyboard would occupy, on a REAL device under `h-[100dvh]`, which
+   * is a fact about the composer's OWN position and not one this popover's
+   * cap can fix. What the cap owns is not growing past the room actually
+   * available above wherever the composer ends up; this test holds it to
+   * that, the same "reach" property the filter popover's band test holds
+   * its own popover to.
+   */
+  test('caps itself to a shrunk viewport and scrolls, never past the top of the screen', async ({
+    page,
+  }) => {
+    await openComposer(page);
+    await page.locator('[data-phone-shell] [data-provider-picker-toggle]').tap();
+    const popover = page.locator('[data-phone-shell] [data-provider-picker]');
+    await expect(popover).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 508 });
+    // `suggestMaxHeight` recomputes from a `resize` LISTENER, not
+    // synchronously with `setViewportSize` -- the same asynchrony
+    // `phone-shell.pw.ts`'s own Android-shrink tests already poll for.
+    await expect
+      .poll(async () => (await popover.boundingBox())?.height ?? null)
+      .not.toBeNull();
+
+    const seen = await popover.evaluate((el) => {
+      const options = [...el.querySelectorAll('[data-provider-option]')];
+      const before = options.map((o) => Math.round(o.getBoundingClientRect().bottom));
+      el.scrollTop = el.scrollHeight;
+      const after = options.map((o) => Math.round(o.getBoundingClientRect().bottom));
+      const r = el.getBoundingClientRect();
+      return {
+        rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
+        scrollable: el.scrollHeight > el.clientHeight,
+        before,
+        after,
+      };
+    });
+    const textareaBox = await page
+      .locator('[data-phone-shell] textarea[aria-label="prompt to session"]')
+      .boundingBox();
+
+    // NEVER PAST THE TOP OF THE SCREEN: the cap this shares with
+    // `SUGGEST_BOX` is what stops a popover from running off the viewport
+    // it has nowhere else to hang off of.
+    expect(seen.rect.top, `popover top ${JSON.stringify(seen.rect)} in a 508px viewport`).toBeGreaterThanOrEqual(
+      0,
+    );
+    // AND STILL CLEAR OF THE TEXTAREA, the property this whole fix is for --
+    // holds under a real shrink exactly as it does at the full 844px height.
+    if (textareaBox !== null) {
+      expect(
+        seen.rect.bottom,
+        `popover ${JSON.stringify(seen.rect)} against textarea ${JSON.stringify(textareaBox)}`,
+      ).toBeLessThanOrEqual(Math.round(textareaBox.y));
+    }
+    // AND REACHABLE: every option is back inside the popover's own
+    // (already on-screen) box once scrolled, the same difference
+    // `e2e/phone-shell.pw.ts`'s filter-popover cap test holds its rows to.
+    if (seen.scrollable) {
+      const stillOut = seen.after.filter((bottom) => bottom > seen.rect.bottom + 1);
+      expect(stillOut, `options still unreachable after scrolling: ${JSON.stringify(stillOut)}`).toEqual(
+        [],
+      );
+    }
+  });
+});

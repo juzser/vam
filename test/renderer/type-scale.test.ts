@@ -124,6 +124,26 @@ const EXCEPTIONS: ReadonlyArray<{
       'direction: a multiplication sign fills its em box where a chevron does ' +
       'not.',
   },
+  {
+    file: 'panels/SessionList.tsx',
+    size: '14',
+    count: 5,
+    why:
+      'The sidebar\u2019s project and group titles. Operator, in one breath: ' +
+      '"make the project and group titles bold and 1px smaller; the session ' +
+      'name regular weight and also 1px smaller." One pixel below `heading` ' +
+      '(15) and not a new number between two steps -- it lands on none of the ' +
+      'other three, so it is written here rather than smuggled in as a fifth ' +
+      'step. Five call sites, not one: the group heading name, the project ' +
+      'heading name, the provisional project heading a session-in-flight ' +
+      'draws before it has a real section to join (which has to match the ' +
+      'real heading\u2019s size and weight exactly, or the row would visibly ' +
+      'change size the moment the session arrives and the two swap), and the ' +
+      'two heading ICON slots -- an emoji is text and takes its size from the ' +
+      'slot it sits in, and `HEADING_GLYPH_PX`\u2019s own history is what a ' +
+      'heading whose picture and word disagree on size looks like, so the ' +
+      'icon moved with the caption rather than being left at `text-heading`.',
+  },
 ];
 
 function sources(dir: string): string[] {

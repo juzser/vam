@@ -2200,12 +2200,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   <Monitor size={11} strokeWidth={1.7} />
                 </span>
                 {/* Typed exactly like the real project heading below -- upper
-                    case and letter-spacing dropped with it, `text-heading`
-                    and the sans face taken with it: this row becomes one the
-                    moment the session arrives, and a change of case, of size
+                    case and letter-spacing dropped with it, the same size and
+                    weight taken with it: this row becomes one the moment the
+                    session arrives, and a change of case, of size, of weight
                     or of face at that moment would read as the name having
-                    been rewritten. */}
-                <span className="truncate text-heading text-ink-dim">{starting.projectName}</span>
+                    been rewritten. See the real heading below for why it is
+                    14px and semibold on a 20px line rather than plain
+                    `text-heading`. */}
+                <span className="truncate text-[14px] font-semibold leading-[20px] text-ink-dim">
+                  {starting.projectName}
+                </span>
               </div>
               <div className="flex flex-col gap-[5px]" style={{ paddingLeft: SIDEBAR_STEP }}>
                 <div
@@ -2271,14 +2275,23 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         beside it, so the icon stands as tall as the line it
                         heads rather than two-thirds of it (`HEADING_SLOT_PX`;
                         the literal here is Tailwind's, the number is owned
-                        there). `text-heading` is the EMOJI's size (an emoji
-                        is text and takes no `size`): the name's own, so the
-                        picture is never the smaller thing beside it -- see
-                        `HEADING_GLYPH_PX`, which owns the argument for all
-                        three numbers and the measured inks. */}
+                        there). The EMOJI's size (an emoji is text and takes no
+                        `size`) is the name's own, so the picture is never the
+                        smaller thing beside it -- see `HEADING_GLYPH_PX`,
+                        which owns the argument for all three numbers and the
+                        measured inks. THAT NAME IS NOW 14, NOT `text-heading`
+                        (15): the size moved with it below, or this slot would
+                        reintroduce the exact inversion `HEADING_GLYPH_PX`'s
+                        own comment was written to close -- the level above
+                        reading as the SMALLER picture the moment only the
+                        word beside it shrank. `e2e/sidebar-tree-shots.mjs`
+                        asserts the equality (an emoji's `fontSize` against the
+                        caption's own), so a heading whose icon and name drift
+                        apart again fails there rather than merely here in
+                        prose. */}
                     <span
                       data-group-icon={group.id}
-                      className="flex h-[20px] w-[20px] flex-none items-center justify-center text-heading leading-none text-ink-faint"
+                      className="flex h-[20px] w-[20px] flex-none items-center justify-center text-[14px] leading-none text-ink-faint"
                     >
                       {/* `text-ink-faint` on the span is the EMOJI's ink and
                           the placeholder's; a chosen glyph carries its own
@@ -2295,17 +2308,43 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     {groupDraft?.kind === 'rename' && groupDraft.group.id === group.id ? (
                       groupEditor
                     ) : (
-                      /* `text-heading`, one step above the rows under it, and
-                         in the SANS face the rows are titled in. The argument
-                         for both is made once, on the project name below,
-                         because the operator asked for both levels in one
-                         breath each time. The register is untouched: upper
-                         case and tracking are what separate this level from
-                         the project's, and at 15px a name the column cannot
-                         hold still clips to an ellipsis before the count and
-                         the controls, which do not move -- measured, at the
-                         default width, with a 531px name in a 117px box. */
-                      <span className="truncate text-heading text-ink uppercase tracking-[0.12em]">
+                      /* ONE STEP ABOVE THE ROWS UNDER IT, and in the SANS
+                         face the rows are titled in. The argument for both is
+                         made once, on the project name below, because the
+                         operator asked for both levels in one breath each
+                         time. The register is untouched: upper case and
+                         tracking are what separate this level from the
+                         project's, and at 14px a name the column cannot hold
+                         still clips to an ellipsis before the count and the
+                         controls, which do not move -- measured, at the
+                         default width, with a 531px name in a 117px box.
+
+                         BOLD AND ONE PIXEL SMALLER THAN `text-heading`, and
+                         not `text-heading` itself. Operator, in one breath:
+                         "make the project and group titles bold and 1px
+                         smaller; the session name regular weight and also 1px
+                         smaller." `font-semibold` (600) rather than a new
+                         `font-bold` (700): it is the weight every OTHER bold
+                         heading in the renderer already uses beside
+                         `text-heading` (`SettingsOverlay.tsx`,
+                         `ErrorLogPanel.tsx`, `KeySheet.tsx`,
+                         `ErrorBoundary.tsx`), and it measures visibly heavier
+                         than the row's own regular weight on the face this
+                         actually resolves to -- Geist is asked for but never
+                         loaded (no `@font-face`, no package), so every one of
+                         these headings paints in the `-apple-system` fallback,
+                         where 600 already reads apart from 400 by design. 14
+                         is one pixel below `--text-heading` (15) and does not
+                         land on any of the scale's other three steps, so it is
+                         a named exception in `type-scale.test.ts` rather than
+                         a fifth step -- see `EXCEPTIONS` there for the count
+                         and the reason repeated. `leading-[20px]` keeps the
+                         line box `text-heading` carried, so none of the
+                         `min-h-[21px]` arithmetic on this container (and the
+                         project heading's, below) moves: only the ink shrinks,
+                         not the row. `e2e/sidebar-tree-shots.mjs` reads both
+                         the size and the weight off the paint. */
+                      <span className="truncate text-[14px] font-semibold leading-[20px] text-ink uppercase tracking-[0.12em]">
                         {group.name}
                       </span>
                     )}
@@ -2532,7 +2571,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       which no browser opens on keyboard focus. */}
                   <ShortcutTip label="Change project icon">
                     {/* Same slot as the group's above -- 20px, the name's own
-                        line, `text-heading` for the emoji -- and the same
+                        line, the SAME size as the emoji (14, not
+                        `text-heading` -- see the group heading's own comment
+                        for why the two must move together) -- and the same
                         `HEADING_GLYPH_PX` for the glyph, because a level is
                         not a third kind of icon. `vam-hit-24` hangs
                         the hit area off an `::after` and the phone floor is a
@@ -2542,7 +2583,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       data-project-icon={section.project.id}
                       onClick={() => onPickIcon(section.project)}
                       aria-label={`change icon for ${section.project.name}`}
-                      className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-heading leading-none text-ink-faint hover:text-ink-dim"
+                      className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-[14px] leading-none text-ink-faint hover:text-ink-dim"
                     >
                       <IconMark
                         value={parseIcon(section.project.icon)}
@@ -2610,8 +2651,36 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        count beside it stays mono, because a count is meta and
                        every piece of meta here (branch, age, badge) is mono.
                        The same guard reads `fontFamily` off every heading
-                       name against the row title's and asserts they agree. */
-                    <span className="truncate text-heading text-ink-dim">
+                       name against the row title's and asserts they agree.
+
+                       BOLD AND ONE PIXEL SMALLER THAN `text-heading`, and the
+                       session name a pixel smaller and regular. Operator, in
+                       one breath: "make the project and group titles bold and
+                       1px smaller; the session name regular weight and also
+                       1px smaller." See the group heading above for the full
+                       argument -- `font-semibold` (600) because it is the
+                       weight every other bold heading in the renderer already
+                       pairs with `text-heading`, and because Geist is asked
+                       for but never loaded (no `@font-face`, no package), so
+                       this paints in the `-apple-system` fallback, where 600
+                       already reads apart from the row's 400 by design; 14
+                       because it is one pixel below `--text-heading` (15) and
+                       lands on none of the scale's other three steps, so it
+                       is a named exception in `type-scale.test.ts`'s
+                       `EXCEPTIONS` rather than a fifth step; `leading-[20px]`
+                       because it is the same line `text-heading` carried, so
+                       the `min-h-[21px]` arithmetic two paragraphs up does not
+                       move. The row title below drops to `text-control`
+                       (12px, one below `text-body`'s 13) and loses its
+                       focused-row `font-medium`: the scale's own floor for
+                       "control" already sits where the operator asked the
+                       session name to land, and the cursor row was never
+                       reading as focused BECAUSE of that weight -- the border,
+                       the raised surface and the status-coloured stripe
+                       (`data-row-cursor`) all still mark it; dropping the
+                       extra weight is what makes "regular" true of every row,
+                       not only the ones nobody has picked. */
+                    <span className="truncate text-[14px] font-semibold leading-[20px] text-ink-dim">
                       {section.project.name}
                     </span>
                   )}
@@ -3133,17 +3202,42 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   <span
                                     data-row-title
                                     className={[
-                                      'truncate text-body',
+                                      // ONE PIXEL SMALLER AND REGULAR.
+                                      // Operator, in one breath with the two
+                                      // headings above: "the session name
+                                      // regular weight and also 1px smaller."
+                                      // `text-control` (12px/16px), not a new
+                                      // exception: it is the scale's own next
+                                      // step down from `text-body` (13px), so
+                                      // the ask lands on a step that already
+                                      // exists rather than a fifth one
+                                      // (`test/renderer/type-scale.test.ts`).
+                                      // `font-normal` makes the 400 explicit
+                                      // rather than merely inherited, so the
+                                      // "regular" in the ask is a class this
+                                      // element carries, not an absence.
+                                      'truncate text-control font-normal',
                                       // The dim-unless-focused title is a
                                       // keyboard affordance: it exists so a
                                       // cursor row pops out of a column. With
                                       // no cursor it is only every row but one
                                       // being harder to read than it needs to be.
-                                      phone
-                                        ? 'text-ink'
-                                        : isFocused
-                                          ? 'font-medium text-ink'
-                                          : 'text-ink-dim',
+                                      //
+                                      // NO LONGER `font-medium` ON FOCUS. That
+                                      // bump predated this ask and was never
+                                      // what the affordance above argues for
+                                      // -- the argument is about CONTRAST
+                                      // (`text-ink` against `text-ink-dim`),
+                                      // and the focused row also carries a
+                                      // border, a raised surface and a
+                                      // status-coloured stripe
+                                      // (`data-row-cursor`) that a weight
+                                      // change never touched. Keeping the
+                                      // extra weight here would leave one row
+                                      // in the column not-regular, which is
+                                      // the one thing the operator's sentence
+                                      // ruled out.
+                                      phone || isFocused ? 'text-ink' : 'text-ink-dim',
                                     ].join(' ')}
                                   >
                                     {session.title}
