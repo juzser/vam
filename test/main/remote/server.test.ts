@@ -636,6 +636,27 @@ describe('create-session-in: confined to the operator’s existing project set',
     expect(createSessionInDirectory).not.toHaveBeenCalled();
   });
 
+  it('admits a two-hop symlink chain into a member repository', async () => {
+    const repo = await gitRepo();
+    const project = await projectFor(repo);
+    const firstHop = join(tmpdir(), `vam-link-hop1-${Date.now()}`);
+    const secondHop = join(tmpdir(), `vam-link-hop2-${Date.now()}`);
+    await symlink(repo, firstHop);
+    await symlink(firstHop, secondHop);
+
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      source: makeSource({ load: async () => [project], createSession }),
+    });
+
+    const response = await post(base, '/api/create-session-in', {
+      cwd: secondHop,
+      title: 'a run',
+    });
+    expect(response.status).toBe(200);
+    expect(createSession).toHaveBeenCalledWith(project.id, 'a run', undefined);
+  });
+
   it(
     'answers the byte-identical unauthorized-directory refusal for five different reasons, ' +
       'and never reaches createSession or createSessionInDirectory',
@@ -728,6 +749,14 @@ describe('create-session-in: confined to the operator’s existing project set',
     listed = [project];
     const after = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
     expect(after.status).toBe(200);
+    expect(createSession).toHaveBeenCalledTimes(1);
+    // A THIRD call, flipping the list back to empty: an off-by-one cache
+    // (one stale read behind, or latched permanently open after the first
+    // admission) would still show 200 here. Only a genuine per-request read
+    // refuses again.
+    listed = [];
+    const third = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
+    expect(third.status).toBe(403);
     expect(createSession).toHaveBeenCalledTimes(1);
   });
 
