@@ -115,7 +115,7 @@ describe('isTextList', () => {
     const backing = Array.from({ length: MAX_LIST_LENGTH + 1 }, () => 'x');
     const poisoned = new Proxy(backing, {
       get(target, prop, receiver) {
-        if (prop === '0' || prop === 0) {
+        if (prop === '0') {
           throw new Error('isTextList walked an element of an oversized list');
         }
         return Reflect.get(target, prop, receiver);
