@@ -285,6 +285,15 @@ const GUARDS = [
   // reading of the reason text a degraded load leaves on screen
   // (`sidebar-ownership-shots.mjs`'s own header holds the falsifications).
   'sidebar-ownership-shots',
+  // DISMISS, THROUGH THE REAL PRELOAD CONTRACT AND A REAL CLICK -- the
+  // operator's own report, "some sessions cannot be closed and report a
+  // failure — they stay there forever." Stubs `window.api` and throws
+  // `stop.ts`'s exact `already-finished` refusal from `closeSession`, then
+  // proves the row's hover-revealed `×` actually removes the row from the
+  // sidebar (never happy-dom's fake hover/opacity), that the status names the
+  // removal rather than a failure, and that the undo control brings it back.
+  // `close-dismiss-shots.mjs`'s own header holds the falsification.
+  'close-dismiss-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

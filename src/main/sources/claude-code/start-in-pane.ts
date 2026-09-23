@@ -33,7 +33,7 @@
  */
 
 import type { SourceError } from '../../ipc/channels.js';
-import { killSessionArgv, sendEnterArgv, sendTextArgv } from '../tmux/argv.js';
+import { isVamSession, killSessionArgv, sendEnterArgv, sendTextArgv } from '../tmux/argv.js';
 import { isShellCommand } from '../tmux/shell.js';
 import {
   classifyTmuxFailure,
@@ -112,15 +112,52 @@ export async function typeIntoOwnPane(input: {
 /**
  * Kill the pane `name` -- §5's "Close the session", for a pane with nothing in
  * it. No confirmation is owed: there is no work in flight to lose, and no
- * conversation, because none was started. `null` when tmux killed it.
+ * conversation, because none was started. `null` when tmux killed it, or when
+ * there was nothing left to kill in the first place -- see below.
+ *
+ * IDEMPOTENT ON A PANE THAT IS ALREADY GONE, and this is deliberately NOT
+ * `ownEmptyPane`'s missing-pane branch, which `typeIntoOwnPane` still uses
+ * unchanged: typing has to refuse when there is no pane to type into, but
+ * closing one that no longer exists has already reached Close's own goal --
+ * "this pane is not running any more" -- so answering that with a refusal was
+ * the bug the operator reported: a row Close could never make go away, on a
+ * poll cycle where the operator's own `tmux kill-session` (or the shell
+ * exiting on its own) won the race against the next `load()`.
+ *
+ * THE PROOF THIS IS SAFE TO DO is `name` itself: a pane-row id is only ever
+ * minted from a name `listVamSessions` already returned (`pane-row.ts`), which
+ * is filtered to vam's own prefix -- so a name that PASSES `isVamSession` but
+ * is no longer in today's listing was vam's pane a moment ago. A name that
+ * fails the prefix (an id nobody could have gotten from a real row, or a
+ * caller's own mistake) is refused exactly as before: there is no evidence at
+ * all that this was ever vam's to close.
  */
 export async function killOwnPane(input: {
   run: TmuxRun;
   name: string;
 }): Promise<SourceError | null> {
   const { run, name } = input;
-  const found = await ownEmptyPane(run, name, 'close');
-  if ('error' in found) return found.error;
+  const listed = await listVamSessions(run);
+  if (listed.kind !== 'ok') return listed.error;
+  const pane = listed.sessions.find((session) => session.name === name);
+  if (pane === undefined) {
+    if (isVamSession(name)) {
+      // See the header: idempotent success, not `not-vam-started`.
+      return null;
+    }
+    return {
+      kind: 'refused',
+      code: 'not-vam-started',
+      message: `vam has no tmux session "${name}" of its own -- it has ended, or vam never started it -- so it will not close there`,
+    };
+  }
+  if (pane.command !== undefined && !isShellCommand(pane.command)) {
+    return {
+      kind: 'refused',
+      code: 'pane-occupied',
+      message: `"${name}" has ${pane.command} running in it now, so it is no longer an empty pane; vam will not close through this control -- the session's own row is where that belongs`,
+    };
+  }
   const killed = await run(killSessionArgv(name));
   if (killed.failure !== null) {
     return classifyTmuxFailure({

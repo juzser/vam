@@ -88,10 +88,25 @@ describe('killOwnPane -- Close on a pane with no agent in it', () => {
     expect(calls.slice(1)).toEqual([['kill-session', '-t', `=${PANE}`]]);
   });
 
-  it('refuses -- kills nothing -- for a name vam did not start, or one already gone', async () => {
+  it('refuses -- kills nothing -- for a name that was never vam’s to begin with', async () => {
     const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tzsh\n`);
     const refused = await killOwnPane({ run, name: 'notes' });
     expect(refused).toMatchObject({ kind: 'refused', code: 'not-vam-started' });
+    expect(calls.map((c) => c[0])).toEqual(['list-sessions']);
+  });
+
+  it('IDEMPOTENT: succeeds -- there is nothing left to kill -- for vam’s own pane already gone', async () => {
+    // `name` carries vam's own prefix (`vam-…`), so it was minted by
+    // `vamSessionName` and this row can only exist because `pane-row.ts` once
+    // read it out of `listVamSessions`. Its tmux session having ended between
+    // that poll and this click -- the operator killed it by hand, or the
+    // shell exited on its own -- means the goal of Close, "this pane is not
+    // running", is already true. Reporting that as a refusal is the bug the
+    // operator described: a row Close cannot make disappear.
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tzsh\n`);
+    await expect(killOwnPane({ run, name: 'vam-atlas-gone99' })).resolves.toBeNull();
+    // Nothing was killed: there is no session by that name to send
+    // `kill-session` to. Only the listing was asked.
     expect(calls.map((c) => c[0])).toEqual(['list-sessions']);
   });
 
