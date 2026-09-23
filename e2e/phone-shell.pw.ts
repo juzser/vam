@@ -992,6 +992,26 @@ test.describe('the phone search route', () => {
     ).toBeLessThanOrEqual(seen.band);
   });
 
+  /**
+   * TWO PROPERTIES, NOT ONE, since the fix for defect 2 of this task:
+   * the four origin rows (`agent`/`prompted`/`ended`/`foreign`) wear
+   * `vam-tap` again, restored to `py-1.5` -- a previous commit had shrunk
+   * them to `py-1` reasoning "no 44x44 sweep covers this popover, so the
+   * four points saved cost no touch target its floor", which ran backwards:
+   * no sweep covering it means nobody MEASURED it, not that the floor held.
+   * Measured here at 390x844 with 44px rows restored, they do not all fit
+   * above a keyboard band alongside the status pills any more -- so the
+   * popover now REACHES the rest by scrolling, the same "scroller's top
+   * edge above the fold" shape `styles.css`'s icon-picker comment states
+   * generally, rather than by shrinking rows a second time.
+   *
+   * `SessionList.tsx`'s `useFilterPopoverCap` carries the fix:
+   * `PHONE_KEYBOARD_RESERVE_PX` reserves the same 336px this file simulates,
+   * UNCONDITIONALLY on phone -- there is no signal here that tells it a
+   * keyboard is actually up, for the reason its own header gives (iOS never
+   * fires `resize` for one), so the reservation cannot be conditional on
+   * detecting one.
+   */
   test('the filter popover fits above an iOS keyboard at 390x844', async ({ page }) => {
     await openDemo(page);
     await page.locator('[data-phone-shell] [data-filter-toggle]').tap();
@@ -1001,26 +1021,75 @@ test.describe('the phone search route', () => {
     const seen = await menu.evaluate((el, keyboard) => {
       const band = window.innerHeight - (keyboard as number);
       const r = el.getBoundingClientRect();
-      const below = [...el.querySelectorAll('button, input')]
-        .map((c) => ({
-          label: (c.getAttribute('aria-label') ?? c.textContent ?? '').trim().slice(0, 30),
-          bottom: Math.round(c.getBoundingClientRect().bottom),
-        }))
-        .filter((c) => c.bottom > band);
+      const rowsOf = () =>
+        [...el.querySelectorAll('[data-origin-toggle]')].map((c) => {
+          const cr = c.getBoundingClientRect();
+          return {
+            label: c.getAttribute('data-origin-toggle'),
+            bottom: Math.round(cr.bottom),
+            height: Math.round(cr.height),
+          };
+        });
+      const before = rowsOf();
+      // The popover's own scroller, taken all the way down -- the same
+      // "reach" the Android-shrink test below already proves for a REAL
+      // viewport shrink, exercised here for the iOS-covered case instead,
+      // where nothing but this scroll can bring a covered row back.
+      el.scrollTop = el.scrollHeight;
+      const after = rowsOf();
       return {
         band,
         rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
         textInputs: el.querySelectorAll('input[type="text"], input:not([type])').length,
-        below,
+        scrollable: el.scrollHeight > el.clientHeight,
+        before,
+        after,
       };
     }, IOS_KEYBOARD_CSS_PX);
 
     // It carries no text box, so nothing in it raises a keyboard: the band
     // only matters here for a keyboard something else left up.
     expect(seen.textInputs, 'the popover holds no search box of its own').toBe(0);
+
+    // EVERY ORIGIN ROW MEASURES THE PHONE FLOOR, whether or not this
+    // particular scroll offset currently paints it: `min-height` applies to
+    // the box regardless of an ancestor's `overflow`, so a row scrolled out
+    // of view still reports its real height rather than a clipped one.
+    for (const row of seen.before) {
+      expect(row.height, `${row.label} measured ${row.height}px tall`).toBeGreaterThanOrEqual(
+        TOUCH_MIN,
+      );
+    }
+
+    // THE SCROLLER ITSELF fits above the band -- `styles.css`'s icon-picker
+    // comment states the general shape: "a sheet is safe when its
+    // scroller's top edge is above the fold, and unsafe when a nested
+    // scroller pushes it below." This popover IS its own scroller
+    // (`useFilterPopoverCap`), so both of its own edges are checked, not
+    // only its top.
     expect(
-      seen.below.map((c) => `${c.label} @ ${c.bottom}`),
+      seen.rect.bottom,
       `popover ${JSON.stringify(seen.rect)} against a ${seen.band}px band`,
+    ).toBeLessThanOrEqual(seen.band);
+
+    // AND THERE IS SOMETHING TO SCROLL TO. A fit that held by cutting
+    // content rather than by capping and scrolling it would report this
+    // same `rect.bottom` with nothing left beneath the fold -- the
+    // difference between a popover that reaches its own rows and one that
+    // simply never grew tall enough to need to.
+    expect(
+      seen.scrollable,
+      'the popover has content below the fold to scroll to, not merely a box that stops at the band',
+    ).toBe(true);
+
+    // SCROLLED ALL THE WAY, every row -- including the two that sat below
+    // the band before scrolling -- is back inside the popover's own
+    // (already above-band) box: REACHABLE, not merely present in the DOM at
+    // an offset nothing brings back.
+    const stillOut = seen.after.filter((row) => row.bottom > seen.rect.bottom + 1);
+    expect(
+      stillOut,
+      `rows still unreachable after scrolling to the end: ${JSON.stringify(stillOut)}`,
     ).toEqual([]);
   });
 

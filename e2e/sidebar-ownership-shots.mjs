@@ -47,6 +47,23 @@
  *     reason is readable in the popover -- `docs/design/vam-owns-the-
  *     session.md`'s own trap: "an unreadable tmux listing must not empty the
  *     sidebar... it is never to show nothing."
+ *
+ *     WHAT THIS STATE DOES AND DOES NOT PROVE. `ownershipSessions`'s `withGap`
+ *     stamps `vamListingGap` onto every row DIRECTLY, including the one
+ *     `source: 'claude-code'` row (`live`) -- there is no real
+ *     `CLAUDE_CODE_SOURCE`/`createCodexSource` behind this stub, only
+ *     `window.api.load()` answering with invented data. So this state proves
+ *     the RENDERER half only: that `Canvas.tsx`'s stand-down memo and
+ *     `SessionList.tsx`'s banner read `Session.vamListingGap` generically,
+ *     off ANY row regardless of which source produced it, and do not require
+ *     a Codex row to fire. It does NOT prove that `CLAUDE_CODE_SOURCE.load()`
+ *     itself stamps the field when the real `listVamSessions` call fails --
+ *     that a Claude Code row on the operator's own machine gets the same
+ *     treatment `codex/source.ts` always gave its own rows is proven at the
+ *     main-process level instead, by `test/sources/claude-code.test.ts`'s own
+ *     `vamListingGap` describe block, which injects a REAL failing runner
+ *     into the REAL `listVamSessions` and asserts `loadClaudeCodeProjects`
+ *     carries the error through.
  *  4. THE BARE PANE ROW: a session shaped exactly like `pane-row.ts`'s
  *     `paneRow()` output -- `status: 'unstarted'`, `vamControlled: true`, an
  *     id under the `pane:` prefix -- draws as an ordinary row with the

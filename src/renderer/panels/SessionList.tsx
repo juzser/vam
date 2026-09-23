@@ -53,6 +53,7 @@ import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { usePhoneViewport } from '../phone/viewport.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
@@ -399,6 +400,39 @@ const FILTER_POPOVER_GUTTER = 24;
 const FILTER_POPOVER_FOOT = 8;
 
 /**
+ * The worst-case iOS portrait keyboard, in CSS pixels, with its accessory
+ * bar -- the same mid-figure `e2e/phone-shell.pw.ts`'s `IOS_KEYBOARD_CSS_PX`
+ * uses to simulate one (iOS portrait keyboards measure roughly 291-380px
+ * depending on the accessory and prediction rows).
+ *
+ * RESERVED ON PHONE UNLESS A REAL RESIZE HAS ALREADY SHRUNK THE VIEWPORT
+ * SINCE THIS POPOVER OPENED -- never gated on detecting a keyboard directly,
+ * since there is no such detection to reach for on iOS at all
+ * (`useFilterPopoverCap`'s own header). The first cut of this fix reserved
+ * unconditionally on every phone measurement and broke the Android case:
+ * `window.innerHeight` there really does shrink to the keyboard-covered
+ * figure, so subtracting this on top of an ALREADY-shrunk measurement
+ * double-counted the same keyboard twice and drove the cap to zero --
+ * falsified against `e2e/phone-shell.pw.ts`'s own Android test, which is
+ * what caught it. `useFilterPopoverCap` compares each measurement against
+ * the viewport height it saw when the popover FIRST opened: smaller than
+ * that baseline means a real shrink already happened and its own arithmetic
+ * is trustworthy on its own (Android's case); still at the baseline means
+ * nothing has told this hook anything, which is the iOS case this constant
+ * exists for.
+ *
+ * This is the same shape of fix `styles.css`'s icon-picker sheet already
+ * uses for the identical iOS trap ("give the picker the full 85dvh so its
+ * scroller STARTS above the fold"): reserve the worst case, geometric
+ * rather than detected. It costs this popover nothing ordinary -- four short
+ * rows and a status strip never approach a 336px cut -- and it is what keeps
+ * the popover's own scroller (already `overflow-y: auto` below) starting,
+ * and ending, above a keyboard-covered band rather than only above the
+ * fully uncovered viewport.
+ */
+const PHONE_KEYBOARD_RESERVE_PX = 336;
+
+/**
  * How tall the popover may be: the distance from where it actually is to the
  * bottom of the viewport, measured.
  *
@@ -423,9 +457,13 @@ const FILTER_POPOVER_FOOT = 8;
  * layout viewport really does shrink when the keyboard opens, and a cap taken
  * only at open time would still be the pre-keyboard one. `visualViewport` is
  * the listener `styles.css` rules out for its jitter and double-resize loops,
- * and this does not use it -- on iOS the layout viewport does not move, the
- * controls are covered rather than off-screen, and the popover's own scroller
- * is what brings them back.
+ * and this does not use it -- on iOS the layout viewport does not move at
+ * all, so `resize` never fires there and this hook never learns a keyboard
+ * opened. `PHONE_KEYBOARD_RESERVE_PX` is what makes the popover's own
+ * scroller the thing that brings covered controls back regardless: reserved
+ * out of every phone measurement unconditionally, not only once told, it
+ * keeps the scroller short enough that its own bottom edge sits above where
+ * an iOS keyboard would cover, with the rest one scroll away.
  *
  * Returns `null` while closed, so the popover renders exactly as it does
  * today until it has been measured once.
@@ -520,10 +558,20 @@ function useFilterPopoverCap(
   open: boolean,
   menuRef: RefObject<HTMLDivElement | null>,
 ): number | null {
+  const phone = usePhoneViewport();
   const [cap, setCap] = useState<number | null>(null);
+  // The viewport height this popover saw the moment it opened -- `null`
+  // until the first measurement. `PHONE_KEYBOARD_RESERVE_PX`'s own header:
+  // a REAL shrink below this baseline (Android's `resize`) means the
+  // browser already reserved the keyboard for us, and reserving again on
+  // top of it is what drove the cap to zero the first time this was
+  // written. Still AT the baseline means nothing has told this hook
+  // anything, which is the silent-iOS-cover case the constant guards.
+  const openHeight = useRef<number | null>(null);
   useEffect(() => {
     if (!open) {
       setCap(null);
+      openHeight.current = null;
       return;
     }
     const measure = () => {
@@ -533,12 +581,15 @@ function useFilterPopoverCap(
       // not move when the cap is applied, so re-measuring cannot walk the
       // popover down the screen one resize at a time.
       const top = menu.getBoundingClientRect().top;
-      setCap(Math.max(0, window.innerHeight - top - FILTER_POPOVER_FOOT));
+      openHeight.current ??= window.innerHeight;
+      const alreadyShrunk = window.innerHeight < openHeight.current;
+      const reserve = phone && !alreadyShrunk ? PHONE_KEYBOARD_RESERVE_PX : 0;
+      setCap(Math.max(0, window.innerHeight - top - FILTER_POPOVER_FOOT - reserve));
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [open, menuRef]);
+  }, [open, menuRef, phone]);
   return cap;
 }
 
@@ -1946,17 +1997,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   )
                 }
                 className={[
-                  // `py-1`, not `py-1.5`: this popover is excluded from the
-                  // phone sheet rules (`FILTER_POPOVER_FOOT`'s own note) and
-                  // caps itself to whatever the viewport leaves below its
-                  // anchor, which on a covered iOS keyboard is a fixed, small
-                  // band -- `e2e/phone-shell.pw.ts`'s "fits above an iOS
-                  // keyboard" measured it at 390x844 with all four origin
-                  // rows drawn. None of the 44x44 sweeps cover this popover
-                  // (`phone-core-loop.pw.ts`'s census opens the provider and
-                  // model pickers, not this one), so the four points saved
-                  // here cost no touch target its floor.
-                  'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1 text-left text-control',
+                  // `vam-tap`, and `py-1.5` restored: measured on the phone
+                  // project at 390x844, these rows painted ~28px tall without
+                  // it -- under the 44px floor the rest of the phone UI keeps
+                  // (`.vam-phone .vam-tap` in styles.css). "No 44x44 sweep
+                  // covers this popover" was the previous fix's argument for
+                  // shrinking them instead, and that reasoning ran backwards:
+                  // no sweep covering it means nobody MEASURED it, not that
+                  // the floor holds. `vam-tap` is what every other text-row
+                  // menu item in this file already wears (the group menu's
+                  // "Rename project" / "Change project icon", a few hundred
+                  // lines down) for exactly this reason.
+                  'vam-tap flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
                   on
                     ? 'border-line-loud bg-raised text-ink'
                     : 'border-line text-ink-dim hover:border-line-strong',

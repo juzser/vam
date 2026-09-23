@@ -1426,7 +1426,16 @@ describe('SessionList reveals the focused row', () => {
     const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
-      value: (query: string) => ({ matches: query.includes('reduced-motion') }),
+      // `addEventListener`/`removeEventListener`, unlike the narrower stub
+      // this used to be: `usePhoneViewport` (`SessionList.tsx` now imports
+      // it, for the filter popover's own keyboard-safe cap) calls both on
+      // whatever `matchMedia` returns, the same shape every other test file
+      // that stubs `matchMedia` already provides (`Canvas.demo-foreign.test.tsx`).
+      value: (query: string) => ({
+        matches: query.includes('reduced-motion'),
+        addEventListener() {},
+        removeEventListener() {},
+      }),
     });
     try {
       const entries = twoProjects();
