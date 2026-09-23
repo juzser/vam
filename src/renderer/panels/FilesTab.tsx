@@ -139,7 +139,8 @@ import { applyTab, isMarkdownPath, lineStartOffset, relativeLabel } from './file
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
-import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
+import { EDITOR_KEYS, type FileTreeRow } from './files-tree.js';
+import { useFilesTreeState } from './files-tree-state.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
 import { OverlayScroll } from './OverlayScroll.js';
@@ -362,14 +363,6 @@ export function FilesTab({
   const [newFileName, setNewFileName] = useState('');
   const [filter, setFilter] = useState('');
   /**
-   * Which directories are open, by absolute path — so nothing has to be
-   * keyed by session: a path belongs to exactly one session's root, and a
-   * path from another root simply never matches a row here. Same for the
-   * cursor below.
-   */
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const [cursorPath, setCursorPath] = useState<string | null>(null);
-  /**
    * RENDERED, OR RAW — the operator's own toggle, and ONE flag for the whole
    * tab rather than one per file.
    *
@@ -528,27 +521,6 @@ export function FilesTab({
     () => () => releaseUnsaved(unsavedSlot, reportUnsaved),
     [unsavedSlot, reportUnsaved],
   );
-
-  /** The visible rows, in draw order. See `files-tree.ts`. */
-  const rows: readonly FileTreeRow[] = useMemo(
-    () =>
-      ready === null
-        ? []
-        : fileTreeRows({ root: ready.root, files: ready.files, expanded, filter }),
-    [ready, expanded, filter],
-  );
-  /**
-   * WHERE THE TREE'S CURSOR IS, derived rather than held — the same rule
-   * `keyboard/focus-scope.ts` makes about the cursor MODE, for the same
-   * reason. A stored index would go stale the moment a filter, an expand or
-   * a fresh listing changed the rows under it; a stored PATH that is no
-   * longer drawn simply falls back to the first row.
-   */
-  const cursorIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.path === cursorPath),
-  );
-  const cursorRow = rows[cursorIndex] ?? null;
 
   const fetchListing = useCallback(() => {
     if (sessionId === null || list === undefined) return;
@@ -832,13 +804,6 @@ export function FilesTab({
     [columnsWidth, commitTreeWidth, treeWidthNow],
   );
 
-  const focusCursorRow = useCallback((): boolean => {
-    const row = treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]') ?? null;
-    if (row === null) return false;
-    row.focus();
-    return row.ownerDocument.activeElement === row;
-  }, []);
-
   /**
    * THE MIDDLE COLUMN, whichever of its two shapes is on screen.
    *
@@ -886,17 +851,33 @@ export function FilesTab({
     if (activeBuffer?.kind !== 'loading') wantEditorFocus.current = false;
   });
 
-  /** Opens `path` in the editor and puts the tree's cursor on it. */
-  const openFromTree = useCallback(
-    (path: string, intoEditor: boolean) => {
-      setNote(null);
-      setCursorPath(path);
-      openFile(path);
-      if (intoEditor) wantEditorFocus.current = true;
-      else wantRowFocus.current = true;
-    },
-    [openFile],
-  );
+  const requestRowFocus = useCallback(() => {
+    wantRowFocus.current = true;
+  }, []);
+  const requestEditorFocus = useCallback(() => {
+    wantEditorFocus.current = true;
+  }, []);
+
+  const {
+    rows,
+    cursorRow,
+    expanded,
+    setCursorPath,
+    toggleDir,
+    openFromTree,
+    focusCursorRow,
+    onTreeKeyDown,
+  } = useFilesTreeState({
+    ready,
+    filter,
+    openFile,
+    setNote,
+    focusEditor,
+    requestRowFocus,
+    requestEditorFocus,
+    treeRef,
+    filterRef,
+  });
 
   /**
    * THE LINE A REQUEST ASKED FOR, held until the file is actually there to
@@ -965,17 +946,6 @@ export function FilesTab({
     if (!Number.isFinite(lineHeight) || lineHeight <= 0) return;
     area.scrollTop = Math.max(0, (pending.line - 1) * lineHeight - area.clientHeight / 2);
   });
-
-  const toggleDir = useCallback((path: string, open: boolean) => {
-    setNote(null);
-    setCursorPath(path);
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (open) next.add(path);
-      else next.delete(path);
-      return next;
-    });
-  }, []);
 
   /**
    * RENDERED OR RAW, AND WHERE THE KEYBOARD GOES WITH IT.
@@ -1091,59 +1061,6 @@ export function FilesTab({
       canPreview,
       togglePreview,
     ],
-  );
-
-  /**
-   * THE TREE'S OWN KEYBOARD. `resolveTreeKey` decides; this only carries the
-   * decision out.
-   *
-   * `preventDefault` on exactly what it answered, and NOTHING else -- a
-   * `null` step falls through unprevented so `Alt-<digit>`, `Mod-k` and the
-   * rest of the grammar still work with the keyboard in here. It is
-   * deliberately not `stopPropagation`, for the reason `focus-scope.ts`
-   * states about the question list: swallowing everything would strand the
-   * keyboard in a list it could not leave.
-   */
-  const onTreeKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLElement>) => {
-      const key = normalizeKey(event);
-      if (key === null) return;
-      const step = resolveTreeKey({ key, rows, index: cursorIndex, expanded });
-      if (step === null) return;
-      event.preventDefault();
-      switch (step.kind) {
-        case 'move':
-          setNote(null);
-          setCursorPath(rows[step.index]?.path ?? null);
-          wantRowFocus.current = true;
-          return;
-        case 'expand':
-          toggleDir(step.path, true);
-          wantRowFocus.current = true;
-          return;
-        case 'collapse':
-          toggleDir(step.path, false);
-          wantRowFocus.current = true;
-          return;
-        case 'open':
-          openFromTree(step.path, step.focusEditor);
-          return;
-        case 'filter':
-          setNote(null);
-          filterRef.current?.focus();
-          return;
-        case 'editor':
-          setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
-          return;
-        case 'leave':
-          (document.activeElement as HTMLElement | null)?.blur();
-          return;
-        case 'refuse':
-          setNote(step.message);
-          return;
-      }
-    },
-    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor],
   );
 
   /** Escape/Mod-[ out of either text box, and Mod-Shift-e across to the editor. */
