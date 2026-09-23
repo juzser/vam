@@ -140,7 +140,7 @@ import { t } from '../i18n/strings.js';
 import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
-import { ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
   activeFocusView,
   drawsProgressLine,
@@ -987,6 +987,22 @@ export type DetailPanelProps = {
    * start something in it (the Terminal view), it just cannot do it from here.
    */
   readonly onStartSession?: (id: ProviderId) => void;
+  /**
+   * RESUME, for a `terminal` row -- a pane whose agent exited but whose
+   * conversation vam still knows (`model.ts`). The SECONDARY action on the
+   * getting-started screen, beside Start session: it types
+   * `entry.session.resumeCommand` into the pane the row already owns
+   * (`recordPrompt`, the same channel `onStartSession` uses) rather than the
+   * chosen provider's bare command, so the same conversation continues in the
+   * same pane instead of a new one starting over it.
+   *
+   * Optional, and ABSENT withdraws the button on `onStartSession`'s own rule.
+   * Also unoffered, regardless of this prop, when the row carries no
+   * `resumeCommand` at all -- vam could not build one, or the status is not
+   * `terminal` -- so a caller wires this once and the screen decides per row
+   * whether there is anything for it to do.
+   */
+  readonly onResumeInPane?: () => void;
   /**
    * `prefs.filesTreeWidth` — the width the operator last dragged the Files
    * tab's tree to, or `null`/absent for "never dragged", which draws the
@@ -2690,6 +2706,74 @@ function AgentDetail({
 }
 
 /**
+ * THE PROVIDER PICKER AND THE START BUTTON, on their own -- the one act
+ * every "nothing is running here" screen offers, extracted so there is
+ * exactly one implementation of it rather than one per screen that draws it.
+ * `StartSession` (the plain `unstarted` pane) and `TerminalOnlyStart` (a
+ * `terminal` pane, whose conversation vam still knows) both mount this and
+ * differ only in the words around it.
+ *
+ * A SEGMENTED PICKER, NOT THE COMPOSER'S POPOVER -- the same `aria-pressed`
+ * row the settings section draws, because it is the same kind of choice.
+ * That popover changes the GLOBAL default for the next session created; this
+ * chooses what THIS pane runs now, and a control that looked like the other
+ * while meaning something else is the confusion `onSetDefaultProvider`'s
+ * comment spends a paragraph on. The stored default is where the picker
+ * STARTS, which is the one honest link between them: it is what the operator
+ * said they usually want.
+ */
+function ProviderStartControls({
+  defaultProvider,
+  onStart,
+}: {
+  readonly defaultProvider: ProviderId | undefined;
+  readonly onStart: (id: ProviderId) => void;
+}) {
+  const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  return (
+    <>
+      <fieldset
+        data-start-providers
+        aria-label="which agent to start"
+        className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1"
+      >
+        {PROVIDERS.map((provider) => {
+          const selected = provider.id === chosen;
+          const mark = PROVIDER_MARKS[provider.id];
+          return (
+            <button
+              key={provider.id}
+              type="button"
+              aria-pressed={selected}
+              data-start-provider={provider.id}
+              onClick={() => setChosen(provider.id)}
+              className={[
+                'vam-tap flex cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-control',
+                selected
+                  ? 'bg-line-strong text-ink'
+                  : 'text-ink-dim hover:bg-line-strong hover:text-ink',
+              ].join(' ')}
+            >
+              {mark === undefined ? <Box size={12} strokeWidth={1.7} /> : <mark.Glyph size={12} />}
+              {provider.label}
+            </button>
+          );
+        })}
+      </fieldset>
+      <button
+        type="button"
+        data-start-session-button
+        onClick={() => onStart(chosen)}
+        className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90"
+      >
+        <Play size={12} strokeWidth={2} />
+        Start session
+      </button>
+    </>
+  );
+}
+
+/**
  * THE START SCREEN: the Response view of a pane with nothing started in it.
  *
  * `docs/design/vam-owns-the-session.md` §3, and the operator's own words,
@@ -2707,15 +2791,6 @@ function AgentDetail({
  * be done -- the same absent-not-disabled rule every optional write in this
  * file follows.
  *
- * A SEGMENTED PICKER, NOT THE COMPOSER'S POPOVER -- the same `aria-pressed`
- * row the settings section draws, because it is the same kind of choice.
- * That popover changes the GLOBAL default for the next session created; this
- * chooses what THIS pane runs now, and a control that looked like the other
- * while meaning something else is the confusion `onSetDefaultProvider`'s
- * comment spends a paragraph on. The stored default is where the picker
- * STARTS, which is the one honest link between them: it is what the operator
- * said they usually want.
- *
  * THE PANE IS NAMED. It is the row's title (`pane-row.ts`) and the only
  * thing that tells two empty panes in one project apart; saying it here is
  * what lets the operator check they are starting in the one they meant.
@@ -2729,7 +2804,6 @@ function StartSession({
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
 }) {
-  const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
   return (
     <div
       data-start-session
@@ -2743,49 +2817,132 @@ function StartSession({
         </p>
       </div>
       {onStart !== undefined && (
-        <>
-          <fieldset
-            data-start-providers
-            aria-label="which agent to start"
-            className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1"
-          >
-            {PROVIDERS.map((provider) => {
-              const selected = provider.id === chosen;
-              const mark = PROVIDER_MARKS[provider.id];
-              return (
-                <button
-                  key={provider.id}
-                  type="button"
-                  aria-pressed={selected}
-                  data-start-provider={provider.id}
-                  onClick={() => setChosen(provider.id)}
-                  className={[
-                    'vam-tap flex cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-control',
-                    selected
-                      ? 'bg-line-strong text-ink'
-                      : 'text-ink-dim hover:bg-line-strong hover:text-ink',
-                  ].join(' ')}
-                >
-                  {mark === undefined ? (
-                    <Box size={12} strokeWidth={1.7} />
-                  ) : (
-                    <mark.Glyph size={12} />
-                  )}
-                  {provider.label}
-                </button>
-              );
-            })}
-          </fieldset>
-          <button
-            type="button"
-            data-start-session-button
-            onClick={() => onStart(chosen)}
-            className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90"
-          >
-            <Play size={12} strokeWidth={2} />
-            Start session
-          </button>
-        </>
+        <ProviderStartControls defaultProvider={defaultProvider} onStart={onStart} />
+      )}
+      <p className="max-w-[36ch] text-meta text-ink-quiet">
+        {onStart === undefined
+          ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
+          : 'Or switch to the Terminal view and type the command yourself; either way it runs in this same pane.'}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * THE GETTING-STARTED SCREEN: the Response view of a `terminal` row -- a pane
+ * whose agent exited but whose conversation vam still knows (`model.ts`).
+ *
+ * REPLACES THE TRANSCRIPT, ON THE OPERATOR'S OWN REVISION of the first draft
+ * of this design: "it should then show a getting-started screen, with the
+ * logo and some information, shortcuts to create a project, create a
+ * session, … and a 'Start session' button with a provider choice. The
+ * terminal stays in terminal mode, and the user will need to type `claude`
+ * themselves to start a session." So this is NOT `StartSession` with a
+ * transcript still open behind it -- the pane is at a shell prompt right now,
+ * same as an `unstarted` one, and the screen says exactly that; the
+ * conversation's identity (`entry.session.title`) is what tells the operator
+ * WHICH shell this is, not a history replayed under it. The Terminal tab
+ * beside this one is unaffected and still shows the real screen.
+ *
+ * NO SECOND IMPLEMENTATION OF THE PICKER -- `ProviderStartControls` above is
+ * the whole of Start session, shared verbatim with `StartSession`, on the
+ * same `start-in-pane.ts` write path (`onStart`, resolved by the caller
+ * exactly as `StartSession`'s is).
+ *
+ * THE SHORTCUTS ARE READ FROM THE CHORD TABLE, never retyped: `InlineChord`
+ * (`keyboard/ShortcutTip.tsx`) draws whatever `primaryChord` finds bound for
+ * the action right now and nothing when the operator has unbound it, so a
+ * rebind can never leave this screen naming a key that does nothing.
+ *
+ * RESUME IS SECONDARY, and stays a plain text-weight link rather than a
+ * second filled button: Start session is the primary act this screen
+ * commits to (a NEW turn on the operator's chosen provider), and Resume is
+ * the quieter "or go back to what was here" -- offered only when the row
+ * actually carries a `resumeCommand` and a caller wired `onResumeInPane`,
+ * the same absent-not-disabled rule every optional control in this file
+ * follows.
+ */
+function TerminalOnlyStart({
+  title,
+  paneName,
+  defaultProvider,
+  onStart,
+  resumeCommand,
+  onResumeInPane,
+}: {
+  readonly title: string;
+  readonly paneName: string;
+  readonly defaultProvider: ProviderId | undefined;
+  readonly onStart: ((id: ProviderId) => void) | undefined;
+  readonly resumeCommand: string | undefined;
+  readonly onResumeInPane: (() => void) | undefined;
+}) {
+  return (
+    <div
+      data-terminal-only-start
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+    >
+      {/* THE MARK VAM ALREADY SHIPS -- `index.html`'s own favicon, not a
+          second drawing of it: a PNG rather than an inline SVG so no colour
+          value for it ever has to live in this file (`index.html`'s own
+          comment on `build/favicon.svg` explains the two-size split this
+          asset is the small half of).
+
+          DOCUMENT-RELATIVE, NOT ROOT-ABSOLUTE -- `./favicon.png`, the exact
+          string `index.html`'s own `<link>` uses, and for the same reason: a
+          leading `/` resolves against the DOCUMENT's own URL, and the
+          packaged app's document is `file://.../out/renderer/index.html`
+          (`src/main/index.ts`, `loadFile`), where a root-absolute path reads
+          as the filesystem root and the image is simply gone. `base: './'`
+          is what both `vite.web.config.ts` and electron-vite's renderer
+          build already promise -- every asset ships at a path relative to
+          the HTML that loads it -- and a relative `src` is the one spelling
+          that reads correctly under a dev server's `http://host/`, the web
+          build's static root, AND `file://`, which is the one of the three
+          nothing here was proven against until it broke. */}
+      <img src="./favicon.png" width={32} height={32} alt="vam" className="opacity-90" />
+      <div className="flex flex-col gap-1">
+        <p className="text-control text-ink">{title}</p>
+        <p className="text-meta text-ink-quiet">
+          <span className="font-mono">{paneName}</span>
+          {' — its agent isn’t running here now; this pane is at a shell prompt.'}
+        </p>
+      </div>
+      <ul data-terminal-only-shortcuts className="flex flex-col gap-1 text-meta text-ink-quiet">
+        <li className="flex items-center justify-center gap-2">
+          <span>New session</span>
+          <InlineChord
+            action={{ kind: 'newSession' }}
+            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
+          />
+        </li>
+        <li className="flex items-center justify-center gap-2">
+          <span>New project</span>
+          <InlineChord
+            action={{ kind: 'newProject' }}
+            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
+          />
+        </li>
+        <li className="flex items-center justify-center gap-2">
+          <span>Command palette</span>
+          <InlineChord
+            action={{ kind: 'palette' }}
+            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
+          />
+        </li>
+      </ul>
+      {onStart !== undefined && (
+        <ProviderStartControls defaultProvider={defaultProvider} onStart={onStart} />
+      )}
+      {resumeCommand !== undefined && onResumeInPane !== undefined && (
+        <button
+          type="button"
+          data-resume-in-pane
+          onClick={onResumeInPane}
+          className="vam-tap cursor-pointer text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >
+          Resume “{title}”
+        </button>
       )}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
@@ -5326,6 +5483,7 @@ export function DetailPanel(props: DetailPanelProps) {
     defaultProvider,
     onSetDefaultProvider,
     onStartSession,
+    onResumeInPane,
     paneFocused = true,
   } = props;
 
@@ -7006,6 +7164,13 @@ export function DetailPanel(props: DetailPanelProps) {
     // whole Response view for this status; the Terminal view is the other
     // way in.
     entry.session.status === 'unstarted' ||
+    // A `terminal` ROW HAS NO AGENT EITHER -- the whole of what tells it
+    // apart from `unstarted` is that vam knows WHICH conversation last held
+    // this pane, not that one is running now. Text typed here would land on
+    // the shell prompt exactly as it would for `unstarted`, so the getting-
+    // started screen (`TerminalOnlyStart` below) takes the same composer-free
+    // treatment.
+    entry.session.status === 'terminal' ||
     (openQuestion && chattingAbout !== setId);
   /**
    * Is the corner overlay on screen?
@@ -7835,6 +8000,15 @@ export function DetailPanel(props: DetailPanelProps) {
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
             onStart={onStartSession}
+          />
+        ) : entry !== null && entry.session.status === 'terminal' ? (
+          <TerminalOnlyStart
+            title={entry.session.title}
+            paneName={entry.session.pane ?? entry.session.title}
+            defaultProvider={defaultProvider}
+            onStart={onStartSession}
+            resumeCommand={entry.session.resumeCommand}
+            onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
           />
         ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip

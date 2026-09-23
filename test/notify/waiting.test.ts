@@ -220,6 +220,35 @@ describe('clearing', () => {
     expect(left.close).toEqual([{ sourceId: 'claude-code', sessionId: 's1' }]);
   });
 
+  /**
+   * FALSIFIED, NOT ASSUMED: the exit that produces a `terminal` row is
+   * exactly the shape most likely to fire a notification by accident -- a
+   * session the operator was waiting on, that they then `/exit`ed out of to
+   * run a command. `crossed` is `before.status !== 'waiting' && session.status
+   * === 'waiting'`, which `'terminal'` can never satisfy as either side, so
+   * this is provable from the rule's own text; this test is what makes that
+   * provable claim a red line if it ever stops being true. It also closes
+   * whatever banner was already open, on the SAME `left` rule ordinary
+   * `waiting -> running` uses -- exiting the agent is exactly as much a
+   * departure from `waiting` as finishing the turn is.
+   */
+  it('never shows for `waiting -> terminal`, and closes whatever banner was open', () => {
+    const ledger = seen([session({ status: 'running' })]);
+    const shown = decideNotifications(ledger, [session({ status: 'waiting' })], {
+      enabled: true,
+      attending: null,
+      now: 2_000,
+    });
+    expect(shown.show).toHaveLength(1);
+    const exited = decideNotifications(shown.ledger, [session({ status: 'terminal' })], {
+      enabled: true,
+      attending: null,
+      now: 12_000,
+    });
+    expect(exited.show).toEqual([]);
+    expect(exited.close).toEqual([{ sourceId: 'claude-code', sessionId: 's1' }]);
+  });
+
   it('closes nothing for a session that never had a banner', () => {
     // Suppressed because attended, then back to running: there is no banner on
     // screen, and asking main to close one is a call that means nothing.

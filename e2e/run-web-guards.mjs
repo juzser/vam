@@ -254,6 +254,19 @@ const GUARDS = [
   // `ambiguous` refusal for a pane-row id -- none of which a unit environment
   // measures. Its three shots are `docs/ui/start-screen-*.png`.
   'start-screen-shots',
+  // THE TERMINAL-ONLY STATE (`docs/design/vam-terminal-only.md`): a pane
+  // whose agent exited but whose conversation is known, and its getting-
+  // started screen -- the operator's own revision, replacing an earlier
+  // transcript-plus-Resume-bar draft. Fully stubs `window.api`, the same
+  // reason `sidebar-ownership-shots.mjs` does, because Resume has to reach a
+  // REAL `recordPrompt` with the row's own `resumeCommand` for this to prove
+  // anything past "the click did not throw". Every other claim is painted:
+  // the `terminal` mark beside its six neighbours in the sidebar AND on the
+  // tab (unlike `idle`/`unstarted`, visible without a click), the mark, the
+  // three shortcuts each with a chord chip, and both buttons inside the
+  // pane's fold on desktop and the phone's 44px floor. Its shots are
+  // `docs/ui/terminal-only-*.png`.
+  'terminal-only-shots',
   // PER-KEYSTROKE TYPING LATENCY, against a REAL tmux, a REAL `claude`
   // fullscreen TUI and the real renderer bundle -- the operator's third
   // report of "still a noticeable delay when typing". No unit environment

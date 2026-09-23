@@ -65,6 +65,7 @@ interface SmokeResult {
   zoomLevelAfterZoomChanged: number;
   zoomLevelAfterReload: number;
   zoomFactorAfterReload: number;
+  images: { src: string | null; naturalWidth: number; naturalHeight: number; complete: boolean }[];
 }
 
 interface MenuRow {
@@ -577,5 +578,42 @@ describe('the Electron shell launches', () => {
   it('does not restore a persisted zoom level after a reload', () => {
     expect(smoke().zoomLevelAfterReload).toBe(0);
     expect(smoke().zoomFactorAfterReload).toBe(1);
+  });
+
+  /**
+   * EVERY `<img>` ON SCREEN ACTUALLY LOADED -- against the REAL `file://`
+   * document `loadFile` opens, the one thing no web build or unit test can
+   * see: a root-absolute `src` resolves against the document's own URL, and
+   * under `file://` that URL is the filesystem root. `docs/design/vam-
+   * terminal-only.md`'s own defect, measured: `<img src="/favicon.png">` in
+   * `TerminalOnlyStart` (`DetailPanel.tsx`) painted in every e2e web guard
+   * (served over `http://…/`) and in the packaged DMG alike -- the guard
+   * could not tell the two apart, because both times the browser resolved
+   * the SAME leading slash to a document root that happened to hold the
+   * file. Only `file://` does not.
+   *
+   * THE CORPUS IS ASSERTED FIRST, on the rule this repo's own memory keeps: a
+   * guard that finds zero images passes vacuously and proves nothing. The
+   * probe clicks `LAUNCH_FIXTURE_PROJECTS`'s second row (`launch-fixture.ts`)
+   * to reach `TerminalOnlyStart`, the one screen in this app with an `<img>`
+   * at all, before this field is read.
+   *
+   * FALSIFIED by putting `/favicon.png` back
+   * (`git stash` a one-line edit, or just revert the fix locally) and
+   * re-running this file: `naturalWidth` reads `0` for the mark, because
+   * `file:///favicon.png` does not exist.
+   */
+  it('draws at least one image, and every image on screen actually loaded', () => {
+    const images = smoke().images;
+    expect(
+      images.length,
+      'no <img> was on screen -- the click into the row failed',
+    ).toBeGreaterThan(0);
+    for (const image of images) {
+      expect(
+        image.naturalWidth,
+        `${image.src ?? '(no src)'} did not load under file:// (naturalWidth 0)`,
+      ).toBeGreaterThan(0);
+    }
   });
 });

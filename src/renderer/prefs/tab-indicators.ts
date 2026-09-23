@@ -22,16 +22,28 @@
  * an indicator id. The operator's sentence is that a quiet tab needs no mark,
  * and `TabIndicatorId` does not spell `idle`, so a resting tab with no draft
  * is its provider glyph and its title and nothing else -- there is now no
- * value anywhere, stored or typed, that could ask for one.
+ * value anywhere, stored or typed, that could ask for one. `unstarted` -- a
+ * pane that has never hosted anything -- keeps the same absence for the same
+ * reason (`Canvas.tsx`'s `tabStatusMark`).
+ *
+ * `terminal` IS NOT THAT CASE, and is the one quiet status that IS on the
+ * list. It is quiet in the same colour (`idle`'s neutral ink), but it is not
+ * the absence of news: a tab drawing it looks identical to every resting tab
+ * from the strip alone, and the operator's report about `unstarted`'s
+ * ancestor state ("this got a mark before I knew what it meant") is exactly
+ * the trap a terminal-only tab would fall into silently -- the Response view
+ * behind it has quietly stopped being a transcript and become a getting-
+ * started screen, which a bare title cannot say. So it earns the mark
+ * `idle`/`unstarted` are spared.
  *
  * ── ONE STATUS MARK, AT MOST ──────────────────────────────────────────────
- * `running`, `waiting`, `failed` and `done` are the four status glyphs
- * `panels/status-mark.tsx` draws on the sidebar row, and a tab draws the same
- * glyph so the two surfaces say one thing. A session has one status, so at
- * most one of the four is ever drawn; the toggles decide which STATUSES earn
- * a mark, not how many marks a tab gets. `done` ships off: a finished session
- * is the commonest thing left open after a working day, and a tick on every
- * one of them is the grey dot again in a different shape.
+ * `running`, `waiting`, `failed`, `done` and `terminal` are the status
+ * glyphs `panels/status-mark.tsx` draws on the sidebar row, and a tab draws
+ * the same glyph so the two surfaces say one thing. A session has one
+ * status, so at most one of these is ever drawn; the toggles decide which
+ * STATUSES earn a mark, not how many marks a tab gets. `done` ships off: a
+ * finished session is the commonest thing left open after a working day, and
+ * a tick on every one of them is the grey dot again in a different shape.
  *
  * ── `icon` IS GONE ENTIRELY, NOT MERELY OFF ───────────────────────────────
  * The operator, once vam had a second source: "put the provider glyph after
@@ -97,6 +109,7 @@ export const TAB_INDICATOR_IDS = [
   'waiting',
   'failed',
   'done',
+  'terminal',
   'draft',
   'pending',
   'agents',
@@ -127,7 +140,19 @@ export type TabIndicatorId = (typeof TAB_INDICATOR_IDS)[number];
  * `done` is the one they are about today, `icon` having been the one they used
  * before it was deleted (`test/canvas/Canvas.tab-indicators.test.tsx`).
  */
-export const TAB_INDICATORS: readonly TabIndicatorId[] = ['running', 'waiting', 'failed', 'draft'];
+export const TAB_INDICATORS: readonly TabIndicatorId[] = [
+  'running',
+  'waiting',
+  'failed',
+  // `terminal` SHIPS ON, unlike `idle` and `unstarted`, on the operator's own
+  // ask: a pane whose agent exited is the one quiet state worth a mark on the
+  // strip, because the tab still looks like every other resting tab until you
+  // open it and find the getting-started screen instead of a transcript. The
+  // other two quiet statuses stay unmarked for the reason above this list's
+  // header gives; this one is not a synonym for either.
+  'terminal',
+  'draft',
+];
 
 /** Whether the tab strip draws `id`. */
 export function isTabIndicatorOn(id: TabIndicatorId): boolean {

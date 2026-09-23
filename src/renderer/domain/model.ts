@@ -65,12 +65,40 @@ export type SourceId = string;
  * ended), and never `waiting` (nothing asked). Its colour is the neutral
  * `idle` shares, because it too is the absence of news.
  *
+ * `terminal` IS THE SEVENTH: the operator's own words, "a session should have
+ * a 'terminal only' state" -- a pane vam started, whose agent has exited (by
+ * `/exit`, Ctrl+C, or on its own), leaving the shell in the pane's foreground
+ * again, WHILE the conversation it hosted is still known -- vam has a native
+ * session id for it (`docs/design/vam-terminal-only.md`; the pane's own
+ * `@vam-session` tmux option, or the published pane a live row proved this
+ * poll — `main/sources/claude-code/pane-row.ts`). It differs from `unstarted`
+ * in exactly that one fact: `unstarted` is a pane that has NEVER hosted a
+ * conversation, so its `title` is the tmux session's own name and it carries
+ * no transcript; `terminal` is a pane that HAS, so its `title`, `branch` and
+ * `decisions` are the conversation's own, read off the transcript exactly as
+ * a live row's are — identity survives the exit. Never `idle` (which is an
+ * AGENT between turns — this row has no agent at all), never `done` (Claude
+ * Code's own word for a conversation that ended, which this one has not:
+ * typing the provider's command, by hand or through Resume, continues it),
+ * and never `waiting` (nothing asked, and MUST NOT queue the "waiting" OS
+ * notification — `notify/waiting.ts`'s rule is `!== 'waiting' -> 'waiting'`,
+ * so a status this union never assigns can never cross it). Its colour is the
+ * same neutral `idle` and `unstarted` share: the pane is alive and typeable,
+ * asking for nothing.
+ *
  * Every surface that paints a status keys a `Record<SessionStatus, …>` off
  * this union — the tab ink and dot, the sidebar dot, the phone dot, the rank
  * order, the filter tally. That is the guard against this list growing again
  * behind someone's back: add a member and the maps stop compiling.
  */
-export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed' | 'unstarted';
+export type SessionStatus =
+  | 'running'
+  | 'waiting'
+  | 'idle'
+  | 'done'
+  | 'failed'
+  | 'unstarted'
+  | 'terminal';
 
 /**
  * One round trip between you and a session: your words in, its answer out.
@@ -734,6 +762,27 @@ export type Session = {
    * pane in main, by the rule `reply.ts` documents.
    */
   readonly pane?: string;
+  /**
+   * FOR A `terminal` ROW: the exact text that resumes the conversation this
+   * pane last hosted -- `claude --resume <id>`, already joined the way
+   * `recordPrompt` types a command (`startSessionIn` in `Canvas.tsx` does the
+   * identical join for `provider.command`; a Codex resume would be `codex
+   * resume <id>` were a Codex pane possible, which today it is not --
+   * `main/sources/codex/source.ts` declines `terminal` outright).
+   *
+   * PROVIDER-SPECIFIC KNOWLEDGE STAYS IN MAIN, which is why this is a finished
+   * string rather than a provider id plus a session id for the renderer to
+   * assemble: `claudeResumeCommand`/`codexResumeCommand` are main-only
+   * modules (they validate the id's shape and read the provider table), and a
+   * renderer that re-derived the verb would be a second copy of a rule that
+   * already differs by provider.
+   *
+   * Absent whenever the status is not `terminal`, and absent even on a
+   * `terminal` row when vam could not build one (an id that fails the uuid
+   * shape `resume.ts` requires) -- the row still carries its identity and its
+   * transcript either way; only the secondary "Resume" action goes unoffered.
+   */
+  readonly resumeCommand?: string;
   /**
    * THE MODEL THIS SESSION IS ON, when its SOURCE holds that fact -- never
    * read off a screen, and never what vam last asked for.

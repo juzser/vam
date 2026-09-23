@@ -130,3 +130,58 @@ export function paneRow(session: TmuxSession): Session {
     pane: session.name,
   };
 }
+
+/**
+ * The row for a vam pane whose agent has exited but whose conversation vam
+ * still knows -- `docs/design/vam-terminal-only.md`, and `paneRow`'s sibling
+ * for the case that module's own header did not have: `@vam-session` unset
+ * meant "never hosted anything", and now it can also mean "hosted something,
+ * and the pane still remembers what".
+ *
+ * IDENTITY SURVIVES THE EXIT. Where `paneRow` has nothing to draw but the tmux
+ * session's own name, this has the conversation's own `title`, `branch` and
+ * `decisions` -- read off its transcript by the caller (`source.ts`, which
+ * holds the transcript index this function has no IO of its own to consult)
+ * exactly as a live row's are, so a person who switches to the Response view
+ * mid-getting-started-screen and back sees the same words either way.
+ *
+ * THE ROW ID STAYS PANE-ROUTED, on purpose, not the conversation's bare id.
+ * `CLAUDE_CODE_SOURCE.recordPrompt` and `.closeSession` (`source.ts`) both
+ * dispatch on `paneNameOf(id)` before they ever ask `claude agents --json`,
+ * which is exactly right here too: there is no live agent to look up, only a
+ * pane to type into or kill, the same as the anonymous row beside it. Keeping
+ * the id scheme identical is what lets Start session, Resume and Close all
+ * keep working through the SAME write paths `paneRow`'s row already uses,
+ * with no branch added to either.
+ */
+export function terminalRow(
+  session: TmuxSession,
+  conversation: {
+    /** The native id this pane's `@vam-session` names -- carried through only
+     *  for a caller that wants it; the row itself is addressed by pane. */
+    readonly sessionId: string;
+    readonly title: string;
+    readonly decisions: Session['decisions'];
+    readonly branch: string | null;
+    /** `claude --resume <id>`, already joined -- `null` when vam could not
+     *  build one, which omits `resumeCommand` rather than inventing it. */
+    readonly resumeCommand: string | null;
+  },
+): Session {
+  return {
+    id: paneRowId(session.name),
+    title: conversation.title,
+    epic: null,
+    status: 'terminal',
+    runningAgents: 0,
+    activity: null,
+    age: null,
+    branch: conversation.branch,
+    decisions: conversation.decisions,
+    source: 'claude-code',
+    origin: { startedBy: 'human', promptCount: null },
+    vamControlled: true,
+    pane: session.name,
+    ...(conversation.resumeCommand === null ? {} : { resumeCommand: conversation.resumeCommand }),
+  };
+}

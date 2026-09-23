@@ -57,4 +57,41 @@ export const LAUNCH_FIXTURE_PROJECTS: readonly Project[] = [
       },
     ],
   },
+  /**
+   * A SECOND, SEPARATE PROJECT rather than a second session in the first: the
+   * fixture above is deliberately exactly one project of exactly one session
+   * (its own header, and `launch-fixture.test.ts`'s first assertion), so a
+   * row added here has to arrive as a project of its own rather than disturb
+   * that count.
+   *
+   * WHY IT EXISTS: AC-13's own asset-path defect
+   * (`docs/design/vam-terminal-only.md`) -- `TerminalOnlyStart`
+   * (`DetailPanel.tsx`) is the one screen in this app that draws an `<img>`,
+   * and a root-absolute `src` reads as the filesystem root under this
+   * window's real `file://` document (`index.ts`, `loadFile`), which no web
+   * build or unit test can see. `test/electron/probe.cjs` clicks this row and
+   * asserts every `<img>` on screen loaded -- the one check that is only true
+   * against the REAL packaged app.
+   */
+  {
+    id: 'launch-fixture-terminal',
+    name: 'launch fixture (terminal-only)',
+    source: 'claude-code',
+    sessions: [
+      {
+        id: 'pane:launch-fixture-terminal-1',
+        title: 'launch fixture terminal-only session',
+        epic: null,
+        branch: null,
+        status: 'terminal',
+        runningAgents: 0,
+        activity: null,
+        age: null,
+        decisions: [],
+        vamControlled: true,
+        pane: 'launch-fixture-terminal-1',
+        resumeCommand: 'claude --resume 00000000-0000-4000-8000-000000000000',
+      },
+    ],
+  },
 ];
