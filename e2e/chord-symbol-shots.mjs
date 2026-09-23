@@ -51,10 +51,10 @@ const PLATFORMS = [
     name: 'mac',
     platform: 'MacIntel',
     /** `palette` holds `Mod-k`; `newProject` holds `Mod-Shift-p`. */
-    palette: '⌘K',
-    newProject: '⇧⌘P',
+    palette: '⌘ K',
+    newProject: '⇧ ⌘ P',
     /** `pickView:1`, a real Control chord on every platform. */
-    pickView: '⌃⌥1',
+    pickView: '⌃ ⌥ 1',
     /** Apple's own set, plus the named keys this sheet draws. */
     glyphs: ['⌘', '⇧', '⌥', '⌃', '⏎', '⎋', '⇥'],
     native: process.platform === 'darwin',

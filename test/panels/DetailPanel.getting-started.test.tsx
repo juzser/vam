@@ -89,7 +89,7 @@ describe('the getting-started screen -- vam has no session to show anywhere', ()
     expect(q('[data-getting-started]')).toBeNull();
   });
 
-  it('draws vam’s own mark, reused rather than redrawn', () => {
+  it('draws vam’s own mark, reused rather than redrawn -- the crisp icon, not the small favicon', () => {
     draw({
       gettingStarted: {
         onNewProject: () => {},
@@ -101,7 +101,40 @@ describe('the getting-started screen -- vam has no session to show anywhere', ()
     });
     const img = q<HTMLImageElement>('[data-getting-started] img');
     expect(img).not.toBeNull();
-    expect(img?.src).toContain('favicon.png');
+    // `icon.svg`, not `favicon.png` -- the small mark is tuned for 16/32px and
+    // reads as a blur at this frame's larger size; see `GettingStarted.tsx`'s
+    // own comment on the asset split.
+    expect(img?.src).toContain('icon.svg');
+    expect(img?.src).not.toContain('favicon.png');
+  });
+
+  /**
+   * THE MACOS APP-ICON FRAME -- the operator's own ask: a bigger mark "inside
+   * a frame with a radius like a macOS app icon". `IconFrame`
+   * (`GettingStarted.tsx`) is the one component both this screen and
+   * `TerminalOnlyStart` draw it through; this pins its shape here, once, and
+   * `DetailPanel.terminal-only.test.tsx` only has to prove it reuses this
+   * exact wrapper rather than re-asserting the frame's own rules.
+   */
+  it('wraps the mark in a 64px rounded-square frame with a border and a shadow', () => {
+    draw({
+      gettingStarted: {
+        onNewProject: () => {},
+        newProjectDecline: null,
+        hasDirectoryPicker: true,
+        foreignHiddenCount: 0,
+        onShowForeign: () => {},
+      },
+    });
+    const frame = q('[data-getting-started] [data-icon-frame]');
+    expect(frame).not.toBeNull();
+    expect(frame?.className).toContain('h-16');
+    expect(frame?.className).toContain('w-16');
+    expect(frame?.className).toContain('rounded-[14px]');
+    expect(frame?.className).toContain('border');
+    expect(frame?.className).toContain('shadow-sm');
+    // The mark is INSIDE the frame, not a sibling of it.
+    expect(frame?.querySelector('img')).not.toBeNull();
   });
 
   it('offers a primary New project button that hands the caller the click', () => {

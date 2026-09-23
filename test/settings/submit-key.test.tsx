@@ -122,7 +122,7 @@ describe('the sessions section offers the two keys', () => {
         chordSymbols(SUBMIT_KEY_LABELS['shift-enter'], mac),
       );
       expect(option('enter')?.textContent).toBe(mac ? '⏎' : 'Enter');
-      expect(option('shift-enter')?.textContent).toBe(mac ? '⇧⏎' : 'Shift+Enter');
+      expect(option('shift-enter')?.textContent).toBe(mac ? '⇧ ⏎' : 'Shift+Enter');
       cleanup();
     });
   });

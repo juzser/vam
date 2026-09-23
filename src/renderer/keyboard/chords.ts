@@ -1544,7 +1544,26 @@ function keyLabel(key: string, mac: boolean, modified: boolean): string {
  * with no key at all. A trailing token with nothing behind it (`Mod-`) is not
  * a chord and is handed back untouched rather than painted as a naked glyph.
  */
-export function chordSymbols(chord: string, mac: boolean = applePlatform()): string {
+/**
+ * ONE GLYPH OR WORD OUT OF A CHORD, TAGGED with what it is: `modifier` for a
+ * held key (⇧⌘⌥⌃ on a Mac, a word off one) or `key` for the letter/named key
+ * it holds. `chordSegments` is `chordSymbols`' own computation, stopped one
+ * step short of the join -- the operator's own finding, reading a `⇧⌘P`
+ * chip: painted at one font-size, the modifiers and the letter they modify
+ * read as one dense glyph, the modifiers smaller than the capital beside
+ * them. A caller that wants to draw the two at different sizes (`ShortcutTip.
+ * tsx`'s `InlineChord`/`Chip`, `KeySheet.tsx`, the status bar's own hint)
+ * needs the tag; `chordSymbols` below still exists for every caller that
+ * only ever wanted a sentence — a tooltip's `sr-only` twin, a line in
+ * `FilesTab.tsx`, `keysheet.ts`'s own search haystack — and is now defined
+ * IN TERMS OF this, so the two can never compute the modifier set two ways.
+ */
+export type ChordSegment = { readonly text: string; readonly modifier: boolean };
+
+export function chordSegments(
+  chord: string,
+  mac: boolean = applePlatform(),
+): readonly ChordSegment[] {
   const held = new Set<string>();
   let rest = chord;
   for (;;) {
@@ -1573,7 +1592,21 @@ export function chordSymbols(chord: string, mac: boolean = applePlatform()): str
     ),
   ];
   const key = keyLabel(rest, mac, held.size > 0);
-  return [...modifiers, key].join(mac ? '' : '+');
+  return [...modifiers.map((text) => ({ text, modifier: true })), { text: key, modifier: false }];
+}
+
+/**
+ * THE JOIN, AND WHY IT NOW HOLDS A SPACE ON A MAC. The operator, translated:
+ * "increase the size of the Shift and Command symbols, and put one space
+ * between them and the letter" — read together with the worked example
+ * (`⇧ ⌘ P`, not `⇧⌘P`), that is a space between EVERY glyph, modifiers
+ * included, not only before the key. Off a Mac the words already read apart
+ * (`Ctrl+Shift+E`); `+` is untouched.
+ */
+export function chordSymbols(chord: string, mac: boolean = applePlatform()): string {
+  return chordSegments(chord, mac)
+    .map((segment) => segment.text)
+    .join(mac ? ' ' : '+');
 }
 
 /** The inverse. Only a two-character string opening with a prefix is a chord:

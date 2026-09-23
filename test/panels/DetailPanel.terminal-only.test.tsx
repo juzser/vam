@@ -96,11 +96,49 @@ describe('the Response view of a pane whose agent exited but whose conversation 
     expect(text).toMatch(/shell prompt/);
   });
 
-  it('shows vam’s own mark, reused rather than redrawn', () => {
+  /**
+   * THE SESSION'S OWN AGENT, NOT VAM'S -- the operator's own revision: "change
+   * the agent screen's icon to the agent's icon." `TERMINAL.source` is
+   * `'claude-code'` (this file's own fixture), so this screen must draw
+   * Claude's brand mark, through the SAME `SourceMark` resolver the sidebar
+   * row and the status bar already draw theirs through -- never a second
+   * logo table, and never vam's own mark once a real session is named.
+   */
+  it('shows the SESSION’S OWN agent mark, wrapped in the macOS-icon frame -- never vam’s', () => {
     draw({ onStartSession: () => {} });
-    const img = q<HTMLImageElement>('[data-terminal-only-start] img');
-    expect(img).not.toBeNull();
-    expect(img?.src).toContain('favicon.png');
+    const frame = q('[data-terminal-only-start] [data-icon-frame]');
+    expect(frame).not.toBeNull();
+    // vam's own mark (GettingStarted's) is an <img>; a session's agent mark
+    // is the inline SVG `SourceMark` draws -- the two must never trade
+    // places once a real session is named.
+    expect(frame?.querySelector('img')).toBeNull();
+    const mark = q('[data-terminal-only-mark]');
+    expect(mark?.getAttribute('data-source-mark')).toBe('brand');
+    expect(mark?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('shows a DIFFERENT mark for a session Codex ran than for one Claude Code ran', () => {
+    draw({ onStartSession: () => {} });
+    const claudePath = q('[data-terminal-only-mark] svg path')?.getAttribute('d');
+    expect(claudePath, 'Claude’s mark must actually draw a path').toBeTruthy();
+    cleanup();
+
+    const codexTerminal: Session = { ...TERMINAL, source: 'codex' };
+    draw({ entry: { project: PROJECT, session: codexTerminal }, onStartSession: () => {} });
+    const mark = q('[data-terminal-only-mark]');
+    expect(mark?.getAttribute('data-source-mark')).toBe('brand');
+    const codexPath = mark?.querySelector('svg path')?.getAttribute('d');
+    expect(codexPath, 'Codex’s mark must actually draw a path').toBeTruthy();
+    // NEVER ANOTHER PROVIDER'S LOGO: the two sources' marks must differ, or
+    // one of them is silently borrowing the other's.
+    expect(codexPath).not.toBe(claudePath);
+  });
+
+  it('draws the neutral glyph, never a borrowed brand mark, for a source vam does not recognise', () => {
+    const unknownTerminal: Session = { ...TERMINAL, source: 'some-other-tool' };
+    draw({ entry: { project: PROJECT, session: unknownTerminal }, onStartSession: () => {} });
+    const mark = q('[data-terminal-only-mark]');
+    expect(mark?.getAttribute('data-source-mark')).toBe('neutral');
   });
 
   it('lists New session, New project and the command palette, each with ITS OWN current chord', () => {

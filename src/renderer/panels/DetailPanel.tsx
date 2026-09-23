@@ -168,7 +168,7 @@ import {
 import { useAgentWorkReader } from '../sources/agent-work-reader.js';
 import { useHistoryReader } from '../sources/history-reader.js';
 import { describeFailure, type SourceError } from '../sources/port.js';
-import { PROVIDER_MARKS } from '../sources/provider-marks.js';
+import { markRegisterOf, PROVIDER_MARKS, SourceMark } from '../sources/provider-marks.js';
 import { useAgentWork } from '../sources/useAgentWork.js';
 import { useVisibilityInterval } from '../useVisibilityInterval.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
@@ -181,6 +181,7 @@ import type { FileOpenRequest } from './FilesTab.js';
 import {
   GettingStarted,
   type GettingStartedProps,
+  IconFrame,
   StartShortcuts,
   TERMINAL_ONLY_SHORTCUT_ROWS,
 } from './GettingStarted.js';
@@ -2768,15 +2769,27 @@ function AgentDetail({
  * comment spends a paragraph on. The stored default is where the picker
  * STARTS, which is the one honest link between them: it is what the operator
  * said they usually want.
+ *
+ * CONTROLLED, NOT SELF-OWNED -- `chosen` used to be this component's own
+ * `useState`, seeded from `defaultProvider` and never read anywhere else.
+ * `StartSession` now draws the CHOSEN provider's own mark beside this same
+ * picker (the operator's own ask: "for an unstarted pane use the currently
+ * chosen provider in its picker, updating when the choice changes"), which
+ * needs the live value one level up. Lifting it here is the one-component
+ * version of that; `TerminalOnlyStart` does not read the value but still
+ * owns a `useState` of its own to hand this component the same two props,
+ * so there is exactly one shape for "the picker's current choice" rather
+ * than one owned and one lifted.
  */
 function ProviderStartControls({
-  defaultProvider,
+  chosen,
+  onChosenChange,
   onStart,
 }: {
-  readonly defaultProvider: ProviderId | undefined;
+  readonly chosen: ProviderId;
+  readonly onChosenChange: (id: ProviderId) => void;
   readonly onStart: (id: ProviderId) => void;
 }) {
-  const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
   return (
     <>
       <fieldset
@@ -2793,7 +2806,7 @@ function ProviderStartControls({
               type="button"
               aria-pressed={selected}
               data-start-provider={provider.id}
-              onClick={() => setChosen(provider.id)}
+              onClick={() => onChosenChange(provider.id)}
               className={[
                 'vam-tap flex cursor-pointer items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-control',
                 selected
@@ -2841,6 +2854,15 @@ function ProviderStartControls({
  * THE PANE IS NAMED. It is the row's title (`pane-row.ts`) and the only
  * thing that tells two empty panes in one project apart; saying it here is
  * what lets the operator check they are starting in the one they meant.
+ *
+ * THE MARK IS THE CHOSEN PROVIDER'S, LIVE -- the operator's own words: "for
+ * an unstarted pane use the currently chosen provider in its picker,
+ * updating when the choice changes." There is no session here yet, so there
+ * is no AGENT mark the way `TerminalOnlyStart` has one; the picker's own
+ * selection is the closest honest fact, and it is the SAME resolver every
+ * other mark in this app draws through (`SourceMark`). Withdrawn along with
+ * the picker itself when `onStart` is absent -- a mark for a choice with no
+ * control to make it would be naming a fact this screen cannot act on.
  */
 function StartSession({
   paneName,
@@ -2851,11 +2873,24 @@ function StartSession({
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
 }) {
+  const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
   return (
     <div
       data-start-session
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
     >
+      {onStart !== undefined && (
+        <IconFrame>
+          <span
+            data-start-session-mark
+            data-source-mark={markRegisterOf(chosen)}
+            role="img"
+            aria-label={`the chosen provider: ${chosen}`}
+          >
+            <SourceMark source={chosen} lane={40} />
+          </span>
+        </IconFrame>
+      )}
       <div className="flex flex-col gap-1">
         <p className="text-control text-ink">Nothing is running in this pane yet.</p>
         <p className="text-meta text-ink-quiet">
@@ -2864,7 +2899,7 @@ function StartSession({
         </p>
       </div>
       {onStart !== undefined && (
-        <ProviderStartControls defaultProvider={defaultProvider} onStart={onStart} />
+        <ProviderStartControls chosen={chosen} onChosenChange={setChosen} onStart={onStart} />
       )}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
@@ -2912,10 +2947,23 @@ function StartSession({
  * actually carries a `resumeCommand` and a caller wired `onResumeInPane`,
  * the same absent-not-disabled rule every optional control in this file
  * follows.
+ *
+ * THE MARK IS THIS SESSION'S OWN AGENT, NOT VAM'S -- the operator's own
+ * revision: "change the agent screen's icon to the agent's icon." This
+ * screen belongs to ONE session, whose agent really did exit, so its mark
+ * names the SOURCE that ran it (`source`, resolved by the caller the same
+ * way `terminalFor`/`isSessionDismissed` already do: `entry.session.source
+ * ?? entry.project.source`) through `SourceMark` -- the ONE resolver the
+ * sidebar row and the status bar already draw theirs through, never a
+ * second logo table and never another provider's mark for a source nobody
+ * has drawn (`markRegisterOf`'s neutral register). `GettingStarted` below,
+ * the WHOLE APP's own screen with no session to name, keeps vam's own mark
+ * instead -- there is no agent to be wrong about there.
  */
 function TerminalOnlyStart({
   title,
   paneName,
+  source,
   defaultProvider,
   onStart,
   resumeCommand,
@@ -2923,35 +2971,36 @@ function TerminalOnlyStart({
 }: {
   readonly title: string;
   readonly paneName: string;
+  readonly source: string;
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly resumeCommand: string | undefined;
   readonly onResumeInPane: (() => void) | undefined;
 }) {
+  // `ProviderStartControls` is CONTROLLED (see its own header) -- this
+  // screen's own mark above stays `source`, the session's PAST agent, never
+  // this restart picker's current pick, so this state exists only to give
+  // that shared component the two props it now needs.
+  const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
   return (
     <div
       data-terminal-only-start
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
     >
-      {/* THE MARK VAM ALREADY SHIPS -- `index.html`'s own favicon, not a
-          second drawing of it: a PNG rather than an inline SVG so no colour
-          value for it ever has to live in this file (`index.html`'s own
-          comment on `build/favicon.svg` explains the two-size split this
-          asset is the small half of).
-
-          DOCUMENT-RELATIVE, NOT ROOT-ABSOLUTE -- `./favicon.png`, the exact
-          string `index.html`'s own `<link>` uses, and for the same reason: a
-          leading `/` resolves against the DOCUMENT's own URL, and the
-          packaged app's document is `file://.../out/renderer/index.html`
-          (`src/main/index.ts`, `loadFile`), where a root-absolute path reads
-          as the filesystem root and the image is simply gone. `base: './'`
-          is what both `vite.web.config.ts` and electron-vite's renderer
-          build already promise -- every asset ships at a path relative to
-          the HTML that loads it -- and a relative `src` is the one spelling
-          that reads correctly under a dev server's `http://host/`, the web
-          build's static root, AND `file://`, which is the one of the three
-          nothing here was proven against until it broke. */}
-      <img src="./favicon.png" width={32} height={32} alt="vam" className="opacity-90" />
+      {/* THE SESSION'S OWN AGENT MARK -- see this function's own header.
+          `data-source-mark` records which register answered (brand, native,
+          neutral), the same idiom the sidebar row and the status bar's
+          `SourceGlyph` already carry it by. */}
+      <IconFrame>
+        <span
+          data-terminal-only-mark
+          data-source-mark={markRegisterOf(source)}
+          role="img"
+          aria-label={`this session's agent: ${source}`}
+        >
+          <SourceMark source={source} lane={40} />
+        </span>
+      </IconFrame>
       <div className="flex flex-col gap-1">
         <p className="text-control text-ink">{title}</p>
         <p className="text-meta text-ink-quiet">
@@ -2961,7 +3010,7 @@ function TerminalOnlyStart({
       </div>
       <StartShortcuts testId="terminal-only-shortcuts" rows={TERMINAL_ONLY_SHORTCUT_ROWS} />
       {onStart !== undefined && (
-        <ProviderStartControls defaultProvider={defaultProvider} onStart={onStart} />
+        <ProviderStartControls chosen={chosen} onChosenChange={setChosen} onStart={onStart} />
       )}
       {resumeCommand !== undefined && onResumeInPane !== undefined && (
         <button
@@ -8052,6 +8101,7 @@ export function DetailPanel(props: DetailPanelProps) {
           <TerminalOnlyStart
             title={entry.session.title}
             paneName={entry.session.pane ?? entry.session.title}
+            source={entry.session.source ?? entry.project.source ?? 'unknown'}
             defaultProvider={defaultProvider}
             onStart={onStartSession}
             resumeCommand={entry.session.resumeCommand}

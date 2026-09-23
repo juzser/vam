@@ -57,7 +57,10 @@ const CHOSEN = '/srv/work/orchard';
 
 type Spawned = [string, string][];
 
-function sourceWith(canCreate: boolean): { source: CanvasSource; spawned: Spawned } {
+function sourceWith(
+  canCreate: boolean,
+  loading = false,
+): { source: CanvasSource; spawned: Spawned } {
   const spawned: Spawned = [];
   const writes = canCreate
     ? {
@@ -91,9 +94,54 @@ function sourceWith(canCreate: boolean): { source: CanvasSource; spawned: Spawne
     write: { recordPrompt: async () => {}, ...writes },
   };
   return {
-    source: { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} },
+    source: {
+      kind: 'session',
+      source: inner as unknown as SessionSource,
+      onWrote: () => {},
+      loading,
+    },
     spawned,
   };
+}
+
+/**
+ * A vam-owned session that can be DISMISSED -- `closeSession` refuses every
+ * time (`not-vam-started`, the same shape `Canvas.dismiss-session.test.tsx`
+ * throws), which is what makes `x` hide the row from `entries` while leaving
+ * it exactly where it was in the UNFILTERED model. What item 1's fix reads
+ * is that unfiltered model, not `entries` -- a dismissed row must still
+ * count as "vam has a session of its own".
+ */
+function sourceWithDismiss(): CanvasSource {
+  const inner = {
+    id: 'claude-code',
+    label: 'Claude Code',
+    capabilities: {
+      liveUpdates: false,
+      recordPrompt: true,
+      deliverPrompt: false,
+      promptAttachments: false,
+      slashCommands: false,
+      renameSession: false,
+      closeSession: true,
+      createSession: false,
+      governance: false,
+      pullRequests: false,
+      terminal: false,
+      agentRoster: false,
+      resumeSession: false,
+    },
+    declines: {},
+    viewerScope: { kind: 'connection', note: 'one local process' },
+    load: async () => [],
+    write: {
+      recordPrompt: async () => {},
+      closeSession: async () => {
+        throw { kind: 'refused', code: 'not-vam-started', message: 'not vam’s' };
+      },
+    },
+  };
+  return { kind: 'session', source: inner as unknown as SessionSource, onWrote: () => {} };
 }
 
 /** Installs a picker, or -- with `undefined` -- the browser build's absence of one. */
@@ -211,6 +259,55 @@ describe('the getting-started screen, wired from Canvas', () => {
     });
     expect(gettingStarted()).toBeNull();
     expect(document.querySelectorAll('[data-session-row]')).toHaveLength(1);
+  });
+});
+
+/**
+ * ITEM 1 OF THE OPERATOR'S "start-polish" ASK: "if there are sessions in
+ * vam, don't show the getting-started screen prematurely." Two distinct
+ * ways it used to: the first load had not answered yet (the model reads
+ * empty while `useSourceModel` is still out), and a session vam genuinely
+ * started but the operator dismissed or filtered out of `entries` -- hidden
+ * from view, never hidden from EXISTENCE, and the screen's whole claim is
+ * "you have never used vam", which a hidden row makes false. Both must read
+ * the UNFILTERED model, not `entries`; case (b) from PR 467 -- every row
+ * foreign, vam started none -- is proven unchanged by the describe block
+ * above and must stay that way.
+ */
+describe('the getting-started screen does not trigger prematurely', () => {
+  const stripText = () => document.querySelector('[data-tab-strip]')?.textContent ?? '';
+
+  it('stays off while the first load has not answered yet, even with nothing in the model', () => {
+    const { source } = sourceWith(true, true);
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={EMPTY_MODEL} source={source} />);
+    expect(gettingStarted()).toBeNull();
+    // THE NEUTRAL STATE THE PANE HAD BEFORE PR 467 -- never the getting-started
+    // screen's own "no sessions yet", which would be a claim `useSourceModel`
+    // has not actually settled yet.
+    expect(stripText()).not.toBe('no sessions yet');
+  });
+
+  it('shows once that same load settles with truly nothing in it', () => {
+    const { source } = sourceWith(true, false);
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={EMPTY_MODEL} source={source} />);
+    expect(gettingStarted()).not.toBeNull();
+    expect(stripText()).toBe('no sessions yet');
+  });
+
+  it('stays off once a session vam started is merely dismissed, not gone', async () => {
+    const source = sourceWithDismiss();
+    withDialog(async () => CHOSEN);
+    render(<Canvas model={ONE_VISIBLE_MODEL} source={source} />);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
+    });
+    // The row really did leave the filtered list -- otherwise this proves
+    // nothing about the unfiltered read the fix is about.
+    expect(document.querySelectorAll('[data-session-row]')).toHaveLength(0);
+    expect(gettingStarted()).toBeNull();
+    expect(stripText()).not.toBe('no sessions yet');
   });
 });
 

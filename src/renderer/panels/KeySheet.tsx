@@ -69,8 +69,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { chordSymbols } from '../keyboard/chords.js';
 import { buildFilesSheet, buildKeySheet, filterSheet } from '../keyboard/keysheet.js';
+import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 
 export type KeySheetProps = {
   readonly onClose: () => void;
@@ -229,9 +229,10 @@ export function KeySheet({ onClose }: KeySheetProps) {
                             `row.keys` is the grammar's own spelling — the
                             string `buildKeySheet` judged `isSelectOnlyChord`
                             against and keyed `row.dead` by — and
-                            `chordSymbols` is what a person reads: ⌘ on a Mac,
-                            `Ctrl` off one. */}
-                        {chordSymbols(row.keys)}
+                            `ChordGlyphs` is what a person reads: ⌘ on a Mac,
+                            `Ctrl` off one, its modifier glyphs a size bigger
+                            than the key beside them. */}
+                        <ChordGlyphs chord={row.keys} />
                       </kbd>
                     </li>
                   ))}

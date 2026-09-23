@@ -156,11 +156,16 @@ const browser = await chromium.launch();
     );
     const sidebarAdd = document.querySelector('[data-sidebar-add]');
     const strip = document.querySelector('[data-tab-strip]');
+    const markFrame = screenEl?.querySelector('[data-icon-frame]');
     return {
       screenBox: r2(screenEl),
       paneBox: r2(pane),
       button: r2(button),
-      hasMark: screenEl?.querySelector('img')?.getAttribute('src')?.includes('favicon.png') ?? false,
+      // `icon.svg`, never `favicon.png` -- "start-polish" (2026-09-23) moved
+      // this screen onto the crisp, detailed mark; the small one is tuned for
+      // 16/32px and is not what a 64px frame should be showing.
+      hasMark: screenEl?.querySelector('img')?.getAttribute('src')?.includes('icon.svg') ?? false,
+      markFrameBox: r2(markFrame),
       shortcuts,
       hidden: document.querySelector('[data-getting-started-hidden]'),
       sidebarAddLabel: sidebarAdd?.textContent ?? null,
@@ -169,7 +174,18 @@ const browser = await chromium.launch();
   });
   console.log('getting-started desktop (case a):', JSON.stringify(shape));
   check('the screen is in the focused pane', shape.paneBox !== null && shape.screenBox !== null);
-  check('it carries vam’s own mark', shape.hasMark);
+  check('it carries vam’s own mark, the crisp icon.svg', shape.hasMark);
+  // THE MACOS APP-ICON FRAME, MEASURED -- the operator's own ask: a bigger
+  // mark "inside a frame with a radius like a macOS app icon", ~64px on
+  // desktop. Measuring the PAINTED box, not the class list: a Tailwind v4
+  // class naming a missing token emits no rule at all, silently.
+  check(
+    'the mark is painted at ~64px, inside its own frame',
+    shape.markFrameBox !== null &&
+      Math.abs(shape.markFrameBox.w - 64) <= 1 &&
+      Math.abs(shape.markFrameBox.h - 64) <= 1,
+    JSON.stringify(shape.markFrameBox),
+  );
   // TWO ROWS, NEVER "New session" -- `o` falls back to New project on this
   // screen (`Canvas.tsx`'s own `case 'newSession'`), so a row naming "New
   // session" beside one naming "New project" would claim two keys do two
@@ -388,6 +404,7 @@ const browser = await chromium.launch();
       button: r2(document.querySelector('[data-getting-started-new-project]')),
       decline: document.querySelector('[data-getting-started-decline]')?.textContent ?? null,
       show: r2(show),
+      markFrameBox: r2(document.querySelector('[data-getting-started] [data-icon-frame]')),
       sidebarFootDrawn: document.querySelector('[data-sidebar-add]') !== null,
       standaloneHiddenStrips: document.querySelectorAll('[data-foreign-hidden]').length,
       shortcutsDrawn: document.querySelector('[data-getting-started-shortcuts]') !== null,
@@ -395,6 +412,17 @@ const browser = await chromium.launch();
   });
   console.log('getting-started phone (case b, no picker):', JSON.stringify(phone));
   check('no New project button -- the browser/phone build has no picker', phone.button === null);
+  // THE 64PX FRAME ON A 390PX PHONE -- the operator's own ask ("64px on
+  // desktop, check phone"): the mark must fit inside the viewport with room
+  // either side, not just paint at some non-zero size.
+  check(
+    'the mark’s frame fits the phone viewport, centred with room either side',
+    phone.markFrameBox !== null &&
+      Math.abs(phone.markFrameBox.w - 64) <= 1 &&
+      phone.markFrameBox.x > 0 &&
+      phone.markFrameBox.x + phone.markFrameBox.w < phone.viewport.w,
+    JSON.stringify(phone.markFrameBox),
+  );
   // NO BARE-WORD SHORTCUT ROWS. `InlineChord` draws no chip at all on a
   // phone (`styles.css`), so a list of "New project"/"Command palette" with
   // nothing beside them named keys a touch operator has no way to press --

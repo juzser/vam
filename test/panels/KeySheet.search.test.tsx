@@ -81,8 +81,8 @@ describe('the sheet has a search box', () => {
   it('filters by the key itself, in the spelling this platform paints', () => {
     onBothPlatforms((mac) => {
       render(<KeySheet onClose={vi.fn()} />);
-      type(mac ? '⌘k' : 'ctrl+k');
-      expect(chords()).toContain(mac ? '⌘K' : 'Ctrl+K');
+      type(mac ? '⌘ k' : 'ctrl+k');
+      expect(chords()).toContain(mac ? '⌘ K' : 'Ctrl+K');
       expect(rows().length).toBeLessThan(10);
       cleanup();
     });

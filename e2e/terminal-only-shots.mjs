@@ -218,14 +218,31 @@ const browser = await chromium.launch();
       namesPane: text.includes(pane),
       namesShellPrompt: /shell prompt/.test(text),
       namesResumeTitle: (resume?.textContent ?? '').includes('fix the flaky test'),
-      hasMark: document.querySelector('[data-terminal-only-start] img') !== null,
+      // THE SESSION'S OWN AGENT, NOT VAM'S -- "start-polish" (2026-09-23):
+      // this screen belongs to ONE session, so its mark names the agent that
+      // ran it (`SourceMark`), never vam's own (that is `GettingStarted.tsx`'s
+      // screen alone, the WHOLE APP's, which names no session). This fixture's
+      // rows are all `source: 'claude-code'`, so the register must be `brand`
+      // and there must be no `<img>` at all -- an `<img>` here would mean vam's
+      // mark leaked back onto a screen that now belongs to a named session.
+      markRegister: document.querySelector('[data-terminal-only-mark]')?.getAttribute('data-source-mark') ?? null,
+      markFrameBox: r2(document.querySelector('[data-terminal-only-start] [data-icon-frame]')),
+      hasImg: document.querySelector('[data-terminal-only-start] img') !== null,
       textarea: document.querySelector('[data-split-pane] textarea') !== null,
       screenBox: r2(screenEl),
     };
   }, PANE);
   console.log('terminal-only screen:', JSON.stringify(shape));
   check('the getting-started screen is in the focused pane', shape.pane !== null && shape.screenBox !== null);
-  check('it carries vam’s own mark', shape.hasMark);
+  check('it carries the SESSION’S OWN agent mark (claude-code, a brand register), never vam’s', shape.markRegister === 'brand' && shape.hasImg === false);
+  // THE MACOS APP-ICON FRAME, MEASURED -- same shape `getting-started-shots.
+  // mjs` pins for vam's own mark; this screen's agent mark must be painted
+  // inside the identical frame, not a smaller or differently-shaped one.
+  check(
+    'the mark is painted at ~64px, inside its own frame',
+    shape.markFrameBox !== null && Math.abs(shape.markFrameBox.w - 64) <= 1 && Math.abs(shape.markFrameBox.h - 64) <= 1,
+    JSON.stringify(shape.markFrameBox),
+  );
   check('it names the conversation, not just the pane', shape.namesConversation);
   check('it also names the pane', shape.namesPane);
   check('and says the pane is at a shell prompt', shape.namesShellPrompt);
