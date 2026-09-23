@@ -159,15 +159,29 @@
  * running them would only turn a green tick into a broader claim than it is.
  *
  * Environment:
- *   VAM_E2E_PORT       preview port (default 5520)
- *   VAM_E2E_OUT        screenshot directory (default e2e/test-results/web-guards,
- *                      gitignored — never docs/ui, CI must not produce a repo diff)
- *   VAM_E2E_SKIP_BUILD serve whatever is already in dist-web. This is how the
- *                      guard itself gets falsified: mutate the built bundle,
- *                      re-run, watch it go red.
+ *   VAM_E2E_PORT          preview port (default 5520)
+ *   VAM_E2E_OUT           screenshot directory (default e2e/test-results/web-guards,
+ *                         gitignored — never docs/ui, CI must not produce a repo diff)
+ *   VAM_E2E_SKIP_BUILD    serve whatever is already in dist-web. This is how the
+ *                         guard itself gets falsified: mutate the built bundle,
+ *                         re-run, watch it go red.
+ *   VAM_E2E_CHECK_ORPHANS after every guard has run, compare this run's own
+ *                         output directory (never docs/ui, so this needs no
+ *                         extra port or build) against `docs/ui`'s committed
+ *                         PNGs. A committed PNG this run did not write AND
+ *                         that `git grep` finds referenced nowhere else in
+ *                         the tree (a doc, a source comment) is an orphan --
+ *                         a screenshot a rename or a removed guard left
+ *                         behind — and fails the run. Off by default because
+ *                         it is only meaningful on the FULL 50-guard list (a
+ *                         partial run would flag everything the guards it
+ *                         skipped would have written); the CI web-guards job
+ *                         sets it because that job always runs the full list
+ *                         anyway, and the check itself costs one `readdir`
+ *                         and a `git grep` per candidate, not another guard.
  */
-import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdirSync, readdirSync } from 'node:fs';
 
 const GUARDS = [
   'split-panes-shots',
@@ -376,8 +390,48 @@ try {
   preview.kill('SIGTERM');
 }
 
+/** A name is "referenced elsewhere" if `git grep` finds it anywhere in the
+ *  tracked tree outside the two PNG directories themselves (a doc, a source
+ *  comment) -- a screenshot a doc still points at must survive even though
+ *  no guard's assertion happens to write it any more. Exit 1 from `git
+ *  grep -q` means no match; anything else (no repo, no git) is a real error
+ *  this check should not silently swallow into a false "orphaned". */
+function isReferencedElsewhere(name) {
+  try {
+    execFileSync(
+      'git',
+      ['grep', '-q', '-F', '-e', name, '--', '.', ':!docs/ui', ':!docs/images', ':!e2e/test-results'],
+      { stdio: 'ignore' },
+    );
+    return true;
+  } catch (err) {
+    if (err.status === 1) return false;
+    throw err;
+  }
+}
+
+if (process.env.VAM_E2E_CHECK_ORPHANS) {
+  const docsUiPngs = readdirSync('docs/ui').filter((f) => f.endsWith('.png'));
+  const produced = new Set(readdirSync(outDir).filter((f) => f.endsWith('.png')));
+  const notProduced = docsUiPngs.filter((f) => !produced.has(f));
+  const orphans = notProduced.filter((f) => !isReferencedElsewhere(f));
+  if (orphans.length > 0) {
+    console.error(
+      `\ndocs/ui holds ${orphans.length} PNG(s) this run did not write and nothing ` +
+        `references:\n${orphans.map((f) => `  docs/ui/${f}`).join('\n')}`,
+    );
+    failed.push('docs-ui-orphan-check');
+  } else {
+    console.log(
+      `\ndocs/ui orphan check: all ${docsUiPngs.length} committed PNGs are either produced ` +
+        'by this run or referenced elsewhere.',
+    );
+  }
+}
+
 if (failed.length > 0) {
-  console.error(`\nFAILED: ${failed.map((g) => `e2e/${g}.mjs`).join(', ')}`);
+  const label = (g) => (g === 'docs-ui-orphan-check' ? g : `e2e/${g}.mjs`);
+  console.error(`\nFAILED: ${failed.map(label).join(', ')}`);
   process.exit(1);
 }
 console.log(`\nAll ${GUARDS.length} web guards passed. Screenshots in ${outDir}.`);
