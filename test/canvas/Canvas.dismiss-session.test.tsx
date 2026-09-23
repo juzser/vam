@@ -244,6 +244,52 @@ describe('any other refusal dismisses too, not only the graceful one', () => {
   });
 });
 
+describe('the message a source’s own decline carries through to the status bar', () => {
+  /**
+   * `main/sources/codex/source.ts`'s own `NOT_OURS`, copied rather than
+   * imported: that module is main-process only and this file exercises the
+   * renderer's own `write.closeSession` boundary, the same one every other
+   * test in this file mocks by throwing. What this test is FOR is the
+   * property `combine.ts`'s `routeWrite` now guarantees -- a Codex row's
+   * Close reaches the STATUS BAR wearing Codex's own sentence, never the
+   * generic "claims this but carries no member for it" `routeWrite` used to
+   * invent when `createCodexSource` ships no `closeSession` function at all
+   * (`test/sources/combine-sources.test.ts` proves that boundary directly;
+   * this proves the sentence it produces is the one the operator reads).
+   */
+  it('a Codex row’s Close shows Codex’s own decline, not a generic internal one', async () => {
+    const MODEL: CanvasModel = {
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'codex',
+          sessions: [session('codex-1', { title: 'a codex thread' })],
+        },
+      ],
+    };
+    const source = sessionSourceWith(async () => {
+      // The exact envelope `routeWrite`'s `performed === undefined` branch
+      // now returns for a Codex row: `not-implemented`, carrying the
+      // source's OWN `declines.closeSession` rather than a made-up sentence.
+      throw {
+        kind: 'refused',
+        code: 'not-implemented',
+        message:
+          'this is the operator’s own Codex thread, started outside vam; vam can queue a message for it and nothing else',
+      };
+    });
+    render(<Canvas model={MODEL} source={source} />);
+    await pressAsync('x');
+
+    expect(sidebarText()).not.toContain('a codex thread');
+    expect(statusFull()).toContain('this is the operator’s own Codex thread, started outside vam');
+    // NOT THE SENTENCE `routeWrite` USED TO INVENT: this is what the bug
+    // actually looked like on screen before the fix.
+    expect(statusFull()).not.toMatch(/carries no member for it/i);
+  });
+});
+
 describe('the dismissed count and its one-click undo', () => {
   it('shows a count once something is dismissed, and restores everything on click', async () => {
     const MODEL: CanvasModel = {

@@ -257,4 +257,57 @@ describe('combineSources routing', () => {
       kind: 'unavailable',
     });
   });
+
+  /**
+   * THE OWNER CLAIMS A CAPABILITY BY THE COMBINED OR, AND CARRIES NO MEMBER
+   * FOR IT ANYWAY -- Codex's own shape: `closeSession: false` on its own
+   * descriptor (so it never claims the combined `true` a Claude Code peer
+   * puts there) and no `closeSession` function on the source object either,
+   * because "vam did not start the process, so there is nothing of vam's to
+   * stop" (`main/sources/codex/source.ts`). `routeWrite`'s fallback used to
+   * invent its own sentence here -- "Codex claims this but carries no member
+   * for it" -- which is not merely unhelpful, it is FALSE: Codex never
+   * claimed `closeSession` at all, and the row's own descriptor already
+   * carries the honest reason (`declines.closeSession`, its `NOT_OURS`).
+   */
+  it('reports the OWNING source’s own decline, not a made-up "carries no member" sentence', async () => {
+    const a = make('a', {
+      caps: { closeSession: true },
+      load: load('a', ['s-a']),
+      closeSession: async () => null,
+    });
+    const b: MainSource = {
+      ...make('b', { load: load('b', ['s-b']) }),
+      descriptor: {
+        ...make('b').descriptor,
+        declines: { closeSession: 'b did not start this and has nothing to stop' },
+      },
+      // NO `closeSession` MEMBER AT ALL -- the exact shape `createCodexSource`
+      // ships, and the one `performed === undefined` branch below exists for.
+    };
+    const combined = combineSources([a, b]);
+    await combined.load();
+    expect(await combined.closeSession?.('s-b', false)).toMatchObject({
+      kind: 'refused',
+      code: 'not-implemented',
+      message: 'b did not start this and has nothing to stop',
+    });
+  });
+
+  it('falls back to the generic sentence only when the owner recorded no decline of its own', async () => {
+    const a = make('a', { caps: { closeSession: true }, load: load('a', ['s-a']) });
+    // `a` claims `closeSession` (so `routeWrite` is reached) but ships no
+    // function AND no `declines.closeSession` -- an owner that never wrote
+    // down why, which is the one case the generic sentence still has to
+    // cover honestly.
+    const combined = combineSources([a]);
+    const two = combineSources([a, make('b', { load: load('b', ['s-b']) })]);
+    await two.load();
+    expect(await two.closeSession?.('s-a', false)).toMatchObject({
+      kind: 'refused',
+      code: 'not-implemented',
+      message: 'a claims this but carries no member for it',
+    });
+    expect(combined).toBe(a);
+  });
 });
