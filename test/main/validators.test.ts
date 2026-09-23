@@ -103,6 +103,26 @@ describe('isTextList', () => {
   it('refuses a list at bound+1, before walking elements', () => {
     expect(isTextList(Array.from({ length: MAX_LIST_LENGTH + 1 }, () => 'x'))).toBe(false);
   });
+  it('refuses an oversized list WITHOUT walking its elements (length check precedes .every)', () => {
+    // A Proxy that throws if any index is ever read. `isTextList` must refuse
+    // this list on length alone, via `&&` short-circuit, before `.every`
+    // gets a chance to call `isText` on element 0 -- which is exactly the
+    // "length-check-before-.every" ordering this module's contract commits
+    // to (a list bounded BEFORE anything walks it). If a future edit
+    // reorders the `&&` operands (or swaps to `value.every(isText) &&
+    // value.length <= MAX_LIST_LENGTH`), this proxy trap fires and the test
+    // fails with the thrown error instead of a false-negative pass.
+    const backing = Array.from({ length: MAX_LIST_LENGTH + 1 }, () => 'x');
+    const poisoned = new Proxy(backing, {
+      get(target, prop, receiver) {
+        if (prop === '0' || prop === 0) {
+          throw new Error('isTextList walked an element of an oversized list');
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    });
+    expect(isTextList(poisoned)).toBe(false);
+  });
   it('refuses a non-array', () => {
     expect(isTextList('not-an-array')).toBe(false);
   });
