@@ -19,6 +19,7 @@ import {
   projectsFrom,
 } from '../../src/main/sources/codex/source.js';
 import type { RunSqlite, ThreadRow } from '../../src/main/sources/codex/store.js';
+import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const THREAD = '00000000-1111-2222-3333-444444444444';
 const OTHER = '55555555-6666-7777-8888-999999999999';
@@ -42,7 +43,15 @@ const codexNeverRun: RunCodex = vi.fn(async () => {
   throw new Error('no test may spawn codex');
 });
 
-const sourceWith = (over: Parameters<typeof createCodexSource>[0]) => createCodexSource(over);
+/** Answers "no vam sessions here" -- the honest state of a machine `load()`
+ * asks tmux about while nothing this file's fixtures care about is running.
+ * `load()` now asks tmux for every load, so every `.load()` call in this file
+ * needs one -- the alternative is a real spawn, which this directory forbids
+ * (see the header). */
+const noVamSessions: TmuxRun = async () => ({ failure: null, stdout: '', stderr: '' });
+
+const sourceWith = (over: Parameters<typeof createCodexSource>[0]) =>
+  createCodexSource({ runTmux: noVamSessions, ...over });
 
 describe('codexProjectId', () => {
   it('namespaces by source, so two sources reading one directory never collide', () => {
@@ -79,6 +88,34 @@ describe('a Codex row', () => {
     // started nothing here, and `deliverPrompt` on the descriptor is what says
     // vam can still reach it.
     expect(project?.sessions[0]?.vamControlled).toBe(false);
+  });
+
+  /**
+   * `docs/design/vam-owns-the-session.md` Stage 1: "Codex rows get a real
+   * vamControlled." A resume writes `@vam-session` with the thread's own uuid
+   * (`resume.ts`), so a THREAD ID vam finds among the ids currently recorded
+   * on vam's own tmux sessions is one vam started and can still reach a pane
+   * for -- `true`, not the old unconditional `false`.
+   */
+  it('is controlled when the thread’s own id is among vam’s tmux sessions', async () => {
+    const [project] = await projectsFrom([row()], NOW, () => 'unknown', new Set([THREAD]));
+    expect(project?.sessions[0]?.vamControlled).toBe(true);
+  });
+
+  it('stays false when tmux is readable and simply has no match', async () => {
+    const [project] = await projectsFrom([row()], NOW, () => 'unknown', new Set([OTHER]));
+    expect(project?.sessions[0]?.vamControlled).toBe(false);
+  });
+
+  /**
+   * ABSENT, NOT FALSE, when vam could not ask tmux at all -- the same rule
+   * `vamControlled`'s own header states and `claude-code/source.ts` already
+   * follows. `null` is what a caller passes when `listVamSessions` itself
+   * answered `unavailable`.
+   */
+  it('is absent, not false, when vam could not ask tmux at all', async () => {
+    const [project] = await projectsFrom([row()], NOW, () => 'unknown', null);
+    expect(project?.sessions[0]).not.toHaveProperty('vamControlled');
   });
 
   it('shows the model the store recorded, verbatim', async () => {
@@ -247,6 +284,71 @@ describe('the Codex source’s load', () => {
     expect(projects[0]?.source).toBe('codex');
     expect(projects[0]?.sessions[0]?.branch).toBe('a-branch');
     expect(projects[0]?.sessions[0]?.age).toBe('1m');
+  });
+
+  /** The wiring version of the `vamControlled` tests above: the source really
+   * does ask tmux, and really does read `@vam-session` back off it. */
+  it('reads vamControlled off the tmux listing it asks for on every load', async () => {
+    const answering = (rows: readonly Record<string, unknown>[]) =>
+      sourceWith({
+        exists: () => true,
+        runSqlite: sqliteAnswering(rows),
+        runCodex: codexNeverRun,
+        now: () => NOW,
+        runTmux: async () => ({
+          failure: null,
+          stdout: `\t\tvam-a1b2c3\t\t${THREAD}\t/invented/work/a-repo\n`,
+          stderr: '',
+        }),
+      });
+    const projects = await answering([
+      {
+        id: THREAD,
+        rollout_path: '/invented/not/here.jsonl',
+        cwd: '/invented/work/a-repo',
+        preview: 'an invented prompt',
+        name: null,
+        model: 'an-invented-model',
+        git_branch: 'a-branch',
+        recency_at_ms: NOW - 60_000,
+      },
+    ]).load();
+    expect(projects[0]?.sessions[0]?.vamControlled).toBe(true);
+  });
+
+  /**
+   * `docs/design/vam-owns-the-session.md`'s own trap: "an unreadable tmux
+   * listing must not empty the sidebar." The rows still come back -- Codex's
+   * OWN store read did not fail -- and the reason rides along on every one of
+   * them so the filter layer can stand down rather than trust a `false` it
+   * cannot back up.
+   */
+  it('stamps vamListingGap on every row when tmux itself could not be read', async () => {
+    const source = sourceWith({
+      exists: () => true,
+      runSqlite: sqliteAnswering([
+        {
+          id: THREAD,
+          rollout_path: '/invented/not/here.jsonl',
+          cwd: '/invented/work/a-repo',
+          preview: 'an invented prompt',
+          name: null,
+          model: 'an-invented-model',
+          git_branch: 'a-branch',
+          recency_at_ms: NOW - 60_000,
+        },
+      ]),
+      runCodex: codexNeverRun,
+      now: () => NOW,
+      runTmux: async () => ({
+        failure: { message: 'ENOENT', code: 'ENOENT' },
+        stdout: '',
+        stderr: '',
+      }),
+    });
+    const projects = await source.load();
+    expect(projects[0]?.sessions[0]).not.toHaveProperty('vamControlled');
+    expect(projects[0]?.sessions[0]?.vamListingGap).toMatchObject({ code: 'tmux-missing' });
   });
 
   it('answers an empty list -- never a rejection -- when the read fails', async () => {

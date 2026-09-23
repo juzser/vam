@@ -753,14 +753,24 @@ describe('SessionList projects header', () => {
     // the status choice is theirs, so the badge reads 1.
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
-      originFilters: { hideAgentStarted: true, onlyPrompted: false, hideEnded: false },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: false,
+        hideForeign: true,
+      },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
     cleanup();
 
     const { container: three } = mountWith(twoProjects(), {
       statusFilter: 'done',
-      originFilters: { hideAgentStarted: true, onlyPrompted: true, hideEnded: false },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: true,
+        hideEnded: false,
+        hideForeign: true,
+      },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
@@ -808,7 +818,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 0, unprompted: 0, ended: 11 },
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 11, foreign: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
     expect(row).not.toBeNull();
@@ -827,7 +837,9 @@ describe('SessionList filter popover', () => {
     act(() => {
       fireEvent.click(container.querySelector('[data-origin-toggle="ended"]') as Element);
     });
-    expect(seen).toEqual([{ hideAgentStarted: true, onlyPrompted: false, hideEnded: false }]);
+    expect(seen).toEqual([
+      { hideAgentStarted: true, onlyPrompted: false, hideEnded: false, hideForeign: true },
+    ]);
   });
 
   it('draws the badge in the filter badge yellow, not in a status colour', () => {
@@ -842,7 +854,7 @@ describe('SessionList filter popover', () => {
     // rules the badge counts -- even though it does narrow the list.
     const { container } = mountWith(twoProjects(), {
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0, ended: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0 },
     });
     expect(container.querySelector('[data-filter-badge]')).toBeNull();
     cleanup();
@@ -857,7 +869,12 @@ describe('SessionList filter popover', () => {
 
     const { container: two } = mountWith(twoProjects(), {
       statusFilter: 'waiting',
-      originFilters: { hideAgentStarted: true, onlyPrompted: true, hideEnded: false },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: true,
+        hideEnded: false,
+        hideForeign: true,
+      },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
@@ -868,7 +885,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0, ended: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
     expect(row.getAttribute('aria-pressed')).toBe('true');
@@ -885,16 +902,151 @@ describe('SessionList filter popover', () => {
     act(() => {
       fireEvent.click(live.querySelector('[data-origin-toggle="agent"]') as Element);
     });
-    expect(seen).toEqual([{ hideAgentStarted: false, onlyPrompted: false, hideEnded: true }]);
+    expect(seen).toEqual([
+      { hideAgentStarted: false, onlyPrompted: false, hideEnded: true, hideForeign: true },
+    ]);
   });
 
   it('drops the default tag from a rule the operator applied', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
-      originFilters: { hideAgentStarted: true, onlyPrompted: true, hideEnded: false },
+      originFilters: {
+        hideAgentStarted: true,
+        onlyPrompted: true,
+        hideEnded: false,
+        hideForeign: true,
+      },
     });
     const prompted = container.querySelector('[data-origin-toggle="prompted"]') as HTMLElement;
     expect(prompted.querySelector('[data-filter-default]')).toBeNull();
+  });
+
+  /**
+   * THE FOURTH ROW -- `docs/design/vam-owns-the-session.md`'s own Stage 1
+   * acceptance line, the popover half of it.
+   */
+  it('offers a row for foreign sessions, on by default and saying how many it holds back', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 11 },
+    });
+    const row = container.querySelector('[data-origin-toggle="foreign"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
+    expect(row.textContent).toContain('11');
+  });
+
+  it('turns the foreign rule off without disturbing the other three', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-origin-toggle="foreign"]') as Element);
+    });
+    expect(seen).toEqual([
+      { hideAgentStarted: true, onlyPrompted: false, hideEnded: true, hideForeign: false },
+    ]);
+  });
+
+  /**
+   * THE REASON, ON SCREEN -- `docs/design/vam-owns-the-session.md`'s own
+   * trap: "an unreadable tmux listing must not empty the sidebar." The
+   * popover is where an operator would otherwise read a toggle that stopped
+   * narrowing as simply broken.
+   */
+  it('says nothing extra when there is no listing gap', () => {
+    const { container } = mountWith(twoProjects(), { filterMenuOpen: true });
+    expect(container.querySelector('[data-vam-listing-gap]')).toBeNull();
+  });
+
+  it('shows the reason on screen while vam cannot read its own tmux spine', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      vamListingGap: 'no tmux server is running, so there is nothing to reach',
+    });
+    const gap = container.querySelector('[data-vam-listing-gap]');
+    expect(gap?.textContent).toContain('no tmux server is running');
+  });
+});
+
+/**
+ * THE SIDEBAR'S OWN QUIET LINE, distinct from `vamListingGap` above: that one
+ * covers a listing vam could not READ, this one covers a listing vam read
+ * perfectly and found nothing of its own in -- `listVamSessions` answering
+ * `ok, []`, the ordinary state after every reboot before vam starts its
+ * first session. Not a failure, so `vamListingGap` stays null and ownership
+ * really is zero -- but `hideForeign` (on by default) can still take every
+ * Claude Code row with it, leaving a wordless empty sidebar an operator
+ * cannot tell apart from "vam is broken".
+ *
+ * `foreignHiddenCount` ARRIVES AS A PROP, computed by `Canvas.tsx` off
+ * `countHiddenByForeignFilter` (`session-filter.foreign.test.ts` proves that
+ * function). This pane never recomputes it from `allEntries` itself: the
+ * count has to agree with `entries`'s own `vamListingGap`/`?demo=1`
+ * exemptions, which only `Canvas.tsx` knows about, so these tests exercise
+ * the RENDERING of a given count and the `Show` route, not the arithmetic.
+ */
+describe('the foreign-hidden quiet line', () => {
+  it('says nothing when the count is zero', () => {
+    const { container } = mountWith(twoProjects(), { foreignHiddenCount: 0 });
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+  });
+
+  /**
+   * THE BUG ITSELF: `hideForeign` takes every row, `vamListingGap` is null
+   * (the listing succeeded), and the plain "No sessions yet" empty state
+   * would say nothing true but misleading in its silence. This is the state
+   * the coordinator's own report named: no tmux server yet, so every Claude
+   * Code row reads `vamControlled: false`.
+   */
+  it('replaces the silent empty state when the count is not zero', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 3 });
+    const notice = container.querySelector('[data-foreign-hidden-count]');
+    expect(notice?.textContent).toContain('3 sessions hidden');
+    expect(notice?.textContent).toContain('vam did not start them');
+    // Not BOTH messages -- the strip already says why the list is empty, and
+    // "No sessions yet" beside it would read as contradicting it.
+    expect(container.textContent).not.toContain('No sessions yet');
+  });
+
+  it('says ONE session, singular, when the count is exactly one', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1 });
+    const notice = container.querySelector('[data-foreign-hidden-count]');
+    expect(notice?.textContent).toContain('1 session hidden');
+    expect(notice?.textContent).toContain('vam did not start it');
+  });
+
+  /**
+   * THE NON-EMPTY CASE: a small count so a hidden row is never
+   * invisible-and-unmentioned just because it was not the ONLY row.
+   */
+  it('still names a hidden session when the rest of the list is not empty', () => {
+    const { container } = mountWith(entriesOf([makeSession({ id: 's1' })]), {
+      foreignHiddenCount: 2,
+    });
+    expect(container.querySelector('[data-session-row="s1"]')).not.toBeNull();
+    expect(container.querySelector('[data-foreign-hidden-count]')?.textContent).toContain(
+      '2 sessions hidden',
+    );
+  });
+
+  it('Show flips the same pref the popover row does, without opening the popover', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith([], {
+      foreignHiddenCount: 2,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideForeign: true },
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-foreign-hidden-show]') as Element);
+    });
+    expect(seen).toEqual([{ ...DEFAULT_SESSION_FILTERS, hideForeign: false }]);
+    expect(container.querySelector('[data-filter-menu]')).toBeNull();
   });
 });
 
@@ -1350,7 +1502,16 @@ describe('SessionList reveals the focused row', () => {
     const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
-      value: (query: string) => ({ matches: query.includes('reduced-motion') }),
+      // `addEventListener`/`removeEventListener`, unlike the narrower stub
+      // this used to be: `usePhoneViewport` (`SessionList.tsx` now imports
+      // it, for the filter popover's own keyboard-safe cap) calls both on
+      // whatever `matchMedia` returns, the same shape every other test file
+      // that stubs `matchMedia` already provides (`Canvas.demo-foreign.test.tsx`).
+      value: (query: string) => ({
+        matches: query.includes('reduced-motion'),
+        addEventListener() {},
+        removeEventListener() {},
+      }),
     });
     try {
       const entries = twoProjects();

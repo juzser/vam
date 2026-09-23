@@ -130,5 +130,9 @@ export async function resumeThread(input: {
     cwd: row.cwd,
     command,
     projectId: codexProjectId(row.cwd),
+    // `docs/design/vam-owns-the-session.md` §2, step 1: the thread's uuid is
+    // already in hand -- `command` was just built from it -- so it is written
+    // now, for free, rather than guessed later.
+    sessionId: row.id,
   });
 }

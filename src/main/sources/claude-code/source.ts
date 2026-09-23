@@ -316,6 +316,13 @@ export async function loadClaudeCodeProjects(
   // means vam asked the CLI and could not be told, which the session carries
   // as `slashCommandGap` so the short list says why it is short.
   builtinCommands: BuiltinCommandList | null = null,
+  // WHY `listVamSessions` RETURNED `tmuxSessions: null`, so the same trap
+  // `codex/source.ts`'s `vamListingGap` closes is closed here too --
+  // `docs/design/vam-owns-the-session.md`: "an unreadable tmux listing must
+  // not empty the sidebar." NULL means either nobody asked or the ask
+  // succeeded; `CLAUDE_CODE_SOURCE` passes the real error alongside the real
+  // `null` it hands `tmuxSessions` above, never one without the other.
+  vamListingGap: { readonly code: string; readonly message: string } | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -485,6 +492,7 @@ export async function loadClaudeCodeProjects(
       // and is what `claimed` below subtracts.
       ...(pane === null ? {} : { pane }),
       ...(tmuxSessions === null ? {} : { vamControlled: pane !== null }),
+      ...(vamListingGap === null ? {} : { vamListingGap }),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
@@ -493,15 +501,33 @@ export async function loadClaudeCodeProjects(
 
   // SOURCE ROWS, PLUS EVERY VAM PANE NO SOURCE ROW IS PAIRED TO (`pane-row.ts`
   // carries the argument). Filed under the project whose digest the pane
-  // recorded, which is only findable for a project some live row already
-  // names: a digest cannot be turned back into a directory, so a pane in a
-  // brand-new project has no section until something runs there.
+  // recorded, when it has one; a TAGGED pane with no live row for its digest
+  // still has nowhere to go, because a digest cannot be turned back into a
+  // directory. An UNTAGGED pane -- `unclaimedPanes` now lets one through when
+  // tmux told us its real cwd -- gets a brand-new project bucket instead,
+  // built from that cwd exactly as a live agent row's own project is: this is
+  // the only way a bare `tmux new-session -s vam-x`, never handed to
+  // `createVamSession` at all, still becomes a row.
   if (tmuxSessions !== null) {
     const byProjectId = new Map(
       [...grouped.entries()].map(([cwd, group]) => [projectIdOf(cwd), group] as const),
     );
     for (const empty of unclaimedPanes(tmuxSessions, claimed)) {
-      byProjectId.get(empty.project)?.sessions.push(paneRow(empty));
+      const cwd = empty.cwd !== undefined && empty.cwd !== '' ? empty.cwd : null;
+      const projectId =
+        empty.project !== '' ? empty.project : cwd !== null ? projectIdOf(cwd) : null;
+      if (projectId === null) continue;
+      let bucket = byProjectId.get(projectId);
+      if (bucket === undefined) {
+        // Only reachable via the cwd fallback: a TAGGED project with no live
+        // row still has no cwd to build a section from, and is skipped below
+        // exactly as before this change.
+        if (cwd === null) continue;
+        bucket = { cwd, sessions: [] };
+        grouped.set(cwd, bucket);
+        byProjectId.set(projectId, bucket);
+      }
+      bucket.sessions.push(paneRow(empty));
     }
   }
 
@@ -670,6 +696,16 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
     if (agentsResult.kind === 'unavailable') {
       throw new Error(agentsResult.message);
     }
+    // ONE tmux call per load, read ONCE into both `tmuxSessions` and
+    // `vamListingGap` -- Codex's `createCodexSource` does the same split from
+    // its own single `listVamSessions` call, and the two must never disagree
+    // about whether the listing failed: `tmuxSessions` stays NULL on a
+    // failure exactly when `vamListingGap` is non-null for it, never one
+    // without the other (`loadClaudeCodeProjects`'s own contract above).
+    const listed = await listVamSessions(createTmuxRunner());
+    const tmuxSessions = listed.kind === 'ok' ? listed.sessions : null;
+    const vamListingGap =
+      listed.kind === 'ok' ? null : { code: listed.error.code, message: listed.error.message };
     return loadClaudeCodeProjects(
       defaultTranscriptRoot(),
       agentsResult.agents,
@@ -685,10 +721,7 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // answerable. `unavailable` stays NULL rather than becoming an empty
       // list: vam could not ask, and must not report that as "vam started
       // none of these".
-      await (async () => {
-        const listed = await listVamSessions(createTmuxRunner());
-        return listed.kind === 'ok' ? listed.sessions : null;
-      })(),
+      tmuxSessions,
       await readUserSlashCommands(),
       // One lookup per `load()`, so the sessions of one project read their
       // `.claude/commands` once between them.
@@ -697,6 +730,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // installed CLI does not change under a running app, so this spawn
       // happens once rather than on every ten-second poll.
       await BUILTIN_COMMANDS(),
+      // WHY `tmuxSessions` IS NULL, when it is -- the operator's primary
+      // source, so a GUI-launched vam's non-UTF-8 `LC_CTYPE`
+      // (`listing-unreadable`) reaches the sidebar's reason banner from here,
+      // not only from Codex.
+      vamListingGap,
     );
   },
   /**

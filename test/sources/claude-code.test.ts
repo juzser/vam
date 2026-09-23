@@ -31,6 +31,7 @@ import {
   loadClaudeCodeProjects,
 } from '../../src/main/sources/claude-code/source.js';
 import { compactAge, summarizeTranscript } from '../../src/main/sources/claude-code/transcript.js';
+import { listVamSessions, type TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const NOW = Date.parse('2026-09-03T09:05:00.000Z');
 
@@ -964,6 +965,52 @@ describe('loadClaudeCodeProjects', () => {
         ],
       );
       expect(loaded?.sessions.map((s) => s.vamControlled)).toEqual([true, true]);
+    });
+  });
+
+  /**
+   * `docs/design/vam-owns-the-session.md`'s own trap, the Claude Code half:
+   * "an unreadable tmux listing must not empty the sidebar." The Codex source
+   * already stamps `vamListingGap` on every row when its own `listVamSessions`
+   * call fails; this source must too, since it is the operator's primary one
+   * and a GUI-launched vam's non-UTF-8 `LC_CTYPE` is the common case the trap
+   * names. A REAL failing runner is injected into the REAL `listVamSessions`,
+   * exactly the shape `CLAUDE_CODE_SOURCE.load` hands it, so the error this
+   * asserts on is the one tmux itself would produce, not an invented one.
+   */
+  describe('vamListingGap', () => {
+    const only = agent({ cwd: '/w/alpha' });
+
+    it('is stamped on every session when tmux itself could not be read', async () => {
+      const failing: TmuxRun = async () => ({
+        failure: { message: 'ENOENT', code: 'ENOENT' },
+        stdout: '',
+        stderr: '',
+      });
+      const listed = await listVamSessions(failing);
+      if (listed.kind !== 'unavailable') throw new Error('expected the listing to fail');
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [only],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        // tmuxSessions: null -- vam could not ask, same as `vamControlled`'s
+        // own "absent" case above.
+        null,
+        undefined,
+        undefined,
+        undefined,
+        { code: listed.error.code, message: listed.error.message },
+      );
+      expect(project?.sessions[0]).not.toHaveProperty('vamControlled');
+      expect(project?.sessions[0]?.vamListingGap).toMatchObject({ code: 'tmux-missing' });
+    });
+
+    it('says nothing about a gap when nobody asked at all', async () => {
+      const [project] = await loadClaudeCodeProjects(root, [only], NOW);
+      expect('vamListingGap' in (project?.sessions[0] ?? {})).toBe(false);
     });
   });
 

@@ -687,6 +687,36 @@ export type Session = {
    */
   readonly vamControlled?: boolean;
   /**
+   * WHY THIS SOURCE COULD NOT CONFIRM ITS OWN OWNERSHIP THIS LOAD -- absent on
+   * every ordinary poll, present only while vam's tmux spine itself could not
+   * be read (`docs/design/vam-owns-the-session.md`'s own trap: "an unreadable
+   * tmux listing must not empty the sidebar").
+   *
+   * THE SAME SHAPE `slashCommandGap` USES, for the same reason: `code` is for
+   * a reader that wants to branch, `message` is the sentence a person reads,
+   * and a code alone cannot be shown while a message alone cannot be matched
+   * on.
+   *
+   * WHY IT RIDES ON THE SESSION AND NOT ON THE SOURCE. A descriptor is
+   * computed once, at construction, and cannot change per poll
+   * (`combine.ts`'s own header); this is a fact about THIS load, so it has to
+   * travel with what this load produced. Stamped identically on every session
+   * a source returns while its own tmux read failed -- the same "one per-load
+   * fact, many rows" shape `slashCommandGap`'s `builtinCommands` arm already
+   * uses -- so the filter layer only has to find ONE occurrence to know the
+   * whole load is degraded, and the popover has the actual words to show for
+   * it.
+   *
+   * `vamControlled` ITSELF ALREADY SAYS "ABSENT WHEN VAM COULD NOT ASK" --
+   * this is not a second copy of that fact, it is the REASON, which absence
+   * alone cannot carry. A filter that hides a row on `vamControlled === false`
+   * needs this to know THAT false is trustworthy right now, and a filter that
+   * would otherwise hide an ended session needs it to know the same tmux
+   * failure is why it cannot trust ITS OWN default either -- see
+   * `isHiddenByForeignFilter` and the orchestration in `Canvas.tsx`.
+   */
+  readonly vamListingGap?: { readonly code: string; readonly message: string };
+  /**
    * WHICH vam tmux session this row is proven to be in -- the pane's name --
    * when `vamControlled` is `true`; absent otherwise.
    *
