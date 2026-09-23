@@ -43,12 +43,26 @@
  * their own command directly for the identical reason and needed the
  * identical fix -- their own headers carry it rather than repeating it here.
  *
- * THE OPERATOR STILL GETS AN AGENT RUNNING IMMEDIATELY on this path: nothing
- * about WHEN the provider starts changed, only what is underneath it while it
- * runs. There is no Start session button here and none is added -- the
- * directory was just chosen in Electron's own dialog for exactly this
- * purpose, so the provider is typed the instant the shell exists rather than
- * waiting on a second click for a choice the operator already made.
+ * THIS PATH NO LONGER TYPES THE PROVIDER IN EITHER, as of the operator's
+ * second report against the shell-first build: "there seems to be a
+ * start-session flow running in the background, in parallel with the
+ * getting-started screen -- about 5 seconds later the session is created
+ * automatically." That five seconds was real: this function used to spawn
+ * the shell and then `typeThenEnter` the provider's command the same tick,
+ * while the row it had just created was drawn `unstarted` (`pane-row.ts`
+ * marks every unclaimed vam pane that way regardless of what is actually
+ * running in its foreground) and the Response view showed the SAME start
+ * screen `StartSession` draws for a pane that truly has nothing running --
+ * so the operator saw a provider picker and a Start button over a pane
+ * `claude` was already loading into, and a press of that button raced
+ * `typeIntoOwnPane`'s own re-proof of ownership into a `pane-occupied`
+ * refusal the operator never asked for. Removed: this function spawns a
+ * shell now and returns, exactly like `createSessionInProject` beside it --
+ * `provider` is still accepted, for the IPC contract's sake, and still not
+ * spent, exactly as that function has never spent it. The one door left
+ * that types a provider into a pane THIS FUNCTION just opened is the
+ * operator's own choice, on the same start screen a new session in an
+ * existing project already shows, or their own hands in the Terminal view.
  *
  * WHAT IT STILL CANNOT DO. The session vam creates is vam's. The operator's
  * existing sessions are children of their own login shell and cannot be
@@ -62,7 +76,6 @@
  * is worse than no session.
  */
 
-import { resolveProvider } from '../../../shared/providers.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { whyNotARepository } from '../repo.js';
 import { vamSessionName } from '../tmux/argv.js';
@@ -70,25 +83,15 @@ import { loginShellCommand } from '../tmux/shell.js';
 import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
 import type { LiveAgent } from './agents.js';
 import { projectIdOf } from './project-id.js';
-import { typeThenEnter } from './start-in-pane.js';
 
 /**
- * WHAT THE NEW-PROJECT SESSION RUNS COMES FROM THE PROVIDER TABLE, not from a
- * literal here. `shared/providers.ts` carries the words for each provider vam
- * can start, and `resolveProvider` is total, so an id from a store main never
- * wrote and does not recognise starts the default provider instead of
- * nothing. Main normalises for itself: the renderer already did, and a
- * renderer's normalisation is not something main may take on trust.
- *
- * ON THE PROJECT PATH `provider` IS ACCEPTED BUT NOT SPENT HERE: the spawn
- * there is a shell (see the header), and the choice the id names is made
- * later, by the Start session button, where `start-in-pane.ts` is handed the
- * command the renderer resolved from the same table -- there is no button on
- * the NEW-PROJECT path below, so this file spends it itself, the instant the
- * shell exists, rather than waiting for a click the operator already made by
- * choosing a directory in the first place. Both paths still take `provider`
- * on the same signature so the IPC contract keeps its shape under the
- * callers that send it.
+ * `provider` IS ACCEPTED BUT NOT SPENT BY EITHER FUNCTION BELOW. Both spawn a
+ * shell (see the header) and stop there; the choice the id names is made
+ * later, by the Start session button on the row the spawn just created --
+ * `start-in-pane.ts` is handed the command the RENDERER resolved from
+ * `shared/providers.ts`, main never resolves one itself. The parameter stays
+ * on both signatures only so the IPC contract keeps its shape under the
+ * callers that already send it (`combine.ts`, `source.ts`).
  */
 
 /**
@@ -157,12 +160,14 @@ export async function createSessionInProject(input: {
  * anything spawns, and carries the path, so the operator who picked their
  * downloads folder reads what was wrong with it rather than nothing at all.
  *
- * THE SHELL, THEN THE PROVIDER TYPED IN -- see the header for why this path
- * used to spend the provider at spawn and no longer does. `name` is resolved
- * ONCE, here, rather than left to `spawnSessionIn`'s own fallback: the type
- * that follows has to address the exact pane the spawn just created, and
- * re-deriving `vamSessionName(title)` a second time would mint a SECOND
- * random tail that names no session at all.
+ * THE SHELL, AND NOTHING ELSE -- see the header for why this path used to
+ * type the provider in the instant the shell existed, and no longer does:
+ * that raced the SAME start screen a new session in an existing project
+ * shows, on a pane where the provider had already started underneath it.
+ * `name` is resolved ONCE, here, rather than left to `spawnSessionIn`'s own
+ * fallback, so a caller that inspects the failure (or, before this fix, a
+ * caller that typed into the pane after spawning it) addresses the exact
+ * pane the spawn just created rather than a second, re-derived random tail.
  */
 export async function createSessionInDirectory(input: {
   cwd: string;
@@ -174,20 +179,18 @@ export async function createSessionInDirectory(input: {
   const refusal = whyNotARepository(input.cwd);
   if (refusal !== null) return refusal;
   const name = input.name ?? vamSessionName(input.title);
-  const spawned = await spawnSessionIn({
+  // THE SPAWN IS THE WHOLE OF THIS FUNCTION NOW -- see the header. The row
+  // the next `load()` reports is `unstarted` (`pane-row.ts`), exactly as
+  // `createSessionInProject`'s row is, and the SAME start screen
+  // (`StartSession`, `DetailPanel.tsx`) is what types a provider into it,
+  // through `recordPrompt` -> `typeIntoOwnPane` -- never this function again.
+  return spawnSessionIn({
     cwd: input.cwd,
     title: input.title,
     run: input.run,
     name,
-    // THE SHELL, NOW HERE TOO -- what still runs the provider is the type
-    // below, not this spawn.
     command: loginShellCommand(),
   });
-  if (spawned !== null) return spawned;
-  // TYPED, NOT SPAWNED, THE INSTANT THE SHELL EXISTS -- no Start session
-  // button on this path (see the header), so `typeThenEnter` runs right here
-  // rather than waiting for a click the operator already made.
-  return typeThenEnter(input.run, name, resolveProvider(input.provider).command.join(' '));
 }
 
 /** The spawn both paths share, once the directory and the command are settled. */

@@ -23,7 +23,7 @@ import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
 import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
-import { DEFAULT_PROVIDER_ID, PROVIDERS, resolveProvider } from '../../src/shared/providers.js';
+import { PROVIDERS } from '../../src/shared/providers.js';
 
 function recordingTmux(stderr = ''): TmuxRun & { calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
@@ -176,12 +176,17 @@ describe('o, on the Claude Code source', () => {
  * dialog, which no project id names yet.
  */
 describe('a new session in a chosen directory', () => {
-  it('starts a SHELL there, types claude in, and records the id the next load() will report', async () => {
+  it('starts a SHELL there and TYPES NOTHING -- Start session on the row is the only door', async () => {
     // Stage 2, now on this path too (issue: Ctrl+C in the terminal used to
     // shut the whole session down -- `create-session.ts`'s header carries the
-    // measurement). The shell is spawned exactly as the project path spawns
-    // one; the provider is typed in immediately after, since there is no
-    // Start session button on this path to wait for.
+    // measurement). This used to type the provider in immediately after the
+    // spawn, on the theory that this path has no Start session button to
+    // wait for -- but the row it just created is drawn `unstarted`
+    // (`pane-row.ts` does not read the pane's foreground command) and the
+    // Response view shows the SAME start screen a plain `unstarted` row
+    // shows, so the operator saw a picker and a Start button over a pane
+    // `claude` was already loading into. Fixed: this spawns the shell and
+    // stops, exactly like `createSessionInProject` beside it.
     const run = recordingTmux();
     const orchard = tempRepo();
     const failure = await createSessionInDirectory({
@@ -208,8 +213,6 @@ describe('a new session in a chosen directory', () => {
       // The SAME digest every other project id comes from. Anything else and
       // the Terminal tab would find nothing for a session vam itself started.
       ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf(orchard)],
-      ['send-keys', '-t', '=vam-orchard-a1b2c3:', '-l', '--', 'claude'],
-      ['send-keys', '-t', '=vam-orchard-a1b2c3:', 'Enter'],
     ]);
   });
 
@@ -254,67 +257,41 @@ describe('a new session in a chosen directory', () => {
  * are that provider's own command.
  */
 describe('the provider the session is started with', () => {
-  it('types the chosen provider’s command, by value, once the shell exists', async () => {
-    const run = recordingTmux();
-    const orchard = tempRepo();
-    const failure = await createSessionInDirectory({
-      cwd: orchard,
-      title: 'orchard',
-      run,
-      name: 'vam-orchard-a1b2c3',
-      provider: 'claude-code',
-    });
-
-    expect(failure).toBeNull();
-    // The spawn is the shell, whatever was named -- pinned above. What the
-    // provider choice changes is what gets TYPED afterward.
-    expect(run.calls[0]?.slice(-2)).toEqual(loginShellCommand());
-    expect(run.calls.at(-2)).toEqual([
-      'send-keys',
-      '-t',
-      '=vam-orchard-a1b2c3:',
-      '-l',
-      '--',
-      resolveProvider('claude-code').command.join(' '),
-    ]);
-  });
-
-  it('falls back to the default provider for an id nothing answers to', async () => {
-    const run = recordingTmux();
-    const orchard = tempRepo();
-    const failure = await createSessionInDirectory({
-      cwd: orchard,
-      title: 'orchard',
-      run,
-      name: 'vam-orchard-a1b2c3',
-      // A provider a later vam may add, stored by a browser that has been
-      // through a downgrade -- or simply hand-edited. The session must still
-      // start.
-      provider: 'cursor-cli',
-    });
-
-    expect(failure).toBeNull();
-    expect(run.calls.at(-2)).toEqual([
-      'send-keys',
-      '-t',
-      '=vam-orchard-a1b2c3:',
-      '-l',
-      '--',
-      resolveProvider(DEFAULT_PROVIDER_ID).command.join(' '),
-    ]);
-  });
-
   /**
-   * NEITHER PATH SPENDS THE PROVIDER AT SPAWN ANY MORE. Both run a shell
-   * (`tmux/shell.ts`) and the provider's command is typed into that shell
-   * afterwards -- by the Start button or by hand on the existing-project
-   * path, immediately by this path itself on the chosen-directory one (see
-   * the two tests above). What is asserted here is the project path's own
-   * negative: naming a provider, or an id nothing answers to, changes NOTHING
-   * about what tmux is handed AT SPAWN on that path, because nothing is typed
-   * there either -- the Start button, not `createSessionInProject`, does
-   * that (`claude-code-start-in-pane.test.ts`).
+   * NEITHER PATH SPENDS THE PROVIDER AT SPAWN, OR AFTER, ANY MORE. Both run a
+   * shell (`tmux/shell.ts`) and stop -- the provider's command is typed into
+   * that shell only by the Start button, or by the operator's own hands, on
+   * whichever row the spawn just created (`claude-code-start-in-pane.test.ts`).
+   * What is asserted here is that naming a provider, or an id nothing answers
+   * to, changes NOTHING about what tmux is handed on EITHER creation path --
+   * the argv is identical to the no-provider case, and none of it is the
+   * provider's own command.
    */
+  it('does not reach the chosen-directory path’s spawn: that pane runs the shell whatever was named', async () => {
+    const orchard = tempRepo();
+    const spawnWith = async (provider?: string) => {
+      const run = recordingTmux();
+      await createSessionInDirectory({
+        cwd: orchard,
+        title: 'orchard',
+        run,
+        name: 'vam-orchard-a1b2c3',
+        provider,
+      });
+      return run.calls;
+    };
+    const named = await spawnWith('claude-code');
+    const unnamed = await spawnWith();
+    const unknown = await spawnWith('cursor-cli');
+    expect(named).toEqual(unnamed);
+    expect(unknown).toEqual(unnamed);
+    expect(unnamed[0]?.slice(-2)).toEqual(loginShellCommand());
+    expect(unnamed).toHaveLength(2); // spawn + @vam-project, never a type
+    for (const provider of PROVIDERS) {
+      expect(named.flat()).not.toContain(provider.command[0]);
+    }
+  });
+
   it('does not reach the project path’s spawn: that pane runs the shell whatever was named', async () => {
     const spawnWith = async (provider?: string) => {
       const run = recordingTmux();

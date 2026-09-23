@@ -88,7 +88,7 @@ describe('which chosen directories count as a repository', () => {
 });
 
 describe('starting a session in a directory the operator chose', () => {
-  it('starts a SHELL, then types the STORED provider’s command into it', async () => {
+  it('starts a SHELL and types NOTHING into it -- Start session on the row types the provider now', async () => {
     const repo = tempRepo();
     const run = recordingTmux();
 
@@ -101,9 +101,6 @@ describe('starting a session in a directory the operator chose', () => {
     });
 
     expect(failure).toBeNull();
-    // Asserted BY VALUE, not by re-deriving it from the same call the code
-    // makes: a hardcoded command would pass an identity assertion.
-    expect(resolveProvider(DEFAULT_PROVIDER_ID).command).toEqual(['claude']);
     expect(run.calls[0]).toEqual([
       'new-session',
       '-d',
@@ -116,18 +113,13 @@ describe('starting a session in a directory the operator chose', () => {
       repo,
       ...loginShellCommand(),
     ]);
-    // The provider is TYPED once the shell exists, not handed to tmux at
-    // spawn -- Ctrl+C used to end the whole tmux session, not just the
-    // provider (`create-session.ts`'s header carries the measurement).
-    expect(run.calls.at(-2)).toEqual([
-      'send-keys',
-      '-t',
-      '=vam-orchard-a1b2c3:',
-      '-l',
-      '--',
-      'claude',
-    ]);
-    expect(run.calls.at(-1)).toEqual(['send-keys', '-t', '=vam-orchard-a1b2c3:', 'Enter']);
+    // NOTHING TYPED -- spawn, then `@vam-project`, and no third call. This
+    // used to type the STORED provider's command right here, racing the
+    // start screen the row (drawn `unstarted`, same as any other empty pane)
+    // shows for exactly the same pane -- `create-session.ts`'s header carries
+    // the operator's report and the fix.
+    expect(run.calls).toHaveLength(2);
+    expect(run.calls.flat()).not.toContain(resolveProvider(DEFAULT_PROVIDER_ID).command[0]);
   });
 
   it('refuses a directory that is not a repository, and SPAWNS NOTHING', async () => {

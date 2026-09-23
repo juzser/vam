@@ -8,6 +8,16 @@
  * subset -- see the fixture's own header) and asserts the tmux SESSION
  * SURVIVES with the SHELL in its pane's foreground.
  *
+ * PHASE 1 TYPES THE FIXTURE IN ITSELF, through `typeIntoOwnPane`
+ * (`start-in-pane.ts`, also bundled unmodified) -- `createSessionInDirectory`
+ * no longer does, since the operator's SECOND report (a start-session flow
+ * racing the getting-started screen; `create-session.ts`'s own header carries
+ * it). That removed the one-tick auto-type this phase used to get for free
+ * from the function under test; typing it explicitly here, through the exact
+ * primitive the Start session button now owns, keeps this phase proving the
+ * same thing -- Ctrl-C survives on a pane `createSessionInDirectory` spawned
+ * -- against the two-step flow that is real now.
+ *
  * UNLIKE EVERY OTHER GUARD IN THIS DIRECTORY, this one drives no browser and
  * needs no served page: the bug and the fix are both entirely in MAIN, three
  * calls deep from any renderer, so there is nothing here for Chromium to add.
@@ -129,6 +139,7 @@ const { createSessionInDirectory } = await bundleOf(
   'src/main/sources/claude-code/create-session.ts',
 );
 const { resumeClaudeSession } = await bundleOf('src/main/sources/claude-code/resume.ts');
+const { typeIntoOwnPane } = await bundleOf('src/main/sources/claude-code/start-in-pane.ts');
 const { createTmuxRunner } = await bundleOf('src/main/sources/tmux/spawn.ts');
 const { loginShellCommand } = await bundleOf('src/main/sources/tmux/shell.ts');
 
@@ -209,6 +220,23 @@ async function phaseNewProject() {
     provider: 'claude-code',
   });
   check('createSessionInDirectory started', failure === null, JSON.stringify(failure));
+
+  // NOTHING AUTO-STARTS. The operator's second report -- this same guard's
+  // own header -- measured five seconds between the row's start screen
+  // appearing and an agent already running underneath it. Six seconds of
+  // real wall clock, well past that, with the pane still a shell: the fix
+  // this phase now falsifies below if it is ever undone.
+  await new Promise((r) => setTimeout(r, 6_000));
+  check(
+    'six seconds on: the pane is STILL a shell -- createSessionInDirectory started nothing on its own',
+    listedSessions().get(name) === SHELL_COMM,
+    `pane_current_command was ${JSON.stringify(listedSessions().get(name))}, expected ${SHELL_COMM}`,
+  );
+
+  // START SESSION, THE ONLY DOOR NOW -- the exact primitive the button in
+  // `DetailPanel.tsx`'s start screen reaches through `recordPrompt`.
+  const started = await typeIntoOwnPane({ run, name, text: `node ${FIXTURE}` });
+  check('typeIntoOwnPane (Start session) started the fixture', started === null, JSON.stringify(started));
 
   await waitFor('the fixture’s READY line', () => paneText(name).includes('CTRLC-FIXTURE READY'));
   await pressCtrlCTwice(name);
