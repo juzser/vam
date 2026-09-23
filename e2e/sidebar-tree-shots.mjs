@@ -37,7 +37,15 @@
  *    the token honoured, and happy-dom resolves no stylesheet at all. The
  *    operator asked for the project and the group to read a bit larger than
  *    the session, and for a long time it was the reverse.
+ *  - AND, SINCE THAT PASS, WHETHER THE TWO CAPTIONS ACTUALLY PAINT BOLD AND A
+ *    PIXEL SMALLER, AND THE ROW REGULAR AND A PIXEL SMALLER. `font-semibold`
+ *    and `font-normal` are claims about a token too, and `getComputedStyle().
+ *    fontWeight` is what a real font stack resolves them to -- which matters
+ *    here specifically, because the sidebar asks for `Geist` and never loads
+ *    it (no `@font-face`, no package), so every one of these elements paints
+ *    in whatever system face Chromium falls back to instead.
  *
+
  * It also takes the screenshots that make the whole change reviewable as an
  * image, which is why it seeds two GROUPS: the demo fixture has none, and a
  * three-level tree with only two levels on screen proves nothing about the
@@ -62,6 +70,19 @@ const STEP = 10;
 const LANE = 14;
 /** `.vam-spin`'s own duration, which `SPIN_PERIOD_MS` also copies. */
 const SPIN_PERIOD = 1100;
+
+/**
+ * THE SIZES BEFORE THE BOLD-AND-A-PIXEL-SMALLER PASS, measured on the shipped
+ * build ahead of the change (`getComputedStyle().fontSize` against a served
+ * `?demo=1` page, the same way the assertions below read the after-state):
+ * both headings sat at `text-heading`, 15px, and every row title at
+ * `text-body`, 13px. Recorded here, not re-typed as a bare 14 and 12 in the
+ * checks below, so the two numbers this file asserts are visibly "the old
+ * one, minus one" rather than two fresh literals that happen to agree with
+ * `SessionList.tsx` today and could silently stop agreeing with it tomorrow.
+ */
+const BEFORE_HEADING_PX = 15;
+const BEFORE_ROW_PX = 13;
 
 /**
  * Two groups, seeded the way a real one arrives.
@@ -227,6 +248,7 @@ check(
 // would be a regression this sweep is the only place to catch.
 const sizes = await page.evaluate(() => {
   const px = (el) => Number.parseFloat(getComputedStyle(el).fontSize);
+  const weight = (el) => Number.parseFloat(getComputedStyle(el).fontWeight);
   const nameIn = (heading) =>
     [...heading.querySelectorAll('span')].find(
       (s) => s.textContent.trim().length > 1 && s.querySelector('svg') === null,
@@ -238,20 +260,24 @@ const sizes = await page.evaluate(() => {
       return {
         text: name?.textContent.trim() ?? null,
         name: name === undefined ? null : px(name),
+        weight: name === undefined ? null : weight(name),
         count: count === null || count === undefined ? null : px(count),
       };
     });
   return {
     projects: captions('[data-project-heading]', (_h, name) => name?.nextElementSibling),
     groups: captions('[data-group-heading]', (h) => h.querySelector('[data-group-count]')),
-    rows: [...document.querySelectorAll('[data-session-row] [data-row-title]')].map(px),
+    rows: [...document.querySelectorAll('[data-session-row] [data-row-title]')].map((el) => ({
+      size: px(el),
+      weight: weight(el),
+    })),
   };
 });
 console.log('type sizes:', JSON.stringify(sizes));
 {
   const headings = [...sizes.projects, ...sizes.groups];
   const smallestHeading = Math.min(...headings.map((h) => h.name ?? Number.NaN));
-  const largestRow = Math.max(...sizes.rows);
+  const largestRow = Math.max(...sizes.rows.map((r) => r.size));
   check(
     'a project heading, a group heading and a session title were all found, so the size order below is about something',
     sizes.projects.length > 0 &&
@@ -278,6 +304,46 @@ console.log('type sizes:', JSON.stringify(sizes));
   );
   console.log(
     `type sizes: smallest heading ${smallestHeading}px, largest row title ${largestRow}px`,
+  );
+}
+
+// BOLD HEADINGS, A REGULAR ROW, AND EVERY NUMBER A PIXEL OFF WHAT IT WAS.
+// Operator, in one breath: "make the project and group titles bold and 1px
+// smaller; the session name regular weight and also 1px smaller." The check
+// above only ever asked for an ORDER (headings above rows); it would have
+// stayed green through a heading left at its old size, or a row weight left
+// at its old one, as long as nothing crossed the other's line. This asks the
+// exact numbers instead, against `BEFORE_HEADING_PX` / `BEFORE_ROW_PX`
+// recorded above -- the shipped sizes, minus exactly one -- and the weight
+// `getComputedStyle().fontWeight` reports, which `font-semibold` /
+// `font-normal` are only a CLAIM about until a browser resolves them.
+{
+  const headingsAfter = [...sizes.projects, ...sizes.groups];
+  check(
+    'every project heading now reads one pixel below its old size',
+    sizes.projects.length > 0 &&
+      sizes.projects.every((h) => h.name === BEFORE_HEADING_PX - 1),
+    `expected ${BEFORE_HEADING_PX - 1}, got ${JSON.stringify(sizes.projects.map((h) => h.name))}`,
+  );
+  check(
+    'and so does every group heading',
+    sizes.groups.length > 0 && sizes.groups.every((h) => h.name === BEFORE_HEADING_PX - 1),
+    `expected ${BEFORE_HEADING_PX - 1}, got ${JSON.stringify(sizes.groups.map((h) => h.name))}`,
+  );
+  check(
+    'every session title now reads one pixel below its old size',
+    sizes.rows.length > 0 && sizes.rows.every((r) => r.size === BEFORE_ROW_PX - 1),
+    `expected ${BEFORE_ROW_PX - 1}, got ${JSON.stringify(sizes.rows.map((r) => r.size))}`,
+  );
+  check(
+    'every heading name is set at least semibold -- it reads as bold against the row it heads',
+    headingsAfter.length > 0 && headingsAfter.every((h) => h.weight !== null && h.weight >= 600),
+    JSON.stringify(headingsAfter.map((h) => [h.text, h.weight])),
+  );
+  check(
+    'every session title is set regular -- including the focused row, which used to carry its own font-medium',
+    sizes.rows.length > 0 && sizes.rows.every((r) => r.weight === 400),
+    JSON.stringify(sizes.rows.map((r) => r.weight)),
   );
 }
 
