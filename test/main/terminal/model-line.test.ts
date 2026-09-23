@@ -19,6 +19,7 @@ import { readModelLine } from '../../../src/main/terminal/model.js';
 import {
   MODEL_MENU_OPEN,
   NARROW_TRUNCATED,
+  OPUS_5_5_FRESH,
   OPUS_FRESH,
   PERMISSION_ASKING,
   PLAIN_SHELL,
@@ -42,6 +43,12 @@ const screenOf = (status: string): string =>
 describe('a real status line names the model', () => {
   it('reads it off a fresh session, where the footer is dir, model, in and out', () => {
     expect(readModelLine(OPUS_FRESH)).toBe('Opus 5');
+  });
+
+  it('reads a version with a dot in it just as plainly — Claude Code 2.1.280, Opus 5.5', () => {
+    // Real, not synthetic: `claude-opus-5-5` is the new default Opus id, and
+    // this account's own footer already painted it with no `/model` typed.
+    expect(readModelLine(OPUS_5_5_FRESH)).toBe('Opus 5.5');
   });
 
   it('reads it after a turn, where the CLI has inserted a ctx: field before in:', () => {

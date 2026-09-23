@@ -4367,7 +4367,9 @@ function QuestionCard({
                           {NUMBERED_OPTIONS[index]}
                         </span>
                       )}
-                      <span className="min-w-0">{option.label}</span>
+                      <span data-question-label className="min-w-0">
+                        {option.label}
+                      </span>
                       {(option.preview ?? null) !== null && (
                         <span
                           data-question-preview-hint
@@ -4385,8 +4387,27 @@ function QuestionCard({
                       )}
                     </span>
                     {option.description !== null && (
-                      <span data-question-description className="max-w-full text-meta text-ink-dim">
-                        {option.description}
+                      // UNDER THE LABEL, NOT UNDER THE NUMBER. MEASURED on
+                      // Claude Code 2.1.280: "fixed multi-select option
+                      // descriptions being indented under the option number
+                      // instead of under the label". A row with no indent at
+                      // all starts flush with the NUMBER above it, which is
+                      // the shape the fix ended -- so a spacer reserves the
+                      // number's own column, tabular-nums and the same
+                      // `gap-1.5` as the row it lines up with, rather than a
+                      // guessed pixel amount. `aria-hidden` and no text of its
+                      // own: it costs nothing in the accessible name or in a
+                      // reader that walks `textContent`, only the width.
+                      <span className="flex max-w-full items-baseline gap-1.5">
+                        {NUMBERED_OPTIONS[index] !== undefined && (
+                          <span
+                            aria-hidden="true"
+                            className="inline-block w-[1ch] flex-none text-meta tabular-nums"
+                          />
+                        )}
+                        <span data-question-description className="min-w-0 text-meta text-ink-dim">
+                          {option.description}
+                        </span>
                       </span>
                     )}
                   </button>

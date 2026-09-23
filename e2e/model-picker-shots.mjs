@@ -435,7 +435,7 @@ check(
 // ---------------------------------------------------------------------------
 // THE VERSIONS, ON THE RIGHT. Operator: "in the model picker, add the version
 // on the right as well." The values are `MODEL_CHOICES`' own, re-captured from
-// Claude Code 2.1.276 (see `model-command.ts` for the capture and its date);
+// Claude Code 2.1.280 (see `model-command.ts` for the capture and its date);
 // what is measured here is the two things a unit test cannot say -- that they
 // PAINT, and that they paint to the RIGHT of the name rather than merely after
 // it in the markup.
@@ -446,8 +446,8 @@ check(
   JSON.stringify(menu?.columns),
 );
 check(
-  'carrying the CLI’s own numbers — Fable 5.1 and Opus 5, not the other way round',
-  menu !== null && menu.columns.map((c) => c?.text).join(',') === 'Sonnet 5,5,5.1,5,4.5',
+  'carrying the CLI’s own numbers — Fable 5.1 and Opus 5.5, not the other way round',
+  menu !== null && menu.columns.map((c) => c?.text).join(',') === 'Sonnet 5,5,5.1,5.5,4.5',
   JSON.stringify(menu?.columns?.map((c) => `${c?.id}=${c?.text}`)),
 );
 check(
@@ -606,12 +606,12 @@ console.log(`  ${OWNED}: ${JSON.stringify(one)}`);
 console.log(`  ${OWNED} names: ${JSON.stringify(oneNames)}`);
 check(
   'the button wears the model the session is running, not the word "model"',
-  one.label === 'Opus 5',
+  one.label === 'Opus 5.5',
   JSON.stringify(one.label),
 );
 check(
   'and a screen reader is told the same name — the one Chromium computes',
-  oneNames.button.includes('Opus 5'),
+  oneNames.button.includes('Opus 5.5'),
   JSON.stringify(oneNames.button),
 );
 check(
@@ -702,7 +702,7 @@ const labelTip = await tipText();
 console.log(`  hover tip: ${JSON.stringify(labelTip)}`);
 check(
   'hovering the labelled button names the model it is running',
-  (labelTip ?? '').startsWith('running Opus 5 ·'),
+  (labelTip ?? '').startsWith('running Opus 5.5 ·'),
   JSON.stringify(labelTip),
 );
 // WHICH ROUTE COSTS THE OPERATOR THEIR DEFAULT: none of them, now, and the
@@ -974,12 +974,20 @@ check(
   narrow !== null && narrow.phone === false && narrow.rowWidth < 330,
   JSON.stringify({ phone: narrow?.phone, row: narrow?.rowWidth }),
 );
+// MEASURED AFTER CLAUDE CODE 2.1.280: `Opus 5.5` (eight characters) now
+// clips at this row width too, same as `Sonnet 4.5` below -- the two extra
+// characters `.5` added to a name this check used to find drawn whole. The
+// property this row exists to prove was never "short names never clip"; it
+// is "nothing bursts, whatever the name" (the check right after this one
+// says so explicitly), so what moved is which names count as short enough,
+// not the row's own behaviour. Re-asserting an unclipped `Opus 5.5` would be
+// demanding the old id's width out of the new one.
 check(
-  'a short name is drawn whole there, and nothing leaves the row',
-  narrow?.label === 'Opus 5' &&
-    narrow.clipped === false &&
+  'the real label clips safely at this width -- nothing bursts, whatever the name',
+  narrow?.label === 'Opus 5.5' &&
     narrow.outside.length === 0 &&
-    narrow.spill <= 0,
+    narrow.spill <= 0 &&
+    narrow.overflow <= 0,
   JSON.stringify(narrow),
 );
 

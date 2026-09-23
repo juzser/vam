@@ -35,11 +35,13 @@
 
 import type { SourceError } from '../../ipc/channels.js';
 import { withConciseLead } from '../../terminal/concise.js';
+import { plain } from '../../terminal/plain.js';
 import { promptKeystrokes, sendEnterArgv } from '../tmux/argv.js';
 import { isShellCommand } from '../tmux/shell.js';
 import {
   classifyTmuxFailure,
   listVamSessions,
+  readPane,
   type TmuxRun,
   type TmuxSession,
 } from '../tmux/spawn.js';
@@ -212,6 +214,44 @@ export function paneForRow(
 }
 
 /**
+ * THE HINT CLAUDE CODE 2.1.277+ PRINTS INSTEAD OF SUBMITTING, when the prompt
+ * carried invisible Unicode formatting or a tag character.
+ *
+ * MEASURED on a real `claude` 2.1.280, private tmux socket: pasting a prompt
+ * with a zero-width space and pressing Enter once did not send it. The pane
+ * repainted with the CLEANED text still sitting in the input box and this
+ * line in its footer -- a second Enter is what actually submits. Before this,
+ * one Enter always submitted; now some prompts silently need two, and a reply
+ * built for the old rule would leave the words sitting there while vam
+ * reported a delivery.
+ *
+ * NO CHARACTER CLASS IS GUESSED HERE, deliberately -- the same argument
+ * `model.ts` and `transcript-model.ts` make about vocabularies going stale.
+ * vam does not enumerate which characters the CLI now calls "invisible" or a
+ * "tag character"; it reads the CLI's OWN screen for the sentence that says a
+ * second Enter is still owed. A future CLI that cleans a wider set costs
+ * nothing here.
+ */
+const REVIEW_GATE_HINT = /review and press enter to send/i;
+
+/**
+ * Press Enter a second time when the screen says the first one only opened a
+ * review, never a guess from the prompt's own text.
+ *
+ * READ-THEN-ACT, the same rule `answer.ts` states for a picker: the pane is
+ * asked what is actually on it rather than trusted to have taken the
+ * keystroke that was meant for it. A read that fails is not a second
+ * question -- `pane.kind !== 'ok'` answers `false`, which leaves the reply
+ * exactly as honest as it was before this gate existed: vam already could not
+ * confirm a submit from an echo, and refusing to guess here does not make
+ * that any less true.
+ */
+async function reviewGateOpen(run: TmuxRun, name: string): Promise<boolean> {
+  const pane = await readPane(run, name);
+  return pane.kind === 'ok' && REVIEW_GATE_HINT.test(plain(pane.text));
+}
+
+/**
  * Type the whole prompt into a pane, then press Return once to submit.
  *
  * TYPE, THEN SUBMIT, AND THE ORDER IS THE POINT. The prompt goes through
@@ -255,6 +295,26 @@ async function typeIntoPane(
       ...error,
       message: `the reply was typed into ${name} but vam could not press Return, so it is sitting there unsent: ${error.message}`,
     };
+  }
+  // THE REVIEW GATE. One Enter used to always submit; Claude Code 2.1.277+
+  // spends it on cleaning invisible characters instead when the prompt
+  // carried one, and leaves the cleaned text sitting unsent until a second
+  // Enter -- see `REVIEW_GATE_HINT`. Checked after every reply rather than
+  // only ones vam suspects, because the check is a read of the CLI's own
+  // screen and not a guess from the prompt's bytes.
+  if (await reviewGateOpen(run, name)) {
+    const resubmit = await run(sendEnterArgv(name));
+    if (resubmit.failure !== null) {
+      const error = classifyTmuxFailure({
+        failure: resubmit.failure,
+        stderr: resubmit.stderr,
+        action: `submitting a reply in session ${name}`,
+      });
+      return {
+        ...error,
+        message: `the reply was typed into ${name} but Claude Code opened its invisible-character review and vam could not press the second Return, so it is sitting there unsent: ${error.message}`,
+      };
+    }
   }
   return null;
 }

@@ -107,7 +107,7 @@ export const DEMO_PROMPT: PromptView = {
  */
 export function demoSessionModel(rowId?: string): SessionModel {
   const running: Record<string, SessionModel> = {
-    'notes-1': { kind: 'model', name: 'Opus 5' },
+    'notes-1': { kind: 'model', name: 'Opus 5.5' },
     'notes-2': { kind: 'model', name: 'Sonnet 5' },
     // THE LONGEST REAL NAME THERE IS, and the first reason it is in the
     // fixture: this is what the status line reads on a session started on a
