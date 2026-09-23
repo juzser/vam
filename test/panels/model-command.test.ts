@@ -131,6 +131,20 @@ describe('the five choices are the CLI’s own aliases', () => {
     // So FABLE is 5.1 and OPUS is 5, which is the way round the request had
     // them reversed. A literal list because the CLI is the only authority for
     // these and nothing in vam can derive them.
+    //
+    // RE-CAPTURED ON CLAUDE CODE 2.1.280, 2026-09-23 -- the changelog's own
+    // "Added Claude Opus 5.5 ... now the default Opus model", and the same
+    // private-socket `/model` capture now reads:
+    //
+    //     ❯ 1. Default (recommended)     Sonnet 5 · Efficient for routine tasks
+    //       2. Sonnet                    Sonnet 5 · Efficient for routine tasks
+    //       3. Fable                     Fable 5.1 · Most capable for your ...
+    //   ❯   4. Opus ✔                    Opus 5.5 · Best for everyday, complex ...
+    //       5. Haiku                     Haiku 4.5 · Fastest for quick answers
+    //
+    // Only OPUS moved -- 5 to 5.5 -- and the date above is the whole diff:
+    // whoever next finds a number here that disagrees with the CLI should
+    // re-capture all five and move the date again, not patch the one noticed.
     expect(MODEL_CHOICES.map((choice) => choice.version)).toEqual([
       // `Default` has no version OF ITS OWN -- it is whichever model the CLI
       // currently recommends -- so it carries that model's name and number,
@@ -139,7 +153,7 @@ describe('the five choices are the CLI’s own aliases', () => {
       'Sonnet 5',
       '5',
       '5.1',
-      '5',
+      '5.5',
       '4.5',
     ]);
   });
@@ -158,7 +172,7 @@ describe('which rows the session’s own model marks', () => {
   // on screen, while the CLI's own menu ticks whichever was chosen.
 
   it('marks the one row whose model the CLI is naming', () => {
-    expect(runningModelRows('Opus 5')).toEqual(['opus']);
+    expect(runningModelRows('Opus 5.5')).toEqual(['opus']);
     expect(runningModelRows('Fable 5.1')).toEqual(['fable']);
     expect(runningModelRows('Haiku 4.5')).toEqual(['haiku']);
   });
@@ -215,12 +229,12 @@ describe('what the button says', () => {
   });
 
   it('wears the same word whichever source the name came from', () => {
-    // ONE VOCABULARY. The transcript hands up an id (`claude-opus-5`) and
+    // ONE VOCABULARY. The transcript hands up an id (`claude-opus-5-5`) and
     // main derives the footer's own shape from it before it crosses the
     // bridge (`transcript-model.ts`), so the button does not rename itself
     // when a session's footer appears or disappears.
-    expect(modelButtonLabel('Opus 5')).toBe(modelButtonLabel('Opus 5'));
-    expect(runningModelRows('Opus 5')).toEqual(['opus']);
+    expect(modelButtonLabel('Opus 5.5')).toBe(modelButtonLabel('Opus 5.5'));
+    expect(runningModelRows('Opus 5.5')).toEqual(['opus']);
   });
 });
 

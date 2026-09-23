@@ -159,6 +159,12 @@ describe('the name the button wears for an id', () => {
     expect(displayModelName('claude-opus-5')).toBe('Opus 5');
     expect(displayModelName('claude-sonnet-5')).toBe('Sonnet 5');
     expect(displayModelName('claude-fable-5-1')).toBe('Fable 5.1');
+    // Claude Code 2.1.280 added `claude-opus-5-5` as the new default Opus
+    // model -- a REAL id now in the corpus, not a hypothetical. No vocabulary
+    // was consulted to read it: the same multi-segment-number rule
+    // `claude-fable-5-1` above already exercises answers it correctly on its
+    // own, which is the whole point of deriving from shape.
+    expect(displayModelName('claude-opus-5-5')).toBe('Opus 5.5');
   });
 
   it('drops an eight-digit date, because a date is not a version', () => {
