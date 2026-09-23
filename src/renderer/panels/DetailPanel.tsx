@@ -3693,7 +3693,14 @@ const TurnBlock = memo(function TurnBlock({
   );
 });
 
-export function DetailPanel(props: DetailPanelProps) {
+/**
+ * `React.memo`: same reason `SessionList.tsx:734` already carries it --
+ * `draft` and its siblings live one level up in `Canvas`, so a keystroke in
+ * ANOTHER pane must not re-render this one. `Canvas.tsx` carries the
+ * matching half: every prop this panel receives is a stable
+ * `useCallback`/`useMemo`, including the per-pane props object itself.
+ */
+export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const {
     entry,
     decision: canvasDecision,
@@ -3852,7 +3859,12 @@ export function DetailPanel(props: DetailPanelProps) {
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
   const olderNow = sessionChanged ? NO_TURNS : older;
   const pagerNow = sessionChanged ? RESTING_PAGER : pager;
-  const mergedColumn = columnOf(entry?.session.decisions ?? NO_TURNS, olderNow);
+  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  // Memoized on the two inputs `columnOf` actually reads: an unrelated
+  // re-render (a sibling pane's keystroke, a focus flip) must reuse the
+  // previous array rather than rebuilding a Set, a filter and a spread over
+  // up to MAX_DECISIONS turns.
+  const mergedColumn = useMemo(() => columnOf(liveDecisions, olderNow), [liveDecisions, olderNow]);
   /**
    * A PICK THE COLUMN NO LONGER CARRIES AT ALL -- not merely off the newest
    * slice, but genuinely absent, the same gap `source.ts` already documents for
@@ -5537,7 +5549,10 @@ export function DetailPanel(props: DetailPanelProps) {
   // Oldest first: the column is newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
-  const orderedTurns = [...mergedColumn].reverse();
+  // `mergedColumn` is itself memoized on `liveDecisions`/`olderNow`, so
+  // keying on it here keeps this reversed copy stable across the same
+  // unrelated re-renders without a second copy of that dependency pair.
+  const orderedTurns = useMemo(() => [...mergedColumn].reverse(), [mergedColumn]);
   /**
    * How many tool calls failed across the turns ON SCREEN, or `null` when no
    * turn read carries the field at all.
@@ -8058,7 +8073,7 @@ export function DetailPanel(props: DetailPanelProps) {
   // the transcript's markdown AND the Files tab's markdown preview, which
   // share one component map. See `out-actions.ts`.
   return <OutActionsProvider value={outActions}>{pane}</OutActionsProvider>;
-}
+});
 
 /**
  * What a right-click on an In bubble offers.
