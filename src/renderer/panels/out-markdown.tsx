@@ -723,12 +723,23 @@ export const OUT_MARKDOWN: Components = {
   pre: ({ children }) => {
     const fence = readFence(children);
     const lang = fence === null ? null : resolveLang(fence.lang);
+    // A FENCE WITH NO INFOSTRING AT ALL -- never one naming a language vam
+    // simply has no grammar for. MEASURED on Claude Code 2.1.280: "code blocks
+    // that don't name a language are now coloured like inline code, so
+    // commands stand out from the surrounding text". Before this, both cases
+    // fell through to the same `[&_code]:text-ink-dim` reset below and read as
+    // plain body text; only the truly language-less one moves, to the ink
+    // `InlineCode` already carries on its own `<code>` (`text-chip`) -- this
+    // is that reset made conditional, not a second rendering path.
+    const noLanguage = fence !== null && fence.lang === null;
     return (
       // EVERYTHING inside the `<pre>` is marked fenced, not just the fallback
       // branch: see `Fenced`'s own comment. A fence is a quotation, and the
       // `code` rule above must not make controls out of a diff.
       <Fenced.Provider value={true}>
-        <pre className="vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-ground px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 [&_code]:text-ink-dim">
+        <pre
+          className={`vam-no-scrollbar overflow-x-auto rounded-[7px] border border-line bg-ground px-2.5 py-2 font-mono text-[0.917em] text-ink-dim leading-[1.55] [&_code]:bg-transparent [&_code]:px-0 ${noLanguage ? '[&_code]:text-chip' : '[&_code]:text-ink-dim'}`}
+        >
           {fence !== null && lang !== null ? <Fence code={fence.code} lang={lang} /> : children}
         </pre>
       </Fenced.Provider>
