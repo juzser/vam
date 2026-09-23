@@ -32,10 +32,15 @@
  *      promises it, and a container that is itself a tab stop would hand
  *      Shift+Tab straight back into the box it just left. Only real
  *      sequential focus navigation can tell.
- *   5. THE SCROLLING KEYS REALLY SCROLL. A focused text control eats
- *      PageUp/PageDown/Home/End before any scroll container sees them, so the
- *      pane does it itself now; `scrollTop` after a real keypress is the only
- *      thing that can say whether that works.
+ *   5. VAM'S OWN SCROLLBACK KEYS REALLY SCROLL, AND THE BARE ONES REALLY
+ *      REACH THE PROGRAM (vam/terminal-arrows). A focused text control eats
+ *      Shift+PageUp/PageDown/Home/End before any scroll container sees them,
+ *      so the pane does that scroll itself; `scrollTop` after a real keypress
+ *      is the only thing that can say whether that works. The BARE arrows and
+ *      Page/Home/End keys are the program's now -- Claude Code's own option
+ *      pickers are walked with them -- so this also proves they reach the
+ *      send channel as `{ kind: "nav", ... }` rather than being read as vam's
+ *      own scroll the way they used to be.
  *   6. A DRAG REALLY SELECTS THE SCREEN. Focusing a text control collapses the
  *      document selection, so the box must not take the keyboard mid-gesture
  *      -- mouse selection is the only way to copy text out of this tab.
@@ -286,14 +291,19 @@ const paneScroll = () =>
     const pane = document.querySelector('[data-terminal-pane]');
     return { top: pane?.scrollTop ?? -1, height: pane?.scrollHeight ?? -1 };
   });
-const keyDown = (key, code, keyCode) =>
+const keyDown = (key, code, keyCode, modifiers) =>
   cdp.send('Input.dispatchKeyEvent', {
     type: 'keyDown',
     key,
     code: code ?? `Key${key.toUpperCase()}`,
     windowsVirtualKeyCode: keyCode ?? key.toUpperCase().charCodeAt(0),
     nativeVirtualKeyCode: keyCode ?? key.toUpperCase().charCodeAt(0),
+    ...(modifiers === undefined ? {} : { modifiers }),
   });
+/** CDP's own modifier bitmask (`Input.dispatchKeyEvent`'s `modifiers`): Alt 1,
+ *  Ctrl 2, Meta 4, Shift 8 -- `CTRL`/`META`/`SHIFT` further down name the
+ *  other three; only this one is needed before that table is declared. */
+const SHIFT = 8;
 
 // ---------------------------------------------------------------------------
 // 3. THE HIDDEN BOX REALLY TAKES THE KEYBOARD.
@@ -404,35 +414,64 @@ check(
 await page.screenshot({ path: `${outDir}/terminal-ime.png` });
 
 // ---------------------------------------------------------------------------
-// 5. THE SCROLLING KEYS REALLY SCROLL.
+// 5. VAM'S OWN SCROLLBACK KEYS REALLY SCROLL, AND THE PANE'S OWN NAVIGATION
+//    KEYS REALLY REACH THE PROGRAM (vam/terminal-arrows).
+//
+// THE REPORT this half now answers: "in the terminal, the arrow keys can't
+// be used to select options." A bare PageDown/End/Home/ArrowDown used to be
+// vam's OWN scroll of the pane's view -- a focused text control eats them for
+// its own caret before a scroll container ever sees them, so the pane had to
+// scroll itself. That is still true, and it is still exactly why
+// Shift+PageDown/Shift+End/Shift+Home exist: vam's scrollback needed a
+// keyboard route once the BARE keys became the program's, and these are the
+// ones a real terminal (xterm, GNOME Terminal) already reserves for it.
 
 await page.evaluate(() => {
   document.querySelector('[data-terminal-pane]').scrollTop = 0;
 });
 await sent();
-await keyDown('PageDown', 'PageDown', 34);
+await keyDown('PageDown', 'PageDown', 34, SHIFT);
 await page.waitForTimeout(150);
 const paged = await paneScroll();
 check(
-  'PageDown scrolls the pane, which a focused text control would otherwise eat',
+  'Shift+PageDown scrolls the pane, which a focused text control would otherwise eat',
   paged.top > 0,
   `scrollTop is ${paged.top} of ${paged.height}`,
 );
-await keyDown('End', 'End', 35);
+await keyDown('End', 'End', 35, SHIFT);
 await page.waitForTimeout(150);
 const ended = await paneScroll();
-check('End reaches the bottom of the screen', ended.top > paged.top, JSON.stringify(ended));
+check(
+  'Shift+End reaches the bottom of the screen',
+  ended.top > paged.top,
+  JSON.stringify(ended),
+);
+await keyDown('Home', 'Home', 36, SHIFT);
+await page.waitForTimeout(150);
+check('Shift+Home comes back to the top', (await paneScroll()).top === 0);
+check(
+  'and none of the four Shift+ chords is typed into the agent',
+  (await sent()).length === 0,
+  'a vam-scroll chord was sent to tmux',
+);
+
+// THE BARE KEYS ARE THE PANE'S NOW, exactly like a printable character --
+// delivered as `{ kind: 'nav', ... }` and NOT a scroll of vam's own view.
+await page.evaluate(() => {
+  document.querySelector('[data-terminal-pane]').scrollTop = 0;
+});
+await keyDown('ArrowDown', 'ArrowDown', 40);
+await keyDown('PageDown', 'PageDown', 34);
+await keyDown('End', 'End', 35);
 await keyDown('Home', 'Home', 36);
 await page.waitForTimeout(150);
-check('Home comes back to the top', (await paneScroll()).top === 0);
-await keyDown('ArrowDown', 'ArrowDown', 40);
-await page.waitForTimeout(150);
-const arrowed = await paneScroll();
-check('ArrowDown moves it by a row', arrowed.top > 0, JSON.stringify(arrowed));
+const navSent = await sent();
 check(
-  'and none of the six is typed into the agent',
-  (await sent()).length === 0,
-  'a scroll key was sent to tmux',
+  'the four bare navigation keys reach the program, as { kind: "nav", nav: <name> }',
+  navSent.length === 4 &&
+    navSent.every((k) => k.kind === 'nav') &&
+    navSent.map((k) => k.nav).join(',') === 'down,page-down,end,home',
+  JSON.stringify(navSent),
 );
 
 // ---------------------------------------------------------------------------
@@ -641,7 +680,7 @@ const chordDown = (key, code, keyCode, modifiers) =>
   });
 const CTRL = 2;
 const META = 4;
-const SHIFT = 8;
+// `SHIFT` is already declared above, next to `keyDown`'s own first use of it.
 
 await sent();
 await heard();

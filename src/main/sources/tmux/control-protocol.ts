@@ -42,13 +42,13 @@
  * `tmux-control-protocol.test.ts` asserts neither contains a character this
  * file would ever need to escape. Every other token has to be an EXACT
  * literal this file already knows about (a verb, a flag, `Enter`, one of the
- * twenty-six `C-<letter>` names). Anything that does not match one of these
- * shapes makes `encodeControlLine` return `null`, and the caller falls back
- * to a real spawn for that one call -- the SAME fallback the whole client
- * degrades to when the persistent connection itself is not there
- * (`control.ts`). A token this file does not recognise is therefore never a
- * reason to guess; it is a reason to do what vam already did before this
- * file existed.
+ * twenty-six `C-<letter>` names, one of the eight navigation keys). Anything
+ * that does not match one of these shapes makes `encodeControlLine` return
+ * `null`, and the caller falls back to a real spawn for that one call -- the
+ * SAME fallback the whole client degrades to when the persistent connection
+ * itself is not there (`control.ts`). A token this file does not recognise is
+ * therefore never a reason to guess; it is a reason to do what vam already
+ * did before this file existed.
  *
  * ── WHAT NEVER RIDES THIS PATH AT ALL ──────────────────────────────────────
  * `new-session`, `set-option` and `kill-session` are not in the allowlist and
@@ -109,6 +109,18 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
   'BSpace',
   'BTab',
   'Escape',
+  // The eight navigation keys (`argv.ts`'s `sendNavArgv`/`NAV_KEY_NAMES`) --
+  // pressed with `--`, exactly as a control chord is, so each reaches this
+  // loop as its own bareword token rather than the six-token `-l --` shape
+  // above.
+  'Up',
+  'Down',
+  'Left',
+  'Right',
+  'Home',
+  'End',
+  'PageUp',
+  'PageDown',
   ...'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => `C-${letter}`),
 ]);
 

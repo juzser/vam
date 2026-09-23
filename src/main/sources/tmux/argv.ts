@@ -29,7 +29,7 @@
  * element reaches the exec'd program as one word whatever it contains.
  */
 
-import type { ControlLetter } from '../../../shared/terminal.js';
+import type { ControlLetter, NavKey } from '../../../shared/terminal.js';
 
 /**
  * The prefix that makes a session vam's own, AT A GLANCE.
@@ -857,6 +857,72 @@ export function sendControlArgv(name: string, letter: ControlLetter): readonly s
     // and would send the next reader to the wrong builder entirely.
     throw new Error(
       `vam will not build a tmux send-keys argv: \`${String(letter)}\` is not one of the twenty-six control chords`,
+    );
+  }
+  return ['send-keys', '-t', paneTarget(name), '--', keyName];
+}
+
+/**
+ * THE EIGHT NAVIGATION KEYS, one tmux key name each -- `CONTROL_KEY_NAMES`'s
+ * own shape, keyed by `NavKey` instead of `ControlLetter`.
+ *
+ * MEASURED on tmux 3.7b over a private `-L` socket, against
+ * `e2e/fixtures/key-echo.cjs` in a real pane, plain cursor-key mode: `send-keys
+ * Up`/`Down`/`Left`/`Right` delivered the VT100 cursor sequences (`1b 5b 41`,
+ * `42`, `44`, `43`), `Home`/`End` delivered `1b 5b 31 7e` / `1b 5b 34 7e`, and
+ * `PageUp`/`PageDown` -- tmux's own aliases for `PPage`/`NPage`, confirmed to
+ * deliver the identical bytes -- delivered `1b 5b 35 7e` / `1b 5b 36 7e`.
+ * `PageUp`/`PageDown` are spelled that way rather than `PPage`/`NPage` for the
+ * same reason `sendControlArgv` writes `C-u` rather than a shorter form
+ * nothing else here uses: the next reader should not have to know a second
+ * name means the same key.
+ *
+ * WHAT TMUX DOES WITH `Up`/`Down` WHEN THE PANE'S OWN PROGRAM CARES, MEASURED
+ * ON THE SAME SOCKET rather than assumed: a program that turns on application
+ * cursor mode (DECCKM, `ESC [ ? 1 h`) made the identical `send-keys Up`/`Down`
+ * arrive as the SS3 form instead (`1b 4f 41` / `1b 4f 42`) -- `Home`/`End`
+ * unchanged. This is tmux's own job, not vam's: it tracks the mode of the
+ * pane it is emulating a terminal for, so pressing the ABSTRACT key here and
+ * letting tmux translate it is what makes a Claude Code picker (which sets
+ * the mode) and a plain shell (which does not) both receive the sequence
+ * their own program actually expects, from the one table below.
+ */
+const NAV_KEY_NAMES: Readonly<Record<NavKey, string>> = {
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+  home: 'Home',
+  end: 'End',
+  'page-up': 'PageUp',
+  'page-down': 'PageDown',
+};
+
+/**
+ * Press one of the terminal's own navigation keys -- the SEVENTH interpreted
+ * key, and `sendControlArgv`'s own shape: a value off the bridge SELECTS a
+ * compile-time constant out of a closed table, rather than being spliced into
+ * one, so `--` is here for the identical reason it is there -- the terminator
+ * makes "no argument can be read as an option" a property of the argv's
+ * SHAPE, not of what the table happens to hold today.
+ *
+ * WHY THIS IS A KIND AND NOT A FIELD ON `text`, restated for the eighth time
+ * this file makes the argument: `send-keys -l -- 'Up'` would TYPE the two
+ * letters into the operator's own prompt, which is not what an arrow key is
+ * for. `Up` and its seven siblings have to go through tmux's own key
+ * translation exactly as `Enter` and `BSpace` do.
+ *
+ * THE LOOKUP REFUSES RATHER THAN SPLICING, for the same reason
+ * `sendControlArgv`'s does: a `NavKey` with no constant is unreachable twice
+ * over (`isNavKey` at the bridge, the parameter's type at compile time), and
+ * the alternative to a refusal is an argv carrying the literal string
+ * `undefined`.
+ */
+export function sendNavArgv(name: string, nav: NavKey): readonly string[] {
+  const keyName = NAV_KEY_NAMES[nav];
+  if (keyName === undefined) {
+    throw new Error(
+      `vam will not build a tmux send-keys argv: \`${String(nav)}\` is not one of the eight navigation keys`,
     );
   }
   return ['send-keys', '-t', paneTarget(name), '--', keyName];

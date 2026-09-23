@@ -335,6 +335,10 @@ describe('the send channel refuses what the renderer may not ask', () => {
     // is the least trusted process in the app, and `isPaneKey` checks the
     // field rather than defaulting it (`shared/terminal.ts`).
     ['an Enter with no shift field', [ATLAS, { kind: 'enter' }]],
+    // `send-nav-keys.test.ts` carries the full table of malformed `nav`
+    // shapes; this is the one representative case that belongs beside the
+    // rest of the general refusal table.
+    ['a nav key that is not one of the eight', [ATLAS, { kind: 'nav', nav: 'diagonal' }]],
     ['a row id that is not a string', [ATLAS, { kind: 'enter', shift: false }, 42]],
     ['one argument too many', [ATLAS, { kind: 'enter', shift: false }, ATLAS, 'extra']],
   ])('refuses %s without running tmux', async (_why, args) => {

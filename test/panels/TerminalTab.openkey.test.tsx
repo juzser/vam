@@ -202,8 +202,6 @@ describe('a named key is still not text, however many characters spell its name'
     ['Shift', { key: 'Shift', shiftKey: true }],
     ['Tab', { key: 'Tab' }],
     ['CapsLock', { key: 'CapsLock' }],
-    ['ArrowLeft', { key: 'ArrowLeft' }],
-    ['ArrowRight', { key: 'ArrowRight' }],
     ['F5', { key: 'F5' }],
     ['Delete', { key: 'Delete' }],
     ['ContextMenu', { key: 'ContextMenu' }],
@@ -216,10 +214,11 @@ describe('a named key is still not text, however many characters spell its name'
     // ASCII, which is exactly what a correction from OpenKey never is -- it
     // has no reason to correct anything that carries no diacritic.
     expect(sent).toEqual([]);
-    // AND IT WAS NOT SWALLOWED EITHER. `ArrowLeft`/`ArrowRight` are not among
-    // `SCROLL_KEYS` and reach the window listener exactly as before; `Tab` is
-    // the pane's own way out; `Shift` alone is a hand moving, not a chord vam
-    // or the pane owns.
+    // AND IT WAS NOT SWALLOWED EITHER. `Tab` is the pane's own way out;
+    // `Shift` alone is a hand moving, not a chord vam or the pane owns.
+    // `ArrowLeft`/`ArrowRight` used to be declined here too -- they are the
+    // pane's `nav` keys now (vam/terminal-arrows), pinned as sent rather than
+    // declined in `TerminalTab.nav-keys.test.tsx`.
     expect(heard).toEqual([init.key]);
     expect(notPrevented).toBe(true);
   });

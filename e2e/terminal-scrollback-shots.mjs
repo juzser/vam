@@ -341,14 +341,18 @@ check(
 
 /* ── 4: GOING BACK TO THE BOTTOM RE-PINS IT ──────────────────────────────── */
 
-// `End` is one of the six scroll keys the pane binds (`SCROLL_KEYS`), and the
-// pane has to hold the keyboard for it — a click is how an operator gives it.
+// `Shift+End` is vam's OWN scrollback control now (vam/terminal-arrows): a
+// bare `End` reaches the program in the pane instead (`NAV_KEYS`), because
+// the operator's report was that the arrows and Home/End/PageUp/PageDown
+// could not be used to walk a Claude Code picker from inside this tab — see
+// `TerminalTab.nav-keys.test.tsx` for the fix in full. The pane has to hold
+// the keyboard for either spelling — a click is how an operator gives it.
 await page.locator('[data-terminal-pane]').click();
-await page.keyboard.press('End');
+await page.keyboard.press('Shift+End');
 await page.waitForTimeout(150);
 const returned = await readPane();
 check(
-  'End takes the operator back to the live end',
+  'Shift+End takes the operator back to the live end',
   atBottom(returned),
   `scrollTop ${returned.scrollTop} of ${returned.scrollHeight - returned.clientHeight}`,
 );
