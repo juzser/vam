@@ -6162,9 +6162,19 @@ function CanvasInner({
    * room for a split, and the chord grammar that would create one is
    * already off there — see the `onKeyDown` effect's own guard).
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draft`/`composing`/`writing`/`actionIndex` below are not read directly here -- `buildDetailProps` reads its own copies through `mapsRef` -- they are listed ONLY so this memo recomputes exactly when the FOCUSED session's slice of the four maps changes, mirroring `PaneDetail`'s own memo above for the same reason: PhoneShell is handed this object directly (no per-pane wrapper), so without these deps a keystroke in the phone composer would never recompute it.
   const detailProps = useMemo(
     () => buildDetailProps(focusedEntry, focusedSessionId, focusedPaneId, true),
-    [buildDetailProps, focusedEntry, focusedSessionId, focusedPaneId],
+    [
+      buildDetailProps,
+      focusedEntry,
+      focusedSessionId,
+      focusedPaneId,
+      focusedSessionId === null ? undefined : draftsBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : composingBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : writingBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : actionIndexBySession[focusedSessionId],
+    ],
   );
 
   /**

@@ -192,6 +192,24 @@ describe('the phone session screen', () => {
     expect(document.querySelector('[data-question-submit]')).toBeNull();
   });
 
+  it('keeps a typed character in the composer: `detailProps` recomputes on a draft change', () => {
+    // Regression for the round-1 memoization bug: `detailProps` (the object
+    // handed straight to `PhoneShell`, unlike the split panes which go
+    // through `PaneDetail`'s own memo) must still recompute when the
+    // focused session's draft changes, or this controlled textarea reverts
+    // every keystroke to the stale cached value.
+    openSession();
+    const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    act(() => {
+      fireEvent.focus(textarea);
+    });
+    act(() => {
+      fireEvent.change(textarea, { target: { value: 'a' } });
+    });
+    expect(textarea.value).toBe('a');
+  });
+
   it('does not draw the composer at all on a read-only server', () => {
     render(
       <Canvas
