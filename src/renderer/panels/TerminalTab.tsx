@@ -64,6 +64,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type {
+  NavKey,
   PaneKey,
   PaneReadMode,
   PaneSendResult,
@@ -508,34 +509,60 @@ function controlStrokeFor(key: string): PaneKey | null {
 }
 
 /**
- * WHAT A FOCUSED TEXT CONTROL TAKES AWAY, AND THE PANE DOES FOR ITSELF.
+ * THE OPERATOR'S REPORT: "in the terminal, the arrow keys can't be used to
+ * select options." This used to be the opposite function -- `SCROLL_KEYS`
+ * mapped these six DOM key names to a scroll of THIS element's own view,
+ * ahead of anything the pane could be sent, on the argument that a focused
+ * text control eats them for its own caret before a scroll container ever
+ * sees them (still true, and still argued below at `SCROLL_CHORDS`). What
+ * that argument missed is that Claude Code's own option pickers --
+ * `AskUserQuestion`, a permission prompt, `/model`, `/config`, plan approval,
+ * and as of 2.1.280 all four with Home/End/PageUp/PageDown too -- are walked
+ * with exactly these keys, so a tab that swallowed them into its own
+ * scrollbar left every one of those pickers unreachable from inside vam.
+ * `ArrowLeft`/`ArrowRight` were never even scroll keys here; `strokeFor`
+ * declined them outright (a named key is never one printable character), so
+ * they reached neither the pane nor vam's own grammar at all.
  *
- * The pane is a scroll region with a hidden scrollbar, and the focus stop
- * exists so that the keyboard can read past the first screenful -- that is the
- * original reason this element takes focus at all. THE HIDDEN BOX BREAKS THAT
- * FOR FREE, because the browser gives these keys to whatever text control has
- * the keyboard before it gives them to a scroll container. Measured in
- * Chromium with an empty one-by-one `<textarea>` focused inside a scrolling
- * `<section>`: `PageDown`, `PageUp`, `Home` and `End` moved the pane not at
- * all, and `ArrowUp`/`ArrowDown` moved it only sometimes -- they fall through
- * to the container when the caret cannot move, which stops being true the
- * moment an input method puts a candidate in the box.
- *
- * So the pane scrolls itself, for all six, rather than leaving a surface whose
- * only reason to take focus has silently stopped working. The distance is
- * measured in the SCREEN'S own rows (the ruler, the same character the column
- * count is derived from), which is what a terminal scrolls in, and what the
- * browser's 40px guess was only ever approximating.
- *
- * Nothing is stopped from PROPAGATING: these keys still reach vam's own window
- * listener exactly as they did, where the pane's `data-insert-scope` stands the
- * canvas grammar down.
+ * A TERMINAL BEHAVES LIKE A TERMINAL: all eight go to the program now, PRESSED
+ * exactly as a Ctrl chord is (`shared/terminal.ts`'s `PaneKey.nav`,
+ * `sources/tmux/argv.ts`'s `sendNavArgv`) -- and vam's own scrollback, which
+ * still needs a keyboard route now that these are the program's, moved to
+ * `SCROLL_CHORDS` below: Shift+PageUp/PageDown/Home/End, the chords a real
+ * terminal (xterm, GNOME Terminal) already reserves for its own scrollback
+ * rather than the program.
  */
-type PaneScroll = 'up' | 'down' | 'page-up' | 'page-down' | 'top' | 'bottom';
-
-const SCROLL_KEYS: Readonly<Record<string, PaneScroll>> = {
+const NAV_KEYS: Readonly<Record<string, NavKey>> = {
   ArrowUp: 'up',
   ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+  Home: 'home',
+  End: 'end',
+  PageUp: 'page-up',
+  PageDown: 'page-down',
+};
+
+/**
+ * VAM'S OWN SCROLLBACK, ONLY EVER Shift-HELD -- the four of `NAV_KEYS`'s
+ * eight that a real terminal also binds to ITS OWN history rather than to the
+ * program (there is no terminal convention for a Shift-held single-row arrow,
+ * so the arrows carry no vam meaning at all now; the wheel is what scrolls a
+ * row at a time). Checked FIRST, ahead of `NAV_KEYS`, and only while
+ * `event.shiftKey` holds -- a bare `PageUp` etc. is the program's, exactly
+ * like a bare arrow.
+ *
+ * Measured in Chromium with an empty one-by-one `<textarea>` focused inside a
+ * scrolling `<section>` (the ORIGINAL reason this element takes focus at
+ * all): `PageDown`, `PageUp`, `Home` and `End` moved the pane not at all on
+ * their own -- a focused text control eats them for its own caret before a
+ * scroll container ever sees them -- so the pane still has to scroll itself
+ * for these four, or the operator's own scrollback becomes unreachable by
+ * keyboard the moment the hidden box holds the caret.
+ */
+type PaneScroll = 'page-up' | 'page-down' | 'top' | 'bottom';
+
+const SCROLL_CHORDS: Readonly<Record<string, PaneScroll>> = {
   PageUp: 'page-up',
   PageDown: 'page-down',
   Home: 'top',
@@ -557,13 +584,9 @@ export function scrollPane(pane: HTMLElement, how: PaneScroll, row: number): voi
       ? 0
       : how === 'bottom'
         ? pane.scrollHeight
-        : how === 'up'
-          ? from - row
-          : how === 'down'
-            ? from + row
-            : how === 'page-up'
-              ? from - page
-              : from + page;
+        : how === 'page-up'
+          ? from - page
+          : from + page;
   // Clamped at the top by hand because a negative `scrollTop` is not a
   // position; the bottom is clamped by the browser against the real content
   // height, which is the only thing that knows it.
@@ -1532,17 +1555,18 @@ export function TerminalTab({
    * carries no Shift bit on a control character, so `Ctrl+Shift+P` is `C-p`
    * and the pane owes it to the agent.
    *
-   * A printable key, Return and Backspace are the PANE'S, and they are stopped
-   * here. The canvas reads a focused element as text entry only when it is an
-   * `INPUT` or a `TEXTAREA`, and this is a `section`: without stopping the
-   * event, typing `j` here would type a `j` into the agent AND move vam's
-   * cursor.
+   * A printable key, Return, Backspace and now the eight navigation keys
+   * (`NAV_KEYS`) are the PANE'S, and they are stopped here. The canvas reads a
+   * focused element as text entry only when it is an `INPUT` or a `TEXTAREA`,
+   * and this is a `section`: without stopping the event, typing `j` here
+   * would type a `j` into the agent AND move vam's cursor -- and an unstopped
+   * arrow would walk a Claude Code picker AND vam's own session list at once.
    *
-   * Everything else is the BROWSER'S -- the arrows, the Page keys, Home/End,
-   * Tab. The first six are why this element takes focus at all (the pane is a
-   * scroll region with a hidden scrollbar), and Tab is the second way out.
-   * They are not forwarded to tmux, so scrolling the transcript is still
-   * scrolling and not a keypress inside the agent.
+   * TAB IS STILL THE BROWSER'S, and it is the only thing left that is: the way
+   * out of a surface that now consumes every other named key. `SCROLL_CHORDS`
+   * (Shift+PageUp/PageDown/Home/End) is vam's own, checked first and never
+   * forwarded to tmux -- see its own doc for why it exists at all now that the
+   * bare keys are the pane's.
    */
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
@@ -1658,15 +1682,45 @@ export function TerminalTab({
       // keyboard back so the next syllable has somewhere to compose. Deferred
       // so it cannot move focus out from under this event's own default.
       if (event.target !== inputRef.current) queueMicrotask(takeKeyboard);
-      // The six keys a focused text control would eat -- see `SCROLL_KEYS`.
-      // Cancelled, because the pane is doing the browser's job here; not
-      // stopped, because they still belong to vam's own keyboard afterwards.
-      const scroll = SCROLL_KEYS[event.key];
-      if (scroll !== undefined) {
-        const pane = paneRef.current;
-        if (pane === null) return;
+      // VAM'S OWN SCROLLBACK, Shift-HELD ONLY -- `SCROLL_CHORDS`'s own doc has
+      // why these four moved here. Cancelled, because the pane is doing the
+      // browser's job here; not stopped, because they still belong to vam's
+      // own keyboard afterwards, exactly as the six keys they replace always
+      // did. Checked before `NAV_KEYS` below so a bare `PageUp` still reaches
+      // the program once this declines it (no Shift held).
+      if (event.shiftKey) {
+        const scroll = SCROLL_CHORDS[event.key];
+        if (scroll !== undefined) {
+          const pane = paneRef.current;
+          if (pane === null) return;
+          event.preventDefault();
+          scrollPane(pane, scroll, rulerRef.current?.getBoundingClientRect().height ?? 0);
+          return;
+        }
+      }
+      // THE EIGHT NAVIGATION KEYS -- an arrow, Home, End, PageUp or PageDown
+      // -- are the PANE'S now, exactly like a printable character. `NAV_KEYS`
+      // carries the report this answers.
+      const nav = NAV_KEYS[event.key];
+      if (nav !== undefined) {
+        // THE SAME GUARD, IN THE SAME ORDER, AS EVERY OTHER SEND BELOW: a
+        // build with no bridge behind it must not eat an arrow key either, or
+        // a browser build would silently kill the browser's own scrolling of
+        // whatever ends up focused here with nothing to replace it.
+        if (send === undefined || projectId === null) return;
         event.preventDefault();
-        scrollPane(pane, scroll, rulerRef.current?.getBoundingClientRect().height ?? 0);
+        event.stopPropagation();
+        queue([{ kind: 'nav', nav }]);
+        // TERMINAL CONVENTION: a key delivered to the program returns the
+        // view to the live end, so the operator can see what they just
+        // navigated to. Unconditional -- the same call the sticky-follow
+        // layout effect makes (`scrollPane(pane, 'bottom', row)`) -- rather
+        // than guarded on `atBottom`, because it is a no-op there and the one
+        // case worth this line is the operator scrolled away from it.
+        const pane = paneRef.current;
+        if (pane !== null) {
+          scrollPane(pane, 'bottom', rulerRef.current?.getBoundingClientRect().height ?? 0);
+        }
         return;
       }
       const stroke = strokeFor(event.key, event.shiftKey);
@@ -1985,11 +2039,15 @@ export function TerminalTab({
           first can no longer be justified by the old reasoning. It began as a
           scroll region: `vam-no-scrollbar` hides the bar, so without a focus
           stop there was no way at all, mouse or key, to read past the first
-          screenful. That is still true, and the arrows, Page keys and
-          Home/End still scroll here because they are still not bound.
-          What changed is that printable keys and Return are bound, and are
-          typed into a running agent. So this is no longer "a focus stop that
-          activates nothing": it activates something on someone else's
+          screenful. That is still true, and Shift+PageUp/PageDown/Home/End
+          (`SCROLL_CHORDS`) still scroll THIS view for exactly that reason --
+          the bare arrows and Page keys and Home/End are bound to the PANE now
+          (`NAV_KEYS`, vam/terminal-arrows), not to vam's own scroll, because
+          Claude Code's own option pickers are walked with them and a tab that
+          swallowed them left every picker unreachable from in here. What
+          changed before that is that printable keys and Return are bound, and
+          are typed into a running agent. So this is no longer "a focus stop
+          that activates nothing": it activates something on someone else's
           machine. It is therefore focused deliberately on arrival, and left by
           TAB -- Escape is not an exit here, it is one of the keys sent into
           the agent, which is the point of the pane. Tab is the way out, and it

@@ -20,6 +20,7 @@ import {
   sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNavArgv,
   sendNewlineArgv,
   sendTextArgv,
   sendWheelArgv,
@@ -89,6 +90,38 @@ describe('encodeControlLine', () => {
     );
     expect(encodeControlLine(sendControlArgv('vam-a1b2c3', 'u'))?.line).toBe(
       'send-keys -t =vam-a1b2c3: -- C-u',
+    );
+  });
+
+  it('encodes each of the eight navigation keys untouched, `--` and all', () => {
+    // vam/terminal-arrows. `sendNavArgv`'s own shape -- `send-keys -t <target>
+    // -- <Name>` -- rather than the six-token `-l --` shape above, so this
+    // rides the plain bareword loop exactly as `sendControlArgv`'s output
+    // does, and the fast path never has to fall back to a real spawn for a
+    // key the operator presses on every arrow, Home, End, PageUp or PageDown.
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'up'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- Up',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'down'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- Down',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'left'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- Left',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'right'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- Right',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'home'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- Home',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'end'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- End',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'page-up'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- PageUp',
+    );
+    expect(encodeControlLine(sendNavArgv('vam-a1b2c3', 'page-down'))?.line).toBe(
+      'send-keys -t =vam-a1b2c3: -- PageDown',
     );
   });
 

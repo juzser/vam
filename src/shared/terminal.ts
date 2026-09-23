@@ -416,6 +416,28 @@ export function isPaneSize(size: PaneSize): boolean {
  * A discriminated pair rather than a string with a flag: the renderer is the
  * least trusted process in the app, and "was this literal?" must not be a
  * boolean that a missing field can make false.
+ *
+ * `nav` IS THE FOURTH, AND THE LIST BEING SHORT NEVER MEANT CLOSED -- `control`
+ * already grew it once. The operator's report, translated: "in the terminal,
+ * the arrow keys can't be used to select options." `TerminalTab.tsx` read
+ * `ArrowUp`/`ArrowDown`/`PageUp`/`PageDown`/`Home`/`End` as VAM'S OWN scroll
+ * keys, before a keystroke ever reached `strokeFor` -- so Claude Code's own
+ * option pickers (`AskUserQuestion`, a permission prompt, `/model`, `/config`,
+ * plan approval), every one of them walked with the arrows, could not be
+ * driven from inside vam's pane at all. `ArrowLeft`/`ArrowRight` were not even
+ * that lucky: `strokeFor` declined them outright (a named key is never one
+ * printable character) and they reached neither the pane nor vam's own
+ * grammar. `nav` is the eight keys a terminal is navigated with -- the four
+ * arrows and Home/End/PageUp/PageDown -- PRESSED rather than typed, for the
+ * same reason `control` is: `send-keys -l -- 'Up'` would type the two letters
+ * into the operator's own prompt. `sources/tmux/argv.ts`'s `sendNavArgv`
+ * carries the measurement of what a real pane receives for each.
+ *
+ * A KIND CARRYING A CLOSED VALUE, NOT EIGHT KINDS, matching `control`'s own
+ * shape rather than `enter`/`escape`/`backspace`/`back-tab`'s: `nav` is one
+ * FAMILY of the pane's own keys, exactly as `control` is one family of Ctrl
+ * chords, and `isNavKey` checks it against a frozen eight-member set the same
+ * way `isControlLetter` does its twenty-six.
  */
 export type PaneKey =
   | { readonly kind: 'text'; readonly text: string }
@@ -434,6 +456,13 @@ export type PaneKey =
   | { readonly kind: 'escape' }
   /** One Ctrl chord -- `C-u` to tmux, and its twenty-five siblings. */
   | { readonly kind: 'control'; readonly letter: ControlLetter }
+  /**
+   * One of the terminal's own navigation keys -- an arrow, Home, End,
+   * PageUp or PageDown -- pressed in the pane rather than scrolled in vam's
+   * own view. See the type doc above for the report this answers and
+   * `sendNavArgv` for the measured escape sequence each one delivers.
+   */
+  | { readonly kind: 'nav'; readonly nav: NavKey }
   /**
    * The wheel, for a pane whose program asked for the mouse (`PaneView.mouse`).
    * Delivered as `ticks` SGR mouse reports at the cell under the pointer,
@@ -529,6 +558,48 @@ export function isControlLetter(value: unknown): value is ControlLetter {
 }
 
 /**
+ * THE WHOLE ALLOWLIST OF NAVIGATION KEYS -- the four arrows and Home, End,
+ * PageUp, PageDown, written out exactly as `CONTROL_LETTERS` is.
+ *
+ * EIGHT, AND CLOSED FOR THE SAME REASON THAT LIST IS: these are the keys a
+ * terminal is navigated with (`PaneKey`'s own `nav` doc has the report), and
+ * anything else a keyboard sends is either a character `strokeFor` already
+ * carries or a browser/vam chord this file has no business claiming.
+ * `Insert` and `Delete` are deliberately NOT here -- the operator's report was
+ * about the arrows and the pickers they walk, `Delete` already means
+ * something to a browser (and nothing measured yet to a pane), and a list
+ * grown on a guess is a list this file would have to defend twice.
+ *
+ * SPELLED AS LITERALS, so a `string` narrowed by a regular expression can
+ * never stand in for it -- the same defence `CONTROL_LETTERS` makes.
+ */
+export const NAV_KEYS = [
+  'up',
+  'down',
+  'left',
+  'right',
+  'home',
+  'end',
+  'page-up',
+  'page-down',
+] as const;
+
+/** One of the eight above, and nothing else is assignable to it. */
+export type NavKey = (typeof NAV_KEYS)[number];
+
+const NAV_KEY_SET: ReadonlySet<string> = new Set<string>(NAV_KEYS);
+
+/**
+ * Whether a value off the bridge names one of the eight navigation keys --
+ * `isControlLetter`'s own reasoning, unchanged: a `Set` built FROM the list
+ * so membership of the array IS the definition, and exported because the
+ * renderer decides with it too (`TerminalTab.tsx`).
+ */
+export function isNavKey(value: unknown): value is NavKey {
+  return typeof value === 'string' && NAV_KEY_SET.has(value);
+}
+
+/**
  * The longest text one keystroke may carry. A `KeyboardEvent.key` for a
  * printable key is one character, and a composed one (an IME, a dead key) is
  * a very few. The bound is what keeps this channel from becoming an unbounded
@@ -567,6 +638,7 @@ export function isPaneKey(value: unknown): value is PaneKey {
     kind?: unknown;
     text?: unknown;
     letter?: unknown;
+    nav?: unknown;
     direction?: unknown;
     ticks?: unknown;
     column?: unknown;
@@ -581,10 +653,11 @@ export function isPaneKey(value: unknown): value is PaneKey {
   // for the same reason `wheel`'s numbers are bounded here rather than
   // trusted -- the renderer is the least trusted process in the app.
   if (key.kind === 'enter') return key.shift === true || key.shift === false;
-  // The only kind that carries a field main turns into a tmux KEY, and so the
-  // only one whose field is checked against a closed list rather than bounded
-  // in length: `letter` is looked up, never spliced.
+  // The only two kinds that carry a field main turns into a tmux KEY, and so
+  // the only two whose field is checked against a closed list rather than
+  // bounded in length: `letter` and `nav` are looked up, never spliced.
   if (key.kind === 'control') return isControlLetter(key.letter);
+  if (key.kind === 'nav') return isNavKey(key.nav);
   // Every number a report carries is bounded here and only here, so main can
   // format them without a clamp of its own: a clamp is a value invented for
   // a caller that sent one main would not have.

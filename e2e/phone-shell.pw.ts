@@ -1624,14 +1624,17 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
   });
 
-  test('the keystroke strip draws five 44px controls that fit inside 390px', async ({ page }) => {
+  test('the keystroke strip draws seven 44px controls that fit inside 390px', async ({ page }) => {
+    // vam/terminal-arrows: Up/Down joined the five (a phone has no arrow
+    // keys, and Claude Code's own option pickers need them) -- see
+    // `KEY_STRIP` in `DetailPanel.tsx`.
     await stubSource(page);
     await openFirstAlphaSession(page);
 
     const strip = page.locator('[data-key-strip]');
     await expect(strip).toBeVisible();
     const keys = strip.locator('[data-key-strip-key]');
-    await expect(keys).toHaveCount(5);
+    await expect(keys).toHaveCount(7);
 
     const geometry = await strip.evaluate((el) => {
       const r = el.getBoundingClientRect();

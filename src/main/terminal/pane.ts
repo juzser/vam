@@ -36,6 +36,7 @@ import {
   sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNavArgv,
   sendNewlineArgv,
   sendTextArgv,
   sendWheelArgv,
@@ -414,13 +415,14 @@ export async function sendToPane(
 ): Promise<PaneSendResult> {
   const match = { name } as const;
   // The builders are kept apart in `tmux/argv.ts` for the one reason that
-  // matters here: `-l` types, and Return, Backspace, Shift-Tab, Escape and a
-  // Ctrl chord have to be PRESSED. There is deliberately no builder that takes
-  // a key name, so nothing here can turn the operator's text into a keypress
-  // by accident -- and this switch is where that holds: a `kind` off the bridge
-  // selects one of five fixed argvs, or one of twenty-six constants in a table
-  // it can only INDEX, and only `text` carries anything the operator wrote.
-  // `enter` alone answers TWO of the five, by `shift` -- the one field this
+  // matters here: `-l` types, and Return, Backspace, Shift-Tab, Escape, a
+  // Ctrl chord and a navigation key all have to be PRESSED. There is
+  // deliberately no builder that takes a key name, so nothing here can turn
+  // the operator's text into a keypress by accident -- and this switch is
+  // where that holds: a `kind` off the bridge selects one of five fixed
+  // argvs, or one of twenty-six or eight constants in a table it can only
+  // INDEX, and only `text` carries anything the operator wrote. `enter`
+  // alone answers TWO of the five, by `shift` -- the one field this
   // switch reads off a kind rather than dispatching on, because Shift+Return
   // is typed (`-l`, a literal LF) rather than pressed and still is not text
   // the operator wrote: it is vam's own answer to a modifier, exactly as
@@ -453,13 +455,19 @@ export async function sendToPane(
                 // the wrong pane is a bigger mistake than a letter in it and
                 // never a smaller one.
                 sendControlArgv(match.name, key.letter)
-              : key.kind === 'wheel'
-                ? // The one key that is neither pressed nor typed by the
-                  // operator: a mouse report the program in the pane asked
-                  // for, and aimed by the same guard as everything else --
-                  // a wheel that scrolls somebody else's pager is a smaller
-                  // mistake than a chord, and still one.
-                  sendWheelArgv(match.name, key)
-                : sendTextArgv(match.name, key.text);
+              : key.kind === 'nav'
+                ? // An arrow, Home, End, PageUp or PageDown -- the operator's
+                  // own navigation keys, pressed in the pane exactly as a
+                  // control chord is (`sendNavArgv`'s own note has the
+                  // measurement).
+                  sendNavArgv(match.name, key.nav)
+                : key.kind === 'wheel'
+                  ? // The one key that is neither pressed nor typed by the
+                    // operator: a mouse report the program in the pane asked
+                    // for, and aimed by the same guard as everything else --
+                    // a wheel that scrolls somebody else's pager is a smaller
+                    // mistake than a chord, and still one.
+                    sendWheelArgv(match.name, key)
+                  : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }
