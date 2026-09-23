@@ -19,9 +19,15 @@ export default defineConfig({
     // and 15s/30s launches blow the default suite's much shorter
     // `testTimeout` regardless of a display, which is exactly what running
     // it once, unexcluded, measured.
+    //
+    // `test/electron/getting-started-image.test.ts` is the same bargain
+    // again: it spawns a real Electron binary via `runProbe` and needs the
+    // longer timeout `vitest.app.config.ts` gives it, not the default
+    // suite's -- measured directly (5000ms timeout, unexcluded).
     exclude: [
       'test/electron/launch.test.ts',
       'test/electron/userdata-isolation.test.ts',
+      'test/electron/getting-started-image.test.ts',
       '**/node_modules/**',
       '**/dist/**',
     ],
