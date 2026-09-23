@@ -37,6 +37,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_REMOTE_PORT } from '../../src/main/remote/launch.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const bin = (name: string) => path.join(repoRoot, 'node_modules', '.bin', name);
@@ -196,6 +197,56 @@ describe('the Electron harness gets its own throwaway userData', () => {
       expect(existsSync(path.join(userDataA, 'Local Storage'))).toBe(true);
     } finally {
       childA.kill('SIGKILL');
+    }
+  }, 40_000);
+
+  /**
+   * `VAM_USER_DATA_DIR` ISOLATES STORAGE, NOT THE REMOTE ENDPOINT.
+   *
+   * `src/main/index.ts` starts `startRemoteTransport()` unconditionally on
+   * every launch, fixture or not, and `remote/launch.ts`'s own header
+   * explains why it defaults to `DEFAULT_REMOTE_PORT` (58217) rather than
+   * refusing to listen: a packaged app launched from Finder has no shell to
+   * set `VAM_REMOTE_PORT` in. That default is exactly what the operator's
+   * own, already-running `vam.app` binds on the same machine -- and unlike
+   * `userData`, nothing about a fresh profile touches it.
+   *
+   * Every call this suite makes itself passes `VAM_REMOTE_PORT` explicitly
+   * (`freePort()`, above) -- but a probe run directly, the way this bug was
+   * actually found, does not go through this file at all, and used to fall
+   * straight through to the default. This spawns exactly that: no
+   * `VAM_REMOTE_PORT`, a decoy already holding 58217 (standing in for the
+   * operator's live app, or simply IS it, if one happens to be running),
+   * and asserts the probe never even tries that port -- `main.ts` itself
+   * (via `test/electron/free-port.cjs`, the probes' own guard) must pick a
+   * throwaway one before `require`-ing main, exactly as this file's own
+   * `freePort()` does for every OTHER launch here.
+   */
+  it('never lets the remote endpoint default to the operator’s own live port, even when the caller forgets VAM_REMOTE_PORT', async () => {
+    let decoy: ReturnType<typeof createServer> | null = createServer();
+    const decoyIsBorrowed = await new Promise<boolean>((resolve, reject) => {
+      decoy?.once('error', (error: NodeJS.ErrnoException) => {
+        if (error.code === 'EADDRINUSE') {
+          // Already taken -- almost certainly the operator's own real app.
+          // Either way the port is spoken for, which is all this test needs.
+          decoy = null;
+          resolve(true);
+        } else {
+          reject(error);
+        }
+      });
+      decoy?.listen(DEFAULT_REMOTE_PORT, '127.0.0.1', () => resolve(false));
+    });
+    try {
+      const override = scratchDir('vam-override-remote-');
+      // VAM_REMOTE_PORT DELIBERATELY OMITTED.
+      const run = await waitForExit(spawnProbe({ VAM_USER_DATA_DIR: override }));
+      expect(`${run.code} ${run.stderr}`).toBe(`0 ${run.stderr}`);
+      expect(run.stderr).not.toContain(`could not bind port ${DEFAULT_REMOTE_PORT}`);
+    } finally {
+      if (!decoyIsBorrowed) {
+        decoy?.close();
+      }
     }
   }, 40_000);
 });

@@ -21,6 +21,7 @@
  */
 const path = require('node:path');
 const { app, BrowserWindow } = require('electron');
+const { ensureHarnessRemotePort } = require('./free-port.cjs');
 
 const MAIN = path.join(__dirname, '..', '..', 'out', 'main', 'index.cjs');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,6 +38,12 @@ async function waitForWindow() {
 }
 
 async function main() {
+  // MUST RUN BEFORE `require(MAIN)`: `startRemoteTransport()` reads
+  // `VAM_REMOTE_PORT` at `whenReady`, and `VAM_USER_DATA_DIR` above isolates
+  // storage only -- see `free-port.cjs`'s own header for why a probe run
+  // directly, with no caller to pass a port, must never fall through to the
+  // operator's own live `DEFAULT_REMOTE_PORT`.
+  await ensureHarnessRemotePort();
   require(MAIN);
   await app.whenReady();
   const win = await waitForWindow();
