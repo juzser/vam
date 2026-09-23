@@ -571,13 +571,30 @@ const overlap =
 if (overlap > 0) {
   throw new Error(`the view icon tooltip covers ${Math.round(overlap)}px2 of the icon it explains`);
 }
+// THE CROP MUST CONTAIN THE TIP, NOT ONLY THE ICON. `docs/ui/view-icon-
+// tooltip.png` cropped its height off `iconBox`'s own bottom edge alone --
+// right when the tip was one line and short of it the day the chord chip
+// pushed the sentence onto a second line, so the tip's own bottom ran past
+// the crop and the shot cut it off. The crop height is the UNION of both
+// boxes' bottom edges (plus the same 40px foot the icon-only version had),
+// asserted here so a future edit that goes back to sizing off the icon
+// alone fails loudly rather than shipping a silently-cropped PNG again.
+const cropHeight = Math.round(
+  Math.max(iconBox.y + iconBox.height, tipBox.y + tipBox.height) + 40,
+);
+if (cropHeight < tipBox.y + tipBox.height) {
+  throw new Error(
+    `the view-icon-tooltip crop (${cropHeight}px tall) is shorter than the tip itself ` +
+      `(bottom ${Math.round(tipBox.y + tipBox.height)}px) -- it would cut the tip off`,
+  );
+}
 await page.screenshot({
   path: `${outDir}/view-icon-tooltip.png`,
   clip: {
     x: Math.max(0, tipBox.x - 220),
     y: 0,
     width: Math.min(view.width, tipBox.width + 300),
-    height: Math.round(iconBox.y + iconBox.height + 40),
+    height: cropHeight,
   },
 });
 
