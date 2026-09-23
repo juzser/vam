@@ -1048,6 +1048,28 @@ describe('the foreign-hidden quiet line', () => {
     expect(seen).toEqual([{ ...DEFAULT_SESSION_FILTERS, hideForeign: false }]);
     expect(container.querySelector('[data-filter-menu]')).toBeNull();
   });
+
+  /**
+   * ONE COPY OF THE SENTENCE ON A PHONE, NOT TWO. `GettingStarted.tsx`
+   * (drawn below the list when `phone && entries.length === 0`, see the
+   * getting-started describe block) carries its OWN copy of this exact
+   * line, fed the identical `foreignHiddenCount`. Drawing both put "1
+   * session hidden — vam did not start it · Show" on the 390px screen
+   * twice -- once above an otherwise-empty list, once inside the screen
+   * that replaced it. The desktop never withdraws this strip: its own
+   * getting-started screen lives in the detail pane, a different piece of
+   * chrome the sidebar never draws.
+   */
+  it('withdraws on a phone once the getting-started screen owns this line', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1, phone: true });
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+    expect(container.querySelector('[data-getting-started-hidden]')).not.toBeNull();
+  });
+
+  it('stays on the desktop, where the getting-started screen is a different pane entirely', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1, phone: false });
+    expect(container.querySelector('[data-foreign-hidden]')).not.toBeNull();
+  });
 });
 
 describe('the filter badge yellow, in styles.css', () => {
