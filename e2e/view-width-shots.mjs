@@ -1042,11 +1042,15 @@ const readType = (target) =>
       // the loop below reads it off a second session, and the first read
       // carries `null` here on purpose.
       composer: size('[data-composer-bar] textarea'),
-      // Outside the pane: the sidebar's session title is `text-body` too
-      // (`data-row-title` in `SessionList.tsx`), and it must NOT follow a
-      // setting that is about the pane. Read off the title itself -- the row
-      // around it inherits a size no scale step sets, and read there this
-      // check stayed green with the scope keyed to `body`.
+      // Outside the pane: the sidebar's session title (`data-row-title` in
+      // `SessionList.tsx`) is `text-control` -- one step below `text-body`,
+      // since the operator asked for the session name a pixel smaller and
+      // regular ("make the project and group titles bold and 1px smaller;
+      // the session name regular weight and also 1px smaller") -- and it
+      // must NOT follow a setting that is about the pane either way. Read
+      // off the title itself -- the row around it inherits a size no scale
+      // step sets, and read there this check stayed green with the scope
+      // keyed to `control`.
       sidebar: size('[data-session-row] [data-row-title]'),
     };
   });
@@ -1107,8 +1111,8 @@ for (const size of [15, 20]) {
   );
   check(
     `and the sidebar outside the pane does not move at out ${size}`,
-    near(t.sidebar, SCALE.body, 0.05),
-    `sidebar title ${t.sidebar}px against the shipped ${SCALE.body}px`,
+    near(t.sidebar, SCALE.control, 0.05),
+    `sidebar title ${t.sidebar}px against the shipped ${SCALE.control}px`,
   );
 }
 check(

@@ -1,7 +1,8 @@
 /**
- * REOPENING A CODEX THREAD: start `codex resume <uuid>` in the thread's own
- * directory, in a tmux session vam tags exactly as it tags the ones it
- * creates, and let the ordinary discovery path find it.
+ * REOPENING A CODEX THREAD: a shell started in the thread's own directory, in
+ * a tmux session vam tags exactly as it tags the ones it creates, with
+ * `codex resume <uuid>` typed into it the instant the shell exists -- and let
+ * the ordinary discovery path find it.
  *
  * `docs/design/reopening-a-session.md` wrote the rules for Claude Code and
  * they hold word for word here. Codex is the easier half of that spec: the CLI
@@ -15,6 +16,31 @@
  * uuid's writer lock. So a reopened thread is the same thread, it is live by
  * `liveness.ts`'s own test the moment it starts, and `source.ts` draws it
  * without being told anything.
+ *
+ * ── SHELL, THEN TYPED -- THE SAME FIX `claude-code/resume.ts` NEEDED ──────
+ *
+ * This used to hand `codexResumeCommand(threadId)` straight to `new-session`.
+ * `newSessionArgv` spreads a command across tmux's own argv, so tmux execs it
+ * directly with nothing in front, and with `remain-on-exit` off (tmux's
+ * default) the pane -- the session's only one -- dies the instant that
+ * process does: the operator's report, "Ctrl+C in the terminal shuts the
+ * session down". MEASURED, same private socket, real `codex` 0.153.2: spawned
+ * straight into the pane, one Ctrl-C ended it and `list-sessions` answered
+ * "no server running" a moment later. Spawned into a shell instead
+ * (`loginShellCommand`), with `codex` typed in after (`typeThenEnter`), the
+ * identical Ctrl-C left the pane alive with the shell in its foreground.
+ * `resume <uuid>` is the same binary reading the same Ctrl-C the same way, so
+ * that measurement is what this function relies on rather than re-measures
+ * with a real resumed thread, which would need a real conversation already on
+ * disk -- see `claude-code/create-session.ts`'s header for the fuller
+ * measurement this shares.
+ *
+ * WHAT THIS COSTS THE PAIRING, AND WHY IT IS NOTHING: this source never
+ * pairs by pid at all. `vamControlled` (`source.ts`) is proven by
+ * `@vam-session` alone -- whether the thread's own uuid is recorded on any of
+ * vam's tmux sessions -- which is written in the SAME `createVamSession` call
+ * below, on the session, not on the pane's foreground process. `@vam-pid`
+ * naming the shell rather than `codex` changes nothing this source reads.
  *
  * ── THE REFUSALS, AND WHY EACH IS HERE RATHER THAN ONLY IN THE UI ─────────
  *
@@ -40,7 +66,9 @@
 
 import { existsSync } from 'node:fs';
 import type { SourceError } from '../../ipc/channels.js';
+import { typeThenEnter } from '../claude-code/start-in-pane.js';
 import { vamSessionName } from '../tmux/argv.js';
+import { loginShellCommand } from '../tmux/shell.js';
 import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
 import type { Liveness } from './liveness.js';
 import { codexProjectId } from './source.js';
@@ -125,14 +153,20 @@ export async function resumeThread(input: {
     );
   }
 
-  return await createVamSession(input.run, {
-    name: input.name ?? vamSessionName(row.name ?? row.id.slice(0, 8)),
+  const name = input.name ?? vamSessionName(row.name ?? row.id.slice(0, 8));
+  const spawned = await createVamSession(input.run, {
+    name,
     cwd: row.cwd,
-    command,
+    // THE SHELL, NOT `command` -- see the header. What still runs `command`
+    // is the type below, the instant the shell exists.
+    command: loginShellCommand(),
     projectId: codexProjectId(row.cwd),
     // `docs/design/vam-owns-the-session.md` §2, step 1: the thread's uuid is
     // already in hand -- `command` was just built from it -- so it is written
-    // now, for free, rather than guessed later.
+    // now, for free, rather than guessed later. Unaffected by the shell: this
+    // tags the SESSION, not the pane's foreground process.
     sessionId: row.id,
   });
+  if (spawned !== null) return spawned;
+  return typeThenEnter(input.run, name, command.join(' '));
 }

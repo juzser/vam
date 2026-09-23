@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 import type { Liveness } from '../../src/main/sources/codex/liveness.js';
 import { codexResumeCommand, resumeThread } from '../../src/main/sources/codex/resume.js';
 import type { ThreadRow } from '../../src/main/sources/codex/store.js';
+import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const THREAD = '00000000-1111-2222-3333-444444444444';
@@ -78,14 +79,28 @@ describe('codexResumeCommand', () => {
 });
 
 describe('resumeThread', () => {
-  it('starts the thread’s own `codex resume` in the thread’s own directory', async () => {
+  it('starts a SHELL in the thread’s own directory, then types `codex resume` into it', async () => {
+    // Not a direct spawn any more -- see the module header for the measured
+    // reason (Ctrl-C used to end the whole tmux session, not just Codex).
     const { failure, calls } = await attempt();
     expect(failure).toBeNull();
     const newSession = calls[0] ?? [];
     expect(newSession).toContain('new-session');
-    expect(newSession.slice(-3)).toEqual(['codex', 'resume', THREAD]);
+    expect(newSession.slice(-2)).toEqual(loginShellCommand());
     // The cwd is the STORE's, never one the caller passed in.
     expect(newSession[newSession.indexOf('-c') + 1]).toBe(CWD);
+    expect(calls).toContainEqual([
+      'send-keys',
+      '-t',
+      '=vam-fixed-name:',
+      '-l',
+      '--',
+      `codex resume ${THREAD}`,
+    ]);
+    expect(calls).toContainEqual(['send-keys', '-t', '=vam-fixed-name:', 'Enter']);
+    expect(calls.findIndex((argv) => argv[0] === 'send-keys')).toBeGreaterThan(
+      calls.findIndex((argv) => argv[0] === 'new-session'),
+    );
   });
 
   /**
@@ -169,8 +184,7 @@ describe('resumeThread', () => {
    */
   it('passes codex nothing but the thread it was asked to resume', async () => {
     const { calls } = await attempt();
-    const argv = calls[0] ?? [];
-    const command = argv.slice(argv.indexOf('-c') + 2);
-    expect(command).toEqual(['codex', 'resume', THREAD]);
+    const typed = calls.find((argv) => argv[0] === 'send-keys' && argv.includes('-l'));
+    expect(typed?.at(-1)).toEqual('codex resume ' + THREAD);
   });
 });

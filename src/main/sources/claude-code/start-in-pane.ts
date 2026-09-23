@@ -73,19 +73,30 @@ async function ownEmptyPane(
 }
 
 /**
- * Type `text` into the pane `name`, then press Return once. `null` when both
- * landed; a `SourceError` otherwise, never a thrown one (`MainSource`'s
- * contract). Return is NOT pressed when the text did not land: submitting
- * half a command is worse than a command sitting there untyped.
+ * Type `text` into the pane `name` literally, then press Return once. `null`
+ * when both landed; a `SourceError` otherwise, never a thrown one
+ * (`MainSource`'s contract). Return is NOT pressed when the text did not
+ * land: submitting half a command is worse than a command sitting there
+ * untyped.
+ *
+ * SPLIT OUT OF `typeIntoOwnPane`, which is `ownEmptyPane`'s proof plus
+ * exactly this. The proof exists for the Start session BUTTON, where a poll
+ * may have gone stale and the operator may since have typed something by
+ * hand into the pane the row was drawn for (see `ownEmptyPane`'s own header).
+ * A caller that just created the pane in this SAME run of calls -- a resume
+ * (`claude-code/resume.ts`, `codex/resume.ts`), or the "new project" path
+ * (`create-session.ts`) -- has no such gap to close: nothing else knows the
+ * freshly-minted, random-suffixed session name yet, so re-asking
+ * `listVamSessions` whether the pane is still vam's own and still a shell
+ * answers a question that cannot have changed since `new-session` returned
+ * two lines above. Those callers use this directly; `typeIntoOwnPane` below
+ * is unchanged for the caller that still needs the proof.
  */
-export async function typeIntoOwnPane(input: {
-  run: TmuxRun;
-  name: string;
-  text: string;
-}): Promise<SourceError | null> {
-  const { run, name, text } = input;
-  const found = await ownEmptyPane(run, name, 'type');
-  if ('error' in found) return found.error;
+export async function typeThenEnter(
+  run: TmuxRun,
+  name: string,
+  text: string,
+): Promise<SourceError | null> {
   const typed = await run(sendTextArgv(name, text));
   if (typed.failure !== null) {
     return classifyTmuxFailure({
@@ -107,6 +118,22 @@ export async function typeIntoOwnPane(input: {
     };
   }
   return null;
+}
+
+/**
+ * Type `text` into the pane `name`, then press Return once -- `typeThenEnter`
+ * plus `ownEmptyPane`'s proof, for Start session, the one caller with a real
+ * gap between the row being drawn and this running.
+ */
+export async function typeIntoOwnPane(input: {
+  run: TmuxRun;
+  name: string;
+  text: string;
+}): Promise<SourceError | null> {
+  const { run, name, text } = input;
+  const found = await ownEmptyPane(run, name, 'type');
+  if ('error' in found) return found.error;
+  return typeThenEnter(run, name, text);
 }
 
 /**

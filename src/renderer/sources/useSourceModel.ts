@@ -11,9 +11,28 @@
  *
  * This is the same shape as the usage cell's poll, and it repeats none of the
  * mistakes that one was fixed for: only the most recently ISSUED load may
- * write, a load in flight is never joined by a second one, a failure keeps
- * the last good model rather than blanking a list somebody is reading, and
- * nothing sets state after unmount.
+ * write, a load in flight is never JOINED by a second one (never two at
+ * once), a failure keeps the last good model rather than blanking a list
+ * somebody is reading, and nothing sets state after unmount.
+ *
+ * A CALL THAT ARRIVES WHILE ONE IS IN FLIGHT IS QUEUED, NOT DROPPED --
+ * `reloadQueued` below. `reload` (this hook's return value) IS `load`: every
+ * write handler in `Canvas.tsx` calls `source.onWrote()`, which is `reload`,
+ * the instant its own write resolves (`createSession`'s "the wait becomes
+ * visible here", `closeSession`'s `source.onWrote()`). If a background poll
+ * happened to already be in flight at that exact moment -- reading a tmux
+ * listing from BEFORE the write, since nothing here cancels an in-flight
+ * request -- the old code's early return dropped the reload on the floor,
+ * and the in-flight poll's stale answer landed a moment later with nothing
+ * left to correct it before the NEXT scheduled tick, up to 40s away while
+ * hidden. Measured on a real close: `killOwnPane` kills the pane, the write
+ * resolves, `onWrote` fires -- and a periodic poll that started its own
+ * `claude agents --json --all` a few hundred milliseconds earlier can still
+ * be running, so the row the operator just closed could reappear until the
+ * next tick. Queuing costs nothing the "never two at once" rule did not
+ * already spend: still exactly one in flight, ever; the difference is that a
+ * request which arrived while busy now runs the MOMENT the busy one clears,
+ * rather than being silently forgotten.
  *
  * It is a hook in its own module rather than an effect inside `App.tsx`
  * because `DesktopCanvas` is not exported and none of the above is testable
@@ -120,6 +139,11 @@ export function useSourceModel(source: SessionSource | null): {
   // Refs, not state: these coordinate loads and must never cause a render.
   const cancelled = useRef(false);
   const inFlight = useRef(false);
+  /** A call to `load` that arrived while `inFlight` was already true --
+   *  consumed exactly once, in the `finally` below, the moment the in-flight
+   *  one clears. See this file's header for why dropping it outright was the
+   *  bug. */
+  const reloadQueued = useRef(false);
   const issued = useRef(0);
   /** The previous successful load's `projects`, serialised -- `null` until
    *  the first one lands, so that answer alone can never look "unchanged". */
@@ -129,58 +153,76 @@ export function useSourceModel(source: SessionSource | null): {
    *  whole backoff in the same tick it is noticed. */
   const unchangedStreak = useRef(0);
 
-  const load = useCallback(() => {
-    if (source === null || inFlight.current) {
-      return;
-    }
-    inFlight.current = true;
-    issued.current += 1;
-    const seq = issued.current;
-    // Only the newest ISSUED load may write. Without this a slow load
-    // answering after a newer one would put an older list back on screen.
-    const mine = () => !cancelled.current && seq === issued.current;
-    source
-      .load()
-      .then((projects) => {
-        if (mine()) {
-          setModel({ projects });
-          setError(null);
-          // THE UNCHANGED-STREAK BACKOFF -- see this file's header. Tracked
-          // on every successful load regardless of visibility; only what it
-          // is COMPOSED WITH (below, at the call site) is visibility-gated.
-          const json = JSON.stringify(projects);
-          if (json === lastJson.current) {
-            unchangedStreak.current += 1;
-          } else {
-            lastJson.current = json;
-            unchangedStreak.current = 1;
+  const load = useCallback(
+    function load() {
+      if (source === null) {
+        return;
+      }
+      if (inFlight.current) {
+        // Queued rather than dropped -- see this file's header. Still never
+        // joined: this returns exactly as before, nothing is issued here.
+        reloadQueued.current = true;
+        return;
+      }
+      inFlight.current = true;
+      issued.current += 1;
+      const seq = issued.current;
+      // Only the newest ISSUED load may write. Without this a slow load
+      // answering after a newer one would put an older list back on screen.
+      const mine = () => !cancelled.current && seq === issued.current;
+      source
+        .load()
+        .then((projects) => {
+          if (mine()) {
+            setModel({ projects });
+            setError(null);
+            // THE UNCHANGED-STREAK BACKOFF -- see this file's header. Tracked
+            // on every successful load regardless of visibility; only what it
+            // is COMPOSED WITH (below, at the call site) is visibility-gated.
+            const json = JSON.stringify(projects);
+            if (json === lastJson.current) {
+              unchangedStreak.current += 1;
+            } else {
+              lastJson.current = json;
+              unchangedStreak.current = 1;
+            }
+            setVisibleIntervalMs(
+              unchangedStreak.current >= UNCHANGED_STREAK_FOR_BACKOFF
+                ? BACKED_OFF_INTERVAL_MS
+                : SOURCE_POLL_INTERVAL_MS,
+            );
           }
-          setVisibleIntervalMs(
-            unchangedStreak.current >= UNCHANGED_STREAK_FOR_BACKOFF
-              ? BACKED_OFF_INTERVAL_MS
-              : SOURCE_POLL_INTERVAL_MS,
-          );
-        }
-      })
-      .catch((reason: unknown) => {
-        // The model is deliberately left alone: a transient CLI failure must
-        // not blank a list the operator is in the middle of reading. The
-        // error says what happened beside it.
-        if (mine()) {
-          setError(noteFailure('load projects', reason));
-        }
-      })
-      .finally(() => {
-        if (seq === issued.current) {
-          inFlight.current = false;
-        }
-        // Settled, win or lose -- once an answer has arrived, no later poll
-        // puts "loading" back; that is `error`'s job.
-        if (mine()) {
-          setLoading(false);
-        }
-      });
-  }, [source]);
+        })
+        .catch((reason: unknown) => {
+          // The model is deliberately left alone: a transient CLI failure must
+          // not blank a list the operator is in the middle of reading. The
+          // error says what happened beside it.
+          if (mine()) {
+            setError(noteFailure('load projects', reason));
+          }
+        })
+        .finally(() => {
+          if (seq === issued.current) {
+            inFlight.current = false;
+          }
+          // Settled, win or lose -- once an answer has arrived, no later poll
+          // puts "loading" back; that is `error`'s job.
+          if (mine()) {
+            setLoading(false);
+          }
+          // THE QUEUED RELOAD, CONSUMED HERE -- one request that arrived while
+          // this one was in flight, run now that it has cleared. Still never
+          // two in flight at once: `inFlight.current` is false by this line
+          // (just above, when `seq === issued.current`), so this call issues a
+          // fresh one rather than queuing again.
+          if (reloadQueued.current) {
+            reloadQueued.current = false;
+            load();
+          }
+        });
+    },
+    [source],
+  );
 
   // Bookkeeping that must restart clean for a NEW source -- unrelated to the
   // poll's own cadence, which `useVisibilityInterval` below owns entirely.
@@ -188,6 +230,7 @@ export function useSourceModel(source: SessionSource | null): {
   useEffect(() => {
     cancelled.current = false;
     inFlight.current = false;
+    reloadQueued.current = false;
     lastJson.current = null;
     unchangedStreak.current = 0;
     setVisibleIntervalMs(SOURCE_POLL_INTERVAL_MS);
