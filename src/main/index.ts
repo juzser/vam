@@ -36,6 +36,7 @@ import { registerFilesListIpc } from './files/list-ipc.js';
 import { registerFilesResolveIpc } from './files/resolve-ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
+import { LAUNCH_FIXTURE_PROJECTS } from './launch-fixture.js';
 import { registerLinkIpc } from './link/ipc.js';
 import { applyApplicationMenu } from './menu.js';
 import { notifyActivationRoute, registerNotifyIpc } from './notify/ipc.js';
@@ -72,39 +73,12 @@ import { lockZoom } from './zoom.js';
 
 /**
  * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`
- * on the spawned process. A clean CI runner has no Claude Code sessions on
- * disk, so `CLAUDE_CODE_SOURCE.load()` there legitimately answers `[]` --
- * and AC-13's proof that the launched shell actually reaches a real model
- * needs at least one project to reach. One project, one session, with every
- * field `test/electron/launch.test.ts`'s shape assertion reads off
- * `DEMO_MODEL`'s first session (`waitingFor`, `vamControlled` included).
+ * on the spawned process. The data lives in `launch-fixture.ts`, not here --
+ * that file's own header says why (this one cannot be unit-imported at all).
  */
 const LAUNCH_FIXTURE_SOURCE: MainSource = {
   descriptor: CLAUDE_CODE_SOURCE.descriptor,
-  load: () =>
-    Promise.resolve([
-      {
-        id: 'launch-fixture',
-        name: 'launch fixture',
-        source: 'claude-code',
-        sessions: [
-          {
-            id: 'launch-fixture-1',
-            title: 'launch fixture session',
-            epic: null,
-            branch: null,
-            status: 'waiting',
-            runningAgents: 0,
-            activity: null,
-            age: null,
-            decisions: [],
-            agents: [],
-            waitingFor: null,
-            vamControlled: false,
-          },
-        ],
-      },
-    ]),
+  load: () => Promise.resolve(LAUNCH_FIXTURE_PROJECTS),
 };
 
 /**

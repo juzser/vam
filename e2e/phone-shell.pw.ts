@@ -992,6 +992,26 @@ test.describe('the phone search route', () => {
     ).toBeLessThanOrEqual(seen.band);
   });
 
+  /**
+   * TWO PROPERTIES, NOT ONE, since the fix for defect 2 of this task:
+   * the four origin rows (`agent`/`prompted`/`ended`/`foreign`) wear
+   * `vam-tap` again, restored to `py-1.5` -- a previous commit had shrunk
+   * them to `py-1` reasoning "no 44x44 sweep covers this popover, so the
+   * four points saved cost no touch target its floor", which ran backwards:
+   * no sweep covering it means nobody MEASURED it, not that the floor held.
+   * Measured here at 390x844 with 44px rows restored, they do not all fit
+   * above a keyboard band alongside the status pills any more -- so the
+   * popover now REACHES the rest by scrolling, the same "scroller's top
+   * edge above the fold" shape `styles.css`'s icon-picker comment states
+   * generally, rather than by shrinking rows a second time.
+   *
+   * `SessionList.tsx`'s `useFilterPopoverCap` carries the fix:
+   * `PHONE_KEYBOARD_RESERVE_PX` reserves the same 336px this file simulates,
+   * UNCONDITIONALLY on phone -- there is no signal here that tells it a
+   * keyboard is actually up, for the reason its own header gives (iOS never
+   * fires `resize` for one), so the reservation cannot be conditional on
+   * detecting one.
+   */
   test('the filter popover fits above an iOS keyboard at 390x844', async ({ page }) => {
     await openDemo(page);
     await page.locator('[data-phone-shell] [data-filter-toggle]').tap();
@@ -1001,26 +1021,75 @@ test.describe('the phone search route', () => {
     const seen = await menu.evaluate((el, keyboard) => {
       const band = window.innerHeight - (keyboard as number);
       const r = el.getBoundingClientRect();
-      const below = [...el.querySelectorAll('button, input')]
-        .map((c) => ({
-          label: (c.getAttribute('aria-label') ?? c.textContent ?? '').trim().slice(0, 30),
-          bottom: Math.round(c.getBoundingClientRect().bottom),
-        }))
-        .filter((c) => c.bottom > band);
+      const rowsOf = () =>
+        [...el.querySelectorAll('[data-origin-toggle]')].map((c) => {
+          const cr = c.getBoundingClientRect();
+          return {
+            label: c.getAttribute('data-origin-toggle'),
+            bottom: Math.round(cr.bottom),
+            height: Math.round(cr.height),
+          };
+        });
+      const before = rowsOf();
+      // The popover's own scroller, taken all the way down -- the same
+      // "reach" the Android-shrink test below already proves for a REAL
+      // viewport shrink, exercised here for the iOS-covered case instead,
+      // where nothing but this scroll can bring a covered row back.
+      el.scrollTop = el.scrollHeight;
+      const after = rowsOf();
       return {
         band,
         rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
         textInputs: el.querySelectorAll('input[type="text"], input:not([type])').length,
-        below,
+        scrollable: el.scrollHeight > el.clientHeight,
+        before,
+        after,
       };
     }, IOS_KEYBOARD_CSS_PX);
 
     // It carries no text box, so nothing in it raises a keyboard: the band
     // only matters here for a keyboard something else left up.
     expect(seen.textInputs, 'the popover holds no search box of its own').toBe(0);
+
+    // EVERY ORIGIN ROW MEASURES THE PHONE FLOOR, whether or not this
+    // particular scroll offset currently paints it: `min-height` applies to
+    // the box regardless of an ancestor's `overflow`, so a row scrolled out
+    // of view still reports its real height rather than a clipped one.
+    for (const row of seen.before) {
+      expect(row.height, `${row.label} measured ${row.height}px tall`).toBeGreaterThanOrEqual(
+        TOUCH_MIN,
+      );
+    }
+
+    // THE SCROLLER ITSELF fits above the band -- `styles.css`'s icon-picker
+    // comment states the general shape: "a sheet is safe when its
+    // scroller's top edge is above the fold, and unsafe when a nested
+    // scroller pushes it below." This popover IS its own scroller
+    // (`useFilterPopoverCap`), so both of its own edges are checked, not
+    // only its top.
     expect(
-      seen.below.map((c) => `${c.label} @ ${c.bottom}`),
+      seen.rect.bottom,
       `popover ${JSON.stringify(seen.rect)} against a ${seen.band}px band`,
+    ).toBeLessThanOrEqual(seen.band);
+
+    // AND THERE IS SOMETHING TO SCROLL TO. A fit that held by cutting
+    // content rather than by capping and scrolling it would report this
+    // same `rect.bottom` with nothing left beneath the fold -- the
+    // difference between a popover that reaches its own rows and one that
+    // simply never grew tall enough to need to.
+    expect(
+      seen.scrollable,
+      'the popover has content below the fold to scroll to, not merely a box that stops at the band',
+    ).toBe(true);
+
+    // SCROLLED ALL THE WAY, every row -- including the two that sat below
+    // the band before scrolling -- is back inside the popover's own
+    // (already above-band) box: REACHABLE, not merely present in the DOM at
+    // an offset nothing brings back.
+    const stillOut = seen.after.filter((row) => row.bottom > seen.rect.bottom + 1);
+    expect(
+      stillOut,
+      `rows still unreachable after scrolling to the end: ${JSON.stringify(stillOut)}`,
     ).toEqual([]);
   });
 
@@ -1580,6 +1649,13 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
   });
 
   test('the keystroke strip is absent for a session vam did not start', async ({ page }) => {
+    // `beta-one` is `vamControlled: false`, which is also what the new
+    // `hideForeign` default (`session-filter.ts`) hides by default -- this
+    // test is about the keystroke strip, not the sidebar, so it turns the
+    // filter off rather than asserting a row that would otherwise never draw.
+    await page.addInitScript(() => {
+      localStorage.setItem('vam.prefs.v1', JSON.stringify({ filters: { hideForeign: false } }));
+    });
     await stubSource(page);
     // `beta-one` is the second project's only session -- `vamControlled: false`.
     const row = page.locator('[data-phone-shell] [data-session-row]', {
@@ -1635,5 +1711,125 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await page.locator('[data-phone-back]').tap();
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
     await expect(page.locator('[data-project-heading][data-project-id="p1"]')).toBeInViewport();
+  });
+});
+
+/**
+ * `SessionList.tsx`'s own quiet line, the empty-sidebar-with-no-explanation
+ * fix: `listVamSessions` answering `ok, []` (no tmux server yet, the state
+ * after every reboot before vam starts its first session) is not a
+ * `vamListingGap` -- ownership is honestly zero -- so `hideForeign` (on by
+ * default) can still take every row with it. `Canvas.tsx` exempts `?demo=1`
+ * from `hideForeign` entirely (`Canvas.demo-foreign.test.tsx`), so this line
+ * never reaches the phone screen through the demo fixture every other test
+ * in this file uses -- it needs a REAL (non-demo) source, the same route
+ * "the sheets behind a source" above stubs over HTTP rather than through
+ * `window.api`, for the same reason that block's own header gives: `App.tsx`
+ * asks its own origin for `/api/describe` and `/api/load`, and Playwright
+ * can answer both without touching `src/`.
+ */
+test.describe('the foreign-hidden quiet line on a phone list screen', () => {
+  const DESCRIPTOR = {
+    id: 'stub',
+    label: 'stub source',
+    capabilities: {
+      liveUpdates: false,
+      recordPrompt: true,
+      deliverPrompt: false,
+      promptAttachments: false,
+      slashCommands: false,
+      renameSession: true,
+      closeSession: true,
+      createSession: true,
+      governance: false,
+      pullRequests: false,
+      terminal: false,
+      agentRoster: false,
+      resumeSession: false,
+    },
+    declines: {
+      liveUpdates: 'the stub does not stream',
+      deliverPrompt: 'the stub delivers nothing',
+      promptAttachments: 'the stub takes no attachments',
+      slashCommands: 'the stub has no slash commands',
+      governance: 'the stub has no governance surface',
+      pullRequests: 'the stub has no pull requests',
+      terminal: 'the stub has no terminal',
+      agentRoster: 'the stub has no agent roster',
+    },
+    viewerScope: { kind: 'connection', note: 'a stubbed transport, not a server' },
+  };
+  /** Two rows, both `vamControlled: false` -- exactly what every Claude Code
+   * row reads when `listVamSessions` answers `ok, []` and the source pairs
+   * each one against an empty tmux listing. */
+  const session = (id: string, title: string) => ({
+    id,
+    title,
+    icon: null,
+    epic: null,
+    status: 'idle',
+    runningAgents: 0,
+    activity: null,
+    age: '4m',
+    branch: null,
+    decisions: [],
+    source: 'stub',
+    vamControlled: false,
+  });
+  const PROJECTS = [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'stub',
+      sessions: [session('s1', 'alpha-1'), session('s2', 'alpha-2')],
+    },
+  ];
+  const envelope = (value: unknown) => ({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, value }),
+  });
+
+  test('the Show control meets the phone floor, and brings both rows back', async ({ page }) => {
+    // Same route order note as "the sheets behind a source": the catch-all
+    // goes on first, the two reads over the top of it.
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    await page.goto('/');
+
+    // NO ROW YET -- both are foreign, `hideForeign` is on by default, and
+    // there is no `vamListingGap` (the read succeeded): the quiet line is
+    // the only thing on screen that explains why.
+    await page.waitForSelector('[data-foreign-hidden-show]', { timeout: 10_000 });
+    expect(await page.locator('[data-session-row]').count()).toBe(0);
+
+    const noticeText = await page.locator('[data-foreign-hidden-count]').textContent();
+    expect(noticeText).toContain('2 sessions hidden');
+    expect(noticeText).toContain('vam did not start them');
+
+    const box = await page.locator('[data-foreign-hidden-show]').boundingBox();
+    expect(box, 'the Show control has a box at all').not.toBeNull();
+    expect(box?.width ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+    expect(box?.height ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+
+    await page.locator('[data-foreign-hidden-show]').tap();
+    await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length === 2, {
+      timeout: 5_000,
+    });
+    expect(await page.locator('[data-foreign-hidden]').count()).toBe(0);
   });
 });

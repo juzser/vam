@@ -53,6 +53,7 @@ import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { usePhoneViewport } from '../phone/viewport.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
@@ -399,6 +400,39 @@ const FILTER_POPOVER_GUTTER = 24;
 const FILTER_POPOVER_FOOT = 8;
 
 /**
+ * The worst-case iOS portrait keyboard, in CSS pixels, with its accessory
+ * bar -- the same mid-figure `e2e/phone-shell.pw.ts`'s `IOS_KEYBOARD_CSS_PX`
+ * uses to simulate one (iOS portrait keyboards measure roughly 291-380px
+ * depending on the accessory and prediction rows).
+ *
+ * RESERVED ON PHONE UNLESS A REAL RESIZE HAS ALREADY SHRUNK THE VIEWPORT
+ * SINCE THIS POPOVER OPENED -- never gated on detecting a keyboard directly,
+ * since there is no such detection to reach for on iOS at all
+ * (`useFilterPopoverCap`'s own header). The first cut of this fix reserved
+ * unconditionally on every phone measurement and broke the Android case:
+ * `window.innerHeight` there really does shrink to the keyboard-covered
+ * figure, so subtracting this on top of an ALREADY-shrunk measurement
+ * double-counted the same keyboard twice and drove the cap to zero --
+ * falsified against `e2e/phone-shell.pw.ts`'s own Android test, which is
+ * what caught it. `useFilterPopoverCap` compares each measurement against
+ * the viewport height it saw when the popover FIRST opened: smaller than
+ * that baseline means a real shrink already happened and its own arithmetic
+ * is trustworthy on its own (Android's case); still at the baseline means
+ * nothing has told this hook anything, which is the iOS case this constant
+ * exists for.
+ *
+ * This is the same shape of fix `styles.css`'s icon-picker sheet already
+ * uses for the identical iOS trap ("give the picker the full 85dvh so its
+ * scroller STARTS above the fold"): reserve the worst case, geometric
+ * rather than detected. It costs this popover nothing ordinary -- four short
+ * rows and a status strip never approach a 336px cut -- and it is what keeps
+ * the popover's own scroller (already `overflow-y: auto` below) starting,
+ * and ending, above a keyboard-covered band rather than only above the
+ * fully uncovered viewport.
+ */
+const PHONE_KEYBOARD_RESERVE_PX = 336;
+
+/**
  * How tall the popover may be: the distance from where it actually is to the
  * bottom of the viewport, measured.
  *
@@ -423,9 +457,13 @@ const FILTER_POPOVER_FOOT = 8;
  * layout viewport really does shrink when the keyboard opens, and a cap taken
  * only at open time would still be the pre-keyboard one. `visualViewport` is
  * the listener `styles.css` rules out for its jitter and double-resize loops,
- * and this does not use it -- on iOS the layout viewport does not move, the
- * controls are covered rather than off-screen, and the popover's own scroller
- * is what brings them back.
+ * and this does not use it -- on iOS the layout viewport does not move at
+ * all, so `resize` never fires there and this hook never learns a keyboard
+ * opened. `PHONE_KEYBOARD_RESERVE_PX` is what makes the popover's own
+ * scroller the thing that brings covered controls back regardless: reserved
+ * out of every phone measurement unconditionally, not only once told, it
+ * keeps the scroller short enough that its own bottom edge sits above where
+ * an iOS keyboard would cover, with the rest one scroll away.
  *
  * Returns `null` while closed, so the popover renders exactly as it does
  * today until it has been measured once.
@@ -520,10 +558,20 @@ function useFilterPopoverCap(
   open: boolean,
   menuRef: RefObject<HTMLDivElement | null>,
 ): number | null {
+  const phone = usePhoneViewport();
   const [cap, setCap] = useState<number | null>(null);
+  // The viewport height this popover saw the moment it opened -- `null`
+  // until the first measurement. `PHONE_KEYBOARD_RESERVE_PX`'s own header:
+  // a REAL shrink below this baseline (Android's `resize`) means the
+  // browser already reserved the keyboard for us, and reserving again on
+  // top of it is what drove the cap to zero the first time this was
+  // written. Still AT the baseline means nothing has told this hook
+  // anything, which is the silent-iOS-cover case the constant guards.
+  const openHeight = useRef<number | null>(null);
   useEffect(() => {
     if (!open) {
       setCap(null);
+      openHeight.current = null;
       return;
     }
     const measure = () => {
@@ -533,12 +581,15 @@ function useFilterPopoverCap(
       // not move when the cap is applied, so re-measuring cannot walk the
       // popover down the screen one resize at a time.
       const top = menu.getBoundingClientRect().top;
-      setCap(Math.max(0, window.innerHeight - top - FILTER_POPOVER_FOOT));
+      openHeight.current ??= window.innerHeight;
+      const alreadyShrunk = window.innerHeight < openHeight.current;
+      const reserve = phone && !alreadyShrunk ? PHONE_KEYBOARD_RESERVE_PX : 0;
+      setCap(Math.max(0, window.innerHeight - top - FILTER_POPOVER_FOOT - reserve));
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [open, menuRef]);
+  }, [open, menuRef, phone]);
   return cap;
 }
 
@@ -634,7 +685,38 @@ export type SessionListProps = {
     readonly agent: number;
     readonly unprompted: number;
     readonly ended: number;
+    readonly foreign: number;
   };
+  /**
+   * HOW MANY ROWS `hideForeign` IS HIDING RIGHT NOW -- NOT `hiddenCounts.
+   * foreign` above, which counts every foreign session whether or not the
+   * rule is even on. `Canvas.tsx` computes this with
+   * `countHiddenByForeignFilter` (`session-filter.ts`) rather than this pane
+   * doing it from `allEntries` itself, because the count has to agree with
+   * two exemptions only `Canvas.tsx`'s own `entries` memo knows about:
+   * `vamListingGap` standing the rule down entirely, and `?demo=1` being
+   * exempt from it so `fixtures/demo.ts`'s own foreign row is never hidden.
+   * A count computed here from `allEntries` alone would say "hidden" about a
+   * row `entries` never actually hid.
+   *
+   * `docs/design/vam-owns-the-session.md`'s trap, closed a second time:
+   * `listVamSessions` answering `ok, []` -- no tmux server yet, the state
+   * after every reboot before vam starts its first session -- is not a
+   * `vamListingGap` (ownership is honestly zero), so `hideForeign` can still
+   * empty the sidebar with no explanation at all. This is what the quiet
+   * line at the foot of the list reads to say why.
+   */
+  readonly foreignHiddenCount: number;
+  /**
+   * WHY THE FOREIGN AND ENDED RULES ARE STANDING DOWN RIGHT NOW, or `null` on
+   * every ordinary poll. `docs/design/vam-owns-the-session.md`'s own trap:
+   * "an unreadable tmux listing must not empty the sidebar" -- once a source's
+   * own tmux read fails, neither rule can trust what it would otherwise hide
+   * (`Canvas.tsx`'s `entries` memo is what actually stands them down; this is
+   * the words for why, so the popover can say so rather than silently
+   * narrowing less than the operator expects).
+   */
+  readonly vamListingGap?: string | null;
   readonly renamingId: string | null;
   readonly renameDraft: string;
   readonly onRenameChange: (value: string) => void;
@@ -880,6 +962,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     originFilters,
     onOriginFilters,
     hiddenCounts,
+    foreignHiddenCount,
+    vamListingGap = null,
     renamingId,
     renameDraft,
     onRenameChange,
@@ -1331,7 +1415,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     (statusFilter === 'all' ? 0 : 1) +
     applied('hideAgentStarted') +
     applied('onlyPrompted') +
-    applied('hideEnded');
+    applied('hideEnded') +
+    applied('hideForeign');
 
   /**
    * Whether ANY rule is narrowing the list, default or not — what the toggle's
@@ -1348,7 +1433,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     activeFilters > 0 ||
     originFilters.hideAgentStarted ||
     originFilters.onlyPrompted ||
-    originFilters.hideEnded;
+    originFilters.hideEnded ||
+    originFilters.hideForeign;
 
   // Sized against the column when there is one. With no width the pane fills
   // its host, and the popover opens at its full 288 -- which still clears the
@@ -1900,6 +1986,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   hiddenCounts.ended,
                   DEFAULT_SESSION_FILTERS.hideEnded,
                 ],
+                // THE FOURTH ROW: `docs/design/vam-owns-the-session.md`, the
+                // operator's own ask distilled -- "it should only show the
+                // sessions that vam creates." ON BY DEFAULT for the same
+                // reason `ended` is: the count beside it is what keeps a
+                // hidden session from being indistinguishable from one that
+                // does not exist.
+                [
+                  'foreign',
+                  'Hide sessions vam did not start',
+                  originFilters.hideForeign,
+                  hiddenCounts.foreign,
+                  DEFAULT_SESSION_FILTERS.hideForeign,
+                ],
               ] as const
             ).map(([key, label, on, hides, byDefault]) => (
               <button
@@ -1913,11 +2012,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       ? { ...originFilters, hideAgentStarted: !on }
                       : key === 'ended'
                         ? { ...originFilters, hideEnded: !on }
-                        : { ...originFilters, onlyPrompted: !on },
+                        : key === 'foreign'
+                          ? { ...originFilters, hideForeign: !on }
+                          : { ...originFilters, onlyPrompted: !on },
                   )
                 }
                 className={[
-                  'flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
+                  // `vam-tap`, and `py-1.5` restored: measured on the phone
+                  // project at 390x844, these rows painted ~28px tall without
+                  // it -- under the 44px floor the rest of the phone UI keeps
+                  // (`.vam-phone .vam-tap` in styles.css). "No 44x44 sweep
+                  // covers this popover" was the previous fix's argument for
+                  // shrinking them instead, and that reasoning ran backwards:
+                  // no sweep covering it means nobody MEASURED it, not that
+                  // the floor holds. `vam-tap` is what every other text-row
+                  // menu item in this file already wears (the group menu's
+                  // "Rename project" / "Change project icon", a few hundred
+                  // lines down) for exactly this reason.
+                  'vam-tap flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
                   on
                     ? 'border-line-loud bg-raised text-ink'
                     : 'border-line text-ink-dim hover:border-line-strong',
@@ -1946,6 +2058,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 <span className="flex-none font-mono text-meta text-ink-faint">−{hides}</span>
               </button>
             ))}
+
+            {/* WHY "ended" AND "foreign" JUST STOPPED NARROWING, if they did.
+                `docs/design/vam-owns-the-session.md`'s own trap: "an
+                unreadable tmux listing must not empty the sidebar." Both
+                rules read a fact vam's own tmux spine has to answer for --
+                whether a row is vam's at all -- and `Canvas.tsx` stands them
+                both down the instant that spine could not be read, showing
+                every row rather than trusting a default it cannot back up.
+                This says why, in the one place an operator would otherwise
+                read the toggles as simply not working. */}
+            {vamListingGap !== null && (
+              <span
+                data-vam-listing-gap
+                className="rounded-[7px] border border-failed bg-card px-2 py-1.5 text-control text-failed"
+              >
+                {vamListingGap}
+              </span>
+            )}
 
             {/* A15.3: the UNTIMED twin of the restore strip below. That strip
                 shows for a while and then goes; a project it named does not
@@ -3413,13 +3543,75 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               Loading sessions…
             </li>
           )}
-          {entries.length === 0 && !loading && (
-            <li className="px-1 py-4 text-control text-ink-dim">
-              {filter.trim() === '' ? 'No sessions yet' : 'No match'}
-            </li>
+          {/* NOT "No sessions yet" WHEN THE REAL REASON IS `foreignHiddenCount`
+              -- the strip below the list already names it, and an operator
+              reading both would read the second as contradicting the first.
+              `filter.trim() !== ''` (a search with no match) is left alone:
+              that emptiness is about the query, not about ownership, and
+              stays true whether or not anything is foreign-hidden elsewhere. */}
+          {entries.length === 0 && !loading && filter.trim() === '' && foreignHiddenCount === 0 && (
+            <li className="px-1 py-4 text-control text-ink-dim">No sessions yet</li>
+          )}
+          {entries.length === 0 && !loading && filter.trim() !== '' && (
+            <li className="px-1 py-4 text-control text-ink-dim">No match</li>
           )}
         </ul>
       </OverlayScroll>
+
+      {/*
+       * THE QUIET LINE `docs/design/vam-owns-the-session.md`'s own trap
+       * needed a second time. `vamListingGap` above covers a listing vam
+       * could not READ; this covers a listing vam read PERFECTLY and found
+       * nothing of its own in -- `listVamSessions` answering `ok, []`, the
+       * ordinary state after every reboot before vam starts its first
+       * session. That is not a failure and stays out of `vamListingGap`
+       * entirely: ownership really is zero. But `hideForeign` (on by
+       * default) can still take every row with it, and an operator opening
+       * the app to a wordless empty sidebar cannot tell "vam is broken" from
+       * "vam owns nothing yet" -- exactly the ambiguity the design's trap
+       * forbids, for a different cause than the one it names.
+       *
+       * SHOWN WHETHER OR NOT THE LIST IS EMPTY, unlike the loading/no-match
+       * lines above: a single row hidden among several visible ones is as
+       * unmentioned as twelve hidden behind none, just quieter about it --
+       * `countHiddenByForeignFilter`'s own header is the small-count half of
+       * this. `border-line border-t` and the restore strip's own spacing,
+       * because this is the same shape of fact (something is hidden, here
+       * is the one-tap way back) and a different visual language for it
+       * would teach the operator two idioms for one idea.
+       *
+       * `Show` flips the SAME pref the popover's fourth row does
+       * (`onOriginFilters({ ...originFilters, hideForeign: false })`) rather
+       * than opening the popover -- the popover is one MORE tap away for a
+       * state this severe, and the row itself already disappears the
+       * instant the pref does, since `foreignHiddenCount` reads the live
+       * pref and not a snapshot.
+       */}
+      {foreignHiddenCount > 0 && (
+        <div
+          data-foreign-hidden
+          className="flex flex-wrap items-center gap-1.5 border-line border-t px-[11px] py-2 text-control text-ink-faint"
+        >
+          <span data-foreign-hidden-count>
+            {foreignHiddenCount} session{foreignHiddenCount === 1 ? '' : 's'} hidden — vam did not
+            start {foreignHiddenCount === 1 ? 'it' : 'them'}
+          </span>
+          {/* `vam-tap`: a phone renders this same strip on the list screen the
+              instant `hideForeign` empties it, and a control that size fails
+              the 44px floor every other phone control keeps -- the exact
+              mistake this task's own defect 2 already made once with the
+              popover's origin rows. */}
+          <button
+            type="button"
+            data-foreign-hidden-show
+            aria-label="show sessions vam did not start"
+            onClick={() => onOriginFilters({ ...originFilters, hideForeign: false })}
+            className="vam-tap ml-auto flex-none cursor-pointer font-mono text-control text-ink-dim underline hover:text-ink"
+          >
+            Show
+          </button>
+        </div>
+      )}
 
       {/* A15.3: where a removed project comes back from, for a WHILE.
           A permanent strip is a standing cost for a momentary action, so

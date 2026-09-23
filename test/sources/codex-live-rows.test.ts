@@ -41,6 +41,7 @@ import {
   selectThreads,
 } from '../../src/main/sources/codex/source.js';
 import type { RunSqlite, ThreadRow } from '../../src/main/sources/codex/store.js';
+import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 
 const NOW = 1_700_000_000_000;
 const id = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -224,6 +225,11 @@ describe('the Codex source’s load, with a writer-lock probe', () => {
     throw new Error('no test may spawn codex');
   });
 
+  /** `load()` now asks tmux on every load too (`vamControlled`); this file's
+   * own rule is that nothing here spawns anything real, so every source built
+   * below gets a stub that answers "no vam sessions here". */
+  const noVamSessions: TmuxRun = async () => ({ failure: null, stdout: '', stderr: '' });
+
   const sourceOver = (rows: readonly ThreadRow[], live: ReadonlySet<string>) =>
     createCodexSource({
       home: HOME,
@@ -232,6 +238,7 @@ describe('the Codex source’s load, with a writer-lock probe', () => {
       runCodex: codexNeverRun,
       now: () => NOW,
       livenessReadable: true,
+      runTmux: noVamSessions,
       // The probe is addressed BY PATH, which is also how this asserts that
       // the source built the path from the thread's own uuid.
       probeLock: (path) =>
@@ -300,6 +307,7 @@ describe('the Codex source’s load, with a writer-lock probe', () => {
       runCodex: codexNeverRun,
       now: () => NOW,
       livenessReadable: true,
+      runTmux: noVamSessions,
       probeLock: (path) => {
         asked.push(path);
         return 'ended';
@@ -320,6 +328,7 @@ describe('the Codex source’s load, with a writer-lock probe', () => {
       runCodex: codexNeverRun,
       now: () => NOW,
       livenessReadable: false,
+      runTmux: noVamSessions,
       probeLock: () => 'unknown',
     });
     const projects = await source.load();

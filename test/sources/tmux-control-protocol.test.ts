@@ -163,7 +163,7 @@ describe('encodeControlLine', () => {
       'resize-window -t =vam-a1b2c3: -x 137 -y 41',
     );
     expect(encodeControlLine(listSessionsArgv())?.line).toBe(
-      'list-sessions -F "#{@vam-project}\t#{@vam-pid}\t#{session_name}\t#{pane_current_command}"',
+      'list-sessions -F "#{@vam-project}\t#{@vam-pid}\t#{session_name}\t#{pane_current_command}\t#{@vam-session}\t#{pane_current_path}"',
     );
   });
 

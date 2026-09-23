@@ -37,6 +37,8 @@ describe('the session-origin filters, persisted', () => {
       onlyPrompted: false,
       // The live list holds live sessions: see `session-filter.ts`.
       hideEnded: true,
+      // Only vam's own sessions, by default: see `session-filter.ts`.
+      hideForeign: true,
     });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
@@ -49,12 +51,14 @@ describe('the session-origin filters, persisted', () => {
         hideAgentStarted: false,
         onlyPrompted: true,
         hideEnded: false,
+        hideForeign: false,
       }),
     );
     expect(readPrefs(s).filters).toEqual({
       hideAgentStarted: false,
       onlyPrompted: true,
       hideEnded: false,
+      hideForeign: false,
     });
   });
 
@@ -87,8 +91,9 @@ describe('the session-origin filters, persisted', () => {
       hideAgentStarted: false,
       onlyPrompted: true,
       // Per FIELD, which is this reader's whole rule: the two stored choices
-      // are kept, and the key this payload predates takes the shipped default.
+      // are kept, and the keys this payload predates take the shipped default.
       hideEnded: true,
+      hideForeign: true,
     });
   });
 
@@ -100,6 +105,17 @@ describe('the session-origin filters, persisted', () => {
       // Absent, not garbage -- and an absent key is every store that
       // predates this rule, which must read back as the shipped default.
       hideEnded: true,
+      hideForeign: true,
+    });
+  });
+
+  it('keeps a stored choice to SHOW foreign sessions, per field like every other rule', () => {
+    const raw = '{"filters":{"hideForeign":false}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      hideEnded: true,
+      hideForeign: false,
     });
   });
 });

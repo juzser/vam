@@ -102,6 +102,18 @@ describe('resumeThread', () => {
   });
 
   /**
+   * `docs/design/vam-owns-the-session.md` §2, step 1: a resume already holds
+   * the thread's uuid -- it is `threadId` itself -- so vam writes
+   * `@vam-session` for free, in the same run of calls, rather than guessing
+   * it later the way a fresh start (Stage 2) will have to.
+   */
+  it('writes @vam-session with the thread uuid it is resuming', async () => {
+    const { calls } = await attempt();
+    const tag = calls.find((argv) => argv.includes('@vam-session'));
+    expect(tag).toEqual(['set-option', '-t', 'vam-fixed-name', '@vam-session', THREAD]);
+  });
+
+  /**
    * THE RULE THE 409 SPEC PUTS FIRST. Resuming a running session starts a
    * SECOND process on one conversation. For Claude Code that collapses a row
    * keyed `<sessionId>#<pid>`; for Codex both processes would fight over one
