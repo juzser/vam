@@ -79,4 +79,22 @@ describe('useFilesTreeState', () => {
     expect(result.current.cursorIndex).toBe(0);
     expect(result.current.cursorRow).toBe(result.current.rows[0]);
   });
+
+  it('pressing the down key at the last row is a no-op, not a step off the end', () => {
+    const { result } = setup(['/w/atlas/README.md']);
+
+    // Only one row is visible, so the cursor is already on the last one.
+    act(() => result.current.setCursorPath(result.current.rows[0]?.path ?? null));
+    expect(result.current.cursorIndex).toBe(0);
+
+    act(() => {
+      result.current.onTreeKeyDown({
+        key: 'j',
+        preventDefault: () => {},
+      } as unknown as Parameters<typeof result.current.onTreeKeyDown>[0]);
+    });
+
+    expect(result.current.cursorIndex).toBe(0);
+    expect(result.current.cursorPath).toBe(result.current.rows[0]?.path ?? null);
+  });
 });
