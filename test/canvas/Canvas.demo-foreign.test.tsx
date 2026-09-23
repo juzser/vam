@@ -94,6 +94,22 @@ describe('a foreign session on the demo canvas', () => {
     expect(rows()).toEqual(['vam-build-1']);
   });
 
+  /**
+   * `Canvas.tsx`'s `foreignHiddenCount` MUST agree with the exemption above,
+   * or the sidebar's own quiet line (`SessionList.tsx`'s
+   * `[data-foreign-hidden]`) would announce "1 session hidden — vam did not
+   * start it" about the very row the test above just proved is on screen,
+   * unhidden. Caught while building the line: a first draft counted
+   * straight off `allEntries` with `countHiddenByForeignFilter` alone and
+   * disagreed with `entries` on exactly this demo row.
+   */
+  it('is not counted as hidden either, so the quiet line says nothing about it', () => {
+    const { container } = render(
+      <Canvas model={modelWith()} source={{ kind: 'demo', note: 'demo data' }} />,
+    );
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+  });
+
   it('the same foreign session IS hidden on a real session source', () => {
     const sessionSource: SessionSource = {
       id: 'claude-code',

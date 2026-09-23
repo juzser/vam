@@ -72,6 +72,14 @@
  *     untagged `vam-x` session (`test/sources/claude-code-pane-rows.test.ts`
  *     proves the main-process half; the real-tmux half is in this task's own
  *     report, scripted against a private `-L` socket).
+ *  5. NO TMUX SERVER YET: `listVamSessions` answering `ok, []` -- the state
+ *     after every reboot before vam starts its first session -- is NOT a
+ *     listing gap: ownership is honestly zero, so `vamListingGap` stays
+ *     null, and there is nothing for state 3 above to catch. `hideForeign`
+ *     (on by default) still takes both Claude Code rows with it, and the
+ *     sidebar's own quiet line (`SessionList.tsx`'s `[data-foreign-hidden]`)
+ *     is what keeps that from reading as an empty, broken app: it names how
+ *     many and why, and `Show` brings both back with no popover in between.
  *
  * FALSIFIED BY HAND, twice, at the UNIT level (`test/canvas/Canvas.demo-
  * foreign.test.tsx`, `test/domain/session-filter.foreign.test.ts`) rather
@@ -202,6 +210,40 @@ function paneRowProjects() {
           pane: 'vam-x-000001',
         },
       ],
+    },
+  ];
+}
+
+/**
+ * THE STATE THE COORDINATOR'S OWN REPORT NAMED: no tmux server yet, the
+ * ordinary state after every reboot before vam starts its first session.
+ * `listVamSessions` answers `ok, []` here -- NOT a listing gap, ownership is
+ * honestly zero -- so every Claude Code row this fixture draws carries
+ * `vamControlled: false` and no `vamListingGap` at all, unlike every other
+ * state in this file. `hideForeign` (on by default) takes both rows with it,
+ * and `SessionList.tsx`'s own quiet line (`[data-foreign-hidden]`) is the
+ * only thing that keeps the sidebar from reading as simply broken.
+ */
+function noServerProjects() {
+  const session = (id, title) => ({
+    id,
+    title,
+    epic: null,
+    branch: 'main',
+    status: 'idle',
+    runningAgents: 0,
+    activity: null,
+    age: '4m',
+    decisions: [],
+    source: 'claude-code',
+    vamControlled: false,
+  });
+  return [
+    {
+      id: 'claude-code:alpha',
+      name: 'alpha',
+      source: 'claude-code',
+      sessions: [session('claude:a1', 'session one'), session('claude:a2', 'session two')],
     },
   ];
 }
@@ -357,6 +399,58 @@ const browser = await chromium.launch();
     `${await row.locator('[data-status-mark]').count()} status mark(s) on the row`,
   );
   await page.screenshot({ path: `${outDir}/sidebar-ownership-bare-pane.png` });
+
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// STATE 5: no tmux server yet -- `listVamSessions` answers `ok, []`, which is
+// NOT a listing gap. Ownership is honestly zero, and `SessionList.tsx`'s own
+// quiet line is what keeps that from reading as an empty, broken sidebar.
+// ---------------------------------------------------------------------------
+{
+  const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript((caps) => {
+    window.__ownershipCapabilities = caps;
+  }, CAPABILITIES);
+  await page.addInitScript(install, noServerProjects());
+  await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
+  // No row is expected at all -- wait on the quiet line instead of a row.
+  await page.waitForSelector('[data-foreign-hidden]', { timeout: 10_000 });
+
+  const rowsHidden = await rowCount(page);
+  check(
+    'every row is hidden by the shipped default -- honestly zero, not a failure',
+    rowsHidden === 0,
+    `${rowsHidden}`,
+  );
+  check(
+    'no vamListingGap banner — the listing itself succeeded',
+    (await page.locator('[data-vam-listing-gap]').count()) === 0,
+    `${await page.locator('[data-vam-listing-gap]').count()}`,
+  );
+  const noticeText = await page.locator('[data-foreign-hidden-count]').textContent();
+  check(
+    'the quiet line says how many, and why',
+    (noticeText ?? '').includes('2 sessions hidden') &&
+      (noticeText ?? '').includes('vam did not start them'),
+    noticeText ?? '(none)',
+  );
+  await page.screenshot({ path: `${outDir}/sidebar-ownership-no-server.png` });
+
+  await page.locator('[data-foreign-hidden-show]').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length === 2, {
+    timeout: 5_000,
+  });
+  const rowsShown = await rowCount(page);
+  check('Show brings both rows back', rowsShown === 2, `${rowsShown}`);
+  check(
+    'and the quiet line goes with them',
+    (await page.locator('[data-foreign-hidden]').count()) === 0,
+    `${await page.locator('[data-foreign-hidden]').count()}`,
+  );
+  await page.screenshot({ path: `${outDir}/sidebar-ownership-no-server-shown.png` });
 
   await page.close();
 }

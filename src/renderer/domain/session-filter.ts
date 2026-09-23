@@ -241,3 +241,26 @@ export function isForeign(session: Session): boolean {
 export function isHiddenByForeignFilter(session: Session, filters: SessionFilters): boolean {
   return filters.hideForeign && isForeign(session);
 }
+
+/**
+ * How many rows the foreign rule is hiding RIGHT NOW -- not `Canvas.tsx`'s
+ * `hiddenCounts.foreign`, which counts every foreign session over the whole
+ * workspace independently of whether `hideForeign` is even on (right for the
+ * popover pill, which states what the rule would take away whether or not it
+ * currently does). This one answers zero the instant the rule is turned off,
+ * which is what lets the sidebar's own quiet line disappear along with it.
+ *
+ * `listVamSessions` answering `ok, []` -- no tmux server yet, the state after
+ * every reboot before vam starts its first session -- is not a listing gap:
+ * `vamListingGap` stays null, and ownership is honestly zero, so every
+ * Claude Code row gets `vamControlled: false` and this rule (on by default)
+ * can hide every one of them. Truthful, and exactly the empty-sidebar-with-
+ * no-explanation the design's own trap forbids for a different cause. This
+ * count is what the sidebar reads to say so instead of staying silent.
+ */
+export function countHiddenByForeignFilter(
+  sessions: readonly Session[],
+  filters: SessionFilters,
+): number {
+  return sessions.filter((session) => isHiddenByForeignFilter(session, filters)).length;
+}

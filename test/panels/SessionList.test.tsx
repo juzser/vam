@@ -974,6 +974,82 @@ describe('SessionList filter popover', () => {
   });
 });
 
+/**
+ * THE SIDEBAR'S OWN QUIET LINE, distinct from `vamListingGap` above: that one
+ * covers a listing vam could not READ, this one covers a listing vam read
+ * perfectly and found nothing of its own in -- `listVamSessions` answering
+ * `ok, []`, the ordinary state after every reboot before vam starts its
+ * first session. Not a failure, so `vamListingGap` stays null and ownership
+ * really is zero -- but `hideForeign` (on by default) can still take every
+ * Claude Code row with it, leaving a wordless empty sidebar an operator
+ * cannot tell apart from "vam is broken".
+ *
+ * `foreignHiddenCount` ARRIVES AS A PROP, computed by `Canvas.tsx` off
+ * `countHiddenByForeignFilter` (`session-filter.foreign.test.ts` proves that
+ * function). This pane never recomputes it from `allEntries` itself: the
+ * count has to agree with `entries`'s own `vamListingGap`/`?demo=1`
+ * exemptions, which only `Canvas.tsx` knows about, so these tests exercise
+ * the RENDERING of a given count and the `Show` route, not the arithmetic.
+ */
+describe('the foreign-hidden quiet line', () => {
+  it('says nothing when the count is zero', () => {
+    const { container } = mountWith(twoProjects(), { foreignHiddenCount: 0 });
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+  });
+
+  /**
+   * THE BUG ITSELF: `hideForeign` takes every row, `vamListingGap` is null
+   * (the listing succeeded), and the plain "No sessions yet" empty state
+   * would say nothing true but misleading in its silence. This is the state
+   * the coordinator's own report named: no tmux server yet, so every Claude
+   * Code row reads `vamControlled: false`.
+   */
+  it('replaces the silent empty state when the count is not zero', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 3 });
+    const notice = container.querySelector('[data-foreign-hidden-count]');
+    expect(notice?.textContent).toContain('3 sessions hidden');
+    expect(notice?.textContent).toContain('vam did not start them');
+    // Not BOTH messages -- the strip already says why the list is empty, and
+    // "No sessions yet" beside it would read as contradicting it.
+    expect(container.textContent).not.toContain('No sessions yet');
+  });
+
+  it('says ONE session, singular, when the count is exactly one', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1 });
+    const notice = container.querySelector('[data-foreign-hidden-count]');
+    expect(notice?.textContent).toContain('1 session hidden');
+    expect(notice?.textContent).toContain('vam did not start it');
+  });
+
+  /**
+   * THE NON-EMPTY CASE: a small count so a hidden row is never
+   * invisible-and-unmentioned just because it was not the ONLY row.
+   */
+  it('still names a hidden session when the rest of the list is not empty', () => {
+    const { container } = mountWith(entriesOf([makeSession({ id: 's1' })]), {
+      foreignHiddenCount: 2,
+    });
+    expect(container.querySelector('[data-session-row="s1"]')).not.toBeNull();
+    expect(container.querySelector('[data-foreign-hidden-count]')?.textContent).toContain(
+      '2 sessions hidden',
+    );
+  });
+
+  it('Show flips the same pref the popover row does, without opening the popover', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith([], {
+      foreignHiddenCount: 2,
+      originFilters: { ...DEFAULT_SESSION_FILTERS, hideForeign: true },
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-foreign-hidden-show]') as Element);
+    });
+    expect(seen).toEqual([{ ...DEFAULT_SESSION_FILTERS, hideForeign: false }]);
+    expect(container.querySelector('[data-filter-menu]')).toBeNull();
+  });
+});
+
 describe('the filter badge yellow, in styles.css', () => {
   const CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles.css'), 'utf8');
   const block = (selector: string) => {

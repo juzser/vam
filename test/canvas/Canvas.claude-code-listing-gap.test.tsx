@@ -107,4 +107,18 @@ describe('a Claude-Code-only load whose own tmux listing failed', () => {
     const gap = document.querySelector('[data-vam-listing-gap]');
     expect(gap?.textContent).toContain('tmux rewrote its separators');
   });
+
+  /**
+   * THE SIDEBAR'S OWN QUIET LINE (`SessionList.tsx`'s `[data-foreign-hidden]`)
+   * MUST NOT ALSO FIRE HERE. `entries`'s own early return stands the foreign
+   * rule down entirely while `vamListingGap` is set -- `foreign-one` above is
+   * ON SCREEN, not hidden -- so a count computed independently of that
+   * exemption would say "1 session hidden" about a row that plainly is not.
+   * One banner explaining the state is the point; two, disagreeing, would be
+   * worse than the one this whole file is about.
+   */
+  it('does not also show the foreign-hidden quiet line -- one banner, not two', () => {
+    const { container } = render(<Canvas model={MODEL} />);
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+  });
 });

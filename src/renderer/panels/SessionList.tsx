@@ -688,6 +688,26 @@ export type SessionListProps = {
     readonly foreign: number;
   };
   /**
+   * HOW MANY ROWS `hideForeign` IS HIDING RIGHT NOW -- NOT `hiddenCounts.
+   * foreign` above, which counts every foreign session whether or not the
+   * rule is even on. `Canvas.tsx` computes this with
+   * `countHiddenByForeignFilter` (`session-filter.ts`) rather than this pane
+   * doing it from `allEntries` itself, because the count has to agree with
+   * two exemptions only `Canvas.tsx`'s own `entries` memo knows about:
+   * `vamListingGap` standing the rule down entirely, and `?demo=1` being
+   * exempt from it so `fixtures/demo.ts`'s own foreign row is never hidden.
+   * A count computed here from `allEntries` alone would say "hidden" about a
+   * row `entries` never actually hid.
+   *
+   * `docs/design/vam-owns-the-session.md`'s trap, closed a second time:
+   * `listVamSessions` answering `ok, []` -- no tmux server yet, the state
+   * after every reboot before vam starts its first session -- is not a
+   * `vamListingGap` (ownership is honestly zero), so `hideForeign` can still
+   * empty the sidebar with no explanation at all. This is what the quiet
+   * line at the foot of the list reads to say why.
+   */
+  readonly foreignHiddenCount: number;
+  /**
    * WHY THE FOREIGN AND ENDED RULES ARE STANDING DOWN RIGHT NOW, or `null` on
    * every ordinary poll. `docs/design/vam-owns-the-session.md`'s own trap:
    * "an unreadable tmux listing must not empty the sidebar" -- once a source's
@@ -942,6 +962,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     originFilters,
     onOriginFilters,
     hiddenCounts,
+    foreignHiddenCount,
     vamListingGap = null,
     renamingId,
     renameDraft,
@@ -3522,13 +3543,75 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               Loading sessions…
             </li>
           )}
-          {entries.length === 0 && !loading && (
-            <li className="px-1 py-4 text-control text-ink-dim">
-              {filter.trim() === '' ? 'No sessions yet' : 'No match'}
-            </li>
+          {/* NOT "No sessions yet" WHEN THE REAL REASON IS `foreignHiddenCount`
+              -- the strip below the list already names it, and an operator
+              reading both would read the second as contradicting the first.
+              `filter.trim() !== ''` (a search with no match) is left alone:
+              that emptiness is about the query, not about ownership, and
+              stays true whether or not anything is foreign-hidden elsewhere. */}
+          {entries.length === 0 && !loading && filter.trim() === '' && foreignHiddenCount === 0 && (
+            <li className="px-1 py-4 text-control text-ink-dim">No sessions yet</li>
+          )}
+          {entries.length === 0 && !loading && filter.trim() !== '' && (
+            <li className="px-1 py-4 text-control text-ink-dim">No match</li>
           )}
         </ul>
       </OverlayScroll>
+
+      {/*
+       * THE QUIET LINE `docs/design/vam-owns-the-session.md`'s own trap
+       * needed a second time. `vamListingGap` above covers a listing vam
+       * could not READ; this covers a listing vam read PERFECTLY and found
+       * nothing of its own in -- `listVamSessions` answering `ok, []`, the
+       * ordinary state after every reboot before vam starts its first
+       * session. That is not a failure and stays out of `vamListingGap`
+       * entirely: ownership really is zero. But `hideForeign` (on by
+       * default) can still take every row with it, and an operator opening
+       * the app to a wordless empty sidebar cannot tell "vam is broken" from
+       * "vam owns nothing yet" -- exactly the ambiguity the design's trap
+       * forbids, for a different cause than the one it names.
+       *
+       * SHOWN WHETHER OR NOT THE LIST IS EMPTY, unlike the loading/no-match
+       * lines above: a single row hidden among several visible ones is as
+       * unmentioned as twelve hidden behind none, just quieter about it --
+       * `countHiddenByForeignFilter`'s own header is the small-count half of
+       * this. `border-line border-t` and the restore strip's own spacing,
+       * because this is the same shape of fact (something is hidden, here
+       * is the one-tap way back) and a different visual language for it
+       * would teach the operator two idioms for one idea.
+       *
+       * `Show` flips the SAME pref the popover's fourth row does
+       * (`onOriginFilters({ ...originFilters, hideForeign: false })`) rather
+       * than opening the popover -- the popover is one MORE tap away for a
+       * state this severe, and the row itself already disappears the
+       * instant the pref does, since `foreignHiddenCount` reads the live
+       * pref and not a snapshot.
+       */}
+      {foreignHiddenCount > 0 && (
+        <div
+          data-foreign-hidden
+          className="flex flex-wrap items-center gap-1.5 border-line border-t px-[11px] py-2 text-control text-ink-faint"
+        >
+          <span data-foreign-hidden-count>
+            {foreignHiddenCount} session{foreignHiddenCount === 1 ? '' : 's'} hidden — vam did not
+            start {foreignHiddenCount === 1 ? 'it' : 'them'}
+          </span>
+          {/* `vam-tap`: a phone renders this same strip on the list screen the
+              instant `hideForeign` empties it, and a control that size fails
+              the 44px floor every other phone control keeps -- the exact
+              mistake this task's own defect 2 already made once with the
+              popover's origin rows. */}
+          <button
+            type="button"
+            data-foreign-hidden-show
+            aria-label="show sessions vam did not start"
+            onClick={() => onOriginFilters({ ...originFilters, hideForeign: false })}
+            className="vam-tap ml-auto flex-none cursor-pointer font-mono text-control text-ink-dim underline hover:text-ink"
+          >
+            Show
+          </button>
+        </div>
+      )}
 
       {/* A15.3: where a removed project comes back from, for a WHILE.
           A permanent strip is a standing cost for a momentary action, so

@@ -32,6 +32,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Session } from '../../src/renderer/domain/model.js';
 import {
+  countHiddenByForeignFilter,
   DEFAULT_SESSION_FILTERS,
   isForeign,
   isHiddenByForeignFilter,
@@ -126,5 +127,62 @@ describe('isHiddenByForeignFilter', () => {
         true,
       );
     }
+  });
+});
+
+/**
+ * THE SIDEBAR'S OWN QUIET LINE, not the popover's row count.
+ *
+ * `Canvas.tsx`'s `hiddenCounts.foreign` counts every foreign session over the
+ * WHOLE workspace, independently of whether `hideForeign` is even on --
+ * right for the popover pill, which states what the rule WOULD take away
+ * whether or not it currently is. The sidebar's own line asks a different
+ * question: how many rows are hidden RIGHT NOW, so it can say nothing once
+ * the operator has turned the rule off, rather than keep naming sessions
+ * that are already on screen.
+ *
+ * The trap this closes: `listVamSessions` answering `ok, []` -- no tmux
+ * server yet, the state after every reboot before vam starts its first
+ * session -- is not a listing GAP (`vamListingGap` stays null, ownership is
+ * honestly zero), so every Claude Code row gets `vamControlled: false` and
+ * `hideForeign` (on by default) can hide all of them. Truthful about
+ * ownership, and exactly the empty-sidebar-with-no-explanation the design's
+ * own trap forbids for a different cause. This count is what the sidebar
+ * reads to say so.
+ */
+describe('countHiddenByForeignFilter', () => {
+  it('counts zero when nothing is foreign', () => {
+    expect(
+      countHiddenByForeignFilter([session({ vamControlled: true }), session({})], filters()),
+    ).toBe(0);
+  });
+
+  it('counts every foreign session while the rule is in force', () => {
+    expect(
+      countHiddenByForeignFilter(
+        [
+          session({ vamControlled: false }),
+          session({ vamControlled: false }),
+          session({ vamControlled: true }),
+        ],
+        filters(),
+      ),
+    ).toBe(2);
+  });
+
+  /** THE WHOLE POINT: once the operator turns the rule off, nothing is
+   * hidden by it any more, even though the sessions are still foreign --
+   * unlike `hiddenCounts.foreign`, which would still say 2. */
+  it('counts zero once the rule itself is off, even though the sessions are still foreign', () => {
+    expect(
+      countHiddenByForeignFilter(
+        [session({ vamControlled: false }), session({ vamControlled: false })],
+        filters({ hideForeign: false }),
+      ),
+    ).toBe(0);
+  });
+
+  it('never counts a session vam could not ask tmux about at all', () => {
+    expect(countHiddenByForeignFilter([session({}), session({})], filters())).toBe(0);
   });
 });

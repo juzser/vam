@@ -1713,3 +1713,123 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(page.locator('[data-project-heading][data-project-id="p1"]')).toBeInViewport();
   });
 });
+
+/**
+ * `SessionList.tsx`'s own quiet line, the empty-sidebar-with-no-explanation
+ * fix: `listVamSessions` answering `ok, []` (no tmux server yet, the state
+ * after every reboot before vam starts its first session) is not a
+ * `vamListingGap` -- ownership is honestly zero -- so `hideForeign` (on by
+ * default) can still take every row with it. `Canvas.tsx` exempts `?demo=1`
+ * from `hideForeign` entirely (`Canvas.demo-foreign.test.tsx`), so this line
+ * never reaches the phone screen through the demo fixture every other test
+ * in this file uses -- it needs a REAL (non-demo) source, the same route
+ * "the sheets behind a source" above stubs over HTTP rather than through
+ * `window.api`, for the same reason that block's own header gives: `App.tsx`
+ * asks its own origin for `/api/describe` and `/api/load`, and Playwright
+ * can answer both without touching `src/`.
+ */
+test.describe('the foreign-hidden quiet line on a phone list screen', () => {
+  const DESCRIPTOR = {
+    id: 'stub',
+    label: 'stub source',
+    capabilities: {
+      liveUpdates: false,
+      recordPrompt: true,
+      deliverPrompt: false,
+      promptAttachments: false,
+      slashCommands: false,
+      renameSession: true,
+      closeSession: true,
+      createSession: true,
+      governance: false,
+      pullRequests: false,
+      terminal: false,
+      agentRoster: false,
+      resumeSession: false,
+    },
+    declines: {
+      liveUpdates: 'the stub does not stream',
+      deliverPrompt: 'the stub delivers nothing',
+      promptAttachments: 'the stub takes no attachments',
+      slashCommands: 'the stub has no slash commands',
+      governance: 'the stub has no governance surface',
+      pullRequests: 'the stub has no pull requests',
+      terminal: 'the stub has no terminal',
+      agentRoster: 'the stub has no agent roster',
+    },
+    viewerScope: { kind: 'connection', note: 'a stubbed transport, not a server' },
+  };
+  /** Two rows, both `vamControlled: false` -- exactly what every Claude Code
+   * row reads when `listVamSessions` answers `ok, []` and the source pairs
+   * each one against an empty tmux listing. */
+  const session = (id: string, title: string) => ({
+    id,
+    title,
+    icon: null,
+    epic: null,
+    status: 'idle',
+    runningAgents: 0,
+    activity: null,
+    age: '4m',
+    branch: null,
+    decisions: [],
+    source: 'stub',
+    vamControlled: false,
+  });
+  const PROJECTS = [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'stub',
+      sessions: [session('s1', 'alpha-1'), session('s2', 'alpha-2')],
+    },
+  ];
+  const envelope = (value: unknown) => ({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, value }),
+  });
+
+  test('the Show control meets the phone floor, and brings both rows back', async ({ page }) => {
+    // Same route order note as "the sheets behind a source": the catch-all
+    // goes on first, the two reads over the top of it.
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    await page.goto('/');
+
+    // NO ROW YET -- both are foreign, `hideForeign` is on by default, and
+    // there is no `vamListingGap` (the read succeeded): the quiet line is
+    // the only thing on screen that explains why.
+    await page.waitForSelector('[data-foreign-hidden-show]', { timeout: 10_000 });
+    expect(await page.locator('[data-session-row]').count()).toBe(0);
+
+    const noticeText = await page.locator('[data-foreign-hidden-count]').textContent();
+    expect(noticeText).toContain('2 sessions hidden');
+    expect(noticeText).toContain('vam did not start them');
+
+    const box = await page.locator('[data-foreign-hidden-show]').boundingBox();
+    expect(box, 'the Show control has a box at all').not.toBeNull();
+    expect(box?.width ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+    expect(box?.height ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+
+    await page.locator('[data-foreign-hidden-show]').tap();
+    await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length === 2, {
+      timeout: 5_000,
+    });
+    expect(await page.locator('[data-foreign-hidden]').count()).toBe(0);
+  });
+});

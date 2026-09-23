@@ -75,6 +75,7 @@ import type { SessionEntry } from '../domain/selectors.js';
 import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import {
+  countHiddenByForeignFilter,
   isAgentStarted,
   isEnded,
   isForeign,
@@ -2929,6 +2930,31 @@ function CanvasInner({
     }),
     [allEntries],
   );
+
+  /**
+   * HOW MANY ROWS `hideForeign` IS ACTUALLY HIDING RIGHT NOW -- unlike
+   * `hiddenCounts.foreign` above, which counts every foreign session
+   * regardless of whether the rule is even on (right for the popover pill,
+   * which states what the rule WOULD take away). This is what the sidebar's
+   * own quiet line reads, and it has to agree with `entries` above about
+   * BOTH exemptions that memo makes, or the line would name a session that
+   * memo never actually hid:
+   *
+   *  - `vamListingGap !== null` stands the foreign rule down entirely
+   *    (`entries`'s own early return) -- the listing-gap banner already
+   *    explains why everything is shown, so this counts nothing while it is
+   *    up rather than naming a second, contradicting reason.
+   *  - `source.kind === 'demo'` is the same carve-out `entries` makes for
+   *    `fixtures/demo.ts`'s own `vam-build-1` row: `?demo=1` never hides a
+   *    foreign session, so nothing is hidden here on it either.
+   */
+  const foreignHiddenCount = useMemo(() => {
+    if (vamListingGap !== null || source.kind === 'demo') return 0;
+    return countHiddenByForeignFilter(
+      allEntries.map((e) => e.session),
+      prefs.filters,
+    );
+  }, [allEntries, prefs.filters, source.kind, vamListingGap]);
 
   /** The pill counts are off the UNFILTERED list — a count that moved when you
       clicked it would be a count of your own click. */
@@ -6214,6 +6240,7 @@ function CanvasInner({
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
     hiddenCounts: hiddenCounts,
+    foreignHiddenCount: foreignHiddenCount,
     vamListingGap: vamListingGap,
     onReopen: onSidebarReopen,
     canReopen:

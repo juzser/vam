@@ -104,6 +104,7 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     },
     onOriginFilters: noop,
     hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 0 },
+    foreignHiddenCount: 0,
     filter: '',
     filtering: false,
     onFilterChange: noop,
