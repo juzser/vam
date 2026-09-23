@@ -30,10 +30,27 @@ function theOneSession() {
   return session;
 }
 
+/** The second project's one session -- `status: 'terminal'`, added so
+ *  `test/electron/probe.cjs` has a real row to click to reach
+ *  `TerminalOnlyStart`, the one screen in this app that draws an `<img>`. */
+function theTerminalSession() {
+  const session = LAUNCH_FIXTURE_PROJECTS[1]?.sessions[0];
+  if (session === undefined)
+    throw new Error('the launch fixture has no terminal-only session to test');
+  return session;
+}
+
 describe("the launch fixture's own session", () => {
-  it('exists, one project and one session', () => {
-    expect(LAUNCH_FIXTURE_PROJECTS).toHaveLength(1);
+  it('exists, two projects, one session each', () => {
+    expect(LAUNCH_FIXTURE_PROJECTS).toHaveLength(2);
     expect(LAUNCH_FIXTURE_PROJECTS[0]?.sessions).toHaveLength(1);
+    expect(LAUNCH_FIXTURE_PROJECTS[1]?.sessions).toHaveLength(1);
+  });
+
+  it('the second session is the terminal-only one, and vam-controlled', () => {
+    expect(theTerminalSession().status).toBe('terminal');
+    expect(theTerminalSession().vamControlled).toBe(true);
+    expect(isHiddenByForeignFilter(theTerminalSession(), DEFAULT_SESSION_FILTERS)).toBe(false);
   });
 
   /**

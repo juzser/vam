@@ -395,6 +395,49 @@ async function main() {
   // Leave nothing behind for the next launch to inherit.
   contents.setZoomLevel(0);
 
+  // EVERY <img> ON SCREEN LOADED -- the ONLY check in this whole harness that
+  // can see the difference between a document-relative `src` and a root-
+  // absolute one, because it is the only one running against the REAL
+  // `file://` document `loadFile` opens (`src/main/index.ts`). A web build or
+  // a unit environment serves the app from an HTTP root, where the two
+  // spellings resolve to the same URL and the defect is invisible; under
+  // `file://` a root-absolute `src="/favicon.png"` reads as the filesystem
+  // root and the `<img>` never loads at all.
+  //
+  // `LAUNCH_FIXTURE_PROJECTS`'s second project (`launch-fixture.ts`) is a
+  // `status: 'terminal'` row for exactly this: `TerminalOnlyStart`
+  // (`DetailPanel.tsx`) is the one screen in this app that draws an `<img>`
+  // at all (measured: `grep -rn '<img' src/renderer` finds one), so it is
+  // clicked here before the check runs -- an app-wide corpus of ONE row is
+  // not a coincidence to work around, it is the whole surface this guards.
+  //
+  // THE CLICK WRITES `lastFocus` INTO THE SAME SHARED, PERSISTENT
+  // `localStorage` THE ZOOM NOTE ABOVE ALREADY NAMES -- this probe sets no
+  // `userData` override, so `prefs/prefs.ts`'s `vam.prefs.v1` key outlives
+  // this process exactly the way the zoom factor did. Measured the same way
+  // that regression was: an unrelated assertion ("denies its own
+  // microphone, and therefore draws no button to use it", which reads
+  // `sendControls` off the FIRST session's composer) started failing on the
+  // launch AFTER this click first ran, because the NEXT launch's own "land
+  // focus on something real" effect (`Canvas.tsx`) read the persisted
+  // pointer back and opened the terminal-only row instead of the waiting
+  // one, whose composer this harness's own earlier assertion needs on
+  // screen. Saved and restored around the click, the same "leave nothing
+  // behind for the next launch to inherit" rule as the zoom reset above.
+  const prefsBeforeClick = await run("window.localStorage.getItem('vam.prefs.v1')");
+  await run(
+    "document.querySelector('[data-session-row=\"pane:launch-fixture-terminal-1\"]')?.click(); undefined",
+  );
+  await sleep(300);
+  result.images = await run(
+    "Array.from(document.images).map((img) => ({ src: img.getAttribute('src'), naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, complete: img.complete }))",
+  );
+  await run(
+    prefsBeforeClick === null
+      ? "window.localStorage.removeItem('vam.prefs.v1'); undefined"
+      : `window.localStorage.setItem('vam.prefs.v1', ${JSON.stringify(prefsBeforeClick)}); undefined`,
+  );
+
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
   app.exit(0);
 }

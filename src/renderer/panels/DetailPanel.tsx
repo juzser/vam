@@ -2886,8 +2886,21 @@ function TerminalOnlyStart({
           second drawing of it: a PNG rather than an inline SVG so no colour
           value for it ever has to live in this file (`index.html`'s own
           comment on `build/favicon.svg` explains the two-size split this
-          asset is the small half of). */}
-      <img src="/favicon.png" width={32} height={32} alt="vam" className="opacity-90" />
+          asset is the small half of).
+
+          DOCUMENT-RELATIVE, NOT ROOT-ABSOLUTE -- `./favicon.png`, the exact
+          string `index.html`'s own `<link>` uses, and for the same reason: a
+          leading `/` resolves against the DOCUMENT's own URL, and the
+          packaged app's document is `file://.../out/renderer/index.html`
+          (`src/main/index.ts`, `loadFile`), where a root-absolute path reads
+          as the filesystem root and the image is simply gone. `base: './'`
+          is what both `vite.web.config.ts` and electron-vite's renderer
+          build already promise -- every asset ships at a path relative to
+          the HTML that loads it -- and a relative `src` is the one spelling
+          that reads correctly under a dev server's `http://host/`, the web
+          build's static root, AND `file://`, which is the one of the three
+          nothing here was proven against until it broke. */}
+      <img src="./favicon.png" width={32} height={32} alt="vam" className="opacity-90" />
       <div className="flex flex-col gap-1">
         <p className="text-control text-ink">{title}</p>
         <p className="text-meta text-ink-quiet">
