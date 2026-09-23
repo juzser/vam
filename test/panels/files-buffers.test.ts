@@ -102,7 +102,9 @@ describe('useFileBuffers', () => {
     await waitFor(() => expect(result.current.buffers['/w/atlas/app.ts']?.kind).toBe('editable'));
 
     act(() => result.current.setContent('/w/atlas/app.ts', 'local edit, never sent'));
-    expect(result.current.buffers['/w/atlas/app.ts']).toMatchObject({ content: 'local edit, never sent' });
+    expect(result.current.buffers['/w/atlas/app.ts']).toMatchObject({
+      content: 'local edit, never sent',
+    });
 
     act(() => result.current.reloadFile('/w/atlas/app.ts'));
     await waitFor(() =>

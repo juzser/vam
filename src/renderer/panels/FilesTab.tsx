@@ -438,8 +438,16 @@ export function FilesTab({
   const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
   const root = ready?.root ?? null;
 
-  const { buffers, activePath, activeBuffer, unsavedKey, openFile, setContent, saveFile, reloadFile } =
-    useFileBuffers({ sessionId, root, read, write });
+  const {
+    buffers,
+    activePath,
+    activeBuffer,
+    unsavedKey,
+    openFile,
+    setContent,
+    saveFile,
+    reloadFile,
+  } = useFileBuffers({ sessionId, root, read, write });
 
   /**
    * Whether the open file COULD be previewed, and whether it IS.
