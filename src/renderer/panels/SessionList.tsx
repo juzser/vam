@@ -58,6 +58,7 @@ import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
+import { GettingStarted } from './GettingStarted.js';
 import { IconMark, parseIcon } from './icon-value.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
@@ -753,6 +754,19 @@ export type SessionListProps = {
   readonly onRenameSession?: (sessionId: string) => void;
   readonly onAdd: () => void;
   /**
+   * Whether `onAdd` is about to fall back to New project -- `Canvas.tsx`'s
+   * own `focusedEntry === null`, computed there and handed down rather than
+   * approximated here from `entries`/`focusedSessionId`: `onAdd`'s real
+   * target is `focusedEntry`, built off the UNFILTERED session set, and a
+   * second guess from this component's own FILTERED `entries` could disagree
+   * with it the moment a search or a status pill hides the focused row
+   * without un-focusing it. The footer's LABEL is read from this so it can
+   * never claim "New session" while a click is about to start a project
+   * instead -- the exact lie `newSessionDecline` already exists to prevent
+   * one layer up.
+   */
+  readonly addWillCreateProject: boolean;
+  /**
    * The `+` in a project's heading. Separate from `onAdd` because it can say
    * WHICH project the click was about, and the answer differs per project the
    * moment there is a route to create a session in one.
@@ -773,6 +787,16 @@ export type SessionListProps = {
    * make impossible, and the component cannot ask a source anything itself.
    */
   readonly newSessionDecline: string | null;
+  /**
+   * Whether THIS BUILD can open a native directory picker at all --
+   * `window.api?.dialog?.chooseDirectory !== undefined`, read at the call
+   * site exactly as `DetailPanel.tsx`'s `prRepo` insists on for the same
+   * bridge. Read only by the phone's own getting-started screen
+   * (`GettingStarted.tsx`, drawn below when `phone` and the list is empty):
+   * absent there, the screen withdraws its New project button rather than
+   * drawing one the browser build and a phone can never act on.
+   */
+  readonly hasDirectoryPicker: boolean;
   /**
    * The id of the one action currently in flight -- a project id for a create,
    * a session id for a close -- or `null`. Owned by `Canvas.tsx`, which is
@@ -979,9 +1003,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     canReopen,
     onRenameSession,
     onAdd,
+    addWillCreateProject,
     onAddInProject,
     onNewProject,
     newSessionDecline,
+    hasDirectoryPicker,
     pendingAction,
     starting,
     onPickIcon,
@@ -1019,6 +1045,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     pendingAction === id
       ? ({ 'data-pending': 'true', 'aria-busy': true, disabled: true, title: busy } as const)
       : {};
+
+  /**
+   * THE PHONE'S OWN GETTING-STARTED SCREEN (`GettingStarted.tsx`) TAKES
+   * OVER THIS LIST'S BODY -- see the render site's own comment for why a
+   * phone needs its copy drawn HERE rather than in `DetailPanel`.
+   * `filter.trim() === ''`/`!loading`, the same guard the plain "No sessions
+   * yet" line already used: a search with no match, or a listing still in
+   * flight, is a different emptiness and keeps its own existing text.
+   */
+  const showGettingStarted = phone && entries.length === 0 && filter.trim() === '' && !loading;
 
   const filterRef = useRef<HTMLInputElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
@@ -3684,8 +3720,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
        * state this severe, and the row itself already disappears the
        * instant the pref does, since `foreignHiddenCount` reads the live
        * pref and not a snapshot.
+       *
+       * WITHDRAWN WHILE THE PHONE'S GETTING-STARTED SCREEN OWNS THIS SAME
+       * LINE (`showGettingStarted`, below): that screen carries its own
+       * copy of this exact sentence (`GettingStarted.tsx`'s own
+       * `foreignHiddenCount` prop, the identical value), and drawing both at
+       * once put "1 session hidden — vam did not start it · Show" on a
+       * 390px screen twice, one above an otherwise-empty list and one below
+       * it. The desktop never withdraws this strip -- its getting-started
+       * screen lives in the detail pane, so there is no second copy here to
+       * collide with.
        */}
-      {foreignHiddenCount > 0 && (
+      {foreignHiddenCount > 0 && !showGettingStarted && (
         <div
           data-foreign-hidden
           className="flex flex-wrap items-center gap-1.5 border-line border-t px-[11px] py-2 text-control text-ink-faint"
@@ -3806,39 +3852,91 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           footer rather than merged into it, because those two rows answer
           different questions ("what am I in", not "what do I do next") and
           the mockup keeps New session as its own full-width strip. */}
-      <div className="border-line border-t px-[11px] py-2.5">
-        {/* Grey and small, at the operator's request. The fill and the medium
-            weight were doing as much of the shouting as the colour: an
-            ink-on-`line-strong` slab made the least urgent control in the
-            sidebar its loudest. It is an outline now, a step down the ink
-            ladder, and shorter and smaller in the same breath so the type
-            still fits the box. Hover restores full ink, so it still reads as
-            something you press. */}
-        {/* The footer names no project: it starts one in the FOCUSED session's,
-            exactly as `o` does, so it is pending for that same project id and
-            for no other. */}
-        <ShortcutTip label="New session" action={NEW_SESSION_ACTION}>
-          <button
-            type="button"
-            onClick={onAdd}
-            aria-label="new session"
-            {...pending(
-              entries.find((candidate) => candidate.session.id === focusedSessionId)?.project.id ??
-                '',
-              'Starting a session…',
-            )}
-            className="vam-tap flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-quiet text-control text-ink-dim hover:border-ink-faint hover:text-ink"
+      {/* WITHDRAWN, NOT DRAWN AND DUPLICATED, while the phone's own
+          getting-started screen owns this same act below: that screen carries
+          its own primary New project button, and a second one immediately
+          above it would be two controls for one act on a 390px screen. The
+          desktop never withdraws this strip -- its getting-started screen
+          lives in the DETAIL pane, a different piece of chrome entirely, so
+          there is no sibling button to collide with there. */}
+      {!showGettingStarted && (
+        <div className="border-line border-t px-[11px] py-2.5">
+          {/* Grey and small, at the operator's request. The fill and the medium
+              weight were doing as much of the shouting as the colour: an
+              ink-on-`line-strong` slab made the least urgent control in the
+              sidebar its loudest. It is an outline now, a step down the ink
+              ladder, and shorter and smaller in the same breath so the type
+              still fits the box. Hover restores full ink, so it still reads as
+              something you press. */}
+          {/* The footer names no project: it starts one in the FOCUSED
+              session's, exactly as `o` does, so it is pending for that same
+              project id and for no other.
+
+              NEVER A DEAD END. With nothing focused there is no project for
+              this button to add a session TO -- `addWillCreateProject`, the
+              exact condition `Canvas.tsx`'s `onAdd` itself branches on, so the
+              label can never claim "New session" while a click is about to
+              start a project instead. `o` still opens this same control (the
+              chip beside it never changes): in that state `o` ALSO falls back
+              to New project, so the chord shown here stays true regardless of
+              which act it currently performs. */}
+          <ShortcutTip
+            label={addWillCreateProject ? 'New project' : 'New session'}
+            action={NEW_SESSION_ACTION}
           >
-            <Plus size={13} strokeWidth={1.7} />
-            New session
-            {/* Read, not written: this cell used to spell `o`. */}
-            <InlineChord
-              action={NEW_SESSION_ACTION}
-              className="ml-0.5 font-mono text-meta text-ink-faint"
-            />
-          </button>
-        </ShortcutTip>
-      </div>
+            <button
+              type="button"
+              data-sidebar-add
+              onClick={onAdd}
+              aria-label={
+                addWillCreateProject ? 'new project (no session to add to)' : 'new session'
+              }
+              {...pending(
+                addWillCreateProject
+                  ? NEW_PROJECT_PENDING
+                  : (entries.find((candidate) => candidate.session.id === focusedSessionId)?.project
+                      .id ?? ''),
+                addWillCreateProject
+                  ? 'Starting a session in the chosen directory…'
+                  : 'Starting a session…',
+              )}
+              className="vam-tap flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-quiet text-control text-ink-dim hover:border-ink-faint hover:text-ink"
+            >
+              {addWillCreateProject ? (
+                <FolderPlus size={13} strokeWidth={1.7} />
+              ) : (
+                <Plus size={13} strokeWidth={1.7} />
+              )}
+              {addWillCreateProject ? 'New project' : 'New session'}
+              {/* Read, not written: this cell used to spell `o`. */}
+              <InlineChord
+                action={NEW_SESSION_ACTION}
+                className="ml-0.5 font-mono text-meta text-ink-faint"
+              />
+            </button>
+          </ShortcutTip>
+        </div>
+      )}
+      {/* THE PHONE'S OWN GETTING-STARTED SCREEN. `DetailPanel`'s copy
+          (`GettingStarted.tsx`, wired in `Canvas.tsx`'s `gettingStarted` prop)
+          is unreachable from a phone: `PhoneShell` mounts `SessionList` as
+          ITS list screen and only reaches `DetailPanel` once a session is
+          already open (`entry !== null`), so an app with no session to show
+          would otherwise draw this list's own "No sessions yet" line and
+          nothing else -- the desktop's rich screen, minus everything that
+          made it a getting-started screen. This is that same screen, the
+          identical component, replacing the list body on the ONE surface
+          the desktop does not need it to. */}
+      {showGettingStarted && (
+        <GettingStarted
+          onNewProject={onNewProject}
+          newProjectDecline={newSessionDecline}
+          hasDirectoryPicker={hasDirectoryPicker}
+          foreignHiddenCount={foreignHiddenCount}
+          onShowForeign={() => onOriginFilters({ ...originFilters, hideForeign: false })}
+          phone
+        />
+      )}
     </aside>
   );
 });

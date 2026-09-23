@@ -1048,6 +1048,52 @@ describe('the foreign-hidden quiet line', () => {
     expect(seen).toEqual([{ ...DEFAULT_SESSION_FILTERS, hideForeign: false }]);
     expect(container.querySelector('[data-filter-menu]')).toBeNull();
   });
+
+  /**
+   * ONE COPY OF THE SENTENCE ON A PHONE, NOT TWO. `GettingStarted.tsx`
+   * (drawn below the list when `phone && entries.length === 0`, see the
+   * getting-started describe block) carries its OWN copy of this exact
+   * line, fed the identical `foreignHiddenCount`. Drawing both put "1
+   * session hidden — vam did not start it · Show" on the 390px screen
+   * twice -- once above an otherwise-empty list, once inside the screen
+   * that replaced it. The desktop never withdraws this strip: its own
+   * getting-started screen lives in the detail pane, a different piece of
+   * chrome the sidebar never draws.
+   */
+  it('withdraws on a phone once the getting-started screen owns this line', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1, phone: true });
+    expect(container.querySelector('[data-foreign-hidden]')).toBeNull();
+    expect(container.querySelector('[data-getting-started-hidden]')).not.toBeNull();
+  });
+
+  it('stays on the desktop, where the getting-started screen is a different pane entirely', () => {
+    const { container } = mountWith([], { foreignHiddenCount: 1, phone: false });
+    expect(container.querySelector('[data-foreign-hidden]')).not.toBeNull();
+  });
+});
+
+/**
+ * TWO THINGS A PHONE'S OWN GETTING-STARTED SCREEN GETS WRONG IF IT JUST
+ * COPIES THE DESKTOP'S: a shortcut list naming keys nothing on a touch
+ * screen can press, and a "the browser build has no picker" sentence that
+ * is true of EVERY phone (a phone is a browser build, always) and points
+ * nowhere an operator holding one can act. Both were caught by eye on the
+ * committed screenshot (`docs/ui/getting-started-phone.png`) before being
+ * pinned here.
+ */
+describe('the phone’s own getting-started screen', () => {
+  it('withdraws the shortcut rows -- a touch screen cannot press a chord', () => {
+    const { container } = mountWith([], { phone: true, hasDirectoryPicker: true });
+    expect(container.querySelector('[data-getting-started]')).not.toBeNull();
+    expect(container.querySelector('[data-getting-started-shortcuts]')).toBeNull();
+  });
+
+  it('says the phone-accurate sentence when there is no picker, not the desktop’s "browser build" one', () => {
+    const { container } = mountWith([], { phone: true, hasDirectoryPicker: false });
+    const decline = container.querySelector('[data-getting-started-decline]');
+    expect(decline?.textContent).toContain('desktop app');
+    expect(decline?.textContent).not.toContain('browser build');
+  });
 });
 
 describe('the filter badge yellow, in styles.css', () => {

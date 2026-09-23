@@ -1044,6 +1044,7 @@ function TabStrip({
   onTabContextMenu,
   onTabDragStart,
   onTabDragEnd,
+  emptyText = 'no sessions open — pick one from the sidebar',
 }: {
   readonly orientation: 'horizontal' | 'vertical';
   readonly tabs: readonly SessionEntry[];
@@ -1105,6 +1106,19 @@ function TabStrip({
     sessionId: string,
   ) => (event: ReactDragEvent<HTMLButtonElement>) => void;
   readonly onTabDragEnd?: () => void;
+  /**
+   * WHAT THE STRIP SAYS WITH NOTHING OPEN, when there is something else on
+   * screen to point at — "no sessions open — pick one from the sidebar" is
+   * only honest while the sidebar actually HAS a row to pick, which is every
+   * caller but one: the getting-started screen's own empty app, where
+   * `Canvas.tsx` overrides this to "no sessions yet" (the sidebar's own
+   * words for the identical fact, `SessionList.tsx`'s empty-state `<li>`) --
+   * pointing the operator at a sidebar that has nothing either would be the
+   * same false lead the detail pane's plain "no session" text was pulled for
+   * (audit F9). Optional and defaulted so every existing caller keeps its
+   * own sentence unchanged.
+   */
+  readonly emptyText?: string;
 }) {
   /** One right-click handler per tab, shared by its two buttons so they cannot
    *  drift, and `undefined` when the caller offered no menu -- which leaves the
@@ -1194,7 +1208,7 @@ function TabStrip({
         data-orientation={orientation}
         className="flex min-w-0 shrink items-center whitespace-nowrap px-1 text-control text-ink-faint"
       >
-        no sessions open — pick one from the sidebar
+        {emptyText}
       </div>
     );
   }
@@ -5885,10 +5899,21 @@ function CanvasInner({
         case 'newSession':
           // Real now: main starts a detached tmux session running `claude` in
           // the project's own directory. Which project is the focused
-          // session's — with nothing focused there is no directory to use, and
-          // vam will not pick one.
+          // session's — with nothing focused there is no directory to use,
+          // and vam will not pick one BY GUESSING.
+          //
+          // BUT NOT A DEAD END. `focusedEntry === null` used to stop here
+          // with a status line and nothing else -- the one state where this
+          // key can do the LEAST is the one state an operator pressing it is
+          // likeliest to be in (a fresh launch, or every project hidden).
+          // `newProject` is the honest fallback: it owns its own three
+          // refusals (source, picker, cancel) and ends in exactly the row
+          // this key is for, one directory pick later. Same handler the
+          // sidebar foot button and the getting-started screen's own button
+          // call -- one path, not a second "no session, no route" case to
+          // keep in step with it.
           if (focusedEntry === null) {
-            setStatus('pick a session first — a new one is started in its project');
+            void newProject();
             return;
           }
           void createSession(focusedEntry.project.id, focusedEntry.project.name);
@@ -6239,12 +6264,21 @@ function CanvasInner({
   const onSidebarAdd = useCallback(() => {
     // The footer strip names no project, so it uses the focused
     // session's, exactly as `o` does — the two controls are one path.
+    //
+    // NEVER A DEAD END. With nothing focused there is no project for this
+    // button to add TO, so it falls back to `newProject` -- the same
+    // handler the Projects header's `+` and `Mod-Shift-p` already call, and
+    // the same one `case 'newSession'` above falls back to for the `o`
+    // chord. `SessionList`'s own `addWillCreateProject` prop is computed
+    // from the identical condition, which is what keeps the footer's LABEL
+    // ("New project" instead of "New session") from disagreeing with what a
+    // click on it is about to do.
     if (focusedEntry === null) {
-      setStatus('pick a session first — a new one is started in its project');
+      void newProject();
       return;
     }
     void createSession(focusedEntry.project.id, focusedEntry.project.name);
-  }, [focusedEntry, createSession]);
+  }, [focusedEntry, createSession, newProject]);
 
   const onSidebarAddInProject = useCallback(
     (project: Project) => void createSession(project.id, project.name),
@@ -6382,6 +6416,19 @@ function CanvasInner({
           ? source.status === 'loading'
           : false;
 
+  /**
+   * Whether THIS BUILD can open a native directory picker at all --
+   * `window.api?.dialog?.chooseDirectory`, the same bridge `newProject` and
+   * `buildDetailProps`'s own `prRepo` read at their call sites rather than
+   * inside a component. Hoisted here because it is now read from THREE
+   * places (`newProject`'s own body still checks it again at click time,
+   * which is the actual refusal; this is only what the getting-started
+   * screen says BEFORE a click) and a fourth copy of `window.api?.dialog?.
+   * chooseDirectory !== undefined` is exactly the drift this rule exists to
+   * avoid.
+   */
+  const hasDirectoryPicker = globalThis.window?.api?.dialog?.chooseDirectory !== undefined;
+
   const sidebarProps: ComponentProps<typeof SessionList> = {
     // The line at this column's top edge, off the SAME `mode` the status
     // bar's word reads. Select is the sidebar's mode and only the
@@ -6449,6 +6496,10 @@ function CanvasInner({
     onClose: onSidebarClose,
     onRenameSession: onSidebarRenameSession,
     onAdd: onSidebarAdd,
+    // See `onSidebarAdd`'s own comment: the SAME condition that decides
+    // what a click on the footer button DOES also decides what it is
+    // LABELLED, so the two can never disagree about what pressing it means.
+    addWillCreateProject: focusedEntry === null,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
     // The project fold, stored -- the pair whose absence was the defect. Both
@@ -6478,6 +6529,12 @@ function CanvasInner({
     revealRequest: revealRequest,
     onNewProject: onSidebarNewProject,
     newSessionDecline: newSessionDecline,
+    // The phone's own getting-started screen (`GettingStarted.tsx`, drawn by
+    // `SessionList` itself there -- see its own comment) needs this same
+    // capability fact `buildDetailProps`'s `gettingStarted` hands the
+    // desktop's copy, and for the same reason: absent, not disabled, is the
+    // rule for the button it withdraws.
+    hasDirectoryPicker: hasDirectoryPicker,
     onPickIcon: onSidebarPickIcon,
     onRenameProject: renameOneProject,
     onSettings: onSidebarSettings,
@@ -6624,6 +6681,25 @@ function CanvasInner({
         // rule `onStartSession` follows; `DetailPanel` further withholds the
         // button unless the row itself carries a `resumeCommand`.
         onResumeInPane: entry === null ? undefined : () => void resumeInPane(entry),
+        // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
+        // when THIS pane holds nothing AND vam has no session to show
+        // ANYWHERE, `entries` being the same filtered set the sidebar and
+        // the tab strip already agree is "what's visible right now". Unlike
+        // `onStartSession`/`onResumeInPane` above, whose absence follows
+        // THIS pane's own `entry`, this is an APP-WIDE fact -- a pane can
+        // hold nothing while a sibling pane, or another project, still has a
+        // real session, and only the truly-empty state gets this screen.
+        gettingStarted:
+          entry !== null || entries.length > 0
+            ? undefined
+            : {
+                onNewProject: () => void newProject(),
+                newProjectDecline: newSessionDecline,
+                hasDirectoryPicker,
+                foreignHiddenCount,
+                onShowForeign: () =>
+                  onSidebarOriginFilters({ ...prefs.filters, hideForeign: false }),
+              },
         // The Files tab's tree width, and the way back. GLOBAL for the same
         // reason `defaultProvider` above it is passed identically to every
         // pane: one `FilesTab` per split leaf, and an arrangement the
@@ -6730,6 +6806,12 @@ function CanvasInner({
       resumeInPane,
       setViewFor,
       mode,
+      entries,
+      newProject,
+      newSessionDecline,
+      hasDirectoryPicker,
+      foreignHiddenCount,
+      onSidebarOriginFilters,
     ],
   );
 
@@ -6815,6 +6897,13 @@ function CanvasInner({
               paneFocused={isFocused}
               drafts={draftsBySession}
               pending={pending}
+              // See `emptyText`'s own comment: "pick one from the sidebar" is
+              // only true while the sidebar has a row to pick. `entries` is
+              // the SAME filtered set `gettingStarted`'s own condition reads
+              // a few hundred lines below -- the operator's own finding,
+              // reading the first screenshot, was this line contradicting
+              // that screen's "no sessions yet" 40px below it.
+              emptyText={entries.length === 0 ? 'no sessions yet' : undefined}
               onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
@@ -6878,6 +6967,7 @@ function CanvasInner({
       focusedPaneId,
       focusedEntry,
       allEntries,
+      entries,
       entriesById,
       activeProjectId,
       buildDetailProps,

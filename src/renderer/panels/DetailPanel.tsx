@@ -140,7 +140,7 @@ import { t } from '../i18n/strings.js';
 import { normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
-import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
   activeFocusView,
   drawsProgressLine,
@@ -178,6 +178,12 @@ import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
 import type { FileOpenRequest } from './FilesTab.js';
+import {
+  GettingStarted,
+  type GettingStartedProps,
+  StartShortcuts,
+  TERMINAL_ONLY_SHORTCUT_ROWS,
+} from './GettingStarted.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
@@ -1031,6 +1037,19 @@ export type DetailPanelProps = {
    * whether there is anything for it to do.
    */
   readonly onResumeInPane?: () => void;
+  /**
+   * THE GETTING-STARTED SCREEN'S OWN DATA (`GettingStarted.tsx`) — present
+   * only when the CALLER (`Canvas.tsx`) has confirmed vam has no session to
+   * show ANYWHERE in the app, not merely that this one pane's `entry` is
+   * `null`. A pane can hold nothing while a sibling pane, or another project
+   * entirely, still has a real session, and this screen is a statement about
+   * the whole app -- so unlike `onStartSession`/`onResumeInPane`, whose
+   * absence follows this PANE's own `entry`, this follows a fact this panel
+   * cannot derive from its own props and must be handed. `entry !== null`
+   * withdraws the screen regardless of what this carries — see the render
+   * site's own guard.
+   */
+  readonly gettingStarted?: GettingStartedProps;
   /**
    * `prefs.filesTreeWidth` — the width the operator last dragged the Files
    * tab's tree to, or `null`/absent for "never dragged", which draws the
@@ -2877,10 +2896,14 @@ function StartSession({
  * same `start-in-pane.ts` write path (`onStart`, resolved by the caller
  * exactly as `StartSession`'s is).
  *
- * THE SHORTCUTS ARE READ FROM THE CHORD TABLE, never retyped: `InlineChord`
- * (`keyboard/ShortcutTip.tsx`) draws whatever `primaryChord` finds bound for
- * the action right now and nothing when the operator has unbound it, so a
- * rebind can never leave this screen naming a key that does nothing.
+ * THE SHORTCUTS ARE READ FROM THE CHORD TABLE, never retyped: `StartShortcuts`
+ * (`GettingStarted.tsx`) draws whatever `primaryChord` finds bound for each
+ * action right now and nothing when the operator has unbound it, so a rebind
+ * can never leave this screen naming a key that does nothing. Extracted
+ * rather than kept inline because `GettingStarted` below -- the WHOLE APP's
+ * own "nothing to show" screen -- ends the identical sentence; one `<ul>`
+ * shared by both is the only way a change to it cannot land on one screen and
+ * not the other.
  *
  * RESUME IS SECONDARY, and stays a plain text-weight link rather than a
  * second filled button: Start session is the primary act this screen
@@ -2936,29 +2959,7 @@ function TerminalOnlyStart({
           {' — its agent isn’t running here now; this pane is at a shell prompt.'}
         </p>
       </div>
-      <ul data-terminal-only-shortcuts className="flex flex-col gap-1 text-meta text-ink-quiet">
-        <li className="flex items-center justify-center gap-2">
-          <span>New session</span>
-          <InlineChord
-            action={{ kind: 'newSession' }}
-            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
-          />
-        </li>
-        <li className="flex items-center justify-center gap-2">
-          <span>New project</span>
-          <InlineChord
-            action={{ kind: 'newProject' }}
-            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
-          />
-        </li>
-        <li className="flex items-center justify-center gap-2">
-          <span>Command palette</span>
-          <InlineChord
-            action={{ kind: 'palette' }}
-            className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim"
-          />
-        </li>
-      </ul>
+      <StartShortcuts testId="terminal-only-shortcuts" rows={TERMINAL_ONLY_SHORTCUT_ROWS} />
       {onStart !== undefined && (
         <ProviderStartControls defaultProvider={defaultProvider} onStart={onStart} />
       )}
@@ -5512,6 +5513,7 @@ export function DetailPanel(props: DetailPanelProps) {
     onSetDefaultProvider,
     onStartSession,
     onResumeInPane,
+    gettingStarted,
     paneFocused = true,
   } = props;
 
@@ -8055,6 +8057,15 @@ export function DetailPanel(props: DetailPanelProps) {
             resumeCommand={entry.session.resumeCommand}
             onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
           />
+        ) : entry === null && gettingStarted !== undefined ? (
+          // THE APP HAS NO SESSION TO SHOW ANYWHERE -- `Canvas.tsx`'s own
+          // signal, not a fact this panel could derive from `entry` alone
+          // (see `gettingStarted`'s own comment). Takes priority over the
+          // plain "no session"/"no sessions open" text right below: that
+          // text is the honest fallback for a pane with nothing in it while
+          // OTHER sessions exist elsewhere; this screen is what replaces it
+          // the one time there is truly nothing in the whole app to point at.
+          <GettingStarted {...gettingStarted} />
         ) : orderedTurns.length === 0 ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —

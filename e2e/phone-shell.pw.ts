@@ -1718,18 +1718,27 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
 });
 
 /**
- * `SessionList.tsx`'s own quiet line, the empty-sidebar-with-no-explanation
- * fix: `listVamSessions` answering `ok, []` (no tmux server yet, the state
- * after every reboot before vam starts its first session) is not a
- * `vamListingGap` -- ownership is honestly zero -- so `hideForeign` (on by
- * default) can still take every row with it. `Canvas.tsx` exempts `?demo=1`
- * from `hideForeign` entirely (`Canvas.demo-foreign.test.tsx`), so this line
- * never reaches the phone screen through the demo fixture every other test
- * in this file uses -- it needs a REAL (non-demo) source, the same route
- * "the sheets behind a source" above stubs over HTTP rather than through
- * `window.api`, for the same reason that block's own header gives: `App.tsx`
- * asks its own origin for `/api/describe` and `/api/load`, and Playwright
- * can answer both without touching `src/`.
+ * The empty-sidebar-with-no-explanation fix: `listVamSessions` answering
+ * `ok, []` (no tmux server yet, the state after every reboot before vam
+ * starts its first session) is not a `vamListingGap` -- ownership is
+ * honestly zero -- so `hideForeign` (on by default) can still take every row
+ * with it. `Canvas.tsx` exempts `?demo=1` from `hideForeign` entirely
+ * (`Canvas.demo-foreign.test.tsx`), so this line never reaches the phone
+ * screen through the demo fixture every other test in this file uses -- it
+ * needs a REAL (non-demo) source, the same route "the sheets behind a
+ * source" above stubs over HTTP rather than through `window.api`, for the
+ * same reason that block's own header gives: `App.tsx` asks its own origin
+ * for `/api/describe` and `/api/load`, and Playwright can answer both
+ * without touching `src/`.
+ *
+ * THE QUIET LINE MOVED. It used to be `SessionList.tsx`'s own standalone
+ * strip (`data-foreign-hidden`) drawn above an otherwise-empty list; it now
+ * reads from the getting-started screen (`GettingStarted.tsx`) that same
+ * emptiness draws instead (`SessionList.tsx`'s own `showGettingStarted`) --
+ * one copy of "N sessions hidden — vam did not start them · Show" on the
+ * 390px screen, not two. The standalone strip still exists and is still
+ * tested (`SessionList.test.tsx`'s own describe block) for the case that
+ * strip is FOR: some rows visible, some hidden alongside them.
  */
 test.describe('the foreign-hidden quiet line on a phone list screen', () => {
   const DESCRIPTOR = {
@@ -1811,16 +1820,23 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
     await page.goto('/');
 
     // NO ROW YET -- both are foreign, `hideForeign` is on by default, and
-    // there is no `vamListingGap` (the read succeeded): the quiet line is
-    // the only thing on screen that explains why.
-    await page.waitForSelector('[data-foreign-hidden-show]', { timeout: 10_000 });
+    // there is no `vamListingGap` (the read succeeded). The quiet line used
+    // to be this list's OWN strip (`data-foreign-hidden`); it now reads from
+    // the getting-started screen (`GettingStarted.tsx`) that replaces the
+    // list body once `entries` is empty -- the SAME rule the screenshot
+    // guard `getting-started-shots.mjs`'s own phone state exercises, and the
+    // reason there is only one copy of this sentence on a 390px screen
+    // rather than two (`SessionList.tsx`'s own `showGettingStarted`).
+    await page.waitForSelector('[data-getting-started-show]', { timeout: 10_000 });
     expect(await page.locator('[data-session-row]').count()).toBe(0);
+    // WITHDRAWN, NOT DUPLICATED -- see the render site's own comment.
+    expect(await page.locator('[data-foreign-hidden]').count()).toBe(0);
 
-    const noticeText = await page.locator('[data-foreign-hidden-count]').textContent();
+    const noticeText = await page.locator('[data-getting-started-hidden-count]').textContent();
     expect(noticeText).toContain('2 sessions hidden');
     expect(noticeText).toContain('vam did not start them');
 
-    const box = await page.locator('[data-foreign-hidden-show]').boundingBox();
+    const box = await page.locator('[data-getting-started-show]').boundingBox();
     expect(box, 'the Show control has a box at all').not.toBeNull();
     expect(box?.width ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
       TOUCH_MIN,
@@ -1829,11 +1845,11 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
       TOUCH_MIN,
     );
 
-    await page.locator('[data-foreign-hidden-show]').tap();
+    await page.locator('[data-getting-started-show]').tap();
     await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length === 2, {
       timeout: 5_000,
     });
-    expect(await page.locator('[data-foreign-hidden]').count()).toBe(0);
+    expect(await page.locator('[data-getting-started]').count()).toBe(0);
   });
 });
 
