@@ -30,12 +30,14 @@
  * by anything local, so they are never read as a credential.
  */
 
+import { realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { resolve } from 'node:path';
 import type { SourceCapabilities } from '../../renderer/sources/port.js';
 import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import { isDirectoryPath, isOptionalText, isPromptText, isText } from '../ipc/validators.js';
+import { projectIdOf } from '../sources/claude-code/project-id.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
 import {
@@ -166,6 +168,79 @@ const UNAUTHENTICATED = {
   },
 } as const;
 
+/**
+ * THE ONLY 403 THIS SERVER SENDS, byte for byte, whoever asked and whatever
+ * kept `/api/create-session-in` from confirming the caller's `cwd`.
+ *
+ * A path that does not exist, one that is not a git repository, one the
+ * operator never added, one behind a permission wall, and one whose project
+ * has no `createSession` capability to serve it -- all of them get this. The
+ * moment the body names the path or the cause, this route becomes an oracle
+ * for which repositories vam knows about, which is the one thing a remote,
+ * bearer-token-holding caller must never learn from a refusal.
+ */
+const UNAUTHORIZED_DIRECTORY: SourceError = {
+  kind: 'refused',
+  code: 'unauthorized-directory',
+  message: 'this device may only start a session in a project vam already lists',
+};
+
+/**
+ * The `guard` arm `write()`'s `{ projectId }` success case discriminates
+ * against `SourceError`. `SourceError` always carries `kind`; the success
+ * arm never does, so this is a property test rather than a cast -- and a
+ * mis-discriminated refusal here would spawn a shell in a caller-named
+ * directory.
+ */
+function isProjectMatch(
+  outcome: SourceError | { projectId: string },
+): outcome is { projectId: string } {
+  return !('kind' in outcome);
+}
+
+/**
+ * `/api/create-session-in`'s guard: confines the route to a `cwd` that
+ * canonicalises to a project id `options.source.load()` already lists, and
+ * hands back that id rather than the caller's path -- see the `write()`
+ * `guard` parameter this feeds.
+ *
+ * ORDER MATTERS, AND IS PART OF THE CONTRACT. The capability check runs
+ * FIRST, before `load()` is even awaited: a route that cannot spawn must not
+ * read the operator's project list at all. Canonicalisation happens EXACTLY
+ * ONCE -- `fs.realpath`, matching `src/main/files/authorize.ts`'s own
+ * ordering -- and the id it produces is the only thing this function ever
+ * returns on success; the caller's `cwd`, raw or canonicalised, is not
+ * returned and must never reach a `source.*` call.
+ *
+ * FAIL CLOSED throughout: an unreadable path, an unreadable project list, or
+ * an absent `createSession` capability all resolve the same refusal as a
+ * confirmed non-member, never a fallthrough to the spawn.
+ */
+async function confineToProjectSet(
+  source: MainSource,
+  body: Record<string, unknown>,
+): Promise<SourceError | { projectId: string }> {
+  if (source.createSession === undefined) {
+    return UNAUTHORIZED_DIRECTORY;
+  }
+  let canonical: string;
+  try {
+    canonical = await realpath(body.cwd as string);
+  } catch {
+    return UNAUTHORIZED_DIRECTORY;
+  }
+  const projectId = projectIdOf(canonical);
+  let projects: readonly { readonly id: string }[];
+  try {
+    projects = await source.load();
+  } catch {
+    return UNAUTHORIZED_DIRECTORY;
+  }
+  return projects.some((project) => project.id === projectId)
+    ? { projectId }
+    : UNAUTHORIZED_DIRECTORY;
+}
+
 type Envelope = { ok: true; value: unknown } | { ok: false; error: SourceError };
 
 type Route = (
@@ -232,15 +307,32 @@ function readBody(request: IncomingMessage): Promise<Record<string, unknown> | n
 }
 
 /**
- * A write route: validate, then call the member if the source carries one.
- * The source's own `SourceError` is forwarded WHOLE -- re-wrapping it would
- * cost the code a consumer branches on and the message it renders.
+ * A write route: validate, guard (if one is given), then call the member if
+ * the source carries one. The source's own `SourceError` is forwarded WHOLE
+ * -- re-wrapping it would cost the code a consumer branches on and the
+ * message it renders.
+ *
+ * `guard` is opt-in and only `/api/create-session-in` passes one: every
+ * other route's `call` keeps running the identical two-argument branches it
+ * runs today, and the third argument is never supplied to them. When a
+ * guard resolves a `SourceError`, the route answers 403 with it -- the only
+ * 403 this server sends -- and `call` never runs. When it resolves
+ * `{ projectId }`, that id -- and never the caller's own `cwd` -- is the
+ * third argument `call` receives.
  */
 function write(
   options: RemoteServerOptions,
   name: string,
   valid: (body: Record<string, unknown>) => boolean,
-  call: (source: MainSource, body: Record<string, unknown>) => Promise<SourceError | null> | null,
+  call: (
+    source: MainSource,
+    body: Record<string, unknown>,
+    projectId?: string,
+  ) => Promise<SourceError | null> | null,
+  guard?: (
+    source: MainSource,
+    body: Record<string, unknown>,
+  ) => Promise<SourceError | { projectId: string }>,
 ): Route {
   const audit = options.audit ?? ((line: string) => console.info(line));
   return async (_request, response, { identity, body }) => {
@@ -251,7 +343,17 @@ function write(
       });
       return;
     }
-    const performed = call(options.source, body);
+    let projectId: string | undefined;
+    if (guard !== undefined) {
+      const outcome = await guard(options.source, body);
+      if (!isProjectMatch(outcome)) {
+        audit(`remote write ${name} refused for ${identity.name} (${identity.deviceId})`);
+        send(response, 403, { ok: false, error: outcome });
+        return;
+      }
+      projectId = outcome.projectId;
+    }
+    const performed = call(options.source, body, projectId);
     if (performed === null) {
       send(response, 200, {
         ok: false,
@@ -552,19 +654,32 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     string,
     string,
     (b: Record<string, unknown>) => boolean,
-    (s: MainSource, b: Record<string, unknown>) => Promise<SourceError | null> | null,
+    (
+      s: MainSource,
+      b: Record<string, unknown>,
+      projectId?: string,
+    ) => Promise<SourceError | null> | null,
+    (
+      | ((
+          s: MainSource,
+          b: Record<string, unknown>,
+        ) => Promise<SourceError | { projectId: string }>)
+      | undefined
+    ),
   ][] = [
     [
       '/api/record-prompt',
       'recordPrompt',
       (b) => isText(b.sessionId) && isPromptText(b.prompt),
       (s, b) => s.recordPrompt?.(b.sessionId as string, b.prompt as string) ?? null,
+      undefined,
     ],
     [
       '/api/close-session',
       'closeSession',
       (b) => isText(b.sessionId) && (b.force === undefined || typeof b.force === 'boolean'),
       (s, b) => s.closeSession?.(b.sessionId as string, b.force as boolean | undefined) ?? null,
+      undefined,
     ],
     [
       '/api/create-session',
@@ -576,21 +691,26 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
           b.title as string,
           b.provider as string | undefined,
         ) ?? null,
+      undefined,
     ],
     [
       '/api/create-session-in',
       'createSessionIn',
       (b) => isDirectoryPath(b.cwd) && isText(b.title) && isOptionalText(b.provider),
-      (s, b) =>
-        s.createSessionInDirectory?.(
-          b.cwd as string,
+      // NEVER `b.cwd` -- see `confineToProjectSet`. The directory is
+      // re-derived downstream, inside `createSessionInProject`, from
+      // `projectId` alone.
+      (s, b, projectId) =>
+        s.createSession?.(
+          projectId as string,
           b.title as string,
           b.provider as string | undefined,
         ) ?? null,
+      confineToProjectSet,
     ],
   ];
-  for (const [path, name, valid, call] of writes) {
-    table.set(path, { method: 'POST', route: write(options, name, valid, call) });
+  for (const [path, name, valid, call, guard] of writes) {
+    table.set(path, { method: 'POST', route: write(options, name, valid, call, guard) });
   }
   return table;
 }
