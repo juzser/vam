@@ -1664,6 +1664,60 @@ console.log(`${outDir}/key-truth-question-enter-submits.png`);
   await narrow.close();
 }
 
+// ---------------------------------------------------------------------------
+// A MULTI-SELECT DESCRIPTION, UNDER THE LABEL -- not under the option number.
+//
+// Claude Code 2.1.280: "fixed multi-select option descriptions being indented
+// under the option number instead of under the label". happy-dom lays nothing
+// out, so this is a rectangle no unit test can compare -- `vam-build-1`'s
+// second question ("Retries") is `multiSelect: true` with a description on
+// every option, reached through the step strip rather than a second session,
+// so nothing here needs the answer bridge the marking tests above stub.
+{
+  const page2 = await browser.newPage({ viewport: { width: 1200, height: 760 } });
+  await page2.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page2.waitForSelector('[data-session-row]');
+  await page2.locator(`[data-session-row="${ASKING_SESSION}"]`).click();
+  await page2.waitForSelector('[data-question-option]', { timeout: 4000 });
+  // Two questions on this one call ("Transport", then "Retries") -- the step
+  // strip only draws once there is a second, and clicking its second tab
+  // switches which one is showing without answering or submitting either.
+  await page2.locator('[data-question-step]').nth(1).click();
+  await page2.waitForFunction(
+    () => document.querySelector('[data-question-step][data-current]')?.textContent?.includes('Retries') ?? false,
+  );
+
+  const aligned = await page2.evaluate(() => {
+    const left = (el) => (el === null ? null : el.getBoundingClientRect().left);
+    return [...document.querySelectorAll('[data-question-option]')].map((option) => ({
+      label: option.querySelector('[data-question-label]')?.textContent ?? null,
+      labelLeft: left(option.querySelector('[data-question-label]')),
+      descriptionLeft: left(option.querySelector('[data-question-description]')),
+    }));
+  });
+  console.log(`  Retries option alignment: ${JSON.stringify(aligned)}`);
+  check(
+    'every option has a description on this question, so the sweep actually measured something',
+    aligned.length === 3 && aligned.every((row) => row.descriptionLeft !== null),
+    JSON.stringify(aligned),
+  );
+  check(
+    // WITHIN A TENTH OF A PIXEL, NOT EXACT -- measured at 310 vs 309.921875:
+    // a real layout engine distributes a flex `gap` and a `1ch` spacer against
+    // a real font's own metrics, and the two are not bit-identical the way two
+    // reads of the same rectangle would be. The option NUMBER a broken build
+    // would align under instead sits many pixels to the left, so a bound this
+    // tight still catches that regression and only that one.
+    'the description lines up under the LABEL, not under the option number',
+    aligned.every(
+      (row) => row.labelLeft !== null && Math.abs(row.descriptionLeft - row.labelLeft) < 0.5,
+    ),
+    JSON.stringify(aligned),
+  );
+
+  await page2.close();
+}
+
 await browser.close();
 
 if (failures.length > 0) {

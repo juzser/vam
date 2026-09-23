@@ -91,6 +91,23 @@ describe('an open question is drawn, with everything the record carries', () => 
     expect(text()).toContain('a local editor agent');
   });
 
+  it('reserves the number column ahead of a description, so it lines up under the label', () => {
+    // MEASURED on Claude Code 2.1.280: "fixed multi-select option descriptions
+    // being indented under the option number instead of under the label".
+    // The real geometry is `e2e/key-truth-shots.mjs`'s to prove; what a unit
+    // test can pin is the DOM shape the alignment depends on -- a spacer the
+    // same width as the visible number, ahead of the description, costing
+    // nothing in `textContent` or the accessible name.
+    draw([QUESTION]);
+    const first = all('[data-question-option]')[0];
+    const description = first?.querySelector('[data-question-description]');
+    const spacer = description?.previousElementSibling;
+    expect(spacer).not.toBeNull();
+    expect(spacer?.getAttribute('aria-hidden')).toBe('true');
+    expect(spacer?.textContent).toBe('');
+    expect(spacer?.className).toContain('tabular-nums');
+  });
+
   it('draws a multi-select as multi-select and a single-select as single', () => {
     draw([QUESTION]);
     expect(q('[data-question]')?.getAttribute('data-question-select')).toBe('multi');
