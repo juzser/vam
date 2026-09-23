@@ -176,7 +176,12 @@ describe('o, on the Claude Code source', () => {
  * dialog, which no project id names yet.
  */
 describe('a new session in a chosen directory', () => {
-  it('starts claude there, and records the id the next load() will report', async () => {
+  it('starts a SHELL there, types claude in, and records the id the next load() will report', async () => {
+    // Stage 2, now on this path too (issue: Ctrl+C in the terminal used to
+    // shut the whole session down -- `create-session.ts`'s header carries the
+    // measurement). The shell is spawned exactly as the project path spawns
+    // one; the provider is typed in immediately after, since there is no
+    // Start session button on this path to wait for.
     const run = recordingTmux();
     const orchard = tempRepo();
     const failure = await createSessionInDirectory({
@@ -198,11 +203,13 @@ describe('a new session in a chosen directory', () => {
         'vam-orchard-a1b2c3',
         '-c',
         orchard,
-        'claude',
+        ...loginShellCommand(),
       ],
       // The SAME digest every other project id comes from. Anything else and
       // the Terminal tab would find nothing for a session vam itself started.
       ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf(orchard)],
+      ['send-keys', '-t', '=vam-orchard-a1b2c3:', '-l', '--', 'claude'],
+      ['send-keys', '-t', '=vam-orchard-a1b2c3:', 'Enter'],
     ]);
   });
 
@@ -247,7 +254,7 @@ describe('a new session in a chosen directory', () => {
  * are that provider's own command.
  */
 describe('the provider the session is started with', () => {
-  it('runs the chosen provider’s command, by value', async () => {
+  it('types the chosen provider’s command, by value, once the shell exists', async () => {
     const run = recordingTmux();
     const orchard = tempRepo();
     const failure = await createSessionInDirectory({
@@ -259,17 +266,16 @@ describe('the provider the session is started with', () => {
     });
 
     expect(failure).toBeNull();
-    expect(run.calls[0]).toEqual([
-      'new-session',
-      '-d',
-      '-P',
-      '-F',
-      '#{pane_pid}',
-      '-s',
-      'vam-orchard-a1b2c3',
-      '-c',
-      orchard,
-      ...resolveProvider('claude-code').command,
+    // The spawn is the shell, whatever was named -- pinned above. What the
+    // provider choice changes is what gets TYPED afterward.
+    expect(run.calls[0]?.slice(-2)).toEqual(loginShellCommand());
+    expect(run.calls.at(-2)).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-orchard-a1b2c3:',
+      '-l',
+      '--',
+      resolveProvider('claude-code').command.join(' '),
     ]);
   });
 
@@ -288,29 +294,26 @@ describe('the provider the session is started with', () => {
     });
 
     expect(failure).toBeNull();
-    expect(run.calls[0]).toEqual([
-      'new-session',
-      '-d',
-      '-P',
-      '-F',
-      '#{pane_pid}',
-      '-s',
-      'vam-orchard-a1b2c3',
-      '-c',
-      orchard,
-      ...resolveProvider(DEFAULT_PROVIDER_ID).command,
+    expect(run.calls.at(-2)).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-orchard-a1b2c3:',
+      '-l',
+      '--',
+      resolveProvider(DEFAULT_PROVIDER_ID).command.join(' '),
     ]);
   });
 
   /**
-   * THE PROJECT PATH DOES NOT SPEND THE PROVIDER AT ALL. It runs a shell
+   * NEITHER PATH SPENDS THE PROVIDER AT SPAWN ANY MORE. Both run a shell
    * (`tmux/shell.ts`) and the provider's command is typed into that shell
-   * afterwards, by the Start button or by hand -- asserted by value in
-   * `claude-code-start-in-pane.test.ts`. What is asserted here is the
+   * afterwards -- by the Start button or by hand on the existing-project
+   * path, immediately by this path itself on the chosen-directory one (see
+   * the two tests above). What is asserted here is the project path's own
    * negative: naming a provider, or an id nothing answers to, changes NOTHING
-   * about what tmux is handed on this path, and no provider's command is in
-   * it. The chosen-directory path above is the exception, and
-   * `create-session.ts`'s header says why.
+   * about what tmux is handed AT SPAWN on that path, because nothing is typed
+   * there either -- the Start button, not `createSessionInProject`, does
+   * that (`claude-code-start-in-pane.test.ts`).
    */
   it('does not reach the project path’s spawn: that pane runs the shell whatever was named', async () => {
     const spawnWith = async (provider?: string) => {

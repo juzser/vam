@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createSessionInDirectory } from '../../src/main/sources/claude-code/create-session.js';
 import { repoRootOf, whyNotARepository } from '../../src/main/sources/repo.js';
 import { newSessionArgv } from '../../src/main/sources/tmux/argv.js';
+import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
 
@@ -87,7 +88,7 @@ describe('which chosen directories count as a repository', () => {
 });
 
 describe('starting a session in a directory the operator chose', () => {
-  it('starts it when the directory is a repository, running the STORED provider’s command', async () => {
+  it('starts a SHELL, then types the STORED provider’s command into it', async () => {
     const repo = tempRepo();
     const run = recordingTmux();
 
@@ -113,8 +114,20 @@ describe('starting a session in a directory the operator chose', () => {
       'vam-orchard-a1b2c3',
       '-c',
       repo,
+      ...loginShellCommand(),
+    ]);
+    // The provider is TYPED once the shell exists, not handed to tmux at
+    // spawn -- Ctrl+C used to end the whole tmux session, not just the
+    // provider (`create-session.ts`'s header carries the measurement).
+    expect(run.calls.at(-2)).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-orchard-a1b2c3:',
+      '-l',
+      '--',
       'claude',
     ]);
+    expect(run.calls.at(-1)).toEqual(['send-keys', '-t', '=vam-orchard-a1b2c3:', 'Enter']);
   });
 
   it('refuses a directory that is not a repository, and SPAWNS NOTHING', async () => {

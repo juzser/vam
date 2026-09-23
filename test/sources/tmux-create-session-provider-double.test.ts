@@ -99,7 +99,7 @@ const agent = (cwd: string) => ({
 });
 
 describe('the requested provider is what runs, not merely what the default already runs (issue 166)', () => {
-  it('runs the SECOND provider’s command when asked for it', async () => {
+  it('types the SECOND provider’s command when asked for it', async () => {
     const run = recordingTmux();
     const orchard = tempRepo();
     const failure = await createSessionInDirectory({
@@ -111,17 +111,15 @@ describe('the requested provider is what runs, not merely what the default alrea
     });
 
     expect(failure).toBeNull();
-    expect(run.calls[0]).toEqual([
-      'new-session',
-      '-d',
-      '-P',
-      '-F',
-      '#{pane_pid}',
-      '-s',
-      'vam-orchard-a1b2c3',
-      '-c',
-      orchard,
-      ...resolveProvider(SECOND_PROVIDER_ID).command,
+    // The spawn is a shell now, whichever provider was named -- pinned in
+    // `tmux-create-session.test.ts`. What the choice reaches is the TYPE.
+    expect(run.calls.at(-2)).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-orchard-a1b2c3:',
+      '-l',
+      '--',
+      resolveProvider(SECOND_PROVIDER_ID).command.join(' '),
     ]);
     // The discriminator itself: the second provider's command is not the
     // default's, so this assertion cannot be satisfied by a bug that always
@@ -132,9 +130,10 @@ describe('the requested provider is what runs, not merely what the default alrea
   });
 
   it('still falls back to the default for an id nothing answers to', async () => {
-    // On the CHOSEN-DIRECTORY path, which is the one that still spends the
-    // provider at spawn (`create-session.ts`'s header on why). The project
-    // path runs a shell whatever id it is handed -- pinned in
+    // On the CHOSEN-DIRECTORY path, which is the one that types a provider
+    // in immediately, with no Start button to wait for
+    // (`create-session.ts`'s header on why). The project path runs a shell
+    // whatever id it is handed AND types nothing at all -- pinned in
     // `tmux-create-session.test.ts`, not here.
     const run = recordingTmux();
     const orchard = tempRepo();
@@ -147,17 +146,13 @@ describe('the requested provider is what runs, not merely what the default alrea
     });
 
     expect(failure).toBeNull();
-    expect(run.calls[0]).toEqual([
-      'new-session',
-      '-d',
-      '-P',
-      '-F',
-      '#{pane_pid}',
-      '-s',
-      'vam-orchard-a1b2c3',
-      '-c',
-      orchard,
-      ...resolveProvider(DEFAULT_PROVIDER_ID).command,
+    expect(run.calls.at(-2)).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-orchard-a1b2c3:',
+      '-l',
+      '--',
+      resolveProvider(DEFAULT_PROVIDER_ID).command.join(' '),
     ]);
   });
 

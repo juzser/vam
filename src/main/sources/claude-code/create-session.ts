@@ -6,24 +6,49 @@
  * detachable pty, with no native module involved.
  *
  * WHAT THE PANE RUNS IS A SHELL, NOT `claude`, since Stage 2 of
- * `docs/design/vam-owns-the-session.md` -- IN A PROJECT VAM ALREADY DRAWS.
- * The pane exists from the first frame with nothing started in it; it is a
- * row of its own (`pane-row.ts`), its Terminal view works at once, and the
- * provider is chosen AFTER -- typed into the pane by the Start session button
- * (`start-in-pane.ts`) or by the operator's own hand. `tmux/shell.ts` says
- * which shell and why.
+ * `docs/design/vam-owns-the-session.md` -- ON BOTH PATHS BELOW, NOW. The pane
+ * exists from the first frame with nothing started in it, its Terminal view
+ * works at once, and the provider is chosen AFTER: typed into the pane
+ * (`typeThenEnter`, `start-in-pane.ts`) rather than handed to tmux at spawn.
+ * `tmux/shell.ts` says which shell and why.
  *
- * THE "NEW PROJECT" PATH STILL RUNS THE PROVIDER, and the reason is where the
- * row lives. A pane row is filed under the project section its digest names,
- * and a digest cannot be turned back into a directory: until something RUNS
- * in a brand-new directory no source reports a project for it, so a shell
- * pane there would be a pane no row, no tab and no Terminal view could
- * reach -- a session the operator started that only `tmux attach` could find.
- * The design's Stage 1 (the list inverting onto `listVamSessions`) is what
- * gives such a pane a section; until then, `createSessionInDirectory` spends
- * the provider at spawn exactly as it always has, and the shell-first start
- * is the project path's alone. The design document does not draw this line;
- * building against it did.
+ * THE "NEW PROJECT" PATH USED TO BE THE EXCEPTION, spending the provider at
+ * spawn, and the reason was where the row lives: a pane row is filed under
+ * the project section its digest names, and until Stage 1 of the design
+ * (`listVamSessions` inverting into a project for an untagged, real-cwd
+ * session -- `pane-row.ts`, `source.ts`) a shell pane in a brand-new
+ * directory would have been a pane no row, no tab and no Terminal view could
+ * reach. Stage 1 has since shipped, which is what let this path close the
+ * exception rather than merely narrate it.
+ *
+ * WHY IT COULD NOT STAY OPEN. The operator's report against this build:
+ * pressing Ctrl+C in the terminal shut the session down entirely, on every
+ * path except the (already shell-first) existing-project one. The reason is
+ * `VAM_PID_OPTION`'s own measured fact -- `tmux/argv.ts` -- restated here
+ * because this file is where it bites: `new-session`'s command is SPREAD
+ * across tmux's own argv, so tmux execs it directly with no shell in front,
+ * and when that one process exits, `remain-on-exit` being off (tmux's
+ * default) tears the pane down and, with nothing else in the session, the
+ * session with it. MEASURED, on a private `-L` socket, real `claude` and
+ * `codex`: spawned straight into the pane, two Ctrl-C (`claude`) or one
+ * (`codex`) ended the process and `list-sessions` answered "no server
+ * running" a moment later -- the whole tmux session was gone, along with the
+ * conversation vam had a pane and a row for. Spawned into a shell instead,
+ * typed afterward, the identical keystrokes ended the agent and left the pane
+ * alive with the shell in its foreground (`pane_current_command` read back
+ * `zsh`), which is what the operator's report says a terminal ought to do.
+ * `createSessionInDirectory` closing this file's own gap is what stops that
+ * for the "new project" path; `claude-code/resume.ts` and `codex/resume.ts`
+ * close the same gap for the two paths that reopen a session, which spawned
+ * their own command directly for the identical reason and needed the
+ * identical fix -- their own headers carry it rather than repeating it here.
+ *
+ * THE OPERATOR STILL GETS AN AGENT RUNNING IMMEDIATELY on this path: nothing
+ * about WHEN the provider starts changed, only what is underneath it while it
+ * runs. There is no Start session button here and none is added -- the
+ * directory was just chosen in Electron's own dialog for exactly this
+ * purpose, so the provider is typed the instant the shell exists rather than
+ * waiting on a second click for a choice the operator already made.
  *
  * WHAT IT STILL CANNOT DO. The session vam creates is vam's. The operator's
  * existing sessions are children of their own login shell and cannot be
@@ -45,6 +70,7 @@ import { loginShellCommand } from '../tmux/shell.js';
 import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
 import type { LiveAgent } from './agents.js';
 import { projectIdOf } from './project-id.js';
+import { typeThenEnter } from './start-in-pane.js';
 
 /**
  * WHAT THE NEW-PROJECT SESSION RUNS COMES FROM THE PROVIDER TABLE, not from a
@@ -54,11 +80,15 @@ import { projectIdOf } from './project-id.js';
  * nothing. Main normalises for itself: the renderer already did, and a
  * renderer's normalisation is not something main may take on trust.
  *
- * ON THE PROJECT PATH `provider` IS ACCEPTED AND NOT READ: the spawn there is
- * a shell (see the header), and the choice the id names is made later, in
- * the pane, where `start-in-pane.ts` is handed the command the renderer
- * resolved from the same table. It stays on that signature so the IPC
- * contract keeps its shape under the callers that send it.
+ * ON THE PROJECT PATH `provider` IS ACCEPTED BUT NOT SPENT HERE: the spawn
+ * there is a shell (see the header), and the choice the id names is made
+ * later, by the Start session button, where `start-in-pane.ts` is handed the
+ * command the renderer resolved from the same table -- there is no button on
+ * the NEW-PROJECT path below, so this file spends it itself, the instant the
+ * shell exists, rather than waiting for a click the operator already made by
+ * choosing a directory in the first place. Both paths still take `provider`
+ * on the same signature so the IPC contract keeps its shape under the
+ * callers that send it.
  */
 
 /**
@@ -126,6 +156,13 @@ export async function createSessionInProject(input: {
  * validation and not a list of known repositories. The refusal returns BEFORE
  * anything spawns, and carries the path, so the operator who picked their
  * downloads folder reads what was wrong with it rather than nothing at all.
+ *
+ * THE SHELL, THEN THE PROVIDER TYPED IN -- see the header for why this path
+ * used to spend the provider at spawn and no longer does. `name` is resolved
+ * ONCE, here, rather than left to `spawnSessionIn`'s own fallback: the type
+ * that follows has to address the exact pane the spawn just created, and
+ * re-deriving `vamSessionName(title)` a second time would mint a SECOND
+ * random tail that names no session at all.
  */
 export async function createSessionInDirectory(input: {
   cwd: string;
@@ -134,16 +171,23 @@ export async function createSessionInDirectory(input: {
   name?: string;
   provider?: string;
 }): Promise<SourceError | null> {
-  return (
-    whyNotARepository(input.cwd) ??
-    spawnSessionIn({
-      ...input,
-      // THE PROVIDER, not the shell -- see the header for why this path is
-      // the exception: there is no section for a row to appear in until
-      // something runs here.
-      command: resolveProvider(input.provider).command,
-    })
-  );
+  const refusal = whyNotARepository(input.cwd);
+  if (refusal !== null) return refusal;
+  const name = input.name ?? vamSessionName(input.title);
+  const spawned = await spawnSessionIn({
+    cwd: input.cwd,
+    title: input.title,
+    run: input.run,
+    name,
+    // THE SHELL, NOW HERE TOO -- what still runs the provider is the type
+    // below, not this spawn.
+    command: loginShellCommand(),
+  });
+  if (spawned !== null) return spawned;
+  // TYPED, NOT SPAWNED, THE INSTANT THE SHELL EXISTS -- no Start session
+  // button on this path (see the header), so `typeThenEnter` runs right here
+  // rather than waiting for a click the operator already made.
+  return typeThenEnter(input.run, name, resolveProvider(input.provider).command.join(' '));
 }
 
 /** The spawn both paths share, once the directory and the command are settled. */
@@ -158,9 +202,9 @@ async function spawnSessionIn(input: {
   return createVamSession(run, {
     name: input.name ?? vamSessionName(title),
     cwd,
-    // On the project path this is a shell, and the pane's own `@vam-pid`
-    // therefore names the shell, not an agent; `pane-row.ts` says what that
-    // costs the pairing and what stands in for it.
+    // BOTH PATHS RUN A SHELL NOW, so the pane's own `@vam-pid` always names
+    // the shell, never an agent; `pane-row.ts` says what that costs the
+    // pairing and what stands in for it.
     command: input.command,
     // WHAT THE TERMINAL TAB WILL LOOK THIS UP BY. The name is for a person
     // reading `tmux ls`; the pairing is this id, recorded on the session
