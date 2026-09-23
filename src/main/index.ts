@@ -28,6 +28,7 @@ import { contentSecurityPolicy } from './csp.js';
 import { registerAttachImageIpc } from './dialog/attach-image.js';
 import { registerDialogIpc } from './dialog/ipc.js';
 import { applyLoginShellPath, probeLoginShellPath } from './env/resolve-path.js';
+import { resolveUserDataOverride } from './env/user-data-dir.js';
 import { applyUtf8Ctype } from './env/utf8-ctype.js';
 import { registerMainErrorIpc } from './errors/ipc.js';
 import { recordMainFailure } from './errors/log.js';
@@ -70,6 +71,30 @@ import { registerUpdateIpc } from './update/ipc.js';
 import { registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
 import { lockZoom } from './zoom.js';
+
+/**
+ * FIRST, BEFORE ANYTHING ELSE TOUCHES `app`: a test/fixture launch gets its
+ * own throwaway `userData`, never the operator's real profile.
+ *
+ * `app.setPath('userData', ...)` has to run before `app.whenReady()` and
+ * before any subsystem opens a file under the default location -- Chromium's
+ * disk caches, `Local Storage`, `Preferences` and the per-origin zoom level
+ * all resolve against whatever `userData` was when they first initialise,
+ * and nothing below this line is early enough to still redirect them. It is
+ * placed ahead of `app.on('web-contents-created', ...)` for the same reason,
+ * even though that handler does not itself touch `userData`: nothing in this
+ * module may run first.
+ *
+ * Read once, from `VAM_USER_DATA_DIR`: unset in every production launch
+ * (Finder, Dock, Spotlight, `pnpm run dev:app`), so this is a no-op there and
+ * the platform default is untouched. Only `test/electron/launch.test.ts` and
+ * `e2e/electron-launch.et.ts` ever set it, each to a fresh directory made
+ * with `fs.mkdtempSync` and torn down after the run.
+ */
+const userDataOverride = resolveUserDataOverride(process.env);
+if (userDataOverride !== undefined) {
+  app.setPath('userData', userDataOverride);
+}
 
 /**
  * Serves `test/electron/launch.test.ts` only, selected by `VAM_FIXTURE_SOURCE`

@@ -53,6 +53,29 @@ async function waitForWindow() {
   throw new Error('probe: no BrowserWindow finished loading within 10s');
 }
 
+/**
+ * Polls for a selector rather than trusting a fixed sleep after the reload
+ * below -- a FRESH, throwaway `userData` (see `src/main/index.ts`'s
+ * `VAM_USER_DATA_DIR`) pays Chromium's own cold-start cost on every single
+ * launch: first-ever `Local Storage`/`Preferences`/GPU-cache creation on
+ * disk, which the old SHARED, long-lived profile this repo used to leak into
+ * had already paid once and amortised across every run since. Measured: a
+ * fixed 300ms margin here was comfortably enough against that warm, reused
+ * profile and not enough against a genuinely cold one -- the row this
+ * function waits for simply had not rendered yet when the click fired, and
+ * `?.click()` on a still-`null` `querySelector` throws nothing, so the
+ * failure only ever surfaced three lines later as "no <img> was on screen".
+ */
+async function waitForSelector(run, selector, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await run(`document.querySelector(${JSON.stringify(selector)}) !== null`);
+    if (found) return;
+    await sleep(50);
+  }
+  throw new Error(`probe: ${selector} did not appear within ${timeoutMs}ms`);
+}
+
 async function main() {
   require(MAIN);
   await app.whenReady();
@@ -384,16 +407,21 @@ async function main() {
 
   // (d) a zoom level PERSISTED from an earlier session. Chromium stores it
   // per origin and re-applies it on navigation, so it survives a reload -- and
-  // a relaunch, which is how it was found: the harness left 2.5 behind and the
-  // next launch came up at zoom factor 1.577.
+  // used to survive a relaunch too, which is how it was found: the harness
+  // left 2.5 behind and the next launch came up at zoom factor 1.577. Now
+  // moot for the NEXT launch specifically -- `launch.test.ts` hands every
+  // launch its own fresh `userData` dir (`VAM_USER_DATA_DIR`, see
+  // `src/main/index.ts`), so there is no "next launch" left to inherit
+  // anything from this one -- but the reset that used to follow this
+  // assertion is not restored: nothing after this line in THIS process reads
+  // the zoom level again, so leaving it at 2.5 for the remainder of this run
+  // changes nothing this harness checks.
   contents.setZoomLevel(2.5);
   await contents.reload();
   await new Promise((resolve) => contents.once('did-finish-load', resolve));
   await sleep(300);
   result.zoomLevelAfterReload = contents.getZoomLevel();
   result.zoomFactorAfterReload = contents.getZoomFactor();
-  // Leave nothing behind for the next launch to inherit.
-  contents.setZoomLevel(0);
 
   // EVERY <img> ON SCREEN LOADED -- the ONLY check in this whole harness that
   // can see the difference between a document-relative `src` and a root-
@@ -411,31 +439,26 @@ async function main() {
   // clicked here before the check runs -- an app-wide corpus of ONE row is
   // not a coincidence to work around, it is the whole surface this guards.
   //
-  // THE CLICK WRITES `lastFocus` INTO THE SAME SHARED, PERSISTENT
-  // `localStorage` THE ZOOM NOTE ABOVE ALREADY NAMES -- this probe sets no
-  // `userData` override, so `prefs/prefs.ts`'s `vam.prefs.v1` key outlives
-  // this process exactly the way the zoom factor did. Measured the same way
-  // that regression was: an unrelated assertion ("denies its own
-  // microphone, and therefore draws no button to use it", which reads
-  // `sendControls` off the FIRST session's composer) started failing on the
-  // launch AFTER this click first ran, because the NEXT launch's own "land
-  // focus on something real" effect (`Canvas.tsx`) read the persisted
-  // pointer back and opened the terminal-only row instead of the waiting
-  // one, whose composer this harness's own earlier assertion needs on
-  // screen. Saved and restored around the click, the same "leave nothing
-  // behind for the next launch to inherit" rule as the zoom reset above.
-  const prefsBeforeClick = await run("window.localStorage.getItem('vam.prefs.v1')");
+  // THE CLICK WRITES `lastFocus` INTO `localStorage` (`prefs/prefs.ts`'s
+  // `vam.prefs.v1` key). That USED TO outlive this process and corrupt the
+  // NEXT launch: an unrelated assertion ("denies its own microphone, and
+  // therefore draws no button to use it", which reads `sendControls` off the
+  // FIRST session's composer) started failing on the launch AFTER this click
+  // first ran, because the next launch's own "land focus on something real"
+  // effect (`Canvas.tsx`) read the persisted pointer back and opened the
+  // terminal-only row instead of the waiting one. `launch.test.ts` now hands
+  // every launch its own fresh `userData` dir (`VAM_USER_DATA_DIR`, see
+  // `src/main/index.ts`), so this process's `localStorage` never exists
+  // before it starts and never exists after it exits -- there is no next
+  // launch left for this write to reach, and the save/restore that used to
+  // guard against it is gone.
+  await waitForSelector(run, '[data-session-row="pane:launch-fixture-terminal-1"]');
   await run(
     "document.querySelector('[data-session-row=\"pane:launch-fixture-terminal-1\"]')?.click(); undefined",
   );
   await sleep(300);
   result.images = await run(
     "Array.from(document.images).map((img) => ({ src: img.getAttribute('src'), naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, complete: img.complete }))",
-  );
-  await run(
-    prefsBeforeClick === null
-      ? "window.localStorage.removeItem('vam.prefs.v1'); undefined"
-      : `window.localStorage.setItem('vam.prefs.v1', ${JSON.stringify(prefsBeforeClick)}); undefined`,
   );
 
   process.stdout.write(`VAM_SMOKE_RESULT ${JSON.stringify(result)}\n`);
