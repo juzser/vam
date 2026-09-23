@@ -3706,11 +3706,21 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
 }
 
 /**
- * The phone keystroke strip's five keys -- vam's real `PaneKey` shapes, not
+ * The phone keystroke strip's seven keys -- vam's real `PaneKey` shapes, not
  * orca's five: there is no `PaneKey` kind for a plain Tab (`terminal.ts`), so
  * it is refused outright rather than drawn as a button that always fails.
  * `id` is the strip's own attribute name, distinct from `PaneKey['kind']`
- * only for `space`, which is a `text` key rather than a kind of its own.
+ * only for `space` (a `text` key rather than a kind of its own) and for
+ * `up`/`down` (both `nav`, distinguished by `PaneKey.nav` the way `space`
+ * is distinguished by `PaneKey.text`).
+ *
+ * UP/DOWN ARE THE ADDITION, vam/terminal-arrows: a phone has no arrow keys at
+ * all, and Claude Code's own option pickers -- `AskUserQuestion`, a
+ * permission prompt, `/model`, `/config`, plan approval -- are walked with
+ * exactly them, the same report the Terminal tab's own keyboard fix answers.
+ * Left/Right are not here: nothing on this strip is a line of text to move a
+ * caret through, and every picker this strip exists for walks its rows with
+ * Up/Down alone.
  *
  * Escape and Enter carry a visible caption naming a different destination
  * than their textarea siblings already claim (`Esc → sidebar`, the send
@@ -3752,6 +3762,18 @@ const KEY_STRIP: readonly {
     key: { kind: 'text', text: ' ' },
     caption: '␣',
     ariaLabel: 'press Space in the session',
+  },
+  {
+    id: 'up',
+    key: { kind: 'nav', nav: 'up' },
+    caption: '↑',
+    ariaLabel: 'press the up arrow in the session',
+  },
+  {
+    id: 'down',
+    key: { kind: 'nav', nav: 'down' },
+    caption: '↓',
+    ariaLabel: 'press the down arrow in the session',
   },
 ];
 

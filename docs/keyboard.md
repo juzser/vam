@@ -100,6 +100,21 @@ which reads the `In the Files tab` column above and the two key lists
 added without a row, or a row left behind by a binding that went away, fails
 `vitest run` rather than reaching an operator.
 
+## In the Terminal tab
+
+The pane is a real terminal, and it takes the keyboard while it holds it: a
+printable key, Return, Backspace and every Ctrl chord (Ctrl+U, Ctrl+C, and
+the rest) are typed or pressed into the session vam started, exactly as they
+would be in any other terminal. Two rows of that grammar are worth naming
+here because they used to belong to vam instead.
+
+| In the Terminal tab | Action |
+|---|---|
+| `↑` `↓` `←` `→` `Home` `End` `PageUp` `PageDown` | Pressed in the pane — real navigation keys, delivered to the program running there. This is what walks a Claude Code option picker (`AskUserQuestion`, a permission prompt, `/model`, `/config`, plan approval) from inside the Terminal tab; before vam/terminal-arrows these six read as vam's OWN scroll of the pane's view and the pickers could not be answered from in here at all. A key delivered this way returns the view to the live end, the way a real terminal does, so what the operator just navigated to is on screen |
+| `Shift-PageUp` / `Shift-PageDown` / `Shift-Home` / `Shift-End` | vam's own scrollback — the terminal convention xterm and GNOME Terminal both use, since the bare keys are the program's now. The mouse wheel scrolls it too, and is forwarded to the program instead when it owns the mouse (a fullscreen picker's own scrollback) |
+| `Escape` | Sent into the session — cancels a picker, leaves vim's insert mode, whatever the program does with it. Not a way out of the pane |
+| `Tab` | The one way out, back to vam's own keyboard |
+
 ## In a browser tab
 
 vam ships one keyboard two ways, and only one of them has the keyboard to

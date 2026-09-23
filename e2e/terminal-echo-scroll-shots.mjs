@@ -2,6 +2,11 @@
  * THE TERMINAL SCROLLS -- against a REAL tmux, read by the REAL main-process
  * read path, in both of the situations the operator has met.
  *
+ * ── PHASE E: THE ARROWS REACH THE PROGRAM; Shift+PageUp IS VAM'S OWN ─────
+ * vam/terminal-arrows. The operator's report: "in the terminal, the arrow
+ * keys can't be used to select options." See the phase's own header, well
+ * below the other four, for the measurement.
+ *
  * ── PHASE A: A SHELL WITH SCROLLBACK, WHILE TYPING ───────────────────────
  * The report against #437, translated: "can't scroll in the terminal view".
  * An `echo` read answers with the SCREEN alone (its measured win, 7,760
@@ -418,11 +423,14 @@ try {
     `${stillHeld.scrollTop} against ${scrolled.scrollTop}`,
   );
 
-  await page.keyboard.press('End');
+  // `Shift+End` is vam's OWN scrollback control now (vam/terminal-arrows); a
+  // bare `End` reaches the shell's own readline instead. See PHASE E below
+  // for the real pty proof of both halves of that split.
+  await page.keyboard.press('Shift+End');
   await page.waitForTimeout(600);
   const returned = await readPane();
   check(
-    'End takes the operator back to the live end, and the pane follows the output again',
+    'Shift+End takes the operator back to the live end, and the pane follows the output again',
     atBottom(returned) && returned.reads > stillHeld.reads,
     `scrollTop ${returned.scrollTop} of ${returned.scrollHeight - returned.clientHeight}`,
   );
@@ -683,6 +691,116 @@ try {
     'and the tone-marked replacement really reaches it whole, as the UTF-8 bytes of "ối" — not lost the way the operator’s report describes',
     afterCorrection.includes(hexOf('ối')),
     `expected a chunk of "${hexOf('ối')}" in:\n${afterCorrection}`,
+  );
+
+  /* ── PHASE E: THE EIGHT NAVIGATION KEYS REACH THE PROGRAM, AND
+     Shift+PageUp SCROLLS VAM'S OWN VIEW WHILE DELIVERING NOTHING ─────────── */
+
+  // vam/terminal-arrows. The operator's report, translated: "in the terminal,
+  // the arrow keys can't be used to select options." `TerminalTab.tsx` read
+  // the arrows and Home/End/PageUp/PageDown as vam's OWN scroll of the pane's
+  // view before a keystroke ever reached the pane, so every one of Claude
+  // Code's own option pickers -- walked with exactly those keys -- could not
+  // be answered from inside this tab. Asserting only that vam's own `send`
+  // bridge was called with `{ kind: 'nav', ... }` would still pass if tmux
+  // declined the delivery, or if `-l` had typed the key's NAME instead of
+  // pressing it (both real ways for that gap to open, and both measured
+  // against directly in `tmux/argv.ts`'s own note) -- so this drives REAL
+  // arrow keys over a REAL pane and reads the REAL bytes a program on the
+  // other end of the pty received, the same instrument the Shift+Enter phase
+  // above uses for one key.
+  aimed = null;
+  sent.length = 0;
+  tmux('kill-session', '-t', `=${TMUX_SESSION}:`);
+  tmux(
+    'new-session',
+    '-d',
+    '-s',
+    TMUX_SESSION,
+    '-x',
+    String(COLUMNS),
+    '-y',
+    String(ROWS),
+    'node',
+    echo,
+  );
+  tmux('set-option', '-t', `=${TMUX_SESSION}:`, '@vam-project', PROJECT);
+  await page.waitForTimeout(1_000);
+
+  await page.locator('[data-terminal-pane]').click();
+  await page.waitForTimeout(200);
+
+  // FILLER, so Shift+PageUp below has real scrollback to move into -- a
+  // FRESH key-echo session has nothing on screen yet, exactly like Phase A's
+  // shell needed its 300-line printf fill before a wheel had anything to
+  // prove. Each character rides the SAME serialised send path a real
+  // operator's typing does, so this is not a shortcut: it is eighty ordinary
+  // keystrokes, each hex-dumped on its own line by the fixture.
+  await page.keyboard.type('x'.repeat(80));
+  await page.waitForTimeout(1_500);
+
+  const chunkLines = (capture) =>
+    capture
+      .split('\n')
+      .map((line) => /^chunk \d+: (.+)$/.exec(line.trimEnd())?.[1])
+      .filter((hex) => hex !== undefined);
+
+  const NAV_PRESSES = [
+    ['ArrowUp', 'up', '1b 5b 41'],
+    ['ArrowDown', 'down', '1b 5b 42'],
+    ['ArrowLeft', 'left', '1b 5b 44'],
+    ['ArrowRight', 'right', '1b 5b 43'],
+  ];
+  for (const [domKey] of NAV_PRESSES) {
+    await page.keyboard.press(domKey);
+    await page.waitForTimeout(200);
+  }
+  const afterArrows = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+  const lastFour = chunkLines(afterArrows).slice(-4);
+  check(
+    'ArrowUp/ArrowDown/ArrowLeft/ArrowRight each deliver the real VT100 cursor escape sequence, in order',
+    JSON.stringify(lastFour) === JSON.stringify(NAV_PRESSES.map(([, , hex]) => hex)),
+    `expected ${JSON.stringify(NAV_PRESSES.map(([, , hex]) => hex))}, got ${JSON.stringify(lastFour)}`,
+  );
+  check(
+    'vam’s own send bridge carries each one as { kind: "nav", nav: <name> }, never as typed text',
+    NAV_PRESSES.every(([, nav]) =>
+      sent.some((s) => s.key.kind === 'nav' && s.key.nav === nav && s.landed === 'sent'),
+    ),
+    JSON.stringify(sent.filter((s) => s.key.kind === 'nav')),
+  );
+
+  const beforeShift = await page.evaluate(() => {
+    const paneEl = document.querySelector('[data-terminal-pane]');
+    return { scrollTop: paneEl.scrollTop, scrollHeight: paneEl.scrollHeight };
+  });
+  check(
+    'the eighty-line filler really overflowed the box, so Shift+PageUp has somewhere to go',
+    beforeShift.scrollHeight > 0 && beforeShift.scrollTop > 0,
+    JSON.stringify(beforeShift),
+  );
+  const chunksBeforeShift = chunkLines(afterArrows).length;
+  sent.length = 0;
+  await page.keyboard.press('Shift+PageUp');
+  await page.waitForTimeout(400);
+  const afterShift = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+  check(
+    'Shift+PageUp delivers NOTHING to the program -- no new chunk on the wire',
+    chunkLines(afterShift).length === chunksBeforeShift,
+    `${chunksBeforeShift} chunks before, ${chunkLines(afterShift).length} after`,
+  );
+  check(
+    'and vam’s own send bridge was never asked either',
+    sent.length === 0,
+    JSON.stringify(sent),
+  );
+  const afterShiftScroll = await page.evaluate(
+    () => document.querySelector('[data-terminal-pane]').scrollTop,
+  );
+  check(
+    'Shift+PageUp really moved vam’s own scrollTop, up out of the live end',
+    afterShiftScroll < beforeShift.scrollTop,
+    `${beforeShift.scrollTop} -> ${afterShiftScroll}`,
   );
 } finally {
   await browser.close();

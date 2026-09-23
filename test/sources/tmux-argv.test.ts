@@ -27,6 +27,7 @@ import {
   sendBackTabArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNavArgv,
   sendNewlineArgv,
   sendTextArgv,
   tagPidArgv,
@@ -174,6 +175,85 @@ describe('tmux argv', () => {
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('-l');
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('S-Tab');
     expect(sendBackTabArgv('vam-a1b2c3')).not.toContain('Tab');
+  });
+
+  it('presses each of the eight navigation keys, interpreted, never typed', () => {
+    // vam/terminal-arrows. MEASURED on tmux 3.7b over a private `-L` socket,
+    // against `e2e/fixtures/key-echo.cjs` in a real pane, plain cursor-key
+    // mode: `send-keys Up/Down/Left/Right` delivered `1b 5b 41/42/44/43`,
+    // `Home`/`End` delivered `1b 5b 31/34 7e`, and `PageUp`/`PageDown`
+    // (tmux's own aliases for `PPage`/`NPage`, confirmed to deliver the
+    // identical bytes) delivered `1b 5b 35/36 7e` -- exactly the sequences a
+    // real terminal sends. `--`, the same terminator `sendControlArgv` takes,
+    // because the key NAME is selected by a value off the bridge.
+    expect(sendNavArgv('vam-a1b2c3', 'up')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Up',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'down')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Down',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'left')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Left',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'right')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Right',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'home')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'Home',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'end')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'End',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'page-up')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'PageUp',
+    ]);
+    expect(sendNavArgv('vam-a1b2c3', 'page-down')).toEqual([
+      'send-keys',
+      '-t',
+      '=vam-a1b2c3:',
+      '--',
+      'PageDown',
+    ]);
+    for (const nav of [
+      'up',
+      'down',
+      'left',
+      'right',
+      'home',
+      'end',
+      'page-up',
+      'page-down',
+    ] as const) {
+      expect(sendNavArgv('vam-a1b2c3', nav)).not.toContain('-l');
+    }
   });
 
   it('sends Shift+Enter as a literal LF, never the interpreted Return', () => {
