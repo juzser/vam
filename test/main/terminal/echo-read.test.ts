@@ -148,6 +148,20 @@ describe('an echo read asks for the screen and nothing above it', () => {
     expect(tab.capture()).toContain('-S');
     expect(tab.capture()).toContain('-500');
   });
+
+  it('leaves `-S` off `poll-live` too -- the interval read while pinned to the live end', async () => {
+    // MEASURED against this task's own scratch harness, through the REAL
+    // control-mode runner, on a 137x41 pane with 600 lines of coloured
+    // scrollback (tmux 3.7b, private `-L` socket, n=60): a window read
+    // (`-S -500`) answered 35,068 bytes at a 1.88ms median; the screen alone
+    // answered 2,608 bytes at 0.33ms. The poll re-reads four times a second
+    // for as long as the tab is open (`REFRESH_MS`), so an operator pinned to
+    // the live end -- the common case -- was paying the window's bytes for a
+    // screen it could not scroll into anyway.
+    const tab = reader();
+    expect((await tab.read('poll-live')).kind).toBe('ok');
+    expect(tab.capture()).not.toContain('-S');
+  });
 });
 
 describe('the interval read re-proves the pairing; the echo read rides it', () => {
@@ -204,6 +218,19 @@ describe('the interval read re-proves the pairing; the echo read rides it', () =
     // Past the backstop: the proof the aim rode has expired, so this read
     // proves the pairing again rather than riding on.
     expect((await tab.read('echo')).kind).toBe('ok');
+    expect(tab.verbs()).toEqual(['list-sessions', 'capture-pane']);
+  });
+
+  it('proves the pairing on `poll-live` too -- it is still the interval read, only cheaper', async () => {
+    // `poll-live` is the SAME tick `poll` is: it is what refreshes the aim, so
+    // it may never ride one. Only `echo`/`echo-scrollback` are allowed to
+    // trust a proof somebody else made.
+    const tab = reader();
+    expect((await tab.read()).kind).toBe('ok');
+    expect((await tab.read('echo')).kind).toBe('ok');
+    tab.clear();
+
+    expect((await tab.read('poll-live')).kind).toBe('ok');
     expect(tab.verbs()).toEqual(['list-sessions', 'capture-pane']);
   });
 

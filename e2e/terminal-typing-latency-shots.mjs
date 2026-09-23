@@ -44,6 +44,15 @@
  *
  * `tmux -L vam-e2e-latency`, killed on the way out; nothing here touches the
  * operator's default server or any `vam-*` session on it.
+ *
+ * THE BACKGROUND INTERVAL IS MEASURED TOO, not just the keystroke chain: a
+ * steady typing run leaves `REFRESH_MS` ticking underneath it the whole time,
+ * pinned to the live end throughout (nothing here ever scrolls it away), so
+ * every tick but the first ought to be `poll-live` rather than `poll` --
+ * `shared/terminal.ts`'s `PaneReadMode` holds why -- and its capture ought to
+ * read like a screen rather than the 500-line window `poll` still asks for
+ * when the operator has scrolled away. `checkPollLive` asserts both, with the
+ * byte bound documented at `POLL_LIVE_BYTES_BOUND`.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -85,6 +94,29 @@ const PAINT_P95_BOUND_MS = 120;
  * whose control client had to be (re)established during the run.
  */
 const CLAIMED_SPAWNS_PER_KEYSTROKE = 0;
+
+/**
+ * How many bytes a `poll-live` capture may carry before it stops looking like
+ * a screen and starts looking like the window it exists to avoid asking for.
+ *
+ * MEASURED, twice. First against a REAL 137x41 pane with 600 lines of
+ * coloured scrollback, through the same control-mode runner this harness uses
+ * (this task's own scratch measurement, `tmux 3.7b`, private socket, n=60): a
+ * window read (`-S -500`) answers 35,068 bytes at a 1.88ms median, the screen
+ * alone answers 2,608 bytes at 0.33ms. Second, live, in THIS run, against the
+ * two panes below: pane A's `sh` prompt answers 75-98 bytes, pane B's real
+ * `claude` fullscreen TUI answers 913-936 (both far smaller, because neither
+ * has 600 lines of scrollback on screen yet).
+ *
+ * The bound is not "headroom over a slow CI runner" the way a millisecond
+ * bound is -- a byte count does not care how fast the machine is -- so it is
+ * headroom over CONTENT instead: an order of magnitude above the largest of
+ * the four measurements above, and still nowhere near what a window read of
+ * `PANE_HISTORY_LINES` (500) lines would answer at these dimensions (tens of
+ * KB, per the first measurement). A `poll-live` read this large would mean
+ * the screen-only capture regressed back into asking for the scrollback.
+ */
+const POLL_LIVE_BYTES_BOUND = 8_192;
 
 /* ── tmux, or an honest skip ────────────────────────────────────────────── */
 
@@ -276,7 +308,15 @@ await page.addInitScript(
         read: (_projectId, _rowId, mode) => {
           const t0 = performance.now();
           return globalThis.window.__realRead(mode).then((view) => {
-            window.__perf.reads.push({ mode: mode ?? 'poll', t0, t1: performance.now() });
+            window.__perf.reads.push({
+              mode: mode ?? 'poll',
+              t0,
+              t1: performance.now(),
+              // The byte count actually captured, for the `poll`/`poll-live`
+              // split below: `poll-live` is `poll-live` only because it asked
+              // tmux for the screen alone rather than the 500-line window.
+              bytes: view.kind === 'ok' ? view.text.length : 0,
+            });
             return view;
           });
         },
@@ -429,18 +469,70 @@ function reportBurst(perf, label) {
   return { echoReads: echoReads.length, sends: perf.sends.length, keydowns: perf.keydowns.length, overlapping, maxDepth };
 }
 
+/**
+ * THE BACKGROUND INTERVAL'S OWN READS, captured alongside the keystroke
+ * chain rather than by it: `REFRESH_MS` keeps ticking underneath a steady
+ * typing run, and every one of those ticks is `poll` or `poll-live`, never
+ * `echo`/`echo-scrollback` (`shared/terminal.ts`, `PaneReadMode`). While the
+ * pane stays pinned to the live end for the whole run -- true here, since
+ * `sh` echoing a keystroke does not push the view away from the bottom --
+ * every tick after the very first (mount) one should be `poll-live`, and its
+ * bytes should read close to a screen rather than the whole window.
+ */
+function reportPoll(perf, label) {
+  const ticks = perf.reads.filter((r) => r.mode === 'poll' || r.mode === 'poll-live');
+  const live = ticks.filter((r) => r.mode === 'poll-live');
+  const full = ticks.filter((r) => r.mode === 'poll');
+  console.log(
+    `\n${label}: ${ticks.length} interval tick(s) during the run -- ${live.length} poll-live, ${full.length} poll`,
+  );
+  if (live.length > 0) {
+    console.log(
+      `  poll-live bytes: median ${percentile(live.map((r) => r.bytes), 50)}, max ${Math.max(...live.map((r) => r.bytes))}`,
+    );
+  }
+  return { ticks, live, full };
+}
+
 async function measurePane(label) {
   const steady = await typeSteady(50, 80);
   const stages = stageTable(steady.perf, `${label} -- steady (80ms cadence, n=50)`);
   const stSpawnsPerKey = steady.spawns / steady.perf.keydowns.length;
   console.log(`  spawns issued: ${steady.spawns} over ${steady.perf.keydowns.length} keystrokes (${stSpawnsPerKey.toFixed(2)}/key)`);
+  const pollStats = reportPoll(steady.perf, `${label} -- background interval during the steady run`);
 
   const burst = await typeBurst(20, 20);
   const burstStats = reportBurst(burst.perf, `${label} -- burst (20ms cadence, n=20)`);
   const burstSpawnsPerKey = burst.spawns / burst.perf.keydowns.length;
   console.log(`  spawns issued: ${burst.spawns} over ${burst.perf.keydowns.length} keystrokes (${burstSpawnsPerKey.toFixed(2)}/key)`);
 
-  return { stages, stSpawnsPerKey, burstSpawnsPerKey, burstStats };
+  return { stages, stSpawnsPerKey, burstSpawnsPerKey, burstStats, pollStats };
+}
+
+/**
+ * THE WIN ITEM 1 CLAIMS, asserted against the background interval's own
+ * reads rather than the keystroke chain: while the pane stays pinned to the
+ * live end (true for the whole steady run, on both panes), MOST ticks ask
+ * `poll-live` -- the screen alone -- and none of those captures may look
+ * anywhere near the size a window read would be. Not ALL of them:
+ * `POLL_LIVE_RESYNC_TICKS` forces one real `poll` every four ticks
+ * (`TerminalTab.tsx`'s own note on why a splice-only interval is unsound), so
+ * the expected split at that constant's current value is 3 `poll-live` to
+ * every 1 `poll` -- asserted here as "at least half", generous slack for a
+ * run whose sample happens to straddle a resync boundary either way.
+ */
+function checkPollLive(label, pollStats) {
+  check(
+    `${label}: most of the background interval's ticks are \`poll-live\` once pinned`,
+    pollStats.ticks.length > 0 && pollStats.live.length >= pollStats.ticks.length * 0.5,
+    `${pollStats.live.length} poll-live of ${pollStats.ticks.length} tick(s), ${pollStats.full.length} still full \`poll\` (the periodic resync, \`POLL_LIVE_RESYNC_TICKS\`)`,
+  );
+  const bytes = pollStats.live.map((r) => r.bytes);
+  check(
+    `${label}: every \`poll-live\` capture stays under the ${POLL_LIVE_BYTES_BOUND}-byte bound`,
+    bytes.length > 0 && Math.max(...bytes) < POLL_LIVE_BYTES_BOUND,
+    bytes.length > 0 ? `max ${Math.max(...bytes)} bytes` : 'no poll-live reads captured',
+  );
 }
 
 let paneAResult;
@@ -473,6 +565,7 @@ try {
     paneAResult.burstStats.overlapping === 0,
     `${paneAResult.burstStats.overlapping} overlapping`,
   );
+  checkPollLive('pane A (sh)', paneAResult.pollStats);
 
   await page.screenshot({ path: `${outDir}/terminal-typing-latency-sh.png` });
   console.log(`${outDir}/terminal-typing-latency-sh.png`);
@@ -537,6 +630,7 @@ try {
         percentile(paneBResult.stages.total, 95) < PAINT_P95_BOUND_MS,
       `p95 ${percentile(paneBResult.stages.total, 95)?.toFixed(2)}ms`,
     );
+    checkPollLive('pane B (claude, fullscreen)', paneBResult.pollStats);
 
     await page.screenshot({ path: `${outDir}/terminal-typing-latency-claude.png` });
     console.log(`${outDir}/terminal-typing-latency-claude.png`);

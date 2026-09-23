@@ -201,6 +201,25 @@ describe('createSourceFromHttp', () => {
     expect(fetch.calls.map((c) => c.url)).toContain('/api/load');
   });
 
+  /**
+   * `agentWork` REACHES `/api/agent-work`, wired exactly like `history`
+   * reaches `/api/history` two tests below -- both cross the same factory
+   * (`createSourceFromPreload`), so a gap in that shared factory strands both
+   * transports at once, and `DesktopCanvas` and `BrowserCanvas` (the phone
+   * build) alike.
+   */
+  it('reads agent work through /api/agent-work, wired exactly like history', async () => {
+    const answer = { kind: 'work' as const, turns: [], brief: null, whole: true };
+    const fetch = fetcher({ ...READS, '/api/agent-work': { ok: true, value: answer } });
+    const source = await createSourceFromHttp({ fetch, openStream: stream().open });
+
+    expect(source.agentWork).toBeDefined();
+    expect(await source.agentWork?.('s1', 'agent-a')).toEqual(answer);
+    const call = fetch.calls.find((c) => c.url === '/api/agent-work');
+    expect(call?.init?.method).toBe('POST');
+    expect(JSON.parse(call?.init?.body ?? '{}')).toEqual({ sessionId: 's1', agentId: 'agent-a' });
+  });
+
   it('leaves a capability the server does not offer ABSENT, not present-and-failing', async () => {
     const source = await createSourceFromHttp({ fetch: fetcher(READS), openStream: stream().open });
     expect(source.capabilities.terminal).toBe(false);
