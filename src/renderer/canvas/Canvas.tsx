@@ -948,6 +948,11 @@ const TAB_STATUS_INK: Readonly<Record<SessionStatus, string>> = {
   waiting: 'text-waiting',
   idle: 'text-idle',
   unstarted: 'text-idle',
+  // The pane is alive and a conversation is known -- the same quiet `idle`
+  // and `unstarted` already share, and the tab draws it because, unlike
+  // those two, the operator asked for a mark here (`model.ts`'s own doc on
+  // `terminal`).
+  terminal: 'text-idle',
   done: 'text-done',
   failed: 'text-failed',
 };
@@ -3036,6 +3041,7 @@ function CanvasInner({
       waiting: of('waiting'),
       idle: of('idle'),
       unstarted: of('unstarted'),
+      terminal: of('terminal'),
       done: of('done'),
       failed: of('failed'),
     };
@@ -4521,6 +4527,56 @@ function CanvasInner({
         source.onWrote();
       } catch (cause) {
         setStatus(noteFailure(`start ${provider.label}`, cause));
+      } finally {
+        setWritingFor(entry.session.id, false);
+      }
+    },
+    [source, writingBySession, setWritingFor],
+  );
+
+  /**
+   * RESUME, IN THE SAME PANE -- the secondary action on the `terminal`
+   * getting-started screen (`TerminalOnlyStart`, `DetailPanel.tsx`), and
+   * `startSessionIn`'s own twin in every way but the text it types.
+   *
+   * NOT `reopenSession` BELOW, though the two sound alike. That one calls the
+   * SOURCE's `resumeSession` write, which spawns a brand-new vam session in a
+   * brand-new pane for a conversation that has genuinely ENDED. This pane is
+   * not gone -- it is sitting at a shell prompt, still vam's, still the one
+   * the conversation was in -- so continuing it here is exactly
+   * `startSessionIn`'s act (type a command into a pane vam already owns)
+   * and never a second pane for one conversation.
+   *
+   * `entry.session.resumeCommand` IS THE WHOLE COMMAND, main-built
+   * (`model.ts`'s own doc on the field says why the renderer does not
+   * assemble it): this function's only job is to type it, exactly as
+   * `startSessionIn` types `provider.command.join(' ')`.
+   */
+  const resumeInPane = useCallback(
+    async (entry: SessionEntry): Promise<void> => {
+      const title = entry.session.title;
+      const command = entry.session.resumeCommand;
+      if (command === undefined) return;
+      if (source.kind !== 'session') {
+        setStatus(`nothing can be resumed in "${title}" from here — no source is connected`);
+        return;
+      }
+      const sessionSource = source.source;
+      if (!canWriteTo(sessionSource)) {
+        setStatus(`${sessionSource.label} cannot be written to — "${title}" was not resumed`);
+        return;
+      }
+      if (writingBySession[entry.session.id] ?? false) {
+        return;
+      }
+      setWritingFor(entry.session.id, true);
+      setStatus(`resuming "${title}"…`);
+      try {
+        await sessionSource.write.recordPrompt(entry.session.id, command);
+        setStatus(`typed the resume command into "${title}" — it appears here once it registers`);
+        source.onWrote();
+      } catch (cause) {
+        setStatus(noteFailure('resume', cause));
       } finally {
         setWritingFor(entry.session.id, false);
       }
@@ -6562,6 +6618,12 @@ function CanvasInner({
         // start in, so the screen says "use the Terminal view" instead of
         // drawing a button that cannot type.
         onStartSession: entry === null ? undefined : (id) => void startSessionIn(entry, id),
+        // THIS PANE'S ROW, on the `terminal` getting-started screen's
+        // secondary act -- see `resumeInPane`'s own comment for why this is
+        // not `reopenSession`. Withdrawn on the same "no session, no control"
+        // rule `onStartSession` follows; `DetailPanel` further withholds the
+        // button unless the row itself carries a `resumeCommand`.
+        onResumeInPane: entry === null ? undefined : () => void resumeInPane(entry),
         // The Files tab's tree width, and the way back. GLOBAL for the same
         // reason `defaultProvider` above it is passed identically to every
         // pane: one `FilesTab` per split leaf, and an arrangement the
@@ -6665,6 +6727,7 @@ function CanvasInner({
       setComposingFor,
       sendPromptFor,
       startSessionIn,
+      resumeInPane,
       setViewFor,
       mode,
     ],

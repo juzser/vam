@@ -109,6 +109,10 @@ const STATUS_DOT: Readonly<Record<SessionStatus, string>> = {
   idle: 'bg-idle',
   // The neutral `idle` shares: an empty pane is the absence of news too.
   unstarted: 'bg-idle',
+  // A pane and a known conversation, at rest -- the same neutral hue; the
+  // cursor stripe this band paints for is 2px and has no room for a shape,
+  // which is what `status-mark.tsx`'s glyph is for.
+  terminal: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };

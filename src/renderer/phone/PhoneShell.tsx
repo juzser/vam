@@ -236,6 +236,9 @@ const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
   idle: 'bg-idle',
   // The neutral `idle` shares: an empty pane is the absence of news too.
   unstarted: 'bg-idle',
+  // A pane and a known conversation, at rest -- same neutral hue as the two
+  // above; `status-mark.tsx`'s glyph is what a 6px dot has no room to draw.
+  terminal: 'bg-idle',
   done: 'bg-done',
   failed: 'bg-failed',
 };

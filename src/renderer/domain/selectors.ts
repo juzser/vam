@@ -159,6 +159,11 @@ const STATUS_RANK: Readonly<Record<Session['status'], number>> = {
   // nothing. Beside `idle`, whose quiet it shares -- and never in front of
   // it, because a pane you have not started cannot be the one that needs you.
   unstarted: 2,
+  // A pane whose agent exited but whose conversation is known: alive,
+  // typeable (Start, Resume, or the operator's own hand), asking for
+  // nothing -- `unstarted`'s own rank and reasoning, not `idle`'s: there is
+  // no agent here to be "attached" the way `idle`'s definition means.
+  terminal: 2,
   done: 3,
   failed: 3,
 };

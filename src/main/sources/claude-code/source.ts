@@ -57,14 +57,20 @@ import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
 import type { MainSource } from '../source.js';
-import { createTmuxRunner, listVamSessions, type TmuxSession } from '../tmux/spawn.js';
+import { tagVamSessionArgv } from '../tmux/argv.js';
+import {
+  createTmuxRunner,
+  listVamSessions,
+  type TmuxRun,
+  type TmuxSession,
+} from '../tmux/spawn.js';
 import { type AgentRoster, readAgentRoster, subagentsDirOf } from './agent-roster.js';
 import { readAgentWork } from './agent-work.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { readTranscriptHistory } from './history.js';
-import { paneNameOf, paneRow, unclaimedPanes } from './pane-row.js';
+import { paneNameOf, paneRow, terminalRow, unclaimedPanes } from './pane-row.js';
 import { prRepoOverride } from './pr-repos.js';
 import { projectIdOf } from './project-id.js';
 import {
@@ -74,7 +80,7 @@ import {
 } from './pull-requests.js';
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
-import { resumeClaudeSession } from './resume.js';
+import { claudeResumeCommand, resumeClaudeSession } from './resume.js';
 import { readPublishedPanes, readPublishedPanesAndProcessFacts } from './session-pane.js';
 import { defaultSessionsRoot } from './session-status.js';
 import {
@@ -210,6 +216,50 @@ async function readTranscript(
 }
 
 /**
+ * The row for a vam pane no LIVE row is paired to -- `terminalRow` when
+ * `@vam-session` names a conversation vam can still find, `paneRow` (the
+ * plain anonymous shell) otherwise. `docs/design/vam-terminal-only.md`.
+ *
+ * THE FALLBACK IS THE WHOLE OF THE SAFETY ARGUMENT, on the same rule every
+ * other reader of an unset or unusable tag follows: a pane tagged with an id
+ * vam cannot find a transcript for is not evidence of an identity, it is
+ * evidence of NOTHING -- a transcript deleted from disk, a tag left over from
+ * a conversation Claude Code itself lost track of. Falling through to the
+ * anonymous row is what `paneRow` already draws for a pane nobody ever tagged
+ * at all, so this never invents a THIRD shape for "vam is not sure".
+ *
+ * `reads` IS SHARED WITH THE LIVE-AGENT LOOP ABOVE, deliberately: the common
+ * case is that nothing here was already read this poll (a terminal-only
+ * pane's conversation has no live process, or it would not be terminal-only),
+ * but sharing the cache costs nothing and means a session id that happens to
+ * coincide is read once rather than twice.
+ */
+async function rowForEmptyPane(
+  empty: TmuxSession,
+  index: ReadonlyMap<string, string>,
+  reads: Map<string, TranscriptRead>,
+  nowMs: number,
+): Promise<Session> {
+  const sessionId = empty.vamSessionId;
+  const path = sessionId === undefined || sessionId === '' ? undefined : index.get(sessionId);
+  if (sessionId === undefined || path === undefined) return paneRow(empty);
+  const read = reads.get(sessionId) ?? (await readTranscript(path, sessionId, nowMs));
+  reads.set(sessionId, read);
+  const resumeCommand = claudeResumeCommand(sessionId);
+  return terminalRow(empty, {
+    sessionId,
+    // THE SAME FALLBACK CHAIN A LIVE ROW'S TITLE USES (below): the operator's
+    // own name is never available here (there is no `LiveAgent` for a pane
+    // with no process in it), so this starts one rung down, at the
+    // transcript's own generated title.
+    title: read.facts.aiTitle ?? sessionId,
+    decisions: read.facts.decisions,
+    branch: read.facts.branch,
+    resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
+  });
+}
+
+/**
  * The turns BEFORE a cursor, for one session -- the on-demand read `load()`
  * deliberately is not (`history.ts` says why, and what it costs).
  *
@@ -323,6 +373,14 @@ export async function loadClaudeCodeProjects(
   // succeeded; `CLAUDE_CODE_SOURCE` passes the real error alongside the real
   // `null` it hands `tmuxSessions` above, never one without the other.
   vamListingGap: { readonly code: string; readonly message: string } | null = null,
+  // WRITE `@vam-session` WHILE THE PAIRING IS STILL PROVEN, for the row whose
+  // agent has not exited yet -- `docs/design/vam-terminal-only.md`, and the
+  // one write `load()` makes on purpose. NULL BY DEFAULT, on the same rule
+  // every other injected dependency here follows: a caller that has not
+  // handed over a runner gets the pure read this function has always been,
+  // and every test in this suite that predates this parameter keeps behaving
+  // exactly as it did. `CLAUDE_CODE_SOURCE` passes the real runner.
+  tagVamSession: TmuxRun | null = null,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -352,6 +410,24 @@ export async function loadClaudeCodeProjects(
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
     const pane = tmuxSessions === null ? null : paneForRow(tmuxSessions, agents, agent, panes);
     if (pane !== null) claimed.add(pane);
+    // GUESS ONCE, THEN WRITE IT DOWN -- except this is not a guess.
+    // `paneForRow` above already PROVED this row's pane (most often through
+    // the published-pane tier: Claude Code's own `~/.claude/sessions/<pid>
+    // .json`), and that file is gone the moment the process exits cleanly
+    // (measured on a private tmux socket, 2.1.280: `/exit` deletes it). The
+    // tmux session survives its agent exiting -- Stage 2 made the pane a
+    // shell first -- so writing the id onto the SESSION, while a live row can
+    // still prove it, is what lets `terminalRow` below recover the same
+    // identity after the file that proved it today is gone. Skipped once the
+    // tag already agrees: this fires exactly once per pane's whole life, not
+    // once a poll, and `tagVamSessionArgv`'s own doc explains why a bare
+    // `set-option -t <name>` stays safe to run again regardless.
+    if (pane !== null && tagVamSession !== null && tmuxSessions !== null) {
+      const tagged = tmuxSessions.find((session) => session.name === pane);
+      if (tagged !== undefined && tagged.vamSessionId !== agent.sessionId) {
+        await tagVamSession(tagVamSessionArgv(pane, agent.sessionId));
+      }
+    }
     // Per row, because a row is a process: the age below and the waiting
     // state come out of the same file and are read together. Looked up
     // rather than re-read -- `readPublishedPanesAndProcessFacts` above
@@ -527,7 +603,7 @@ export async function loadClaudeCodeProjects(
         grouped.set(cwd, bucket);
         byProjectId.set(projectId, bucket);
       }
-      bucket.sessions.push(paneRow(empty));
+      bucket.sessions.push(await rowForEmptyPane(empty, index, reads, nowMs));
     }
   }
 
@@ -735,6 +811,11 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
       // (`listing-unreadable`) reaches the sidebar's reason banner from here,
       // not only from Codex.
       vamListingGap,
+      // THE ONE WRITE THIS READ PATH MAKES, and why it is safe to: see the
+      // per-agent loop's own comment above. Re-uses the same runner
+      // `listVamSessions` just called through, rather than a second one, for
+      // no reason beyond there being no reason to mint two.
+      createTmuxRunner(),
     );
   },
   /**

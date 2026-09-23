@@ -91,6 +91,7 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
       waiting: 0,
       idle: 0,
       unstarted: 0,
+      terminal: 0,
       done: 0,
       failed: 0,
     },

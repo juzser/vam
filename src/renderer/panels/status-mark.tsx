@@ -35,7 +35,7 @@
  * its box.
  */
 
-import { Bell, Check, Circle, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { Bell, Check, Circle, LoaderCircle, SquareTerminal, TriangleAlert } from 'lucide-react';
 import { type ReactElement, useRef } from 'react';
 import type { SessionStatus } from '../domain/model.js';
 
@@ -159,6 +159,20 @@ const GLYPH: Readonly<Record<SessionStatus, (phase: number, size: number) => Rea
    */
   unstarted: () => (
     <span className="h-[7px] w-[7px] flex-none rounded-full border border-idle bg-transparent" />
+  ),
+  /**
+   * A pane vam started, whose agent has exited but whose conversation vam
+   * still knows -- `docs/design/vam-terminal-only.md`. `unstarted`'s hollow
+   * dot, at the same size and the same neutral ink, says "a pane and nothing
+   * else"; this glyph is what tells the operator there IS something else --
+   * a conversation, paused at the shell -- without borrowing `idle`'s filled
+   * dot, which means an AGENT resting between turns and would be a lie here.
+   * The literal terminal glyph reads as "this pane's shell is what is live
+   * right now" on sight, which a shape variation on the same small dot could
+   * not have said as plainly.
+   */
+  terminal: (_phase, size) => (
+    <SquareTerminal className="text-idle" size={size} strokeWidth={1.8} />
   ),
   /** A tick, not a circled one: the circled check draws a second ring into a
    *  column that already has one turning in it. A hair more stroke than its
