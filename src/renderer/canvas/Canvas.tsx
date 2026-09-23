@@ -2896,22 +2896,6 @@ function CanvasInner({
     // `unknown` and survives both, because hiding what you did not check is
     // how a filter loses work rather than narrowing it.
     const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
-    // TMUX ITSELF COULD NOT BE READ THIS LOAD: neither rule below can be
-    // trusted, because both proxy a fact only vam's own tmux spine can
-    // answer -- whether a row is currently vam's. `docs/design/vam-owns-the-
-    // session.md`'s own trap: "an unreadable tmux listing must not empty the
-    // sidebar. The fallback is to show everything, with the reason on
-    // screen." Standing BOTH rules down here, rather than one, is what makes
-    // that literally true rather than true for one axis and silently false
-    // for the other.
-    if (vamListingGap !== null) return byOrigin;
-    // AND THE SAME DISCIPLINE FOR ENDINGS AND FOR OWNERSHIP. `isEnded` is a
-    // fact a source has positively reported: the Codex source reads it off a
-    // writer lock it probed, and says `idle` rather than `done` wherever it
-    // could not look. `isForeign` is the same discipline for `vamControlled`
-    // — see `session-filter.ts` for why the two are separate rules rather
-    // than one boolean standing for both claims.
-    //
     // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
     // to `CommandPalette` below, so the palette's groups are drawn from the
     // list this line has already narrowed — which is why ended sessions are a
