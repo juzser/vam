@@ -215,8 +215,25 @@ export function combineSources(sources: readonly MainSource[]): MainSource {
     return projects;
   };
 
+  /**
+   * `capability` IS WHAT MAKES THIS FALLBACK HONEST. The owning source's OWN
+   * descriptor already carries the reason it cannot do this -- `declines`,
+   * the same field `port.ts` requires beside every `false` capability -- and
+   * that reason is what a row like Codex's `closeSession` states in its own
+   * words: "this is the operator's own Codex thread, started outside vam;
+   * vam can queue a message for it and nothing else". Before this, the
+   * fallback invented a SECOND sentence of its own ("Codex claims this but
+   * carries no member for it") that is not merely unhelpful, it is FALSE:
+   * Codex's own `closeSession` capability is `false` and it never claimed
+   * anything -- the combined `true` a Claude Code peer put there is what let
+   * the call reach this source at all. `??` falls back to the generic
+   * sentence only for an owner that recorded no decline of its own, which
+   * `port.ts`'s rule says should not exist for a `false` capability but this
+   * does not trust blindly.
+   */
   const routeWrite = async (
     sessionId: string,
+    capability: keyof SourceCapabilities,
     call: (source: MainSource) => Promise<SourceError | null> | undefined,
   ): Promise<SourceError | null> => {
     const owner = ownerOfSession.get(sessionId);
@@ -225,7 +242,8 @@ export function combineSources(sources: readonly MainSource[]): MainSource {
     if (performed === undefined) {
       return refused(
         'not-implemented',
-        `${owner.descriptor.label} claims this but carries no member for it`,
+        owner.descriptor.declines[capability] ??
+          `${owner.descriptor.label} claims this but carries no member for it`,
       );
     }
     return await performed;
@@ -235,13 +253,14 @@ export function combineSources(sources: readonly MainSource[]): MainSource {
     descriptor,
     load,
     recordPrompt: (sessionId, prompt) =>
-      routeWrite(sessionId, (s) => s.recordPrompt?.(sessionId, prompt)),
+      routeWrite(sessionId, 'recordPrompt', (s) => s.recordPrompt?.(sessionId, prompt)),
     // Routed by the ROW, like every other per-session write: the source that
     // produced it is the only one that knows where that conversation ran and
     // how to address it again.
-    resumeSession: (sessionId) => routeWrite(sessionId, (s) => s.resumeSession?.(sessionId)),
+    resumeSession: (sessionId) =>
+      routeWrite(sessionId, 'resumeSession', (s) => s.resumeSession?.(sessionId)),
     closeSession: (sessionId, force) =>
-      routeWrite(sessionId, (s) => s.closeSession?.(sessionId, force)),
+      routeWrite(sessionId, 'closeSession', (s) => s.closeSession?.(sessionId, force)),
     createSession: async (projectId, title, provider) => {
       const owner = ownerOfProject.get(projectId);
       if (owner === undefined) {
