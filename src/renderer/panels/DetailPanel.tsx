@@ -6456,6 +6456,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * request object is the only thing that should re-run this, so it is the
    * only dependency.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `pickTabRef` is the stable ref returned by `useDetailPanelTab`, not a reactive value -- listing it (or `onTabChange`) here is exactly the re-run-on-every-render bug the comment above describes.
   useEffect(() => {
     if (tabRequest !== null) {
       pickTabRef.current(tabRequest.tab);
@@ -6473,6 +6474,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    */
   const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
   const refSessionId = entry?.session.id ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `pickTabRef.current` is called inside `openFileRef` below; the ref itself (from `useDetailPanelTab`) is stable and not a reactive dependency of this memo.
   const outActions = useMemo(
     () => ({
       /**
