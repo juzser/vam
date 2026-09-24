@@ -182,6 +182,20 @@ const openFiles = async () => {
   });
 };
 
+/**
+ * PRESSES THE SAVE CHORD, on whichever element actually holds `onKeyDown` —
+ * the editor while raw, `[data-files-preview-view]` while previewing. There
+ * is no Save button any more (`FilesTab.tsx`'s own dirty-indicator comment):
+ * the operator asked for an indicator instead, so every test that used to
+ * click one now presses `Mod-s` exactly as the operator's fingers would.
+ */
+const saveViaChord = async (target: Element) => {
+  await act(async () => {
+    fireEvent.keyDown(target, { key: 's', metaKey: true });
+    await Promise.resolve();
+  });
+};
+
 describe('the Files tab is withdrawn until a caller confirms the desktop bridge', () => {
   it('draws no Files icon when the files prop is absent', async () => {
     await draw({ files: undefined });
@@ -514,10 +528,7 @@ describe('changed-on-disk — the refusal that must not look like a failure', ()
     await act(async () => {
       fireEvent.change(editor, { target: { value: 'A=2 — my own edit' } });
     });
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
 
     expect(q('[data-files-conflict]')?.textContent).toContain('changed on disk');
     // THE OPERATOR'S TEXT IS STILL THERE. This is the assertion that matters
@@ -566,11 +577,11 @@ describe('dirty state', () => {
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     expect(q('[data-files-dirty]')).not.toBeNull();
+    // A NAME A SCREEN READER CAN SAY, not just a hue: the dot replaced a
+    // labelled Save button, so it owes the operator its own accessible name.
+    expect(q('[data-files-dirty]')?.getAttribute('aria-label')).toBe('unsaved changes');
 
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
     expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2', SIGNATURE());
     expect(q('[data-files-dirty]')).toBeNull();
   });
@@ -1471,10 +1482,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     expect(dispatchBeforeUnload()).toBe(true);
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
     expect(dispatchBeforeUnload()).toBe(false);
   });
 });
@@ -1567,10 +1575,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     expect(lastReport(reportUnsaved)).toEqual({ count: 1, names: ['.env'] });
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
     expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
   });
 
@@ -1908,26 +1913,39 @@ describe('the highlight overlay', () => {
  * THE TOOLBAR'S OWN WORDS.
  *
  * The operator asked for "a tooltip for the Save button and the formatter
- * button". Save had none at all; Format had a `title`, which is the shape
- * `panels/Note.tsx` was written to replace and says why in its own header: a
- * `title` opens on HOVER and on nothing else, so on a keyboard-first tool the
- * explanation was unreadable to the operator it was written for.
+ * button" first, and later for the Save button itself to go, replaced by an
+ * indicator: "no Save button is needed there, just an indicator showing the
+ * file is unsaved". Format had a `title`, which is the shape `panels/Note.tsx`
+ * was written to replace and says why in its own header: a `title` opens on
+ * HOVER and on nothing else, so on a keyboard-first tool the explanation was
+ * unreadable to the operator it was written for. The dirty dot inherits that
+ * same obligation now that it is what a hand reaching for Save's old tooltip
+ * finds instead.
  *
- * So both are `Note`s now, and these hold four things a later edit could
- * quietly undo: that the note exists, that it names the chord (neither key is
- * in the rebindable table -- they are `EDITOR_KEYS`, hardcoded, which is what
- * makes writing them out honest here rather than a lie waiting to happen),
- * that no `title` came back, and that wrapping added no element to a flex row.
+ * So both are `Note`s, and these hold the things a later edit could quietly
+ * undo: that no Save button is drawn at all, that each note exists and names
+ * its chord (neither key is in the rebindable table -- `Mod-s` is `EDITOR_
+ * KEYS`, hardcoded, and `Mod-Shift-f`/`Mod-z` the same, which is what makes
+ * writing them out honest here rather than a lie waiting to happen), that no
+ * `title` came back, and that wrapping added no element to a flex row.
  * ====================================================================== */
 
-describe('the tooltips on the two buttons the operator named', () => {
+describe('the toolbar — no Save button, and the tooltips on what remains', () => {
   const noteOn = (selector: string): string | null =>
     q(selector)?.getAttribute('data-note') ?? null;
 
-  it('gives Save a note a keyboard can read, naming the chord that does the same thing', async () => {
+  it('draws no Save button — saving is Mod-s (or Mod-s from the preview) and the dot alone', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-save]')).toBeNull();
+  });
+
+  it('gives the dirty indicator a note a keyboard can read, naming the chord that saves', async () => {
     await onBothPlatformsAsync(async (mac) => {
-      await openFile('/work/atlas/.env', 'A=1\n');
-      const text = noteOn('[data-files-save]');
+      const editor = await openFile('/work/atlas/.env', 'A=1\n');
+      await act(async () => {
+        fireEvent.change(editor, { target: { value: 'A=2' } });
+      });
+      const text = noteOn('[data-files-dirty]');
       expect(text).not.toBeNull();
       expect(text).toContain(chordSymbols('Mod-s', mac));
       expect(text).not.toContain('Mod-s');
@@ -1972,22 +1990,28 @@ describe('the tooltips on the two buttons the operator named', () => {
    * snapshot -- it works perfectly with a mouse -- so the only thing keeping
    * it from coming back is a check that looks for it.
    */
-  it('uses no bare title on either — the shape that was unreadable from the keyboard', async () => {
-    await openFile('/work/atlas/.env', 'A=1\n');
-    expect(q('[data-files-save]')?.getAttribute('title')).toBeNull();
+  it('uses no bare title on Format or the dirty indicator — the shape that was unreadable from the keyboard', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\n');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=2' } });
+    });
+    expect(q('[data-files-dirty]')?.getAttribute('title')).toBeNull();
     expect(q('[data-files-format]')?.getAttribute('title')).toBeNull();
   });
 
   /**
    * `Tooltip.Trigger asChild` ADDS NO ELEMENT -- `ShortcutTip`'s own header
    * states that as an invariant it depends on and does not enforce, and the
-   * header row these buttons sit in is a flex row whose spacing a wrapper
+   * header row these controls sit in is a flex row whose spacing a wrapper
    * would change. So each must still be a DIRECT child of that row.
    */
-  it('wraps neither button in an extra element — the header row is a flex row', async () => {
-    await openFile('/work/atlas/.env', 'A=1\n');
+  it('wraps neither Format nor the dirty indicator in an extra element — the header row is a flex row', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\n');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=2' } });
+    });
     const children = [...(q('[data-files-header]')?.children ?? [])];
-    expect(children.some((el) => el.hasAttribute('data-files-save'))).toBe(true);
+    expect(children.some((el) => el.hasAttribute('data-files-dirty'))).toBe(true);
     expect(children.some((el) => el.hasAttribute('data-files-format'))).toBe(true);
   });
 });
@@ -2196,7 +2220,7 @@ describe('the markdown preview', () => {
     expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('# edited, never saved\n');
   });
 
-  it('keeps Save reachable from the preview, and a save from there really lands', async () => {
+  it('keeps Save (Mod-s) reachable from the preview, and a save from there really lands', async () => {
     const write = vi.fn(async () => ({ signature: SIGNATURE({ sha256: 'next' }) }));
     withBridge({
       list: async () => ({
@@ -2219,11 +2243,14 @@ describe('the markdown preview', () => {
       await Promise.resolve();
     });
     await pressPreview();
-    expect(q('[data-files-save]')).not.toBeNull();
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    // No button to reach for any more — the textarea `Mod-s` used to answer
+    // is genuinely unmounted here (`onPreviewKeyDown`'s own comment on why
+    // that made a button the ONLY way to save from this view before it
+    // answered the chord itself). `[data-files-preview-view]` is the element
+    // that now carries it.
+    const previewView = q<HTMLElement>('[data-files-preview-view]');
+    expect(previewView).not.toBeNull();
+    await saveViaChord(previewView as HTMLElement);
     expect(write).toHaveBeenCalledWith('/work/atlas/README.md', '# b\n', SIGNATURE());
     expect(q('[data-files-dirty]')).toBeNull();
   });

@@ -143,7 +143,7 @@
  * without either side enumerating the other's keys.
  */
 
-import { AlignLeft, Code, Eye, FilePlus, Loader2, RefreshCw, Save, Search } from 'lucide-react';
+import { AlignLeft, Code, Eye, FilePlus, RefreshCw, Search } from 'lucide-react';
 import {
   type KeyboardEvent,
   lazy,
@@ -349,8 +349,9 @@ export type FilesTabProps = {
    * is focused and this is not a phone, exactly as it does over the
    * transcript column (`TurnBlock`'s own `reserveCorner`) -- and it takes
    * real clicks, not just paint. Measured directly: without this, the Save
-   * button sat under the Agents icon and Playwright's own click retried for
-   * thirty seconds before timing out on the element actually receiving it.
+   * button (since removed -- see the dirty indicator's own comment) sat
+   * under the Agents icon and Playwright's own click retried for thirty
+   * seconds before timing out on the element actually receiving it.
    */
   readonly reserveCorner: number;
   /**
@@ -366,7 +367,9 @@ export type FilesTabProps = {
    * `e2e/files-tab-keyboard-shots.mjs`, which asserts the result as a
    * rectangle rather than as a click -- the Save button was measurably 18px
    * under the pill while every click-based check passed, because Playwright
-   * clicks an element's CENTRE and the centre was clear.
+   * clicks an element's CENTRE and the centre was clear. Save is gone now
+   * (the operator's own instruction: an indicator, not a button); Format is
+   * this row's trailing control and the guard now measures it instead.
    */
   readonly reserveCornerHeight: number;
   /**
@@ -1557,9 +1560,8 @@ export function FilesTab({
   );
 
   /**
-   * THE PREVIEW'S OWN KEYBOARD, and it is a SHORT list on purpose.
-   *
-   * It answers the three keys that MOVE the keyboard and nothing else. It is
+   * THE PREVIEW'S OWN KEYBOARD — four keys that DO something plus the one
+   * that MOVES the keyboard's Select-mode cousins, and nothing else. It is
    * not an insert scope -- it is a `<div>`, there is nothing here to type into
    * -- so every other key falls through unprevented to the app-wide grammar,
    * exactly as it does from a tree row. That includes `j`/`k`: with the
@@ -1568,6 +1570,20 @@ export function FilesTab({
    *
    * Escape and `Mod-[` are here because a read-only pane that swallowed the
    * keyboard would be the one place in this tab an operator could get stuck.
+   *
+   * `Mod-s` IS HERE NOW, AND HAS TO BE. It used to reach `saveFile` only
+   * through `onEditorKeyDown`, on the textarea -- fine while the Save button
+   * covered the case this handler could not, because the textarea is
+   * genuinely UNMOUNTED while previewing (this file's own comment on the
+   * `showingPreview` branch below explains why, for `I`'s sake, and the same
+   * fact applies here). Removing that button in favour of the dirty
+   * indicator alone would have made a file dirtied, then previewed, UNSAVABLE
+   * from the keyboard -- `Mod-Shift-m` toggles back to raw and the chord
+   * still works there, but an operator reading the rendered document with no
+   * reason to leave it deserves the same key everywhere else in this tab
+   * answers to. `test/panels/DetailPanel.files-tab.test.tsx`'s own "keeps
+   * Save reachable from the preview" now presses this rather than a button
+   * that is no longer drawn.
    */
   const onPreviewKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
@@ -1593,9 +1609,14 @@ export function FilesTab({
       if (key === 'Mod-Shift-e') {
         event.preventDefault();
         setNote(focusCursorRow() ? null : 'nothing to move to — no file here matches the filter');
+        return;
+      }
+      if (key === 'Mod-s') {
+        event.preventDefault();
+        if (activePath !== null) void saveFile(activePath);
       }
     },
-    [focusCursorRow, focusFilter, togglePreview],
+    [activePath, focusCursorRow, focusFilter, saveFile, togglePreview],
   );
 
   if (sessionId === null) {
@@ -1628,18 +1649,32 @@ export function FilesTab({
       {/* THE CORNER, RESERVED BY MEASUREMENT, IN BOTH DIRECTIONS --
           `DetailPanel.tsx`'s own `cornerReserve`/`cornerReserveHeight`, which
           derive the pill's real footprint from the pill rather than restating
-          it as a constant. `paddingRight` keeps the Save button out from
-          under it: measured at a 1100px window, the pill is 118px once this
-          tab adds a fifth view icon, and the `6rem` this row first used left
-          the button's right 18px under it -- while `elementFromPoint` at the
-          button's CENTRE still returned the button, so a click-based check
-          passed the whole way through. `minHeight` is what keeps the TREE out
+          it as a constant. `paddingRight` keeps this row's trailing control
+          out from under it: measured at a 1100px window, the pill is 118px
+          once this tab adds a fifth view icon, and the `6rem` this row first
+          used left the (then-trailing) Save button's right 18px under it --
+          while `elementFromPoint` at the button's CENTRE still returned the
+          button, so a click-based check passed the whole way through. Save
+          is gone now -- an indicator replaced it, on the operator's own
+          instruction -- and Format trails the row in its place, protected by
+          the identical reservation. `minHeight` is what keeps the TREE out
           from under it: the tree is at the right-hand edge by definition, so
           no horizontal padding can move it, and its clearance is this row's
           height. Both are asserted as RECTANGLES, not clicks, in
           `e2e/files-tab-keyboard-shots.mjs`. */}
       <div
         data-files-header
+        // `SAVE-STATE`, STILL ON THE DOM, JUST NO LONGER ON A BUTTON. The
+        // `idle`/`saving`/`conflict`/`error` machine (`saveFile`'s own
+        // comment) did not go away when the Save button did — `conflict`
+        // still draws `data-files-conflict` and `error` still draws
+        // `data-files-refusal` below, unchanged. Only `saving` lost its one
+        // visible trace (the spinner sat inside the button being removed),
+        // so this is where a caller — a guard, a test — now reads the same
+        // fact the button used to carry as `data-files-save-state`.
+        {...(activeBuffer?.kind === 'editable'
+          ? { 'data-files-save-state': activeBuffer.save.kind }
+          : {})}
         // `@container`: the segmented control's two WORDS have their own
         // width budget, measured against THIS ROW'S OWN box rather than the
         // viewport -- see the label spans below for why a viewport
@@ -1664,21 +1699,45 @@ export function FilesTab({
               {label}
               {activeBuffer?.kind === 'editable' && activeBuffer.isNew && ' (new)'}
             </span>
+            {/* THE DOT REPLACES A BUTTON — the operator's own instruction:
+                "no Save button is needed there, just an indicator showing
+                the file is unsaved". Saving itself never moved: `Mod-s`
+                still writes the buffer (`onEditorKeyDown`, and now
+                `onPreviewKeyDown` too — see that handler's own comment for
+                why a button was the ONLY way to save while previewing and
+                had to be replaced by a chord rather than simply deleted).
+                `role="img"` + `aria-label` is the shape `DetailPanel.tsx`
+                already uses for a small status glyph with a name a screen
+                reader can say without a hover (`aria-label="failed"` beside
+                a decision's own status dot) — VS Code's own tab dot is the
+                same idea, unlabelled; this one is not, because vam's own
+                `Note` exists precisely for controls a mouse-only `title`
+                would leave keyboard users guessing at. `tabIndex={0}` is
+                what lets that tooltip OPEN on focus rather than only on
+                hover — the dot is not inside another interactive element
+                here (unlike its twin in the tree row below, which is
+                already inside a focusable row and stays `aria-hidden`
+                there to avoid a second stop nested in one). */}
             {dirty && (
-              <span
-                data-files-dirty
-                aria-hidden="true"
-                className="flex-none rounded-full bg-ink-dim"
-                style={{ width: 6, height: 6 }}
-              />
+              <Note text={`Unsaved changes — press ${chordSymbols('Mod-s')} to save.`}>
+                <span
+                  data-files-dirty
+                  // biome-ignore lint/a11y/noNoninteractiveTabindex: a Note's tooltip (see MarkdownPreview's identical exception) only opens on hover without a focus stop, and this dot is not nested in another focusable element.
+                  tabIndex={0}
+                  role="img"
+                  aria-label="unsaved changes"
+                  className="flex-none rounded-full bg-ink-dim outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                  style={{ width: 6, height: 6 }}
+                />
+              </Note>
             )}
             {/* FORMAT, AND IT IS NEVER DISABLED. Every file type gets this
                 control, including the ones vam will not format: pressing it
                 on a `.ts` puts the reason on screen, by name, which is a
                 better answer than a greyed-out button that says nothing about
                 why. It is an ICON rather than a word because the row it is in
-                also holds the path, the dirty dot, Save and the view pill's
-                own reservation, and at the 320px floor the path has to keep
+                also holds the path, the dirty dot and the view pill's own
+                reservation, and at the 320px floor the path has to keep
                 something to truncate. */}
             {/* RENDERED OR RAW, NEXT TO THE FORMATTER — the operator's own
                 placement: one toggle beside the formatter at the top. It
@@ -1725,15 +1784,23 @@ export function FilesTab({
                 the floating view-icon pill (this file's own header, "THE
                 CORNER, RESERVED BY MEASUREMENT") -- and at vam's narrowest
                 legal pane the row's own usable width in front of that
-                padding is ~149px, measured in Chromium. Two LABELLED
-                buttons plus Format plus Save need roughly 240px there, which
-                no amount of trimming buys back; even two ICON-ONLY buttons
-                at their normal padding measured 143px and still clipped
-                Save by a few pixels, because a second bordered, padded
-                button is not free the way a single icon-only toggle was.
-                Both folds are therefore container-scoped together --
-                `@min-[380px]:inline` on the words, `@min-[380px]:px-1.5
-                @min-[380px]:py-1` widening the padding back out once there
+                padding is ~149px, measured in Chromium.
+
+                RECOMPUTED IN `e2e/files-markdown-shots.mjs` NOW THAT SAVE IS
+                GONE (its own DEBUG run, at a 320px pane and at 1100px):
+                Format's box is a fixed 24px everywhere (`h-6 w-6`, this
+                file's own comment on that button). The segmented control
+                measured 132px wide with both words showing, so two LABELLED
+                buttons plus Format plus the row's own gap comes to ~158px --
+                still over the ~149px budget by enough that the fold stays
+                load-bearing even with Save gone, just no longer by the wide
+                margin a 240px-vs-149px reading suggested. Icon-only, the
+                segmented control measured 37px, so the folded total is ~63px
+                -- comfortable room to spare, which is why the fold alone
+                (never a further shrink of Format) is enough. Both folds are
+                therefore container-scoped together --
+                `@min-[380px]:inline` on the words, `@min-[380px]:px-1.5`
+                widening the horizontal padding back out once there
                 is room to spend -- and `sm:`/`md:` are VIEWPORT breakpoints
                 that cannot see a pane narrowed by a SPLIT rather than by the
                 window itself (`SettingsOverlay.tsx`'s `SectionStrip` argues
@@ -1751,7 +1818,14 @@ export function FilesTab({
                 <div
                   data-files-preview
                   data-files-preview-state={showingPreview ? 'preview' : 'raw'}
-                  className="flex flex-none items-center gap-px rounded-[7px] border border-line-loud bg-well p-px @min-[380px]:gap-0.5 @min-[380px]:p-[2px]"
+                  // `h-6`, THE SAME FIXED BOX FORMAT NOW DRAWS, rather than a
+                  // height left to fall out of the buttons' own padding —
+                  // see Format's own comment above for the operator finding
+                  // this fixes. `items-stretch` (the flex default, stated
+                  // rather than assumed) is what lets each segment fill that
+                  // box via `h-full` below instead of a SECOND, independent
+                  // padding-derived height that could drift from the well's.
+                  className="flex h-6 flex-none items-stretch gap-px rounded-[7px] border border-line-loud bg-well p-px @min-[380px]:gap-0.5 @min-[380px]:p-[2px]"
                 >
                   <button
                     type="button"
@@ -1759,7 +1833,7 @@ export function FilesTab({
                     aria-pressed={showingPreview}
                     onClick={() => setPreviewMode(true)}
                     aria-label="preview this markdown"
-                    className={`vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 py-0.5 text-control @min-[380px]:px-1.5 @min-[380px]:py-1 ${
+                    className={`vam-tap flex h-full flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 text-control @min-[380px]:px-1.5 ${
                       showingPreview
                         ? 'bg-segment-on font-medium text-ink'
                         : 'text-ink-dim hover:text-ink'
@@ -1774,7 +1848,7 @@ export function FilesTab({
                     aria-pressed={!showingPreview}
                     onClick={() => setPreviewMode(false)}
                     aria-label="show the raw markdown"
-                    className={`vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 py-0.5 text-control @min-[380px]:px-1.5 @min-[380px]:py-1 ${
+                    className={`vam-tap flex h-full flex-none cursor-pointer items-center gap-1 rounded-[5px] px-0.5 text-control @min-[380px]:px-1.5 ${
                       !showingPreview
                         ? 'bg-segment-on font-medium text-ink'
                         : 'text-ink-dim hover:text-ink'
@@ -1787,7 +1861,9 @@ export function FilesTab({
               </Note>
             )}
             {/* AND ITS TOOLTIP IS A `Note`, NOT A `title`. The operator asked
-                for tooltips on this button and on Save; this one HAD a
+                for tooltips on this button and on Save; Save is a button no
+                longer (see the dirty indicator above, and its own comment
+                for where that explanation lives now). This one HAD a
                 `title`, which is precisely the shape `panels/Note.tsx` exists
                 to replace -- a `title` opens on hover and on nothing else, so
                 on a keyboard-first tool its explanation was unreadable to its
@@ -1797,7 +1873,18 @@ export function FilesTab({
                 The scope is quoted from `FORMAT_OFFER` rather than retyped.
                 A button that is never disabled owes the operator the reason it
                 might refuse, and a hand-written list beside a button is the
-                copy that survives the formatter learning a file type. */}
+                copy that survives the formatter learning a file type.
+
+                `h-6 w-6`, FIXED, RATHER THAN PADDING AROUND THE ICON — the
+                same box `DetailPanel.tsx`'s own view-icon pill draws each of
+                its five buttons in (`vam-tap relative flex h-6 w-6 ...`),
+                which is what "consistent with vam's other toolbar icon
+                buttons" means concretely. It used to be `px-1.5 py-1` with no
+                fixed height, which is what let it and the preview toggle
+                beside it drift a few pixels apart — the operator's own
+                complaint, "Save, prettier and preview-mode buttons are not
+                the same size". `e2e/files-markdown-shots.mjs` now asserts the
+                two as equal-height RECTANGLES, not as matching class names. */}
             {activeBuffer?.kind === 'editable' && (
               <Note
                 text={`Tidy this file's whitespace (${chordSymbols('Mod-Shift-f')}). ${FORMAT_OFFER} — anything else is refused by name, and ${chordSymbols('Mod-z')} puts back whatever it changed.`}
@@ -1807,35 +1894,9 @@ export function FilesTab({
                   data-files-format
                   onClick={formatActive}
                   aria-label="format this file"
-                  className="vam-tap flex flex-none cursor-pointer items-center rounded-[6px] border border-line px-1.5 py-1 text-ink-dim hover:border-line-strong hover:text-ink"
+                  className="vam-tap flex h-6 w-6 flex-none cursor-pointer items-center justify-center rounded-[6px] border border-line text-ink-dim hover:border-line-strong hover:text-ink"
                 >
                   <AlignLeft size={12} strokeWidth={1.8} />
-                </button>
-              </Note>
-            )}
-            {/* SAVE HAD NO TOOLTIP AT ALL, and the one it has now names the
-                one behaviour an operator cannot guess from a disk icon: this
-                write is REFUSED rather than forced when the file moved under
-                it, and their own text survives that refusal. */}
-            {activeBuffer?.kind === 'editable' && (
-              <Note
-                text={`Write this file to disk (${chordSymbols('Mod-s')}). If it changed on disk since you opened it the write is refused, not forced — your edits stay in the box either way.`}
-              >
-                <button
-                  type="button"
-                  data-files-save
-                  data-files-save-state={activeBuffer.save.kind}
-                  onClick={() => void saveFile(activePath)}
-                  disabled={activeBuffer.save.kind === 'saving'}
-                  aria-label="save this file"
-                  className="vam-tap flex flex-none cursor-pointer items-center gap-1 rounded-[6px] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink disabled:cursor-default disabled:opacity-60"
-                >
-                  {activeBuffer.save.kind === 'saving' ? (
-                    <Loader2 size={12} strokeWidth={1.8} className="animate-spin" />
-                  ) : (
-                    <Save size={12} strokeWidth={1.8} />
-                  )}
-                  Save
                 </button>
               </Note>
             )}
@@ -2465,7 +2526,7 @@ function Tree({
           /* THE KEY IS IN THE BOX, because the box was already there and
              nobody could find it: the filter has shipped since this tab did
              and its placeholder said only `filter…`. Parenthesised the way
-             this file's own Format and Save tooltips name theirs, rather than
+             this file's own Format and dirty-indicator tooltips name theirs, rather than
              a chip beside the input — at `TREE_WIDTH`'s 7.5rem floor a chip
              would take a third of the column off a box that has ~62px to begin
              with, and a placeholder clips where a flex item squeezes. `Mod-p`
@@ -2611,9 +2672,18 @@ function Tree({
                   {row.name}
                 </span>
                 {isDirty(buffers[row.path]) && (
+                  // `role="img"` + `aria-label`, NOT `aria-hidden` — this
+                  // file's header comment on the twin dot in the toolbar
+                  // explains the shape; the difference here is that this dot
+                  // is ALREADY inside a focusable row, so it takes no
+                  // `tabIndex` and no `Note` of its own, and its label folds
+                  // straight into the row's own accessible name instead
+                  // (the row carries no `aria-label` of its own to override
+                  // that computation).
                   <span
                     data-files-dirty
-                    aria-hidden="true"
+                    role="img"
+                    aria-label="unsaved changes"
                     className="flex-none rounded-full bg-ink-dim"
                     style={{ width: 5, height: 5 }}
                   />
