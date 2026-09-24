@@ -174,7 +174,6 @@ import {
   setViewOptions,
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
-import type { SectionId } from '../settings/sections.js';
 import { capabilitiesFor } from '../sources/members.js';
 import {
   canWriteTo,
@@ -184,6 +183,7 @@ import {
 } from '../sources/port.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
+import { useCanvasOverlays } from './canvas-overlays.js';
 import { useCanvasPrefs } from './canvas-prefs.js';
 import { useCanvasTheme } from './canvas-theme.js';
 import {
@@ -2160,29 +2160,26 @@ function CanvasInner({
     },
     [setFocusedPaneId],
   );
-  const [jumping, setJumping] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [keySheetOpen, setKeySheetOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  /** Which section Settings opens on next — `appearance` unless the Remote
-   *  icon or its key just asked for `remote` directly (see `openSettings`). */
-  const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
-  const [errorLogOpen, setErrorLogOpen] = useState(false);
-  /**
-   * The row a close refused without being able to prove it is not vam's own
-   * -- `SourceError.forcible` -- and offered the operator a confirmed kill
-   * for. `null` means no such prompt is on screen. See `ConfirmForceClose`.
-   */
-  const [confirmForceClose, setConfirmForceClose] = useState<{
-    sessionId: string;
-    title: string;
-    /** The refusal that opened this prompt, carried along so declining it
-     *  (`onCancel`) can dismiss the row with the SAME reason rather than a
-     *  second, disconnected one -- see `closeSession`'s own dismissal path. */
-    reason: string;
-  } | null>(null);
+  const {
+    jumping,
+    setJumping,
+    status,
+    setStatus,
+    query,
+    setQuery,
+    paletteOpen,
+    setPaletteOpen,
+    keySheetOpen,
+    setKeySheetOpen,
+    settingsOpen,
+    setSettingsOpen,
+    settingsSection,
+    setSettingsSection,
+    errorLogOpen,
+    setErrorLogOpen,
+    confirmForceClose,
+    setConfirmForceClose,
+  } = useCanvasOverlays();
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
     paletteOpen || keySheetOpen || settingsOpen || errorLogOpen || confirmForceClose !== null;
