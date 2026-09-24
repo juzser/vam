@@ -1591,5 +1591,66 @@ describe('loadClaudeCodeProjects', () => {
       const failing = project?.sessions.find((s) => s.id === 'sess-2#1');
       expect(failing?.epic).toBeNull();
     });
+
+    /**
+     * THE EMPTY BATCH. `Promise.all` over zero reads must resolve immediately
+     * to an empty map rather than hang or throw -- the concurrent form has no
+     * loop body to skip the way the old `for` loop did trivially.
+     */
+    it('resolves with no projects when there are no live sessions to read', async () => {
+      const readTranscriptOf = async () => {
+        throw new Error('must never be called with zero agents');
+      };
+      const projects = await loadClaudeCodeProjects(
+        root,
+        [],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        readTranscriptOf,
+      );
+      expect(projects).toEqual([]);
+    });
+
+    /**
+     * EVERY READ REJECTS. The per-item try/catch has to be truly per item --
+     * a batch where every promise in `Promise.all` rejects must still resolve
+     * the whole call (never reject `loadClaudeCodeProjects` itself), with
+     * every session carrying its own `NO_TRANSCRIPT` sentinel rather than one
+     * rejection aborting the others' otherwise-successful bookkeeping.
+     */
+    it('still returns every session, each with the sentinel, when all reads reject', async () => {
+      const sessionIds = ['sess-1', 'sess-2', 'sess-3'];
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        throw new Error(`boom-${sessionId}`);
+      };
+
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        readTranscriptOf,
+      );
+
+      expect(project?.sessions).toHaveLength(3);
+      for (const session of project?.sessions ?? []) {
+        expect(session.epic).toBeNull();
+      }
+    });
   });
 });
