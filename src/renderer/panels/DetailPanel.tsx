@@ -3911,6 +3911,7 @@ function QuestionCard({
   onChat,
   onAnswer,
   onSuggest,
+  phone = false,
 }: {
   /**
    * THE WHOLE SET asked by one `AskUserQuestion` call, in asking order.
@@ -3944,6 +3945,17 @@ function QuestionCard({
    * branch.
    */
   readonly onSuggest?: (label: string | null) => void;
+  /**
+   * Draws the phone-inline skin instead of the desktop's fixed-block card
+   * (docs/design/phone-core-loop.md §3.3): the same internals (state,
+   * handlers, `AnswerRequest` construction, ARIA structure) -- ONLY the root
+   * element's own classes change, from a bordered `bg-card` box to a
+   * left-edge accent bar that inherits the transcript's own turn spacing,
+   * because the card is now a message IN that transcript rather than a
+   * panel pulled out of it. `false` (desktop, and every existing caller) is
+   * byte-identical to before this prop existed.
+   */
+  readonly phone?: boolean;
 }) {
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
@@ -4487,10 +4499,25 @@ function QuestionCard({
          row's own marker) rather than on any of THOSE elements: a container
          query never applies to the element that declares the container
          (`AgentsTab`'s `data-pr-row` carries the same comment). */
-      className={[
-        '@container flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
-        waiting ? 'border-waiting' : 'border-line-strong',
-      ].join(' ')}
+      className={
+        phone
+          ? /* PHONE: no bordered card, no `bg-card` box -- the card IS a
+               message in the transcript now (docs/design/phone-core-loop.md
+               §3.3), so it takes the transcript's own turn rhythm (`gap-1.5`,
+               the same gap `TurnBlock`s stack with) instead of a panel pulled
+               out of it. The amber "needs you" accent moves from an
+               all-around border to a LEFT-EDGE bar -- `border-l-2`, the same
+               `border-waiting` token the desktop card already wears, only
+               worn on one edge instead of four; nothing new, only moved. */
+            [
+              '@container flex flex-col gap-1.5 border-l-2 py-1 pl-2.5',
+              waiting ? 'border-waiting' : 'border-line',
+            ].join(' ')
+          : [
+              '@container flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
+              waiting ? 'border-waiting' : 'border-line-strong',
+            ].join(' ')
+      }
     >
       {/* The strip, and ONLY when there is more than one question: a step
           counter over a single question is furniture that says nothing. It
@@ -8198,7 +8225,16 @@ export function DetailPanel(props: DetailPanelProps) {
           // OTHER sessions exist elsewhere; this screen is what replaces it
           // the one time there is truly nothing in the whole app to point at.
           <GettingStarted {...gettingStarted} />
-        ) : orderedTurns.length === 0 ? (
+        ) : orderedTurns.length === 0 &&
+          // NOT while phone has an inline question to draw (§3.2-3.3): a
+          // fresh session whose only "step" so far IS the question (nothing
+          // else has been read into `orderedTurns` yet, or the transcript's
+          // tail simply has not caught up) must not let "no steps yet"
+          // swallow the one thing on this screen the operator can act on.
+          // Falling through to the column branch below with an empty
+          // `orderedTurns` draws a scroller holding nothing BUT the inline
+          // question, which is still one scrollable region per AC-1.
+          !(phone && current === 'Response' && newestQuestion !== null) ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
           // pick one from the sidebar". This line said the same thing in
@@ -8588,6 +8624,36 @@ export function DetailPanel(props: DetailPanelProps) {
                   onAnswerMenu={openAnswerMenu}
                 />
               ))}
+              {/* PHONE, RESPONSE VIEW ONLY (docs/design/phone-core-loop.md
+                §3.2-3.3): the pending question, drawn as the NEWEST item in
+                THIS SAME scroller instead of `DetailPanel`'s fixed footer
+                block below (`data-question-bar`, `!phone` there). AC-1: one
+                scrollable container holds both a prior turn's text and
+                `[data-question-option]`. `sticky bottom-0` (not `flex-none`,
+                per AC-2) so it reads as "the thing demanding attention" at
+                the bottom of the scroll content without being pinned
+                outside it -- scrolling UP into history lets it scroll out
+                of view like any other message, which is what the jump-to-
+                question pill (§3.2 deviation) answers. `QuestionCard`'s own
+                internals are UNCHANGED -- `phone` only swaps its root
+                classes; see that prop's own doc. */}
+              {phone && current === 'Response' && newestQuestion !== null && (
+                <div
+                  data-question-bar-inline
+                  {...insertScopeMark}
+                  className="sticky bottom-0 flex flex-col bg-pane pt-1.5"
+                >
+                  <QuestionCard
+                    key={setId}
+                    questions={newestQuestions}
+                    firstOptionRef={firstOptionRef}
+                    onChat={startChat}
+                    onAnswer={questionOnAnswer}
+                    onSuggest={setSuggestion}
+                    phone
+                  />
+                </div>
+              )}
             </div>
             {/* THE JUMPS, FLOATING OVER THE COLUMN — what is left of the bar
                 that used to hold them, and of two more controls that went with
@@ -8804,16 +8870,29 @@ export function DetailPanel(props: DetailPanelProps) {
         room for a question card floating over it, and the question this
         card answers is the AGENT's, unrelated to a file the operator opened
         to read or edit by hand. */}
-      {current !== 'Terminal' && current !== 'Files' && newestQuestion !== null && (
-        <div
-          data-question-bar
-          // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
-          // here holds the keyboard, the app IS in Insert. That is the whole
-          // definition of the mode now, which is why there is no flag left
-          // that could disagree with it. The card's options are also the
-          // LANDING `I` aims at, by being the first stop in document order.
-          {...insertScopeMark}
-          /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
+      {/* NOT ON PHONE'S RESPONSE VIEW (docs/design/phone-core-loop.md
+        §3.2-3.3): the fixed block this comment describes is exactly what the
+        spec moves there -- `QuestionCard` mounts INLINE, as the newest item
+        inside the transcript's own scroller, instead of here. See
+        `data-question-bar-inline` below. Every OTHER view (Agents, on
+        phone -- PRs is already cut from phone by `visibleTabs`) keeps this
+        fixed block: it has no transcript scroller of its own to inline
+        into, and the operator's brief is about the reply loop, not about
+        withdrawing the card from a roster view that never had one to
+        replace. Desktop is unchanged either way. */}
+      {(!phone || current !== 'Response') &&
+        current !== 'Terminal' &&
+        current !== 'Files' &&
+        newestQuestion !== null && (
+          <div
+            data-question-bar
+            // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
+            // here holds the keyboard, the app IS in Insert. That is the whole
+            // definition of the mode now, which is why there is no flag left
+            // that could disagree with it. The card's options are also the
+            // LANDING `I` aims at, by being the first stop in document order.
+            {...insertScopeMark}
+            /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
              see the body's comment. The SEAM is what makes this more than
              symmetry: `border-t` above draws the rule between the answer and
              the question, and a rule spanning the whole pane under a 470px
@@ -8824,39 +8903,39 @@ export function DetailPanel(props: DetailPanelProps) {
              Agents view, which the flag does not cap (`narrowsAsProse`), and
              the seam argument runs the other way there: a 890px card under a
              1336px navigator is the same line pointing at nothing. */
-          className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
-            bodyMaxWidth === undefined ? '' : 'mx-auto w-full'
-          }`}
-          style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
-        >
-          {/* The factory's governance queue — findings awaiting a waiver, and
+            className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
+              bodyMaxWidth === undefined ? '' : 'mx-auto w-full'
+            }`}
+            style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
+          >
+            {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
             to go, and it is gone from `buildActions` too: it went on
             contributing keyboard stops and a live `Enter` to this pane long
             after the rows themselves stopped being drawn. */}
-          {/* The `!` typeahead, above the box it completes into -- where the
+            {/* The `!` typeahead, above the box it completes into -- where the
             standing command strip used to be, and only while it is being
             asked for. The strip drew every proposed command on every turn
             that mentioned one; this draws the same list, from the same
             extraction, at the moment the operator types the glyph it belongs
             to. */}
-          {/* The question the session is asking, where the placeholder picker
+            {/* The question the session is asking, where the placeholder picker
             used to stand -- the newest one, because a card per question would
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
-          {newestQuestion !== null && (
-            <QuestionCard
-              key={setId}
-              questions={newestQuestions}
-              firstOptionRef={firstOptionRef}
-              onChat={startChat}
-              onAnswer={questionOnAnswer}
-              onSuggest={setSuggestion}
-            />
-          )}
-        </div>
-      )}
+            {newestQuestion !== null && (
+              <QuestionCard
+                key={setId}
+                questions={newestQuestions}
+                firstOptionRef={firstOptionRef}
+                onChat={startChat}
+                onAnswer={questionOnAnswer}
+                onSuggest={setSuggestion}
+              />
+            )}
+          </div>
+        )}
       {/* The composer, in its own block so that it can stand down while a
         question is open without the card standing down with it. Its top border
         is the seam between the two, and belongs to whichever of them is
