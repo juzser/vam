@@ -60,6 +60,7 @@ import { IconMark, parseIcon } from './icon-value.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
+import { useSessionListDrafts } from './session-list-drafts.js';
 import { MARK_LANE_PX, StatusMark } from './status-mark.js';
 
 /**
@@ -902,20 +903,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const [localGroupCollapsed, setLocalGroupCollapsed] = useState<readonly string[]>([]);
   const groupCollapsed = collapsedGroups ?? localGroupCollapsed;
   /**
-   * The one group name being typed, and what it is for: a group about to
-   * exist, or one being renamed. ONE piece of state, because one editor is
-   * open at a time and two would need a rule about which wins.
-   *
-   * The idiom is the session rename's, deliberately -- a row that turns into
-   * a field, Enter commits, Escape cancels -- and NOT an overlay:
-   * `ConfirmRemoveProject`'s header states vam's overlay idiom exists to make
-   * a disclosure, and naming a group discloses nothing.
-   */
-  const [groupDraft, setGroupDraft] = useState<
-    { readonly kind: 'new' } | { readonly kind: 'rename'; readonly group: Group } | null
-  >(null);
-  const [groupDraftName, setGroupDraftName] = useState('');
-  /**
    * THE RIGHT-CLICKED ROW, and where the pointer was when it happened.
    *
    * One piece of state for the whole list rather than one per row: only one
@@ -934,14 +921,20 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const hidden = hiddenProjects;
   /** The project whose removal is being confirmed, or null. One at a time. */
   const [confirming, setConfirming] = useState<Project | null>(null);
-  /**
-   * The project heading whose name is being edited, or null. Exactly
-   * `groupDraft`'s `'rename'` case, one level down -- there is no `'new'`
-   * case here, since a project heading is never created from this pane, only
-   * derived from a live session's cwd.
-   */
-  const [projectDraft, setProjectDraft] = useState<Project | null>(null);
-  const [projectDraftName, setProjectDraftName] = useState('');
+  const {
+    groupDraft,
+    setGroupDraft,
+    groupDraftName,
+    setGroupDraftName,
+    projectDraft,
+    setProjectDraft,
+    projectDraftName,
+    setProjectDraftName,
+    cancelGroupDraft,
+    commitGroupDraft,
+    cancelProjectDraft,
+    commitProjectDraft,
+  } = useSessionListDrafts(onCreateGroup, onRenameGroup, onRenameProject);
 
   const projectMenuRefs = useRef(new Map<string, HTMLButtonElement>());
   const groupMenuRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -980,44 +973,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     },
     [onToggleCollapse],
   );
-
-  const cancelGroupDraft = useCallback(() => {
-    setGroupDraft(null);
-    setGroupDraftName('');
-  }, []);
-
-  /** An empty name creates nothing and renames nothing -- it just closes. */
-  const commitGroupDraft = useCallback(() => {
-    const name = groupDraftName.trim();
-    if (groupDraft !== null && name !== '') {
-      if (groupDraft.kind === 'new') {
-        onCreateGroup?.(name);
-      } else {
-        onRenameGroup?.(groupDraft.group, name);
-      }
-    }
-    setGroupDraft(null);
-    setGroupDraftName('');
-  }, [groupDraft, groupDraftName, onCreateGroup, onRenameGroup]);
-
-  const cancelProjectDraft = useCallback(() => {
-    setProjectDraft(null);
-    setProjectDraftName('');
-  }, []);
-
-  /**
-   * UNLIKE `commitGroupDraft`, an empty name still commits -- it is the undo,
-   * not a no-op. A group has no name of its own to fall back to; a project
-   * does, and `setProjectRename` already treats an empty title as "clear the
-   * override", so the trimmed name is always handed onward.
-   */
-  const commitProjectDraft = useCallback(() => {
-    if (projectDraft !== null) {
-      onRenameProject?.(projectDraft, projectDraftName.trim());
-    }
-    setProjectDraft(null);
-    setProjectDraftName('');
-  }, [projectDraft, projectDraftName, onRenameProject]);
 
   const toggleGroupCollapse = useCallback(
     (group: Group) => {
