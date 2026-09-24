@@ -142,6 +142,28 @@ await panel.waitFor({ state: 'visible', timeout: 5_000 });
 await page.waitForTimeout(150);
 
 {
+  // THE OUT TEXT'S SIZE, measured — the operator, translated: "the command
+  // palette needs to be larger, with a font size like the out text in the
+  // response view". A session row's computed size must equal the root's
+  // `--vam-out-font-size`, and the panel must be wider than the old 560px.
+  const sizes = await page.evaluate(() => {
+    const out = getComputedStyle(document.documentElement)
+      .getPropertyValue('--vam-out-font-size')
+      .trim();
+    const row = document.querySelector('[data-command-palette] [cmdk-item]');
+    const panelEl = document.querySelector('[data-command-palette]');
+    return {
+      out,
+      row: row === null ? null : getComputedStyle(row).fontSize,
+      width: panelEl === null ? 0 : panelEl.getBoundingClientRect().width,
+    };
+  });
+  check(
+    'a palette row is drawn at the out text size',
+    sizes.row !== null && sizes.row === sizes.out,
+    JSON.stringify(sizes),
+  );
+  check('the palette is wider than the old 560px', sizes.width > 560, JSON.stringify(sizes));
   const box = await panel.boundingBox();
   await page.screenshot({ path: `${outDir}/command-palette-sessions.png`, clip: box });
   console.log(`${outDir}/command-palette-sessions.png`);
