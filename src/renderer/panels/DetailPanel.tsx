@@ -3905,6 +3905,58 @@ function stripCaption(item: (typeof KEY_STRIP)[number]): string {
   return `${chordSymbols(item.chord)}${item.suffix}`;
 }
 
+/**
+ * THE PERSISTENT-PERMISSION KEYWORD TABLE -- one list, read in one place,
+ * for the one thing it is allowed to do: put a subtle marker on an option
+ * row and ask for a second tap before marking it. DEVIATION, approved
+ * (docs/design/phone-core-loop.md §3.3, §3.7 PR4).
+ *
+ * IT READS OPTION TEXT, and that is against this file's own discipline
+ * everywhere else (`answer.ts`: "nothing here reads mtime, status… the
+ * mistakes the placeholder picker was built on" -- vam displays what a tool
+ * wrote, it does not interpret it). This is the one approved exception,
+ * because the two options the operator flagged are not symmetric in risk:
+ * "Yes, don't ask again" changes a STANDING POLICY for the rest of the
+ * session, and a phone reply is typically a fast, half-attentive tap.
+ *
+ * WHY, so a future reader does not widen it believing it is inert: this is
+ * a STRING MATCH ON A LABEL, not a classification vam has any authority
+ * over. It must never become a gate -- `answer.ts` still sends whatever the
+ * card marks, on the same Submit, exactly as before. It only slows the FIRST
+ * tap on a matching row down to an arm-then-confirm, and only the row's own
+ * decoration says why.
+ *
+ * CASE-INSENSITIVE, SUBSTRING: Claude Code's own option vocabulary varies
+ * the exact phrasing around a fixed core ("Yes, and do not ask again for
+ * scripts/rebuild-index.sh" -- `fixtures/demo.ts`'s `DEMO_PROMPT`, the
+ * ACTUAL wording `factory-sse-1` draws in the `?demo=1` fixture this spec's
+ * own screenshots use), so the match has to find the phrase inside a longer
+ * sentence, not equal it. BOTH the contraction and the expanded form are
+ * listed rather than guessed at: a model may write either.
+ */
+const PERSISTENT_PERMISSION_KEYWORDS: readonly string[] = [
+  "don't ask again",
+  'do not ask again',
+  'always allow',
+  'allow all',
+  'skip',
+  'bypass',
+];
+
+/** Whether an option's own label names a persistent-permission choice --
+ *  see the table above for what this may and may not be used for. */
+function isPersistentPermissionOption(label: string): boolean {
+  const lower = label.toLowerCase();
+  return PERSISTENT_PERMISSION_KEYWORDS.some((keyword) => lower.includes(keyword));
+}
+
+/** How long an armed persistent-permission row waits for its confirming tap
+ *  before disarming on its own -- long enough that a genuine second tap is
+ *  never raced by it, short enough that a row does not stay "armed" (and
+ *  therefore one accidental tap away from marking itself) for the rest of
+ *  the operator's visit to this question. */
+const ARM_TIMEOUT_MS = 3000;
+
 function QuestionCard({
   questions,
   firstOptionRef,
@@ -3969,6 +4021,21 @@ function QuestionCard({
    */
   const keys = questionKeys();
   const [marks, setMarks] = useState<Readonly<Record<string, readonly string[]>>>({});
+  /**
+   * WHICH OPTION A PHONE TAP HAS ARMED, NOT YET CONFIRMED -- the double-tap
+   * for a persistent-permission option (`isPersistentPermissionOption`'s own
+   * doc has the argument). `null` at rest, and a real tap on the row a
+   * SECOND time (`toggle`, below) is what confirms it. Scoped to `phone`
+   * only, and to a REAL tap only (`viaPointer`) -- desktop and every
+   * keyboard route are byte-identical to before this existed.
+   */
+  const [armedLabel, setArmedLabel] = useState<string | null>(null);
+  const armTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disarm = () => {
+    if (armTimeout.current !== null) clearTimeout(armTimeout.current);
+    armTimeout.current = null;
+    setArmedLabel(null);
+  };
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
@@ -4111,6 +4178,14 @@ function QuestionCard({
   useEffect(() => {
     setFocusedLabel(null);
   }, [question?.id]);
+  // A step change is a different question -- an arm standing from the last
+  // one would confirm on a row that never asked for a second tap. Same
+  // discipline the effect just above states, for a different piece of state.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `disarm` is a fresh closure every render; only `question?.id` should re-run this.
+  useEffect(() => {
+    disarm();
+    return disarm;
+  }, [question?.id]);
   /** Whether it moved. The caller needs the answer: a step that clamped is a
    *  keystroke the card did not use, and `h` means something else when it is
    *  not walking (see `onKeys`). */
@@ -4249,6 +4324,20 @@ function QuestionCard({
   };
 
   const toggle = (label: string, viaPointer = false) => {
+    // ARM, DO NOT MARK -- the first real tap on a persistent-permission row,
+    // on phone. `viaPointer` is already exactly "a real tap, not a keyboard
+    // route" (see the option button's own `onClick`), which is also the
+    // right scope for this: the deviation is about a fast, half-attentive
+    // finger, not about a keyboard grammar that already types out an
+    // explicit key per step. Confirmed on the SECOND tap of the SAME row,
+    // which falls through to the ordinary mark below.
+    if (phone && viaPointer && isPersistentPermissionOption(label) && armedLabel !== label) {
+      setArmedLabel(label);
+      if (armTimeout.current !== null) clearTimeout(armTimeout.current);
+      armTimeout.current = setTimeout(disarm, ARM_TIMEOUT_MS);
+      return;
+    }
+    if (armedLabel === label) disarm();
     // The refusal named a missing mark. Marking anything is the operator
     // answering it, so it stops being on screen -- a refusal that outlives
     // its cause is the next thing to be ignored.
@@ -4674,78 +4763,106 @@ function QuestionCard({
                     : 'flex flex-col gap-1'
                 }
               >
-                {question.options.map((option, index) => (
-                  <button
-                    key={option.label}
-                    ref={index === 0 ? firstOptionRef : undefined}
-                    type="button"
-                    role="option"
-                    aria-selected={picked.includes(option.label)}
-                    data-question-option
-                    data-question-number={NUMBERED_OPTIONS[index]}
-                    data-picked={picked.includes(option.label) ? 'true' : undefined}
-                    onClick={(event) => toggle(option.label, event.detail > 0)}
-                    onFocus={() => setFocusedLabel(option.label)}
-                    className={[
-                      // `group` is what lets the quiet spans below hear about a
-                      // hover on this button -- see `OPTION_QUIET_INK`.
-                      'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
-                      picked.includes(option.label)
-                        ? `border-running ${OPTION_FILL}`
-                        : `border-line hover:${OPTION_FILL}`,
-                    ].join(' ')}
-                  >
-                    <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
-                      {NUMBERED_OPTIONS[index] !== undefined && (
-                        <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
-                          {NUMBERED_OPTIONS[index]}
-                        </span>
-                      )}
-                      <span data-question-label className="min-w-0">
-                        {option.label}
-                      </span>
-                      {(option.preview ?? null) !== null && (
-                        <span
-                          data-question-preview-hint
-                          className={`ml-auto flex-none text-meta ${OPTION_QUIET_INK}`}
-                        >
-                          {sideBySide ? (
-                            <>
-                              <span className="hidden @min-[720px]:inline">preview →</span>
-                              <span className="@min-[720px]:hidden">preview ↓</span>
-                            </>
-                          ) : (
-                            'preview ↓'
-                          )}
-                        </span>
-                      )}
-                    </span>
-                    {option.description !== null && (
-                      // UNDER THE LABEL, NOT UNDER THE NUMBER. MEASURED on
-                      // Claude Code 2.1.280: "fixed multi-select option
-                      // descriptions being indented under the option number
-                      // instead of under the label". A row with no indent at
-                      // all starts flush with the NUMBER above it, which is
-                      // the shape the fix ended -- so a spacer reserves the
-                      // number's own column, tabular-nums and the same
-                      // `gap-1.5` as the row it lines up with, rather than a
-                      // guessed pixel amount. `aria-hidden` and no text of its
-                      // own: it costs nothing in the accessible name or in a
-                      // reader that walks `textContent`, only the width.
-                      <span className="flex max-w-full items-baseline gap-1.5">
+                {question.options.map((option, index) => {
+                  // DEVIATION, approved (docs/design/phone-core-loop.md
+                  // §3.3, §3.7 PR4) -- see `isPersistentPermissionOption`'s
+                  // own doc for the table and the argument. `phone` only:
+                  // desktop draws this row exactly as it always has.
+                  const risky = phone && isPersistentPermissionOption(option.label);
+                  const armed = risky && armedLabel === option.label;
+                  return (
+                    <button
+                      key={option.label}
+                      ref={index === 0 ? firstOptionRef : undefined}
+                      type="button"
+                      role="option"
+                      aria-selected={picked.includes(option.label)}
+                      data-question-option
+                      data-question-number={NUMBERED_OPTIONS[index]}
+                      data-picked={picked.includes(option.label) ? 'true' : undefined}
+                      data-question-risk={risky ? 'true' : undefined}
+                      data-question-armed={armed ? 'true' : undefined}
+                      onClick={(event) => toggle(option.label, event.detail > 0)}
+                      onFocus={() => setFocusedLabel(option.label)}
+                      className={[
+                        // `group` is what lets the quiet spans below hear about a
+                        // hover on this button -- see `OPTION_QUIET_INK`.
+                        'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                        picked.includes(option.label)
+                          ? `border-running ${OPTION_FILL}`
+                          : armed
+                            ? 'border-waiting'
+                            : `border-line hover:${OPTION_FILL}`,
+                      ].join(' ')}
+                    >
+                      <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
                         {NUMBERED_OPTIONS[index] !== undefined && (
-                          <span
-                            aria-hidden="true"
-                            className="inline-block w-[1ch] flex-none text-meta tabular-nums"
-                          />
+                          <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+                            {NUMBERED_OPTIONS[index]}
+                          </span>
                         )}
-                        <span data-question-description className="min-w-0 text-meta text-ink-dim">
-                          {option.description}
+                        <span data-question-label className="min-w-0">
+                          {option.label}
                         </span>
+                        {(option.preview ?? null) !== null && (
+                          <span
+                            data-question-preview-hint
+                            className={`ml-auto flex-none text-meta ${OPTION_QUIET_INK}`}
+                          >
+                            {sideBySide ? (
+                              <>
+                                <span className="hidden @min-[720px]:inline">preview →</span>
+                                <span className="@min-[720px]:hidden">preview ↓</span>
+                              </>
+                            ) : (
+                              'preview ↓'
+                            )}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </button>
-                ))}
+                      {/* THE MARKER: a thin `text-waiting` suffix, never a
+                          dialog -- see the deviation's own argument for why a
+                          second modal defeats the fast-reply brief this whole
+                          spec serves. Two words while at rest, so the risk is
+                          visible before the first tap; the SECOND tap's own
+                          words while armed, so the row itself explains what
+                          it is waiting for rather than leaving the operator
+                          to guess why nothing happened. */}
+                      {risky && (
+                        <span data-question-risk-note className="text-meta text-waiting">
+                          {armed ? 'tap again to confirm' : "won't ask again this session"}
+                        </span>
+                      )}
+                      {option.description !== null && (
+                        // UNDER THE LABEL, NOT UNDER THE NUMBER. MEASURED on
+                        // Claude Code 2.1.280: "fixed multi-select option
+                        // descriptions being indented under the option number
+                        // instead of under the label". A row with no indent at
+                        // all starts flush with the NUMBER above it, which is
+                        // the shape the fix ended -- so a spacer reserves the
+                        // number's own column, tabular-nums and the same
+                        // `gap-1.5` as the row it lines up with, rather than a
+                        // guessed pixel amount. `aria-hidden` and no text of its
+                        // own: it costs nothing in the accessible name or in a
+                        // reader that walks `textContent`, only the width.
+                        <span className="flex max-w-full items-baseline gap-1.5">
+                          {NUMBERED_OPTIONS[index] !== undefined && (
+                            <span
+                              aria-hidden="true"
+                              className="inline-block w-[1ch] flex-none text-meta tabular-nums"
+                            />
+                          )}
+                          <span
+                            data-question-description
+                            className="min-w-0 text-meta text-ink-dim"
+                          >
+                            {option.description}
+                          </span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
               {/* THE PANEL: the FULL preview of `activeOption` -- focused,
                   else marked, else the first option that has one -- never the
@@ -6278,6 +6395,16 @@ export function DetailPanel(props: DetailPanelProps) {
   };
 
   /**
+   * `questionInlineRef`/`questionInViewport` -- see the deviation's own
+   * comment beside `openStepCount`, just below, where `openQuestion` first
+   * exists: this state is declared here (with `jumpTo`, `outRef`) but the
+   * effect that DRIVES it has to live after `openQuestion` is computed, so
+   * it sits beside `openStepCount` instead.
+   */
+  const questionInlineRef = useRef<HTMLDivElement>(null);
+  const [questionInViewport, setQuestionInViewport] = useState(true);
+
+  /**
    * WHERE THE READER WAS, taken the instant before a page is prepended and
    * spent by the layout effect below. A ref rather than state because nothing
    * renders from it and because it has to survive between an async resolution
@@ -7311,6 +7438,48 @@ export function DetailPanel(props: DetailPanelProps) {
    * lands in the same place, and Esc still does the one thing it did.
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
+  /** How many of the newest call's steps are still open -- what the phone's
+   *  "jump to question" pill counts (below). `QuestionCard`'s own `pending`
+   *  is the SAME filter, scoped inside that component where its Submit copy
+   *  reads it; this is the one outside reader. */
+  const openStepCount = newestQuestions.filter((one) => one.answer === null).length;
+  /**
+   * DEVIATION, approved (docs/design/phone-core-loop.md §3.2, §3.7 PR4). The
+   * inline question reintroduces the classic chat-app problem the FIXED card
+   * never had: it can scroll out of view while the operator reads older
+   * history above it. `questionInlineRef` (declared with `outRef`, above)
+   * marks the mounted card; `outRef` is the scroller it can leave. `true`
+   * (visible) at rest, so a phone with no open question never renders the
+   * pill this drives -- this effect only runs while there is a card to
+   * watch.
+   */
+  useEffect(() => {
+    const root = outRef.current;
+    const target = questionInlineRef.current;
+    if (!phone || !openQuestion || root === null || target === null) {
+      setQuestionInViewport(true);
+      return;
+    }
+    // A fresh observer per (root, target) pair rather than one long-lived
+    // instance re-pointed at a new target: `IntersectionObserver.observe`
+    // does not forget a PREVIOUS target on a second call, so re-observing
+    // would accumulate one stale callback per question the operator has
+    // answered this session.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry !== undefined) setQuestionInViewport(entry.isIntersecting);
+      },
+      // `root`: the SCROLLER, not the viewport -- the default target for a
+      // plain `IntersectionObserver` is the browser viewport, which this
+      // element never leaves (it is `position: sticky` inside a pane that
+      // itself never scrolls the WINDOW). What it leaves is `outRef`'s own
+      // scrolled content, so that is what has to be the root.
+      { root, threshold: 0 },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [phone, openQuestion]);
   // See `onQuestionOpenChange`'s own doc: this is the one route a re-hosting
   // shell (`PhoneShell`) has to this fact, which is derived here and nowhere
   // else. Fires on every value change, including a session switch (`entry`
@@ -8639,6 +8808,7 @@ export function DetailPanel(props: DetailPanelProps) {
                 classes; see that prop's own doc. */}
               {phone && current === 'Response' && newestQuestion !== null && (
                 <div
+                  ref={questionInlineRef}
                   data-question-bar-inline
                   {...insertScopeMark}
                   className="sticky bottom-0 flex flex-col bg-pane pt-1.5"
@@ -8733,19 +8903,46 @@ export function DetailPanel(props: DetailPanelProps) {
               )}
               {/* At the bottom edge, where the newest turn is. `bottom-1`
                   rather than flush, so the chip is not cut by the pane's own
-                  seam with the composer below it. */}
-              {jumps.below && (
+                  seam with the composer below it.
+
+                  PHONE, WITH AN OPEN QUESTION SCROLLED OUT OF VIEW: this
+                  slot draws the "jump to question" pill instead of the bare
+                  chevron -- DEVIATION, approved (docs/design/
+                  phone-core-loop.md §3.2, §3.7 PR4). Same corner, same
+                  `jumpTo('bottom')` (the question is always the newest item
+                  in the scroller, so scrolling to bottom IS scrolling to it
+                  -- no second scroll mechanism), a more specific label
+                  instead of a bare chevron: an operator who has scrolled up
+                  to read history should be told WHY jumping back down
+                  matters, not just that something is there. Never BOTH
+                  controls at once in one corner. */}
+              {phone && openQuestion && !questionInViewport && current === 'Response' ? (
                 <button
                   type="button"
-                  data-out-to-bottom
-                  aria-label="scroll to the newest turn"
+                  data-jump-to-question
+                  aria-label={`${openStepCount} question${openStepCount === 1 ? '' : 's'} pending — jump to it`}
                   onClick={() => jumpTo('bottom')}
-                  className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
+                  className="vam-tap pointer-events-auto absolute right-0 bottom-1 flex h-11 items-center justify-center"
                 >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
-                    <ChevronsDown size={14} strokeWidth={1.8} />
+                  <span className="flex h-7 items-center gap-1 rounded-full border border-waiting bg-card px-2 text-control text-waiting shadow-sm">
+                    <ChevronsDown size={14} strokeWidth={1.8} aria-hidden="true" />
+                    {openStepCount}
                   </span>
                 </button>
+              ) : (
+                jumps.below && (
+                  <button
+                    type="button"
+                    data-out-to-bottom
+                    aria-label="scroll to the newest turn"
+                    onClick={() => jumpTo('bottom')}
+                    className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
+                      <ChevronsDown size={14} strokeWidth={1.8} />
+                    </span>
+                  </button>
+                )
               )}
             </div>
           </div>
