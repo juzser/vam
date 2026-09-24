@@ -308,28 +308,73 @@ describe('useCanvas', () => {
   });
 
   it('a slow load never overwrites a faster one started after it', async () => {
+    // Concurrent overview() calls are gone (in-flight guard, §next test): a
+    // refresh() while the mount load is in flight is now the coalesced
+    // trailing wave, run strictly after, so it is the one that wins.
     const resolvers: Array<(o: ApiOverview) => void> = [];
     const seen = mount(fakeClient({ overview: () => new Promise((r) => resolvers.push(r)) }));
     await act(async () => {
-      seen.current?.refresh();
+      seen.current?.refresh(); // in flight already: coalesced, not a new call
     });
-    resolvers[1]?.(overviewWith(['fast']));
-    await act(async () => {});
     resolvers[0]?.(overviewWith(['slow']));
+    await act(async () => {});
+    resolvers[1]?.(overviewWith(['fast']));
     await act(async () => {});
     expect(seen.current?.model.projects[0]?.sessions[0]?.id).toBe('fast');
   });
 
   it('a slow error never downgrades status set by a faster success', async () => {
+    // Same coalescing: the mount load rejects, and the trailing wave it
+    // queued (from the refresh() that landed while it was in flight) still
+    // runs afterwards (clause: the trailing load runs even if the in-flight
+    // one rejects) and its success is what status ends up showing.
     const c: Array<{ a: (o: ApiOverview) => void; b: (e: unknown) => void }> = [];
     const seen = mount(fakeClient({ overview: () => new Promise((a, b) => c.push({ a, b })) }));
     await act(async () => {
       seen.current?.refresh();
     });
-    c[1]?.a(overviewWith(['fast']));
-    await act(async () => {});
     c[0]?.b(new Error('late'));
     await act(async () => {});
+    c[1]?.a(overviewWith(['fast']));
+    await act(async () => {});
     expect(seen.current?.status).toBe('live');
+  });
+
+  it('five change frames landing during one in-flight load coalesce into exactly one trailing wave, not five', async () => {
+    // Differential: under today's code (no in-flight guard) each of the five
+    // frames calls load() unconditionally, so this counts 6 (mount + 5).
+    // Under the fix it counts 2: the in-flight wave, plus one coalesced
+    // trailing wave.
+    let calls = 0;
+    const resolvers: Array<(o: ApiOverview) => void> = [];
+    const seen = mount(
+      fakeClient({
+        overview: () => {
+          calls += 1;
+          return new Promise((r) => resolvers.push(r));
+        },
+      }),
+    );
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) {
+        seen.instances[0]?.emit('change', change(['s1']));
+      }
+    });
+    resolvers[0]?.(overviewWith([]));
+    await act(async () => {});
+    expect(calls).toBe(2);
+  });
+
+  it('a change frame landing during an in-flight load is not dropped: the model reflects the second overview, not the first', async () => {
+    const resolvers: Array<(o: ApiOverview) => void> = [];
+    const seen = mount(fakeClient({ overview: () => new Promise((r) => resolvers.push(r)) }));
+    await act(async () => {
+      seen.instances[0]?.emit('change', change(['s1']));
+    });
+    resolvers[0]?.(overviewWith(['first']));
+    await act(async () => {});
+    resolvers[1]?.(overviewWith(['second']));
+    await act(async () => {});
+    expect(seen.current?.model.projects[0]?.sessions[0]?.id).toBe('second');
   });
 });
