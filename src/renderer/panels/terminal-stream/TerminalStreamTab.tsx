@@ -21,6 +21,7 @@ import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { INSERT_STOP, insertScopeMark } from '../../keyboard/focus-scope.js';
 import { activeTerminalFontSize, subscribeTerminalFontSize } from '../../prefs/terminal-font.js';
 import {
   activeTerminalScheme,
@@ -115,6 +116,14 @@ export function TerminalStreamTab(props: {
         const fit = new FitAddon();
         term.loadAddon(fit);
         term.open(container);
+        // WHERE `I`/A CLICK LANDS. `focus-scope.ts`'s `focusInsertStop` finds
+        // the first `data-insert-stop` inside the nearest `data-insert-scope`
+        // (the container, marked below) and calls `.focus()` on it -- for
+        // every other pane that is an element rendered in JSX; xterm.js
+        // creates its own `<textarea>` inside `container` on `open()`, so the
+        // mark has to be set imperatively on the element it actually gives
+        // back rather than rendered.
+        term.textarea?.setAttribute(INSERT_STOP, '');
         term.write(result.seed);
         fit.fit();
         termRef.current = term;
@@ -197,6 +206,11 @@ export function TerminalStreamTab(props: {
   }
 
   return (
-    <div data-terminal-stream ref={containerRef} className="relative min-h-0 flex-1 font-mono" />
+    <div
+      data-terminal-stream
+      ref={containerRef}
+      {...insertScopeMark}
+      className="relative min-h-0 flex-1 font-mono"
+    />
   );
 }

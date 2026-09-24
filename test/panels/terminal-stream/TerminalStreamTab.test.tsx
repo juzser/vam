@@ -12,6 +12,7 @@
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { focusInsertStop } from '../../../src/renderer/keyboard/focus-scope.js';
 
 const writeCalls: string[] = [];
 const disposeCalls: number[] = [];
@@ -22,12 +23,19 @@ class FakeTerminal {
   cols = 80;
   rows = 24;
   options: Record<string, unknown> = {};
+  // A REAL element, not a stub: `focusInsertStop`'s `.focus()` and
+  // `document.activeElement` check need a node actually attached to the
+  // document, which is exactly what xterm.js hands back as `term.textarea`
+  // once `open()` runs against a real container.
+  textarea: HTMLTextAreaElement = document.createElement('textarea');
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
     lastTerm = this;
   }
   loadAddon() {}
-  open() {}
+  open(container: HTMLElement) {
+    container.appendChild(this.textarea);
+  }
   write(text: string) {
     writeCalls.push(text);
   }
@@ -208,6 +216,31 @@ describe('mounted with a bridge', () => {
     // covers it). This component subscribes with the right streamId, proven
     // by the `expect(streamId).toBe('stream-1')` assertion inside `onData`
     // above -- the one thing wrong wiring here could get wrong.
+  });
+
+  it('marks the container as an insert scope and the real textarea as its insert stop', async () => {
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const container = q('[data-terminal-stream]');
+    expect(container?.hasAttribute('data-insert-scope')).toBe(true);
+    expect(lastTerm?.textarea.hasAttribute('data-insert-stop')).toBe(true);
+  });
+
+  it('focusInsertStop lands DOM focus on term.textarea, not the container', async () => {
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const container = q('[data-terminal-stream]');
+    const landed = focusInsertStop(container);
+    expect(landed).toBe(true);
+    expect(document.activeElement).toBe(lastTerm?.textarea);
   });
 
   it('types into the stream via write()', async () => {
