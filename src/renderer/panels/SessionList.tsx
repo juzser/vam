@@ -390,11 +390,20 @@ export const BRANCH_TAIL_MAX_CHARS = 20;
  * drawn width is `min(this, sidebar - 24)` — a 12px gutter on each side —
  * which keeps the popover inside the sidebar, and therefore inside the
  * window, at every width the resizer allows (`SIDEBAR_MIN` = 200 gives 176,
- * the default 264 gives 240, and from 312 up it opens at its full 288).
+ * the default 264 gives 240, and from 344 up it opens at its full 320).
  * Growing past the column would put it over the canvas, which is not a wider
  * popover so much as a popover somewhere else.
+ *
+ * 288 -> 320 WITH THE WORKSPACE-OPTIONS PASS: measured on the shipped 288,
+ * a Filters row now carries a leading icon AND a trailing switch (orca's own
+ * row shape) on top of the count and the "default" badge that were already
+ * there, and the label itself truncated to "Hide a…" / "Hide s…" -- narrower
+ * than the words say. 320 is the smallest step that reads every label in
+ * full at the demo fixture's own longest row ("Hide sessions vam did not
+ * start"); still comfortably inside a phone's 390px minus the same 24px
+ * gutter (366).
  */
-export const FILTER_POPOVER_WIDTH = 288;
+export const FILTER_POPOVER_WIDTH = 320;
 
 /**
  * How long the restore strip stays on screen after a hide, in either
@@ -2515,34 +2524,50 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       // menu item in this file already wears (the group menu's
                       // "Rename project" / "Change project icon", a few hundred
                       // lines down) for exactly this reason.
-                      'vam-tap flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
+                      'vam-tap flex w-full cursor-pointer items-start gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
                       on
                         ? 'border-line-loud bg-raised text-ink'
                         : 'border-line text-ink-dim hover:border-line-strong',
                     ].join(' ')}
                   >
-                    <Icon size={14} strokeWidth={1.7} className="flex-none text-ink-faint" />
-                    <span className="min-w-0 flex-1 truncate">{label}</span>
-                    {/* The one place the operator can learn that a rule they
-                    never chose is in force — the badge deliberately does not
-                    count it. Only while it is ON and still at its shipped
-                    value: once they turn it off and back on it is their
-                    choice, and this stops claiming otherwise. */}
-                    {on && byDefault && (
-                      <span
-                        data-filter-default
-                        className="flex-none rounded-full border border-line px-1.5 font-mono text-meta text-ink-faint uppercase tracking-[0.08em]"
-                      >
-                        default
+                    <Icon size={14} strokeWidth={1.7} className="mt-0.5 flex-none text-ink-faint" />
+                    {/* Two lines, not one: at the popover's own width (320,
+                        `FILTER_POPOVER_WIDTH`'s own header) a leading icon
+                        AND a trailing switch left the label as little as
+                        ~90px on the longest row ("Hide sessions vam did not
+                        start"), which truncated to "Hide s…" -- narrower
+                        than the words say. The label gets the row's full
+                        width on its own line now; the badge and the count
+                        move to a second, smaller line underneath it rather
+                        than competing for the first one. */}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{label}</span>
+                      <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                        {/* The one place the operator can learn that a rule
+                        they never chose is in force — the badge deliberately
+                        does not count it. Only while it is ON and still at
+                        its shipped value: once they turn it off and back on
+                        it is their choice, and this stops claiming
+                        otherwise. */}
+                        {on && byDefault && (
+                          <span
+                            data-filter-default
+                            className="flex-none rounded-full border border-line px-1.5 font-mono text-meta text-ink-faint uppercase tracking-[0.08em]"
+                          >
+                            default
+                          </span>
+                        )}
+                        <span className="flex-none font-mono text-meta text-ink-faint">
+                          −{hides}
+                        </span>
                       </span>
-                    )}
-                    <span className="flex-none font-mono text-meta text-ink-faint">−{hides}</span>
+                    </span>
                     {/* The switch itself, purely a picture: `aria-checked` above
                     on the button is the fact, this is the paint. */}
                     <span
                       aria-hidden="true"
                       className={[
-                        'relative h-[16px] w-[28px] flex-none rounded-full transition-colors',
+                        'relative mt-0.5 h-[16px] w-[28px] flex-none rounded-full transition-colors',
                         on ? 'bg-running' : 'bg-line-strong',
                       ].join(' ')}
                     >
