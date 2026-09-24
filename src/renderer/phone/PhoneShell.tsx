@@ -66,9 +66,9 @@ import {
   MessageSquare,
   SquareTerminal,
 } from 'lucide-react';
-import { type ComponentProps, type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import type { Project, Session } from '../domain/model.js';
-import { orderedInProject } from '../domain/selectors.js';
+import type { SessionEntry } from '../domain/selectors.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
@@ -85,6 +85,16 @@ export type PhoneShellProps = {
   readonly sidebar: ComponentProps<typeof SessionList>;
   /** The same object the detail column is built from. `width` is dropped. */
   readonly detail: ComponentProps<typeof DetailPanel>;
+  /**
+   * `Canvas.tsx`'s own `paneEligibleEntries` -- every session vam has not
+   * positively excluded (not foreign, not dismissed), the set its pane tab
+   * strips draw from. `SessionTabStrip` below narrows this to one project the
+   * same way `Canvas.tsx` does, rather than reading `entry.project.sessions`
+   * directly: that field is the RAW project off the model, unfiltered, and
+   * reading it straight was the phone half of the bug report -- a session
+   * the list screen hid still drew as a chip here.
+   */
+  readonly paneEligibleEntries: readonly SessionEntry[];
   /**
    * The `data-source` readout, lifted out of the canvas top bar -- which is
    * not drawn here. Mandatory: over a tunnel, a dropped connection and an idle
@@ -245,8 +255,12 @@ const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
 
 /**
  * Which session, in this project -- a different axis from `ViewIcons`, which
- * answers which facet of ONE session. Ordered by `orderedInProject`, the same
- * urgency-first rule the canvas itself uses, scoped to one project.
+ * answers which facet of ONE session. `sessions` is `projectPaneSessions`
+ * below, the same pane-eligible, urgency-first list `Canvas.tsx`'s own tab
+ * strips draw from, scoped to one project -- not `orderedInProject(project)`
+ * read straight off the model, which used to hand this strip every session
+ * the project has, foreign and dismissed ones the list screen already hid
+ * included.
  *
  * ONE SESSION RENDERS NOTHING: a strip that can only ever show one tab,
  * permanently selected, teaches nothing and costs a full row on every
@@ -352,6 +366,7 @@ function isTyping(target: EventTarget | null): boolean {
 export function PhoneShell({
   sidebar,
   detail,
+  paneEligibleEntries,
   sourceReadout,
   records,
   failureCount,
@@ -411,6 +426,23 @@ export function PhoneShell({
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
+  /**
+   * THIS SCREEN'S OWN `SessionTabStrip`, scoped to `entry.project` -- the
+   * status-rank order `orderedInProject` gives directly, for free:
+   * `paneEligibleEntries` is `Canvas.tsx`'s `allEntries` (itself built
+   * project-major, urgency-first per project, `selectors.ts`'s
+   * `orderedSessions`) narrowed by the same filter, so a project's slice of
+   * it is already in that order without a second sort.
+   */
+  const projectPaneSessions = useMemo(
+    () =>
+      entry === null
+        ? []
+        : paneEligibleEntries
+            .filter((e) => e.project.id === entry.project.id)
+            .map((e) => e.session),
+    [paneEligibleEntries, entry],
+  );
   /**
    * The step this screen shows: the newest, always.
    *
@@ -681,7 +713,7 @@ export function PhoneShell({
       {!typing && !questionOpen && (
         <SessionTabStrip
           project={entry.project}
-          sessions={orderedInProject(entry.project)}
+          sessions={projectPaneSessions}
           currentSessionId={entry.session.id}
           onPick={(sessionId) => sidebar.onPick(sessionId)}
         />

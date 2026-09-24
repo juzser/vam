@@ -111,7 +111,11 @@ import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
 import { ContextMenu } from '../panels/ContextMenu.js';
 import { copyText } from '../panels/clipboard.js';
-import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
+import {
+  DetailPanel,
+  type Tab as DetailTab,
+  type StartingPaneWait,
+} from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { describeIcon, parseIcon } from '../panels/icon-value.js';
@@ -284,6 +288,15 @@ const STATUS_MAX_CHARS = 72;
  * and the refusal says what happened either way.
  */
 const REPEAT_WINDOW_MS = 1_500;
+
+/**
+ * HOW LONG START SESSION / RESUME WAIT BEFORE OFFERING THE TERMINAL VIEW
+ * INSTEAD OF A SPINNER -- `startingPaneByKey`'s own comment. Exported for the
+ * same reason `PAINT_LIFETIME_MS` is: a test that means "past the timeout"
+ * says so in this name rather than restating the number and drifting from it
+ * the day this changes.
+ */
+export const START_PANE_WAIT_TIMEOUT_MS = 30_000;
 
 /**
  * A status message shortened for the bar, never for the log.
@@ -2557,6 +2570,110 @@ function CanvasInner({
   const setWritingFor = useCallback((sessionId: string, value: boolean) => {
     setWritingBySession((current) => ({ ...current, [sessionId]: value }));
   }, []);
+  /**
+   * THE WAIT BETWEEN A PRESS AND THE AGENT REGISTERING -- Start session or
+   * Resume, on a pane row (`StartSession`/`TerminalOnlyStart`, `DetailPanel.tsx`).
+   *
+   * Operator: "after clicking Start session on the start screen, there needs
+   * to be a loading state while the session is being created." `writingBySession`
+   * above already covers the write itself, and the write is not the wait:
+   * `typeIntoOwnPane` resolves once the KEYS are typed, seconds before the
+   * agent registers anywhere vam can see it (`startSessionIn`'s own header),
+   * so a guard that cleared with the write would go quiet exactly when the
+   * operator is still watching a shell prompt.
+   *
+   * KEYED BY THE PANE, NOT THE SESSION ID, for the reason `viewBySession`'s
+   * rename effect above exists at all: an `unstarted`/`terminal` row changes
+   * ID the instant the agent registers (`Session.pane`'s own comment,
+   * `domain/model.ts`) -- so a record keyed by `entry.session.id` would name
+   * an id that has already stopped existing at the exact moment its own
+   * write succeeded. `entry.session.pane` is the one fact both rows share.
+   *
+   * STATE, NOT A REF, because `DetailPanel` draws it -- and Canvas state,
+   * not `StartSession`'s own, for the same reason `sendFailureBySession`
+   * above is not local to the composer: ONE `DetailPanel` instance is reused
+   * for every tab a pane holds (`renderLeaf`'s own comment), so a wait held
+   * in that component's local state would follow the pane to whichever OTHER
+   * session the operator switches to next, or vanish switching away and back.
+   */
+  const [startingPaneByKey, setStartingPaneByKey] = useState<
+    Readonly<Record<string, StartingPaneWait>>
+  >({});
+  /**
+   * PAST THIS, NOTHING IS WORTH WAITING FOR SILENTLY -- the operator's own
+   * bound (`START_PANE_WAIT_TIMEOUT_MS` above), and `StartingSession`'s
+   * neighbour rather than its twin: that indicator (new session, a pane that
+   * does not exist yet) deliberately names no duration because vam has
+   * nothing to measure against; THIS wait is for a pane the operator can
+   * already see and can already reach by hand (the Terminal view), so a
+   * bound that hands them that door is honest where a bare "still waiting"
+   * forever would not be.
+   */
+  /** One pending timeout per waiting pane, so `clearStartingPane` can cancel
+   *  the ONE that named this key rather than leaving it to fire later against
+   *  a record that has already moved on to a different wait. */
+  const startingPaneTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const beginStartingPane = useCallback((key: string, wait: StartingPaneWait) => {
+    const existing = startingPaneTimeouts.current.get(key);
+    if (existing !== undefined) clearTimeout(existing);
+    setStartingPaneByKey((current) => ({ ...current, [key]: wait }));
+    const handle = setTimeout(() => {
+      startingPaneTimeouts.current.delete(key);
+      setStartingPaneByKey((current) => {
+        const value = current[key];
+        // Superseded by a later `beginStartingPane`/`clearStartingPane`
+        // while this timer was ticking -- nothing here is still true of it.
+        if (value === undefined || value.timedOut) return current;
+        return { ...current, [key]: { ...value, timedOut: true } };
+      });
+    }, START_PANE_WAIT_TIMEOUT_MS);
+    startingPaneTimeouts.current.set(key, handle);
+  }, []);
+  const clearStartingPane = useCallback((key: string) => {
+    const existing = startingPaneTimeouts.current.get(key);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+      startingPaneTimeouts.current.delete(key);
+    }
+    setStartingPaneByKey((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+  // Nothing is left ticking behind a canvas that has already gone -- the same
+  // discipline `paintCount`'s own sweep effect keeps for its interval.
+  useEffect(
+    () => () => {
+      for (const handle of startingPaneTimeouts.current.values()) clearTimeout(handle);
+      startingPaneTimeouts.current.clear();
+    },
+    [],
+  );
+  /**
+   * AND IT ENDS WHEN THE ROW ITSELF SAYS SO -- never when the write resolves
+   * (`beginStartingPane`'s own header), and never on a timer either: the
+   * timeout above only stops the SPINNER, not the wait, because vam still has
+   * no better source of truth than the next poll. A row is still waited on
+   * while it is `unstarted` or `terminal`; anything else -- it went `running`,
+   * it closed, the project it lived in vanished -- ends the wait, the same
+   * "AND IT ENDS WHEN THE ROW ARRIVES" rule the brand-new-session `starting`
+   * indicator follows a few screens up.
+   */
+  useEffect(() => {
+    const keys = Object.keys(startingPaneByKey);
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      const stillWaiting =
+        row !== undefined &&
+        (row.session.status === 'unstarted' || row.session.status === 'terminal');
+      if (!stillWaiting) clearStartingPane(key);
+    }
+  }, [allEntries, startingPaneByKey, clearStartingPane]);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -2986,6 +3103,54 @@ function CanvasInner({
   }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
 
   /**
+   * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
+   * what a pane may hold and draw as a tab. `drawnPaneTabs`, A11.1's
+   * adoption effect and A15.5's prune effect all read from HERE, never
+   * `allEntries` and never `entries`.
+   *
+   * NOT `allEntries`: the operator's own report -- a new session in a
+   * project whose OTHER sessions were running outside vam showed every one
+   * of them as a tab, though the sidebar (`hideForeign`, on by default) drew
+   * only the one just started. `allEntries` is unfiltered, and A11.1's
+   * "every session of the project is a tab, always" adopted the foreign ones
+   * the moment the project loaded -- before the operator toggled anything.
+   * The same gap applies to a DISMISSED row: an explicit "get this off my
+   * screen" the sidebar honours and the tab strip did not.
+   *
+   * NOT `entries` either -- A15.1's own rule, kept: "a pane the operator
+   * deliberately populated should not vanish because the search box or a
+   * status pill now hides its session." `entries` also narrows by
+   * `hideAgentStarted`, `onlyPrompted` and `hideEnded`, and
+   * `isHiddenByEndedFilter`'s own contract ties `hideEnded` to the LIVE
+   * status pill in a way that only makes sense inside the sidebar's own
+   * pipeline (its own comment: "the status pill wins"). Reusing that logic
+   * here, against a pill this layer deliberately does not read, would either
+   * fight it or silently duplicate a second copy of it. So this layer
+   * answers a narrower question than `entries` does: not vam's, or
+   * dismissed. Nothing here about being busy, being an agent's own session,
+   * or having finished -- those stay exactly the sidebar-only narrowing they
+   * already were.
+   *
+   * Same two predicates `entries` calls (`isSessionDismissed`,
+   * `isHiddenByForeignFilter`), the same listing-gap stand-down and the same
+   * demo exemption -- `foreignHiddenCount` below already pairs them this way
+   * for the quiet line's own count.
+   */
+  const paneEligibleEntries = useMemo(() => {
+    const undismissed = allEntries.filter(
+      (e) =>
+        !isSessionDismissed(
+          prefs,
+          e.session.source ?? e.project.source ?? 'unknown',
+          e.session.id,
+          e.session.activity,
+        ),
+    );
+    if (vamListingGap !== null || source.kind === 'demo') return undismissed;
+    return undismissed.filter((e) => !isHiddenByForeignFilter(e.session, prefs.filters));
+  }, [allEntries, prefs, vamListingGap, source.kind]);
+
+  /**
    * What each origin rule takes away, counted over the WHOLE workspace and
    * independently of whether its toggle is on — the popover shows it either
    * way, so turning one on is a number you saw coming rather than a row that
@@ -3278,8 +3443,12 @@ function CanvasInner({
    */
   const focusedPaneTabs = useMemo(
     () =>
-      drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
-    [allEntries, panes, focusedPaneId, activeProjectId],
+      drawnPaneTabs(
+        paneEligibleEntries,
+        findLeaf(panes, focusedPaneId)?.sessionIds ?? [],
+        activeProjectId,
+      ),
+    [paneEligibleEntries, panes, focusedPaneId, activeProjectId],
   );
   /**
    * EVERY TAB ON SCREEN, IN THE ORDER THE STRIPS PAINT THEM — what
@@ -3299,25 +3468,28 @@ function CanvasInner({
    */
   const drawnTabsAcrossPanes = useMemo(
     () =>
-      leaves(panes).flatMap((leaf) => drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId)),
-    [allEntries, panes, activeProjectId],
+      leaves(panes).flatMap((leaf) =>
+        drawnPaneTabs(paneEligibleEntries, leaf.sessionIds, activeProjectId),
+      ),
+    [paneEligibleEntries, panes, activeProjectId],
   );
   /**
-   * EVERY session of the active project, filters and all — the list A11.1's
-   * invariant is stated over. Read from `allEntries` rather than the filtered
-   * `entries` for the reason the prune effect gives: a filter narrows what
-   * the SIDEBAR lists, and must not decide which sessions a pane holds, or
-   * turning one on would silently drop tabs and turning it off would silently
-   * add them.
+   * EVERY PANE-ELIGIBLE session of the active project — the list A11.1's
+   * invariant is stated over. Read from `paneEligibleEntries`, not
+   * `allEntries` (that was the bug: every foreign or dismissed session of
+   * the project got auto-adopted as a tab the moment the project loaded) and
+   * not the fully filtered `entries` either (a search query or a status pill
+   * must not decide which sessions a pane holds — see `paneEligibleEntries`'
+   * own comment for why that line is drawn between the two).
    */
   const activeProjectSessionIds = useMemo(
     () =>
       activeProjectId === null
         ? []
-        : allEntries
+        : paneEligibleEntries
             .filter((entry) => entry.project.id === activeProjectId)
             .map((entry) => entry.session.id),
-    [allEntries, activeProjectId],
+    [paneEligibleEntries, activeProjectId],
   );
 
   // The render-phase half of the two mirrors declared beside `panes` above.
@@ -3336,6 +3508,18 @@ function CanvasInner({
    * cannot churn the render, and it never closes the last pane. Skipped
    * entirely while the model is empty — that is the pre-load state, not
    * every session closing at once.
+   *
+   * "OPEN" NOW MEANS PANE-ELIGIBLE, NOT MERELY PRESENT. `open` used to read
+   * `allEntries`, so an already-open tab whose session turned foreign or got
+   * dismissed while a pane held it stayed a tab forever — the sidebar's own
+   * row was gone and the strip's was not. Sourcing `open` from
+   * `paneEligibleEntries` instead means the same session leaving that set
+   * (the operator dismisses it, or turns `hideForeign` on) prunes its tab the
+   * next render, same as a session that actually closed: `pruneClosedTabs`
+   * already picks the next kept tab in the leaf, or draws "no sessions open"
+   * when none are left. `wasPaneOf`/`nowByPane`/`lastPaneOfSession` below
+   * stay on `allEntries` — identity tracking for the rename case a few lines
+   * down, a different question from eligibility.
    *
    * AND THE KEYBOARD GOES WITH THE PANE THAT CLOSED. A pane emptied this way
    * is closed, so this is the one site that can leave `focusedPaneId` naming
@@ -3359,7 +3543,7 @@ function CanvasInner({
     if (allEntries.length === 0) {
       return;
     }
-    const open = new Set(allEntries.map((entry) => entry.session.id));
+    const open = new Set(paneEligibleEntries.map((entry) => entry.session.id));
     /**
      * BEFORE THE PRUNE, THE RENAME. A row can change identity without its
      * pane changing at all: a vam pane with nothing in it is a row keyed by
@@ -3413,7 +3597,7 @@ function CanvasInner({
     if (survivor !== undefined) {
       setFocusedPaneId(survivor.id);
     }
-  }, [allEntries, setFocusedPaneId]);
+  }, [allEntries, paneEligibleEntries, setFocusedPaneId]);
 
   /**
    * The other half of the per-pane `+`: the session it started, once it
@@ -3564,6 +3748,15 @@ function CanvasInner({
    * The `orphans` read off the rendered tree is an early-out, not the
    * decision: it keeps the common render from touching state at all, while
    * the updater is what actually decides against the freshest tree.
+   *
+   * AMENDED: "every session" now means every PANE-ELIGIBLE session
+   * (`activeProjectSessionIds`, sourced from `paneEligibleEntries`), not
+   * literally every row the project has. "All of them, always" predates
+   * `hideForeign` and dismissal; taken literally against a project with a
+   * session running outside vam, it auto-adopted that row into a tab the
+   * sidebar had already hidden, which is the bug `paneEligibleEntries`'s
+   * comment describes. The operator's "all of them" still holds for every
+   * session that is actually vam's to draw.
    */
   useEffect(() => {
     const orphans = activeProjectSessionIds.filter((id) => paneHolding(panes, id) === null);
@@ -4544,6 +4737,7 @@ function CanvasInner({
     async (entry: SessionEntry, providerId: ProviderId): Promise<void> => {
       const provider = resolveProvider(providerId);
       const title = entry.session.title;
+      const paneKey = entry.session.pane ?? entry.session.id;
       if (source.kind !== 'session') {
         setStatus(`nothing can be started in "${title}" from here — no source is connected`);
         return;
@@ -4553,10 +4747,18 @@ function CanvasInner({
         setStatus(`${sessionSource.label} cannot be written to — "${title}" was not started`);
         return;
       }
-      if (writingBySession[entry.session.id] ?? false) {
+      if (
+        (writingBySession[entry.session.id] ?? false) ||
+        startingPaneByKey[paneKey] !== undefined
+      ) {
         return;
       }
       setWritingFor(entry.session.id, true);
+      // THE WAIT BECOMES VISIBLE HERE, before the write is even issued -- the
+      // operator's own "immediately" -- and OUTLIVES it: cleared only by the
+      // row leaving `unstarted`/`terminal` (the effect above) or by this same
+      // press being refused below, never by the write resolving.
+      beginStartingPane(paneKey, { kind: 'start', provider: providerId, timedOut: false });
       setStatus(`starting ${provider.label} in "${title}"…`);
       try {
         await sessionSource.write.recordPrompt(entry.session.id, provider.command.join(' '));
@@ -4565,12 +4767,23 @@ function CanvasInner({
         );
         source.onWrote();
       } catch (cause) {
+        // NOTHING IS LEFT SPINNING -- `createSession`'s own discipline, a
+        // screen up: a wait that outlived this failure would say vam is
+        // still trying when vam has stopped.
+        clearStartingPane(paneKey);
         setStatus(noteFailure(`start ${provider.label}`, cause));
       } finally {
         setWritingFor(entry.session.id, false);
       }
     },
-    [source, writingBySession, setWritingFor],
+    [
+      source,
+      writingBySession,
+      setWritingFor,
+      startingPaneByKey,
+      beginStartingPane,
+      clearStartingPane,
+    ],
   );
 
   /**
@@ -4596,6 +4809,7 @@ function CanvasInner({
       const title = entry.session.title;
       const command = entry.session.resumeCommand;
       if (command === undefined) return;
+      const paneKey = entry.session.pane ?? entry.session.id;
       if (source.kind !== 'session') {
         setStatus(`nothing can be resumed in "${title}" from here — no source is connected`);
         return;
@@ -4605,22 +4819,34 @@ function CanvasInner({
         setStatus(`${sessionSource.label} cannot be written to — "${title}" was not resumed`);
         return;
       }
-      if (writingBySession[entry.session.id] ?? false) {
+      if (
+        (writingBySession[entry.session.id] ?? false) ||
+        startingPaneByKey[paneKey] !== undefined
+      ) {
         return;
       }
       setWritingFor(entry.session.id, true);
+      beginStartingPane(paneKey, { kind: 'resume', timedOut: false });
       setStatus(`resuming "${title}"…`);
       try {
         await sessionSource.write.recordPrompt(entry.session.id, command);
         setStatus(`typed the resume command into "${title}" — it appears here once it registers`);
         source.onWrote();
       } catch (cause) {
+        clearStartingPane(paneKey);
         setStatus(noteFailure('resume', cause));
       } finally {
         setWritingFor(entry.session.id, false);
       }
     },
-    [source, writingBySession, setWritingFor],
+    [
+      source,
+      writingBySession,
+      setWritingFor,
+      startingPaneByKey,
+      beginStartingPane,
+      clearStartingPane,
+    ],
   );
 
   /**
@@ -6742,6 +6968,16 @@ function CanvasInner({
         // rule `onStartSession` follows; `DetailPanel` further withholds the
         // button unless the row itself carries a `resumeCommand`.
         onResumeInPane: entry === null ? undefined : () => void resumeInPane(entry),
+        // THIS PANE'S ROW's own wait, if it has one -- see `startingPaneByKey`'s
+        // own comment. Looked up by the SAME key `startSessionIn`/`resumeInPane`
+        // write it under, `entry.session.pane`, not `entry.session.id`: a row
+        // whose agent just registered carries a NEW id but the SAME pane, and
+        // this is what lets the wait still find it for the one poll where the
+        // two disagree.
+        startingPane:
+          entry === null
+            ? null
+            : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
         // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
         // when THIS pane holds nothing, vam has no session to show ANYWHERE
         // (`entries`, the same filtered set the sidebar and the tab strip
@@ -6768,6 +7004,12 @@ function CanvasInner({
                 foreignHiddenCount,
                 onShowForeign: () =>
                   onSidebarOriginFilters({ ...prefs.filters, hideForeign: false }),
+                // THE SAME WAIT the sidebar's own New project button already
+                // shows (`pending(NEW_PROJECT_PENDING, …)`, `SessionList.tsx`)
+                // -- this screen's button is the identical act and owes the
+                // operator the identical visible "this is running" it was
+                // missing (item 4 of the brief).
+                pending: pendingAction === NEW_PROJECT_PENDING,
               },
         // The Files tab's tree width, and the way back. GLOBAL for the same
         // reason `defaultProvider` above it is passed identically to every
@@ -6859,6 +7101,7 @@ function CanvasInner({
       writingBySession,
       actionIndexBySession,
       sendFailureBySession,
+      startingPaneByKey,
       viewBySession,
       viewSeed,
       source,
@@ -6883,6 +7126,7 @@ function CanvasInner({
       onSidebarOriginFilters,
       hasOwnSession,
       sidebarLoading,
+      pendingAction,
     ],
   );
 
@@ -6931,7 +7175,7 @@ function CanvasInner({
         : leaf.sessionId === null
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
-      const paneTabs = drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId);
+      const paneTabs = drawnPaneTabs(paneEligibleEntries, leaf.sessionIds, activeProjectId);
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -7044,7 +7288,7 @@ function CanvasInner({
       starting,
       focusedPaneId,
       focusedEntry,
-      allEntries,
+      paneEligibleEntries,
       entries,
       entriesById,
       activeProjectId,
@@ -7121,6 +7365,7 @@ function CanvasInner({
         <PhoneShell
           sidebar={sidebarProps}
           detail={detailProps}
+          paneEligibleEntries={paneEligibleEntries}
           sourceReadout={<SourceReadout source={source} />}
           // A read-only server registers no write routes at all, so the box is
           // withdrawn rather than drawn and refused. Only a `session` source
