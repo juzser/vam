@@ -199,6 +199,10 @@ describe('the phone session screen', () => {
     // focused session's draft changes, or this controlled textarea reverts
     // every keystroke to the stale cached value.
     openSession();
+    // Proves this is exercising `detailProps` (handed straight to
+    // `PhoneShell`) and not `PaneDetail`'s own memo.
+    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-composer-bar]')).toHaveLength(1);
     const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
     expect(textarea).not.toBeNull();
     act(() => {
@@ -218,6 +222,10 @@ describe('the phone session screen', () => {
     // stale memoized props would still hand the panel `composing: false` --
     // the box would stay readOnly and no keystroke could ever land.
     openSession();
+    // Proves this is exercising `detailProps` (handed straight to
+    // `PhoneShell`) and not `PaneDetail`'s own memo.
+    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-composer-bar]')).toHaveLength(1);
     const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
     expect(textarea).not.toBeNull();
     expect(textarea.readOnly).toBe(true);
@@ -251,6 +259,10 @@ describe('the phone session screen', () => {
     act(() => {
       fireEvent.click(rows()[0] as Element);
     });
+    // Proves this is exercising `detailProps` (handed straight to
+    // `PhoneShell`) and not `PaneDetail`'s own memo.
+    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-composer-bar]')).toHaveLength(1);
     const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
     act(() => {
       fireEvent.focus(textarea);
