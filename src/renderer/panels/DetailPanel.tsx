@@ -86,6 +86,7 @@ import {
   NotepadText,
   Paperclip,
   Play,
+  Plus,
   Sparkles,
   SquareTerminal,
   TriangleAlert,
@@ -6479,7 +6480,24 @@ export function DetailPanel(props: DetailPanelProps) {
    * a copy of the mode: the mode lives in the draft, which is the text that
    * actually gets recorded.
    */
-  type ToolsPopover = 'provider' | 'model' | 'mode';
+  /**
+   * `'phone-overflow'` JOINED THE THREE FOR THE SAME REASON A FOURTH NEVER
+   * DID BEFORE IT: it is one more name this one slot can hold, not a second
+   * kind of state. The phone composer diet (operator: "model/mode pickers
+   * leave the phone composer, reachable from an overflow") pulled the
+   * provider/model/mode TOGGLE buttons out of the tools row on phone (see
+   * `!phone &&` around each, below) but left their popovers -- the actual
+   * listboxes -- exactly where they were, unconditional on `phone`. The "+"
+   * button opens this sheet; a row inside it (`data-composer-overflow-model`
+   * etc.) opens one of the other three by calling `setOpenPopover` directly,
+   * which is a DRILL-DOWN for free: the single-slot rule above already closes
+   * whichever popover was open the moment another one is asked for, so
+   * tapping "Model" inside the sheet closes the sheet and opens the model
+   * listbox in the same breath, with no extra state and no extra dismissal
+   * wiring -- the existing outside-pointerdown effect and `dismissPopoverOnEscape`
+   * already key off `openPopover` and know nothing else changed.
+   */
+  type ToolsPopover = 'provider' | 'model' | 'mode' | 'phone-overflow';
   const [openPopover, setOpenPopover] = useState<ToolsPopover | null>(null);
   /** A toggle in one place: the same click that opens closes, as it always did. */
   const togglePopover = (name: ToolsPopover) =>
@@ -6487,6 +6505,7 @@ export function DetailPanel(props: DetailPanelProps) {
   const providerPickerOpen = openPopover === 'provider';
   const modePickerOpen = openPopover === 'mode';
   const modelPickerOpen = openPopover === 'model';
+  const phoneOverflowOpen = openPopover === 'phone-overflow';
   /**
    * AND A POINTER LANDING ANYWHERE ELSE CLOSES IT -- the other half of the
    * report, and the half that had no code at all: nothing anywhere listened
@@ -9355,6 +9374,152 @@ export function DetailPanel(props: DetailPanelProps) {
                   </span>
                 </button>
               )}
+              {/* PHONE COMPOSER DIET (docs/design/phone-core-loop.md §3.4):
+                  one "+" replaces FIVE resident icons (attach, attach-image,
+                  provider, model, mode) with ONE, leaving the phone row at
+                  textarea + "+" + mic + Send -- 4 controls, not 6..9. Nothing
+                  each row does is new: every action below is the SAME
+                  handler/state the desktop's own resident control already
+                  calls (`fileRef.current?.click()`, `pickImage()`,
+                  `setOpenPopover('provider' | 'model' | 'mode')`), reached
+                  through one extra tap instead of a resident icon. Desktop is
+                  untouched -- this whole block is `phone &&`. */}
+              {phone && (
+                <div data-popover-root="phone-overflow" className="flex-none">
+                  <button
+                    type="button"
+                    data-composer-overflow
+                    onKeyDown={dismissPopoverOnEscape}
+                    aria-haspopup="menu"
+                    aria-expanded={phoneOverflowOpen}
+                    aria-label="more composer tools — attach, model, mode"
+                    onClick={() => togglePopover('phone-overflow')}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                  >
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                    >
+                      <Plus size={12} strokeWidth={1.7} />
+                    </span>
+                  </button>
+                  {phoneOverflowOpen && (
+                    <div
+                      data-composer-overflow-menu
+                      role="menu"
+                      aria-label="composer tools"
+                      onKeyDown={dismissPopoverOnEscape}
+                      className={COMPOSER_POPOVER_MENU}
+                      style={
+                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
+                      }
+                    >
+                      <button
+                        type="button"
+                        data-composer-overflow-attach
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenPopover(null);
+                          fileRef.current?.click();
+                        }}
+                        className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                      >
+                        <Paperclip size={12} strokeWidth={1.7} aria-hidden="true" />
+                        Attach file
+                      </button>
+                      {pickImageAttachment !== undefined && entry !== null && (
+                        <button
+                          type="button"
+                          data-composer-overflow-attach-image
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenPopover(null);
+                            void pickImage();
+                          }}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          <ImageIcon size={12} strokeWidth={1.7} aria-hidden="true" />
+                          Attach image
+                        </button>
+                      )}
+                      {CAN_CHOOSE_PROVIDER && onSetDefaultProvider !== undefined && (
+                        <button
+                          type="button"
+                          data-composer-overflow-provider
+                          role="menuitem"
+                          aria-haspopup="listbox"
+                          onClick={() => setOpenPopover('provider')}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          Provider: {currentProvider.label}
+                        </button>
+                      )}
+                      {modelControl === 'picker' && (
+                        <button
+                          type="button"
+                          data-composer-overflow-model
+                          role="menuitem"
+                          aria-haspopup="listbox"
+                          onClick={() => setOpenPopover('model')}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          Model: {modelButtonLabel(running?.name ?? null)}
+                        </button>
+                      )}
+                      {/* DISABLED, NOT ABSENT -- same rule the desktop's own
+                          disabled model row states at length above: a model is
+                          a fact about the session whether or not vam can reach
+                          it. No listbox to open, so this row is informational
+                          only, same as its desktop twin. */}
+                      {modelControl === 'disabled' && (
+                        <div data-composer-overflow-model className="px-2 py-1">
+                          <p className="text-control text-ink-faint">
+                            Model: {recordedModel ?? 'model'}
+                          </p>
+                          <p className="text-meta text-ink-faint">vam cannot switch models here.</p>
+                        </div>
+                      )}
+                      {modelControl === 'request' && (
+                        <div
+                          data-composer-overflow-model-request
+                          className="flex items-center gap-1.5 px-2 py-1"
+                        >
+                          <label
+                            htmlFor="phone-model-request"
+                            className="text-control text-ink-dim"
+                          >
+                            Model
+                          </label>
+                          <input
+                            id="phone-model-request"
+                            data-model-request
+                            value={readModelRequest(draft)}
+                            onChange={(event) =>
+                              onDraftChange(setModelRequest(draft, event.target.value))
+                            }
+                            placeholder="model"
+                            aria-label="model requested in this prompt"
+                            className={`vam-tap min-w-0 flex-1 rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink placeholder:text-ink-quiet ${FOCUS_RING}`}
+                          />
+                        </div>
+                      )}
+                      {canCycleMode && (
+                        <button
+                          type="button"
+                          data-composer-overflow-mode
+                          role="menuitem"
+                          aria-haspopup="listbox"
+                          onClick={() => setOpenPopover('mode')}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          Mode: {currentMode}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
@@ -9368,29 +9533,34 @@ export function DetailPanel(props: DetailPanelProps) {
                 onChange={(event) => void takeFile(event.currentTarget)}
                 className="hidden"
               />
-              <Note text="puts the file’s text into the prompt text — vam uploads nothing">
-                <button
-                  type="button"
-                  data-attach
-                  aria-label="attach a text file to this prompt"
-                  onClick={() => fileRef.current?.click()}
-                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
-                >
-                  {/* HIT ON THE ELEMENT, PAINT ON THE SKIN -- the same shape
-                  the phone's other class-A controls take, and the last one
-                  still painting its border on the 44 box. The button keeps its
-                  box and centres; the border, the ground and the radius move
-                  inward, where the phone rule can shrink them to 30 without
-                  touching the touch target (`styles.css`). */}
-                  <span
-                    aria-hidden="true"
-                    data-tap-skin
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+              {/* PHONE: this trigger moves into the "+" overflow
+                  (`data-composer-overflow`) below -- see its own comment.
+                  Desktop keeps the resident icon, unchanged. */}
+              {!phone && (
+                <Note text="puts the file’s text into the prompt text — vam uploads nothing">
+                  <button
+                    type="button"
+                    data-attach
+                    aria-label="attach a text file to this prompt"
+                    onClick={() => fileRef.current?.click()}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                   >
-                    <Paperclip size={12} strokeWidth={1.7} />
-                  </span>
-                </button>
-              </Note>
+                    {/* HIT ON THE ELEMENT, PAINT ON THE SKIN -- the same shape
+                    the phone's other class-A controls take, and the last one
+                    still painting its border on the 44 box. The button keeps its
+                    box and centres; the border, the ground and the radius move
+                    inward, where the phone rule can shrink them to 30 without
+                    touching the touch target (`styles.css`). */}
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                    >
+                      <Paperclip size={12} strokeWidth={1.7} />
+                    </span>
+                  </button>
+                </Note>
+              )}
               {attachedName !== null && (
                 <span
                   data-attach-chip
@@ -9420,7 +9590,9 @@ export function DetailPanel(props: DetailPanelProps) {
               on its own line in the prompt text -- Claude Code reads the
               bytes itself off that path; vam still uploads nothing. See
               `state/artifacts/vam-image-attach/findings.md`. */}
-              {pickImageAttachment !== undefined && entry !== null && (
+              {/* PHONE: this trigger moves into the "+" overflow too -- same
+                  note as the text-attach button above. */}
+              {!phone && pickImageAttachment !== undefined && entry !== null && (
                 <Note text="puts an image’s path into the prompt — it must sit inside this session’s own directory; vam uploads nothing">
                   <button
                     type="button"
@@ -9501,33 +9673,40 @@ export function DetailPanel(props: DetailPanelProps) {
                    only one of them would dismiss on a press inside the very
                    thing being pressed. */
                 <div data-popover-root="provider" className="flex-none">
-                  <Note text="the agent NEW sessions start with — not this one, which is already running">
-                    <button
-                      type="button"
-                      data-provider-picker-toggle
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-haspopup="listbox"
-                      aria-expanded={providerPickerOpen}
-                      aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
-                      onClick={() => togglePopover('provider')}
-                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
-                    >
-                      <span
-                        aria-hidden="true"
-                        data-tap-skin
-                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                  {/* PHONE: the toggle moves into the "+" overflow's "Provider"
+                      row, which opens this SAME listbox by setting the shared
+                      `openPopover` state directly -- see `data-composer-overflow`
+                      below. This wrapper and the listbox stay unconditional so
+                      that row has something to open. */}
+                  {!phone && (
+                    <Note text="the agent NEW sessions start with — not this one, which is already running">
+                      <button
+                        type="button"
+                        data-provider-picker-toggle
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-haspopup="listbox"
+                        aria-expanded={providerPickerOpen}
+                        aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
+                        onClick={() => togglePopover('provider')}
+                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                       >
-                        {(() => {
-                          const mark = PROVIDER_MARKS[currentProvider.id];
-                          return mark === undefined ? (
-                            <Box size={12} strokeWidth={1.7} />
-                          ) : (
-                            <mark.Glyph size={12} />
-                          );
-                        })()}
-                      </span>
-                    </button>
-                  </Note>
+                        <span
+                          aria-hidden="true"
+                          data-tap-skin
+                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                        >
+                          {(() => {
+                            const mark = PROVIDER_MARKS[currentProvider.id];
+                            return mark === undefined ? (
+                              <Box size={12} strokeWidth={1.7} />
+                            ) : (
+                              <mark.Glyph size={12} />
+                            );
+                          })()}
+                        </span>
+                      </button>
+                    </Note>
+                  )}
                   {providerPickerOpen && (
                     <div
                       data-provider-picker
@@ -9628,7 +9807,13 @@ export function DetailPanel(props: DetailPanelProps) {
               cannot falsify is a rule nobody chose, so it is not here.
               `e2e/model-picker-shots.mjs` measures that the note really
               opens both ways, and what the dimmed label paints. */}
-              {modelControl === 'request' && (
+              {/* PHONE: a record-only source's free-text `model:` line has no
+                  popover to reopen from an overflow row -- it IS the control
+                  -- so it moves into the "+" sheet whole, as
+                  `data-composer-overflow-model-request` below, rather than
+                  splitting a toggle from a menu the way the picker/mode
+                  controls do. */}
+              {!phone && modelControl === 'request' && (
                 <Note text="vam cannot switch models here — the factory chooses; this writes your request into the prompt">
                   <input
                     data-model-request
@@ -9725,21 +9910,27 @@ export function DetailPanel(props: DetailPanelProps) {
                       line. `modelRunningClause` holds the two sentences and
                       the argument for keeping them apart; the short of it is
                       that "running" is a claim only the footer supports. */}
-                  <Note
-                    text={
-                      running === null
-                        ? MODEL_PICKER_NOTE
-                        : `${modelRunningClause(running)} · ${MODEL_PICKER_NOTE}`
-                    }
-                  >
-                    <button
-                      type="button"
-                      data-model-picker
-                      data-model-picker-state="picker"
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-haspopup="listbox"
-                      aria-expanded={modelPickerOpen}
-                      /* LABELLED WITH THE MODEL THE PANE REPORTS, and with the
+                  {/* PHONE: the toggle moves into the "+" overflow's "Model"
+                      row, which opens this SAME listbox (`modelPickerOpen`,
+                      below) by setting the shared `openPopover` state
+                      directly. This `Note`+`button` is desktop-only; the
+                      wrapper and the listbox stay unconditional. */}
+                  {!phone && (
+                    <Note
+                      text={
+                        running === null
+                          ? MODEL_PICKER_NOTE
+                          : `${modelRunningClause(running)} · ${MODEL_PICKER_NOTE}`
+                      }
+                    >
+                      <button
+                        type="button"
+                        data-model-picker
+                        data-model-picker-state="picker"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-haspopup="listbox"
+                        aria-expanded={modelPickerOpen}
+                        /* LABELLED WITH THE MODEL THE PANE REPORTS, and with the
                          old word when there is none.
 
                          WHAT CHANGED. This said "model" and nothing else,
@@ -9769,9 +9960,9 @@ export function DetailPanel(props: DetailPanelProps) {
                          eye is told rather than only what the control does --
                          and it carries the qualifier too, because a screen
                          reader has no tooltip to hover for the rest of it. */
-                      aria-label={modelButtonName(running)}
-                      onClick={() => togglePopover('model')}
-                      /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
+                        aria-label={modelButtonName(running)}
+                        onClick={() => togglePopover('model')}
+                        /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
                          THAT CAN -- because it is the only thing in the row
                          whose width is not vam's to choose. Everything else
                          here is a 24px glyph; this wears whatever the CLI
@@ -9793,22 +9984,23 @@ export function DetailPanel(props: DetailPanelProps) {
                          status line does when its pane is narrow, and the
                          whole name stays one hover or one Tab away in the
                          accessible name above and the note around it. */
-                      className="vam-tap flex h-6 min-w-0 shrink cursor-pointer items-center text-ink-dim hover:text-ink"
-                    >
-                      <span
-                        aria-hidden="true"
-                        data-tap-skin
-                        className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                        className="vam-tap flex h-6 min-w-0 shrink cursor-pointer items-center text-ink-dim hover:text-ink"
                       >
-                        <span data-model-label className="truncate">
-                          {modelButtonLabel(running?.name ?? null)}
-                        </span>
-                        {/* The chevron never gives way: a picker with no
+                        <span
+                          aria-hidden="true"
+                          data-tap-skin
+                          className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                        >
+                          <span data-model-label className="truncate">
+                            {modelButtonLabel(running?.name ?? null)}
+                          </span>
+                          {/* The chevron never gives way: a picker with no
                             affordance left on it is a label. */}
-                        <ChevronDown size={11} strokeWidth={2} className="flex-none" />
-                      </span>
-                    </button>
-                  </Note>
+                          <ChevronDown size={11} strokeWidth={2} className="flex-none" />
+                        </span>
+                      </button>
+                    </Note>
+                  )}
                   {modelPickerOpen && (
                     <div
                       data-model-picker-menu
@@ -10007,7 +10199,11 @@ export function DetailPanel(props: DetailPanelProps) {
                   )}
                 </div>
               )}
-              {modelControl === 'disabled' && (
+              {/* PHONE: moves into the "+" overflow as a plain (still
+                  disabled) row -- `data-composer-overflow-model` below,
+                  same recordedModel/note text, no separate popover to
+                  reopen since this state has never had one. */}
+              {!phone && modelControl === 'disabled' && (
                 /* THE NAME WHEN THE SOURCE KEEPS ONE, AND THE OLD WORD WHEN
                    IT DOES NOT.
 
@@ -10115,34 +10311,40 @@ export function DetailPanel(props: DetailPanelProps) {
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
                 <div data-popover-root="mode" className="flex-none">
-                  <Note
-                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
-                  >
-                    <button
-                      type="button"
-                      data-mode-toggle
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-haspopup="listbox"
-                      aria-expanded={modePickerOpen}
-                      aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
-                      onClick={() => togglePopover('mode')}
-                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                  {/* PHONE: the toggle moves into the "+" overflow's "Mode"
+                      row, which opens this SAME listbox by setting the shared
+                      `openPopover` state directly -- see the model toggle's
+                      own comment above for the identical pattern. */}
+                  {!phone && (
+                    <Note
+                      text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
                     >
-                      {/* The glyph carries the ink now (`MODE_SKIN`), so the
-                          button no longer sets one: `text-ink-dim
-                          hover:text-ink` here would have been a second opinion
-                          about the same pixels, settled by source order rather
-                          than by intent. The hover affordance stays on the
-                          chip, which is where it was already drawn. */}
-                      <span
-                        aria-hidden="true"
-                        data-tap-skin
-                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                      <button
+                        type="button"
+                        data-mode-toggle
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-haspopup="listbox"
+                        aria-expanded={modePickerOpen}
+                        aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
+                        onClick={() => togglePopover('mode')}
+                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                       >
-                        <ModeGlyph mode={currentMode} />
-                      </span>
-                    </button>
-                  </Note>
+                        {/* The glyph carries the ink now (`MODE_SKIN`), so the
+                            button no longer sets one: `text-ink-dim
+                            hover:text-ink` here would have been a second opinion
+                            about the same pixels, settled by source order rather
+                            than by intent. The hover affordance stays on the
+                            chip, which is where it was already drawn. */}
+                        <span
+                          aria-hidden="true"
+                          data-tap-skin
+                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                        >
+                          <ModeGlyph mode={currentMode} />
+                        </span>
+                      </button>
+                    </Note>
+                  )}
                   {modePickerOpen && (
                     <div
                       data-mode-picker
