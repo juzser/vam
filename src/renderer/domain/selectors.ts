@@ -19,6 +19,81 @@
 
 import type { CanvasModel, Command, Decision, Group, Project, Session } from './model.js';
 
+/**
+ * ORCA'S "GROUP BY" AND "SORT BY", against vam's own data.
+ *
+ * Two of orca's four `Group by` options translate cheaply: `Project` is
+ * exactly what the sidebar has always drawn, and `Status` needs nothing vam
+ * does not already have (`Session.status`). `PR` and a manual `Project
+ * order` do not -- see `docs/design/workspace-options.md` for the reasons --
+ * and are not offered here.
+ *
+ * `Sort by` has exactly two cheap members. `needs-you` is `orderedSessions`'
+ * own order left alone (urgent-first within a project, most-urgent-project
+ * first): the default, and the only order that ever shipped. `name` is the
+ * one other fact every session already carries that sorts meaningfully --
+ * `Session.title`. Orca's own "Agent Activity" has no vam equivalent: `age`
+ * is a pre-formatted display string ("2m", "6h"), not a timestamp, so nothing
+ * here can sort by it without inventing a new source fact.
+ */
+export type GroupBy = 'project' | 'status' | 'none';
+export type SortBy = 'needs-you' | 'name';
+
+export type ViewOptions = {
+  readonly groupBy: GroupBy;
+  readonly sortBy: SortBy;
+};
+
+/** `project` + `needs-you`: today's only behaviour, so a fresh install and
+ *  an upgraded one draw the identical order. */
+export const DEFAULT_VIEW_OPTIONS: ViewOptions = { groupBy: 'project', sortBy: 'needs-you' };
+
+/**
+ * The four buckets `groupBy: 'status'` draws its section headings from --
+ * orca's own four words, `SessionStatus`'s seven values folded down to them.
+ * `unstarted` and `terminal` join `idle` under "sleeping": all three share
+ * the neutral colour and the "nothing to do right now" reading; see
+ * `SessionStatus`'s own header in `model.ts` for why the three are still
+ * three separate statuses elsewhere.
+ */
+export type StatusBucket = 'needs-you' | 'running' | 'sleeping' | 'done';
+
+const STATUS_BUCKET: Readonly<Record<Session['status'], StatusBucket>> = {
+  waiting: 'needs-you',
+  running: 'running',
+  idle: 'sleeping',
+  unstarted: 'sleeping',
+  terminal: 'sleeping',
+  done: 'done',
+  failed: 'done',
+};
+
+export function statusBucketOf(session: Session): StatusBucket {
+  return STATUS_BUCKET[session.status];
+}
+
+/** Drawing order for `groupBy: 'status'`'s own section headings. */
+export const STATUS_BUCKET_ORDER: readonly StatusBucket[] = [
+  'needs-you',
+  'running',
+  'sleeping',
+  'done',
+];
+
+export const STATUS_BUCKET_LABELS: Readonly<Record<StatusBucket, string>> = {
+  'needs-you': 'Needs you',
+  running: 'Running',
+  sleeping: 'Sleeping',
+  done: 'Done',
+};
+
+/** One run, reordered by `sortBy` -- `needs-you` leaves it exactly as
+ *  handed in, because that order already came from `orderedSessions`. */
+function sortRun(run: readonly SessionEntry[], sortBy: SortBy): SessionEntry[] {
+  if (sortBy !== 'name') return [...run];
+  return [...run].sort((a, b) => a.session.title.localeCompare(b.session.title));
+}
+
 /** How many decision rows a session shows at once. */
 const VISIBLE_DECISION_COUNT = 3;
 
@@ -328,4 +403,63 @@ export function orderedPaneTabs(
 ): SessionEntry[] {
   const members = new Set(held);
   return ordered.filter((entry) => members.has(entry.session.id));
+}
+
+/**
+ * The operator's `ViewOptions`, applied to an already `orderedSessions`-
+ * ordered array. `Canvas.tsx` folds this into `entries` itself (its final
+ * step) rather than keeping it as a second, SessionList-local array, because
+ * `entries` is also what `j`/`k`/`gt`/`gT`/`f` step through -- a display
+ * order the keyboard disagreed with would be the exact defect class #475
+ * closed one layer up, for the foreign/dismissed filter. `allEntries`
+ * (`orderedSessions(model)` untouched) still feeds tab membership, so this
+ * never changes which sessions are tabs, only what order the sidebar and the
+ * keyboard agree to walk them in.
+ *
+ * `groupBy: 'project'` (the default) never reorders which project's run
+ * comes first, and never merges two projects' sessions into one run -- only
+ * `sortBy` acts, WITHIN each project's own contiguous run, which is what
+ * keeps `gt`/`gT` ("the next row with a different project id") coherent
+ * regardless of `sortBy`. `'status'` and `'none'` both regroup globally,
+ * because there is no project boundary left to respect once the operator
+ * asked not to see one.
+ */
+export function applyViewOrder(
+  entries: readonly SessionEntry[],
+  view: ViewOptions,
+): SessionEntry[] {
+  if (view.groupBy === 'status') {
+    const buckets = new Map<StatusBucket, SessionEntry[]>();
+    for (const entry of entries) {
+      const bucket = statusBucketOf(entry.session);
+      const run = buckets.get(bucket);
+      if (run === undefined) {
+        buckets.set(bucket, [entry]);
+      } else {
+        run.push(entry);
+      }
+    }
+    return STATUS_BUCKET_ORDER.flatMap((bucket) => sortRun(buckets.get(bucket) ?? [], view.sortBy));
+  }
+  if (view.groupBy === 'none') {
+    return sortRun(entries, view.sortBy);
+  }
+  // 'project': flush each contiguous project run through `sortRun`, run
+  // order (which project comes first) untouched.
+  const result: SessionEntry[] = [];
+  let run: SessionEntry[] = [];
+  let runProjectId: string | null = null;
+  const flush = () => {
+    result.push(...sortRun(run, view.sortBy));
+    run = [];
+  };
+  for (const entry of entries) {
+    if (runProjectId !== null && entry.project.id !== runProjectId) {
+      flush();
+    }
+    run.push(entry);
+    runProjectId = entry.project.id;
+  }
+  flush();
+  return result;
 }
