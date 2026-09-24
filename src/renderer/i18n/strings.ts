@@ -226,8 +226,7 @@ const EN = {
   // over a persistent connection instead of the shipping poll. Off by
   // default until it has seen real use.
   'settings.behaviour.streamingTerminal.label': 'streaming terminal (beta)',
-  'settings.behaviour.streamingTerminal.hint':
-    'draw the Terminal tab with xterm.js over a live connection instead of the periodic screen capture',
+  'settings.behaviour.streamingTerminal.hint': 'a live xterm.js pane instead of periodic capture',
   'settings.behaviour.streamingTerminal.on': 'on',
   'settings.behaviour.streamingTerminal.off': 'off',
   // DESKTOP NOTIFICATIONS. The label names the thing, not the mechanism; the
