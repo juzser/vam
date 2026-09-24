@@ -39,6 +39,7 @@ import {
   normalizeKey,
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
+import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../prefs/editor.js';
 import {
@@ -1219,10 +1220,12 @@ export function SettingsOverlay({
                       {/* THE SEND KEY IS A CHORD, and the table spells it as
                           one on purpose (`Shift-Enter`, "vam already has one
                           spelling for a modified key and this is it") — so it
-                          reaches the screen through the same renderer as every
-                          other key on this surface: ⇧⏎ on a Mac, Shift+Enter
-                          off one. */}
-                      {chordSymbols(SUBMIT_KEY_LABELS[key])}
+                          reaches the screen through `ChordGlyphs`, the ONE
+                          component every chord in this app now paints
+                          through, THIS BUTTON INCLUDED, so its own look — the
+                          operator's named reference — cannot drift from
+                          itself: ⇧ ⏎ on a Mac, Shift+Enter off one. */}
+                      <ChordGlyphs chord={SUBMIT_KEY_LABELS[key]} />
                     </button>
                   ))}
                 </div>

@@ -59,11 +59,11 @@ type TipLine = {
   readonly keys: string;
   /**
    * The SAME chords `keys` above already rendered into one sentence, kept
-   * here raw and unjoined — what `Chip` needs to draw each one through
-   * `ChordGlyphs` (a modifier glyph bigger than the key it sits beside),
-   * which a pre-joined string cannot carry two font sizes inside. `keys`
-   * stays the rendering for the one consumer that only ever wanted a
-   * sentence: the `sr-only` twin beside the chip.
+   * here raw and unjoined — what `Chip` needs to draw each one through its
+   * own `ChordGlyphs` call, one per chord, joined by a literal " or " that a
+   * pre-joined string has no seam left to insert. `keys` stays the rendering
+   * for the one consumer that only ever wanted a sentence: the `sr-only`
+   * twin beside the chip.
    */
   readonly chords: readonly string[];
 };
@@ -171,23 +171,30 @@ export function primaryChord(action: KeyAction, overrides = activeBindings()): s
  * ONE CHORD, PAINTED — every surface that draws a chip rather than only
  * SAYING one (`InlineChord` below, the tooltip's own `Chip`, `KeySheet.tsx`,
  * the status bar's `?` hint) reaches for this instead of `chordSymbols`
- * directly, so a modifier glyph and the key letter it holds down can be
- * drawn at two different sizes without a second computation of which
- * segment is which — `chordSegments` (`chords.ts`) is the one answer to
- * that question, reused rather than re-derived.
+ * directly, so every one of them paints the identical rendering rather than
+ * re-deriving it — `chordSegments` (`chords.ts`) is the one glyph table this
+ * and `chordSymbols` both read, and this component is now the one PAINTED
+ * form the whole app uses, the Send key option included (`SettingsOverlay.
+ * tsx`).
  *
- * THE OPERATOR'S OWN FINDING, reading a `⇧⌘P` chip: painted at one
- * font-size the modifiers read SMALLER than the capital letter beside them,
- * cramped rather than legible. `text-[1.3em]` on a modifier segment only,
- * `leading-none` so the taller glyph does not stretch the row it sits in —
- * the chip's own height still comes entirely from its caller's line-height
- * (`text-meta`/`text-control`, `styles.css`'s type scale), never from this
- * component, which is what keeps every chip's height unchanged.
+ * FLAT, UNIFORM-SIZE TEXT — THE SEND KEY OPTION'S OWN LOOK, AND A NEWER
+ * INSTRUCTION THAN THE ONE THIS COMPONENT SHIPPED WITH. Pull request 468
+ * painted a modifier glyph at `text-[1.3em]`, one size larger than the key
+ * beside it, on the operator's OWN finding that a `⇧⌘P` chip read cramped at
+ * one size.
+ * Read together with the operator's newer ask — "the icons in the Send key
+ * option under Sessions settings are the best" — that reference paints ⌘/⇧/⏎
+ * at exactly the SAME size as the key beside them (`SettingsOverlay.tsx`'s
+ * Send key buttons, `test/settings/chord-symbols.test.tsx` pins the exact
+ * strings), just spaced apart the way `chordSymbols` already spaces every
+ * segment on a Mac. THE NEWER INSTRUCTION WINS: no span, no size step, every
+ * glyph the same size as the letter it sits beside.
  *
  * `.textContent` OF THE RESULT IS `chordSymbols(chord, mac)`, CHARACTER FOR
- * CHARACTER — the same segments, the same separator, some of them wrapped
- * in a bigger span. `test/keyboard/shortcut-tip.test.tsx` holds the two to
- * that agreement, so a hand-rolled separator here can never drift from the
+ * CHARACTER — the same segments, the same separator, and now the identical
+ * markup a plain string would have produced, because there is nothing left
+ * to wrap. `test/keyboard/shortcut-tip.test.tsx` holds the two to that
+ * agreement, so a hand-rolled separator here can never drift from the
  * sentence `chordSymbols` still owes a tooltip's `sr-only` twin.
  */
 export function ChordGlyphs({
@@ -204,11 +211,7 @@ export function ChordGlyphs({
       {segments.map((segment, index) => (
         <Fragment key={segment.text}>
           {index > 0 ? sep : null}
-          {segment.modifier ? (
-            <span className="text-[1.3em] leading-none">{segment.text}</span>
-          ) : (
-            segment.text
-          )}
+          {segment.text}
         </Fragment>
       ))}
     </>
@@ -270,11 +273,12 @@ export function TipProvider({ children }: { readonly children: ReactNode }) {
  *
  * A border is not readable, so the word is spoken instead: the visible chip
  * goes `aria-hidden` and an `sr-only` twin carries "shortcut: <chord>". The
- * PAINTED half draws each chord through `ChordGlyphs` (modifiers bigger than
- * the key), joined by a literal " or " for the rare action that holds two;
- * the SPOKEN half stays `keys`, `shortcutLines`' own pre-joined sentence, so
- * neither surface prettifies what the key sheet spells and the two can never
- * name a different chord.
+ * PAINTED half draws each chord through `ChordGlyphs` (the Send key option's
+ * own flat, one-size rendering — see that component's doc comment), joined
+ * by a literal " or " for the rare action that holds two; the SPOKEN half
+ * stays `keys`, `shortcutLines`' own pre-joined sentence, so neither surface
+ * prettifies what the key sheet spells and the two can never name a
+ * different chord.
  */
 function Chip({ keys, chords }: { readonly keys: string; readonly chords: readonly string[] }) {
   return (
