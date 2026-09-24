@@ -141,8 +141,19 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
  */
 const MUTATING_VERBS: ReadonlySet<string> = new Set(['send-keys', 'resize-window']);
 
-/** `Buffer.from(text, 'utf8')`, one lowercase hex pair per byte. */
-function hexBytes(text: string): readonly string[] {
+/**
+ * `Buffer.from(text, 'utf8')`, one lowercase hex pair per byte.
+ *
+ * Exported for reuse by the streaming client (`terminal/stream/client.ts`):
+ * `encodeSegment` below uses it for the operator's own text and the wheel
+ * report's raw SGR bytes; the streaming client uses it for xterm's own
+ * `onData` text, which is a JS string of raw bytes/escape sequences the same
+ * shape `sendTextArgv`'s text always was. Both go out through the identical
+ * `send-keys -H` encoding for the identical reason -- tmux's control-mode
+ * grammar performs shell-like expansion even inside quotes (see the module
+ * note above) -- so this is the one place that reasoning is written, not two.
+ */
+export function hexBytes(text: string): readonly string[] {
   const bytes = Buffer.from(text, 'utf8');
   const out: string[] = [];
   for (const byte of bytes) out.push(byte.toString(16).padStart(2, '0'));
