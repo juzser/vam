@@ -23,6 +23,7 @@ import {
 } from '../../src/renderer/keyboard/chords.js';
 import { MODE_TITLES } from '../../src/renderer/keyboard/keysheet.js';
 import {
+  ChordGlyphs,
   InlineChord,
   primaryChord,
   ShortcutTip,
@@ -372,6 +373,32 @@ describe('a chord reaches the screen as its own platform’s symbols', () => {
       expect(openByFocus().textContent ?? '').toContain('G or gt');
       cleanup();
     });
+  });
+});
+
+/**
+ * THE SEND KEY OPTION'S OWN LOOK WINS OVER PULL REQUEST 468's. That PR painted a
+ * modifier glyph at `text-[1.3em]` beside a same-size key — "cramped rather
+ * than legible", its own doc comment says — but the operator has since named
+ * a newer reference: the Send key buttons under Settings → Sessions, which
+ * paint ⌘/⇧/⏎ at the SAME size as the key beside them, just spaced apart.
+ * That is the newer instruction, and it wins: `ChordGlyphs` now paints flat,
+ * uniform-size text, matching `chordSymbols` character for character with no
+ * element wrapping any segment at all — one rendering, not two.
+ */
+describe('ChordGlyphs paints flat, the Send key option’s own look', () => {
+  it('wraps no segment in its own element — every glyph is one size', () => {
+    const { container } = render(<ChordGlyphs chord="Mod-Shift-p" mac={true} />);
+    // No `text-[1.3em]` span, no span at all: the whole chord is plain text,
+    // exactly what a `chordSymbols` string already is.
+    expect(container.querySelector('span')).toBeNull();
+    expect(container.textContent).toBe('⇧ ⌘ P');
+  });
+
+  it('still equals chordSymbols character for character, off a Mac too', () => {
+    const { container } = render(<ChordGlyphs chord="Mod-Shift-p" mac={false} />);
+    expect(container.querySelector('span')).toBeNull();
+    expect(container.textContent).toBe(chordSymbols('Mod-Shift-p', false));
   });
 });
 

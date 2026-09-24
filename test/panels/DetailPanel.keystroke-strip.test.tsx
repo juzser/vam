@@ -16,8 +16,10 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import type { PaneSendResult } from '../../src/shared/terminal.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 const SESSION: Session = {
   id: 's1',
@@ -162,6 +164,36 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     // rather than a matter of which caption won.
     expect(document.querySelector('[data-prompt-keys]')).toBeNull();
     expect(document.querySelector('[data-prompt-escape]')).toBeNull();
+  });
+
+  /**
+   * THE STRIP PAINTS chords.ts's OWN TABLE, NOT A SECOND ONE HAND-TYPED
+   * BESIDE IT. It shipped with `⏎`, `⌫`, `⇧⇥` and `␣` written straight into
+   * `KEY_STRIP`'s captions — Apple's own glyphs, painted on every platform
+   * unconditionally, including the Android phone this same bundle is served
+   * to over Tailscale (`test/support/platform.ts`'s whole reason for
+   * existing). `chordSymbols` was already the one function this app trusts
+   * to answer that question; the strip now asks it, per key, like every
+   * other chord in the app.
+   */
+  it('paints the platform’s own glyphs for every key, off chords.ts’s table', () => {
+    const EXPECT: Readonly<Record<string, { chord: string; suffix: string }>> = {
+      escape: { chord: 'Escape', suffix: ' → agent' },
+      enter: { chord: 'Enter', suffix: ' → agent' },
+      backspace: { chord: 'Backspace', suffix: '' },
+      'back-tab': { chord: 'Shift-Tab', suffix: '' },
+      space: { chord: ' ', suffix: '' },
+      up: { chord: 'ArrowUp', suffix: '' },
+      down: { chord: 'ArrowDown', suffix: '' },
+    };
+    onBothPlatforms((mac) => {
+      draw({}, { terminal: true });
+      for (const [id, { chord, suffix }] of Object.entries(EXPECT)) {
+        const el = document.querySelector(`[data-key-strip-key="${id}"]`);
+        expect(el?.textContent, id).toBe(`${chordSymbols(chord, mac)}${suffix}`);
+      }
+      cleanup();
+    });
   });
 
   it('disappears with the composer while a QuestionCard is open', () => {
