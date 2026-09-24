@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { layoutWidths } from '../prefs/panes.js';
-import { type Prefs, readPrefs, setPaneWidth, type StorageLike, writePrefs } from '../prefs/prefs.js';
+import {
+  type Prefs,
+  readPrefs,
+  type StorageLike,
+  setPaneWidth,
+  writePrefs,
+} from '../prefs/prefs.js';
 
 /**
  * What you arranged, as opposed to what the factory reported. Read once —

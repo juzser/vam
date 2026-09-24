@@ -3,8 +3,8 @@ import {
   applyPalette,
   applyTheme,
   type EffectiveTheme,
-  paletteFor,
   type Prefs,
+  paletteFor,
   type Theme,
   watchOsTheme,
 } from '../prefs/prefs.js';
