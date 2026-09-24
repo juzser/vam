@@ -52,4 +52,19 @@ describe('useDetailPanelTab', () => {
     expect(result.current.pickTab).not.toBe(firstPickTab);
     expect(result.current.pickTabRef.current).toBe(result.current.pickTab);
   });
+
+  it('falls back to Response when initialTab names a withdrawn or unknown tab', () => {
+    const { result } = renderHook(() => useDetailPanelTab({ initialTab: 'Nonexistent' }));
+
+    expect(result.current.tab).toBe('Response');
+  });
+
+  it('falls back to Response when a controlled tab prop names a withdrawn or unknown tab', () => {
+    const onTabChange = vi.fn();
+    const { result } = renderHook(() => useDetailPanelTab({ tab: 'Nonexistent', onTabChange }));
+
+    // The validation is not bypassed by controlling the value externally --
+    // a stale or hand-edited store entry costs only the default, not a crash.
+    expect(result.current.tab).toBe('Response');
+  });
 });
