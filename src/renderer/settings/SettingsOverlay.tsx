@@ -68,6 +68,7 @@ import {
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
+  setStreamingTerminal,
   setTerminalFontSize,
   setTheme,
   stylesheetPaletteValue,
@@ -1030,6 +1031,28 @@ export function SettingsOverlay({
                   tell — turn this off and on again to re-ask. Turning it off stops the asking, not
                   what a session was already told.
                 </p>
+              </Block>
+
+              {/* THE STREAMING TERMINAL, BETA. A second Terminal tab
+                  implementation, `TerminalStreamTab.tsx`, driven by xterm.js
+                  over a persistent `tmux -C` connection (`docs/design/
+                  terminal-streaming.md`) instead of `TerminalTab.tsx`'s
+                  `capture-pane` poll. Off by default: it is unreviewed
+                  against a real terminal workload, and the shipping tab
+                  keeps working untouched either way -- `DetailPanel.tsx`
+                  reads this pref to choose which component to mount. */}
+              <Block
+                label={t('settings.behaviour.streamingTerminal.label')}
+                hint={t('settings.behaviour.streamingTerminal.hint')}
+              >
+                <Switch
+                  name="streaming-terminal"
+                  label={t('settings.behaviour.streamingTerminal.label')}
+                  checked={prefs.streamingTerminal}
+                  onChange={(next) => onChange(setStreamingTerminal(prefs, next))}
+                  on={t('settings.behaviour.streamingTerminal.on')}
+                  off={t('settings.behaviour.streamingTerminal.off')}
+                />
               </Block>
 
               {/* THE INDENT, LAST, and it is the one row here whose subject is
