@@ -26,6 +26,7 @@ import type {
   NotifyApi,
   PrsApi,
   TerminalApi,
+  TerminalStreamApi,
   UpdateApi,
   UsageApi,
 } from '../preload/api.js';
@@ -90,6 +91,14 @@ declare global {
        */
       readonly prs: PrsApi;
       readonly terminal: TerminalApi;
+      /**
+       * The Terminal tab's STREAMING half, behind the `streamingTerminal`
+       * pref (`src/renderer/prefs/streaming-terminal.ts`) and drawn by
+       * nothing yet. OPTIONAL for the reason `notify`/`prefs` are: a
+       * packaged build whose preload predates this member has the bridge
+       * without it, and the pref must be able to see that rather than throw.
+       */
+      readonly terminalStream?: TerminalStreamApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;
       /**

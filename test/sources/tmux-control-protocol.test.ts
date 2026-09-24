@@ -28,6 +28,7 @@ import {
 import {
   CONTROL_SESSION_NAME,
   ControlFramer,
+  decodeOutputPayload,
   encodeControlLine,
   reconstructResult,
   splitServerPrefix,
@@ -329,6 +330,92 @@ describe('ControlFramer', () => {
         reply: true,
       },
     ]);
+  });
+});
+
+describe('decodeOutputPayload', () => {
+  it('passes raw text through untouched', () => {
+    expect(decodeOutputPayload('hello world')).toBe('hello world');
+  });
+
+  it('unescapes a backslash-escaped-as-itself', () => {
+    expect(decodeOutputPayload('a\\\\b')).toBe('a\\b');
+  });
+
+  it('unescapes a control byte as three octal digits', () => {
+    // 015 is CR (0x0d), 012 is LF (0x0a) -- tmux's own escaping of the two
+    // bytes a `%output` payload is most likely to carry.
+    expect(decodeOutputPayload('a\\015\\012b')).toBe('a\r\nb');
+  });
+
+  it('keeps a malformed escape literal rather than eating bytes silently', () => {
+    expect(decodeOutputPayload('a\\0')).toBe('a\\0');
+  });
+
+  it('passes multi-byte UTF-8 through literally -- it is never escaped by this grammar', () => {
+    expect(decodeOutputPayload('xin ch\u00e0o')).toBe('xin ch\u00e0o');
+  });
+});
+
+describe('ControlFramer.feedEvents (streaming reuse -- one framer, not two)', () => {
+  it('still yields block events for a %begin/%end pair, now tagged kind: block', () => {
+    const framer = new ControlFramer();
+    const events = framer.feedEvents('%begin 1 1 1\nline one\n%end 1 1 1\n');
+    expect(events).toEqual([{ kind: 'block', ok: true, body: 'line one\n', reply: true }]);
+  });
+
+  it('surfaces %output as a decoded output event instead of dropping it', () => {
+    const framer = new ControlFramer();
+    const events = framer.feedEvents('%output %3 hello\\015\\012\n');
+    expect(events).toEqual([{ kind: 'output', paneId: '%3', data: 'hello\r\n' }]);
+  });
+
+  it('surfaces any other unsolicited notification as kind: other, instead of dropping it', () => {
+    const framer = new ControlFramer();
+    const events = framer.feedEvents('%window-renamed @0 x\n');
+    expect(events).toEqual([{ kind: 'other', line: '%window-renamed @0 x' }]);
+  });
+
+  it('decodes a multi-byte UTF-8 character split across two feed() chunks', () => {
+    // 'à' is 0xc3 0xa0 in UTF-8. Split the %output line so the chunk boundary
+    // lands between the two bytes of the character -- StreamClient decodes
+    // with node:string_decoder over the RAW BYTES the child process hands it,
+    // but the octal-escape unwrap this framer does operates on already-
+    // decoded JS string characters one at a time, so this pins that a
+    // %output LINE split mid-line (the framer's own buffering) still decodes
+    // correctly once the full line has arrived.
+    const framer = new ControlFramer();
+    expect(framer.feedEvents('%output %3 h\\303')).toEqual([]);
+    expect(framer.feedEvents('\\240i\n')).toEqual([
+      { kind: 'output', paneId: '%3', data: 'h\u00c3\u00a0i' },
+    ]);
+  });
+
+  it('does not close a block on a %end-shaped line inside pane text, same A3 rule as feed()', () => {
+    const framer = new ControlFramer();
+    const events = framer.feedEvents(
+      '%begin 1 1 1\nsome text\n%end 9 9 9\n%begin 9 9 9\nmore text\n%end 1 1 1\n',
+    );
+    expect(events).toEqual([
+      {
+        kind: 'block',
+        ok: true,
+        body: 'some text\n%end 9 9 9\n%begin 9 9 9\nmore text\n',
+        reply: true,
+      },
+    ]);
+  });
+
+  it('feed() itself is unchanged: a block-shaped subset of feedEvents(), no kind field', () => {
+    // The shipping caller (control.ts) still calls feed() and filters on
+    // `.reply` -- this pins that feed()'s return shape never picked up the
+    // `kind` discriminant feedEvents() needed, so control.ts needed no changes
+    // to its own filter logic.
+    const framer = new ControlFramer();
+    const blocks = framer.feed(
+      '%output %0 hello\n%begin 1 1 1\nok\n%end 1 1 1\n%window-renamed @0 x\n',
+    );
+    expect(blocks).toEqual([{ ok: true, body: 'ok\n', reply: true }]);
   });
 });
 
