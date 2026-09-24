@@ -375,6 +375,114 @@ for (const each of PLATFORMS) {
     console.log(`${outDir}/chord-symbols-settings-${each.name}.png`);
   }
 
+  /* ── THE SEND KEY OPTION'S ⇧, AGAINST A CHIP THAT SHARES IT ─────────────
+   *
+   * The operator's ask: the Shift/Command/Option/Control symbols must look
+   * like the Send Key option EVERYWHERE, and a real Chromium measurement
+   * (`docs/design/ref/send-key-reference.png` beside it) found why they did
+   * not — `font-mono` (every other chip) draws a noticeably narrower ⌘/⇧
+   * than `font-sans` (the Send key option's own ambient font) at the same
+   * size. `ChordGlyphs` now wraps a Mac glyph segment in the sans stack
+   * (`chords.ts`'s `chordSegments`, tagged `glyph: true`); this pins that a
+   * ⇧ painted through it elsewhere is pixel-identical to the reference.
+   *
+   * NO SHIPPED TOOLTIP CARRIES A SHIFT-BOUND CHORD TO HOVER — every
+   * `ShortcutTip` wired to a live action reaches for `o`, `Mod-n`,
+   * `Ctrl-Alt-<digit>`, a bare letter or `Mod-w`, never a `Shift-` token, so
+   * there is no `[data-tip-keys]` chip holding a ⇧ to measure. The key
+   * sheet's own `⇧ ⌘ P` row (`newProject`) is the next best thing: the SAME
+   * `ChordGlyphs` paints it, at the SAME `text-control` (12px) size the Send
+   * key option uses, so the comparison needs no size-driven tolerance beyond
+   * sub-pixel rounding.
+   */
+  if (each.name === 'mac') {
+    // Settings is still open from the section above (still on "keyboard"),
+    // and `?` typed into a modal does not reach the global listener.
+    await page.keyboard.press('Escape');
+    await settle(
+      page,
+      () => document.querySelector('[data-settings-overlay]') === null,
+      `${each.name}: settings closes before the ⇧ comparison`,
+    );
+    await page.keyboard.press('?');
+    const sheetForShift = await settle(
+      page,
+      () => document.querySelector('[data-key-sheet]') !== null,
+      `${each.name}: the key sheet reopens for the ⇧ comparison`,
+    );
+    const sheetGlyph = sheetForShift
+      ? await page.evaluate(() => {
+          const glyphRect = (root, glyph) => {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              const idx = node.textContent.indexOf(glyph);
+              if (idx !== -1) {
+                const range = document.createRange();
+                range.setStart(node, idx);
+                range.setEnd(node, idx + 1);
+                const rect = range.getBoundingClientRect();
+                return {
+                  fontFamily: getComputedStyle(node.parentElement).fontFamily,
+                  height: rect.height,
+                };
+              }
+            }
+            return null;
+          };
+          const row = [...document.querySelectorAll('[data-key-sheet-keys]')].find((el) =>
+            (el.textContent ?? '').includes('⇧'),
+          );
+          return row === undefined ? null : glyphRect(row, '⇧');
+        })
+      : null;
+    await page.keyboard.press('Escape');
+    await settle(
+      page,
+      () => document.querySelector('[data-key-sheet]') === null,
+      `${each.name}: the sheet closes again`,
+    );
+
+    await page.keyboard.press(',');
+    await settle(
+      page,
+      () => document.querySelector('[data-settings-overlay]') !== null,
+      `${each.name}: settings reopens for the Send key comparison`,
+    );
+    await page.locator('[data-settings-nav-item="sessions"]').click();
+    await page.waitForSelector('[data-submit-key-option="shift-enter"]', { timeout: 5_000 });
+    const sendKeyGlyph = await page.evaluate(() => {
+      const root = document.querySelector('[data-submit-key-option="shift-enter"]');
+      if (root === null) return null;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        const idx = node.textContent.indexOf('⇧');
+        if (idx !== -1) {
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + 1);
+          const rect = range.getBoundingClientRect();
+          return { fontFamily: getComputedStyle(node.parentElement).fontFamily, height: rect.height };
+        }
+      }
+      return null;
+    });
+
+    check(
+      `${each.name}: a chip’s ⇧ (key sheet) shares the Send key option’s computed font-family`,
+      sheetGlyph !== null &&
+        sendKeyGlyph !== null &&
+        sheetGlyph.fontFamily === sendKeyGlyph.fontFamily,
+      JSON.stringify({ sheetGlyph, sendKeyGlyph }),
+    );
+    check(
+      `${each.name}: and paints within 1px of the Send key option’s own ⇧ height`,
+      sheetGlyph !== null &&
+        sendKeyGlyph !== null &&
+        Math.abs(sheetGlyph.height - sendKeyGlyph.height) <= 1,
+      JSON.stringify({ sheetGlyph, sendKeyGlyph }),
+    );
+  }
+
   /* ── TWO MORE TIGHT SITES, NOW THAT `ChordGlyphs` PAINTS FLAT ────────── */
   //
   // The Send key option's look replaced #468's enlarged-modifier one

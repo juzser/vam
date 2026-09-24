@@ -177,25 +177,42 @@ export function primaryChord(action: KeyAction, overrides = activeBindings()): s
  * form the whole app uses, the Send key option included (`SettingsOverlay.
  * tsx`).
  *
- * FLAT, UNIFORM-SIZE TEXT — THE SEND KEY OPTION'S OWN LOOK, AND A NEWER
- * INSTRUCTION THAN THE ONE THIS COMPONENT SHIPPED WITH. Pull request 468
- * painted a modifier glyph at `text-[1.3em]`, one size larger than the key
- * beside it, on the operator's OWN finding that a `⇧⌘P` chip read cramped at
- * one size.
- * Read together with the operator's newer ask — "the icons in the Send key
- * option under Sessions settings are the best" — that reference paints ⌘/⇧/⏎
- * at exactly the SAME size as the key beside them (`SettingsOverlay.tsx`'s
- * Send key buttons, `test/settings/chord-symbols.test.tsx` pins the exact
- * strings), just spaced apart the way `chordSymbols` already spaces every
- * segment on a Mac. THE NEWER INSTRUCTION WINS: no span, no size step, every
- * glyph the same size as the letter it sits beside.
+ * THE SEND KEY OPTION'S OWN LOOK — BUT THAT LOOK IS A FONT, MEASURED, NOT
+ * ONLY A SIZE. Pull request 468 painted a modifier glyph at `text-[1.3em]`,
+ * one size larger than the key beside it, on the operator's OWN finding that
+ * a `⇧⌘P` chip read cramped at one size. #471 answered a newer ask — "the
+ * icons in the Send key option under Sessions settings are the best" — by
+ * dropping the wrapper span entirely, so every glyph fell back to the chip's
+ * own ambient font at the key's own size.
  *
- * `.textContent` OF THE RESULT IS `chordSymbols(chord, mac)`, CHARACTER FOR
- * CHARACTER — the same segments, the same separator, and now the identical
- * markup a plain string would have produced, because there is nothing left
- * to wrap. `test/keyboard/shortcut-tip.test.tsx` holds the two to that
- * agreement, so a hand-rolled separator here can never drift from the
- * sentence `chordSymbols` still owes a tooltip's `sr-only` twin.
+ * That held for `SettingsOverlay.tsx`'s Send key buttons themselves — their
+ * ambient font already IS the body sans stack (`text-control`, no
+ * `font-mono`) — but the operator kept seeing a difference everywhere else,
+ * and a real Chromium measurement (`e2e/chord-symbol-shots.mjs`) found why:
+ * every OTHER chip in this app (`Chip` below, `InlineChord`, `KeySheet.tsx`,
+ * `CommandPalette.tsx`, the phone's key strip) is `font-mono`, and Geist
+ * Mono draws a noticeably narrower ⌘ than Geist does at the same size — the
+ * Send key option's own ⇧ measured ~11.8px wide at 12px, a tooltip chip's
+ * ⌘ ~6.6px wide at 11px in the mono face. Thin next to the reference is
+ * exactly what was reported.
+ *
+ * SO THE SPAN RETURNS — FOR GLYPH SEGMENTS ONLY. `chordSegments` tags which
+ * segment is one of Apple's own pictograms (`chords.ts`'s `glyph` field): a
+ * modifier on a Mac, or a named key this table draws as one (⏎ ⎋ ⇥ ⌫ an
+ * arrow, …). Exactly those are wrapped in the body sans stack — the SAME
+ * face the Send key option's ambient font already gives its own buttons, so
+ * that button's look never moves. A bare letter or digit (`P`, `1`) is not a
+ * pictogram and stays unwrapped, inheriting whatever font the chip around it
+ * chose — "letters/digits keep the chip's own font" is the other half of
+ * this ask. Off a Mac nothing is tagged a glyph at all, so nothing is
+ * wrapped there either: the word spellings (`Ctrl+Shift+P`) are untouched.
+ *
+ * `.textContent` OF THE RESULT IS STILL `chordSymbols(chord, mac)`, CHARACTER
+ * FOR CHARACTER — the span changes what paints, never what a screen reader
+ * or a `.textContent` comparison sees. `test/keyboard/shortcut-tip.test.tsx`
+ * holds the two to that agreement, so a hand-rolled separator here can never
+ * drift from the sentence `chordSymbols` still owes a tooltip's `sr-only`
+ * twin.
  */
 export function ChordGlyphs({
   chord,
@@ -211,7 +228,7 @@ export function ChordGlyphs({
       {segments.map((segment, index) => (
         <Fragment key={segment.text}>
           {index > 0 ? sep : null}
-          {segment.text}
+          {segment.glyph ? <span className="font-sans">{segment.text}</span> : segment.text}
         </Fragment>
       ))}
     </>
