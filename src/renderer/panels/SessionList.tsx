@@ -2284,7 +2284,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     been rewritten. See the real heading below for why it is
                     14px and semibold on a 20px line rather than plain
                     `text-heading`. */}
-                  <span className="truncate text-[14px] font-semibold leading-[20px] text-ink-dim">
+                  <span className="truncate text-[13px] font-semibold leading-[20px] text-ink-dim">
                     {starting.projectName}
                   </span>
                 </div>
@@ -2356,7 +2356,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         `size`) is the name's own, so the picture is never the
                         smaller thing beside it -- see `HEADING_GLYPH_PX`,
                         which owns the argument for all three numbers and the
-                        measured inks. THAT NAME IS NOW 14, NOT `text-heading`
+                        measured inks. THAT NAME IS NOW 13, NOT `text-heading`
                         (15): the size moved with it below, or this slot would
                         reintroduce the exact inversion `HEADING_GLYPH_PX`'s
                         own comment was written to close -- the level above
@@ -2368,7 +2368,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         prose. */}
                       <span
                         data-group-icon={group.id}
-                        className="flex h-[20px] w-[20px] flex-none items-center justify-center text-[14px] leading-none text-ink-faint"
+                        className="flex h-[20px] w-[20px] flex-none items-center justify-center text-[13px] leading-none text-ink-faint"
                       >
                         {/* `text-ink-faint` on the span is the EMOJI's ink and
                           the placeholder's; a chosen glyph carries its own
@@ -2391,27 +2391,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                          operator asked for both levels in one breath each
                          time. The register is untouched: upper case and
                          tracking are what separate this level from the
-                         project's, and at 14px a name the column cannot hold
+                         project's, and at 13px a name the column cannot hold
                          still clips to an ellipsis before the count and the
                          controls, which do not move -- measured, at the
                          default width, with a 531px name in a 117px box.
 
-                         BOLD AND ONE PIXEL SMALLER THAN `text-heading`, and
-                         not `text-heading` itself. Operator, in one breath:
-                         "make the project and group titles bold and 1px
-                         smaller; the session name regular weight and also 1px
-                         smaller." `font-semibold` (600) rather than a new
-                         `font-bold` (700): it is the weight every OTHER bold
-                         heading in the renderer already uses beside
-                         `text-heading` (`SettingsOverlay.tsx`,
+                         BOLD AND TWO PIXELS SMALLER THAN `text-heading`, and
+                         not `text-heading` itself. Operator, in one breath,
+                         twice: first "make the project and group titles bold
+                         and 1px smaller; the session name regular weight and
+                         also 1px smaller" (landing at 14), then, in the
+                         workspace-options pass, "make the project and group
+                         title font size in the sidebar 1px smaller" again
+                         (landing at 13, this size). `font-semibold` (600)
+                         rather than a new `font-bold` (700): it is the weight
+                         every OTHER bold heading in the renderer already uses
+                         beside `text-heading` (`SettingsOverlay.tsx`,
                          `ErrorLogPanel.tsx`, `KeySheet.tsx`,
                          `ErrorBoundary.tsx`), and it measures visibly heavier
                          than the row's own regular weight on the face this
                          actually resolves to -- Geist is asked for but never
                          loaded (no `@font-face`, no package), so every one of
                          these headings paints in the `-apple-system` fallback,
-                         where 600 already reads apart from 400 by design. 14
-                         is one pixel below `--text-heading` (15) and does not
+                         where 600 already reads apart from 400 by design. 13
+                         is two pixels below `--text-heading` (15) and does not
                          land on any of the scale's other three steps, so it is
                          a named exception in `type-scale.test.ts` rather than
                          a fifth step -- see `EXCEPTIONS` there for the count
@@ -2421,7 +2424,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                          project heading's, below) moves: only the ink shrinks,
                          not the row. `e2e/sidebar-tree-shots.mjs` reads both
                          the size and the weight off the paint. */
-                        <span className="truncate text-[14px] font-semibold leading-[20px] text-ink uppercase tracking-[0.12em]">
+                        <span className="truncate text-[13px] font-semibold leading-[20px] text-ink uppercase tracking-[0.12em]">
                           {group.name}
                         </span>
                       )}
@@ -2648,7 +2651,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       which no browser opens on keyboard focus. */}
                     <ShortcutTip label="Change project icon">
                       {/* Same slot as the group's above -- 20px, the name's own
-                        line, the SAME size as the emoji (14, not
+                        line, the SAME size as the emoji (13, not
                         `text-heading` -- see the group heading's own comment
                         for why the two must move together) -- and the same
                         `HEADING_GLYPH_PX` for the glyph, because a level is
@@ -2660,7 +2663,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         data-project-icon={section.project.id}
                         onClick={() => onPickIcon(section.project)}
                         aria-label={`change icon for ${section.project.name}`}
-                        className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-[14px] leading-none text-ink-faint hover:text-ink-dim"
+                        className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-[13px] leading-none text-ink-faint hover:text-ink-dim"
                       >
                         <IconMark
                           value={parseIcon(section.project.icon)}
@@ -2730,19 +2733,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        The same guard reads `fontFamily` off every heading
                        name against the row title's and asserts they agree.
 
-                       BOLD AND ONE PIXEL SMALLER THAN `text-heading`, and the
+                       BOLD AND TWO PIXELS SMALLER THAN `text-heading`, and the
                        session name a pixel smaller and regular. Operator, in
-                       one breath: "make the project and group titles bold and
-                       1px smaller; the session name regular weight and also
-                       1px smaller." See the group heading above for the full
-                       argument -- `font-semibold` (600) because it is the
-                       weight every other bold heading in the renderer already
-                       pairs with `text-heading`, and because Geist is asked
-                       for but never loaded (no `@font-face`, no package), so
-                       this paints in the `-apple-system` fallback, where 600
-                       already reads apart from the row's 400 by design; 14
-                       because it is one pixel below `--text-heading` (15) and
-                       lands on none of the scale's other three steps, so it
+                       one breath, twice: first "make the project and group
+                       titles bold and 1px smaller; the session name regular
+                       weight and also 1px smaller" (landing at 14), then, in
+                       the workspace-options pass, one pixel further. See the
+                       group heading above for the full argument --
+                       `font-semibold` (600) because it is the weight every
+                       other bold heading in the renderer already pairs with
+                       `text-heading`, and because Geist is asked for but never
+                       loaded (no `@font-face`, no package), so this paints in
+                       the `-apple-system` fallback, where 600 already reads
+                       apart from the row's 400 by design; 13 because it is two
+                       pixels below `--text-heading` (15) and lands on none of
+                       the scale's other three steps, so it
                        is a named exception in `type-scale.test.ts`'s
                        `EXCEPTIONS` rather than a fifth step; `leading-[20px]`
                        because it is the same line `text-heading` carried, so
@@ -2757,7 +2762,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        (`data-row-cursor`) all still mark it; dropping the
                        extra weight is what makes "regular" true of every row,
                        not only the ones nobody has picked. */
-                      <span className="truncate text-[14px] font-semibold leading-[20px] text-ink-dim">
+                      <span className="truncate text-[13px] font-semibold leading-[20px] text-ink-dim">
                         {section.project.name}
                       </span>
                     )}
