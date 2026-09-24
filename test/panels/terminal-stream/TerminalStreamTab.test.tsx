@@ -133,6 +133,36 @@ describe('with no bridge and no project', () => {
   });
 });
 
+describe('a refused open', () => {
+  it.each([
+    ['bad-request', /malformed/],
+    ['unavailable', /could not ask tmux/],
+    ['unresolved-session', /which tmux session/],
+    ['unsupported-tmux', /older than streaming needs/],
+  ] as const)('draws distinguishable, non-blank text for %s', async (reason, expected) => {
+    withBridge({ open: async () => ({ ok: false, reason }) });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const el = q('[data-terminal-stream-refused]');
+    expect(el?.getAttribute('data-terminal-stream-reason')).toBe(reason);
+    expect(el?.textContent ?? '').not.toBe('');
+    expect(el?.textContent).toMatch(expected);
+  });
+
+  it('never leaves a blank pane -- no container is drawn once refused', async () => {
+    withBridge({ open: async () => ({ ok: false, reason: 'unavailable' }) });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(lastTerm).toBeUndefined();
+  });
+});
+
 describe('mounted with a bridge', () => {
   it('opens the stream by projectId/rowId and writes the real seed to the real terminal', async () => {
     withBridge({

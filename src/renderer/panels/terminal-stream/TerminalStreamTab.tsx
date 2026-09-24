@@ -20,7 +20,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { activeTerminalFontSize, subscribeTerminalFontSize } from '../../prefs/terminal-font.js';
 import {
   activeTerminalScheme,
@@ -45,6 +45,27 @@ function mapScheme(scheme: ResolvedTerminalScheme): ITheme {
  *  browser build has no stream behind this tab either. */
 const NOT_AVAILABLE_TEXT = 'the terminal is only available in the vam desktop app';
 
+/** The four ways `terminalStreamOpen` refuses (`main/terminal/stream-ipc.ts`'s
+ *  own `StreamOpenRefusal`), named here rather than imported: that module
+ *  reaches `node:crypto`, and this file is typechecked under
+ *  `tsconfig.web.json` too -- the same reason `preload/api.ts` writes the
+ *  union out by hand instead of importing it. */
+type RefusalReason = 'bad-request' | 'unavailable' | 'unresolved-session' | 'unsupported-tmux';
+
+/** One honest sentence per refusal, in `TerminalTab.tsx`'s own register: what
+ *  vam could not do, never a guess at why. `unsupported-tmux` gets its own
+ *  claim -- the operator's tmux, not vam's request, is what fell short --
+ *  because folding it into `unavailable` would send them after the wrong
+ *  cause. */
+const REFUSAL_TEXT: Record<RefusalReason, string> = {
+  'bad-request': 'vam could not open this session’s stream: the request it sent was malformed.',
+  unavailable: 'vam could not ask tmux for its sessions, so it has nothing to stream.',
+  'unresolved-session':
+    'vam could not tell which tmux session this is: none of the ones it started answer for this row, or more than one does.',
+  'unsupported-tmux':
+    'this tmux is older than streaming needs (control-mode output notifications need tmux 3.2 or later) — the operator’s tmux, not this request, is what fell short.',
+};
+
 export function TerminalStreamTab(props: {
   readonly projectId: string | null;
   readonly rowId?: string | undefined;
@@ -55,6 +76,7 @@ export function TerminalStreamTab(props: {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const streamIdRef = useRef<string | null>(null);
+  const [refusal, setRefusal] = useState<RefusalReason | null>(null);
 
   const bridge = globalThis.window?.api?.terminalStream;
   const fontSize = useSyncExternalStore(subscribeTerminalFontSize, activeTerminalFontSize);
@@ -71,10 +93,15 @@ export function TerminalStreamTab(props: {
     let resizeObserver: ResizeObserver | undefined;
     let frame: number | undefined;
 
+    setRefusal(null);
     bridge
       .open(projectId, rowId)
       .then((result) => {
-        if (cancelled || !result.ok) return;
+        if (cancelled) return;
+        if (!result.ok) {
+          setRefusal(result.reason);
+          return;
+        }
         const { streamId } = result;
         streamIdRef.current = streamId;
 
@@ -152,6 +179,19 @@ export function TerminalStreamTab(props: {
     return (
       <p data-terminal-stream data-terminal-stream-empty className="text-control text-ink-faint">
         {NOT_AVAILABLE_TEXT}
+      </p>
+    );
+  }
+
+  if (refusal !== null) {
+    return (
+      <p
+        data-terminal-stream
+        data-terminal-stream-refused
+        data-terminal-stream-reason={refusal}
+        className="text-control text-ink-faint"
+      >
+        {REFUSAL_TEXT[refusal]}
       </p>
     );
   }
