@@ -1039,6 +1039,37 @@ export type DetailPanelProps = {
    */
   readonly onResumeInPane?: () => void;
   /**
+   * THE WAIT BETWEEN THE PRESS AND THE AGENT REGISTERING -- for Start session
+   * or Resume, whichever this pane's row last pressed. `Canvas.tsx` owns it
+   * (`startingPaneByKey`, keyed by `entry.session.pane` so it survives the
+   * `unstarted`/`terminal` id changing identity the moment the agent
+   * registers -- see that state's own comment) because a `StartSession`-local
+   * `useState` would not: this same `DetailPanel` instance is reused across
+   * every tab a pane holds (`Canvas.tsx`'s own comment on `renderLeaf`), so a
+   * wait that lived in this component's own state would follow the pane to
+   * whichever OTHER session the operator switched to next, or vanish the
+   * moment they switched away and back.
+   *
+   * Operator: "after clicking Start session ... there needs to be a loading
+   * state while the session is being created." `null`/absent draws the
+   * ordinary picker; present freezes it and the Start/Resume buttons until
+   * the caller clears it (the row left `unstarted`/`terminal`, or the write
+   * itself was refused) or `timedOut` turns the spinner into a quiet link to
+   * the Terminal view (see `StartTimeoutHint`) -- vam has nothing further to
+   * wait ON, and a spinner with no end is worse than admitting that.
+   */
+  readonly startingPane?: StartingPaneWait | null;
+  /**
+   * SWITCH THIS PANE TO ITS TERMINAL TAB -- the escape hatch
+   * `StartTimeoutHint` offers once `startingPane.timedOut` is true. Built by
+   * the caller from `onTabChange`/`pickTab` (`DetailPanel`'s own, further
+   * down) rather than threaded in as a raw setter, so this component never
+   * has to know the tab bar's own vocabulary. ABSENT, NOT DISABLED when the
+   * Terminal tab itself is withdrawn (no `terminal` capability) -- a link
+   * promising a view that is not on the bar would land exactly nowhere.
+   */
+  readonly onShowTerminal?: () => void;
+  /**
    * THE GETTING-STARTED SCREEN'S OWN DATA (`GettingStarted.tsx`) — present
    * only when the CALLER (`Canvas.tsx`) has confirmed vam has no session to
    * show ANYWHERE in the app, not merely that this one pane's `entry` is
@@ -2754,6 +2785,19 @@ function AgentDetail({
 }
 
 /**
+ * WHAT A PANE'S ROW IS WAITING ON, between a press and the agent registering
+ * -- `Canvas.tsx`'s `startingPaneByKey`, and the shape crossing the boundary
+ * `startingPane`'s own comment (`DetailPanelProps`) explains at length. Two
+ * shapes because the two acts need different words once they are drawn
+ * (`ProviderStartControls`/`TerminalOnlyStart`'s own Resume button): Start
+ * names the provider it typed, Resume does not need to -- there is only ever
+ * one command a resume pane can type.
+ */
+export type StartingPaneWait =
+  | { readonly kind: 'start'; readonly provider: ProviderId; readonly timedOut: boolean }
+  | { readonly kind: 'resume'; readonly timedOut: boolean };
+
+/**
  * THE PROVIDER PICKER AND THE START BUTTON, on their own -- the one act
  * every "nothing is running here" screen offers, extracted so there is
  * exactly one implementation of it rather than one per screen that draws it.
@@ -2785,17 +2829,38 @@ function ProviderStartControls({
   chosen,
   onChosenChange,
   onStart,
+  disabled = false,
+  starting = null,
 }: {
   readonly chosen: ProviderId;
   readonly onChosenChange: (id: ProviderId) => void;
   readonly onStart: (id: ProviderId) => void;
+  /**
+   * FROZEN WHILE THIS PANE'S ROW IS WAITING -- for Start OR for Resume, the
+   * screen's other act: only one write may be in flight against a pane at
+   * once, so the picker freezes for the OTHER act's wait too, not only its
+   * own. See `starting` below for the fact that IS its own.
+   */
+  readonly disabled?: boolean;
+  /**
+   * Non-null only while THIS control's own press is what the pane is
+   * waiting on -- swaps "Start session" for a spinner naming the provider
+   * being started. Null while `disabled` for the OTHER act's wait instead
+   * (Resume), so this button never claims to be starting a provider it did
+   * not start. `spinning` false past the operator's own timeout
+   * (`StartSession`/`TerminalOnlyStart`'s own comment): the label stays
+   * honest but the animation -- which promises an end no one can see -- does
+   * not run forever.
+   */
+  readonly starting?: { readonly label: string; readonly spinning: boolean } | null;
 }) {
   return (
     <>
       <fieldset
         data-start-providers
         aria-label="which agent to start"
-        className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1"
+        disabled={disabled}
+        className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1 disabled:cursor-progress disabled:opacity-60"
       >
         {PROVIDERS.map((provider) => {
           const selected = provider.id === chosen;
@@ -2824,12 +2889,67 @@ function ProviderStartControls({
         type="button"
         data-start-session-button
         onClick={() => onStart(chosen)}
-        className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90"
+        disabled={disabled}
+        aria-busy={starting !== null}
+        className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90 disabled:cursor-progress disabled:opacity-70"
       >
-        <Play size={12} strokeWidth={2} />
-        Start session
+        {starting !== null ? (
+          <>
+            <LoaderCircle
+              size={12}
+              strokeWidth={1.8}
+              className={starting.spinning ? 'vam-spin' : undefined}
+            />
+            {starting.label}
+          </>
+        ) : (
+          <>
+            <Play size={12} strokeWidth={2} />
+            Start session
+          </>
+        )}
       </button>
     </>
+  );
+}
+
+/**
+ * THE ESCAPE HATCH, past the operator's own 30s timeout.
+ *
+ * Operator: a spinner that could be wrong forever is worse than one that
+ * admits it. `tmux new-session -d`/`typeIntoOwnPane` return once the KEYS are
+ * typed, not once an agent answers, and most of the time that is seconds --
+ * but "most of the time" is not "always", and vam has no second signal to
+ * wait on once the ordinary window has passed. So past it the spinner stops
+ * (`ProviderStartControls`' own `spinning`) and this quiet sentence takes
+ * over: not a failure (nothing failed; the write landed), just a way out that
+ * does not depend on guessing right.
+ *
+ * SHARED BY BOTH START SCREENS because it says the exact same thing about the
+ * exact same fact, the same reason `StartShortcuts` below is shared by both.
+ */
+function StartTimeoutHint({
+  onShowTerminal,
+}: {
+  readonly onShowTerminal: (() => void) | undefined;
+}) {
+  return (
+    <p data-start-timeout-hint className="max-w-[36ch] text-meta text-ink-quiet">
+      {onShowTerminal === undefined ? (
+        'Still starting — check the Terminal view.'
+      ) : (
+        <>
+          {'Still starting — '}
+          <button
+            type="button"
+            onClick={onShowTerminal}
+            className="vam-tap cursor-pointer underline decoration-line-strong underline-offset-2 hover:text-ink"
+          >
+            check the Terminal view
+          </button>
+        </>
+      )}
+    </p>
   );
 }
 
@@ -2868,12 +2988,17 @@ function StartSession({
   paneName,
   defaultProvider,
   onStart,
+  startingPane = null,
+  onShowTerminal,
 }: {
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
+  readonly startingPane?: StartingPaneWait | null;
+  readonly onShowTerminal?: () => void;
 }) {
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  const starting = startingPane ?? null;
   return (
     <div
       data-start-session
@@ -2899,8 +3024,22 @@ function StartSession({
         </p>
       </div>
       {onStart !== undefined && (
-        <ProviderStartControls chosen={chosen} onChosenChange={setChosen} onStart={onStart} />
+        <ProviderStartControls
+          chosen={chosen}
+          onChosenChange={setChosen}
+          onStart={onStart}
+          disabled={starting !== null}
+          starting={
+            starting?.kind === 'start'
+              ? {
+                  label: `Starting ${resolveProvider(starting.provider).label}…`,
+                  spinning: !starting.timedOut,
+                }
+              : null
+          }
+        />
       )}
+      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -2968,6 +3107,8 @@ function TerminalOnlyStart({
   onStart,
   resumeCommand,
   onResumeInPane,
+  startingPane = null,
+  onShowTerminal,
 }: {
   readonly title: string;
   readonly paneName: string;
@@ -2976,12 +3117,15 @@ function TerminalOnlyStart({
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly resumeCommand: string | undefined;
   readonly onResumeInPane: (() => void) | undefined;
+  readonly startingPane?: StartingPaneWait | null;
+  readonly onShowTerminal?: () => void;
 }) {
   // `ProviderStartControls` is CONTROLLED (see its own header) -- this
   // screen's own mark above stays `source`, the session's PAST agent, never
   // this restart picker's current pick, so this state exists only to give
   // that shared component the two props it now needs.
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  const starting = startingPane ?? null;
   return (
     <div
       data-terminal-only-start
@@ -3010,18 +3154,45 @@ function TerminalOnlyStart({
       </div>
       <StartShortcuts testId="terminal-only-shortcuts" rows={TERMINAL_ONLY_SHORTCUT_ROWS} />
       {onStart !== undefined && (
-        <ProviderStartControls chosen={chosen} onChosenChange={setChosen} onStart={onStart} />
+        <ProviderStartControls
+          chosen={chosen}
+          onChosenChange={setChosen}
+          onStart={onStart}
+          disabled={starting !== null}
+          starting={
+            starting?.kind === 'start'
+              ? {
+                  label: `Starting ${resolveProvider(starting.provider).label}…`,
+                  spinning: !starting.timedOut,
+                }
+              : null
+          }
+        />
       )}
       {resumeCommand !== undefined && onResumeInPane !== undefined && (
         <button
           type="button"
           data-resume-in-pane
           onClick={onResumeInPane}
-          className="vam-tap cursor-pointer text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink"
+          disabled={starting !== null}
+          aria-busy={starting?.kind === 'resume'}
+          className="vam-tap flex cursor-pointer items-center gap-1.5 text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink disabled:cursor-progress disabled:no-underline disabled:opacity-70"
         >
-          Resume “{title}”
+          {starting?.kind === 'resume' ? (
+            <>
+              <LoaderCircle
+                size={12}
+                strokeWidth={1.8}
+                className={starting.timedOut ? undefined : 'vam-spin'}
+              />
+              Resuming…
+            </>
+          ) : (
+            <>Resume “{title}”</>
+          )}
         </button>
       )}
+      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -5589,6 +5760,7 @@ export function DetailPanel(props: DetailPanelProps) {
     onSetDefaultProvider,
     onStartSession,
     onResumeInPane,
+    startingPane = null,
     gettingStarted,
     paneFocused = true,
   } = props;
@@ -6160,6 +6332,17 @@ export function DetailPanel(props: DetailPanelProps) {
   // `current`'s fallback is precisely what catches all of them at once.
   const tabs = visibleTabs(terminal !== false, files === true, phone);
   const current = tabs.includes(tab) ? tab : 'Response';
+
+  /**
+   * `StartTimeoutHint`'s own escape hatch: switch THIS pane to Terminal,
+   * through `pickTab` -- the one function that also reports the choice
+   * upward (`onTabChange`) and remembers it locally when uncontrolled -- so
+   * the link behaves exactly like clicking the Terminal icon by hand rather
+   * than being a second, poorer route to the same tab. ABSENT when Terminal
+   * itself is withdrawn (`tabs` above already answers that): a link past a
+   * 30s wait promising a view that is not on the bar would land nowhere.
+   */
+  const onShowTerminal = tabs.includes('Terminal') ? () => pickTab('Terminal') : undefined;
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
@@ -8129,6 +8312,8 @@ export function DetailPanel(props: DetailPanelProps) {
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
             onStart={onStartSession}
+            startingPane={startingPane}
+            onShowTerminal={onShowTerminal}
           />
         ) : entry !== null && entry.session.status === 'terminal' ? (
           <TerminalOnlyStart
@@ -8139,6 +8324,8 @@ export function DetailPanel(props: DetailPanelProps) {
             onStart={onStartSession}
             resumeCommand={entry.session.resumeCommand}
             onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
+            startingPane={startingPane}
+            onShowTerminal={onShowTerminal}
           />
         ) : entry === null && gettingStarted !== undefined ? (
           // THE APP HAS NO SESSION TO SHOW ANYWHERE -- `Canvas.tsx`'s own
