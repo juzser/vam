@@ -35,7 +35,7 @@
  * only available in the desktop app on macOS" is `shared/usage.ts`'s own
  * `reasonText` default-case sentence, repeated here rather than reinvented,
  * and no member of `window.api` is ever read to produce it -- see the
- * `?window.api === undefined` guard below, checked before either provider
+ * `window.api === undefined` guard below, checked before either provider
  * section is drawn.
  */
 
