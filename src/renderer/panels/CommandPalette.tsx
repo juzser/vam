@@ -91,7 +91,7 @@ export function CommandPalette({
       : [];
 
   return (
-    <div className="absolute inset-0 z-50 flex items-start justify-center pt-24">
+    <div className="absolute inset-0 z-50 flex items-start justify-center pt-[12vh]">
       {/*
         The scrim is a real button, not a div with a click handler, because that
         is what it is: a control whose whole job is closing the palette. Written
@@ -118,7 +118,12 @@ export function CommandPalette({
            a class that names nothing cannot pass again. */
         data-command-palette
         data-palette-mode={mode}
-        className="relative w-[min(560px,90vw)] overflow-hidden rounded-md border border-line bg-panel"
+        // THE RESPONSE VIEW'S OWN TYPE SIZE: the operator asked for the palette
+        // to read like the out text, so it follows `--vam-out-font-size` (the
+        // Settings "out text" stepper) rather than a fixed `text-body` -- set on
+        // the input and on each row, since a `Command.Group` wears `text-meta`
+        // and would otherwise shrink everything inside it.
+        className="relative w-[min(720px,92vw)] overflow-hidden rounded-md border border-line bg-panel"
         // SESSION SEARCH KEEPS `cmdk`'s OWN SCORER, unchanged from before this
         // component had two modes; the action list is pre-filtered by hand and
         // drawn as-is, so `cmdk` is told to stand down rather than score a
@@ -146,7 +151,7 @@ export function CommandPalette({
           // actions" belongs — repeating it in the placeholder too would be
           // the same sentence twice for no reader who cannot already see it.
           placeholder={mode === 'actions' ? 'action name…' : 'go to session…'}
-          className="w-full border-line border-b bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-faint"
+          className="w-full border-line border-b bg-transparent px-4 py-3 text-ink text-[length:var(--vam-out-font-size,13px)] outline-none placeholder:text-ink-faint"
         />
         {/* THE ONE-LINE HINT, directly under the box, in the muted text token
             every other secondary line in this shell already wears
@@ -154,10 +159,10 @@ export function CommandPalette({
             `placeholder:` above both use) — short enough that
             `e2e/command-palette-shots.mjs` can assert it never clips at
             390px, which is the narrowest legal pane this shell draws. */}
-        <p data-palette-hint className="truncate px-3 pt-1 pb-1.5 text-ink-faint text-meta">
+        <p data-palette-hint className="truncate px-4 pt-1.5 pb-2 text-ink-faint text-meta">
           {paletteHint(mode)}
         </p>
-        <Command.List className="vam-no-scrollbar max-h-72 overflow-y-auto p-1">
+        <Command.List className="vam-no-scrollbar max-h-[min(60vh,32rem)] overflow-y-auto p-1.5">
           {mode === 'actions' ? (
             <>
               <Command.Empty className="px-3 py-4 text-ink-faint">No matching action</Command.Empty>
@@ -227,7 +232,7 @@ function PaletteRow({
       // project's name still belongs to it as far as search is concerned.
       value={`${project.name} ${session.title} ${session.epic ?? ''} ${session.id}`}
       onSelect={() => onPick(session.id)}
-      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[selected=true]:bg-raised"
+      className="flex cursor-pointer items-baseline gap-2 rounded px-2.5 py-1.5 text-ink text-[length:var(--vam-out-font-size,13px)] data-[selected=true]:bg-raised"
     >
       {showProjectName && (
         <span data-palette-project className="text-ink-faint">
@@ -271,7 +276,7 @@ function ActionRow({
         if (row.disabled) return;
         onRunAction(row.action);
       }}
-      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[selected=true]:bg-raised"
+      className="flex cursor-pointer items-baseline gap-2 rounded px-2.5 py-1.5 text-ink text-[length:var(--vam-out-font-size,13px)] data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[selected=true]:bg-raised"
     >
       <span className="min-w-0 flex-1 truncate">{row.title}</span>
       {row.disabled && row.disabledReason !== null && (

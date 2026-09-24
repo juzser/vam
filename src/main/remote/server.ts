@@ -397,6 +397,18 @@ export function servedDescriptor(
  * extension -- the "looks static" rule this shape exists to avoid. The cost is
  * a missing tab icon before pairing.
  *
+ * `/icon.svg` IS named, individually, the same way `/index.html` is -- not by
+ * extension, which is the exact widening the paragraph above refuses. The
+ * favicon's cost is bearable because the browser fetches it itself, before any
+ * script of vam's has run, so no token could ever reach it either way.
+ * `icon.svg` is different: it is read by `GettingStarted.tsx`'s own `<img>`,
+ * INSIDE the authenticated app, on the screen a freshly-paired phone is most
+ * likely to be looking at, and an `<img src>` carries no bearer header this
+ * server could check even after pairing. Left off the shape it is not
+ * "missing before pairing" the way the favicon is, it is broken every time,
+ * on every browser -- see `the served root` in `phone-shell.test.ts` for the
+ * fixture that holds this the same way it holds `favicon.png`'s exclusion.
+ *
  * The first character must be alphanumeric, so `/assets/..` and `/assets/.env`
  * cannot match, and there is no second slash, so nothing nests. `serveAsset`
  * refuses to leave the root independently of this: two guards, neither relying
@@ -405,7 +417,9 @@ export function servedDescriptor(
 const APP_SHELL_ASSET = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function isAppShellPath(path: string): boolean {
-  return path === '/' || path === '/index.html' || APP_SHELL_ASSET.test(path);
+  return (
+    path === '/' || path === '/index.html' || path === '/icon.svg' || APP_SHELL_ASSET.test(path)
+  );
 }
 
 /**

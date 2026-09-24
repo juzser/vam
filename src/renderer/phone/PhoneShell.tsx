@@ -498,9 +498,18 @@ export function PhoneShell({
   if (!open || entry === null) {
     return (
       <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-ground">
-        <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-3">
-          {sourceReadout}
-        </header>
+        {/* NO DEDICATED BAR FOR THIS ANY MORE -- there used to be a second
+            `<header>` here, above `SessionList`'s own, whose only content
+            was this readout. For the healthy arm that is a LONE DOT (see
+            `SourceReadout`'s own comment on why nothing else paints), so a
+            48px, full-width, bordered bar existed to hold seven visible
+            pixels -- the operator's own report, translated: "an empty gap
+            and a blue dot" at the very top of the getting-started screen,
+            measured at y:0 w:390 h:48 holding one 7x16 dot. `SessionList`
+            now takes the readout as a prop and folds it into the row it
+            already draws for the avatar and the theme toggle -- a row that
+            exists whether or not there is anything to say here, so the
+            readout stops needing a bar of its own to be seen in. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <SessionList
             {...sidebar}
@@ -510,6 +519,7 @@ export function PhoneShell({
             // it, no detail pane answers a question, and no cursor has
             // anywhere to be. The row says so itself (UI spec D1).
             phone
+            sourceReadout={sourceReadout}
             onPick={(id) => {
               sidebar.onPick(id);
               show();
@@ -531,13 +541,26 @@ export function PhoneShell({
             one job something at the bottom of this screen always has
             (`styles.css`). The element stays in the tree either way: see the
             refusal cell's own comment below for why its PRESENCE must not be
-            the signal. */}
+            the signal.
+
+            `bg-sidebar`, ON BOTH ARMS, WHICH IS NEW: neither used to set a
+            background at all when this bar was empty, so `SessionList`'s
+            own `bg-sidebar` pane ended one pixel above the footer's box and
+            the SHELL's `bg-ground` -- darker, meant for the app's outer
+            canvas, never for a surface an operator reads text against --
+            showed through the safe-area padding instead. A second reviewer
+            caught it on the regenerated screenshot: a dark band along the
+            very bottom edge, the same family as the fix above but inside
+            the shell's own paint rather than past its edge. The non-empty
+            arm carried `bg-panel` for the same reason and the same bug, one
+            shade off `bg-sidebar` rather than two -- less visible, not
+            absent, so it moved too. */}
         <footer
           data-phone-status-bar
           className={
             statusCell === null && failureCount === 0
-              ? 'flex flex-none items-center'
-              : 'flex min-h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim'
+              ? 'flex flex-none items-center bg-sidebar'
+              : 'flex min-h-[44px] flex-none items-center gap-3 border-line border-t bg-sidebar px-3 font-mono text-meta text-ink-dim'
           }
         >
           {/* Drawn always, empty and out of layout when there is nothing to

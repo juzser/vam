@@ -78,6 +78,7 @@ describe('encodeControlLine', () => {
     expect(encodeControlLine(sendEnterArgv('vam-a1b2c3'))).toEqual({
       line: 'send-keys -t =vam-a1b2c3: Enter',
       blocks: 1,
+      mutating: true,
     });
     expect(encodeControlLine(sendBackspaceArgv('vam-a1b2c3'))?.line).toBe(
       'send-keys -t =vam-a1b2c3: BSpace',
@@ -133,6 +134,7 @@ describe('encodeControlLine', () => {
     expect(encodeControlLine(sendTextArgv('vam-a1b2c3', 'a'))).toEqual({
       line: 'send-keys -t =vam-a1b2c3: -H 61',
       blocks: 1,
+      mutating: true,
     });
   });
 
@@ -151,6 +153,7 @@ describe('encodeControlLine', () => {
     expect(encodeControlLine(sendNewlineArgv('vam-a1b2c3'))).toEqual({
       line: 'send-keys -t =vam-a1b2c3: -H 0a',
       blocks: 1,
+      mutating: true,
     });
   });
 
@@ -181,6 +184,7 @@ describe('encodeControlLine', () => {
         'display-message -p -t =vam-a1b2c3: -F "@vam-cursor #{cursor_flag} #{cursor_x} #{cursor_y} #{history_size} #{mouse_any_flag}" ; ' +
         'capture-pane -p -e -S -500 -t =vam-a1b2c3:',
       blocks: 2,
+      mutating: false,
     });
   });
 
@@ -218,54 +222,113 @@ describe('encodeControlLine', () => {
     expect(encodeControlLine(['list-sessions', ';'])).toBeNull();
     expect(encodeControlLine([';', 'list-sessions'])).toBeNull();
   });
+
+  it('marks a call MUTATING when any segment is send-keys or resize-window -- A2', () => {
+    // control.ts's own A2 fix reads this to decide whether a command that
+    // may already have reached tmux is safe to run again through a fallback
+    // spawn: a READ asked twice answers the same question again, but a
+    // send-keys or resize-window run twice REPEATS AN EFFECT -- a keystroke
+    // delivered twice, a window resized twice. Every verb this file
+    // recognises is one or the other, with no third case.
+    expect(encodeControlLine(sendTextArgv('vam-a1b2c3', 'a'))?.mutating).toBe(true);
+    expect(encodeControlLine(sendEnterArgv('vam-a1b2c3'))?.mutating).toBe(true);
+    expect(encodeControlLine(resizeWindowArgv('vam-a1b2c3', 80, 24))?.mutating).toBe(true);
+    expect(encodeControlLine(capturePaneArgv('vam-a1b2c3'))?.mutating).toBe(false);
+    expect(encodeControlLine(listSessionsArgv())?.mutating).toBe(false);
+  });
 });
 
 describe('ControlFramer', () => {
   it('yields one block per %begin/%end pair, with its body lines joined', () => {
     const framer = new ControlFramer();
-    const blocks = framer.feed('%begin 1 1 0\nline one\nline two\n%end 1 1 0\n');
-    expect(blocks).toEqual([{ ok: true, body: 'line one\nline two\n' }]);
+    const blocks = framer.feed('%begin 1 1 1\nline one\nline two\n%end 1 1 1\n');
+    expect(blocks).toEqual([{ ok: true, body: 'line one\nline two\n', reply: true }]);
   });
 
   it('marks a %error block failed and keeps its body as the error text', () => {
     const framer = new ControlFramer();
-    const blocks = framer.feed('%begin 1 1 0\ncan\u2019t find session: x\n%error 1 1 0\n');
-    expect(blocks).toEqual([{ ok: false, body: 'can\u2019t find session: x\n' }]);
+    const blocks = framer.feed('%begin 1 1 1\ncan\u2019t find session: x\n%error 1 1 1\n');
+    expect(blocks).toEqual([{ ok: false, body: 'can\u2019t find session: x\n', reply: true }]);
   });
 
   it('discards unsolicited notifications between blocks', () => {
     const framer = new ControlFramer();
     const blocks = framer.feed(
-      '%output %0 hello\n%begin 1 1 0\nok\n%end 1 1 0\n%window-renamed @0 x\n',
+      '%output %0 hello\n%begin 1 1 1\nok\n%end 1 1 1\n%window-renamed @0 x\n',
     );
-    expect(blocks).toEqual([{ ok: true, body: 'ok\n' }]);
+    expect(blocks).toEqual([{ ok: true, body: 'ok\n', reply: true }]);
   });
 
   it('yields two blocks for one compound line, in order', () => {
     // MEASURED against a real tmux 3.7b: a `display-message ; capture-pane`
-    // line produces TWO %begin/%end pairs, in order -- this file does not
-    // need their `cmd_num`s to relate to each other, only that they arrive
-    // in the order the sub-commands were written.
+    // line produces TWO %begin/%end pairs, in order, BOTH carrying flags `1`
+    // -- this file does not need their `cmd_num`s to relate to each other,
+    // only that they arrive in the order the sub-commands were written.
     const framer = new ControlFramer();
     const blocks = framer.feed(
-      '%begin 1 1 0\n@vam-cursor 1 8 0 0 0\n%end 1 1 0\n%begin 1 2 0\nsh-3.2$\n\n%end 1 2 0\n',
+      '%begin 1 1 1\n@vam-cursor 1 8 0 0 0\n%end 1 1 1\n%begin 1 2 1\nsh-3.2$\n\n%end 1 2 1\n',
     );
     expect(blocks).toEqual([
-      { ok: true, body: '@vam-cursor 1 8 0 0 0\n' },
-      { ok: true, body: 'sh-3.2$\n\n' },
+      { ok: true, body: '@vam-cursor 1 8 0 0 0\n', reply: true },
+      { ok: true, body: 'sh-3.2$\n\n', reply: true },
     ]);
   });
 
   it('holds a block across a chunk boundary that lands mid-line', () => {
     const framer = new ControlFramer();
-    expect(framer.feed('%begin 1 1 0\nhalf')).toEqual([]);
-    expect(framer.feed(' line\n%end 1 1 0\n')).toEqual([{ ok: true, body: 'half line\n' }]);
+    expect(framer.feed('%begin 1 1 1\nhalf')).toEqual([]);
+    expect(framer.feed(' line\n%end 1 1 1\n')).toEqual([
+      { ok: true, body: 'half line\n', reply: true },
+    ]);
   });
 
   it('carries a partial trailing line across feeds without losing it', () => {
     const framer = new ControlFramer();
     expect(framer.feed('%beg')).toEqual([]);
-    expect(framer.feed('in 1 1 0\nx\n%end 1 1 0\n')).toEqual([{ ok: true, body: 'x\n' }]);
+    expect(framer.feed('in 1 1 1\nx\n%end 1 1 1\n')).toEqual([
+      { ok: true, body: 'x\n', reply: true },
+    ]);
+  });
+
+  it('marks a block NOT a reply when flags bit 0 is unset -- A1, tmux\u2019s own unsolicited startup block', () => {
+    // MEASURED against a real tmux 3.7b (a private `-L` socket): the
+    // `%begin`/`%end` block tmux emits unsolicited on EVERY `-C` connect --
+    // new and reconnected alike -- carries flags `0`; every block answering
+    // a command this file's own client actually wrote carries flags `1`.
+    // `control.ts`'s `#onData` reads this field to drop that block instead
+    // of letting it satisfy the first real command's reply.
+    const framer = new ControlFramer();
+    const blocks = framer.feed('%begin 1790226903 279 0\n%end 1790226903 279 0\n');
+    expect(blocks).toEqual([{ ok: true, body: '', reply: false }]);
+  });
+
+  it('treats an odd flags value as a reply too -- only bit 0 is read, per the man page\u2019s own field width', () => {
+    const framer = new ControlFramer();
+    const blocks = framer.feed('%begin 1 1 3\nx\n%end 1 1 3\n');
+    expect(blocks[0]?.reply).toBe(true);
+  });
+
+  it('closes a block only on an EXACT header match, never on a line merely SHAPED like a close -- A3', () => {
+    // VERIFIED cross-review finding, reproduced against a real tmux: pane
+    // TEXT is not escaped by this grammar the way a command's ARGUMENTS are,
+    // so a program printing a line that itself starts `%end ` (trivially,
+    // `echo '%end 9 9 9'`) must not be read as closing the block -- only the
+    // line carrying the SAME `<time> <n> <flags>` the matching `%begin` had
+    // may close it, and a `%begin`-shaped pane line must not be read as
+    // starting a nested block either. Ported from the terminal-streaming
+    // spike's own `StreamFramer`, proven there against the identical
+    // grammar.
+    const framer = new ControlFramer();
+    const blocks = framer.feed(
+      '%begin 1 1 1\nsome text\n%end 9 9 9\n%begin 9 9 9\nmore text\n%end 1 1 1\n',
+    );
+    expect(blocks).toEqual([
+      {
+        ok: true,
+        body: 'some text\n%end 9 9 9\n%begin 9 9 9\nmore text\n',
+        reply: true,
+      },
+    ]);
   });
 });
 
@@ -273,8 +336,8 @@ describe('reconstructResult', () => {
   it('joins every OK block into stdout, with no failure, when the last block succeeds', () => {
     expect(
       reconstructResult([
-        { ok: true, body: '@vam-cursor 1 8 0 0 0\n' },
-        { ok: true, body: 'sh-3.2$\n\n' },
+        { ok: true, body: '@vam-cursor 1 8 0 0 0\n', reply: true },
+        { ok: true, body: 'sh-3.2$\n\n', reply: true },
       ]),
     ).toEqual({ failure: null, stdout: '@vam-cursor 1 8 0 0 0\nsh-3.2$\n\n', stderr: '' });
   });
@@ -284,7 +347,7 @@ describe('reconstructResult', () => {
     // shape, so a synthetic `{code:1, killed:false, signal:null}` here is
     // read exactly as an ordinary non-zero `execFile` exit is -- the shape
     // `spawn.ts`'s own comment on `SpawnFailure` documents.
-    const result = reconstructResult([{ ok: false, body: "can't find session: x\n" }]);
+    const result = reconstructResult([{ ok: false, body: "can't find session: x\n", reply: true }]);
     expect(result.failure).toEqual({
       code: 1,
       killed: false,
@@ -303,8 +366,8 @@ describe('reconstructResult', () => {
     // as "unreadable", not as a crash, so dropping the failed block from
     // stdout (rather than aborting the whole read) reproduces that exactly.
     const result = reconstructResult([
-      { ok: false, body: "can't find pane: x\n" },
-      { ok: true, body: 'sh-3.2$\n\n' },
+      { ok: false, body: "can't find pane: x\n", reply: true },
+      { ok: true, body: 'sh-3.2$\n\n', reply: true },
     ]);
     expect(result.failure).toBeNull();
     expect(result.stdout).toBe('sh-3.2$\n\n');
