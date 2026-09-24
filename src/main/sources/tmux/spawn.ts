@@ -58,8 +58,14 @@ const TMUX_TIMEOUT_MS = 10_000;
  * `killSignal`, and it is what tells a timeout apart from a kill vam did not
  * ask for -- so `createTmuxRunner` passes it explicitly rather than leaving the
  * classifier's reasoning resting on a default that could change.
+ *
+ * EXPORTED for `control.ts`'s own synthetic timeout failure (A2): a control-
+ * mode command this file refuses to re-run after losing its reply reads
+ * exactly like this module's own timeout to `classifyTmuxFailure` below,
+ * which is the honest description -- tmux did not answer in time -- and
+ * reusing the same constant keeps the two timeouts from drifting apart.
  */
-const TIMEOUT_SIGNAL = 'SIGTERM';
+export const TIMEOUT_SIGNAL = 'SIGTERM';
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 

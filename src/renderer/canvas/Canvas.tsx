@@ -2986,6 +2986,54 @@ function CanvasInner({
   }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
 
   /**
+   * EVERY SESSION OF THE ACTIVE PROJECT VAM HAS NOT POSITIVELY EXCLUDED --
+   * what a pane may hold and draw as a tab. `drawnPaneTabs`, A11.1's
+   * adoption effect and A15.5's prune effect all read from HERE, never
+   * `allEntries` and never `entries`.
+   *
+   * NOT `allEntries`: the operator's own report -- a new session in a
+   * project whose OTHER sessions were running outside vam showed every one
+   * of them as a tab, though the sidebar (`hideForeign`, on by default) drew
+   * only the one just started. `allEntries` is unfiltered, and A11.1's
+   * "every session of the project is a tab, always" adopted the foreign ones
+   * the moment the project loaded -- before the operator toggled anything.
+   * The same gap applies to a DISMISSED row: an explicit "get this off my
+   * screen" the sidebar honours and the tab strip did not.
+   *
+   * NOT `entries` either -- A15.1's own rule, kept: "a pane the operator
+   * deliberately populated should not vanish because the search box or a
+   * status pill now hides its session." `entries` also narrows by
+   * `hideAgentStarted`, `onlyPrompted` and `hideEnded`, and
+   * `isHiddenByEndedFilter`'s own contract ties `hideEnded` to the LIVE
+   * status pill in a way that only makes sense inside the sidebar's own
+   * pipeline (its own comment: "the status pill wins"). Reusing that logic
+   * here, against a pill this layer deliberately does not read, would either
+   * fight it or silently duplicate a second copy of it. So this layer
+   * answers a narrower question than `entries` does: not vam's, or
+   * dismissed. Nothing here about being busy, being an agent's own session,
+   * or having finished -- those stay exactly the sidebar-only narrowing they
+   * already were.
+   *
+   * Same two predicates `entries` calls (`isSessionDismissed`,
+   * `isHiddenByForeignFilter`), the same listing-gap stand-down and the same
+   * demo exemption -- `foreignHiddenCount` below already pairs them this way
+   * for the quiet line's own count.
+   */
+  const paneEligibleEntries = useMemo(() => {
+    const undismissed = allEntries.filter(
+      (e) =>
+        !isSessionDismissed(
+          prefs,
+          e.session.source ?? e.project.source ?? 'unknown',
+          e.session.id,
+          e.session.activity,
+        ),
+    );
+    if (vamListingGap !== null || source.kind === 'demo') return undismissed;
+    return undismissed.filter((e) => !isHiddenByForeignFilter(e.session, prefs.filters));
+  }, [allEntries, prefs, vamListingGap, source.kind]);
+
+  /**
    * What each origin rule takes away, counted over the WHOLE workspace and
    * independently of whether its toggle is on — the popover shows it either
    * way, so turning one on is a number you saw coming rather than a row that
@@ -3278,8 +3326,12 @@ function CanvasInner({
    */
   const focusedPaneTabs = useMemo(
     () =>
-      drawnPaneTabs(allEntries, findLeaf(panes, focusedPaneId)?.sessionIds ?? [], activeProjectId),
-    [allEntries, panes, focusedPaneId, activeProjectId],
+      drawnPaneTabs(
+        paneEligibleEntries,
+        findLeaf(panes, focusedPaneId)?.sessionIds ?? [],
+        activeProjectId,
+      ),
+    [paneEligibleEntries, panes, focusedPaneId, activeProjectId],
   );
   /**
    * EVERY TAB ON SCREEN, IN THE ORDER THE STRIPS PAINT THEM — what
@@ -3299,25 +3351,28 @@ function CanvasInner({
    */
   const drawnTabsAcrossPanes = useMemo(
     () =>
-      leaves(panes).flatMap((leaf) => drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId)),
-    [allEntries, panes, activeProjectId],
+      leaves(panes).flatMap((leaf) =>
+        drawnPaneTabs(paneEligibleEntries, leaf.sessionIds, activeProjectId),
+      ),
+    [paneEligibleEntries, panes, activeProjectId],
   );
   /**
-   * EVERY session of the active project, filters and all — the list A11.1's
-   * invariant is stated over. Read from `allEntries` rather than the filtered
-   * `entries` for the reason the prune effect gives: a filter narrows what
-   * the SIDEBAR lists, and must not decide which sessions a pane holds, or
-   * turning one on would silently drop tabs and turning it off would silently
-   * add them.
+   * EVERY PANE-ELIGIBLE session of the active project — the list A11.1's
+   * invariant is stated over. Read from `paneEligibleEntries`, not
+   * `allEntries` (that was the bug: every foreign or dismissed session of
+   * the project got auto-adopted as a tab the moment the project loaded) and
+   * not the fully filtered `entries` either (a search query or a status pill
+   * must not decide which sessions a pane holds — see `paneEligibleEntries`'
+   * own comment for why that line is drawn between the two).
    */
   const activeProjectSessionIds = useMemo(
     () =>
       activeProjectId === null
         ? []
-        : allEntries
+        : paneEligibleEntries
             .filter((entry) => entry.project.id === activeProjectId)
             .map((entry) => entry.session.id),
-    [allEntries, activeProjectId],
+    [paneEligibleEntries, activeProjectId],
   );
 
   // The render-phase half of the two mirrors declared beside `panes` above.
@@ -3336,6 +3391,18 @@ function CanvasInner({
    * cannot churn the render, and it never closes the last pane. Skipped
    * entirely while the model is empty — that is the pre-load state, not
    * every session closing at once.
+   *
+   * "OPEN" NOW MEANS PANE-ELIGIBLE, NOT MERELY PRESENT. `open` used to read
+   * `allEntries`, so an already-open tab whose session turned foreign or got
+   * dismissed while a pane held it stayed a tab forever — the sidebar's own
+   * row was gone and the strip's was not. Sourcing `open` from
+   * `paneEligibleEntries` instead means the same session leaving that set
+   * (the operator dismisses it, or turns `hideForeign` on) prunes its tab the
+   * next render, same as a session that actually closed: `pruneClosedTabs`
+   * already picks the next kept tab in the leaf, or draws "no sessions open"
+   * when none are left. `wasPaneOf`/`nowByPane`/`lastPaneOfSession` below
+   * stay on `allEntries` — identity tracking for the rename case a few lines
+   * down, a different question from eligibility.
    *
    * AND THE KEYBOARD GOES WITH THE PANE THAT CLOSED. A pane emptied this way
    * is closed, so this is the one site that can leave `focusedPaneId` naming
@@ -3359,7 +3426,7 @@ function CanvasInner({
     if (allEntries.length === 0) {
       return;
     }
-    const open = new Set(allEntries.map((entry) => entry.session.id));
+    const open = new Set(paneEligibleEntries.map((entry) => entry.session.id));
     /**
      * BEFORE THE PRUNE, THE RENAME. A row can change identity without its
      * pane changing at all: a vam pane with nothing in it is a row keyed by
@@ -3413,7 +3480,7 @@ function CanvasInner({
     if (survivor !== undefined) {
       setFocusedPaneId(survivor.id);
     }
-  }, [allEntries, setFocusedPaneId]);
+  }, [allEntries, paneEligibleEntries, setFocusedPaneId]);
 
   /**
    * The other half of the per-pane `+`: the session it started, once it
@@ -3564,6 +3631,15 @@ function CanvasInner({
    * The `orphans` read off the rendered tree is an early-out, not the
    * decision: it keeps the common render from touching state at all, while
    * the updater is what actually decides against the freshest tree.
+   *
+   * AMENDED: "every session" now means every PANE-ELIGIBLE session
+   * (`activeProjectSessionIds`, sourced from `paneEligibleEntries`), not
+   * literally every row the project has. "All of them, always" predates
+   * `hideForeign` and dismissal; taken literally against a project with a
+   * session running outside vam, it auto-adopted that row into a tab the
+   * sidebar had already hidden, which is the bug `paneEligibleEntries`'s
+   * comment describes. The operator's "all of them" still holds for every
+   * session that is actually vam's to draw.
    */
   useEffect(() => {
     const orphans = activeProjectSessionIds.filter((id) => paneHolding(panes, id) === null);
@@ -6931,7 +7007,7 @@ function CanvasInner({
         : leaf.sessionId === null
           ? null
           : (entriesById.get(leaf.sessionId) ?? null);
-      const paneTabs = drawnPaneTabs(allEntries, leaf.sessionIds, activeProjectId);
+      const paneTabs = drawnPaneTabs(paneEligibleEntries, leaf.sessionIds, activeProjectId);
       return (
         // Not a control and not a keyboard stop of its own -- the real
         // interactive content is the `DetailPanel` instance inside it,
@@ -7044,7 +7120,7 @@ function CanvasInner({
       starting,
       focusedPaneId,
       focusedEntry,
-      allEntries,
+      paneEligibleEntries,
       entries,
       entriesById,
       activeProjectId,
@@ -7121,6 +7197,7 @@ function CanvasInner({
         <PhoneShell
           sidebar={sidebarProps}
           detail={detailProps}
+          paneEligibleEntries={paneEligibleEntries}
           sourceReadout={<SourceReadout source={source} />}
           // A read-only server registers no write routes at all, so the box is
           // withdrawn rather than drawn and refused. Only a `session` source
