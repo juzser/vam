@@ -74,6 +74,31 @@ const REFUSAL_TEXT: Record<RefusalReason, string> = {
     'this tmux is older than streaming needs (control-mode output notifications need tmux 3.2 or later) — the operator’s tmux, not this request, is what fell short.',
 };
 
+/**
+ * `StreamClient`'s own `StreamDownEvent` (`main/terminal/stream/client.ts`),
+ * carried across the bridge by `terminalStreamDown` -- written out here
+ * rather than imported for the same `tsconfig.web.json` reason `RefusalReason`
+ * above is. A review finding: this pane never subscribed to it at all, so a
+ * dropped connection sat frozen -- the LAST screen drawn, no sign anything
+ * was wrong -- for as long as `StreamClient` kept retrying, and then stayed
+ * frozen forever once it gave up.
+ */
+type StreamDownEvent =
+  | { readonly kind: 'reconnecting'; readonly attempt: number }
+  | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
+
+/** One honest sentence for the banner drawn over the pane while `down` is
+ *  set -- `reconnecting…` for a retry still in flight, `disconnected —
+ *  <reason>` once `StreamClient` has given up for good (matched to this
+ *  file's own `RefusalReason` register: what happened, never a guess at
+ *  why beyond what `StreamClient` itself already knows). */
+function downText(event: StreamDownEvent): string {
+  if (event.kind === 'reconnecting') return 'reconnecting…';
+  return event.reason === 'session-gone'
+    ? 'disconnected — the session ended'
+    : 'disconnected — vam could not reconnect';
+}
+
 export function TerminalStreamTab(props: {
   readonly projectId: string | null;
   readonly rowId?: string | undefined;
@@ -85,6 +110,7 @@ export function TerminalStreamTab(props: {
   const fitRef = useRef<FitAddon | null>(null);
   const streamIdRef = useRef<string | null>(null);
   const [refusal, setRefusal] = useState<RefusalReason | null>(null);
+  const [down, setDown] = useState<StreamDownEvent | null>(null);
 
   const bridge = globalThis.window?.api?.terminalStream;
   const fontSize = useSyncExternalStore(subscribeTerminalFontSize, activeTerminalFontSize);
@@ -105,6 +131,7 @@ export function TerminalStreamTab(props: {
     let cancelled = false;
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeSeed: (() => void) | undefined;
+    let unsubscribeDown: (() => void) | undefined;
     let resizeObserver: ResizeObserver | undefined;
     let frame: number | undefined;
 
@@ -127,8 +154,10 @@ export function TerminalStreamTab(props: {
     function teardownStream() {
       unsubscribeData?.();
       unsubscribeSeed?.();
+      unsubscribeDown?.();
       unsubscribeData = undefined;
       unsubscribeSeed = undefined;
+      unsubscribeDown = undefined;
       const streamId = streamIdRef.current;
       streamIdRef.current = null;
       if (streamId !== null) openBridge.close(streamId);
@@ -136,6 +165,7 @@ export function TerminalStreamTab(props: {
 
     async function connect() {
       setRefusal(null);
+      setDown(null);
       const result = await openBridge.open(openProjectId, rowId);
       if (cancelled) return;
       if (!result.ok) {
@@ -231,8 +261,16 @@ export function TerminalStreamTab(props: {
 
       unsubscribeData = openBridge.onData(streamId, (chunk) => term?.write(chunk));
       unsubscribeSeed = openBridge.onSeed(streamId, (seed) => {
+        // A FRESH SEED IS THE ALL-CLEAR (review finding, paired with
+        // `onDown` below): `StreamClient` only ever pushes one after a
+        // successful reconnect or a post-pause catch-up, so whatever
+        // banner `onDown` raised is stale the moment this arrives.
+        setDown(null);
         term?.reset();
         term?.write(seed);
+      });
+      unsubscribeDown = openBridge.onDown(streamId, (event) => {
+        setDown(event);
       });
     }
 
@@ -311,6 +349,21 @@ export function TerminalStreamTab(props: {
       ref={containerRef}
       {...insertScopeMark}
       className="relative min-h-0 flex-1 font-mono"
-    />
+    >
+      {down !== null && (
+        // A review finding: this pane never subscribed to onDown at all, so
+        // a dropped connection sat frozen -- the last screen drawn, no sign
+        // anything was wrong. `absolute` over the pane rather than replacing
+        // it: the operator's last-known screen (and its scrollback) stays
+        // visible underneath while this says why nothing is moving.
+        <p
+          data-terminal-stream-down
+          data-terminal-stream-down-kind={down.kind}
+          className="absolute top-1 right-1 z-10 rounded border border-line bg-panel px-2 py-0.5 text-control text-ink-faint"
+        >
+          {downText(down)}
+        </p>
+      )}
+    </div>
   );
 }

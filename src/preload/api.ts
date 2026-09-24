@@ -578,8 +578,20 @@ export type TerminalStreamApi = {
   /** Same shared-channel filtering as `onData`, over `terminalStreamSeed`. */
   onSeed(streamId: string, listener: (seed: string) => void): () => void;
   /** Same shared-channel filtering as `onData`, over `terminalStreamDown`. */
-  onDown(streamId: string, listener: () => void): () => void;
+  onDown(streamId: string, listener: (event: TerminalStreamDownEvent) => void): () => void;
 };
+
+/**
+ * `StreamClient`'s own `StreamDownEvent` (`main/terminal/stream/client.ts`),
+ * written out here for the same reason `open`'s result union is (see that
+ * member's own comment) rather than imported: `reconnecting` while a
+ * backed-off retry is still pending, a TERMINAL `gave-up` once `StreamClient`
+ * has stopped trying for good and nothing further will arrive on this
+ * `streamId`.
+ */
+export type TerminalStreamDownEvent =
+  | { readonly kind: 'reconnecting'; readonly attempt: number }
+  | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
 
 /**
  * Builds one filtered listener over a channel SHARED by every open stream:
@@ -642,8 +654,11 @@ export function createTerminalStreamApi(ipc: InvokerLike & ListenerLike): Termin
         listener(seed),
       ),
     onDown: (streamId, listener) =>
-      createFilteredStreamListener<[]>(ipc, CHANNELS.terminalStreamDown, streamId, () =>
-        listener(),
+      createFilteredStreamListener<[TerminalStreamDownEvent]>(
+        ipc,
+        CHANNELS.terminalStreamDown,
+        streamId,
+        (event) => listener(event),
       ),
   };
 }

@@ -98,7 +98,7 @@ function withBridge(over: {
   write?: (streamId: string, bytes: Uint8Array) => void;
   onData?: (streamId: string, listener: (chunk: string) => void) => () => void;
   onSeed?: (streamId: string, listener: (seed: string) => void) => () => void;
-  onDown?: (streamId: string, listener: () => void) => () => void;
+  onDown?: (streamId: string, listener: (event: StreamDownEvent) => void) => () => void;
 }) {
   const close = vi.fn();
   const resize = vi.fn(async () => true);
@@ -117,6 +117,31 @@ function withBridge(over: {
     },
   });
   return { close, resize };
+}
+
+type StreamDownEvent =
+  | { readonly kind: 'reconnecting'; readonly attempt: number }
+  | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
+
+/** Captures the bridge's own `onDown` listener so a test can fire it
+ * directly, exactly the way `withBridge`'s `open`/`onSeed` overrides let a
+ * test drive the rest of the bridge -- a review finding: `onDown` had no
+ * such seam at all before this, which is exactly how the component's own
+ * missing subscription (a second finding on the same review pass) went
+ * unnoticed: nothing in this file could have exercised it either way. */
+function withDownCapture() {
+  let handler: ((event: StreamDownEvent) => void) | undefined;
+  const onDown = vi.fn((_streamId: string, listener: (event: StreamDownEvent) => void) => {
+    handler = listener;
+    return () => {
+      handler = undefined;
+    };
+  });
+  return {
+    onDown,
+    fire: (event: StreamDownEvent) => handler?.(event),
+    isSubscribed: () => handler !== undefined,
+  };
 }
 
 beforeEach(() => {
@@ -423,6 +448,135 @@ describe('visibility-driven connect/disconnect', () => {
         await Promise.resolve();
       });
       expect(openSpy).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+});
+
+// Review finding: this pane never subscribed to `onDown` at all, so a
+// dropped connection sat frozen -- the LAST screen drawn, no sign anything
+// was wrong -- for as long as `StreamClient` kept retrying, and stayed
+// frozen forever once it gave up. `withDownCapture` is what makes that
+// actually exercisable: the bridge stub's own `onDown` used to be a no-op
+// (`() => () => {}`), which is exactly why this went unnoticed by every
+// OTHER test in this file.
+describe('the onDown banner (review finding)', () => {
+  it('subscribes to onDown at all -- the bridge stub used to be a no-op', async () => {
+    const down = withDownCapture();
+    withBridge({ onDown: down.onDown });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(down.onDown).toHaveBeenCalledWith('stream-1', expect.any(Function));
+    expect(down.isSubscribed()).toBe(true);
+  });
+
+  it('shows "reconnecting…" on a reconnecting event, without tearing down the pane', async () => {
+    const down = withDownCapture();
+    withBridge({ onDown: down.onDown });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      down.fire({ kind: 'reconnecting', attempt: 1 });
+    });
+
+    const banner = q('[data-terminal-stream-down]');
+    expect(banner?.textContent).toBe('reconnecting…');
+    expect(banner?.getAttribute('data-terminal-stream-down-kind')).toBe('reconnecting');
+    // The terminal itself is still there -- the operator's last screen
+    // stays visible underneath the banner, never replaced by it.
+    expect(q('[data-terminal-stream]')).not.toBeNull();
+    expect(disposeCalls).toHaveLength(0);
+  });
+
+  it.each([
+    ['max-attempts', 'disconnected — vam could not reconnect'],
+    ['session-gone', 'disconnected — the session ended'],
+  ] as const)(
+    'shows a distinguishable "disconnected" text for gave-up/%s',
+    async (reason, text) => {
+      const down = withDownCapture();
+      withBridge({ onDown: down.onDown });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => {
+        down.fire({ kind: 'gave-up', reason });
+      });
+
+      const banner = q('[data-terminal-stream-down]');
+      expect(banner?.textContent).toBe(text);
+      expect(banner?.getAttribute('data-terminal-stream-down-kind')).toBe('gave-up');
+    },
+  );
+
+  it('clears the banner once a fresh seed arrives', async () => {
+    const down = withDownCapture();
+    let seedListener: ((seed: string) => void) | undefined;
+    withBridge({
+      onDown: down.onDown,
+      onSeed: (_streamId, listener) => {
+        seedListener = listener;
+        return () => {
+          seedListener = undefined;
+        };
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      down.fire({ kind: 'reconnecting', attempt: 1 });
+    });
+    expect(q('[data-terminal-stream-down]')).not.toBeNull();
+
+    act(() => {
+      seedListener?.('a fresh screen');
+    });
+    expect(q('[data-terminal-stream-down]')).toBeNull();
+  });
+
+  it('clears a stale banner on a fresh connect() (visibility reconnect)', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    const down = withDownCapture();
+    try {
+      visibility.mockReturnValue('visible');
+      withBridge({ onDown: down.onDown });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      act(() => {
+        down.fire({ kind: 'gave-up', reason: 'max-attempts' });
+      });
+      expect(q('[data-terminal-stream-down]')).not.toBeNull();
+
+      visibility.mockReturnValue('hidden');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      visibility.mockReturnValue('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(q('[data-terminal-stream-down]')).toBeNull();
     } finally {
       visibility.mockRestore();
     }

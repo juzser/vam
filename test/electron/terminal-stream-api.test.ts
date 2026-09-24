@@ -30,6 +30,8 @@ function fakeIpc() {
       emitter.emit(CHANNELS.terminalStreamData, {}, streamId, chunk),
     emitSeed: (streamId: string, seed: string) =>
       emitter.emit(CHANNELS.terminalStreamSeed, {}, streamId, seed),
+    emitDown: (streamId: string, event: unknown) =>
+      emitter.emit(CHANNELS.terminalStreamDown, {}, streamId, event),
     listenerCount: (channel: string) => emitter.listenerCount(channel),
   };
 }
@@ -167,5 +169,37 @@ describe('createTerminalStreamApi', () => {
 
     expect(listener).not.toHaveBeenCalled();
     expect(ipc.listenerCount(CHANNELS.terminalStreamSeed)).toBe(0);
+  });
+
+  // Review finding: onDown had NO test coverage at all before this -- every
+  // test above it exercised onData/onSeed and left onDown untouched, which
+  // is exactly how TerminalStreamTab.tsx's own missing subscription (a
+  // second finding on the same review pass) went unnoticed: nothing in
+  // this suite would have failed either way.
+  it('onDown delivers the event for the matching streamId and discards others', () => {
+    const ipc = fakeIpc();
+    const api = createTerminalStreamApi(ipc);
+    const listener = vi.fn();
+
+    api.onDown('s1', listener);
+    ipc.emitDown('s2', { kind: 'reconnecting', attempt: 1 });
+    ipc.emitDown('s1', { kind: 'gave-up', reason: 'session-gone' });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({ kind: 'gave-up', reason: 'session-gone' });
+  });
+
+  it("onDown's unsubscribe removes the listener and is idempotent", () => {
+    const ipc = fakeIpc();
+    const api = createTerminalStreamApi(ipc);
+    const listener = vi.fn();
+
+    const unsubscribe = api.onDown('s1', listener);
+    unsubscribe();
+    ipc.emitDown('s1', { kind: 'reconnecting', attempt: 1 });
+    expect(() => unsubscribe()).not.toThrow();
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(ipc.listenerCount(CHANNELS.terminalStreamDown)).toBe(0);
   });
 });
