@@ -1517,12 +1517,20 @@ const OTHER_KEYS: Readonly<Record<string, string>> = {
  * holding the letter, where ⇧ carries the shift and every Mac menu prints the
  * letter capital.
  */
-function keyLabel(key: string, mac: boolean, modified: boolean): string {
+/**
+ * `glyph` alongside the text: true only for a key this table draws as an
+ * Apple pictogram (⏎ ⎋ ⇥ ⌫ an arrow, …) — never for a plain letter or digit,
+ * and never off a Mac, where the same named key is a WORD (`Esc`, `Up`), not
+ * a symbol. `chordSegments` reads this to decide which segments need the
+ * body sans treatment `ChordGlyphs` gives a symbol; see its own doc comment.
+ */
+function keyLabel(key: string, mac: boolean, modified: boolean): { text: string; glyph: boolean } {
   const named = (mac ? APPLE_KEYS : OTHER_KEYS)[key];
   if (named !== undefined) {
-    return named;
+    return { text: named, glyph: mac };
   }
-  return modified && /^[a-z]$/.test(key) ? key.toUpperCase() : key;
+  const text = modified && /^[a-z]$/.test(key) ? key.toUpperCase() : key;
+  return { text, glyph: false };
 }
 
 /**
@@ -1557,8 +1565,24 @@ function keyLabel(key: string, mac: boolean, modified: boolean): string {
  * only ever wanted a sentence — a tooltip's `sr-only` twin, a line in
  * `FilesTab.tsx`, `keysheet.ts`'s own search haystack — and is now defined
  * IN TERMS OF this, so the two can never compute the modifier set two ways.
+ *
+ * `glyph` IS A SECOND TAG, orthogonal to `modifier`: whether this segment is
+ * one of Apple's own pictograms (⇧⌘⌥⌃⏎⎋⇥⌫ an arrow, …) rather than a letter,
+ * digit or word. Measured against the operator's own reference — the Send
+ * Key option under Settings → Sessions — every one of these painted small
+ * and thin next to it everywhere else in the app: `font-mono` (Geist Mono)
+ * draws a noticeably narrower ⌘ than `font-sans` (Geist) does at the same
+ * size, and most chips are mono. `ChordGlyphs` reaches for the sans stack on
+ * exactly the segments tagged `glyph: true`; a bare letter or digit (`P`,
+ * `1`) is not a pictogram and keeps the chip's own font, and off a Mac
+ * nothing is tagged a glyph at all — the same key there is already a WORD
+ * (`Esc`, `Ctrl`), the family the operator's ask never touched.
  */
-export type ChordSegment = { readonly text: string; readonly modifier: boolean };
+export type ChordSegment = {
+  readonly text: string;
+  readonly modifier: boolean;
+  readonly glyph: boolean;
+};
 
 export function chordSegments(
   chord: string,
@@ -1592,7 +1616,10 @@ export function chordSegments(
     ),
   ];
   const key = keyLabel(rest, mac, held.size > 0);
-  return [...modifiers.map((text) => ({ text, modifier: true })), { text: key, modifier: false }];
+  return [
+    ...modifiers.map((text) => ({ text, modifier: true, glyph: mac })),
+    { text: key.text, modifier: false, glyph: key.glyph },
+  ];
 }
 
 /**

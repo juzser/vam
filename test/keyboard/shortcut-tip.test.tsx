@@ -377,28 +377,64 @@ describe('a chord reaches the screen as its own platform’s symbols', () => {
 });
 
 /**
- * THE SEND KEY OPTION'S OWN LOOK WINS OVER PULL REQUEST 468's. That PR painted a
- * modifier glyph at `text-[1.3em]` beside a same-size key — "cramped rather
- * than legible", its own doc comment says — but the operator has since named
- * a newer reference: the Send key buttons under Settings → Sessions, which
- * paint ⌘/⇧/⏎ at the SAME size as the key beside them, just spaced apart.
- * That is the newer instruction, and it wins: `ChordGlyphs` now paints flat,
- * uniform-size text, matching `chordSymbols` character for character with no
- * element wrapping any segment at all — one rendering, not two.
+ * THE SEND KEY OPTION'S OWN LOOK, MEASURED IN A REAL BROWSER AND FOUND TO BE A
+ * FONT, NOT ONLY A SIZE. Pull request 468 painted a modifier glyph at
+ * `text-[1.3em]`, one size larger than the key beside it — "cramped rather
+ * than legible". #471 answered the operator's newer reference (the Send Key
+ * buttons under Settings → Sessions, which paint ⌘/⇧/⏎ at the SAME size as
+ * the key beside them) by dropping the wrapper span entirely, so every
+ * segment fell back to the chip's own ambient font. That held for
+ * `SettingsOverlay.tsx`'s own button — its ambient font already IS the body
+ * sans stack — but every other chip in the app (`Chip` above, `InlineChord`,
+ * `KeySheet.tsx`, `CommandPalette.tsx`, the phone's key strip) is
+ * `font-mono`, and a real Chromium measurement
+ * (`e2e/chord-symbol-shots.mjs`) found Geist Mono draws a noticeably
+ * narrower ⌘ than Geist does at the same size — thin next to the reference,
+ * exactly what the operator reported.
+ *
+ * So the span returns — for glyph segments only. `chordSegments` now tags
+ * which segment is one of Apple's own pictograms (`chords.ts`'s `glyph`
+ * field): a modifier on a Mac, or a named key this table draws as one
+ * (⏎ ⎋ ⇥ ⌫ an arrow, …). `ChordGlyphs` wraps exactly those in the body sans
+ * stack, the SAME face the Send key option's own ambient font already gives
+ * its buttons — so that button's own look never moves — while a plain letter
+ * or digit (`P`, `1`) stays unwrapped, inheriting whatever font the chip
+ * around it chose. Off a Mac nothing is tagged a glyph at all, so nothing is
+ * wrapped there either: the word spellings (`Ctrl+Shift+P`) are exactly what
+ * #471 shipped, untouched.
  */
-describe('ChordGlyphs paints flat, the Send key option’s own look', () => {
-  it('wraps no segment in its own element — every glyph is one size', () => {
+describe('ChordGlyphs paints a Mac glyph in the body sans stack, everything else flat', () => {
+  it('wraps only the Mac modifier glyphs, in the sans stack — the letter stays plain', () => {
     const { container } = render(<ChordGlyphs chord="Mod-Shift-p" mac={true} />);
-    // No `text-[1.3em]` span, no span at all: the whole chord is plain text,
-    // exactly what a `chordSymbols` string already is.
-    expect(container.querySelector('span')).toBeNull();
+    const spans = [...container.querySelectorAll('span')];
+    expect(spans.map((span) => span.textContent)).toEqual(['⇧', '⌘']);
+    for (const span of spans) {
+      expect(span.className).toContain('font-sans');
+    }
+    // The letter is not one of the wrapped spans and carries no class of its
+    // own — it is a plain text node, exactly as #471 left it.
     expect(container.textContent).toBe('⇧ ⌘ P');
   });
 
-  it('still equals chordSymbols character for character, off a Mac too', () => {
+  it('wraps a named Mac glyph too, not only a modifier', () => {
+    const { container } = render(<ChordGlyphs chord="Enter" mac={true} />);
+    const span = container.querySelector('span');
+    expect(span?.textContent).toBe('⏎');
+    expect(span?.className).toContain('font-sans');
+    expect(container.textContent).toBe('⏎');
+  });
+
+  it('wraps nothing off a Mac — the word spellings are untouched', () => {
     const { container } = render(<ChordGlyphs chord="Mod-Shift-p" mac={false} />);
     expect(container.querySelector('span')).toBeNull();
     expect(container.textContent).toBe(chordSymbols('Mod-Shift-p', false));
+  });
+
+  it('still equals chordSymbols character for character, on both platforms', () => {
+    for (const mac of [true, false]) {
+      const { container } = render(<ChordGlyphs chord="Mod-Shift-p" mac={mac} />);
+      expect(container.textContent).toBe(chordSymbols('Mod-Shift-p', mac));
+    }
   });
 });
 

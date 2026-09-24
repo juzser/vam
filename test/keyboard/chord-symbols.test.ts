@@ -225,13 +225,41 @@ describe('every chord the shipped tables hold, rendered', () => {
 describe('chordSegments: the same computation, tagged, before the join', () => {
   it('tags every held modifier and only the trailing key', () => {
     expect(chordSegments('Mod-Shift-e', true)).toEqual([
-      { text: '⇧', modifier: true },
-      { text: '⌘', modifier: true },
-      { text: 'E', modifier: false },
+      { text: '⇧', modifier: true, glyph: true },
+      { text: '⌘', modifier: true, glyph: true },
+      { text: 'E', modifier: false, glyph: false },
     ]);
     expect(chordSegments('Mod-p', false)).toEqual([
-      { text: 'Ctrl', modifier: true },
-      { text: 'P', modifier: false },
+      { text: 'Ctrl', modifier: true, glyph: false },
+      { text: 'P', modifier: false, glyph: false },
+    ]);
+  });
+
+  /**
+   * `glyph` IS THE SEND KEY OPTION'S OWN DISTINCTION, MADE READABLE: a
+   * modifier on a Mac is always a symbol (⇧⌘⌥⌃), and so is a named key this
+   * table draws as one (⏎ ⎋ ⇥ ⌫ an arrow, …) — `ChordGlyphs` reaches for the
+   * body sans stack on exactly those, the same face the Send key option has
+   * always painted its own ⇧/⏎ in. A bare letter or digit is not a symbol —
+   * `G` is a letter a vim user reads as a letter — and neither is a modifier
+   * off a Mac, which is already a word (`Ctrl`, `Shift`). Both keep the
+   * chip's own font, untouched.
+   */
+  it('tags a named Mac glyph — not only a modifier — and no plain letter or digit', () => {
+    expect(chordSegments('Enter', true)).toEqual([{ text: '⏎', modifier: false, glyph: true }]);
+    expect(chordSegments('Escape', true)).toEqual([{ text: '⎋', modifier: false, glyph: true }]);
+    expect(chordSegments('ArrowUp', true)).toEqual([{ text: '↑', modifier: false, glyph: true }]);
+    expect(chordSegments('Mod-1', true)).toEqual([
+      { text: '⌘', modifier: true, glyph: true },
+      { text: '1', modifier: false, glyph: false },
+    ]);
+    // Off a Mac the same named keys fall back to WORDS, which is the family
+    // the operator's ask never touched — untouched here too.
+    expect(chordSegments('Enter', false)).toEqual([
+      { text: 'Enter', modifier: false, glyph: false },
+    ]);
+    expect(chordSegments('Escape', false)).toEqual([
+      { text: 'Esc', modifier: false, glyph: false },
     ]);
   });
 
@@ -250,7 +278,7 @@ describe('chordSegments: the same computation, tagged, before the join', () => {
   });
 
   it('holds a bare key with no modifier at all', () => {
-    expect(chordSegments('G', true)).toEqual([{ text: 'G', modifier: false }]);
+    expect(chordSegments('G', true)).toEqual([{ text: 'G', modifier: false, glyph: false }]);
   });
 });
 
