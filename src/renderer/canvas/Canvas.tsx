@@ -111,7 +111,11 @@ import { CommandPalette } from '../panels/CommandPalette.js';
 import { ConfirmForceClose } from '../panels/ConfirmForceClose.js';
 import { ContextMenu } from '../panels/ContextMenu.js';
 import { copyText } from '../panels/clipboard.js';
-import { DetailPanel, type Tab as DetailTab } from '../panels/DetailPanel.js';
+import {
+  DetailPanel,
+  type Tab as DetailTab,
+  type StartingPaneWait,
+} from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
 import { describeIcon, parseIcon } from '../panels/icon-value.js';
@@ -284,6 +288,15 @@ const STATUS_MAX_CHARS = 72;
  * and the refusal says what happened either way.
  */
 const REPEAT_WINDOW_MS = 1_500;
+
+/**
+ * HOW LONG START SESSION / RESUME WAIT BEFORE OFFERING THE TERMINAL VIEW
+ * INSTEAD OF A SPINNER -- `startingPaneByKey`'s own comment. Exported for the
+ * same reason `PAINT_LIFETIME_MS` is: a test that means "past the timeout"
+ * says so in this name rather than restating the number and drifting from it
+ * the day this changes.
+ */
+export const START_PANE_WAIT_TIMEOUT_MS = 30_000;
 
 /**
  * A status message shortened for the bar, never for the log.
@@ -2557,6 +2570,110 @@ function CanvasInner({
   const setWritingFor = useCallback((sessionId: string, value: boolean) => {
     setWritingBySession((current) => ({ ...current, [sessionId]: value }));
   }, []);
+  /**
+   * THE WAIT BETWEEN A PRESS AND THE AGENT REGISTERING -- Start session or
+   * Resume, on a pane row (`StartSession`/`TerminalOnlyStart`, `DetailPanel.tsx`).
+   *
+   * Operator: "after clicking Start session on the start screen, there needs
+   * to be a loading state while the session is being created." `writingBySession`
+   * above already covers the write itself, and the write is not the wait:
+   * `typeIntoOwnPane` resolves once the KEYS are typed, seconds before the
+   * agent registers anywhere vam can see it (`startSessionIn`'s own header),
+   * so a guard that cleared with the write would go quiet exactly when the
+   * operator is still watching a shell prompt.
+   *
+   * KEYED BY THE PANE, NOT THE SESSION ID, for the reason `viewBySession`'s
+   * rename effect above exists at all: an `unstarted`/`terminal` row changes
+   * ID the instant the agent registers (`Session.pane`'s own comment,
+   * `domain/model.ts`) -- so a record keyed by `entry.session.id` would name
+   * an id that has already stopped existing at the exact moment its own
+   * write succeeded. `entry.session.pane` is the one fact both rows share.
+   *
+   * STATE, NOT A REF, because `DetailPanel` draws it -- and Canvas state,
+   * not `StartSession`'s own, for the same reason `sendFailureBySession`
+   * above is not local to the composer: ONE `DetailPanel` instance is reused
+   * for every tab a pane holds (`renderLeaf`'s own comment), so a wait held
+   * in that component's local state would follow the pane to whichever OTHER
+   * session the operator switches to next, or vanish switching away and back.
+   */
+  const [startingPaneByKey, setStartingPaneByKey] = useState<
+    Readonly<Record<string, StartingPaneWait>>
+  >({});
+  /**
+   * PAST THIS, NOTHING IS WORTH WAITING FOR SILENTLY -- the operator's own
+   * bound (`START_PANE_WAIT_TIMEOUT_MS` above), and `StartingSession`'s
+   * neighbour rather than its twin: that indicator (new session, a pane that
+   * does not exist yet) deliberately names no duration because vam has
+   * nothing to measure against; THIS wait is for a pane the operator can
+   * already see and can already reach by hand (the Terminal view), so a
+   * bound that hands them that door is honest where a bare "still waiting"
+   * forever would not be.
+   */
+  /** One pending timeout per waiting pane, so `clearStartingPane` can cancel
+   *  the ONE that named this key rather than leaving it to fire later against
+   *  a record that has already moved on to a different wait. */
+  const startingPaneTimeouts = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const beginStartingPane = useCallback((key: string, wait: StartingPaneWait) => {
+    const existing = startingPaneTimeouts.current.get(key);
+    if (existing !== undefined) clearTimeout(existing);
+    setStartingPaneByKey((current) => ({ ...current, [key]: wait }));
+    const handle = setTimeout(() => {
+      startingPaneTimeouts.current.delete(key);
+      setStartingPaneByKey((current) => {
+        const value = current[key];
+        // Superseded by a later `beginStartingPane`/`clearStartingPane`
+        // while this timer was ticking -- nothing here is still true of it.
+        if (value === undefined || value.timedOut) return current;
+        return { ...current, [key]: { ...value, timedOut: true } };
+      });
+    }, START_PANE_WAIT_TIMEOUT_MS);
+    startingPaneTimeouts.current.set(key, handle);
+  }, []);
+  const clearStartingPane = useCallback((key: string) => {
+    const existing = startingPaneTimeouts.current.get(key);
+    if (existing !== undefined) {
+      clearTimeout(existing);
+      startingPaneTimeouts.current.delete(key);
+    }
+    setStartingPaneByKey((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+  // Nothing is left ticking behind a canvas that has already gone -- the same
+  // discipline `paintCount`'s own sweep effect keeps for its interval.
+  useEffect(
+    () => () => {
+      for (const handle of startingPaneTimeouts.current.values()) clearTimeout(handle);
+      startingPaneTimeouts.current.clear();
+    },
+    [],
+  );
+  /**
+   * AND IT ENDS WHEN THE ROW ITSELF SAYS SO -- never when the write resolves
+   * (`beginStartingPane`'s own header), and never on a timer either: the
+   * timeout above only stops the SPINNER, not the wait, because vam still has
+   * no better source of truth than the next poll. A row is still waited on
+   * while it is `unstarted` or `terminal`; anything else -- it went `running`,
+   * it closed, the project it lived in vanished -- ends the wait, the same
+   * "AND IT ENDS WHEN THE ROW ARRIVES" rule the brand-new-session `starting`
+   * indicator follows a few screens up.
+   */
+  useEffect(() => {
+    const keys = Object.keys(startingPaneByKey);
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      const stillWaiting =
+        row !== undefined &&
+        (row.session.status === 'unstarted' || row.session.status === 'terminal');
+      if (!stillWaiting) clearStartingPane(key);
+    }
+  }, [allEntries, startingPaneByKey, clearStartingPane]);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -4544,6 +4661,7 @@ function CanvasInner({
     async (entry: SessionEntry, providerId: ProviderId): Promise<void> => {
       const provider = resolveProvider(providerId);
       const title = entry.session.title;
+      const paneKey = entry.session.pane ?? entry.session.id;
       if (source.kind !== 'session') {
         setStatus(`nothing can be started in "${title}" from here — no source is connected`);
         return;
@@ -4553,10 +4671,18 @@ function CanvasInner({
         setStatus(`${sessionSource.label} cannot be written to — "${title}" was not started`);
         return;
       }
-      if (writingBySession[entry.session.id] ?? false) {
+      if (
+        (writingBySession[entry.session.id] ?? false) ||
+        startingPaneByKey[paneKey] !== undefined
+      ) {
         return;
       }
       setWritingFor(entry.session.id, true);
+      // THE WAIT BECOMES VISIBLE HERE, before the write is even issued -- the
+      // operator's own "immediately" -- and OUTLIVES it: cleared only by the
+      // row leaving `unstarted`/`terminal` (the effect above) or by this same
+      // press being refused below, never by the write resolving.
+      beginStartingPane(paneKey, { kind: 'start', provider: providerId, timedOut: false });
       setStatus(`starting ${provider.label} in "${title}"…`);
       try {
         await sessionSource.write.recordPrompt(entry.session.id, provider.command.join(' '));
@@ -4565,12 +4691,23 @@ function CanvasInner({
         );
         source.onWrote();
       } catch (cause) {
+        // NOTHING IS LEFT SPINNING -- `createSession`'s own discipline, a
+        // screen up: a wait that outlived this failure would say vam is
+        // still trying when vam has stopped.
+        clearStartingPane(paneKey);
         setStatus(noteFailure(`start ${provider.label}`, cause));
       } finally {
         setWritingFor(entry.session.id, false);
       }
     },
-    [source, writingBySession, setWritingFor],
+    [
+      source,
+      writingBySession,
+      setWritingFor,
+      startingPaneByKey,
+      beginStartingPane,
+      clearStartingPane,
+    ],
   );
 
   /**
@@ -4596,6 +4733,7 @@ function CanvasInner({
       const title = entry.session.title;
       const command = entry.session.resumeCommand;
       if (command === undefined) return;
+      const paneKey = entry.session.pane ?? entry.session.id;
       if (source.kind !== 'session') {
         setStatus(`nothing can be resumed in "${title}" from here — no source is connected`);
         return;
@@ -4605,22 +4743,34 @@ function CanvasInner({
         setStatus(`${sessionSource.label} cannot be written to — "${title}" was not resumed`);
         return;
       }
-      if (writingBySession[entry.session.id] ?? false) {
+      if (
+        (writingBySession[entry.session.id] ?? false) ||
+        startingPaneByKey[paneKey] !== undefined
+      ) {
         return;
       }
       setWritingFor(entry.session.id, true);
+      beginStartingPane(paneKey, { kind: 'resume', timedOut: false });
       setStatus(`resuming "${title}"…`);
       try {
         await sessionSource.write.recordPrompt(entry.session.id, command);
         setStatus(`typed the resume command into "${title}" — it appears here once it registers`);
         source.onWrote();
       } catch (cause) {
+        clearStartingPane(paneKey);
         setStatus(noteFailure('resume', cause));
       } finally {
         setWritingFor(entry.session.id, false);
       }
     },
-    [source, writingBySession, setWritingFor],
+    [
+      source,
+      writingBySession,
+      setWritingFor,
+      startingPaneByKey,
+      beginStartingPane,
+      clearStartingPane,
+    ],
   );
 
   /**
@@ -6742,6 +6892,16 @@ function CanvasInner({
         // rule `onStartSession` follows; `DetailPanel` further withholds the
         // button unless the row itself carries a `resumeCommand`.
         onResumeInPane: entry === null ? undefined : () => void resumeInPane(entry),
+        // THIS PANE'S ROW's own wait, if it has one -- see `startingPaneByKey`'s
+        // own comment. Looked up by the SAME key `startSessionIn`/`resumeInPane`
+        // write it under, `entry.session.pane`, not `entry.session.id`: a row
+        // whose agent just registered carries a NEW id but the SAME pane, and
+        // this is what lets the wait still find it for the one poll where the
+        // two disagree.
+        startingPane:
+          entry === null
+            ? null
+            : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
         // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
         // when THIS pane holds nothing, vam has no session to show ANYWHERE
         // (`entries`, the same filtered set the sidebar and the tab strip
@@ -6768,6 +6928,12 @@ function CanvasInner({
                 foreignHiddenCount,
                 onShowForeign: () =>
                   onSidebarOriginFilters({ ...prefs.filters, hideForeign: false }),
+                // THE SAME WAIT the sidebar's own New project button already
+                // shows (`pending(NEW_PROJECT_PENDING, …)`, `SessionList.tsx`)
+                // -- this screen's button is the identical act and owes the
+                // operator the identical visible "this is running" it was
+                // missing (item 4 of the brief).
+                pending: pendingAction === NEW_PROJECT_PENDING,
               },
         // The Files tab's tree width, and the way back. GLOBAL for the same
         // reason `defaultProvider` above it is passed identically to every
@@ -6859,6 +7025,7 @@ function CanvasInner({
       writingBySession,
       actionIndexBySession,
       sendFailureBySession,
+      startingPaneByKey,
       viewBySession,
       viewSeed,
       source,
@@ -6883,6 +7050,7 @@ function CanvasInner({
       onSidebarOriginFilters,
       hasOwnSession,
       sidebarLoading,
+      pendingAction,
     ],
   );
 

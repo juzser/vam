@@ -230,6 +230,47 @@ describe('the getting-started screen, wired from Canvas', () => {
     expect(spawned).toEqual([[CHOSEN, 'orchard']]);
   });
 
+  /**
+   * ITEM 4 OF THE BRIEF: "make sure the button itself shows it visibly
+   * (spinner/disabled)" -- the same `pendingAction === NEW_PROJECT_PENDING`
+   * wait the sidebar's own New project button already wears
+   * (`SessionList.test.tsx`), now on THIS screen's copy of the identical
+   * act. Gated on the DIALOG, not the spawn, because the dialog is the
+   * first await on this path (`newProject`'s own header) -- the button has
+   * to freeze before the OS even shows a picker, or a second click during
+   * that window opens a second one.
+   */
+  it('the button itself freezes, visibly, for the whole of the directory dialog and the spawn', async () => {
+    const { source, spawned } = sourceWith(true);
+    let releaseDialog: (() => void) | null = null;
+    withDialog(
+      () =>
+        new Promise<string | null>((resolve) => {
+          releaseDialog = () => resolve(CHOSEN);
+        }),
+    );
+    render(<Canvas model={EMPTY_MODEL} source={source} />);
+    const button = () =>
+      document.querySelector('[data-getting-started-new-project]') as HTMLButtonElement | null;
+    expect(button()?.disabled).toBe(false);
+    await act(async () => {
+      button()?.click();
+    });
+    expect(button()?.disabled).toBe(true);
+    expect(button()?.getAttribute('aria-busy')).toBe('true');
+    expect(button()?.getAttribute('data-pending')).toBe('true');
+    await act(async () => {
+      releaseDialog?.();
+    });
+    expect(spawned).toEqual([[CHOSEN, 'orchard']]);
+    // Past the dialog, the pane hands off to the FULL-PANE "starting a
+    // session" indicator (`StartingSession`, `Canvas.tsx`) -- this screen's
+    // own button is not merely re-enabled, it is gone along with the rest
+    // of the getting-started screen it belonged to.
+    expect(button()).toBeNull();
+    expect(document.querySelector('[data-pane-starting]')).not.toBeNull();
+  });
+
   it('withdraws the button and says so, with no directory picker (the browser build)', () => {
     const { source } = sourceWith(true);
     withDialog();
