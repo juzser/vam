@@ -139,9 +139,16 @@ const clip = (text: string): string =>
  * tmux's own words, matched loosely enough to survive a rewording. NO_SERVER
  * is the one that must not be mistaken for a failure by a caller listing
  * sessions -- see `listVamSessions`.
+ *
+ * `NO_SESSION` is exported so `terminal/stream/client.ts` can recognise the
+ * SAME shape of tmux error text on a control-mode `%error` block's own body
+ * (a `capture-pane`/`list-panes` reply during a reconnect attempt) -- the
+ * session it was streaming is gone, not merely the connection, and that is a
+ * reason to give up permanently rather than keep backing off and retrying
+ * against a session that will never answer.
  */
 const NO_SERVER = /no server running|error connecting to .*\(no such file/i;
-const NO_SESSION = /can't find (?:session|pane|window)|session not found/i;
+export const NO_SESSION = /can't find (?:session|pane|window)|session not found/i;
 const DUPLICATE = /duplicate session/i;
 
 /**
