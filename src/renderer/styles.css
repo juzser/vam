@@ -1776,15 +1776,46 @@ html.light {
   color-scheme: light;
 }
 
+/*
+ * THE OPERATOR'S OWN REPORT ON A PHONE, TRANSLATED: "scrolling exposes a
+ * black background underneath." Two faults, both here.
+ *
+ * `height: 100%` ON THESE THREE tracks the LARGE iOS Safari viewport (the
+ * one with the address bar hidden), while `PhoneShell.tsx`'s own root sizes
+ * itself to `100dvh` -- the CURRENT one, smaller whenever the bar is
+ * showing. A document taller than the shell it holds is a document that can
+ * scroll when nothing on it needs to, which is the "exposes" half of the
+ * report: there is real travel below the app's own content. `100dvh` here
+ * matches the shell exactly instead of exceeding it -- on the desktop,
+ * where nothing ever moves the toolbar, `dvh` and the `%` it replaces are
+ * the same number, so this is not a two-target rule.
+ *
+ * `background` ON `html`, NOT ONLY `body` (below), is the "black" half.
+ * `:root` sets `color-scheme: dark` as vam's default, and a `color-scheme`
+ * with no background of its own to fall back on is what a bare rubber-band
+ * bounce -- or any sliver of `html` peeking past a shorter `body` -- paints
+ * with: the UA's own dark canvas, which is black, not `--color-ground`
+ * (#0d0d0d dark, #ffffff light -- close in the dark theme, wrong everywhere
+ * else). One token, both elements, so the two can never drift apart the way
+ * a hand-picked black or white for each would.
+ *
+ * `overscroll-behavior: none` on both is the belt to `100dvh`'s suspenders:
+ * even if some future element outgrows the shell again, the bounce this
+ * report is ABOUT stops being reachable in the first place, on a page that
+ * has no scrollable content of its own by design (every real scroller in
+ * this app -- `OverlayScroll`, the terminal, the transcript -- is an inner
+ * box, never the document).
+ */
 html,
 body,
 #root {
-  height: 100%;
+  height: 100dvh;
+  background: var(--color-ground);
+  overscroll-behavior: none;
 }
 
 body {
   margin: 0;
-  background: var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-sans);
   /* 12px is orca's workhorse size; 13px is reserved for titles. A fourth

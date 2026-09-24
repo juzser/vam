@@ -466,9 +466,18 @@ export function PhoneShell({
   if (!open || entry === null) {
     return (
       <div data-phone-shell="list" className="flex h-[100dvh] min-h-0 flex-col bg-ground">
-        <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-3">
-          {sourceReadout}
-        </header>
+        {/* NO DEDICATED BAR FOR THIS ANY MORE -- there used to be a second
+            `<header>` here, above `SessionList`'s own, whose only content
+            was this readout. For the healthy arm that is a LONE DOT (see
+            `SourceReadout`'s own comment on why nothing else paints), so a
+            48px, full-width, bordered bar existed to hold seven visible
+            pixels -- the operator's own report, translated: "an empty gap
+            and a blue dot" at the very top of the getting-started screen,
+            measured at y:0 w:390 h:48 holding one 7x16 dot. `SessionList`
+            now takes the readout as a prop and folds it into the row it
+            already draws for the avatar and the theme toggle -- a row that
+            exists whether or not there is anything to say here, so the
+            readout stops needing a bar of its own to be seen in. */}
         <div className="flex min-h-0 flex-1 flex-col">
           <SessionList
             {...sidebar}
@@ -478,6 +487,7 @@ export function PhoneShell({
             // it, no detail pane answers a question, and no cursor has
             // anywhere to be. The row says so itself (UI spec D1).
             phone
+            sourceReadout={sourceReadout}
             onPick={(id) => {
               sidebar.onPick(id);
               show();

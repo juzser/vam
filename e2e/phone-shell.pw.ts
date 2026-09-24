@@ -1851,6 +1851,114 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
     });
     expect(await page.locator('[data-getting-started]').count()).toBe(0);
   });
+
+  /** Same three routes every test in this file stubs, factored once for the
+   *  four measurements below -- they all want the identical empty-screen
+   *  state and differ only in what they read off it. */
+  async function openGettingStarted(page: Page): Promise<void> {
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    await page.goto('/');
+    await page.waitForSelector('[data-getting-started]', { timeout: 10_000 });
+  }
+
+  /**
+   * THE OPERATOR'S OWN REPORT, MEASURED: "the getting-started screen is
+   * broken -- scrolling exposes a black background underneath, and the text
+   * is not centred... an empty gap and a blue dot" at the very top.
+   * `docs/ui/getting-started-phone.png` is what that read like.
+   *
+   * Ground-truthed against the pre-fix build before these assertions were
+   * written (not merely reasoned about): `html`'s computed background was
+   * `rgba(0, 0, 0, 0)` against `body`'s opaque ground, `overscroll-behavior`
+   * on `html` read `auto`, a `<header>` sat directly under
+   * `[data-phone-shell="list"]` holding nothing but a 7x16 dot at y:0..48,
+   * and the getting-started block's own centre (y=682) sat 150px below the
+   * free area's true centre (y=532) -- exactly the bottom half of a 600px
+   * region, because an EMPTY `OverlayScroll` was a `flex-1` sibling taking
+   * the top half for itself. Each assertion below failed on that build for
+   * the reason its own comment states.
+   */
+  test('the getting-started screen: no colour leak, no empty top strip, and a centred block', async ({
+    page,
+  }) => {
+    await openGettingStarted(page);
+
+    const geometry = await page.evaluate(() => {
+      const r2 = (el: Element | null) => {
+        const b = el?.getBoundingClientRect();
+        return b === undefined || b === null
+          ? null
+          : { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) };
+      };
+      return {
+        viewportHeight: window.innerHeight,
+        docScrollHeight: document.documentElement.scrollHeight,
+        htmlBg: getComputedStyle(document.documentElement).backgroundColor,
+        bodyBg: getComputedStyle(document.body).backgroundColor,
+        htmlOverscrollY: getComputedStyle(document.documentElement).overscrollBehaviorY,
+        // The empty strip this screen used to open with: a `<header>` sitting
+        // directly under the phone shell's list root, above `SessionList`'s
+        // own. Gone once the readout folded into that pane's avatar row
+        // instead of keeping a bar of its own.
+        looseHeaderAboveList: document.querySelector('[data-phone-shell="list"] > header') !== null,
+        sourceBox: r2(document.querySelector('[data-source]')),
+        avatarBarBox: r2(document.querySelector('[data-avatar-bar]')),
+        projectsHeaderBox: r2(document.querySelector('[data-projects-header]')),
+        footerBox: r2(document.querySelector('[data-phone-status-bar]')),
+        gettingStartedBox: r2(document.querySelector('[data-getting-started]')),
+      };
+    });
+
+    // (a) NOTHING SCROLLS PAST THE APP'S OWN SURFACE. A regression guard
+    // rather than a reproduction: a headless engine never diverges `vh` from
+    // `dvh` the way an iOS Safari address bar does (this file's own header,
+    // "WHAT IT CANNOT DO"), so this does not fail on the pre-fix build --
+    // `overscrollBehaviorY` below is what catches THIS engine can catch, and
+    // `height: 100dvh` (styles.css) is what keeps this true on a real phone.
+    expect(
+      geometry.docScrollHeight,
+      JSON.stringify(geometry),
+    ).toBeLessThanOrEqual(geometry.viewportHeight);
+    // `html`'s own background, not only `body`'s -- see `styles.css`'s own
+    // comment on why the gap between the two is where the black came from.
+    expect(geometry.htmlBg, JSON.stringify(geometry)).toBe(geometry.bodyBg);
+    expect(geometry.htmlBg).not.toBe('rgba(0, 0, 0, 0)');
+    expect(geometry.htmlOverscrollY).toBe('none');
+
+    // (b) NO EMPTY GAP AND A LONE DOT ABOVE THE HEADER. The connectivity dot
+    // sits inside the avatar row now, not in a bar of its own above it.
+    expect(geometry.looseHeaderAboveList).toBe(false);
+    const { sourceBox, avatarBarBox } = geometry;
+    if (sourceBox === null || avatarBarBox === null) throw new Error('source or avatar bar missing');
+    expect(sourceBox.y, JSON.stringify(geometry)).toBeGreaterThanOrEqual(avatarBarBox.y);
+    expect(sourceBox.y + sourceBox.h, JSON.stringify(geometry)).toBeLessThanOrEqual(
+      avatarBarBox.y + avatarBarBox.h,
+    );
+
+    // (c) THE BLOCK CENTRES IN THE FREE AREA -- the header above it to the
+    // bottom of the screen (the status bar, when it draws anything; the
+    // viewport's own bottom otherwise).
+    const { projectsHeaderBox, footerBox, gettingStartedBox } = geometry;
+    if (projectsHeaderBox === null || gettingStartedBox === null) {
+      throw new Error('projects header or getting-started block missing');
+    }
+    const freeTop = projectsHeaderBox.y + projectsHeaderBox.h;
+    const freeBottom = footerBox?.y ?? geometry.viewportHeight;
+    const freeCentre = (freeTop + freeBottom) / 2;
+    const blockCentre = gettingStartedBox.y + gettingStartedBox.h / 2;
+    expect(Math.abs(blockCentre - freeCentre), JSON.stringify(geometry)).toBeLessThanOrEqual(4);
+  });
 });
 
 /**
