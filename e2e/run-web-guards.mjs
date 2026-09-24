@@ -215,6 +215,15 @@ const GUARDS = [
   'terminal-chrome-shots',
   'terminal-scheme-shots',
   'terminal-settings-shots',
+  // FRAME PARITY BETWEEN THE TWO TERMINAL TABS (docs/design/
+  // terminal-streaming.md): with `streamingTerminal` ON, `TerminalStreamTab.
+  // tsx`'s xterm.js pane has to be visually indistinguishable in its
+  // frame/chrome from `TerminalTab.tsx`'s own capture-pane view with the
+  // setting OFF -- the operator's own ask. Needs no real tmux (both
+  // `window.api.terminal` and `window.api.terminalStream` are stubs), so it
+  // runs here rather than by hand. `terminal-stream-frame-shots.mjs`'s own
+  // header holds the falsifications and what is deliberately not measured.
+  'terminal-stream-frame-shots',
   'command-palette-shots',
   'tree-icon-shots',
   'out-links-shots',

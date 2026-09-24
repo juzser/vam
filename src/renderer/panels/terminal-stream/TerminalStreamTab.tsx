@@ -20,13 +20,21 @@ import { FitAddon } from '@xterm/addon-fit';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
+import { GitBranch } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { INSERT_STOP, insertScopeMark } from '../../keyboard/focus-scope.js';
-import { activeTerminalFontSize, subscribeTerminalFontSize } from '../../prefs/terminal-font.js';
+import {
+  activeTerminalFontSize,
+  subscribeTerminalFontSize,
+  TERMINAL_FONT_FAMILY,
+  TERMINAL_STREAM_LINE_HEIGHT,
+} from '../../prefs/terminal-font.js';
 import {
   activeTerminalScheme,
   type ResolvedTerminalScheme,
   subscribeTerminalScheme,
+  terminalSchemeStyle,
 } from '../../prefs/terminal-scheme.js';
 
 /**
@@ -104,13 +112,23 @@ export function TerminalStreamTab(props: {
   readonly rowId?: string | undefined;
   readonly branch: string | null;
 }) {
-  const { projectId, rowId } = props;
+  const { projectId, rowId, branch } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const streamIdRef = useRef<string | null>(null);
   const [refusal, setRefusal] = useState<RefusalReason | null>(null);
   const [down, setDown] = useState<StreamDownEvent | null>(null);
+  /**
+   * THE RESOLVED TMUX SESSION NAME, once the stream has actually opened --
+   * `null` until then, on purpose: `TerminalTab.tsx`'s own status rule never
+   * draws a name it has not confirmed either (its `view` starts `null` for
+   * the identical reason, see that file's header). `StreamOpenResult.name`
+   * (`main/terminal/stream-ipc.ts`) is the SAME `targetSession` pairing that
+   * file's `view.name` comes from -- the one fact this tab could not
+   * otherwise say, since the stream itself carries bytes, not a name.
+   */
+  const [name, setName] = useState<string | null>(null);
 
   const bridge = globalThis.window?.api?.terminalStream;
   const fontSize = useSyncExternalStore(subscribeTerminalFontSize, activeTerminalFontSize);
@@ -166,6 +184,7 @@ export function TerminalStreamTab(props: {
     async function connect() {
       setRefusal(null);
       setDown(null);
+      setName(null);
       const result = await openBridge.open(openProjectId, rowId);
       if (cancelled) return;
       if (!result.ok) {
@@ -174,14 +193,34 @@ export function TerminalStreamTab(props: {
       }
       const { streamId } = result;
       streamIdRef.current = streamId;
+      setName(result.name);
 
       let term = termRef.current;
       if (term === null) {
         term = new Terminal({
           theme: mapScheme(activeTerminalScheme()),
           fontSize: activeTerminalFontSize(),
+          // THE SAME ROW HEIGHT `TerminalTab.tsx`'s CSS produces, and the
+          // SAME face (`TERMINAL_FONT_FAMILY`, copied from `styles.css`'s
+          // `--font-mono` -- see that constant's own header for why a copy
+          // is unavoidable for a DOM renderer that takes a literal string).
+          // `TERMINAL_STREAM_LINE_HEIGHT`, NOT `TERMINAL_LINE_HEIGHT`: xterm's
+          // own option means something different to the same number -- see
+          // that constant's own header for the measured mismatch it corrects.
+          // Left at xterm's defaults (1.0 lineHeight, a generic `courier-new`
+          // stack) the two screens read as visibly different type, not merely
+          // a different engine underneath the same face.
+          lineHeight: TERMINAL_STREAM_LINE_HEIGHT,
+          fontFamily: TERMINAL_FONT_FAMILY,
           scrollback: 5000,
-          cursorBlink: true,
+          // A STEADY BLOCK, NOT A BLINK -- matching `TerminalTab.tsx`'s own
+          // cursor exactly (that file's header: "IT DOES NOT BLINK"). That
+          // file's reason (a poll cannot honestly animate liveness) does not
+          // apply here -- this pane really is live -- but the operator's own
+          // ask is that the two screens look the same with the setting
+          // flipped, and a blink is the single most visible difference a
+          // cursor can carry.
+          cursorBlink: false,
           convertEol: false,
         });
         const fit = new FitAddon();
@@ -344,26 +383,100 @@ export function TerminalStreamTab(props: {
   }
 
   return (
+    /* THE SAME OUTER SHAPE `TerminalTab.tsx`'s own return draws -- a
+       flex-column with the pane above and a one-row status rule below,
+       `font-mono` ambient and the operator's chosen size on the root so
+       anything drawn in `em`/`ch` inside it (there is nothing today, but
+       `TerminalTab.tsx`'s own comment names this as the reason it carries
+       the size too) inherits it. */
     <div
-      data-terminal-stream
-      ref={containerRef}
-      {...insertScopeMark}
-      className="relative min-h-0 flex-1 font-mono"
+      data-terminal-stream-root
+      className="relative mx-auto flex w-full min-h-0 flex-1 flex-col gap-1.5 font-mono"
+      style={{ fontSize: `${fontSize}px` }}
     >
-      {down !== null && (
-        // A review finding: this pane never subscribed to onDown at all, so
-        // a dropped connection sat frozen -- the last screen drawn, no sign
-        // anything was wrong. `absolute` over the pane rather than replacing
-        // it: the operator's last-known screen (and its scrollback) stays
-        // visible underneath while this says why nothing is moving.
-        <p
-          data-terminal-stream-down
-          data-terminal-stream-down-kind={down.kind}
-          className="absolute top-1 right-1 z-10 rounded border border-line bg-panel px-2 py-0.5 text-control text-ink-faint"
-        >
-          {downText(down)}
-        </p>
-      )}
+      {/* THE PANE FRAME, byte-for-byte the classes `TerminalTab.tsx`'s own
+         `OverlayScroll` scroller carries (`rounded-[9px] border border-line
+         ... has-[:focus-visible]:outline ...`), plus `overflow-hidden`
+         (unlike that file's `overflow-auto`): xterm.js owns its own
+         scrollback and paints its own square-cornered canvas, so the frame
+         has to CLIP it to the radius rather than let it scroll past one --
+         `TerminalTab.tsx` never has this problem because its screen is a
+         `<pre>` inside the SAME rounded/padded box, never a layer under it.
+
+         THE PADDING LIVES HERE, ON THE ELEMENT `term.open()` MOUNTS INTO
+         DIRECTLY, and that placement is load-bearing rather than cosmetic:
+         `FitAddon.proposeDimensions()` reads `getComputedStyle` on THIS
+         element to size the terminal, and a resolved `width`/`height` is
+         always the CONTENT box (padding already excluded) whatever
+         `box-sizing` is in force -- so putting the padding anywhere else
+         (an extra wrapper) would make xterm measure the padding as
+         terminal space and draw text into the rounded corner instead of
+         away from it.
+
+         THE SCHEME'S OWN COLOURS, the same `terminalSchemeStyle` call
+         `TerminalTab.tsx` makes -- the composited background and the
+         `--vam-term-*`/`--vam-ansi-*` custom properties. xterm's OWN canvas
+         paints itself from `mapScheme`'s ITheme (below) rather than reading
+         these, so what this buys here is the FRAME matching at opacity 1
+         (the shipped default): `docs/design/terminal-streaming.md`'s own
+         comparison table names the one case they can disagree -- a
+         `backgroundOpacity` under 1, which xterm's opaque canvas cannot
+         honour without its own translucency work this task did not need at
+         the default the operator will actually see. */}
+      <div
+        data-terminal-stream
+        ref={containerRef}
+        {...insertScopeMark}
+        className="relative min-h-0 flex-1 overflow-hidden rounded-[9px] border border-line px-3 py-2 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
+        style={terminalSchemeStyle(scheme) as CSSProperties}
+      >
+        {down !== null && (
+          // A review finding: this pane never subscribed to onDown at all, so
+          // a dropped connection sat frozen -- the last screen drawn, no sign
+          // anything was wrong. `absolute` over the pane rather than replacing
+          // it: the operator's last-known screen (and its scrollback) stays
+          // visible underneath while this says why nothing is moving.
+          <p
+            data-terminal-stream-down
+            data-terminal-stream-down-kind={down.kind}
+            className="absolute top-1 right-1 z-10 rounded border border-line bg-panel px-2 py-0.5 text-control text-ink-faint"
+          >
+            {downText(down)}
+          </p>
+        )}
+      </div>
+      {/* THE STATUS RULE, the same one row `TerminalTab.tsx` draws under its
+         own screen -- branch at the left where reading starts, the tmux
+         session's name pushed to the right (`aria-hidden`: the pane's own
+         accessible name already carries it, via `term.textarea`'s
+         `aria-label`... which this tab does not set yet, see the design
+         doc). `name` is `null` until the stream actually opens
+         (`StreamOpenResult.name`), which is what keeps this from ever
+         inventing an identity before one is confirmed -- `TerminalTab.tsx`'s
+         own `view` starts `null` for the identical reason. */}
+      <div
+        data-terminal-stream-status
+        className="flex flex-none items-center gap-2 border-line border-t pt-1 font-mono text-meta text-ink-faint"
+      >
+        {typeof branch === 'string' && branch !== '' && (
+          <span className="flex min-w-0 items-center gap-1">
+            <GitBranch size={10} strokeWidth={1.6} aria-hidden="true" />
+            <span data-terminal-stream-branch title={branch} className="truncate">
+              {branch}
+            </span>
+          </span>
+        )}
+        <span className="flex-1" />
+        {name !== null && (
+          <span
+            data-terminal-stream-badge
+            aria-hidden="true"
+            className="max-w-[60%] flex-none truncate text-ink-quiet"
+          >
+            {name}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

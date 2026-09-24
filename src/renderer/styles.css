@@ -2290,6 +2290,31 @@ body {
 }
 
 /*
+ * THE STREAMING TERMINAL'S OWN SCROLLBAR (`TerminalStreamTab.tsx`), hidden
+ * the same way `.vam-no-scrollbar` hides every other native bar in this
+ * renderer -- scoped to `.xterm-viewport` rather than applied as a class,
+ * because xterm.js builds that element itself (`term.open()`) and this
+ * renderer never gets to put a class name on it directly.
+ *
+ * `TerminalTab.tsx`'s own pane hides its native bar the identical way
+ * (`vam-no-scrollbar` on the scroller `OverlayScroll` owns) and paints a
+ * custom overlay thumb over the content instead; this one does not grow that
+ * same overlay for xterm's own scrollback (a separate, bigger task -- xterm's
+ * scroll model is a `<canvas>` and a viewport `<div>`, not a DOM element
+ * `OverlayScroll` could attach to), but the frame parity task this rule
+ * belongs to is specifically about the PANE'S CHROME, not its scrollbar, and
+ * a native bar cutting a straight edge across the rounded frame
+ * (`rounded-[9px] overflow-hidden` on `[data-terminal-stream]`) is the one
+ * piece of xterm's own chrome that would otherwise visibly disagree with it.
+ */
+[data-terminal-stream] .xterm-viewport {
+  scrollbar-width: none;
+}
+[data-terminal-stream] .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+/*
  * THE FILE EDITOR'S OVERLAY, IN FORCED COLOURS.
  *
  * `FilesTab.tsx` draws its syntax colours on a `<pre>` behind the textarea and
