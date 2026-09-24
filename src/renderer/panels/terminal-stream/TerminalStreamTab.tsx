@@ -165,6 +165,20 @@ export function TerminalStreamTab(props: {
         // the mark has to be set imperatively on the element it actually
         // gives back rather than rendered.
         term.textarea?.setAttribute(INSERT_STOP, '');
+        // SILENT, MATCHING `TerminalTab.tsx` EXACTLY -- its own `onInput`
+        // drops `insertFromPaste`/`insertFromDrop` with no visible message,
+        // "this channel is bounded precisely so that it cannot become one".
+        // xterm.js listens for `paste` on this same textarea and, by
+        // default, sends the clipboard text through as input; the CAPTURE
+        // phase is what lets this handler run and refuse BEFORE that.
+        term.textarea?.addEventListener(
+          'paste',
+          (event) => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          },
+          { capture: true },
+        );
         // `false` STOPS THE KEY REACHING XTERM'S OWN HANDLING (and so its
         // `onData`) -- checked BEFORE that handling, exactly where
         // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`

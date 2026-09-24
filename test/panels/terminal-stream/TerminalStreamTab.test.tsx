@@ -301,6 +301,40 @@ describe('mounted with a bridge', () => {
     });
   });
 
+  it('refuses a paste silently, matching TerminalTab.tsx: no message, nothing written', async () => {
+    const write = vi.fn();
+    withBridge({ write });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const textarea = lastTerm?.textarea;
+    if (textarea === undefined) throw new Error('no textarea');
+    // A minimal fake `clipboardData` -- a real `ClipboardEvent`/`DataTransfer`
+    // is awkward to instantiate in happy-dom (no precedent for it in this
+    // file's own paste-adjacent tests, which drive the hidden-input path via
+    // a plain `input` event with `inputType` instead).
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: () => 'a whole pasted paragraph' },
+    });
+    const preventDefault = vi.spyOn(event, 'preventDefault');
+    const stopImmediatePropagation = vi.spyOn(event, 'stopImmediatePropagation');
+    act(() => {
+      textarea.dispatchEvent(event);
+    });
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopImmediatePropagation).toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalledWith(
+      'stream-1',
+      new TextEncoder().encode('a whole pasted paragraph'),
+    );
+    // No visible refusal text either -- TerminalTab.tsx's own posture, a
+    // silent drop.
+    expect(q('[data-terminal-stream-refused]')).toBeNull();
+  });
+
   it('types into the stream via write()', async () => {
     const write = vi.fn();
     withBridge({ write });
