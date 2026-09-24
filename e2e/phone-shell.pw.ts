@@ -476,9 +476,14 @@ test.describe('the phone shell at 390px', () => {
     ).toBeGreaterThanOrEqual(INSET);
 
     await openFirstSession(page);
+    // `data-question-bar-inline`, not the retired fixed `data-question-bar`
+    // (docs/design/phone-core-loop.md §3.2-3.3): the Response view's
+    // question is inline now, `sticky bottom-0` inside the transcript's own
+    // scroller, and it is STILL the bottom of the screen whenever the
+    // composer stands down.
     expect(
-      await pad('[data-phone-shell] [data-question-bar]'),
-      'with a question open the card is the bottom of the screen, and its last row is an option',
+      await pad('[data-phone-shell] [data-question-bar-inline]'),
+      'with a question open the inline card is the bottom of the screen, and its last row is an option',
     ).toBeGreaterThanOrEqual(INSET);
 
     await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
@@ -1693,7 +1698,15 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     page,
   }) => {
     await openDemo(page);
-    await openFirstAlphaSession(page);
+    // Not `openFirstAlphaSession`: the demo fixture's top-ranked session in
+    // this project, `factory-sse-1`, is blocked on a permission prompt --
+    // vam/phone-core-loop now collapses this very strip while a question is
+    // open (in addition to while typing), so asserting the strip from that
+    // session would be asserting the wrong screen. `crosscheck-2` is the
+    // project's other session and carries no open question, so the strip is
+    // the thing on screen to name.
+    await page.locator('[data-phone-shell] [data-session-row="crosscheck-2"]').tap();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
     const strip = page.locator('[data-phone-session-tabs]');
     expect(await strip.getAttribute('aria-label'), 'the region names itself').not.toBeNull();
     const buttons = await strip.evaluate((el) =>
@@ -2064,7 +2077,19 @@ test.describe("the composer's popovers at 390px", () => {
       .filter({ hasText: 'notes-1' })
       .tap();
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
-    await expect(page.locator('[data-phone-shell] [data-provider-picker-toggle]')).toBeVisible();
+    // vam/phone-core-loop: `provider-picker-toggle` is a resident desktop
+    // control now, hidden on phone (composer diet, step 1) -- reached
+    // through the "+" overflow sheet instead. Same `openPopover` state
+    // underneath, so the popover this file asserts against is unchanged.
+    await expect(page.locator('[data-phone-shell] [data-composer-overflow]')).toBeVisible();
+  }
+
+  /** Opens the "+" sheet and taps its provider row -- the phone route to the
+   *  same `[data-provider-picker]` popover the desktop's resident toggle
+   *  opens directly (`setOpenPopover('provider')` either way). */
+  async function openProviderPicker(page: Page): Promise<void> {
+    await page.locator('[data-phone-shell] [data-composer-overflow]').tap();
+    await page.locator('[data-phone-shell] [data-composer-overflow-provider]').tap();
   }
 
   test('the provider picker does not cover the textarea being typed into', async ({ page }) => {
@@ -2074,7 +2099,7 @@ test.describe("the composer's popovers at 390px", () => {
       .boundingBox();
     expect(textareaBefore, 'the textarea has a box before the popover opens').not.toBeNull();
 
-    await page.locator('[data-phone-shell] [data-provider-picker-toggle]').tap();
+    await openProviderPicker(page);
     const popover = page.locator('[data-phone-shell] [data-provider-picker]');
     await expect(popover).toBeVisible();
 
@@ -2124,7 +2149,7 @@ test.describe("the composer's popovers at 390px", () => {
     page,
   }) => {
     await openComposer(page);
-    await page.locator('[data-phone-shell] [data-provider-picker-toggle]').tap();
+    await openProviderPicker(page);
     const popover = page.locator('[data-phone-shell] [data-provider-picker]');
     await expect(popover).toBeVisible();
 
