@@ -98,22 +98,39 @@ describe('the session tab strip', () => {
     expect(dot?.className).not.toContain('bg-waiting');
   });
 
-  it('draws a pinned +, labelled for the project it adds to', () => {
-    // The route it calls (`onAddInProject`) is `Canvas`'s own -- the same one
-    // the list screen's per-project `+` calls -- so what this asserts is the
-    // control's presence and label, not a second copy of that wiring.
+  /**
+   * THE TWO CONTROLS THAT USED TO BE PINNED BESIDE THE TABS, AND ARE NOT.
+   *
+   * A `+` and a `‹` sat fixed outside the scroller. Measured at 390px they
+   * held 88px of the row, which left the chips 266px: the third chip was
+   * always off screen and every name clipped at the 104px cap. Both duplicated
+   * the list screen -- `+` called `sidebar.onAddInProject`, which IS the
+   * list's per-project add, and `‹` unwound to that same list, only
+   * pre-scrolled -- so a whole session tab was spent reaching two things one
+   * tap on the back chevron already reaches. Cut on the operator's
+   * instruction.
+   *
+   * ASSERTED AS AN ABSENCE HERE AND AS ROOM IN `e2e/phone-core-loop.pw.ts`,
+   * where the third chip is measured on screen: this environment lays nothing
+   * out, so it can say the controls are gone and not that the tabs got the
+   * room.
+   */
+  it('pins nothing beside the tabs: the row is the scroller and the tabs', () => {
     openSession();
-    const add = document.querySelector('[data-phone-session-add]');
-    expect(add).not.toBeNull();
-    expect(add?.getAttribute('aria-label')).toBe('new session in alpha');
+    expect(document.querySelector('[data-phone-session-add]'), 'the pinned +').toBeNull();
+    expect(document.querySelector('[data-phone-session-expand]'), 'the pinned ‹').toBeNull();
+    const strip = document.querySelector('[data-phone-session-tabs]');
+    // Every button left in the strip is a tab. A control that came back
+    // without a hook of its own would fail here rather than silently rejoin.
+    const buttons = [...(strip?.querySelectorAll('button') ?? [])];
+    expect(buttons.length).toBe(tabs().length);
+    expect(buttons.every((b) => b.hasAttribute('data-phone-session-tab'))).toBe(true);
   });
 
-  it('draws a pinned › that goes back to the list, at the project heading', () => {
+  it('still leaves the list one tap away, by the route that always did it', () => {
     openSession();
-    const expandButton = document.querySelector('[data-phone-session-expand]');
-    expect(expandButton).not.toBeNull();
     act(() => {
-      fireEvent.click(expandButton as Element);
+      fireEvent.click(document.querySelector('[data-phone-back]') as Element);
     });
     expect(document.querySelector('[data-phone-shell]')?.getAttribute('data-phone-shell')).toBe(
       'list',

@@ -20,10 +20,20 @@
  * fixture: the session's first line moves from y=209 to y=102, so 107px of an
  * 844px viewport came back. The price, so that the next reader does not
  * restore any of it as an obvious omission:
- *   - The views are NOT lost: `Response / PRs / Agents` are icon buttons in
- *     the app bar below, driving the pane through its `tabRequest` seam. What
- *     is lost is the WORD on each one, which is why every icon carries an
+ *   - The views that remain are NOT lost: `Response / Agents` are icon buttons
+ *     in the app bar below, driving the pane through its `tabRequest` seam.
+ *     What is lost is the WORD on each one, which is why every icon carries an
  *     `aria-label` and the selected one is marked by a shape, not a hue.
+ *   - `PRs` IS lost, and that one is a cut rather than a compression. The
+ *     operator asked for it after a mobile audit: this screen exists to send a
+ *     prompt and read the answer, the PRs list serves neither, and it was the
+ *     only place a phone could merge a pull request or delete a remote branch
+ *     -- both irreversible, both against a real repository, both one tap from
+ *     a view switch on a 390px bar. The withdrawal is `visibleTabs`'
+ *     (`panels/tabs.ts`), beside Terminal's and Files', and NOT a filter on
+ *     this file's own list: the pane below re-hosts `DetailPanel`, which reads
+ *     the same function, and a row that hid an icon over a pane that would
+ *     still mount it is not a withdrawal.
  *   - There is no step navigation at all. The screen always shows the NEWEST
  *     step (`session.decisions[0]`, derived on every render), which is the
  *     step a waiting session is waiting in and the one a reply answers. Older
@@ -62,7 +72,7 @@ import { orderedInProject } from '../domain/selectors.js';
 import { DetailPanel } from '../panels/DetailPanel.js';
 import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
-import type { SourceDeclines } from '../sources/port.js';
+import { ConfirmCloseSession } from './ConfirmCloseSession.js';
 import { closeSession, isSessionEntry, openSession } from './history.js';
 
 /** 44x44 is WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure, not a taste. */
@@ -99,14 +109,10 @@ export type PhoneShellProps = {
    * nowhere, which is the one thing this shell is careful not to do.
    */
   readonly statusCell: ReactNode;
-  readonly tally: {
-    readonly running: number;
-    readonly waiting: number;
-    readonly done: number;
-    readonly failed: number;
-  };
-  /** The source's own words for every capability it lacks. Never this file's. */
-  readonly declines: SourceDeclines;
+  /* `tally` and `declines` were props here and are gone with the two bands
+     that read them -- the footer's `N running · N waiting · N done`, and the
+     limits list, which is in the settings dialog now. Removed rather than left
+     unread: a prop nothing draws is an invitation to draw it again. */
 };
 
 /**
@@ -116,6 +122,11 @@ export type PhoneShellProps = {
  */
 const VIEW_ICON: Record<Tab, LucideIcon> = {
   Response: MessageSquare,
+  // Never drawn on a phone either, and for a reason that is a DECISION rather
+  // than a missing bridge: `visibleTabs` withdraws `PRs` from this shell on
+  // the operator's instruction. Kept for the same mechanical reason `Files`
+  // below is -- this is a `Record<Tab, _>`, and a map that cannot be built is
+  // a compile error, not a smaller row.
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
   Agents: Bot,
@@ -239,26 +250,26 @@ const STATUS_DOT: Readonly<Record<Session['status'], string>> = {
  * mark -- never `role="tab"`, which would be a third orphaned tablist in a
  * codebase that already has two unpaired with any `tabpanel`.
  *
- * The `+` and `›` sit fixed outside the scrollable region so they stay
- * reachable at any scroll position, and both reuse existing routes: `+` is
- * `sidebar.onAddInProject`, the same call the list screen's per-project add
- * makes; `›` unwinds this screen's own history entry and lands on the list,
- * pre-scrolled to this project's heading.
+ * TABS, AND NOTHING PINNED BESIDE THEM. A `+` and a `‹` used to sit fixed
+ * outside the scrollable region. They were 88px of a 390px row held out of the
+ * scroller, which left the chips 266px: measured, the third chip was always off
+ * screen and every name clipped at the 104px cap. Both duplicated the list
+ * screen -- `+` called `sidebar.onAddInProject`, which is exactly the list's
+ * own per-project add, and `‹` unwound to that same list, only pre-scrolled --
+ * so the operator lost a whole session tab to reach two things one tap on the
+ * back chevron already reaches. Cut on the operator's instruction; the room
+ * goes to the tabs, which are the one thing here the list cannot do in place.
  */
 function SessionTabStrip({
   project,
   sessions,
   currentSessionId,
   onPick,
-  onAdd,
-  onExpand,
 }: {
   readonly project: Project;
   readonly sessions: readonly Session[];
   readonly currentSessionId: string;
   readonly onPick: (sessionId: string) => void;
-  readonly onAdd: () => void;
-  readonly onExpand: () => void;
 }) {
   if (sessions.length < 2) return null;
   return (
@@ -316,73 +327,17 @@ function SessionTabStrip({
           );
         })}
       </div>
-      <button
-        type="button"
-        data-phone-session-add
-        aria-label={`new session in ${project.name}`}
-        onClick={onAdd}
-        className={`${TOUCH} ${FOCUS_RING} flex-none`}
-      >
-        <span
-          data-tap-skin
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
-        >
-          +
-        </span>
-      </button>
-      {/* THE WAY OUT, named for where it goes.
-          It said `sessions in <project>` -- byte-identical to the `<nav>`'s own
-          label above, so a screen reader read the same phrase twice: once as
-          the region it had just entered, once as a button, with nothing to say
-          the second one LEAVES. And `›` at the end of a strip that scrolls
-          horizontally is the universal promise of MORE TABS, which is not what
-          this does: it unwinds to the list, pre-scrolled to this project. The
-          glyph is the `‹` the header's back control already uses, because this
-          is the same journey with a better landing. */}
-      <button
-        type="button"
-        data-phone-session-expand
-        aria-label={`all sessions in ${project.name}`}
-        onClick={onExpand}
-        className={`${TOUCH} ${FOCUS_RING} flex-none`}
-      >
-        <span
-          data-tap-skin
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] text-ink-dim active:bg-raised"
-        >
-          ‹
-        </span>
-      </button>
     </nav>
   );
 }
 
-/**
- * What this connection cannot do, in the source's own words.
- *
- * Generated from `declines`, never written here: a sentence hard-coded in the
- * phone shell would go stale the first time a source gains a capability. It is
- * a standing fact about the connection, so it lives somewhere you can go and
- * read it rather than in a toast.
- */
-function RemoteLimits({ declines }: { readonly declines: SourceDeclines }) {
-  const entries = Object.entries(declines).filter(([, why]) => why !== undefined && why !== '');
-  if (entries.length === 0) return null;
-  return (
-    <details data-remote-limits className="flex-none border-line border-b bg-panel px-3">
-      <summary className="flex min-h-[44px] cursor-pointer items-center text-control text-ink-dim">
-        What this connection cannot do
-      </summary>
-      <ul className="pb-2">
-        {entries.map(([name, why]) => (
-          <li key={name} data-remote-limit={name} className="py-1 text-control text-ink-dim">
-            {why}
-          </li>
-        ))}
-      </ul>
-    </details>
-  );
-}
+/* `RemoteLimits` used to be here, a 45px band above the transcript on every
+   session screen. It is in the settings dialog now (`settings/RemoteLimits.tsx`,
+   which carries the measurement and the argument): it is a fact about the
+   CONNECTION, not about the session on screen, and it does not change while the
+   operator works. `declines` is no longer a prop of this shell at all -- it goes
+   straight from `Canvas` to the overlay that draws it, so there is no route by
+   which this file could start drawing it again by accident. */
 
 /** Is the soft keyboard up because THIS element took focus? */
 function isTyping(target: EventTarget | null): boolean {
@@ -397,8 +352,6 @@ export function PhoneShell({
   failureCount,
   onOpenErrorLog,
   statusCell,
-  tally,
-  declines,
 }: PhoneShellProps) {
   /**
    * Which screen is on top. Derived from a tap, and NOT persisted: restoring
@@ -422,13 +375,21 @@ export function PhoneShell({
    */
   const [view, setView] = useState<Tab>('Response');
   const [viewRequest, setViewRequest] = useState<{ readonly tab: Tab } | null>(null);
+  /* A `scrollToProjectId` used to live here, set by the session strip's `‹` so
+     the list came back pre-scrolled to this project's heading. It went with the
+     control that wrote it: a piece of state nothing writes is how a screen ends
+     up frozen on a value nobody chose, and leaving it would have been the exact
+     mistake the step rail's removal already avoided once in this file. */
   /**
-   * A project id to scroll the list screen to, set by the session tab
-   * strip's `›` and consumed once the list is back on screen. Not a second
-   * navigation surface: `back()` still does the actual unwind, this only adds
-   * where it lands.
+   * The session the `×` is asking about, or `null` when it is asking about
+   * none. The id AND the title, because the question has to name the thing it
+   * would end and the entry it was raised from may have gone by the time it is
+   * answered.
    */
-  const [scrollToProjectId, setScrollToProjectId] = useState<string | null>(null);
+  const [confirmClose, setConfirmClose] = useState<{
+    readonly id: string;
+    readonly title: string;
+  } | null>(null);
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
@@ -444,7 +405,15 @@ export function PhoneShell({
   // `detail.files` reads `false`/`undefined` on every real phone -- there is
   // no desktop bridge behind a browser build, ever -- so this withdraws
   // `Files` the same way `detail.terminal !== false` withdraws Terminal.
-  const views = visibleTabs(detail.terminal !== false, detail.files === true);
+  //
+  // THE THIRD ARGUMENT IS `true` AND THE LIST IS NOT FILTERED HERE. `PRs` is
+  // off the phone on the operator's instruction, and the WHOLE of that
+  // decision is in `tabs.ts` -- a `.filter()` on this line would be the third
+  // instance of the bug that file's header records twice, because the pane
+  // this shell re-hosts reads the same function and would go on believing the
+  // view was offered. `true` is a statement about which shell is asking, which
+  // is the only thing a caller is allowed to say.
+  const views = visibleTabs(detail.terminal !== false, detail.files === true, true);
 
   useEffect(() => {
     const pop = (event: PopStateEvent) => {
@@ -459,15 +428,6 @@ export function PhoneShell({
     return () => window.removeEventListener('popstate', pop);
   }, []);
 
-  useEffect(() => {
-    if (open || scrollToProjectId === null) return;
-    const heading = document.querySelector(
-      `[data-project-heading][data-project-id="${CSS.escape(scrollToProjectId)}"]`,
-    );
-    heading?.scrollIntoView({ block: 'start' });
-    setScrollToProjectId(null);
-  }, [open, scrollToProjectId]);
-
   const show = () => {
     openSession(window.history);
     pushed.current = true;
@@ -479,7 +439,7 @@ export function PhoneShell({
     // used to greet the NEXT one -- "this source does not report which agents
     // a session is running", about a session that was waiting for an answer.
     // A remembered tab is cheap on a desktop, where every view is one click
-    // away in a labelled strip; here they are four unlabelled glyphs and the
+    // away in a labelled strip; here they are unlabelled glyphs and the
     // recovery costs a tap on the screen whose whole budget is taps.
     //
     // Both halves, because they say different things (see `view` above): the
@@ -496,15 +456,6 @@ export function PhoneShell({
       pushed.current = false;
     }
     setOpen(false);
-  };
-  /**
-   * The strip's `›`: the same unwind `back()` does, plus where it lands. No
-   * second navigation surface -- this is the list screen the chevron already
-   * reaches, arriving pre-scrolled to the right heading instead of at the top.
-   */
-  const expand = () => {
-    if (entry !== null) setScrollToProjectId(entry.project.id);
-    back();
   };
 
   if (!open || entry === null) {
@@ -528,13 +479,30 @@ export function PhoneShell({
             }}
           />
         </div>
+        {/* WHAT THIS BAR NO LONGER SAYS. It opened with `2 running · 3 waiting
+            · 1 done` -- a 44px band restating a view of itself, directly under
+            the rows that are the tally. The desktop had the same cell removed
+            for the same reason ("the bar was restating a view of itself"), and
+            this one was worse: it counted three of the five statuses and
+            dropped `failed` and `idle` silently, so a phone could read `2
+            running · 0 waiting · 0 done` over a list with a failed session in
+            it.
+
+            SO THE BAR IS NOW ITS TWO REAL CELLS AND NOTHING ELSE, and when
+            neither has anything it costs no band at all -- only the padding
+            that keeps the last ROW clear of the home indicator, which is the
+            one job something at the bottom of this screen always has
+            (`styles.css`). The element stays in the tree either way: see the
+            refusal cell's own comment below for why its PRESENCE must not be
+            the signal. */}
         <footer
           data-phone-status-bar
-          className="flex h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim"
+          className={
+            statusCell === null && failureCount === 0
+              ? 'flex flex-none items-center'
+              : 'flex min-h-[44px] flex-none items-center gap-3 border-line border-t bg-panel px-3 font-mono text-meta text-ink-dim'
+          }
         >
-          <span className="flex-none">
-            {tally.running} running · {tally.waiting} waiting · {tally.done} done
-          </span>
           {/* Drawn always, empty and out of layout when there is nothing to
               say. Conditional PRESENCE made "vam has refused nothing" and
               "this screen has no refusal channel" the same observation to
@@ -615,19 +583,42 @@ export function PhoneShell({
             The list row's own `x` is revealed by hover and a finger has no
             hover, so on a phone it is not a control at all (styles.css) -- and
             it sat over the row's primary tap, which is the worst place for one.
-            Here it is visible, it is eight pixels clear of the back chevron at
-            the other end of the bar, and it goes through the same confirm the
-            `x` chord does. */}
+            Here it is visible, and it is at the other end of the bar from the
+            back chevron.
+
+            IT ASKS BEFORE IT ACTS, AND THIS COMMENT USED TO CLAIM IT ALREADY
+            DID -- "it goes through the same confirm the `x` chord does". There
+            was no such confirm on either path: `Canvas`'s `onSidebarClose`
+            calls `closeSession` straight, and `ConfirmForceClose` is only
+            offered AFTER a close has been refused. Driven at 390px against a
+            source that can close, one tap sent the write and opened no dialog
+            at all. What makes that an S2 rather than a nicety is the geometry
+            beside it: the Agents icon ends 8px before this control starts, so
+            a view switch and an unundoable stop are neighbours under one
+            finger. See `ConfirmCloseSession` for why the question is the
+            phone's and not the chord's. */}
         <button
           type="button"
           data-phone-close
           aria-label="close session"
-          onClick={() => sidebar.onClose(entry.session.id)}
+          onClick={() => setConfirmClose({ id: entry.session.id, title: entry.session.title })}
           className={`${TOUCH} ${FOCUS_RING} flex-none rounded-[7px] text-[16px] text-ink-dim`}
         >
           ×
         </button>
       </header>
+
+      {confirmClose !== null && (
+        <ConfirmCloseSession
+          title={confirmClose.title}
+          onCancel={() => setConfirmClose(null)}
+          onConfirm={() => {
+            const target = confirmClose;
+            setConfirmClose(null);
+            sidebar.onClose(target.id);
+          }}
+        />
+      )}
 
       {/* The same refusal channel the list screen has. A rename or a close
           that is declined says so here, rather than into a status bar that is
@@ -640,28 +631,20 @@ export function PhoneShell({
         {statusCell}
       </div>
 
-      {/* Out of the way while the keyboard is up, on the same rule as
-          `RemoteLimits` beside it: chrome the operator is not reading while
-          composing. This is the OTHER axis from `ViewIcons` above -- which
-          session, not which facet of it -- and it sits in the step rail's old
-          slot without being the step rail's return; see this file's header
-          comment. */}
+      {/* Out of the way while the keyboard is up: chrome the operator is not
+          reading while composing. This is the OTHER axis from `ViewIcons`
+          above -- which session, not which facet of it -- and it sits in the
+          step rail's old slot without being the step rail's return; see this
+          file's header comment. The limits band that used to stand under it
+          is gone from this screen entirely (see above `isTyping`). */}
       {!typing && (
         <SessionTabStrip
           project={entry.project}
           sessions={orderedInProject(entry.project)}
           currentSessionId={entry.session.id}
           onPick={(sessionId) => sidebar.onPick(sessionId)}
-          onAdd={() => sidebar.onAddInProject(entry.project)}
-          onExpand={expand}
         />
       )}
-
-      {/* Out of the way while the keyboard is up: chrome the operator is not
-          reading, out of the ~400px the keyboard leaves. The step rail that
-          stood here is gone entirely -- see the note at the top of this file
-          for what that costs. */}
-      {!typing && <RemoteLimits declines={declines} />}
 
       {/* The output takes every pixel the bands above and the composer below do
           not, and it is the only region that shrinks when the keyboard opens.

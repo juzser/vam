@@ -89,6 +89,7 @@ import {
 import { withLiveAgentTurn } from './subagent.js';
 import { MAX_TAIL_READ_BYTES, readLiveTail, TAIL_WINDOW_BYTES } from './tail.js';
 import { compactAge, EMPTY_FACTS, type TranscriptFacts } from './transcript.js';
+import { defaultTranscriptRoot, indexTranscripts, locateTranscript } from './transcript-index.js';
 import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
 /**
@@ -132,39 +133,19 @@ import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } fro
  * single-digit kilobytes on top of the tails.
  */
 
-/** Where Claude Code keeps transcripts. Derived, never a literal home path. */
-export const defaultTranscriptRoot = (): string => join(homedir(), '.claude', 'projects');
-
-/**
- * Where each session id's transcript lives, by walking the slug directories
- * once. Names only -- no file is opened and nothing is stat'd here, so an
- * index over 54 transcripts costs ten `readdir` calls.
+/*
+ * THE TRANSCRIPT ROOT, THE INDEX AND THE ROW-KEY RULE MOVED, to
+ * `transcript-index.ts`, and the move is the only change to them.
+ *
+ * They were here while two readers on this page shared them. The model button
+ * gained a second source (`transcript-model.ts`) and became a third, in
+ * another directory -- and the one thing `locateTranscript` must never be is
+ * copied, because the `#` rule it carries is subtle and a second copy is a
+ * second thing to get wrong. `defaultTranscriptRoot` is still re-exported
+ * below: it is this module's public surface and the source's own answer to
+ * "where does Claude Code keep transcripts".
  */
-async function indexTranscripts(root: string): Promise<Map<string, string>> {
-  const index = new Map<string, string>();
-  let dirs: string[];
-  try {
-    dirs = (await readdir(root, { withFileTypes: true }))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
-  } catch {
-    // No transcript root: Claude Code has never run for this user, or this is
-    // a machine without it. Live sessions can still be listed, with no turns.
-    return index;
-  }
-  for (const dir of dirs) {
-    try {
-      for (const entry of await readdir(join(root, dir), { withFileTypes: true })) {
-        if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-          index.set(entry.name.slice(0, -'.jsonl'.length), join(root, dir, entry.name));
-        }
-      }
-    } catch {
-      // A directory that vanished between the two reads.
-    }
-  }
-  return index;
-}
+export { defaultTranscriptRoot } from './transcript-index.js';
 
 type TranscriptRead = {
   readonly facts: TranscriptFacts;
@@ -238,24 +219,6 @@ async function readTranscript(
  * named, and the session id is what names it. Asking the CLI instead would
  * spawn a subprocess per scroll step.
  */
-/**
- * Which FILE a row's turns live in, and which session that row is.
- *
- * Extracted because two on-demand reads need the same answer -- scrolling back
- * (`readClaudeCodeHistory`) and opening one of a session's agents
- * (`readClaudeCodeAgentWork`) -- and the `#` rule above is subtle enough that
- * a second copy of it would be a second thing to get wrong.
- */
-async function locateTranscript(
-  root: string,
-  rowId: string,
-): Promise<{ readonly sessionId: string; readonly path: string | undefined }> {
-  const index = await indexTranscripts(root);
-  const hash = rowId.lastIndexOf('#');
-  const sessionId = index.has(rowId) || hash === -1 ? rowId : rowId.slice(0, hash);
-  return { sessionId, path: index.get(sessionId) };
-}
-
 export async function readClaudeCodeHistory(
   root: string,
   rowId: string,
@@ -536,7 +499,21 @@ const NO_SURFACE = 'the CLI exposes no such operation on a session, so vam has n
 
 const DESCRIPTOR: SourceDescriptor = {
   id: 'claude-code',
-  label: 'Claude Code (local sessions, read-only)',
+  /*
+    "READ-ONLY" WAS TRUE ONCE AND HAS NOT BEEN FOR A LONG TIME, and the
+    operator read it off the status bar and reported it as wrong -- which it
+    was. This source TYPES prompts into a session's tmux pane (`reply.ts`),
+    answers a picker by navigating it (`terminal/answer.ts`), switches a
+    session's model through the CLI's own menu (`terminal/model-switch.ts`)
+    and, since the PRs tab grew actions, merges pull requests and deletes
+    remote branches with the operator's own credentials.
+
+    The capability table below is the honest account of what this source can
+    do, and it says `deliverPrompt: true` three lines down. A label that
+    contradicts the table under it is worse than no label: it is the one line
+    an operator reads when deciding whether vam can reach a session at all.
+  */
+  label: 'Claude Code',
   capabilities: {
     liveUpdates: false,
     // Both true, and they mean different things. `deliverPrompt` is the real

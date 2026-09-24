@@ -67,8 +67,44 @@ export function narrowsAsProse(tab: Tab): boolean {
 }
 
 /**
- * The tabs actually drawn, given whether the source has a terminal to show
- * and whether this build can show a file editor at all.
+ * Does this view draw the PROMPT BOX — the composer that writes to the agent?
+ *
+ * HERE, BESIDE `narrowsAsProse`, FOR THE SAME REASON: it is a fact about a
+ * NAME, and a sixth tab appended to `TABS` must be classified once, here,
+ * rather than inheriting whatever a `!==` chain at the render site happens to
+ * give it. `DetailPanel` asks this; `DetailPanel.composer-tabs.test.tsx`
+ * derives its whole expectation from it and fails until a new name is
+ * answered for.
+ *
+ * THE QUESTION IS "IS THIS VIEW A CONVERSATION WITH THE AGENT", and only
+ * that. Three names say no, for three different reasons, and none of them is
+ * "it is a list":
+ *
+ *  - `Terminal` has its OWN keyboard. A second insert scope underneath it
+ *    would compete for the same keystrokes a person is typing into tmux.
+ *  - `Files` has its own keyboard too -- the editor is a full-pane surface,
+ *    and a composer prompting the agent below it is the same collision.
+ *  - `PRs` is the operator's own report: "it does not need the prompt input."
+ *    This view is a list of pull requests on GitHub. Nothing typed here is
+ *    addressed to anything: the box would take a sentence, record it against
+ *    the session, and show the operator nothing about the list in front of
+ *    them. A control that cannot act on what it stands under is worse than no
+ *    control -- this file's neighbours state that rule and this is the view
+ *    that was breaking it. The actions the operator DOES want here (merge,
+ *    delete the branch) are buttons on the row they act on, where the number
+ *    and the title they name are already on screen.
+ *
+ * It is NOT "does this view have a keyboard of its own": `Response` and
+ * `Agents` both draw one, and both are places where a typed sentence reaches
+ * the agent.
+ */
+export function drawsComposer(tab: Tab): boolean {
+  return tab === 'Response' || tab === 'Agents';
+}
+
+/**
+ * The tabs actually drawn, given whether the source has a terminal to show,
+ * whether this build can show a file editor at all, and which SHELL is asking.
  *
  * `Terminal` is withdrawn rather than mounted-and-apologising when the source
  * declares none, which moves every tab after it up a position IN THIS LIST.
@@ -91,9 +127,41 @@ export function narrowsAsProse(tab: Tab): boolean {
  * including every existing test that predates this tab -- keeps it withdrawn
  * simply by doing nothing, rather than needing to learn a new flag to stay
  * correct.
+ *
+ * `phone` IS THE THIRD WITHDRAWAL AND THE FIRST THAT IS NOT A CAPABILITY.
+ * Operator instruction, after a mobile audit: "cut the PRs view from mobile
+ * entirely". vam on a phone exists to send a prompt and read the answer, and a
+ * list of pull requests serves neither -- `drawsComposer` above already says
+ * so in the operator's own words -- while being the ONE place a phone can do
+ * something irreversible to a real GitHub repository. `data-pr-merge` merges
+ * on GitHub with the operator's own credentials and `data-pr-delete-branch`
+ * deletes a remote branch; vam can undo neither, and on a 390px bar they sit a
+ * few pixels from a view switch.
+ *
+ * IT IS DECIDED HERE, AND THAT IS THE WHOLE POINT OF THIS MODULE. The phone
+ * shell could have filtered its own icon row in three lines, and it would have
+ * been the third instance of the bug this file's header records twice: a
+ * caller deciding a view's presence for itself, while `DetailPanel` -- which
+ * the phone RE-HOSTS, and which owns the `current === 'PRs'` branch that
+ * mounts the pane -- went on believing the view was offered. A row that draws
+ * no icon over a pane that would still mount one is not a withdrawal.
+ *
+ * ITS POLARITY IS THE OTHER WAY ROUND FROM THE OTHER TWO, deliberately.
+ * `terminal` and `files` ask "can this source or this build OFFER it"; `phone`
+ * asks "which shell is this", and a caller answering `true` is not offering
+ * anything. The policy -- that a phone does not get PRs -- lives in the filter
+ * below rather than at the three call sites, so a fourth caller inherits it by
+ * saying what it is instead of by remembering what it must hide. Passing
+ * `false` is what every desktop route does, including `Canvas`'s
+ * `Ctrl-Alt-<digit>`, whose listener does not even install on a phone.
  */
-export function visibleTabs(terminal: boolean, files: boolean): readonly Tab[] {
-  return TABS.filter((name) => (name !== 'Terminal' || terminal) && (name !== 'Files' || files));
+export function visibleTabs(terminal: boolean, files: boolean, phone: boolean): readonly Tab[] {
+  return TABS.filter(
+    (name) =>
+      (name !== 'Terminal' || terminal) &&
+      (name !== 'Files' || files) &&
+      (name !== 'PRs' || !phone),
+  );
 }
 
 /**

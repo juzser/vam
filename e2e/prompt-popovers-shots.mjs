@@ -22,11 +22,28 @@
  * opened" would both have passed against the shipped build, which is the exact
  * state the operator photographed: both on screen, overlapping.
  *
- * SIX ROUTES, NOT THE TWO REPORTED. The row has THREE popovers -- provider,
- * model, mode -- so there are six ordered pairs plus three click-outsides.
+ * SIX ROUTES WERE MEASURED, NOT THE TWO REPORTED. The row had THREE popovers
+ * -- provider, model, mode -- so six ordered pairs plus three click-outsides.
  * Measured against the bundle before the fix, ALL of them stacked; with the
  * model popover left open from an earlier route, `provider -> mode` put three
  * layers on screen at once. A bug reported in one direction is a sample.
+ *
+ * TWO OF THE THREE ARE LEFT HERE, AND THE THIRD IS NOT GONE FROM COVERAGE. The
+ * provider picker is withdrawn while `PROVIDERS` (`src/shared/providers.ts`)
+ * has one row -- a popover over a single already-selected item is a control
+ * that cannot act -- so at 1280px against the shipped bundle there is no third
+ * control to collide with. Its four pairs and its click-outside live in
+ * `test/panels/DetailPanel.popover-dismiss.test.tsx`, which mocks a two-row
+ * table and keeps the whole family of six.
+ *
+ * WHY NOT PATCH THE TABLE THE WAY THE CAPABILITIES ARE PATCHED BELOW. Those
+ * two are member expressions that survive minification verbatim and are
+ * asserted present before anything is forced. `PROVIDERS.length > 1` is folded
+ * to a constant by the minifier and there is no stable string to find -- a
+ * patch on it would be a guess that silently stops matching, which is the
+ * failure this file's own `patched === 0` throw exists to prevent. What the
+ * browser adds over the unit test is the POINTER, and the pointer is exercised
+ * on every popover the shipped app actually has.
  *
  * WHAT THIS HARNESS FORCES, AND WHY. The demo source reports no terminal and
  * does not deliver (`Canvas.tsx` reads both off `source.source.capabilities`),
@@ -114,11 +131,13 @@ await page.waitForSelector('[data-prompt-tools]');
 
 /** Each popover: the toggle that opens it, and the layer it opens. */
 const POPOVERS = {
-  provider: { toggle: '[data-provider-picker-toggle]', layer: '[data-provider-picker]' },
   model: { toggle: '[data-model-picker]', layer: '[data-model-picker-menu]' },
   mode: { toggle: '[data-mode-toggle]', layer: '[data-mode-picker]' },
 };
-const NAMES = ['provider', 'model', 'mode'];
+const NAMES = ['model', 'mode'];
+
+/** Withdrawn while the provider table has one row -- see the header. */
+const PROVIDER_TOGGLE = '[data-provider-picker-toggle]';
 
 /** Which layers have a node on screen right now, by name -- the property itself. */
 const openNow = () =>
@@ -195,15 +214,25 @@ const present = await page.evaluate(
 );
 console.log('controls on the row:', JSON.stringify(present));
 check(
-  'all three popover controls are drawn, so the collision is reachable here',
+  'both popover controls are drawn, so the collision is reachable here',
   NAMES.every((name) => present[name] === true),
   JSON.stringify(present),
+);
+// AND THE THIRD IS ABSENT ON PURPOSE, asserted rather than left to be noticed:
+// if it came back without its condition, the pairs below would silently stop
+// being the whole family this row can produce.
+check(
+  'and the provider control is withdrawn, so two really is the whole row',
+  (await page.locator(PROVIDER_TOGGLE).count()) === 0,
+  `${await page.locator(PROVIDER_TOGGLE).count()} provider toggles on the row`,
 );
 check('and nothing is open at rest', (await openNow()).length === 0);
 
 // ------------------------------------------------- 1. EVERY ORDERED PAIR CLOSES
-// The reported route is `mode -> model`; the other five were measured to be
-// broken in exactly the same way, so all six are held.
+// The reported route is `mode -> model`; the other four were measured to be
+// broken in exactly the same way. Both of the pairs this row can still produce
+// are held here with a real pointer; the other four are held against a two-row
+// provider table in the unit file named in the header.
 for (const first of NAMES) {
   for (const second of NAMES) {
     if (first === second) continue;
@@ -243,26 +272,50 @@ for (const name of NAMES) {
 
 // --------------------------------------- 3. A PRESS INSIDE DOES *NOT* CLOSE IT
 // The other direction of the same rule, and the one a too-eager dismissal
-// breaks: typing a full model id into the popover's own field must not shut
-// the popover under the operator's hands.
+// breaks: a pointer that goes down inside the open layer must not shut it
+// under the operator's hands.
+//
+// IT USED TO BE PRESSED ON THE FREE-TEXT ROW -- click the field, type a full
+// model id, and the popover had to still be there. That row is gone: a full id
+// has no row on the CLI's own `/model` menu, so the only form that takes one
+// also rewrites `~/.claude/settings.json`, and the operator chose refusal over
+// that fallback (`main/terminal/model-switch.ts`). So the press lands on the
+// layer's own PADDING instead -- inside the boundary the dismissal reads
+// (`data-popover-root`), and on nothing that would close it by doing its job.
+// THE POINT IS CHECKED BEFORE IT IS CLICKED, because a coordinate that had
+// drifted onto an option would make "it stayed open" mean the opposite.
 if (await reachOnly('model')) {
-  await page.locator('[data-model-id]').click();
-  await page.waitForTimeout(150);
-  await page.keyboard.type('claude-x');
-  await page.waitForTimeout(100);
-  const afterTyping = await openNow();
-  const typed = await page.locator('[data-model-id]').inputValue();
+  const layer = await page.locator('[data-model-picker-menu]').boundingBox();
+  const inside = { x: Math.round(layer.x + 2), y: Math.round(layer.y + 2) };
+  const insideHit = await page.evaluate((p) => {
+    const el = document.elementFromPoint(p.x, p.y);
+    return {
+      inPopover: (el?.closest('[data-popover-root="model"]') ?? null) !== null,
+      onOption: (el?.closest('[data-model-option]') ?? null) !== null,
+      tag: el?.tagName ?? null,
+    };
+  }, inside);
   check(
-    'pressing INSIDE the popover leaves it open — the free-text row still takes a click and keys',
-    afterTyping.join(',') === 'model' && typed === 'claude-x',
-    `[${afterTyping}], field=${JSON.stringify(typed)}`,
+    'the inside press really lands in the model layer and on none of its options',
+    insideHit.inPopover === true && insideHit.onOption === false,
+    JSON.stringify({ inside, insideHit }),
+  );
+  await page.mouse.click(inside.x, inside.y);
+  await page.waitForTimeout(150);
+  const afterInside = await openNow();
+  check(
+    'pressing INSIDE the popover leaves it open',
+    afterInside.join(',') === 'model',
+    `[${afterInside}]`,
   );
 
   // --------------------------------------------------- 4. ESCAPE STILL CLOSES
   // It did before this change (`DetailPanel.composer-escape.test.tsx`), on the
   // toggle and on the listbox. Held here as well because the state it reads
   // was replaced: a rule that peels the layer must keep peeling it. Pressed
-  // from the free-text field, which is where the keyboard is by now.
+  // from a row of the listbox, which is where the keyboard used to be handed
+  // to the free-text field.
+  await page.locator('[data-model-option="opus"]').focus();
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
   const afterEscape = await openNow();

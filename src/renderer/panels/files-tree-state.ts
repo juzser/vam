@@ -29,10 +29,17 @@ export interface UseFilesTreeStateParams {
   readonly openFile: (path: string) => void;
   readonly setNote: (note: string | null) => void;
   readonly focusEditor: () => boolean;
+  /**
+   * Puts the keyboard in the filter box and SELECTS its existing text — the
+   * one `focusFilter` every surface in `FilesTab.tsx` reaches the filter
+   * through (`/` from the tree is one of them), so a second `.focus()`
+   * written out here is not a second answer to what the key does. See that
+   * function's own header in `FilesTab.tsx`.
+   */
+  readonly focusFilter: () => void;
   readonly requestRowFocus: () => void;
   readonly requestEditorFocus: () => void;
   readonly treeRef: RefObject<HTMLDivElement | null>;
-  readonly filterRef: RefObject<HTMLInputElement | null>;
 }
 
 export interface UseFilesTreeStateResult {
@@ -55,10 +62,10 @@ export function useFilesTreeState({
   openFile,
   setNote,
   focusEditor,
+  focusFilter,
   requestRowFocus,
   requestEditorFocus,
   treeRef,
-  filterRef,
 }: UseFilesTreeStateParams): UseFilesTreeStateResult {
   /**
    * Which directories are open, by absolute path — so nothing has to be
@@ -158,8 +165,7 @@ export function useFilesTreeState({
           openFromTree(step.path, step.focusEditor);
           return;
         case 'filter':
-          setNote(null);
-          filterRef.current?.focus();
+          focusFilter();
           return;
         case 'editor':
           setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
@@ -179,8 +185,8 @@ export function useFilesTreeState({
       toggleDir,
       openFromTree,
       focusEditor,
+      focusFilter,
       setNote,
-      filterRef,
       requestRowFocus,
     ],
   );

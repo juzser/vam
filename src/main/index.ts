@@ -29,6 +29,7 @@ import { registerIssueIpc } from './issue/ipc.js';
 import { registerLinkIpc } from './link/ipc.js';
 import { applyApplicationMenu } from './menu.js';
 import { isSameOrigin } from './origin.js';
+import { registerPrIpc } from './pr/ipc.js';
 import { createQuitGuard, registerUnsavedIpc } from './quit/guard.js';
 import { unsavedQuitPrompt } from './quit/unsaved.js';
 import { openDeviceRegistry, registryPath } from './remote/devices.js';
@@ -41,6 +42,9 @@ import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { openWritesPreference, writesPreferencePath } from './remote/writes-preference.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
+import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/pr-actions.js';
+import { prRepoOverride } from './sources/claude-code/pr-repos.js';
+import { projectIdOf } from './sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import type { MainSource } from './sources/source.js';
 import { createTmuxRunner } from './sources/tmux/spawn.js';
@@ -556,6 +560,18 @@ async function resolveSessionCwd(sessionId: string): Promise<string | null> {
   return row?.cwd ?? null;
 }
 
+/**
+ * THE ONE RUNNER FOR THE WHOLE APPLICATION, and that singleness is the
+ * guarantee rather than a tidiness.
+ *
+ * `createPrActionRunner` refuses a second write while one is in flight
+ * (`pr-actions.ts`), and a guard held per call would refuse nothing at all: a
+ * fresh one per invoke has never seen the merge that is already running. Built
+ * once, at module scope, exactly as `PR_READER` is in `source.ts` for the same
+ * kind of reason.
+ */
+const PR_ACTIONS = createPrActionRunner(runPrActionViaCli());
+
 void app.whenReady().then(async () => {
   // FIRST, BEFORE ANYTHING ELSE SPAWNS A CHILD PROCESS. A GUI launch (Finder,
   // Dock, Spotlight) does not inherit the operator's shell PATH -- only
@@ -624,6 +640,38 @@ void app.whenReady().then(async () => {
   // this window anywhere, it hands a URL to the operating system's browser.
   registerLinkIpc(ipcMain, async (url) => {
     await shell.openExternal(url);
+  });
+  /**
+   * The PRs tab's own two channels -- and the ONE place in this file that
+   * registers something which changes state on GitHub.
+   *
+   * THE OPERATOR AUTHORISED BOTH ON 2026-09-18. `pull-requests.ts` had
+   * recorded, from the day it was written, that opening a pull request in a
+   * browser was a second outbound capability and deliberately absent; that
+   * sentence is now a dated record of a decision that changed, rather than a
+   * rule quietly deleted.
+   *
+   * THE DIRECTORY IS RESOLVED HERE, from the session id, and it is resolved
+   * the SAME WAY THE READER RESOLVES IT: the operator's per-project override
+   * first, the session's own cwd otherwise. A merge that ran somewhere other
+   * than where the list was read from would act on a repository the operator
+   * was not looking at -- which is the whole failure `prRepoOverride` exists
+   * to prevent on the read side.
+   *
+   * `resolveSessionCwd` is shared with the image picker and the file listing
+   * above, so a session that has closed stops authorising anything the moment
+   * it drops off the live roster.
+   */
+  registerPrIpc(ipcMain, {
+    openExternal: async (url) => {
+      await shell.openExternal(url);
+    },
+    resolveCwd: async (sessionId) => {
+      const cwd = await resolveSessionCwd(sessionId);
+      if (cwd === null) return null;
+      return prRepoOverride('claude-code', projectIdOf(cwd)) ?? cwd;
+    },
+    run: PR_ACTIONS,
   });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while

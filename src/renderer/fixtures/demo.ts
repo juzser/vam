@@ -89,6 +89,13 @@ export const DEMO_PROMPT: PromptView = {
  *    row, because Default resolves to Sonnet 5 and the status line does not
  *    say which alias set it. Two ticks, and a state that would otherwise have
  *    no gate in front of it anywhere.
+ *  - `notes-3` is the one row answered from the TRANSCRIPT rather than the
+ *    pane (`last-turn`). On a machine whose operator has replaced the CLI's
+ *    status line with a script of their own there is no footer to read at all,
+ *    and this is the only arm those sessions ever take -- so an arm with no
+ *    row here would be an arm no browser gate ever draws. It carries a
+ *    different sentence in the note and the accessible name, which is the
+ *    whole point of it being a separate kind (`shared/terminal.ts`).
  *  - every other row is `unknown`, including `factory-sse-1`, which is blocked
  *    on a permission prompt -- and a permission prompt REPLACES the status
  *    line, measured. So that row draws the fallback label, which is the
@@ -99,20 +106,24 @@ export const DEMO_PROMPT: PromptView = {
  * which is exactly what the desktop answers for a pane it could not read.
  */
 export function demoSessionModel(rowId?: string): SessionModel {
-  const running: Record<string, string> = {
-    'notes-1': 'Opus 5',
-    'notes-2': 'Sonnet 5',
-    // THE LONGEST REAL NAME THERE IS, and the reason it is in the fixture:
-    // this is what the status line reads on a session started on a full model
-    // id (`/model claude-sonnet-4-5-20250929` -> `Sonnet 4.5`, measured), and
-    // ten characters is the width at which the tools row at vam's narrowest
-    // legal pane used to push its own send button out of the box. It is also
-    // a name NONE of the five aliases is, so it ticks nothing -- a labelled
-    // button over an unmarked list, which no other row shows.
-    'notes-3': 'Sonnet 4.5',
+  const running: Record<string, SessionModel> = {
+    'notes-1': { kind: 'model', name: 'Opus 5' },
+    'notes-2': { kind: 'model', name: 'Sonnet 5' },
+    // THE LONGEST REAL NAME THERE IS, and the first reason it is in the
+    // fixture: this is what the status line reads on a session started on a
+    // full model id (`/model claude-sonnet-4-5-20250929` -> `Sonnet 4.5`,
+    // measured), and ten characters is the width at which the tools row at
+    // vam's narrowest legal pane used to push its own send button out of the
+    // box. It is also a name NONE of the five aliases is, so it ticks nothing
+    // -- a labelled button over an unmarked list, which no other row shows.
+    //
+    // AND IT IS THE TRANSCRIPT-SOURCED ROW, which fits the same session rather
+    // than needing another: a full model id is what `claude-sonnet-4-5-
+    // 20250929` is, and the id on an assistant line is exactly what
+    // `displayModelName` turns back into `Sonnet 4.5`.
+    'notes-3': { kind: 'last-turn', name: 'Sonnet 4.5' },
   };
-  const name = rowId === undefined ? undefined : running[rowId];
-  return name === undefined ? { kind: 'unknown' } : { kind: 'model', name };
+  return (rowId === undefined ? undefined : running[rowId]) ?? { kind: 'unknown' };
 }
 
 export const DEMO_MODEL: CanvasModel = {

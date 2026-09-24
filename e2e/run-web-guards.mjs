@@ -140,7 +140,14 @@
  * which is a real `pointerdown` reaching a document listener from a real hit
  * test at a real coordinate: a unit environment can only fire a synthetic
  * event at a node it picked itself, which says the handler exists and nothing
- * about whether a pointer ever gets there.
+ * about whether a pointer ever gets there,
+ * and -- since the operator asked a table in an answer to wrap -- whether a
+ * cell REALLY BROKE A LINE and whether the table it is in really fits the pane
+ * around it, at the 408px default pane and at a 390px phone: `w-max` and no
+ * width at all leave the identical DOM behind, every cell in a unit
+ * environment is 0px tall whether it holds one word or forty, and the
+ * scrollbar that would show the difference is hidden by `vam-no-scrollbar`, so
+ * the whole claim is a handful of numbers a browser has and nothing else does.
  * This
  * driver builds the web bundle, serves it with
  * `vite preview`, points each script at it and fails with a non-zero exit as
@@ -201,6 +208,30 @@ const GUARDS = [
   'terminal-scrollback-shots',
   'terminal-insert-shots',
   'prompt-popovers-shots',
+  // The PRs tab, which `?demo=1` structurally cannot reach with content: the
+  // demo fixture declares no pull requests. Stubs `window.api` like
+  // `files-tab-keyboard-shots` does, and measures the row at 390px -- eleven
+  // fields were added to it and whether they FIT is a rectangle question no
+  // unit environment can answer.
+  'prs-tab-shots',
+  // A table in an agent's answer, at the 408px default pane and at a 390px
+  // phone. Stubs `window.api` for the same reason the two above do -- the demo
+  // fixture's answers contain no table, and putting one in it would change the
+  // transcript every demo-driven guard counts turns and rows in.
+  'out-table-shots',
+  // THE `?` SHEET'S SHAPE: one column, label left and key right, a rule
+  // between sections, and a search box that holds the keyboard. Every term of
+  // that is a rectangle or a distance -- "clearer separation" is the claim
+  // that one gap is bigger than another, and both are zero in a unit
+  // environment. It also drives the box with REAL keystrokes, which is the
+  // only way to tell `?`-types-a-character from `?`-closes-the-sheet.
+  'key-sheet-shots',
+  // THE SHORTCUT SYMBOLS, on both platforms out of one bundle. Loads the page
+  // twice with `navigator.platform` overridden before any module runs, which
+  // is the only way to prove ⌘-or-Ctrl is a RUNTIME answer in the shipped
+  // bytes -- and RASTERISES each glyph against the notdef box, because a tofu
+  // is four identical bytes to every string assertion in the unit suite.
+  'chord-symbol-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

@@ -75,11 +75,13 @@ describe('the phone session screen’s identity', () => {
     expect(header.querySelector('[data-prompt-target]')?.textContent).toBe('factory-sse-1');
     const agents = header.querySelector('[data-phone-view="agents"]') as HTMLElement;
     expect(agents.getAttribute('aria-label')).toBe('Agents, 3 running');
-    // Three unlabelled glyphs where three labelled words were would be a real
-    // loss; every one of them says what it is.
+    // Unlabelled glyphs where labelled words were would be a real loss; every
+    // one of them says what it is. TWO of them now, not three: `PRs` is off
+    // the phone entirely (`tabs.ts`, and `prs-withdrawn.test.tsx` owns the
+    // whole withdrawal).
     expect(
       [...header.querySelectorAll('[data-phone-view]')].map((b) => b.getAttribute('aria-label')),
-    ).toEqual(['Response', 'PRs', 'Agents, 3 running']);
+    ).toEqual(['Response', 'Agents, 3 running']);
     expect(agents.textContent, 'the count, still a digit on screen').toContain('3');
   });
 

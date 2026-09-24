@@ -1,5 +1,6 @@
 /**
- * THE MODEL CONTROL'S THREE STATES, AND THE KEYS THE ENABLED ONE SENDS.
+ * THE MODEL CONTROL'S THREE STATES, AND WHAT THE ENABLED ONE IS ALLOWED TO ASK
+ * FOR.
  *
  * The operator's ask, translated: "re-check the model picker in the prompt
  * input. Confirm whether choosing a model in vam is possible or not. If a
@@ -15,26 +16,36 @@
  * on Claude Code 2.1.274: `/model sonnet` + Enter at the REPL answers "Set
  * model to Sonnet 5 and saved as your default for new sessions" and the status
  * line changes at once. So a session vam can type into CAN have its model
- * chosen, by typing that line; a session vam cannot type into cannot; and a
- * source that only records keeps the request-in-words it always had.
+ * chosen; a session vam cannot type into cannot; and a source that only
+ * records keeps the request-in-words it always had.
+ *
+ * AND THE SECOND HALF OF THAT ANSWER LINE IS WHY THIS MODULE NO LONGER BUILDS
+ * KEYS, OR LINES. "saved as your default for new sessions" is a change to
+ * `~/.claude/settings.json` nobody asked for, so main drives the CLI's own
+ * `/model` menu and presses `s` instead (`main/terminal/model-switch.ts`). The
+ * last piece to go was `modelCommandLine`, which survived while main still
+ * typed the argument form for a full model id; the operator chose refusal over
+ * that fallback, the free-text row went with it, and what is left here is the
+ * decision table and the five rows the popover draws. The one-word rule is
+ * `isModelChoice` alone now, and the last describe below holds both facts.
  *
  * `modelControlState` is the decision table, and it is asserted row by row so
  * that a change to one arm reddens here before it reaches the pane.
  */
 
 import { describe, expect, it } from 'vitest';
+// The whole module too, because one of the assertions below is about what it
+// does NOT export -- which a named import cannot ask.
+import * as modelCommand from '../../src/renderer/panels/model-command.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
-  modelCommandLine,
-  modelCommandStrokes,
+  modelButtonName,
   modelControlState,
+  modelRunningClause,
   runningModelRows,
 } from '../../src/renderer/panels/model-command.js';
-import { isPaneKey, MAX_KEY_TEXT, type PaneKey } from '../../src/shared/terminal.js';
-
-const texts = (strokes: readonly PaneKey[]): string[] =>
-  strokes.map((stroke) => (stroke.kind === 'text' ? stroke.text : `<${stroke.kind}>`));
+import { isModelChoice } from '../../src/shared/terminal.js';
 
 describe('which of the three controls a session gets', () => {
   it('keeps the request line for a source that only records, whatever the session says', () => {
@@ -202,68 +213,116 @@ describe('what the button says', () => {
     // cannot be told the truth is shown.
     expect(modelButtonLabel(null)).toBe('model');
   });
+
+  it('wears the same word whichever source the name came from', () => {
+    // ONE VOCABULARY. The transcript hands up an id (`claude-opus-5`) and
+    // main derives the footer's own shape from it before it crosses the
+    // bridge (`transcript-model.ts`), so the button does not rename itself
+    // when a session's footer appears or disappears.
+    expect(modelButtonLabel('Opus 5')).toBe(modelButtonLabel('Opus 5'));
+    expect(runningModelRows('Opus 5')).toEqual(['opus']);
+  });
 });
 
-describe('what one choice becomes on the wire', () => {
-  it('is the CLI’s argument form, `/model <alias>`, never the bare command that opens a menu', () => {
-    // A bare `/model` opens an interactive picker in the REPL; vam must never
-    // drive that menu (it cannot read it back), so the argument form is the
-    // only line this ever produces.
-    expect(modelCommandLine('opus')).toBe('/model opus');
-    expect(modelCommandLine('default')).toBe('/model default');
-    expect(modelCommandLine('  sonnet  ')).toBe('/model sonnet');
+/**
+ * WHAT THE NOTE AND THE ACCESSIBLE NAME MAY CLAIM, which is not the same for
+ * the two sources of one name.
+ *
+ * `model` is the CLI's painted footer: what the session is SET TO, now. The
+ * note has always said "running X" for it and still does.
+ *
+ * `last-turn` is the session's own transcript: what the API SERVED on the most
+ * recent turn (`main/sources/claude-code/transcript-model.ts`), which is the
+ * only source there is on a machine whose operator has replaced the CLI's
+ * status line with a script of their own. It LAGS by exactly one turn, and the
+ * moment it lags is the moment an operator is most likely to be reading it --
+ * they have just switched the model and are looking at the button to see
+ * whether it took. So the words change with the source: a note reading
+ * "running Opus 5" a second after a switch to Haiku would be vam claiming a
+ * fact it had not checked, and the sentence that explains what they are seeing
+ * is the one that says which turn it is about.
+ *
+ * THE BUTTON'S OWN LABEL DOES NOT CHANGE, and that is deliberate rather than
+ * an oversight: it is ten characters wide at vam's narrowest legal pane and
+ * already clips (`e2e/model-picker-shots.mjs` measured the overflow), so a
+ * qualifier there would be a qualifier nobody can read. The note and the
+ * accessible name have room; the label has none.
+ */
+describe('how much the words around the button claim', () => {
+  it('says "running" only for the footer, which is the only source that knows', () => {
+    expect(modelRunningClause({ kind: 'model', name: 'Opus 5' })).toBe('running Opus 5');
   });
 
-  it('takes a full model id too, so the free-text row can name what the aliases cannot', () => {
-    expect(modelCommandLine('claude-opus-5')).toBe('/model claude-opus-5');
+  it('says which turn it is about when the name came from the transcript', () => {
+    expect(modelRunningClause({ kind: 'last-turn', name: 'Opus 5' })).toBe(
+      'last turn ran on Opus 5',
+    );
   });
 
-  it('refuses an empty choice, and any choice with whitespace or a control character in it', () => {
-    // A raw newline in a literal payload reaches the pane as 0x0a and the REPL
-    // submits on it (`tmux/argv.ts`), so a choice carrying one would submit
-    // `/model` bare -- the menu -- and type the rest into the answer. A space
-    // would hand the CLI two arguments. Both are refused before any key is
-    // built, with `null` and never a shorter line.
-    expect(modelCommandLine('')).toBeNull();
-    expect(modelCommandLine('   ')).toBeNull();
-    expect(modelCommandLine('opus\nhello')).toBeNull();
-    expect(modelCommandLine('opus haiku')).toBeNull();
-    expect(modelCommandLine('op\tus')).toBeNull();
-    expect(modelCommandLine(`op${String.fromCharCode(27)}us`)).toBeNull();
-    expect(modelCommandStrokes('')).toBeNull();
-    expect(modelCommandStrokes('a b')).toBeNull();
+  it('says nothing at all when vam could not read one', () => {
+    expect(modelRunningClause(null)).toBeNull();
   });
 
-  it('is typed as literal text and then a SEPARATE Enter, every stroke one the channel accepts', () => {
-    const strokes = modelCommandStrokes('opus');
-    expect(strokes).not.toBeNull();
-    expect(texts(strokes ?? [])).toEqual(['/model opus', '<enter>']);
-    for (const stroke of strokes ?? []) expect(isPaneKey(stroke)).toBe(true);
+  it('carries the same distinction into the accessible name', () => {
+    expect(modelButtonName({ kind: 'model', name: 'Opus 5' })).toBe(
+      'model: Opus 5 — choose one for this session',
+    );
+    expect(modelButtonName({ kind: 'last-turn', name: 'Opus 5' })).toBe(
+      'model: Opus 5, what the last turn ran on — choose one for this session',
+    );
+    expect(modelButtonName(null)).toBe('model — choose one for this session');
   });
+});
 
-  it('splits a long model id at the channel’s bound rather than sending one refused key', () => {
-    // `/model ` plus a full id runs past `MAX_KEY_TEXT` (sixteen). Handed over
-    // whole it fails `isPaneKey` in main, which answers `unaimed` -- a sentence
-    // about session PAIRING that would be false. `composedStrokes` exists for
-    // exactly this and is what splits it, so the pieces rejoin into the line
-    // and each one is within the bound.
-    const strokes = modelCommandStrokes('claude-opus-5-20260501') ?? [];
-    const pieces = strokes.filter((s) => s.kind === 'text');
-    expect(pieces.length).toBeGreaterThan(1);
-    for (const piece of pieces) {
-      expect(piece.kind === 'text' && piece.text.length <= MAX_KEY_TEXT).toBe(true);
-      expect(isPaneKey(piece)).toBe(true);
+/**
+ * AND THIS MODULE BUILDS NO `/model <choice>` LINE AT ALL ANY MORE.
+ *
+ * TWO BUILDERS WENT, ONE AT A TIME. `modelCommandStrokes` cut the line into
+ * `PaneKey`s for `terminal.send`, and the CLI answers that form with "and
+ * saved as your default for new sessions" -- so every pick rewrote
+ * `~/.claude/settings.json`. It went when main took the route over and drove
+ * the CLI's own menu. `modelCommandLine` outlived it by one change: main still
+ * typed the argument form for a full model id, and the renderer printed that
+ * line in the caption while refusing a choice that was not one word.
+ *
+ * NEITHER REASON SURVIVED THIS ONE. The operator chose refusal over the
+ * fallback, so main types the argument form for nothing; the free-text row
+ * went with it, so every choice the picker can send is one of `MODEL_CHOICES`'
+ * own ids and no input is left that the one-word rule could refuse. The rule
+ * did not move -- it is `isModelChoice`, in main's own `shared/terminal.ts`,
+ * on whatever crosses the bridge -- so what is asserted here is the rule's
+ * corpus against that one copy, and the ABSENCE of a renderer-side speller for
+ * the line that costs somebody their default.
+ */
+describe('the one-word rule, and the builder that is not here to break it', () => {
+  it('holds for an alias, a full model id, and nothing carrying whitespace', () => {
+    // The corpus the two copies used to be compared on, kept whole and asked
+    // of the copy that remained. A raw newline in a literal payload reaches
+    // the pane as 0x0a and the REPL submits on it (`tmux/argv.ts`), so a
+    // choice carrying one would submit `/model` bare -- opening a menu with
+    // the rest typed into it. A space would hand the CLI two arguments.
+    for (const choice of ['opus', 'default', 'claude-opus-5-20260501']) {
+      expect(isModelChoice(choice), choice).toBe(true);
     }
-    expect(texts(strokes).slice(0, -1).join('')).toBe('/model claude-opus-5-20260501');
-    expect(strokes.at(-1)).toEqual({ kind: 'enter' });
+    for (const choice of ['', '   ', 'opus haiku', 'opus\nhello', 'op\tus', 'opus']) {
+      expect(isModelChoice(choice), JSON.stringify(choice)).toBe(false);
+    }
   });
 
-  it('ends with exactly one Enter, and nothing after it', () => {
-    // The submit is the last stroke so that a run failing midway leaves the
-    // line sitting in the pane UNSENT rather than half-submitted -- the same
-    // rule `reply.ts` keeps for a prompt.
-    const strokes = modelCommandStrokes('haiku') ?? [];
-    expect(strokes.filter((s) => s.kind === 'enter')).toHaveLength(1);
-    expect(strokes.at(-1)?.kind).toBe('enter');
+  it('exports no way to spell `/model <choice>` in the least trusted process', () => {
+    // NOT A STYLE POINT. A renderer-side builder for the argument form is the
+    // one thing standing between a future hand and the defect this whole
+    // change removes: the line is right there, already written, and typing it
+    // over `terminal.send` is one call away. `modelCommandLine` was that, and
+    // it is asserted gone rather than merely deleted.
+    expect(Object.keys(modelCommand)).not.toContain('modelCommandLine');
+    expect(Object.keys(modelCommand)).not.toContain('modelCommandStrokes');
+    for (const [name, value] of Object.entries(modelCommand)) {
+      if (typeof value !== 'function') continue;
+      expect(String(value), name).not.toContain('/model ');
+    }
+    // And the sweep really had a corpus to sweep -- five exports, of which
+    // three are functions -- rather than passing on an empty object.
+    expect(Object.keys(modelCommand).length).toBeGreaterThanOrEqual(4);
   });
 });

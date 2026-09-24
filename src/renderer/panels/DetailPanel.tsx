@@ -105,8 +105,20 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentWork } from '../../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PanePrompt, PromptView } from '../../shared/answer.js';
-import { PROVIDERS, type ProviderId, resolveProvider } from '../../shared/providers.js';
-import type { PaneKey, PaneSendResult, SessionModel } from '../../shared/terminal.js';
+import type { PrAction } from '../../shared/pr-action.js';
+import {
+  CAN_CHOOSE_PROVIDER,
+  PROVIDERS,
+  type ProviderId,
+  resolveProvider,
+} from '../../shared/providers.js';
+import type {
+  ModelSwitchResult,
+  PaneKey,
+  PaneSendResult,
+  SessionModel,
+} from '../../shared/terminal.js';
+import { relativeTime } from '../adapter/relative-time.js';
 import type {
   AgentQuestion,
   Command,
@@ -154,6 +166,7 @@ import { describeFailure, type SourceError } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { useAgentWork } from '../sources/useAgentWork.js';
 import { appendImagePath, removeImagePath } from './attach-image-path.js';
+import { ConfirmPrAction } from './ConfirmPrAction.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
@@ -162,9 +175,10 @@ import { type FileOpenRequest, FilesTab } from './FilesTab.js';
 import {
   MODEL_CHOICES,
   modelButtonLabel,
-  modelCommandLine,
-  modelCommandStrokes,
+  modelButtonName,
   modelControlState,
+  modelRunningClause,
+  type RunningModel,
   runningModelRows,
 } from './model-command.js';
 import { Note } from './Note.js';
@@ -173,7 +187,7 @@ import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
 import { TerminalTab } from './TerminalTab.js';
-import { narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
+import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
 import {
   appendOlder,
   applyWalk,
@@ -1265,10 +1279,99 @@ const PR_STATE_INK: Record<PullRequest['state'], string> = {
 function PullRequestsTab({
   pullRequests,
   repo,
+  sessionId,
+  bridge,
+  reserveCornerHeight = 0,
+  now = () => new Date(),
 }: {
   readonly pullRequests: PullRequestList | undefined;
   readonly repo?: DetailPanelProps['prRepo'];
+  /**
+   * WHOSE pull requests these are, for the action channel. Main turns this
+   * into the directory to act in -- the renderer never names one, which is
+   * what keeps a pane from acting on a repository its session is not in
+   * (`src/main/pr/ipc.ts`).
+   */
+  readonly sessionId: string | null;
+  /**
+   * The desktop bridge, or `undefined` in the browser build and on the phone.
+   * ABSENT, NOT DISABLED: with no bridge the list still reads -- it comes
+   * through the source, which works everywhere -- and simply grows no controls
+   * that could not act.
+   */
+  readonly bridge?: PrsBridge;
+  /**
+   * How far the floating view pill reaches DOWN into this tab, in px, or 0
+   * when no pill is drawn (an unfocused pane, the phone). Passed rather than
+   * measured, for the reason `cornerReserveHeight` gives at its declaration:
+   * measuring the pill in a layout effect and re-rendering with the result
+   * is what unpinned a column once already. See the `<ul>` below.
+   */
+  readonly reserveCornerHeight?: number;
+  /** Injected so the relative time in a row is testable against a fixed instant. */
+  readonly now?: () => Date;
 }) {
+  /**
+   * WHAT THE LAST ACTION SAID -- gh's own sentence, or vam's refusal.
+   *
+   * ONE NOTE FOR THE WHOLE TAB rather than one per row, because there is only
+   * ever one action in flight (main's runner refuses a second) and a column of
+   * stale sentences beside rows that have moved on is worse than the one
+   * current answer. It carries the pull request number so the operator can see
+   * which row the sentence is about.
+   */
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  /** The question standing in front of an irreversible act, or nothing. */
+  const [asking, setAsking] = useState<PendingPrAction | null>(null);
+  /**
+   * IS ONE ALREADY RUNNING. Main refuses a second write outright -- that is
+   * the real bar, and it is on the far side of the process boundary. THIS is
+   * the half the operator can see: a merge waits on GitHub, so the button is
+   * slow, so it gets pressed again, and a second press that simply vanished
+   * would be indistinguishable from a button that does not work. So the second
+   * press is REFUSED IN WORDS here rather than sent and silently dropped.
+   */
+  const [running, setRunning] = useState(false);
+
+  const ask = (pending: PendingPrAction) => {
+    if (running) {
+      setNote({ ok: false, text: 'vam is already running a pull request action — wait for it.' });
+      return;
+    }
+    setNote(null);
+    setAsking(pending);
+  };
+
+  const go = (pending: PendingPrAction) => {
+    setAsking(null);
+    const act = bridge?.act;
+    if (act === undefined || sessionId === null) return;
+    setRunning(true);
+    void act(sessionId, pending.action)
+      .then((outcome) => {
+        // gh's OWN words, success or failure. "the merge failed" is not
+        // actionable; "the base branch policy prohibits the merge" is.
+        setNote({ ok: outcome.ok, text: outcome.message });
+      })
+      .catch((error: unknown) => {
+        setNote({
+          ok: false,
+          text: error instanceof Error ? error.message : 'that action failed.',
+        });
+      })
+      .finally(() => setRunning(false));
+  };
+
+  const open = (url: string) => {
+    const openIt = bridge?.open;
+    if (openIt === undefined) return;
+    setNote(null);
+    void openIt(url).then((outcome) => {
+      // A browser that declined must not look like one that opened.
+      if (!outcome.ok) setNote({ ok: false, text: outcome.reason });
+    });
+  };
+
   /**
    * WHICH DIRECTORY THIS PANE IS ASKING FROM, and how to point it elsewhere.
    *
@@ -1376,40 +1479,602 @@ function PullRequestsTab({
       </p>,
     );
   }
+  const at = now();
   return framed(
-    <ul data-prs className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
-      {pullRequests.prs.map((pr) => (
-        <li
-          key={pr.number}
-          data-pr-row
-          data-pr-state={pr.state}
-          data-pr-checks={pr.checks}
-          className="flex items-center gap-2 rounded-[9px] border border-line bg-card px-3 py-2"
+    <>
+      <ul
+        data-prs
+        /**
+         * THE CORNER THE VIEW PILL FLOATS OVER, RESERVED -- and it is this
+         * change that made it necessary.
+         *
+         * `data-view-overlay` is absolutely positioned at the pane's top
+         * right and reaches ~34px down into whatever is below it. That cost
+         * nothing while this row stacked everything into ONE LEFT COLUMN:
+         * the top right of the first row was empty, so the pill floated over
+         * blank card. Putting the status rail there puts the first row's
+         * state word, checks and diff directly under it -- laid out, measured
+         * as visible by every rectangle check, and then PAINTED OVER. That is
+         * audit F1's exact shape, and the same one the identity line was
+         * deleted for.
+         *
+         * DOWNWARDS, NOT SIDEWAYS. `reserveCorner` (the width) would take
+         * ~96px off the right of EVERY row to clear a pill that overhangs
+         * only the first; the height clears it for the one row it touches and
+         * costs the others nothing. Zero when the pane is unfocused, because
+         * an unfocused pane paints no pill at all.
+         *
+         * MEASURED AS OCCLUSION, not as a rectangle: `e2e/prs-tab-shots.mjs`
+         * asks `elementFromPoint` what is on top of each status glyph, which
+         * is the only question that can see a half-buried control.
+         */
+        style={reserveCornerHeight > 0 ? { paddingTop: reserveCornerHeight } : undefined}
+        className="vam-no-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto"
+      >
+        {pullRequests.prs.map((pr) => (
+          <PullRequestRow
+            key={pr.number}
+            pr={pr}
+            now={at}
+            /* WITHDRAWN, NOT DISABLED, three times over: no bridge (the
+               browser build), nothing to open (an address vam would refuse,
+               which the reader already turned into `null`), and no session to
+               act for. Each absence removes a control rather than drawing one
+               that refuses under a finger. */
+            onOpen={bridge?.open === undefined ? null : open}
+            onAsk={bridge?.act === undefined || sessionId === null ? null : ask}
+          />
+        ))}
+      </ul>
+      {note === null ? null : (
+        <p
+          data-pr-note
+          data-pr-note-ok={note.ok ? 'true' : undefined}
+          /* `aria-live`: this sentence appears without anything moving focus,
+             which is precisely the case a screen reader is otherwise not told
+             about. */
+          aria-live="polite"
+          className={`flex-none select-text text-control ${note.ok ? 'text-ink-dim' : 'text-danger'}`}
         >
+          {note.text}
+        </p>
+      )}
+      {asking === null ? null : (
+        <ConfirmPrAction
+          verb={asking.verb}
+          number={asking.number}
+          title={asking.title}
+          consequence={asking.consequence}
+          command={asking.command}
+          onConfirm={() => go(asking)}
+          onCancel={() => setAsking(null)}
+        />
+      )}
+    </>,
+  );
+}
+
+/**
+ * The bridge the PRs tab acts through. Named here rather than reached for
+ * inside the tab, for the reason `TerminalTab`'s three members are passed from
+ * the call site: a fact reached for invisibly is a fact a later edit drops
+ * with nothing to notice.
+ */
+type PrsBridge = NonNullable<typeof globalThis.window extends never ? never : Window['api']>['prs'];
+
+/** A question waiting to be answered, and everything needed to draw it. */
+type PendingPrAction = {
+  readonly verb: string;
+  readonly number: number;
+  readonly title: string;
+  readonly consequence: string;
+  readonly command: string;
+  readonly action: PrAction;
+};
+
+/** The one word each review decision gets, and the ink it wears. */
+const PR_REVIEW: Record<NonNullable<PullRequest['review']>, { label: string; ink: string }> = {
+  approved: { label: 'approved', ink: 'text-done' },
+  'changes-requested': { label: 'changes requested', ink: 'text-danger' },
+  'review-required': { label: 'review required', ink: 'text-ink-dim' },
+};
+
+/**
+ * THE WIDTH AT WHICH A PULL REQUEST ROW HAS TWO SIDES.
+ *
+ * WRITTEN OUT AS `356` IN EVERY CLASS BELOW, and this constant is what a test
+ * reads rather than what the markup interpolates -- the same bargain
+ * `AGENT_SPLIT_PX` makes and for the same reason: Tailwind finds classes by
+ * scanning source TEXT for complete strings, so `@min-[${PR_SPLIT_PX}px]:…`
+ * is not a string it can find and the rule would simply never be generated.
+ * The row would then be one column at every width, silently, which is the
+ * exact shape this repo has already shipped once.
+ *
+ * A CONTAINER QUERY, NOT A VIEWPORT ONE. The detail pane is resizable between
+ * `DETAIL_MIN` (320) and `DETAIL_MAX` (520), so a desktop pane can be
+ * NARROWER than a phone screen. Asking the viewport would put two columns in
+ * a 320px pane and one column on a 390px phone -- both backwards.
+ *
+ * 356 IS MEASURED, NOT CHOSEN. The status rail is `PR_STATUS_PX` wide because
+ * that is what its widest natural line needs, and the split's gap takes 12
+ * more. What is left for identity at 356 is 176px, less the check dot's 6 and
+ * its 8px gap: 162px of title. Below that a title stops being a title and
+ * becomes two words and an ellipsis, so below that the two sides STACK
+ * instead of crushing each other. Measured against the real paint in
+ * `e2e/prs-tab-shots.mjs`, which walks the row's own container across the
+ * seam and asserts where it actually falls -- a class that was merely TYPED
+ * proves nothing about what paints.
+ *
+ * WHAT IT MEANS IN PRACTICE: vam's default pane and its widest both split;
+ * the narrowest legal pane (`DETAIL_MIN`, 320) and the 390px phone both
+ * stack. The phone landing on the stacked side is not a compromise -- a 390px
+ * screen has no room for two columns of eleven fields, and the one thing
+ * worse than a row that stacks is a row that clips.
+ */
+export const PR_SPLIT_PX = 356;
+
+/**
+ * HOW WIDE THE STATUS RAIL IS above the split, typed as `w-[168px]` below for
+ * the reason `PR_SPLIT_PX` gives.
+ *
+ * 168 IS THE WIDEST NATURAL LINE THE RAIL HOLDS, measured rather than
+ * rounded: `changes requested` is the longest phrase any status field draws,
+ * and `Delete branch` the wider of the two controls. A rail narrower than
+ * either would wrap a two-word phrase onto two lines on every row that has
+ * one; a wider one takes space out of the title for nothing, because no
+ * status line uses it.
+ *
+ * FIXED RATHER THAN CONTENT-SIZED on purpose. The whole gain of a right rail
+ * is that the words line up DOWN the list -- "which of these is ready" is one
+ * vertical scan. A rail sized to each row's own content would start at a
+ * different x on every row and give that back.
+ */
+export const PR_STATUS_PX = 168;
+
+/**
+ * THE TWO HALVES OF A PULL REQUEST ACTION BUTTON: the box a finger hits, and
+ * the box that is painted.
+ *
+ * THEY ARE NOT THE SAME BOX, and the operator's two reports are what say so.
+ * "The action buttons need different colours" came first; "bigger" came next.
+ * The old chip was `px-2 py-0.5 text-meta` -- 22px tall on an 11px type step,
+ * which is the scale's own FLOOR and is documented there as "chrome
+ * ANNOTATING what is being read", never a control. A control that offers to
+ * merge somebody's pull request should not be drawn in the size reserved for
+ * a timestamp.
+ *
+ * SO THE PAINT IS 30px AND `--text-control`, which is the size this app's
+ * phone chrome already paints (`.vam-phone .vam-tap > [data-tap-skin]`), and
+ * `px-3` rather than `px-2` so the word has room either side of it. Nothing
+ * here is a new number: 30 and the 8px radius are `styles.css`'s own, argued
+ * at length where they were chosen.
+ *
+ * AND THE HIT IS 44 ON A PHONE, through `vam-tap` -- which is this repo's
+ * OPT-IN, per control, and deliberately not a net cast from the stylesheet
+ * over `[data-phone-shell] button` (that was tried once and burst a heading
+ * row). `data-tap-pill` is the second half: the shared skin rule pins every
+ * skin to a 30x30 SQUARE, correct for the icon skins it was written for and
+ * wrong for a skin holding a WORD -- "Delete branch" clamped to 30px wide
+ * would spill its own label past the box it is painted in, which a
+ * `getBoundingClientRect` check asking only "is it AT LEAST 44?" stays green
+ * through. `e2e/prs-tab-shots.mjs` measures BOTH: the hit box clears 44, and
+ * the label fits inside its own skin.
+ *
+ * THE COLOURS ARE NOT HERE. Each control names its own, because green, grey
+ * and red are the whole point of the pair being distinguishable and a shared
+ * string is where that distinction would quietly come back.
+ */
+const PR_ACTION_HIT = 'vam-tap flex flex-none items-center justify-center rounded-[8px]';
+const PR_ACTION_SKIN =
+  'flex h-[30px] items-center justify-center whitespace-nowrap rounded-[8px] border px-3 text-control';
+
+/**
+ * ONE PULL REQUEST, drawn.
+ *
+ * ITS OWN COMPONENT because the row grew from four facts to fifteen when the
+ * operator asked for "more information", and a fifteen-fact row inline inside
+ * a list inside a tab is where a narrow-pane defect goes to hide.
+ *
+ * EVERY ADDED FIELD IS `| null` AND EVERY ONE OF THEM DRAWS NOTHING WHEN IT
+ * IS. That is the model's rule (`model.ts`) carried to the paint: `null` is
+ * "gh did not say", and "+0 −0" or an arrow with nothing on one side of it
+ * would be vam inventing an answer it does not have. `0` is NOT null and does
+ * draw -- a pull request that only deletes says `+0`.
+ *
+ * THE ROW IS A BUTTON, not a `div` with a click handler: it is the control
+ * that opens the pull request, so it has to be reachable by Tab, activate on
+ * Return and Space, and announce itself. The action buttons are SIBLINGS of it
+ * rather than children -- a button inside a button is invalid markup and, in
+ * practice, one click that fires both.
+ *
+ * TWO SIDES: WHAT IT IS, AND WHAT STATE IT IS IN. The operator's ask on
+ * 2026-09-19 was to separate the information and split it left and right, and
+ * the seam the fields fall either side of is that question. IDENTITY is what
+ * does not change while the pull request is open -- its title, its number,
+ * the branches it moves between, who wrote it, what it is labelled -- and it
+ * goes LEFT, where reading starts. STATUS is everything that can be different
+ * on the next poll -- the state word, the checks, the diff, the review, a
+ * conflict, how long ago it moved -- and it goes RIGHT, right-aligned into
+ * its own `PR_STATUS_REM` column, with the two controls that act on it
+ * beneath. Scanning a list for "which of these is ready" is then one column
+ * of aligned words rather than fifteen facts to read past.
+ *
+ * THE CHECK DOT STAYS LEFT and is the one status fact that does. It is 6px of
+ * colour on the title's own line: it is what the eye runs DOWN the list on,
+ * and moved to the right rail it would be a coloured speck at the end of a
+ * paragraph. Its WORDS ("checks pass") went right with the rest of the
+ * status, so the fact is in both places for the two different ways it is
+ * read.
+ *
+ * THE METADATA STILL WRAPS, and both sides do it independently. Measured
+ * against the phone (`e2e/playwright.phone`) and the narrowest legal pane:
+ * below `PR_SPLIT_PX` the two sides STACK rather than crush each other, and
+ * within each side the fields wrap with a small gap rather than sit in a
+ * fixed grid -- a row that clipped would hide the one field the operator
+ * opened this tab to read.
+ */
+function PullRequestRow({
+  pr,
+  now,
+  onOpen,
+  onAsk,
+}: {
+  readonly pr: PullRequest;
+  readonly now: Date;
+  readonly onOpen: ((url: string) => void) | null;
+  readonly onAsk: ((pending: PendingPrAction) => void) | null;
+}) {
+  const url = pr.url;
+  const clickable = onOpen !== null && url !== null;
+  /**
+   * WHAT MAY BE MERGED. `open` only -- a draft is its author's explicit "not
+   * yet", and a merged or closed pull request has nothing left to merge. The
+   * control is WITHDRAWN in every other case rather than drawn and refused.
+   */
+  const mayMerge = onAsk !== null && pr.state === 'open';
+  /**
+   * WHAT MAY HAVE ITS BRANCH DELETED, and the bound here is not tidiness.
+   * Deleting the head branch of an OPEN pull request CLOSES that pull request
+   * on GitHub -- so this button, offered there, would silently be a second and
+   * unannounced "close this". Two acts behind one word is not something this
+   * pane does, so the offer is limited to a pull request that is already
+   * decided and whose branch vam actually knows the name of.
+   */
+  // Bound to a local BEFORE the closures below read it: a narrowing on
+  // `pr.headRefName` does not survive into a callback, and a branch name is
+  // the one argument in this row that must not be able to arrive as `null`.
+  const headRef = pr.headRefName === '' ? null : pr.headRefName;
+  const mayDeleteBranch =
+    onAsk !== null && (pr.state === 'merged' || pr.state === 'closed') && headRef !== null;
+
+  /**
+   * WHETHER GITHUB HAS RULED THAT THIS CANNOT MERGE, and the whole point of
+   * this line is the comparison it does NOT make.
+   *
+   * `mergeable` has THREE values, not two. `'conflicting'` is GitHub saying
+   * it tried and the branches disagree. `'mergeable'` is GitHub saying it
+   * tried and they do not. `null` is GitHub not having tried -- it computes
+   * mergeability lazily and `UNKNOWN` is what MOST open pull requests carry,
+   * which the reader maps to `null` (`model.ts`). So `!== 'mergeable'` would
+   * grey the control on nearly every row the operator owns and refuse merges
+   * GitHub has no objection to at all. Only the literal `'conflicting'`
+   * counts, and `test/panels/DetailPanel.pr-detail.test.tsx` pins all three.
+   */
+  const conflicting = pr.mergeable === 'conflicting';
+
+  /**
+   * WHAT THE PULL REQUEST IS -- the left side. Nothing here changes while it
+   * is open, which is why it is the side that holds still.
+   */
+  const identity = (
+    <>
+      {/* Truncated, not shortened: the pane is a narrow column and this one
+          is now narrower still. The whole title stays in the DOM for anything
+          that reads it, AND on `title=` for an eye -- a truncated name with
+          nowhere to read the rest is information the pane had and threw away,
+          which is the same bargain `data-pr-branches` makes below. */}
+      <span data-pr-title title={pr.title} className="block truncate text-left text-body text-ink">
+        {pr.title}
+      </span>
+      <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-meta text-ink-faint">
+        <span data-pr-number className="flex-none font-mono">
+          {`#${pr.number}`}
+        </span>
+        {pr.headRefName === null || pr.baseRefName === null ? null : (
+          /* HEAD then BASE: the order IS the sentence -- this branch into
+             that one. `min-w-0` + `truncate` so a long branch name cannot
+             push the row wider than the pane. */
+          <span
+            data-pr-branches
+            /* MEASURED at 390px: a real branch name truncates there, and a
+               truncated name with nowhere to read the rest is information
+               the pane had and threw away. The full pair lives on `title`,
+               which is the same bargain the repo heading above makes with
+               its directory path. */
+            title={`${pr.headRefName} → ${pr.baseRefName}`}
+            className="min-w-0 truncate font-mono"
+          >
+            {`${pr.headRefName} → ${pr.baseRefName}`}
+          </span>
+        )}
+      </span>
+      {pr.author === null && pr.labels.length === 0 ? null : (
+        <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-meta">
+          {pr.author === null ? null : (
+            <span data-pr-author className="text-ink-faint">{`@${pr.author}`}</span>
+          )}
+          {pr.labels.map((label) => (
+            <span
+              key={label}
+              data-pr-label
+              className="rounded-full border border-line px-1.5 py-px text-ink-dim"
+            >
+              {label}
+            </span>
+          ))}
+        </span>
+      )}
+    </>
+  );
+
+  /**
+   * WHAT STATE IT IS IN -- the right side, in two lines and then its
+   * controls. VERDICTS first (words GitHub or a reviewer decided), NUMBERS
+   * second (how big and how fresh). Right-aligned above `PR_SPLIT_PX` so the
+   * column reads DOWN the list as one stack of aligned words, which is how a
+   * list is scanned for "which of these is ready".
+   */
+  const status = (
+    <>
+      <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-meta">
+        <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
+          {pr.state}
+        </span>
+        {/* The dot's own words. The dot stays left as the thing the eye runs
+            down; this is the same fact for the reader who is stopped on this
+            row, and it is queryable by name for the guard that measures it. */}
+        <span data-pr-checks-label className="text-ink-faint">
+          {CHECK_MARK[pr.checks].label}
+        </span>
+        {pr.review === null ? null : (
+          <span data-pr-review className={PR_REVIEW[pr.review].ink}>
+            {PR_REVIEW[pr.review].label}
+          </span>
+        )}
+        {conflicting ? (
+          <span data-pr-mergeable className="text-danger">
+            conflicts
+          </span>
+        ) : null}
+      </span>
+      {pr.additions === null &&
+      pr.deletions === null &&
+      pr.changedFiles === null &&
+      pr.updatedAt === null ? null : (
+        <span className="mt-0.5 flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0.5 text-meta">
+          {pr.additions === null ? null : (
+            <span data-pr-additions className="font-mono text-done">
+              {`+${pr.additions}`}
+            </span>
+          )}
+          {pr.deletions === null ? null : (
+            <span data-pr-deletions className="font-mono text-danger">
+              {`−${pr.deletions}`}
+            </span>
+          )}
+          {pr.changedFiles === null ? null : (
+            <span data-pr-files className="text-ink-faint">
+              {`${pr.changedFiles} ${pr.changedFiles === 1 ? 'file' : 'files'}`}
+            </span>
+          )}
+          {pr.updatedAt === null ? null : (
+            <span data-pr-updated className="text-ink-faint">
+              {relativeTime(pr.updatedAt, now)}
+            </span>
+          )}
+        </span>
+      )}
+      {mayMerge || mayDeleteBranch ? (
+        <span data-pr-actions className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
+          {mayMerge && conflicting ? (
+            /**
+             * DISABLED, NOT ABSENT, and the difference is a sentence. GitHub
+             * has RULED here -- it computed the merge and the branches
+             * disagree -- so withdrawing the control would say "there is no
+             * action on this row", which is false: there is one, and it is
+             * blocked on a named, fixable cause. A greyed control says "there
+             * is an action here and it is not available now", and the note on
+             * it carries the reason. Same shape as `data-model-picker-shell`,
+             * and for the same two mechanical reasons: a disabled button
+             * takes NO pointer events and NO focus, so neither hover nor Tab
+             * would ever reach an explanation hung on the button itself.
+             */
+            <Note text="GitHub says this branch conflicts with its base. Merge or rebase the base branch into it and push, then this can go in.">
+              <span
+                data-pr-merge-note
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: the tab stop IS the feature -- see the block comment above.
+                tabIndex={0}
+                className={`inline-flex flex-none rounded ${FOCUS_RING}`}
+              >
+                <button
+                  type="button"
+                  data-pr-merge
+                  data-pr-merge-state="conflicting"
+                  disabled
+                  aria-disabled="true"
+                  aria-label={`merge pull request ${pr.number} — GitHub says it conflicts with its base`}
+                  className={`${PR_ACTION_HIT} cursor-not-allowed`}
+                >
+                  {/* `text-ink-faint` on `border-line-strong` is the disabled
+                      ink this app already uses (`data-model-picker-state
+                      ="disabled"`, and `SettingsOverlay`'s steppers), and it
+                      is measured as PAINT in `e2e/prs-tab-shots.mjs`: the
+                      label must still clear 3:1 in both themes, because a
+                      greyed control an operator cannot read is a control that
+                      is not there. */}
+                  <span
+                    data-tap-skin
+                    data-tap-pill
+                    className={`${PR_ACTION_SKIN} border-line-strong text-ink-faint`}
+                  >
+                    Merge
+                  </span>
+                </button>
+              </span>
+            </Note>
+          ) : null}
+          {mayMerge && !conflicting ? (
+            <button
+              type="button"
+              data-pr-merge
+              data-pr-merge-state="ready"
+              aria-label={`merge pull request ${pr.number}`}
+              onClick={() =>
+                onAsk({
+                  verb: 'Merge',
+                  number: pr.number,
+                  title: pr.title,
+                  consequence:
+                    'This merges the pull request on GitHub, now, with your own credentials. vam cannot undo it, and nothing about your branch protection is overridden — if the repository refuses, GitHub’s own words are what you will see.',
+                  // The exact command, so the strategy is never a private
+                  // decision of this button's. See `ConfirmPrAction`.
+                  command: `gh pr merge ${pr.number} --squash`,
+                  action: { kind: 'merge', number: pr.number, method: 'squash' },
+                })
+              }
+              className={`${PR_ACTION_HIT} cursor-pointer ${FOCUS_RING}`}
+            >
+              {/* GREEN, at the operator's ask, and `--color-icon-green` rather
+                  than `--color-running`. The greens this palette holds are the
+                  running status and the icon tone, and `--color-running` is
+                  ALREADY ON THIS ROW three spans away: `PR_STATE_INK.open` is
+                  `text-running`. Painting the affirmative control with it
+                  would make the button and the word `open` the same colour and
+                  the same claim. The icon tones are named by TONE and make no
+                  claim at all (`styles.css`), which is exactly what a control
+                  wants. `--color-done` is not a candidate either -- in this
+                  palette it is BLUE, and it is on this row too, carrying
+                  `+additions`. Measured as paint in both themes by
+                  `e2e/prs-tab-shots.mjs`. */}
+              <span
+                data-tap-skin
+                data-tap-pill
+                className={`${PR_ACTION_SKIN} border-icon-green text-icon-green hover:bg-icon-green hover:text-ground`}
+              >
+                Merge
+              </span>
+            </button>
+          ) : null}
+          {mayDeleteBranch && headRef !== null ? (
+            <button
+              type="button"
+              data-pr-delete-branch
+              aria-label={`delete the remote branch ${headRef}`}
+              onClick={() =>
+                onAsk({
+                  verb: 'Delete branch',
+                  number: pr.number,
+                  title: pr.title,
+                  consequence: `This deletes the remote branch ${headRef} on GitHub. vam cannot undo it. Your local copy of the branch is untouched.`,
+                  command: `gh api --method DELETE repos/{owner}/{repo}/git/refs/heads/${headRef}`,
+                  action: { kind: 'delete-branch', branch: headRef },
+                })
+              }
+              className={`${PR_ACTION_HIT} cursor-pointer ${FOCUS_RING}`}
+            >
+              {/* RED AT REST, not only under a pointer. It wore `border-line
+                  … text-ink-dim` -- byte-identical to Merge -- and became red
+                  on hover, which is a warning an operator gets only once they
+                  have already reached for it. `--color-danger` is this app's
+                  ACTION red and says so in `styles.css`: "an action must not
+                  be mistakable for the status of the row beside it".
+
+                  RED WORD, NEUTRAL BOUNDARY, and that pairing is the answer to
+                  a real tension. Merge is the affirmative and must have the
+                  stronger presence; a full red outline on the destructive one
+                  would out-shout it, and a list of merged pull requests would
+                  be a column of red chips. So the ink carries the warning, the
+                  boundary stays `line-strong` like every other quiet control,
+                  and the full `bg-danger` commitment arrives on hover -- which
+                  is `ConfirmPrAction`'s own Go button, the other place in this
+                  feature where something irreversible is offered. */}
+              <span
+                data-tap-skin
+                data-tap-pill
+                className={`${PR_ACTION_SKIN} border-line-strong text-danger hover:border-danger hover:bg-danger hover:text-ground`}
+              >
+                Delete branch
+              </span>
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+    </>
+  );
+
+  return (
+    <li
+      data-pr-row
+      data-pr-state={pr.state}
+      data-pr-checks={pr.checks}
+      /* THE QUERY CONTAINER IS THE ROW AND THE RESPONDING BOX IS INSIDE IT. A
+         container query does not apply to the element that DECLARES the
+         container, so `@container` and `@min-[356px]:flex-row` on one element
+         is a rule that can never fire -- the row would be one column at every
+         width and nothing on screen would say so. `AgentsTab` paid for that
+         lesson; this is the same two-box shape, measured the same way. */
+      className="@container rounded-[9px] border border-line bg-card px-3 py-2"
+    >
+      <div
+        data-pr-split
+        className="flex flex-col gap-1.5 @min-[356px]:flex-row @min-[356px]:items-start @min-[356px]:gap-3"
+      >
+        <div data-pr-identity className="flex min-w-0 flex-1 items-start gap-2">
           <span
             data-pr-checks-mark
             title={CHECK_MARK[pr.checks].label}
-            className={`h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
+            /* `mt-[7px]` puts the dot on the title's own first line now that the
+               row is several lines tall -- centred against the whole row it would
+               drift down as fields appear. */
+            className={`mt-[7px] h-1.5 w-1.5 flex-none rounded-full ${CHECK_MARK[pr.checks].dot}`}
           />
-          <span className="min-w-0 flex-1">
-            {/* Truncated, not shortened: the pane is a narrow column, and the
-                whole title stays in the DOM for anything that reads it. */}
-            <span data-pr-title className="block truncate text-body text-ink">
-              {pr.title}
-            </span>
-            <span className="mt-0.5 flex items-center gap-1.5 text-meta">
-              <span data-pr-number className="font-mono text-ink-faint">
-                {`#${pr.number}`}
-              </span>
-              <span data-pr-state-label className={PR_STATE_INK[pr.state]}>
-                {pr.state}
-              </span>
-              <span className="truncate text-ink-faint">{CHECK_MARK[pr.checks].label}</span>
-            </span>
-          </span>
-        </li>
-      ))}
-    </ul>,
+          {clickable ? (
+            <button
+              type="button"
+              data-pr-open
+              title={url}
+              aria-label={`open pull request ${pr.number} on GitHub`}
+              onClick={() => onOpen(url)}
+              /* `vam-tap` for the phone's floor, and a note on what that is
+                 worth TODAY: `onOpen` is `null` without a desktop bridge and
+                 the browser build has none, so this control is not drawn on a
+                 phone at all -- verified at 390px against both `?demo=1` and a
+                 remote-shaped source, where the PRs view draws rows and no
+                 opener. The class is here so the day a phone gets a route to
+                 open a link the control is already a touch target, and the
+                 phone census cannot hold it to that until then. */
+              className={`vam-tap flex min-w-0 flex-1 cursor-pointer flex-col rounded text-left ${FOCUS_RING}`}
+            >
+              {identity}
+            </button>
+          ) : (
+            <span className="flex min-w-0 flex-1 flex-col">{identity}</span>
+          )}
+        </div>
+        {/* `w-[168px]` IS `PR_STATUS_PX`, typed where Tailwind can read it and
+            named where a person can -- see `PR_SPLIT_PX` for why the number
+            cannot be interpolated. Below the split it is a full-width block
+            under the identity; above it, a fixed rail the identity flexes
+            against, so the status words line up down the list instead of
+            starting wherever the longest title happened to end. */}
+        <div
+          data-pr-status
+          className="flex min-w-0 flex-col @min-[356px]:w-[168px] @min-[356px]:flex-none"
+        >
+          {status}
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -1706,7 +2371,12 @@ function AgentsTab({
         data-agents-toggle
         aria-pressed={showIdle}
         onClick={() => setShowIdle((open) => !open)}
-        className="flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink"
+        /* `vam-tap` is the phone's 44px floor, opted into at the component the
+           way `styles.css` asks for a control the shell HOSTS. Agents is one
+           of the three views a phone can be in and the only control in it --
+           measured 74x20 there, half a touch target, and invisible to the
+           repo's census because that census only ever opened Response. */
+        className="vam-tap flex-none cursor-pointer self-start rounded-[var(--radius-sm)] px-1.5 py-0.5 text-control text-ink-faint hover:bg-raised hover:text-ink"
       >
         {showIdle ? `hide ${idleCount} idle` : `show ${idleCount} idle`}
       </button>
@@ -2253,6 +2923,111 @@ function cycleWording(result: PaneSendResult): string | null {
       return 'not sent — this row is in a pane vam cannot use for this project';
     default:
       return 'not sent — tmux would not deliver to that session';
+  }
+}
+
+/**
+ * The model control's own note -- ONE route now, and what it costs, which is
+ * nothing beyond this session.
+ *
+ * IT USED TO NAME TWO. "an alias switches this session only; a full id also
+ * becomes the default for new sessions" was true while the picker carried a
+ * free-text row and main fell back to `/model <id>` + Return for it. The
+ * operator chose refusal over that fallback, so the second clause describes a
+ * route that does not exist -- and a note promising a settings change vam will
+ * not make is worse than one that never mentioned it.
+ *
+ * See the `Note` it is handed to for the measurement, and `MAX_TIP` in
+ * `DetailPanel.tooltip-length.test.tsx` for why it is this short.
+ */
+const MODEL_PICKER_NOTE =
+  'drives this session’s own /model menu — it switches this session only, and changes nothing for later ones';
+
+/**
+ * WHAT THE MODEL PICKER MAY CLAIM after a switch, one sentence per outcome.
+ *
+ * THE SCOPE IS THE HEADLINE AND IT LEADS, because the caption is a single
+ * `truncate` line: whatever is said first is the part that survives a narrow
+ * pane. And there is one scope to lead with now -- vam drives the CLI's own
+ * menu and presses `s`, which the CLI answers with `for this session only`.
+ * The second success sentence this used to have, "also saved as the default
+ * for new sessions", belonged to the argument form vam took for a full model
+ * id; the operator chose refusal over that disclosure, so what was a second
+ * kind of success is `not-in-menu`, a refusal that names the remedy.
+ *
+ * A REFUSAL NAMES THE WAY OUT WHERE THERE IS ONE, which is why `not-in-menu`
+ * spells the line rather than merely declining: typing `/model <id>` at the
+ * REPL is still the operator's to do, and doing it knowingly is their call.
+ * What vam will not do is make that write on their behalf.
+ *
+ * THE LAST FOUR ARE THE PANE CHANNEL'S OWN WORDS, said by calling
+ * `cycleWording` rather than by copying it: `unaimed`, `unavailable`,
+ * `mispaired` and `refused` are the same four states the mode chip and the
+ * keystroke strip meet, and two surfaces describing one state in different
+ * words is its own defect (`shared/terminal.ts` records that one being fixed).
+ */
+function modelSwitchNote(result: ModelSwitchResult, title: string, choice: string): CycleNote {
+  switch (result.kind) {
+    case 'sent':
+      return {
+        kind: 'sent',
+        // NOT "typed /model opus": vam typed `/model` bare and walked the
+        // menu, and a caption naming a line vam did not type would be the
+        // kind of small lie this whole module exists to remove.
+        text: `${choice} set for this session only, on the /model menu in the terminal of ${title} — the session answers there`,
+      };
+    case 'not-in-menu':
+      return {
+        kind: 'refused',
+        // THE WAY OUT COMES FIRST, and that is not a style choice. This
+        // caption is drawn in a `truncate whitespace-nowrap` line (see
+        // `data-mode-cycle` below), so roughly forty characters of it are
+        // ever on screen at a composer's width -- and the first draft of
+        // this sentence put the remedy at character 163 of 220, where no
+        // operator would have read the one part that tells them what to do.
+        // `title` on that span is what keeps the rest reachable.
+        //
+        // `choice` is read off the RESULT and not off the closure: main
+        // answers about what it was asked, and a caption naming the local
+        // variable would drift the day the two stop being the same string.
+        text: `not sent — type /model ${result.choice} in the Terminal tab yourself: it has no row on the /model menu, and the form that takes one also saves it as your default`,
+      };
+    case 'question':
+      return {
+        kind: 'refused',
+        // The question in its OWN words: the operator has to know which one,
+        // and the pane may be off screen behind this tab. A picker with
+        // nothing above its rows leaves main no title to send, and vam says
+        // that rather than quoting an empty string.
+        text:
+          result.title === ''
+            ? `not sent — ${title} has a menu open; close or answer it first, then switch`
+            : `not sent — ${title} is asking “${result.title}”; answer it first, then switch`,
+      };
+    case 'no-menu':
+      return {
+        kind: 'refused',
+        // SAID PLAINLY, because it is what really happens when the REPL is
+        // busy: the text lands in the input and the Return submits it. A
+        // refusal claiming nothing was sent would be a claim vam cannot make.
+        text: `not sent — ${title} did not open its /model menu, and the /model line may have reached the agent as a prompt`,
+      };
+    case 'not-live':
+      return {
+        kind: 'refused',
+        text: `not sent — the /model menu of ${title} did not answer vam’s arrow, so vam closed it rather than press a row it had not read`,
+      };
+    case 'unmatched':
+      return {
+        kind: 'refused',
+        text: `not sent — ${result.label} is not a row on the /model menu of ${title}`,
+      };
+    case 'unreadable':
+      return { kind: 'refused', text: `not sent — vam could not read the screen of ${title}` };
+    default:
+      // `cycleWording` answers `null` for `sent` alone, which cannot reach
+      // here: the four kinds left are exactly the pane channel's refusals.
+      return { kind: 'refused', text: cycleWording(result.kind) ?? 'not sent' };
   }
 }
 
@@ -2918,9 +3693,21 @@ function QuestionCard({
           >
             {/* THE HINT COMES OFF THE SAME TABLE THE HANDLER READS, and is
               not printed at all when the key is not held -- a caption naming a
-              key that does nothing is the defect, not the absence of one. */}
+              key that does nothing is the defect, not the absence of one.
+              `data-inline-chord` PUTS IT IN THE FAMILY, and that is the rest of
+              the same rule. `styles.css` suppresses the chord hints on a phone,
+              and this hook was not one of them -- so the single card a phone
+              operator has to use went on printing `c` at 6x16, on a screen with
+              no `c` to press, through every release of that rule. Suppressed,
+              never deleted: the key still fires under a folio keyboard at
+              390px. `data-question-chat-key` stays beside it because it names
+              WHICH hint this is, which the family hook cannot. */}
             {keys.chat[0] !== undefined && (
-              <span data-question-chat-key className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+              <span
+                data-question-chat-key
+                data-inline-chord
+                className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}
+              >
                 {keys.chat[0]}
               </span>
             )}
@@ -3004,7 +3791,20 @@ function QuestionCard({
             ? // Still exactly true where there is no delivery: nothing here can
               // reach the tool call, and a control that implied otherwise would
               // be the lie this sentence was written against.
-              'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; type your choice in the box below.'
+              //
+              // IT USED TO END "type your choice in the box below", AND THERE
+              // IS NO BOX BELOW. `composerHidden` withdraws the composer for an
+              // unanswered question -- on the desktop as well as the phone, so
+              // this was never a phone bug -- and measured at 390x844 the card
+              // sat over `[data-composer-bar]` count 0 and `textarea` count 0.
+              // Picking an option does not draw one either. The one route from
+              // a card to a box is the card's own last row, so the sentence
+              // names THAT -- a control drawn just above it, which already says
+              // "it opens the box below" in its own caption. Drawing the
+              // composer instead was the other candidate and was measured and
+              // refused: it costs 140px on the one screen this whole change is
+              // about, and it would put two surfaces under one prompt.
+              'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; tap Chat about this to open the box and type your choice.'
             : // And still true where there is: picking sends nothing. Submit is
               // the thing that sends, and it sends the whole set at once, the
               // way the call was asked.
@@ -3951,12 +4751,19 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const canCycleMode = entry !== null && terminal !== false && entry.session.vamControlled === true;
   /**
    * KEYSTROKES INTO THIS SESSION'S PANE, shared by the mode row's own
-   * Shift-Tab, every button of the phone keystroke strip, the composer's
-   * Escape AND the model picker's `/model <x>` line -- they are the SAME
-   * channel (`window.api.terminal.send`) into the SAME pane, so one in-flight
-   * guard and one refusal caption serve all of them rather than each growing
-   * its own copy. `cycleNote` is the shared note; `sentText`/`busyText` are
-   * the one difference between a mode cycle and a keystroke.
+   * Shift-Tab, every button of the phone keystroke strip and the composer's
+   * Escape -- they are the SAME channel (`window.api.terminal.send`) into the
+   * SAME pane, so one in-flight guard and one refusal caption serve all of
+   * them rather than each growing its own copy. `cycleNote` is the shared
+   * note; `sentText`/`busyText` are the one difference between a mode cycle
+   * and a keystroke.
+   *
+   * THE MODEL PICKER USED TO BE ON THIS LIST AND IS NOT ANY MORE. It typed
+   * `/model <alias>` + Enter, which is the form the CLI ALSO saves as the
+   * operator's default for new sessions; it goes down `terminal.switchModel`
+   * now, where main drives the CLI's own menu (`sendModel`). It still SHARES
+   * `cycleNote` -- one caption in the row, one in-flight guard -- because
+   * neither of those was ever about the channel.
    *
    * One press at a time, ACROSS EVERY CONTROL: held down, a repeat here
    * queued a `back-tab` per repeat into a live agent with nothing on screen
@@ -4045,47 +4852,75 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
     pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
   /**
-   * Type `/model <choice>` and Enter into this session's pane -- the model
-   * picker's whole act, over the shared run above.
+   * Switch this session's model -- ONE CALL, because the whole policy lives in
+   * main now (`main/terminal/model-switch.ts`).
    *
-   * WHAT VAM MAY CLAIM AFTERWARDS is the delivery and not the model:
-   * "typed /model opus into the terminal of <title>". The CLI answers in the
-   * pane ("Set model to Opus 5 and saved as your default for new sessions",
-   * measured on 2.1.274) and vam never reads that answer back, so the caption
-   * says the session answers THERE rather than naming a model here. Naming
-   * one would be the claim nothing checked -- the same rule `cycleMode` keeps
-   * for the mode it does not read back.
+   * WHAT THIS FUNCTION USED TO DO, AND WHY IT STOPPED. It built the strokes for
+   * `/model <alias>` and typed them over `terminal.send`. Measured on Claude
+   * Code 2.1.276, that form answers:
    *
-   * A choice that is not one word is refused before a key is built
-   * (`modelCommandLine`): a space would hand the CLI two arguments and a
-   * newline would submit `/model` bare, which opens the CLI's own menu --
-   * the one thing vam must never drive.
+   *     ⎿  Set model to Opus 5 and saved as your default for new sessions
+   *
+   * -- so every pick in vam silently rewrote `~/.claude/settings.json`, from a
+   * control the operator reached for to change ONE session. The CLI's own menu
+   * offers `s` for "this session only", and driving a menu means reading a
+   * screen and walking a cursor: that is `answer.ts`'s discipline, it belongs
+   * in main, and it may not be half here and half there. ONE RULE, ONE PLACE.
+   *
+   * THE ONE CHECK THAT STAYS HERE IS THE BRIDGE, AND THE ORDER IS THE POINT. A
+   * build with no keyboard into a pane -- the browser arm, where `window.api`
+   * is undefined -- cannot switch a model whatever is on the screen, so it must
+   * say so rather than report anything about a question the pane happens to be
+   * asking. The web guard `model-picker-shots.mjs` caught exactly that: it
+   * drives the browser build against a demo row that IS asking one, and the
+   * caption came back naming the question, which would send the operator off to
+   * answer something that would not have helped.
+   *
+   * AND THE ONE-WORD CHECK IS GONE FROM HERE WITH THE FIELD THAT COULD FAIL
+   * IT. `modelCommandLine` refused a choice carrying a space or a newline
+   * before the bridge was touched, because the free-text row let an operator
+   * type either. Every caller is now one of `MODEL_CHOICES`' own five ids, so
+   * that branch had no input left that could reach it -- and a refusal nothing
+   * can produce is a refusal nothing can test. The rule itself did not move:
+   * `isModelChoice` in main enforces it on whatever the renderer sends, which
+   * is where enforcement belonged all along.
    */
-  const sendModel = (choice: string) => {
-    if (entry === null) return Promise.resolve();
-    const line = modelCommandLine(choice);
-    const strokes = modelCommandStrokes(choice);
-    if (line === null || strokes === null) {
+  const sendModel = async (choice: string) => {
+    if (entry === null) return;
+    if (cycleNote?.kind === 'busy') return;
+    const switchModel = globalThis.window?.api?.terminal?.switchModel;
+    if (switchModel === undefined) {
       setCycleNote({
         kind: 'refused',
-        text: 'not sent — a model is one word, and this has a space or a line break in it',
+        text: 'not sent — this build has no keyboard into a session’s pane',
       });
-      return Promise.resolve();
+      return;
     }
-    return typePaneStrokes(
-      strokes,
-      `typed ${line} into the terminal of ${entry.session.title} — the session answers there`,
-      `${line} · typing…`,
-    ).then(() => {
-      // LOOK AGAIN, AND DO NOT ASSUME. The line has just been typed, so this
-      // is the one moment the model is known to be about to change -- but what
-      // goes on the button is still whatever the PANE says next, which is what
-      // makes a CLI that refused the switch show the old model rather than the
-      // asked-for one. If this read is a beat early the interval corrects it;
-      // nothing here writes a name. `null` while no poll is running, which is
-      // every state where there was nothing to label anyway.
-      lookForModel.current?.();
-    });
+    // BEFORE THE AWAIT: main reads the pane, opens a menu and walks it, which
+    // is several tmux spawns at ten seconds each, and a control that looks
+    // idle through that reads as one that did nothing.
+    // NAMED BY THE ALIAS, NOT BY A `/model <alias>` LINE. This used to print
+    // one, which was true while a full id really was typed that way; vam types
+    // `/model` bare and walks the menu for every choice it accepts now, so a
+    // busy caption quoting the argument form would name a line vam never sends
+    // -- the same small lie the `sent` caption below refuses to tell.
+    setCycleNote({ kind: 'busy', text: `${choice} · switching…` });
+    const mine = cycleAbout;
+    const result = await switchModel(entry.project.id, choice, entry.session.id).catch(
+      (): ModelSwitchResult => ({ kind: 'refused' }),
+    );
+    // The row changed under the walk; an answer about the session that was
+    // here then says nothing about the one that is here now.
+    if (noteFor.current !== mine) return;
+    setCycleNote(modelSwitchNote(result, entry.session.title, choice));
+    // LOOK AGAIN, AND DO NOT ASSUME. The menu has just been driven, so this is
+    // the one moment the model is known to be about to change -- but what goes
+    // on the button is still whatever the PANE says next, which is what makes a
+    // CLI that refused the switch show the old model rather than the asked-for
+    // one. If this read is a beat early the interval corrects it; nothing here
+    // writes a name. `null` while no poll is running, which is every state
+    // where there was nothing to label anyway.
+    lookForModel.current?.();
   };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
@@ -4251,7 +5086,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   // the operator can be on Terminal when focus moves to a session from a
   // source without one, and a tab bar with nothing selected over a pane
   // drawing a tab that is no longer offered is the state this collapses.
-  const tabs = visibleTabs(terminal !== false, files === true);
+  //
+  // `phone` IS PASSED HERE, NOT ONLY IN THE PHONE SHELL'S ICON ROW, and that
+  // is what makes the PRs withdrawal structural rather than cosmetic. This
+  // panel is the component the phone RE-HOSTS, and the `current === 'PRs'`
+  // branch far below is the only thing that ever mounts the tab. Withdrawing
+  // the icon alone would leave that branch reachable by any route that names a
+  // tab without going through the row -- a remembered `prefs.detailTab`, a
+  // `tabRequest` from somewhere else, an `initialTab` off the store -- and
+  // `current`'s fallback is precisely what catches all of them at once.
+  const tabs = visibleTabs(terminal !== false, files === true, phone);
   const current = tabs.includes(tab) ? tab : 'Response';
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */
@@ -4580,14 +5424,6 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const providerPickerOpen = openPopover === 'provider';
   const modePickerOpen = openPopover === 'mode';
   const modelPickerOpen = openPopover === 'model';
-  /**
-   * The model popover's free-text row, which is the ONE thing here that is not
-   * a copy of a fact elsewhere: a full model id the operator is still typing
-   * exists nowhere until Enter sends it, and it is cleared once it has gone.
-   * It is not "the current model" either: vam never reads the CLI's answer
-   * back and so holds no opinion about which model a session is on.
-   */
-  const [modelIdText, setModelIdText] = useState('');
   /**
    * AND A POINTER LANDING ANYWHERE ELSE CLOSES IT -- the other half of the
    * report, and the half that had no code at all: nothing anywhere listened
@@ -5080,12 +5916,12 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * WHICH MODEL THIS SESSION IS RUNNING -- the name the CLI paints on its own
    * status line, read back out of the pane, or `null` for "vam cannot tell".
    *
-   * THE FACT IS READ, NEVER REMEMBERED, and that is the whole design. vam types
-   * `/model <alias>` into a pane and nothing more: the operator can type their
-   * own `/model` there, a resumed session was set by somebody else, and the CLI
-   * can refuse. So the button below shows what the pane SAYS, and the two
-   * things it must never show are a name from a request vam sent and a name
-   * read from another row.
+   * THE FACT IS READ, NEVER REMEMBERED, and that is the whole design. vam
+   * drives the CLI's own `/model` menu and reads no answer line afterwards:
+   * the operator can type their own `/model` there, a resumed session was set
+   * by somebody else, and the CLI can refuse. So the button below shows what
+   * the pane SAYS, and the two things it must never show are a name from a
+   * switch vam asked for and a name read from another row.
    *
    * ASKED ONLY WHERE THE PICKER IS DRAWN, which is `delivers` and a pane vam
    * owns (`modelControlState`). On every other row vam does not look into a
@@ -5105,7 +5941,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * of a row that is no longer being polled -- and the effect keeps the
    * dependencies it actually reads.
    */
-  const [running, setRunning] = useState<string | null>(null);
+  const [running, setRunning] = useState<RunningModel | null>(null);
   /** Published only while the poll below is live; see `sendModel`. */
   const lookForModel = useRef<(() => void) | null>(null);
   const modelReadable = modelControl === 'picker' && model !== undefined;
@@ -5133,10 +5969,15 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       if (!live || mine !== issued) return;
       // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
       // tell -- a question over the status line, a cut pane, a pairing it
-      // refused -- lands on the word the button wore before, because the one
-      // thing worse than an unlabelled button is a label that has quietly
-      // stopped being true.
-      setRunning(view.kind === 'model' ? view.name : null);
+      // refused, AND a transcript with no answered turn in it -- lands on the
+      // word the button wore before, because the one thing worse than an
+      // unlabelled button is a label that has quietly stopped being true.
+      //
+      // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
+      // CLI's painted footer and `last-turn` out of the session's transcript;
+      // both put the same word on the button, and only one of them can be
+      // called "running" in the words around it (`modelRunningClause`).
+      setRunning(view.kind === 'unknown' ? null : view);
     };
     lookForModel.current = () => void look();
     void look();
@@ -5147,8 +5988,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
       clearInterval(timer);
     };
   }, [modelReadable, model, projectId, rowId]);
-  /** The rows the pane's answer marks; two when it cannot separate them. */
-  const runningRows = runningModelRows(running);
+  /**
+   * The rows the answer marks; two when the name cannot separate them.
+   *
+   * BY NAME, AND THEREFORE THE SAME FOR BOTH SOURCES. A transcript-sourced
+   * name arrives already in the footer's own shape (`displayModelName`), so
+   * the tick is the same machinery on either -- and a tick that disagreed with
+   * the label beside it would be worse than a tick that lags with it. What the
+   * lag means is carried in the words, where it can be said.
+   */
+  const runningRows = runningModelRows(running?.name ?? null);
   /**
    * THE RECORD WINS. A transcript question carries the tool's own
    * `multiSelect`, its descriptions and its previews; a screen carries none of
@@ -6049,6 +6898,22 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 ? undefined
                 : { ...prRepo, projectName: prRepo.projectName ?? entry?.project.name }
             }
+            /* WHOSE pull requests, for the action channel. Main turns this into
+               the directory to act in, so the renderer never names a path --
+               see `src/main/pr/ipc.ts`. */
+            sessionId={entry?.session.id ?? null}
+            /* The desktop bridge, read at the CALL SITE like the Terminal and
+               Files tabs' bridges directly below, so all of what this tab can
+               reach is visible in one place. `undefined` in the browser build
+               and on the phone, where the list still draws and the controls
+               simply do not. */
+            bridge={globalThis.window?.api?.prs}
+            /* The floating view pill's downward reach, so the first row's
+               status rail is not painted over by it -- see the `<ul>` inside
+               the tab. Threaded like `FilesTab`'s below, and for the same
+               reason it is: a column at the pane's right edge cannot be
+               cleared by right-hand padding. */
+            reserveCornerHeight={cornerReserveHeight}
           />
         ) : current === 'Files' ? // Drawn by the ALWAYS-MOUNTED `FilesTab` sibling below instead --
         // see its own comment for why. This slot contributes nothing so the
@@ -6591,6 +7456,11 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         {files === true && (
           <FilesTab
             hidden={current !== 'Files'}
+            // The same claim `Alt+<digit>` is gated on, passed one layer
+            // further down: this tab answers `Mod-p` on the WINDOW, so every
+            // mounted instance hears every keystroke and only the pane holding
+            // the keyboard may act on one. See `FilesTab`'s own prop comment.
+            paneFocused={paneFocused}
             sessionId={entry?.session.id ?? null}
             list={globalThis.window?.api?.files?.list}
             read={globalThis.window?.api?.files?.read}
@@ -6704,12 +7574,19 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         is the darker colour they were looking at. Nothing else in the app
         wears `header` now; the token stays defined, unworn, rather than being
         deleted out from under a theme that still names it. */}
-      {/* NOT ON `Files`, for the same reason as the question bar just above:
-        the editor is a full-pane surface with its own keyboard, and a
-        composer prompting the AGENT underneath it would be a second insert
-        scope competing for the same keystrokes a person is typing into a
-        file. */}
-      {current !== 'Terminal' && current !== 'Files' && !composerHidden && (
+      {/* WHICH VIEWS GET ONE IS `drawsComposer`'s (`tabs.ts`), not a chain of
+        `!==` here. It used to be exactly that chain, and the cost was that a
+        new tab inherited an answer instead of being given one: the operator
+        found the box drawn under the PRs list, a view where nothing typed is
+        addressed to anything. The reasons -- Terminal and Files own their own
+        keyboards, PRs is not a conversation -- are written beside the names
+        they are about, and `DetailPanel.composer-tabs.test.tsx` derives its
+        whole expectation from that one predicate.
+
+        `composerHidden` is the orthogonal half and stays here: it is about
+        this SESSION (none selected, a source that cannot record, a question
+        open), not about which view is on. */}
+      {drawsComposer(current) && !composerHidden && (
         <div
           data-composer-bar
           // The other insert scope, and the common one: with no question open
@@ -7095,15 +7972,34 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 }}
                 // The ghost, in the placeholder's own faint ink: unmistakably
                 // not a draft yet, and naming the key that would make it one.
+                //
+                // NOT ON A PHONE, AND THE CAPTION IS ONLY HALF THE REASON. A
+                // touchscreen has no Tab, so `— Tab to use` named a key that is
+                // not there; worse, a placeholder holds ONE string, so printing
+                // the ghost cost the sentence that says what the box is for at
+                // the exact moment a phone operator has just opened it. Both
+                // halves are fixed in one place: the phone keeps the sentence,
+                // and the offer moves to `data-prompt-suggestion-use` in the
+                // tools row below -- a control a finger can take, in a row that
+                // is already 44px tall, so it costs no height at all. The
+                // attribute stays on both, because it is what says an offer is
+                // standing at all.
                 data-prompt-suggestion={promptSuggestion ?? undefined}
                 placeholder={
                   entry === null
                     ? 'Pick a session first'
-                    : promptSuggestion !== null
+                    : promptSuggestion !== null && !phone
                       ? `${promptSuggestion} — Tab to use`
                       : 'Reply to agent, answer with a number, or paste a plan…'
                 }
-                className="vam-no-scrollbar max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
+                /* `vam-tap` IS THE TOUCH FLOOR, and the box you type in is a
+                   touch target like any other: measured at 390px it came back
+                   335x40, four pixels under the AAA figure the rest of this
+                   shell keeps -- and it is the one control on the screen that
+                   exists to be tapped. The class is `.vam-phone`-scoped
+                   (`styles.css`), so the desktop box is untouched, and
+                   `max-h-[120px]` still caps the grown height. */
+                className="vam-no-scrollbar vam-tap max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
                 aria-label="prompt to session"
               />
             </div>
@@ -7138,6 +8034,65 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               hook is what lets a test say "beside the model field" without a
               layout engine. */}
             <div data-prompt-tools className="flex items-center gap-2">
+              {/* THE OFFER, AS A CONTROL, because on a phone `Tab` is not one.
+                See the placeholder above for the whole rule. Three things
+                decide the shape:
+
+                  - IT IS THE PHONE'S ONLY ROUTE to `promptSuggestion`, so it
+                    is drawn exactly where the key is missing and nowhere else.
+                    The desktop keeps the caption and the key; a second control
+                    there would be a second way to do a thing that already has
+                    one.
+                  - IT SAYS WHAT IT WOULD WRITE. A pill rather than a glyph:
+                    "Use" alone is a control whose object is invisible once the
+                    ghost has left the placeholder. `data-tap-pill` is the
+                    existing opt-out of the 30x30 square for a skin holding
+                    TEXT (`styles.css`).
+                  - AND IT IS THE ROW'S FLEXIBLE ITEM, which is the part that
+                    was measured rather than reasoned. Every other control
+                    here is fixed at 44 or 65 and none of them will give way,
+                    so a pill sized to its own content pushes the LAST one --
+                    Record -- off the screen: driven at 390px with a
+                    multi-select's three marks joined, the row overflowed its
+                    335px and Record's right edge landed at 397. So this one
+                    shrinks and clips with an ellipsis, down to the 44px floor
+                    `vam-tap` gives it, and the whole label is the accessible
+                    name, which is the channel that cannot be clipped. `max-w`
+                    is the other end: an offer does not get to own half a row
+                    it is only suggesting something into.
+                  - IT IS WITHDRAWN THE MOMENT IT IS TAKEN, because
+                    `promptSuggestion` is null over a non-empty draft: the same
+                    trade the Tab binding already refuses -- an accept that
+                    could only overwrite what the operator has written. */}
+              {phone && promptSuggestion !== null && (
+                <button
+                  type="button"
+                  data-prompt-suggestion-use
+                  aria-label={`use the suggested reply: ${promptSuggestion}`}
+                  onClick={() => onDraftChange(promptSuggestion)}
+                  className="vam-tap flex min-w-0 shrink cursor-pointer items-center justify-center"
+                >
+                  <span
+                    aria-hidden="true"
+                    data-tap-skin
+                    data-tap-pill
+                    className="flex h-[30px] min-w-0 max-w-[132px] items-center gap-1 rounded-[8px] border border-line-strong bg-card px-1.5 text-control text-ink-quiet active:bg-line-strong"
+                  >
+                    {/* THE `truncate` IS ON THIS INNER SPAN AND NOT ON THE
+                      SKIN, and the difference is visible rather than
+                      pedantic: `text-overflow: ellipsis` does nothing on a
+                      FLEX container -- the text becomes an anonymous flex
+                      item and is clipped with no mark at all. Caught on a
+                      screenshot, not by a guard: the chip read `Server-sent
+                      eve`, which is not a shortened label, it is a wrong one.
+                      `data-model-label` two controls over already does it
+                      this way for the same reason. */}
+                    <span data-prompt-suggestion-label className="truncate">
+                      {promptSuggestion}
+                    </span>
+                  </span>
+                </button>
+              )}
               {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
@@ -7257,8 +8212,24 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
 
               ABSENT, NOT DISABLED: drawn only when the caller can actually
               persist a change (`onSetDefaultProvider`), the same rule
-              `pickImageAttachment` follows two blocks up. */}
-              {onSetDefaultProvider !== undefined && (
+              `pickImageAttachment` follows two blocks up.
+
+              AND ONLY WHEN THERE IS A CHOICE, which is the same rule one step
+              further out and the one this control was not obeying.
+              `CAN_CHOOSE_PROVIDER` (`src/shared/providers.ts`) is `false`
+              while the table has one row, and over one row this popover is a
+              list with a single already-selected item in it: pressing it can
+              only re-choose what is chosen. `SettingsOverlay` has withdrawn
+              its own copy on that condition all along; the derivation moved
+              beside the table so both surfaces read one answer.
+
+              WHAT IT COST WHILE IT WAS DRAWN, measured at 390px: 44px of a
+              335px tool row plus its 8px gap, for "the default provider for
+              NEW sessions" on a screen whose whole job is replying to a
+              session that already exists -- and the popover opened INSIDE the
+              prompt box, 99x34 at y=739 against a textarea spanning 727-767.
+              Withdrawing it retires that overlap with it. */}
+              {CAN_CHOOSE_PROVIDER && onSetDefaultProvider !== undefined && (
                 /* `data-popover-root` IS THE DISMISSAL BOUNDARY, not decoration
                    and not a test hook: the document-level `pointerdown` handler
                    above asks whether the press landed inside the OPEN popover's
@@ -7316,8 +8287,15 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                               onSetDefaultProvider(provider.id);
                               setOpenPopover(null);
                             }}
+                            /* `vam-tap`: a popover row is a touch target too,
+                               and this one measured 89x24 at 390px the first
+                               time a census ever opened the popover it lives
+                               in. Dormant while `PROVIDERS` has one row and
+                               this whole control is withdrawn -- and that is
+                               the point of putting it here now rather than
+                               with the row that brings it back. */
                             className={[
-                              'flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
+                              'vam-tap flex cursor-pointer items-center whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control',
                               selected
                                 ? 'bg-line-strong text-ink'
                                 : 'text-ink-dim hover:bg-line-strong hover:text-ink',
@@ -7338,8 +8316,8 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                 delivers   terminal    vamControlled   drawn
                 not true   any         any             the free-text request
                                                        line, unchanged
-                true       !== false   true            a picker that types
-                                                       `/model <x>` + Enter
+                true       !== false   true            a picker that drives
+                                                       the CLI's /model menu
                 true       false       any             the picker, DISABLED
                 true       !== false   not true        the picker, DISABLED
 
@@ -7354,9 +8332,10 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               into the session's tmux pane, so a `model:` line lands in the
               CLI's prompt as words the agent reads -- it switches nothing.
               What does switch it, measured on Claude Code 2.1.274, is
-              `/model <alias>` + Enter typed at the REPL, which is exactly one
-              line into the pane vam already types into. So the picker types
-              that, over `typePaneStrokes`, and NEVER touches the draft.
+              `/model <alias>` + Enter typed at the REPL -- and the CLI ALSO
+              saves that as the operator's default for new sessions, which is
+              why the picker no longer types it. It asks main to drive the
+              CLI's own menu (`sendModel`), and NEVER touches the draft.
 
               DISABLED, NOT ABSENT, WHERE VAM CANNOT TYPE -- and this is the
               one place the control differs from the mode chip beside it,
@@ -7437,13 +8416,23 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                      against its wrapper rather than trusting the row. */
                   className="relative flex min-w-0 shrink"
                 >
-                  {/* THE NOTE DISCLOSES THE CLI'S SIDE EFFECT in one sentence,
-                      because it is one the operator did not ask for: measured
-                      on 2.1.274, `/model <alias>` answers "...and saved as your
-                      default for new sessions". vam cannot send the
-                      session-only form (that is the `s` key inside the
-                      interactive menu vam never drives), so the honest thing
-                      is to say what the line does.
+                  {/* THE NOTE SAYS WHAT THE ONE ROUTE COSTS, which is nothing
+                      beyond this session. An ALIAS is walked onto the CLI's own
+                      `/model` menu and committed with `s`, which the CLI
+                      answers "...for this session only" -- measured, with
+                      `~/.claude/settings.json` byte-identical afterwards.
+
+                      IT NAMED TWO ROUTES UNTIL NOW, AND ONE BAD ONE BEFORE
+                      THAT. vam typed `/model <choice>` + Return for all six
+                      rows, which the CLI answers "...and saved as your default
+                      for new sessions", so the note disclosed a settings
+                      rewrite on every pick. `main/terminal/model-switch.ts`
+                      made that false for the five aliases and left the
+                      disclosure true of the free-text row alone; the operator
+                      then chose refusal over that last fallback. The row is
+                      gone, no input reaches the argument form, and a note
+                      still mentioning a default would promise a write vam
+                      declines to make.
 
                       AND IT LEADS WITH THE MODEL WHEN THERE IS ONE, which is
                       not decoration: the label beside it may be CLIPPED at a
@@ -7454,12 +8443,19 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                       this correction, for exactly this reason. It says
                       "running", never "chosen": the name came off the
                       session's status line, and vam does not know which alias
-                      put it there. */}
+                      put it there.
+
+                      AND IT SAYS WHICH TURN IT IS ABOUT when the name came out
+                      of the transcript instead -- the only source there is on
+                      a machine whose operator has replaced the CLI's status
+                      line. `modelRunningClause` holds the two sentences and
+                      the argument for keeping them apart; the short of it is
+                      that "running" is a claim only the footer supports. */}
                   <Note
                     text={
                       running === null
-                        ? 'types /model <name> into this session’s pane — the CLI also makes it the default for new sessions'
-                        : `running ${running} · types /model <name> into this session’s pane — the CLI also makes it the default for new sessions`
+                        ? MODEL_PICKER_NOTE
+                        : `${modelRunningClause(running)} · ${MODEL_PICKER_NOTE}`
                     }
                   >
                     <button
@@ -7484,14 +8480,22 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                          that comment was protecting, and it still holds: the
                          moment the pane stops saying, so does this.
 
+                         AND THE FOOTER IS NOT THE ONLY PANE FACT ANY MORE. An
+                         operator may replace the CLI's status line with a
+                         script of their own, and then there is no footer to
+                         read for the life of every session on that machine --
+                         which is exactly the defect this control had. The name
+                         then comes out of the session's own transcript
+                         (`main/sources/claude-code/transcript-model.ts`), and
+                         the sentence around it changes with the source rather
+                         than the label doing so.
+
                          THE NAME LEADS THE ACCESSIBLE LABEL, the way the mode
                          chip's does, so a screen reader is told the fact the
-                         eye is told rather than only what the control does. */
-                      aria-label={
-                        running === null
-                          ? 'model — choose one for this session'
-                          : `model: ${running} — choose one for this session`
-                      }
+                         eye is told rather than only what the control does --
+                         and it carries the qualifier too, because a screen
+                         reader has no tooltip to hover for the rest of it. */
+                      aria-label={modelButtonName(running)}
                       onClick={() => togglePopover('model')}
                       /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
                          THAT CAN -- because it is the only thing in the row
@@ -7523,7 +8527,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                         className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
                       >
                         <span data-model-label className="truncate">
-                          {modelButtonLabel(running)}
+                          {modelButtonLabel(running?.name ?? null)}
                         </span>
                         {/* The chevron never gives way: a picker with no
                             affordance left on it is a label. */}
@@ -7537,10 +8541,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                       className="absolute bottom-full left-0 z-10 mb-1 flex flex-col gap-0.5 rounded-[10px] border border-line-strong bg-card p-1 shadow-sm"
                     >
                       {/* THE FIVE, as a listbox of their own rather than the
-                          popover being one: the free-text row below is an
-                          `<input>`, and an input is not an option, so a
-                          `role="listbox"` around both would be a listbox with
-                          a child no screen reader can place. */}
+                          popover being one. That began as a necessity -- a
+                          free-text `<input>` sat below them, and an input is
+                          not an option, so a `role="listbox"` around both
+                          would have been a listbox with a child no screen
+                          reader can place. The input is gone and the nesting
+                          stays, because the popover is a positioned layer with
+                          its own border, padding and shadow: collapsing the
+                          two would make the listbox the thing that paints the
+                          card, and every guard that asks "are the options
+                          inside the listbox" would then be asking nothing. */}
                       <div
                         role="listbox"
                         onKeyDown={dismissPopoverOnEscape}
@@ -7595,30 +8605,49 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                                 above.
 
                                 IT IS DRAWN ONLY WHERE IT IS TRUE, AND NOTHING
-                                MOVES WHEN IT APPEARS -- measured, not reasoned.
-                                The first draft reserved a `w-3` slot on every
-                                row on the theory that a mark coming and going
-                                would shift the version column PR 407 measured
-                                into one lane. It does not: the popover's width
-                                is set by the free-text row below (`w-[148px]`),
-                                the rows have slack inside it, and `ml-auto`
-                                pins every version to the same right edge
-                                whether or not a glyph sits before it. Both
-                                shapes were built and photographed, and the
-                                popover measured 158x164 with the lane intact
-                                either way -- so the reservation was a rule
-                                nothing could falsify, and this file's own
-                                header says what happens to those. What the
-                                guard DOES hold is the outcome: the box does
-                                not grow and the lane does not break. */}
-                            {runningRows.includes(choice.id) && (
-                              <Check
-                                data-model-current
-                                size={11}
-                                strokeWidth={2.5}
-                                aria-hidden="true"
-                              />
-                            )}
+                                MOVES WHEN IT APPEARS -- measured, not reasoned,
+                                and the measurement CHANGED SIDES when the
+                                free-text row was removed.
+
+                                THE SLOT IS RESERVED, AND IT WAS NOT. PR 407's
+                                first draft reserved a `w-3` box on every row so
+                                that a mark coming and going could not shift
+                                anything; it was cut as a rule nothing could
+                                falsify, because the popover's width was set by
+                                the free-text row's own `w-[148px]` and the five
+                                rows had slack inside it whatever was ticked.
+                                That input is gone with the full-id route, so
+                                the WIDEST ROW sets the width now -- and the
+                                measurement came back 132x138 unticked against
+                                155x138 with Default and Sonnet both ticked.
+                                Twenty-three pixels, which is the glyph plus its
+                                gap: the popover really did grow, the rows under
+                                the pointer really did move, and `running` is
+                                POLLED while the picker is open, so a read that
+                                comes back `unknown` for one beat narrows the
+                                box under somebody's hand.
+
+                                So the reservation is back, on the falsification
+                                that was missing the first time. The slot is
+                                always drawn and always `w-3`; the glyph goes
+                                inside it or does not. `aria-hidden` sits on the
+                                slot rather than the glyph -- same effect, one
+                                element -- and the `sr-only` clause below still
+                                carries the fact in words, being `position:
+                                absolute` and so no part of this row's width.
+                                `model-picker-shots.mjs` holds the OUTCOME
+                                rather than a number off this machine: the box
+                                is the same box with no tick, one tick and two.
+                                */}
+                            <span
+                              data-model-tick-slot
+                              aria-hidden="true"
+                              className="flex w-3 flex-none items-center justify-center"
+                            >
+                              {runningRows.includes(choice.id) && (
+                                <Check data-model-current size={11} strokeWidth={2.5} />
+                              )}
+                            </span>
                             {runningRows.includes(choice.id) && (
                               <span className="sr-only">
                                 {runningRows.length > 1
@@ -7674,32 +8703,29 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                           </button>
                         ))}
                       </div>
-                      {/* A FULL MODEL ID, for what the five aliases cannot
-                          name: `claude --help` takes "an alias for the latest
-                          model ... or a model's full name". Enter sends it as
-                          the same line; a space in it is refused before a key
-                          is built (`sendModel`). */}
-                      <input
-                        data-model-id
-                        value={modelIdText}
-                        onChange={(event) => setModelIdText(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== 'Enter') {
-                            dismissPopoverOnEscape(event);
-                            return;
-                          }
-                          // This box's own Enter, not the composer's: the
-                          // prompt box's handler submits the DRAFT on it.
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setOpenPopover(null);
-                          void sendModel(modelIdText);
-                          setModelIdText('');
-                        }}
-                        placeholder="full model id"
-                        aria-label="full model id — Enter to type /model with it"
-                        className={`h-6 w-[148px] rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink-dim placeholder:text-ink-quiet focus:text-ink ${FOCUS_RING}`}
-                      />
+                      {/* A FREE-TEXT ROW FOR A FULL MODEL ID STOOD HERE, and
+                          it is gone rather than disabled.
+
+                          `claude --help` really does take "an alias for the
+                          latest model ... or a model's full name", so the row
+                          was not a mistake -- but the CLI's own `/model` menu
+                          carries the five aliases and nothing else, and the
+                          menu is the only route that keeps a switch to ONE
+                          session. A full id could go in only as `/model <id>`
+                          + Return, which the CLI answers "...and saved as your
+                          default for new sessions": a write to
+                          `~/.claude/settings.json` from a control reached for
+                          to change one session. Offered that fallback with the
+                          cost disclosed, or an outright refusal, the operator
+                          chose refusal (`main/terminal/model-switch.ts`).
+
+                          SO THE ROW'S ONLY POSSIBLE OUTCOME BECAME A REFUSAL,
+                          and a control that can only say no is worse than no
+                          control: it invites the ask and spends the attention
+                          before answering. An operator who still wants a full
+                          id can type the line themselves in the Terminal tab,
+                          knowing what it costs -- which is what the
+                          `not-in-menu` caption tells them. */}
                     </div>
                   )}
                 </div>
@@ -7725,7 +8751,16 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                          `e2e/model-picker-shots.mjs`: the label must still
                          clear 3:1, because a greyed control an operator cannot
                          read is a control that is not there. */
-                      className="flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
+                      /* `vam-tap` LIKE ITS ENABLED TWIN twenty rows up, and
+                         for a reason the word "disabled" hides: this control
+                         is the one the PHONE draws. Over the remote server
+                         `terminal` is UNSERVED, so `modelControlState` lands
+                         on this row every time -- and it measured 65x24 at
+                         390px while the picker beside it measured 44,
+                         because only the picker wore the class. A tab stop
+                         with a tooltip is still something a finger aims at.
+                         `.vam-phone`-scoped, so the desktop keeps its 24. */
+                      className="vam-tap flex h-6 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-faint"
                     >
                       model
                       <ChevronDown size={11} strokeWidth={2} />
@@ -7854,6 +8889,18 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
                     'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
+                  /*
+                    TRUNCATION MAY NOT BE THE END OF A SENTENCE. This line
+                    clips at the composer's width -- about forty characters --
+                    and some of these captions carry a remedy, a question's own
+                    words, or a model id that runs past it. The model button
+                    beside it already holds this rule ("it gives way by
+                    clipping itself instead ... and the whole name is still
+                    there for a reader, and one hover away for an eye"); the
+                    caption is the surface where clipping costs the most,
+                    because what it hides is usually what to DO.
+                  */
+                  title={cycleNote.text}
                 >
                   {cycleNote.text}
                 </span>

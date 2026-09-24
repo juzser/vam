@@ -223,25 +223,42 @@ describe('the generated key sheet gains the row, and lies about neither spelling
 describe('the tooltip splits the two spellings rather than joining them', () => {
   const RESPONSE = { kind: 'pickView', digit: 1 } as const;
 
+  /**
+   * THE PLATFORM IS PASSED, NEVER READ. `shortcutLines` prints what the
+   * operator will press — ⌃⌥1 on a Mac, Ctrl+Alt+1 off one — and its default
+   * is this machine, so a case that omitted the flag would assert a different
+   * string on ubuntu than on the operator's Mac while looking identical in
+   * both. `chords.ts` says exactly that about `normalizeKey`'s own flag.
+   */
   it('prints the chord plainly and the bare digit as Select’s', () => {
-    const lines = shortcutLines(RESPONSE, undefined, NO_BINDINGS);
-    expect(lines).toEqual([
-      { caption: null, keys: 'Ctrl-Alt-1' },
-      { caption: 'Select · the Response view, in the focused pane', keys: '1' },
-    ]);
+    for (const [mac, chord] of [
+      [true, '⌃⌥1'],
+      [false, 'Ctrl+Alt+1'],
+    ] as const) {
+      expect(shortcutLines(RESPONSE, undefined, NO_BINDINGS, mac)).toEqual([
+        { caption: null, keys: chord },
+        { caption: 'Select · the Response view, in the focused pane', keys: '1' },
+      ]);
+    }
   });
 
   it('drops the bare digit entirely for a caller that knows it is in Insert', () => {
-    expect(shortcutLines(RESPONSE, 'insert', NO_BINDINGS)).toEqual([
-      { caption: null, keys: 'Ctrl-Alt-1' },
+    expect(shortcutLines(RESPONSE, 'insert', NO_BINDINGS, true)).toEqual([
+      { caption: null, keys: '⌃⌥1' },
+    ]);
+    expect(shortcutLines(RESPONSE, 'insert', NO_BINDINGS, false)).toEqual([
+      { caption: null, keys: 'Ctrl+Alt+1' },
     ]);
   });
 
   it('leaves every other action’s tip exactly as it was', () => {
     // `close` holds two chords and neither is Select-only, so it must still be
     // one joined line — the shape this change must not spread to.
-    expect(shortcutLines({ kind: 'close' }, undefined, NO_BINDINGS)).toEqual([
-      { caption: null, keys: 'x or Mod-w' },
+    expect(shortcutLines({ kind: 'close' }, undefined, NO_BINDINGS, true)).toEqual([
+      { caption: null, keys: 'x or ⌘W' },
+    ]);
+    expect(shortcutLines({ kind: 'close' }, undefined, NO_BINDINGS, false)).toEqual([
+      { caption: null, keys: 'x or Ctrl+W' },
     ]);
   });
 });

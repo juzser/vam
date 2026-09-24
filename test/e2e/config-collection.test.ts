@@ -100,8 +100,16 @@ describe.skipIf(!harnessInstalled)(
       ]);
     });
 
-    it('the phone config collects exactly its own spec', () => {
-      expect(collectedFiles('playwright.phone.config.ts')).toEqual(['phone-shell.pw.ts']);
+    it('the phone config collects exactly its own two specs', () => {
+      // TWO, AND THEY DO NOT SHARE A FIXTURE. `phone-shell.pw.ts` runs against
+      // `?demo=1`; `phone-core-loop.pw.ts` routes `/api/*` itself, because
+      // demo declines nothing and the phone vam is used from is the web build
+      // over a remote server that turns four capabilities off. Both serve from
+      // the same build on the same port, which is why one config runs both.
+      expect(collectedFiles('playwright.phone.config.ts')).toEqual([
+        'phone-core-loop.pw.ts',
+        'phone-shell.pw.ts',
+      ]);
     });
 
     it('the electron config collects exactly its own spec', () => {

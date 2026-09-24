@@ -316,6 +316,143 @@ const focusedRow = () =>
     () => document.activeElement?.getAttribute('data-files-row-path') ?? null,
   );
 
+/** Is the keyboard in the filter box, as Chromium reports it? */
+const filterHasFocus = () =>
+  page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false);
+
+/**
+ * DID ANYTHING CLAIM THE LAST KEYSTROKE? — and this probe is the reason the
+ * "inert elsewhere" check below can fail at all.
+ *
+ * FOCUS IS NOT THE PROPERTY. A hidden tab is `display: none` and NOT unmounted
+ * (`FilesTab.tsx`'s header), and a `display: none` input cannot take DOM focus
+ * in Chromium at all — so `focusFilter()` running from behind the Response
+ * view moves nothing, and a check phrased as "the filter did not get focus"
+ * passes against a listener that answers unconditionally. Measured: with the
+ * effect's guard removed, that phrasing stayed green. What actually differs is
+ * whether `Mod-p` was CLAIMED, because a claimed `Cmd+P` is one the browser's
+ * print dialog never sees — which is the property `chords.ts` leaving it
+ * unbound is about.
+ *
+ * ON THE WINDOW, IN THE CAPTURE PHASE, and read AFTERWARDS. Capture makes this
+ * the first listener to see the event whatever order the app registered its
+ * own in — a bubble-phase probe would be re-overtaken every time the tab's own
+ * effect re-ran — and `defaultPrevented` is still readable off the event object
+ * once dispatch has finished, so the answer is the FINAL one.
+ */
+await page.evaluate(() => {
+  globalThis.__vamLastKey = null;
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      globalThis.__vamLastKey = event;
+    },
+    true,
+  );
+});
+/** `true` / `false` for the last keydown, or `null` if none ever arrived. */
+const lastKeyClaimed = () =>
+  page.evaluate(() => globalThis.__vamLastKey?.defaultPrevented ?? null);
+/** Enough of the focused element to name it in a failure. */
+const focusedTag = () =>
+  page.evaluate(() => {
+    const el = document.activeElement;
+    if (el === null) return 'nothing focused';
+    const view = el.getAttribute('data-view');
+    return `${el.tagName}${view === null ? '' : `[data-view=${view}]`}`;
+  });
+
+// ---------------------------------------------------------------------------
+// 0a. `Mod-p` IN SELECT MODE — FROM THE PANE CHROME, WHICH IS WHERE THE
+//     KEYBOARD ACTUALLY IS WHEN THE TAB OPENS.
+//
+// THE OPERATOR'S REPORT, translated: "in the files view, in select mode, I
+// cannot press Cmd+P to filter". `Mod-p` shipped on four surfaces, all four of
+// them `onKeyDown` PROPS — the tree rows, the editor, the preview, either box
+// — so each needs DOM focus inside the element that carries it. This is the
+// only environment that can say where focus actually IS: the click above is
+// the same act the operator performs, and Chromium leaves focus ON THE BUTTON
+// it clicked, which is a sibling of this whole tab. No handler ran, the chord
+// fell through to the window grammar that leaves `Mod-p` unbound, and the one
+// act this tab exists for was unreachable from the state it opens in.
+//
+// happy-dom cannot reproduce this at all: its `.click()` moves no focus, so a
+// unit test would be asking about the body in both the broken and the fixed
+// build. The assertion below is that the pill really does hold the keyboard.
+//
+// `Meta+p`, NOT `Control+p` — see the `Mod-p` section further down, which was
+// falsified against exactly that substitution.
+check(
+  'switching to the Files tab leaves the keyboard on the view pill, not in the tab',
+  (await focusedTag()) === 'BUTTON[data-view=files]',
+  `focus is on ${await focusedTag()}`,
+);
+await page.keyboard.press('Meta+p');
+await page
+  .waitForFunction(() => document.activeElement?.matches('[data-files-filter]') ?? false, null, {
+    timeout: 2_000,
+  })
+  .catch(() => {});
+check(
+  'and Mod-p from there still reaches the filter — the fifth surface',
+  await filterHasFocus(),
+  `focus is on ${await focusedTag()}`,
+);
+check(
+  'and claims the key, or Cmd+P is the browser’s print dialog',
+  (await lastKeyClaimed()) === true,
+  `defaultPrevented was ${await lastKeyClaimed()}`,
+);
+
+// AND FROM NOWHERE AT ALL, which is where `Escape` puts it: the shell-level
+// Escape blurs (`releaseInsert`), so the very next thing the operator does is
+// press a key with `document.body` holding the keyboard.
+await page.evaluate(() => document.activeElement?.blur());
+await page.keyboard.press('Meta+p');
+await page
+  .waitForFunction(() => document.activeElement?.matches('[data-files-filter]') ?? false, null, {
+    timeout: 2_000,
+  })
+  .catch(() => {});
+check(
+  'and from the body, where Escape leaves it',
+  await filterHasFocus(),
+  `focus is on ${await focusedTag()}`,
+);
+
+// INERT WHERE THE TAB IS NOT SHOWING, and this half is the one that has to be
+// true for the app: `chords.ts` vacated `Mod-p` deliberately and records it as
+// free. A tab that answered it whether or not it was on screen would have
+// taken the key from the whole shell — and it is still MOUNTED behind the
+// Response view (see `FilesTab.tsx`'s header), filter box and all, so "not
+// showing" is a guard rather than a consequence of unmounting.
+//
+// ASSERTED AS THE CLAIM, NOT AS FOCUS — see `lastKeyClaimed`'s own comment,
+// which is about this exact check passing against a broken build.
+//
+// MUTATION: make the listener's effect unconditional and this reddens, while
+// the three checks above stay green.
+await page.locator('[data-view="response"]').click();
+await page.waitForTimeout(150);
+await page.keyboard.press('Meta+p');
+await page.waitForTimeout(250);
+check(
+  'and Mod-p is left to the browser once another tab is showing',
+  (await lastKeyClaimed()) === false,
+  `defaultPrevented was ${await lastKeyClaimed()}`,
+);
+check(
+  'and nothing moved the keyboard into the hidden filter',
+  !(await filterHasFocus()),
+  `focus is on ${await focusedTag()}`,
+);
+await page.locator('[data-view="files"]').click();
+await page.waitForSelector('[data-files-row]', { timeout: 5_000 });
+// Back to where the rest of this file expects the tab: nothing filtered,
+// nothing focused. The filter box was never typed into above, so there is
+// nothing to clear — only the keyboard to hand back.
+await page.evaluate(() => document.activeElement?.blur());
+
 /**
  * THE CORNER, IN THE STATE THE TAB OPENS IN — before a file is picked.
  *
@@ -482,6 +619,80 @@ check(
   'and the editor keeps focus throughout',
   await page.evaluate(() => document.activeElement?.matches('[data-files-editor]') ?? false),
 );
+
+/**
+ * `Mod-p` — FILE SEARCH, FROM THE ONE PLACE `/` CAN NEVER BE PRESSED.
+ *
+ * Measured here rather than only in happy-dom for this file's own stated
+ * reason: what is being claimed is that the keyboard MOVES, out of a
+ * `<textarea>` and into an `<input>`, and `document.activeElement` in a unit
+ * environment is not the browser's answer to who owns the keyboard. The
+ * selection is the same kind of claim — `focus()` does not select, and only a
+ * real text control has a real selection to read back.
+ *
+ * `Meta+p`, NOT `Control+p`, AND THE DIFFERENCE IS NOT COSMETIC. `normalizeKey`
+ * folds Control into `Mod-` only for the letters in `CTRL_GESTURES` (`d` and
+ * `u`), so on a Mac `Control+p` arrives spelled `Ctrl-p` and reaches nothing at
+ * all — a guard written that way would have gone green against a key the tab
+ * does not answer. `Meta+p` spells `Mod-p` on both platforms: on darwin
+ * through `metaKey`, and off it because `mod` is `ctrlKey || metaKey`.
+ */
+await page.keyboard.press('Meta+p');
+await page
+  .waitForFunction(() => document.activeElement?.matches('[data-files-filter]') ?? false, null, {
+    timeout: 3_000,
+  })
+  .catch(() => {});
+check(
+  'Mod-p moves the keyboard from the editor to the filter box',
+  await page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false),
+  await page.evaluate(() => document.activeElement?.outerHTML?.slice(0, 120) ?? 'nothing focused'),
+);
+
+// It searches: what is typed there narrows the tree to what matches.
+await page.keyboard.type('env');
+const treeAfterSearch = await page.evaluate(() =>
+  [...document.querySelectorAll('[data-files-row]')].map(
+    (row) => row.getAttribute('data-files-row-path') ?? '',
+  ),
+);
+check(
+  'and the box it lands in is the one that filters the tree',
+  treeAfterSearch.length > 0 && treeAfterSearch.every((path) => path.includes('env')),
+  JSON.stringify(treeAfterSearch),
+);
+
+// A SECOND PRESS RESTARTS THE SEARCH. Read as a real selection, which is the
+// half no unit environment can answer for.
+await page.keyboard.press('Meta+p');
+const selection = await page.evaluate(() => {
+  const box = document.querySelector('[data-files-filter]');
+  return box === null ? null : { start: box.selectionStart, end: box.selectionEnd, v: box.value };
+});
+check(
+  'a second Mod-p selects what is already there, so the next keystroke starts over',
+  selection !== null && selection.start === 0 && selection.end === selection.v.length,
+  JSON.stringify(selection),
+);
+await page.keyboard.type('src');
+check(
+  'and typing really does replace the stale search rather than appending to it',
+  (await page.evaluate(
+    () => document.querySelector('[data-files-filter]')?.value ?? '',
+  )) === 'src',
+);
+
+// Back to where the rest of this file expects the keyboard: clear the filter,
+// and put the caret in the editor again.
+await page.keyboard.press('Meta+p');
+await page.keyboard.press('Backspace');
+await editor.click();
+await page.waitForFunction(
+  () => document.activeElement?.matches('[data-files-editor]') ?? false,
+  null,
+  { timeout: 3_000 },
+);
+await editor.press('End');
 
 // Leave the way the composer's own Mod-[ does, and confirm Select comes back.
 await page.keyboard.press('Control+[');
@@ -937,9 +1148,17 @@ check(
   (await editor.inputValue()) === 'A=1\n\n# a note\nB=2\n',
   JSON.stringify(await editor.inputValue()),
 );
+// THE NOTE NAMES THE UNDO KEY THE WAY THIS BROWSER PAINTS IT — ⌘Z on a Mac,
+// Ctrl+Z off one. It used to read `Mod-z`, the grammar's internal spelling,
+// which reaches no screen any more: asking for that string here would report a
+// missing note rather than a renamed one. Derived from the page's own platform
+// rather than imported — a guard shares no module with the bundle it measures.
+const undoChord = await page.evaluate(() =>
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘Z' : 'Ctrl+Z',
+);
 check(
   'and says so, with the way back out of it on screen',
-  (await page.locator('[data-files-note]').textContent())?.includes('Mod-z') === true &&
+  (await page.locator('[data-files-note]').textContent())?.includes(undoChord) === true &&
     (await page.locator('[data-files-format-undo]').count()) === 1,
 );
 await page.keyboard.press('Meta+KeyZ');

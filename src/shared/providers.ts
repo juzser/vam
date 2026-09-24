@@ -44,6 +44,34 @@ export const PROVIDERS: readonly Provider[] = [
 ];
 
 /**
+ * IS THERE A CHOICE HERE AT ALL? Derived from the table above, and stated ONCE
+ * so that every surface offering a provider obeys the same answer.
+ *
+ * "A CONTROL THAT CANNOT ACT IS NOT DRAWN AS ONE" (`settings/RemotePanel.tsx`'s
+ * header) -- and over a one-row table every provider control is one. The
+ * settings section's segmented picker draws a single button that is
+ * `aria-pressed` from the first paint and calls `onChange` with a `Prefs`
+ * identical to the one it was handed; the composer's picker opens a popover
+ * with one row in it. Both were the same decision and only one of them had
+ * made it, which is how the composer came to spend 44px of a 335px tool row
+ * on a choice it could not offer -- measured on a phone, where the popover
+ * also opened INSIDE the prompt box it hangs off, 99x34 overlapping the
+ * textarea by 28px.
+ *
+ * SO THE CONTROLS ARE CONDITIONAL, NOT DELETED, and the condition lives here
+ * rather than in either of them: the day a second source exists in main this is
+ * `true` and both come back unchanged, with no edit at either call site.
+ * `test/settings/provider-double.test.tsx` mocks this module and proves it for
+ * the settings copy; `test/panels/DetailPanel.provider-picker.test.tsx` does
+ * the same for the composer's.
+ *
+ * WITHDRAWING THE CONTROL IS NOT WITHDRAWING THE ANSWER: the settings section
+ * still names the provider and the command it runs, which is what the operator
+ * came there to read.
+ */
+export const CAN_CHOOSE_PROVIDER: boolean = PROVIDERS.length > 1;
+
+/**
  * Whatever was stored or sent, reduced to a provider that can actually start.
  *
  * TOTAL, and deliberately so. The value arrives from `localStorage` -- where a

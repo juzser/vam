@@ -23,10 +23,10 @@ function setup(files: readonly string[]) {
   const openFile = vi.fn();
   const setNote = vi.fn();
   const focusEditor = vi.fn().mockReturnValue(true);
+  const focusFilter = vi.fn();
   const requestRowFocus = vi.fn();
   const requestEditorFocus = vi.fn();
   const treeRef = createRef<HTMLDivElement>();
-  const filterRef = createRef<HTMLInputElement>();
   const { result } = renderHook(() =>
     useFilesTreeState({
       ready: listing(files),
@@ -34,13 +34,13 @@ function setup(files: readonly string[]) {
       openFile,
       setNote,
       focusEditor,
+      focusFilter,
       requestRowFocus,
       requestEditorFocus,
       treeRef,
-      filterRef,
     }),
   );
-  return { result, openFile, setNote, requestRowFocus, requestEditorFocus };
+  return { result, openFile, setNote, focusFilter, requestRowFocus, requestEditorFocus };
 }
 
 describe('useFilesTreeState', () => {

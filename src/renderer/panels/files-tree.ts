@@ -184,6 +184,17 @@ function firstChildRowIndex(rows: readonly FileTreeRow[], index: number): number
  *
  * `Escape` and `Mod-[` are in BOTH because they mean the same thing on either
  * side — hand the keyboard back to Select.
+ *
+ * `Mod-p` IS IN BOTH FOR THE OPPOSITE REASON — not because it means the same
+ * thing on either side, but because it is the only spelling that CAN work on
+ * both. `/` reaches the filter and is a bare character: legal on the tree,
+ * which is not an insert scope, and impossible in the editor, where it is a
+ * character the operator is typing into a file. So the one act this tab is
+ * for — find a file — was unreachable from half of it, and the operator asked
+ * for it by name. `Mod-p` is `Cmd+P`, which is "go to file" in VS Code and
+ * Sublime, and `chords.ts` records that new-project vacated `Mod-p` for
+ * `Mod-Shift-p` and left it free on purpose. `Mod-Shift-f`, the other
+ * candidate, is already FORMAT in here and its tooltip promises it by name.
  * ------------------------------------------------------------------------ */
 
 /** Every key the TREE answers. Anything else is the app-wide grammar's. */
@@ -194,6 +205,7 @@ export const TREE_KEYS: readonly string[] = [
   'l',
   'Enter',
   '/',
+  'Mod-p',
   'Mod-Shift-e',
   'Escape',
   'Mod-[',
@@ -224,6 +236,7 @@ export const EDITOR_KEYS: readonly string[] = [
   'Escape',
   'Mod-[',
   'Tab',
+  'Mod-p',
   'Mod-s',
   'Mod-Shift-e',
   'Mod-Shift-f',
@@ -285,7 +298,9 @@ export function resolveTreeKey({
   // row under the cursor: a keyboard stranded in an empty list is the one
   // outcome worse than a refusal.
   if (key === 'Escape' || key === 'Mod-[') return { kind: 'leave' };
-  if (key === '/') return { kind: 'filter' };
+  // ONE STEP, TWO SPELLINGS, and the second is the one that also works from
+  // the editor -- see this file's key-list header for why `/` alone could not.
+  if (key === '/' || key === 'Mod-p') return { kind: 'filter' };
   if (key === 'Mod-Shift-e') return { kind: 'editor' };
 
   const row = rows[index];

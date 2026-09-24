@@ -44,8 +44,16 @@ import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
+import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
+import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
-import type { PaneKey, PaneSendResult, PaneView, SessionModel } from '../shared/terminal.js';
+import type {
+  ModelSwitchResult,
+  PaneKey,
+  PaneSendResult,
+  PaneView,
+  SessionModel,
+} from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
 
@@ -341,6 +349,41 @@ export function createLinkApi(ipc: InvokerLike): LinkApi {
 }
 
 /**
+ * The bridge's pull-request member: open one, or act on one.
+ *
+ * SEPARATE FROM `link` ABOVE, ON PURPOSE, and the reason is the allowlist
+ * rather than the plumbing -- `CHANNELS.prsOpen` carries it. `link.open` may
+ * go anywhere on the web because an agent's prose may reference anywhere;
+ * `prs.open` may only go to github.com, because the promise a clickable ROW
+ * makes is that the operator knows where it goes without reading an address.
+ * Sending pull requests through `link.open` would have quietly widened that.
+ *
+ * `act` IS THE ONLY MEMBER OF THIS WHOLE BRIDGE THAT CHANGES SOMETHING ON
+ * GITHUB. What it does NOT carry is as load-bearing as what it does: no
+ * directory (main resolves it from the session id, so a pane cannot act on a
+ * repository its session is not in) and no argv (main builds it, so `--admin`
+ * is not expressible from this side at all). Like every forwarder here it
+ * decides nothing; main validates the number, the branch and the method on its
+ * own side of the boundary, whatever this file believes.
+ *
+ * Both forward straight through: the channels answer a bare outcome, not an
+ * `IpcResult`, because a refusal here is a SENTENCE the pane draws beside the
+ * row rather than an error to reject with.
+ */
+export type PrsApi = {
+  open(url: string): Promise<PrLinkOutcome>;
+  act(sessionId: string, action: PrAction): Promise<PrActionOutcome>;
+};
+
+export function createPrsApi(ipc: InvokerLike): PrsApi {
+  return {
+    open: (url) => ipc.invoke(CHANNELS.prsOpen, url) as Promise<PrLinkOutcome>,
+    act: (sessionId, action) =>
+      ipc.invoke(CHANNELS.prsAction, sessionId, action) as Promise<PrActionOutcome>,
+  };
+}
+
+/**
  * The bridge's terminal member: one read, answered by a bare `PaneView`.
  *
  * Asked by PROJECT ID. The pairing between a session and the tmux session vam
@@ -397,7 +440,7 @@ export type TerminalApi = {
    *
    * A read like `prompt`, and beside it for the same reason those two are one
    * act: this is the fact the model BUTTON is drawn from, and the picker
-   * underneath types `/model <alias>` down `send`. Before this member existed
+   * underneath sends its choice down `switchModel`. Before this member existed
    * vam typed a request and never looked, so the button could only ever be
    * labelled with the word "model".
    *
@@ -406,6 +449,25 @@ export type TerminalApi = {
    * (`shared/terminal.ts`).
    */
   model(projectId: string, rowId?: string): Promise<SessionModel>;
+  /**
+   * CHANGE the model that session is running -- the write to `model`'s read.
+   *
+   * NOT BUILT OUT OF `send`, and that is the whole reason this member exists.
+   * The picker used to type `/model <alias>` and Return over `send`, which the
+   * CLI answers with `Set model to Opus 5 and saved as your default for new
+   * sessions` -- so every pick rewrote `~/.claude/settings.json`. Main drives
+   * the CLI's own menu instead and presses `s`, which keeps the change to this
+   * session; there is deliberately no way to express a model switch as a
+   * keystroke on this bridge.
+   *
+   * `choice` IS ONE OF THE CLI'S FIVE ALIASES, which main walks the menu for.
+   * Anything else -- a full model id, say -- has no menu row, and the only
+   * form the CLI takes it in is the argument form that ALSO rewrites the
+   * default. vam used to send that one and disclose the cost; the operator
+   * chose refusal, so it comes back `not-in-menu` with nothing typed, and this
+   * bridge offers no second member that would.
+   */
+  switchModel(projectId: string, choice: string, rowId?: string): Promise<ModelSwitchResult>;
 };
 
 /**
@@ -440,6 +502,15 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
       (rowId === undefined
         ? ipc.invoke(CHANNELS.terminalModel, projectId)
         : ipc.invoke(CHANNELS.terminalModel, projectId, rowId)) as Promise<SessionModel>,
+    switchModel: (projectId, choice, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalSwitchModel, projectId, choice)
+        : ipc.invoke(
+            CHANNELS.terminalSwitchModel,
+            projectId,
+            choice,
+            rowId,
+          )) as Promise<ModelSwitchResult>,
   };
 }
 

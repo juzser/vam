@@ -66,7 +66,9 @@ import {
   AgentWorkReaderProvider,
 } from '../../src/renderer/sources/agent-work-reader.js';
 import type { AgentWork } from '../../src/shared/agent-work.js';
+import { PROVIDERS } from '../../src/shared/providers.js';
 import type { PaneSendResult, PaneView } from '../../src/shared/terminal.js';
+import { makePullRequest } from '../support/pull-request.js';
 
 /** `attachIntoDraft` for the cases a test knows will be accepted. */
 function attachOk(draft: string, file: AttachedFile): string {
@@ -1755,12 +1757,20 @@ describe('the out region renders the agent’s markdown', () => {
     // `remark-gfm` is actually plugged in and not merely installed.
     expect(out.querySelector('del')?.textContent).toBe('struck');
     expect(out.querySelectorAll('li')).toHaveLength(2);
-    // The pane is resizable and 408px by default, so the two elements that
-    // have no width of their own scroll inside their own box rather than
-    // widening the pane.
+    // The pane is resizable and 408px by default, so a table that cannot be
+    // narrowed into it scrolls inside its own box rather than widening the
+    // pane. That box is the fallback and no longer the normal case: the table
+    // itself declares NO width, so the CSS table algorithm sizes it against
+    // the pane and its cells wrap (the operator's request, see
+    // `out-markdown.tsx`). Both halves of that are layout and happy-dom
+    // performs none — `e2e/out-table-shots.mjs` measures the wrap, the fit and
+    // the scroller in Chromium at 408px and at 390px. What is left here is a
+    // spelling alarm: `w-max` coming back would restore the old behaviour
+    // exactly, in one word, and this is the cheap place to notice.
     const table = out.querySelector('table');
     expect(table).not.toBeNull();
     expect(table?.parentElement?.className).toContain('overflow-x-auto');
+    expect(table?.className).not.toContain('w-max');
   });
 
   it('scrolls a fenced block sideways rather than widening the pane', () => {
@@ -2058,57 +2068,38 @@ describe('the composer draws both controls, and both do something', () => {
  * `onSetDefaultProvider` undefined means the caller has nowhere to put a
  * change, so no button pretends otherwise.
  */
-describe('A15.4: the default-provider picker lives beside the model field', () => {
+describe('A15.4: the default-provider picker, and why it is not on screen', () => {
   it('is absent when the caller has no way to persist a change', () => {
     draw();
     expect(q('[data-provider-picker-toggle]')).toBeNull();
   });
 
-  it('names the current default with a real accessible name, immediately beside the model field', () => {
+  /**
+   * AND ABSENT EVEN WHEN IT COULD WRITE, because there is nothing to choose.
+   *
+   * `CAN_CHOOSE_PROVIDER` (`src/shared/providers.ts`) is `false` while the
+   * table has one row, and over one row this popover is a list with a single
+   * already-selected item: pressing it can only re-choose what is chosen.
+   * `SettingsOverlay` had withdrawn its own copy on that condition all along
+   * and this one had not -- one table, two readers, two different answers --
+   * so the derivation moved beside the table and both surfaces read it.
+   *
+   * WHAT IT COST WHILE IT WAS DRAWN, measured at 390px: 44px of a 335px tool
+   * row plus its 8px gap, for "the default provider for NEW sessions" on the
+   * screen whose whole job is replying to a session that already exists -- and
+   * the popover opened INSIDE the prompt box, 99x34 against a textarea
+   * spanning 727-767.
+   *
+   * THIS ASSERTION ALONE CANNOT TELL A CONDITIONAL CONTROL FROM A DELETED
+   * ONE. `DetailPanel.provider-double.test.tsx` is what tells them apart: it
+   * mocks a two-row table and every behaviour that used to be asserted here
+   * is asserted there, against a picker that has something to pick.
+   */
+  it('is absent with a two-way caller too, while the table has one row', () => {
     draw({ defaultProvider: 'claude-code', onSetDefaultProvider: () => {} });
-    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
-    const model = q<HTMLElement>('[data-model-request]');
-    expect(toggle?.tagName).toBe('BUTTON');
-    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
-    expect(model).not.toBeNull();
-    // "Beside": immediately before the model field in document order, not
-    // merely somewhere in the same pane.
-    expect(toggle !== null && model !== null).toBe(true);
-    if (toggle !== null && model !== null) {
-      expect(
-        Boolean(toggle.compareDocumentPosition(model) & Node.DOCUMENT_POSITION_FOLLOWING),
-      ).toBe(true);
-    }
-  });
-
-  it('opens a real listbox on click, marks the current provider, and closes once one is picked', () => {
-    const seen: string[] = [];
-    draw({
-      defaultProvider: 'claude-code',
-      onSetDefaultProvider: (id) => seen.push(id),
-    });
-    expect(q('[data-provider-picker]'), 'closed at rest').toBeNull();
-    act(() => {
-      q<HTMLButtonElement>('[data-provider-picker-toggle]')?.click();
-    });
-    const list = q<HTMLElement>('[data-provider-picker]');
-    expect(list?.getAttribute('role')).toBe('listbox');
-    const option = q<HTMLButtonElement>('[data-provider-option="claude-code"]');
-    expect(option?.getAttribute('role')).toBe('option');
-    expect(option?.getAttribute('aria-selected')).toBe('true');
-    act(() => {
-      option?.click();
-    });
-    expect(seen).toEqual(['claude-code']);
-    expect(q('[data-provider-picker]'), 'closes once a pick lands').toBeNull();
-  });
-
-  it('reads the default provider from a fresh vam the same way resolveProvider does', () => {
-    // No `defaultProvider` passed at all -- the honest "nothing chosen yet"
-    // case, which must not render a blank or a crash.
-    draw({ onSetDefaultProvider: () => {} });
-    const toggle = q<HTMLButtonElement>('[data-provider-picker-toggle]');
-    expect(toggle?.getAttribute('aria-label')).toContain('Claude Code');
+    expect(PROVIDERS).toHaveLength(1);
+    expect(q('[data-provider-picker-toggle]')).toBeNull();
+    expect(q('[data-provider-picker]')).toBeNull();
   });
 });
 
@@ -4007,18 +3998,34 @@ describe('the PRs tab', () => {
   };
   const body = () => q<HTMLElement>('[data-prs]')?.textContent ?? '';
 
+  // Built through `makePullRequest` so these three rows keep saying exactly
+  // what they said before -- a number, a title, a state, a check conclusion --
+  // without restating the eleven descriptive fields the type grew for "it
+  // needs more information". The builder's defaults are the NOT-KNOWING ones,
+  // which is a real payload shape and not an invented one; the drawing of
+  // those fields is asserted in `DetailPanel.pr-detail.test.tsx`.
   const POPULATED: Session['pullRequests'] = {
     kind: 'ok',
     prs: [
-      {
+      makePullRequest({
         number: 128,
         title:
           'Rework the detail pane so a narrow column stays readable end to end, however long the branch name grows',
         state: 'open',
         checks: 'failing',
-      },
-      { number: 121, title: 'Spike the roster reader', state: 'draft', checks: 'pending' },
-      { number: 97, title: 'Carry the branch to the sidebar', state: 'merged', checks: 'passing' },
+      }),
+      makePullRequest({
+        number: 121,
+        title: 'Spike the roster reader',
+        state: 'draft',
+        checks: 'pending',
+      }),
+      makePullRequest({
+        number: 97,
+        title: 'Carry the branch to the sidebar',
+        state: 'merged',
+        checks: 'passing',
+      }),
     ],
   };
 
@@ -4340,15 +4347,22 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     expect(q<HTMLTextAreaElement>('textarea')?.value).toBe('half a sentence');
   });
 
-  it('keeps the composer on the other tabs, which are still about the answer', () => {
-    // Only Terminal. PRs and Agents are read alongside a reply being written,
-    // and nothing about them makes the prompt box the wrong place to type.
+  it('keeps the composer on Agents, which is still about the answer', () => {
+    // Agents is read alongside a reply being written, and nothing about it
+    // makes the prompt box the wrong place to type.
+    //
+    // PRs USED TO BE ASSERTED HERE TOO, and the operator's review on
+    // 2026-09-18 said it should not have been: "it does not need the prompt
+    // input." A list of pull requests on GitHub is not a conversation with the
+    // agent, so there is nothing a sentence typed under it is addressed to.
+    // Which views draw a composer is now `drawsComposer`'s (`tabs.ts`) and is
+    // pinned, per name, in `DetailPanel.composer-tabs.test.tsx`.
     withBridge();
     draw();
-    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
-    expect(q('[data-prompt-box]')).not.toBeNull();
     fireEvent.click(q<HTMLButtonElement>('[data-view="agents"]') as HTMLButtonElement);
     expect(q('[data-prompt-box]')).not.toBeNull();
+    fireEvent.click(q<HTMLButtonElement>('[data-view="prs"]') as HTMLButtonElement);
+    expect(q('[data-prompt-box]')).toBeNull();
   });
 });
 
