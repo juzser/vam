@@ -55,7 +55,7 @@ export function useCanvas(client: SmithClient, options?: UseCanvasOptions): Canv
     };
   }, []);
 
-  const load = useCallback(async () => {
+  const runLoad = useCallback(async () => {
     const mine = ++generation.current;
     try {
       const overview = await client.overview();
@@ -88,6 +88,34 @@ export function useCanvas(client: SmithClient, options?: UseCanvasOptions): Canv
       );
     }
   }, [client]);
+
+  // In-flight guard: stops a second wave STARTING while one is already
+  // running (mount, hello and change all call this), so a burst of frames
+  // fires at most one request pair concurrently. `pending` is the "another
+  // change arrived" latch — cleared right as the trailing wave starts — so
+  // exactly one coalesced reload runs after the in-flight one settles and no
+  // frame is silently dropped. This sits in front of `generation`, not in
+  // place of it: this decides whether a wave starts, `generation` still
+  // decides whether its result gets written.
+  const inFlight = useRef(false);
+  const pending = useRef(false);
+
+  const load = useCallback(async () => {
+    if (inFlight.current) {
+      pending.current = true;
+      return;
+    }
+    inFlight.current = true;
+    try {
+      await runLoad();
+      while (pending.current) {
+        pending.current = false;
+        await runLoad();
+      }
+    } finally {
+      inFlight.current = false;
+    }
+  }, [runLoad]);
 
   // Unconditional: reading never waited on SSE (canvas-layout.md §5.1).
   useEffect(() => {
