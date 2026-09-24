@@ -699,6 +699,11 @@ for (const theme of ['dark', 'light']) {
     return e === null ? null : getComputedStyle(e).color;
   });
   dotPaint[theme] = { dot, icon, waiting: await probeVar('--vam-waiting'), failed: await probeVar('--vam-failed') };
+  // THE OPERATOR'S OWN ASK, LOOKED AT — not just measured. Clipped to the
+  // header row alone (dot, gap, Format) rather than the whole pane: this is
+  // the one control the report is about, and a full-page shot would bury it.
+  await page.locator('[data-files-header]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
+  console.log(`${outDir}/files-dirty-${theme}.png`);
 }
 // Restored before anything below relies on the file's own dark default.
 await page.evaluate(() => document.documentElement.classList.remove('light'));
