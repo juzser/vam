@@ -196,7 +196,7 @@ describe('shortcutLines: the pure reading of the table', () => {
 
   it('joins every chord an action holds, in table order', () => {
     const lines = shortcutLines(SETTINGS, undefined, { [actionId(SETTINGS)]: ['Q', 'gq'] });
-    expect(lines).toEqual([{ caption: null, keys: 'Q or gq' }]);
+    expect(lines).toEqual([{ caption: null, keys: 'Q or gq', chords: ['Q', 'gq'] }]);
   });
 });
 
@@ -303,7 +303,7 @@ describe('a chord reaches the screen as its own platform’s symbols', () => {
     onBothPlatforms((mac) => {
       renderTip({ label: 'Command palette', action: { kind: 'palette' } });
       const text = openByFocus().textContent ?? '';
-      expect(text).toContain(mac ? '⌘K' : 'Ctrl+K');
+      expect(text).toContain(mac ? '⌘ K' : 'Ctrl+K');
       expect(text, 'the internal token reached the screen').not.toContain('Mod-k');
       cleanup();
     });
@@ -317,7 +317,7 @@ describe('a chord reaches the screen as its own platform’s symbols', () => {
       // chord is exactly the part of this hint a touchscreen cannot use" --
       // and a symbol must not escape that by arriving on some new element.
       expect(chip, 'the chip lost the attribute the phone suppresses it by').not.toBeNull();
-      expect(chip?.textContent).toBe(mac ? '⌘K' : 'Ctrl+K');
+      expect(chip?.textContent).toBe(mac ? '⌘ K' : 'Ctrl+K');
       cleanup();
     });
   });
@@ -347,7 +347,7 @@ describe('a chord reaches the screen as its own platform’s symbols', () => {
     onBothPlatforms((mac) => {
       renderTip({ label: 'Command palette', action: { kind: 'palette' } });
       const tip = openByFocus();
-      expect(tip.textContent ?? '').toContain(`shortcut: ${mac ? '⌘K' : 'Ctrl+K'}`);
+      expect(tip.textContent ?? '').toContain(`shortcut: ${mac ? '⌘ K' : 'Ctrl+K'}`);
       cleanup();
     });
   });
@@ -359,7 +359,7 @@ describe('a chord reaches the screen as its own platform’s symbols', () => {
       setActiveBindings({ [actionId(SETTINGS)]: ['Ctrl-k'] });
       renderTip();
       const text = openByFocus().textContent ?? '';
-      expect(text).toContain(mac ? '⌃K' : 'Ctrl+K');
+      expect(text).toContain(mac ? '⌃ K' : 'Ctrl+K');
       if (mac) expect(text).not.toContain('⌘');
       cleanup();
     });
@@ -407,7 +407,7 @@ describe('the status bar prints the key that opens the sheet, not a default', ()
     onBothPlatforms((mac) => {
       render(<Canvas model={DEMO_MODEL} />);
       expect(document.querySelector('[data-keysheet-hint]')?.textContent).toBe(
-        mac ? '⇧⌘H' : 'Ctrl+Shift+H',
+        mac ? '⇧ ⌘ H' : 'Ctrl+Shift+H',
       );
       cleanup();
     });

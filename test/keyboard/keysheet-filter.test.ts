@@ -55,7 +55,7 @@ describe('the sheet filter', () => {
   /** The operator's own example: typing the KEY finds the row, in whichever
    *  spelling this machine paints. */
   it('matches the chord as it is painted, on each platform', () => {
-    const mac = rowsOf(filterSheet(sheet(true), '⌘p', true)).map((row) => row.keys);
+    const mac = rowsOf(filterSheet(sheet(true), '⌘ p', true)).map((row) => row.keys);
     expect(mac).toContain('Mod-p');
     const pc = rowsOf(filterSheet(sheet(false), 'ctrl+p', false)).map((row) => row.keys);
     expect(pc).toContain('Mod-p');

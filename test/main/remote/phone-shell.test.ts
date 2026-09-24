@@ -266,7 +266,9 @@ describe('the served root', () => {
     }
     expect(top.length, 'an empty dist-web is not a build').toBeGreaterThan(0);
 
-    const ALLOWED_TOP = new Set(['index.html', 'favicon.png', 'assets']);
+    // 'icon.svg': the macOS-style icon frame (GettingStarted, TerminalOnlyStart)
+    // needs a crisp source at 64px; favicon.png is tuned only for 16/32px.
+    const ALLOWED_TOP = new Set(['index.html', 'favicon.png', 'icon.svg', 'assets']);
     for (const name of top) {
       expect(ALLOWED_TOP.has(name), `unexpected file in the served root: ${name}`).toBe(true);
     }

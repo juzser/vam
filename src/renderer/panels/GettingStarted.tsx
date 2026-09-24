@@ -28,8 +28,42 @@
  */
 
 import { FolderPlus } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord } from '../keyboard/ShortcutTip.js';
+
+/**
+ * THE MACOS APP-ICON FRAME. The operator's own ask: draw the mark "inside a
+ * frame with a radius like a macOS app icon" -- Apple's own proportion is a
+ * corner radius of 22.37% of the side, `styles.css`'s `--radius-xl` (14px)
+ * at this frame's own 64px (`h-16 w-16`) being close enough that reusing the
+ * token beats inventing a new arbitrary value for one component. A hairline
+ * border and a soft shadow off the SAME two tokens every dialog in this app
+ * already borrows (`border-line-strong`, `shadow-sm`) rather than a new
+ * pairing invented for this one screen.
+ *
+ * ONE FRAME, TWO FILLS. `GettingStarted` below hands it vam's own mark --
+ * the WHOLE APP has no session to name, so there is no session mark to draw
+ * instead. `TerminalOnlyStart` (`DetailPanel.tsx`) hands it a session's own
+ * AGENT mark, through the SAME `SourceMark` resolver the sidebar row and the
+ * status bar already draw theirs through -- one table, so a rebind or a new
+ * provider can never leave one surface out of step with the other two.
+ *
+ * `overflow-hidden` DOES THE CLIPPING, not a `rounded` class on the mark
+ * itself: the frame owns the shape, and a fill that is smaller than the
+ * frame (every `SourceMark` register except `GettingStarted`'s full-bleed
+ * SVG) is simply centred inside it rather than stretched to match.
+ */
+export function IconFrame({ children }: { readonly children: ReactNode }) {
+  return (
+    <div
+      data-icon-frame
+      className="flex h-16 w-16 flex-none items-center justify-center overflow-hidden rounded-[14px] border border-line-strong bg-card shadow-sm"
+    >
+      {children}
+    </div>
+  );
+}
 
 export type StartShortcutRow = {
   readonly label: string;
@@ -181,12 +215,23 @@ export function GettingStarted({
       data-getting-started
       className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
     >
-      {/* THE MARK VAM ALREADY SHIPS -- see `TerminalOnlyStart`'s own comment
-          on this exact `<img>` for why the path is document-relative
-          (`./favicon.png`) rather than root-absolute: the packaged app's
-          document is `file://.../out/renderer/index.html`, where a leading
-          `/` reads as the filesystem root and the image is simply gone. */}
-      <img src="./favicon.png" width={32} height={32} alt="vam" className="opacity-90" />
+      {/* THE MARK VAM ALREADY SHIPS, LARGER AND CRISP -- `build/icon.svg`,
+          copied verbatim to `public/icon.svg` (never re-rendered: it is
+          authored art, the same rule `build/favicon.svg`'s own header
+          states for why nothing here regenerates it). NOT `favicon.png`:
+          that asset is deliberately the SMALL mark, hand-tuned for 16/32px
+          legibility (`index.html`'s own comment) and never meant to be
+          scaled up -- at this frame's 64px the detailed `icon.svg` is the
+          one that reads clearly, the same reasoning `index.html` already
+          gives for why the OS-level app icon uses it over the favicon.
+
+          DOCUMENT-RELATIVE, NOT ROOT-ABSOLUTE -- see `TerminalOnlyStart`'s
+          own comment on this exact point: the packaged app's document is
+          `file://.../out/renderer/index.html`, where a leading `/` reads as
+          the filesystem root and the image is simply gone. */}
+      <IconFrame>
+        <img src="./icon.svg" width={64} height={64} alt="vam" className="h-full w-full" />
+      </IconFrame>
       <div className="flex flex-col gap-1">
         <p className="text-control text-ink">vam</p>
         <p className="max-w-[38ch] text-meta text-ink-quiet">

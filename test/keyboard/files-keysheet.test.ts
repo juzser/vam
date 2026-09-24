@@ -86,7 +86,7 @@ describe('the sheet’s Files section', () => {
       buildFilesSheet(['Tab'], mac)
         .flatMap((group) => group.rows)
         .find((row) => row.keys === 'Tab');
-    expect(tab(true)?.label).toContain('⇧⇥');
+    expect(tab(true)?.label).toContain('⇧ ⇥');
     expect(tab(true)?.label).not.toContain('Shift+Tab');
     expect(tab(false)?.label).toContain('Shift+Tab');
     // And the row's own key is still the token the handlers dispatch on.

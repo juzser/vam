@@ -605,6 +605,22 @@ export type SessionListProps = {
    *  defaulting to `false`. */
   readonly loading?: boolean;
   /**
+   * WHETHER VAM HAS A SESSION OF ITS OWN, ANYWHERE -- `Canvas.tsx`'s own
+   * `hasOwnSession`, computed there off the UNFILTERED model and handed down
+   * rather than re-derived here from `allEntries` below: the two surfaces
+   * this list draws that state the same claim as the desktop's
+   * getting-started screen (`showGettingStarted`'s phone copy of it, and
+   * this list's own "No sessions yet" line) must read the identical fact
+   * that screen does, not a second computation of it that could drift.
+   * `entries.length === 0` alone is NOT this: a session vam started that is
+   * merely hidden by dismiss or a filter leaves `entries` empty while this
+   * stays `true`, and it is exactly that gap neither line may state as "no
+   * sessions". Optional, defaulting to `false` — a caller with no unfiltered
+   * fact of its own falls back to the exact behaviour this prop replaces
+   * (`entries.length === 0` decides alone), never a NEW claim.
+   */
+  readonly hasOwnSession?: boolean;
+  /**
    * The same sessions BEFORE any narrowing -- `Canvas`'s `allEntries`.
    *
    * `entries` has been through search, the status pills and the two origin
@@ -971,6 +987,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const {
     entries,
     loading = false,
+    hasOwnSession = false,
     allEntries: unfiltered,
     focusedSessionId,
     jumpLabels = NO_JUMP_LABELS,
@@ -1053,8 +1070,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * `filter.trim() === ''`/`!loading`, the same guard the plain "No sessions
    * yet" line already used: a search with no match, or a listing still in
    * flight, is a different emptiness and keeps its own existing text.
+   * `!hasOwnSession` is the THIRD: `entries` can be empty while vam still
+   * owns a session merely hidden by dismiss or a filter, and that must read
+   * the same "not truly empty" the desktop's own screen now does.
    */
-  const showGettingStarted = phone && entries.length === 0 && filter.trim() === '' && !loading;
+  const showGettingStarted =
+    phone && entries.length === 0 && filter.trim() === '' && !loading && !hasOwnSession;
 
   const filterRef = useRef<HTMLInputElement>(null);
   const renameRef = useRef<HTMLInputElement>(null);
@@ -3682,10 +3703,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               reading both would read the second as contradicting the first.
               `filter.trim() !== ''` (a search with no match) is left alone:
               that emptiness is about the query, not about ownership, and
-              stays true whether or not anything is foreign-hidden elsewhere. */}
-          {entries.length === 0 && !loading && filter.trim() === '' && foreignHiddenCount === 0 && (
-            <li className="px-1 py-4 text-control text-ink-dim">No sessions yet</li>
-          )}
+              stays true whether or not anything is foreign-hidden elsewhere.
+              NOR WHEN `hasOwnSession` IS TRUE -- a session vam started that
+              is merely hidden by dismiss or a filter is not "no sessions",
+              the same fact the getting-started screen and the tab strip now
+              both read off the unfiltered model. */}
+          {entries.length === 0 &&
+            !loading &&
+            filter.trim() === '' &&
+            foreignHiddenCount === 0 &&
+            !hasOwnSession && (
+              <li className="px-1 py-4 text-control text-ink-dim">No sessions yet</li>
+            )}
           {entries.length === 0 && !loading && filter.trim() !== '' && (
             <li className="px-1 py-4 text-control text-ink-dim">No match</li>
           )}

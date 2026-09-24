@@ -107,6 +107,23 @@ const LAUNCH_FIXTURE_SOURCE: MainSource = {
 };
 
 /**
+ * A SECOND FIXTURE VALUE, `VAM_FIXTURE_SOURCE=2`: genuinely nothing, for
+ * `test/electron/getting-started-image.test.ts` alone. `LAUNCH_FIXTURE_
+ * SOURCE` above always owns a session (AC-13's composer needs one on
+ * screen), which is exactly the state `GettingStarted.tsx`'s own `<img>`
+ * (vam's mark, wrapped in `IconFrame`) can never be reached in -- it draws
+ * only when vam owns no session ANYWHERE. That screen is, since
+ * "start-polish" (2026-09-23) moved `TerminalOnlyStart`'s mark to the
+ * session's own agent, the ONE place left in this app that draws an `<img>`
+ * at all, so it needs its own launch to prove the same `file://`-relative-
+ * path regression `LAUNCH_FIXTURE_SOURCE` used to cover through it.
+ */
+const EMPTY_FIXTURE_SOURCE: MainSource = {
+  descriptor: CLAUDE_CODE_SOURCE.descriptor,
+  load: () => Promise.resolve([]),
+};
+
+/**
  * What the desktop shell serves: the operator's own Claude Code sessions,
  * read from `~/.claude/projects`. This replaces the bundled sample, which
  * showed another tool's bookkeeping and none of the operator's real work.
@@ -138,27 +155,29 @@ const LAUNCH_FIXTURE_SOURCE: MainSource = {
 const DESKTOP_SOURCES: readonly MainSource[] =
   process.env.VAM_FIXTURE_SOURCE === '1'
     ? [LAUNCH_FIXTURE_SOURCE]
-    : [
-        CLAUDE_CODE_SOURCE,
-        /**
-         * THE OPERATOR'S OWN CODEX THREADS, read from `~/.codex/state_5.sqlite`
-         * and their rollout files, with `codex queue` as the one write.
-         *
-         * SECOND, AND THE ORDER IS THE CONTRACT ABOVE: Claude Code's rows come
-         * first in the canvas, and `createSessionInDirectory` -- the "new
-         * project" route, which has no session and no project to key on --
-         * goes to the first source that advertises `createSession`, which is
-         * Claude Code. The Codex source withdraws `createSession` for exactly
-         * that reason: starting a Codex session is Stage 2.
-         *
-         * Registered whether or not Codex is installed. A machine with no
-         * `~/.codex` gets a source that withdraws everything and SAYS WHY in
-         * its label and in every decline, which is the version answer this
-         * source owes; an empty list of threads would read as "you have no
-         * Codex sessions", which is the one lie it must not tell.
-         */
-        defaultCodexSource(existsSync),
-      ];
+    : process.env.VAM_FIXTURE_SOURCE === '2'
+      ? [EMPTY_FIXTURE_SOURCE]
+      : [
+          CLAUDE_CODE_SOURCE,
+          /**
+           * THE OPERATOR'S OWN CODEX THREADS, read from `~/.codex/state_5.sqlite`
+           * and their rollout files, with `codex queue` as the one write.
+           *
+           * SECOND, AND THE ORDER IS THE CONTRACT ABOVE: Claude Code's rows come
+           * first in the canvas, and `createSessionInDirectory` -- the "new
+           * project" route, which has no session and no project to key on --
+           * goes to the first source that advertises `createSession`, which is
+           * Claude Code. The Codex source withdraws `createSession` for exactly
+           * that reason: starting a Codex session is Stage 2.
+           *
+           * Registered whether or not Codex is installed. A machine with no
+           * `~/.codex` gets a source that withdraws everything and SAYS WHY in
+           * its label and in every decline, which is the version answer this
+           * source owes; an empty list of threads would read as "you have no
+           * Codex sessions", which is the one lie it must not tell.
+           */
+          defaultCodexSource(existsSync),
+        ];
 
 /**
  * Where main's own change-stream connects, absolute (main is not served from

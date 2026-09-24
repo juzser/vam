@@ -54,28 +54,6 @@ async function waitForWindow() {
   throw new Error('probe: no BrowserWindow finished loading within 10s');
 }
 
-/**
- * Polls for a selector rather than trusting a fixed sleep after the reload
- * below -- a FRESH, throwaway `userData` (see `src/main/index.ts`'s
- * `VAM_USER_DATA_DIR`) pays Chromium's own cold-start cost on every single
- * launch: first-ever `Local Storage`/`Preferences`/GPU-cache creation on
- * disk, which the old SHARED, long-lived profile this repo used to leak into
- * had already paid once and amortised across every run since. Measured: a
- * fixed 300ms margin here was comfortably enough against that warm, reused
- * profile and not enough against a genuinely cold one -- the row this
- * function waits for simply had not rendered yet when the click fired, and
- * `?.click()` on a still-`null` `querySelector` throws nothing, so the
- * failure only ever surfaced three lines later as "no <img> was on screen".
- */
-async function waitForSelector(run, selector, timeoutMs = 5000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const found = await run(`document.querySelector(${JSON.stringify(selector)}) !== null`);
-    if (found) return;
-    await sleep(50);
-  }
-  throw new Error(`probe: ${selector} did not appear within ${timeoutMs}ms`);
-}
 
 async function main() {
   // MUST RUN BEFORE `require(MAIN)`: `startRemoteTransport()` reads
@@ -364,53 +342,6 @@ async function main() {
   } catch {
     // A clipboard this could not restore is not a reason to lose the run.
   }
-
-  // EVERY <img> ON SCREEN LOADED -- the ONLY check in this whole harness that
-  // can see the difference between a document-relative `src` and a root-
-  // absolute one, because it is the only one running against the REAL
-  // `file://` document `loadFile` opens (`src/main/index.ts`). A web build or
-  // a unit environment serves the app from an HTTP root, where the two
-  // spellings resolve to the same URL and the defect is invisible; under
-  // `file://` a root-absolute `src="/favicon.png"` reads as the filesystem
-  // root and the `<img>` never loads at all.
-  //
-  // `LAUNCH_FIXTURE_PROJECTS`'s second project (`launch-fixture.ts`) is a
-  // `status: 'terminal'` row for exactly this: `TerminalOnlyStart`
-  // (`DetailPanel.tsx`) is the one screen in this app that draws an `<img>`
-  // at all (measured: `grep -rn '<img' src/renderer` finds one), so it is
-  // clicked here before the check runs -- an app-wide corpus of ONE row is
-  // not a coincidence to work around, it is the whole surface this guards.
-  //
-  // HERE, BEFORE THE RELOAD BELOW -- NOT AFTER IT, WHICH IS WHERE THIS USED
-  // TO SIT. `waitForSelector`'s own header already explains why a fixed sleep
-  // could not stand in for this poll on a FRESH profile; what it does not
-  // say is that the poll's fixed budget (5s) was being spent against the
-  // WRONG render. Moved after the zoom section's `contents.reload()`, this
-  // wait was timing a SECOND cold-ish boot -- a full page reload re-parses
-  // and re-executes the whole bundle and redoes the `window.api.load()` IPC
-  // round trip from scratch, same as the first -- except that one starts
-  // 10+ seconds into the run, after every other step above has already spent
-  // wall clock and, on the shared machine this harness runs on, whatever
-  // contention arrived in the meantime. Measured: this file's own
-  // `VAM_SMOKE_ERROR probe: [...] did not appear within 5000ms` reproduced
-  // reliably while the box's load average sat around 80 on 10 cores, and
-  // vanished once it dropped back under 45 -- the row itself was never
-  // missing (`document.querySelectorAll('[data-session-row]')` already named
-  // it moments before the poll even started, on every capture taken), only
-  // late relative to a budget the reload-after-everything-else position gave
-  // it no slack for. The `<img>` this assertion cares about has nothing to
-  // do with zoom or reload; checking it here, right after the FIRST render
-  // (which gets `waitForWindow`'s own 10s and none of the later steps'
-  // accumulated cost) removes the dependency instead of widening the number
-  // that was never the actual bug.
-  await waitForSelector(run, '[data-session-row="pane:launch-fixture-terminal-1"]');
-  await run(
-    "document.querySelector('[data-session-row=\"pane:launch-fixture-terminal-1\"]')?.click(); undefined",
-  );
-  await sleep(300);
-  result.images = await run(
-    "Array.from(document.images).map((img) => ({ src: img.getAttribute('src'), naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight, complete: img.complete }))",
-  );
 
   // ZOOM, ROUTE BY ROUTE, on the real webContents.
   //

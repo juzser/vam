@@ -95,6 +95,45 @@ describe('the Response view of a pane with nothing started in it', () => {
     expect(q('[data-start-provider="claude-code"]')?.getAttribute('aria-pressed')).toBe('false');
   });
 
+  /**
+   * THE MARK IS THE CHOSEN PROVIDER'S, LIVE -- the operator's own words: "for
+   * an unstarted pane use the currently chosen provider in its picker,
+   * updating when the choice changes." There is no session yet, so there is
+   * no agent to name the way `TerminalOnlyStart` names one; the picker's own
+   * live selection is the closest honest fact, wrapped in the same macOS-icon
+   * frame `DetailPanel.getting-started.test.tsx` pins the shape of.
+   */
+  it('draws the DEFAULT provider’s mark before any click, inside the macOS-icon frame', () => {
+    draw({ onStartSession: () => {}, defaultProvider: 'codex' });
+    const frame = q('[data-start-session] [data-icon-frame]');
+    expect(frame).not.toBeNull();
+    expect(frame?.className).toContain('rounded-[14px]');
+    const mark = q('[data-start-session-mark]');
+    expect(mark?.getAttribute('data-source-mark')).toBe('brand');
+    expect(mark?.querySelector('svg')).not.toBeNull();
+  });
+
+  it('switches the mark the instant the picker’s own selection changes', () => {
+    draw({ onStartSession: () => {}, defaultProvider: 'claude-code' });
+    const before = q('[data-start-session-mark] svg path')?.getAttribute('d');
+    expect(before, 'the default provider must actually draw a path').toBeTruthy();
+
+    fireEvent.click(q('[data-start-provider="codex"]') as Element);
+
+    expect(q('[data-start-provider="codex"]')?.getAttribute('aria-pressed')).toBe('true');
+    const after = q('[data-start-session-mark] svg path')?.getAttribute('d');
+    expect(after, 'the newly chosen provider must actually draw a path').toBeTruthy();
+    // NEVER THE OLD MARK LEFT BEHIND: the picker moved, so the icon beside it
+    // must be a different path, not the previous provider's borrowed one.
+    expect(after).not.toBe(before);
+  });
+
+  it('withdraws the mark along with the picker, when the caller has no route to start one', () => {
+    draw();
+    expect(q('[data-start-session-mark]')).toBeNull();
+    expect(q('[data-start-session] [data-icon-frame]')).toBeNull();
+  });
+
   it('Start hands the CHOSEN provider id to the caller -- an id, never a command', () => {
     const started: string[] = [];
     draw({ onStartSession: (id) => started.push(id) });

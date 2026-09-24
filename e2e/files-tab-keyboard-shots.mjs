@@ -1246,7 +1246,7 @@ check(
 // missing note rather than a renamed one. Derived from the page's own platform
 // rather than imported — a guard shares no module with the bundle it measures.
 const undoChord = await page.evaluate(() =>
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘Z' : 'Ctrl+Z',
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⌘ Z' : 'Ctrl+Z',
 );
 check(
   'and says so, with the way back out of it on screen',

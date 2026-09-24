@@ -89,7 +89,6 @@ import { loggedEvents, noteFailure, recordRefusal, subscribeEvents } from '../er
 import {
   type Chord,
   type ChordState,
-  chordSymbols,
   chordText,
   EMPTY_CHORD,
   isSelectOnly,
@@ -104,7 +103,7 @@ import {
   releaseInsert,
 } from '../keyboard/focus-scope.js';
 import { type CursorMode, MODE_TITLES } from '../keyboard/keysheet.js';
-import { primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
+import { ChordGlyphs, primaryChord, ShortcutTip, TipProvider } from '../keyboard/ShortcutTip.js';
 import { useWaitingNotifications } from '../notify/useWaitingNotifications.js';
 import { buildActions, clampIndex } from '../panels/actions.js';
 import { CommandPalette } from '../panels/CommandPalette.js';
@@ -3043,6 +3042,31 @@ function CanvasInner({
       prefs.filters,
     );
   }, [allEntries, prefs, source.kind, vamListingGap]);
+
+  /**
+   * WHETHER VAM HAS A SESSION OF ITS OWN, ANYWHERE -- read off `allEntries`,
+   * the UNFILTERED set, never `entries`. Dismiss, `hiddenProjects`, the
+   * search query, the status pill and every origin filter (`hideForeign`
+   * included) all live in `entries` alone; none of them make a session vam
+   * actually started stop EXISTING, only stop being SHOWN, and the
+   * getting-started screen's whole claim is "you have never used vam" -- a
+   * claim a merely-hidden row makes false. The operator's own words: "if
+   * there are sessions in vam, don't show the getting-started screen
+   * prematurely."
+   *
+   * Read by the getting-started screen's own trigger below, the tab strip's
+   * "no sessions yet" caption, and `SessionList`'s two mirrors of the same
+   * screen (its own empty-list line, and the phone's copy of this one) --
+   * one fact, so the four surfaces can never contradict each other about it.
+   *
+   * CASE (b) FROM PR 467 SURVIVES UNCHANGED: every entry foreign (`isForeign`
+   * true for all of them, or the set is simply empty) still reads `false`
+   * here -- vam really did start nothing, and the getting-started screen's
+   * own hidden-count line is what tells the rest of that story.
+   *  `Canvas.getting-started.test.tsx`'s "shows, with the hidden-count
+   * line, when every session is foreign" pins it.
+   */
+  const hasOwnSession = useMemo(() => allEntries.some((e) => !isForeign(e.session)), [allEntries]);
 
   /** The pill counts are off the UNFILTERED list — a count that moved when you
       clicked it would be a count of your own click. */
@@ -6436,6 +6460,10 @@ function CanvasInner({
     // no other column takes this.
     entries: entries,
     loading: sidebarLoading,
+    // See `hasOwnSession`'s own header: the WHOLE-APP fact, off the
+    // unfiltered model, that keeps the phone's own getting-started screen
+    // and its "No sessions yet" line from contradicting the desktop's.
+    hasOwnSession,
     /* WHICH PROJECT VAM IS STARTING A SESSION IN, or null. The project id and
        name -- the id alone used to be enough, because every existing project
        already carries its own name in the section the sidebar matches it
@@ -6682,15 +6710,23 @@ function CanvasInner({
         // button unless the row itself carries a `resumeCommand`.
         onResumeInPane: entry === null ? undefined : () => void resumeInPane(entry),
         // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
-        // when THIS pane holds nothing AND vam has no session to show
-        // ANYWHERE, `entries` being the same filtered set the sidebar and
-        // the tab strip already agree is "what's visible right now". Unlike
+        // when THIS pane holds nothing, vam has no session to show ANYWHERE
+        // (`entries`, the same filtered set the sidebar and the tab strip
+        // already agree is "what's visible right now" -- unchanged from
+        // before: a sibling pane or another project with something visible
+        // still counts), AND the app truly owns none, `entries.length === 0`
+        // alone -- `hasOwnSession`'s own header explains why a session vam
+        // started that is merely hidden by dismiss/filters must not reach
+        // this screen. NOR BEFORE THE FIRST LOAD HAS ANSWERED: `sidebarLoading`
+        // reads `EMPTY: CanvasModel` the exact same shape as a genuinely
+        // empty workspace, and without this guard the screen flashed on at
+        // every launch before `useSourceModel`'s first answer landed. Unlike
         // `onStartSession`/`onResumeInPane` above, whose absence follows
         // THIS pane's own `entry`, this is an APP-WIDE fact -- a pane can
         // hold nothing while a sibling pane, or another project, still has a
         // real session, and only the truly-empty state gets this screen.
         gettingStarted:
-          entry !== null || entries.length > 0
+          entry !== null || entries.length > 0 || hasOwnSession || sidebarLoading
             ? undefined
             : {
                 onNewProject: () => void newProject(),
@@ -6812,6 +6848,8 @@ function CanvasInner({
       hasDirectoryPicker,
       foreignHiddenCount,
       onSidebarOriginFilters,
+      hasOwnSession,
+      sidebarLoading,
     ],
   );
 
@@ -6898,12 +6936,19 @@ function CanvasInner({
               drafts={draftsBySession}
               pending={pending}
               // See `emptyText`'s own comment: "pick one from the sidebar" is
-              // only true while the sidebar has a row to pick. `entries` is
-              // the SAME filtered set `gettingStarted`'s own condition reads
-              // a few hundred lines below -- the operator's own finding,
-              // reading the first screenshot, was this line contradicting
-              // that screen's "no sessions yet" 40px below it.
-              emptyText={entries.length === 0 ? 'no sessions yet' : undefined}
+              // only true while the sidebar has a row to pick. `entries` and
+              // `hasOwnSession` are the SAME two facts `gettingStarted`'s own
+              // condition reads a few hundred lines below -- the operator's
+              // own finding, reading the first screenshot, was this line
+              // contradicting that screen's "no sessions yet" 40px below it;
+              // `hasOwnSession` is what keeps it from making the SAME claim
+              // early, before the first load answers, or over a session vam
+              // started that is merely dismissed or filtered out of view.
+              emptyText={
+                entries.length === 0 && !hasOwnSession && !sidebarLoading
+                  ? 'no sessions yet'
+                  : undefined
+              }
               onSelect={(sessionId, viaPointer) => {
                 // The pane whose strip was clicked is the pane the keyboard
                 // moves to FIRST: `setFocusedPaneId` writes its ref
@@ -6992,6 +7037,10 @@ function CanvasInner({
       // dependency: see `prefs/tab-indicators.ts`.)
       draftsBySession,
       pending,
+      // The tab strip's own `emptyText` guard -- see `hasOwnSession`'s own
+      // header for why `entries.length === 0` alone is not enough.
+      hasOwnSession,
+      sidebarLoading,
     ],
   );
 
@@ -7000,10 +7049,10 @@ function CanvasInner({
   //
   // AND RENDERED HERE, because this cell paints the chord itself rather than
   // going through `InlineChord` (it carries `data-keysheet-hint`, which the
-  // chip component has no slot for). `chordSymbols` is what every other chord
-  // in the chrome now passes through: ⌘ on a Mac, `Ctrl` off one.
+  // chip component has no slot for). `ChordGlyphs` is what every other chord
+  // in the chrome now passes through: ⌘ on a Mac, `Ctrl` off one, its
+  // modifiers a size bigger than the key beside them.
   const bound = primaryChord({ kind: 'help' });
-  const helpChord = bound === null ? null : chordSymbols(bound);
 
   return (
     // `vam-phone` is the hook the OVERLAYS hang off: they are siblings of the
@@ -7404,12 +7453,12 @@ function CanvasInner({
                 `primaryChord` rather than `InlineChord` for one reason: this
                 cell carries `data-keysheet-hint`, which the status-bar tests
                 query, and the chip component takes no marker. */}
-            {helpChord !== null && (
+            {bound !== null && (
               <span
                 data-keysheet-hint
                 className="rounded-[4px] border border-line-strong px-1.5 py-px text-ink-dim"
               >
-                {helpChord}
+                <ChordGlyphs chord={bound} />
               </span>
             )}
             Keyboard shortcut

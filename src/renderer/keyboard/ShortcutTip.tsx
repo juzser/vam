@@ -38,12 +38,13 @@
  */
 
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { createContext, type ReactNode, useContext } from 'react';
+import { createContext, Fragment, type ReactNode, useContext } from 'react';
 import {
   actionId,
   activeBindings,
   applePlatform,
   bindingChords,
+  chordSegments,
   chordSymbols,
   isSelectOnlyChord,
   type KeyAction,
@@ -56,6 +57,15 @@ import { CURSOR_MODES, type CursorMode, describeAction, MODE_TITLES } from './ke
 type TipLine = {
   readonly caption: string | null;
   readonly keys: string;
+  /**
+   * The SAME chords `keys` above already rendered into one sentence, kept
+   * here raw and unjoined — what `Chip` needs to draw each one through
+   * `ChordGlyphs` (a modifier glyph bigger than the key it sits beside),
+   * which a pre-joined string cannot carry two font sizes inside. `keys`
+   * stays the rendering for the one consumer that only ever wanted a
+   * sentence: the `sr-only` twin beside the chip.
+   */
+  readonly chords: readonly string[];
 };
 
 /**
@@ -108,8 +118,12 @@ export function shortcutLines(
   if (selectOnly.length === 0) {
     const keys = say(chords);
     return byMode === null
-      ? [{ caption: null, keys }]
-      : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }));
+      ? [{ caption: null, keys, chords }]
+      : modes.map((each) => ({
+          caption: `${MODE_TITLES[each]} · ${byMode[each]}`,
+          keys,
+          chords,
+        }));
   }
   const anywhere = chords.filter((chord) => !selectOnly.includes(chord));
   const lines: TipLine[] = [];
@@ -117,8 +131,12 @@ export function shortcutLines(
     const keys = say(anywhere);
     lines.push(
       ...(byMode === null
-        ? [{ caption: null, keys }]
-        : modes.map((each) => ({ caption: `${MODE_TITLES[each]} · ${byMode[each]}`, keys }))),
+        ? [{ caption: null, keys, chords: anywhere }]
+        : modes.map((each) => ({
+            caption: `${MODE_TITLES[each]} · ${byMode[each]}`,
+            keys,
+            chords: anywhere,
+          }))),
     );
   }
   // Shown unless the caller has said it is in Insert, where the key is not
@@ -128,6 +146,7 @@ export function shortcutLines(
     lines.push({
       caption: `${MODE_TITLES.select} · ${byMode === null ? label : byMode.select}`,
       keys: say(selectOnly),
+      chords: selectOnly,
     });
   }
   return lines;
@@ -149,6 +168,54 @@ export function primaryChord(action: KeyAction, overrides = activeBindings()): s
 }
 
 /**
+ * ONE CHORD, PAINTED — every surface that draws a chip rather than only
+ * SAYING one (`InlineChord` below, the tooltip's own `Chip`, `KeySheet.tsx`,
+ * the status bar's `?` hint) reaches for this instead of `chordSymbols`
+ * directly, so a modifier glyph and the key letter it holds down can be
+ * drawn at two different sizes without a second computation of which
+ * segment is which — `chordSegments` (`chords.ts`) is the one answer to
+ * that question, reused rather than re-derived.
+ *
+ * THE OPERATOR'S OWN FINDING, reading a `⇧⌘P` chip: painted at one
+ * font-size the modifiers read SMALLER than the capital letter beside them,
+ * cramped rather than legible. `text-[1.3em]` on a modifier segment only,
+ * `leading-none` so the taller glyph does not stretch the row it sits in —
+ * the chip's own height still comes entirely from its caller's line-height
+ * (`text-meta`/`text-control`, `styles.css`'s type scale), never from this
+ * component, which is what keeps every chip's height unchanged.
+ *
+ * `.textContent` OF THE RESULT IS `chordSymbols(chord, mac)`, CHARACTER FOR
+ * CHARACTER — the same segments, the same separator, some of them wrapped
+ * in a bigger span. `test/keyboard/shortcut-tip.test.tsx` holds the two to
+ * that agreement, so a hand-rolled separator here can never drift from the
+ * sentence `chordSymbols` still owes a tooltip's `sr-only` twin.
+ */
+export function ChordGlyphs({
+  chord,
+  mac = applePlatform(),
+}: {
+  readonly chord: string;
+  readonly mac?: boolean;
+}) {
+  const segments = chordSegments(chord, mac);
+  const sep = mac ? ' ' : '+';
+  return (
+    <>
+      {segments.map((segment, index) => (
+        <Fragment key={segment.text}>
+          {index > 0 ? sep : null}
+          {segment.modifier ? (
+            <span className="text-[1.3em] leading-none">{segment.text}</span>
+          ) : (
+            segment.text
+          )}
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
+/**
  * That chord as the chip itself. Lives here rather than in one panel because
  * three cells across two files print a key beside a control, and every one of
  * them was a literal before this: `/`, `o`, and the status bar's `?`.
@@ -161,17 +228,14 @@ export function InlineChord({
   readonly className: string;
 }) {
   const chord = primaryChord(action);
-  // THE SYMBOLS ARE PAINTED HERE, not read out of the table: `primaryChord`
-  // answers in the grammar's own spelling, and this is the pixel.
-  const keys = chord === null ? null : chordSymbols(chord);
   // `data-inline-chord` so a shell can suppress the whole family from CSS. The
   // phone does (`styles.css`): a chord is exactly the part of this hint a
   // touchscreen cannot use. Suppressed, never deleted -- the keydown listener
   // is not phone-gated, so a folio keyboard at 390px still fires every chord,
   // and the key sheet still documents them for that case.
-  return keys === null ? null : (
+  return chord === null ? null : (
     <span data-inline-chord className={className}>
-      {keys}
+      <ChordGlyphs chord={chord} />
     </span>
   );
 }
@@ -206,10 +270,13 @@ export function TipProvider({ children }: { readonly children: ReactNode }) {
  *
  * A border is not readable, so the word is spoken instead: the visible chip
  * goes `aria-hidden` and an `sr-only` twin carries "shortcut: <chord>". The
- * chord itself is `chordText`'s output verbatim in both, so the two surfaces
- * cannot drift and neither one prettifies what the key sheet spells.
+ * PAINTED half draws each chord through `ChordGlyphs` (modifiers bigger than
+ * the key), joined by a literal " or " for the rare action that holds two;
+ * the SPOKEN half stays `keys`, `shortcutLines`' own pre-joined sentence, so
+ * neither surface prettifies what the key sheet spells and the two can never
+ * name a different chord.
  */
-function Chip({ keys }: { readonly keys: string }) {
+function Chip({ keys, chords }: { readonly keys: string; readonly chords: readonly string[] }) {
   return (
     <>
       <span
@@ -217,7 +284,12 @@ function Chip({ keys }: { readonly keys: string }) {
         aria-hidden="true"
         className="shrink-0 rounded-[4px] border border-on-tip-line px-1 py-px font-mono text-meta text-on-tip-dim"
       >
-        {keys}
+        {chords.map((chord, index) => (
+          <Fragment key={chord}>
+            {index > 0 ? ' or ' : null}
+            <ChordGlyphs chord={chord} />
+          </Fragment>
+        ))}
       </span>
       <span className="sr-only">{` shortcut: ${keys}`}</span>
     </>
@@ -267,7 +339,9 @@ export function ShortcutTip({
           {merge ? (
             <span className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
               <span className="min-w-0 flex-1 text-on-tip">{label}</span>
-              {lines[0] === undefined ? null : <Chip keys={lines[0].keys} />}
+              {lines[0] === undefined ? null : (
+                <Chip keys={lines[0].keys} chords={lines[0].chords} />
+              )}
             </span>
           ) : (
             <>
@@ -277,7 +351,7 @@ export function ShortcutTip({
                   {line.caption === null ? null : (
                     <span className="min-w-0 flex-1 text-on-tip-dim">{line.caption}</span>
                   )}
-                  <Chip keys={line.keys} />
+                  <Chip keys={line.keys} chords={line.chords} />
                 </span>
               ))}
             </>

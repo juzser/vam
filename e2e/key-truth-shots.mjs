@@ -808,7 +808,7 @@ const sheetHasIt = await settle(
 // runs against a SERVED bundle and shares no module with it, which is what
 // makes it an independent reading.
 const newProjectChord = await page.evaluate(() =>
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⇧⌘P' : 'Ctrl+Shift+P',
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⇧ ⌘ P' : 'Ctrl+Shift+P',
 );
 console.log(`this browser spells newProject "${newProjectChord}"`);
 

@@ -1094,6 +1094,40 @@ describe('the phone’s own getting-started screen', () => {
     expect(decline?.textContent).toContain('desktop app');
     expect(decline?.textContent).not.toContain('browser build');
   });
+
+  /**
+   * ITEM 1 OF "start-polish": `entries` empty is not the whole story on a
+   * phone either -- `hasOwnSession` (`Canvas.tsx`'s own fact, off the
+   * UNFILTERED model) is what tells this list a session vam started is
+   * merely hidden by dismiss or a filter, not gone. Without this the phone
+   * showed the exact "you have never used vam" screen the desktop no longer
+   * does in the identical state.
+   */
+  it('withdraws once vam has a session of its own, even though entries is empty', () => {
+    const { container } = mountWith([], { phone: true, hasOwnSession: true });
+    expect(container.querySelector('[data-getting-started]')).toBeNull();
+  });
+
+  it('shows once entries is empty and vam truly owns nothing, the default', () => {
+    const { container } = mountWith([], { phone: true, hasOwnSession: false });
+    expect(container.querySelector('[data-getting-started]')).not.toBeNull();
+  });
+});
+
+/**
+ * THE PLAIN "No sessions yet" LINE gets the identical guard, for the
+ * identical reason -- see `hasOwnSession`'s own header on `SessionList.tsx`.
+ */
+describe('the plain "No sessions yet" line', () => {
+  it('stays off once vam has a session of its own, even though entries is empty', () => {
+    const { container } = mountWith([], { hasOwnSession: true });
+    expect(container.textContent).not.toContain('No sessions yet');
+  });
+
+  it('shows once entries is empty and vam truly owns nothing, the default', () => {
+    const { container } = mountWith([], { hasOwnSession: false });
+    expect(container.textContent).toContain('No sessions yet');
+  });
 });
 
 describe('the filter badge yellow, in styles.css', () => {
