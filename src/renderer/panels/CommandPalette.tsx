@@ -265,7 +265,7 @@ function ActionRow({
 }) {
   return (
     <Command.Item
-      value={`${row.label} ${row.id}`}
+      value={`${row.title} ${row.id}`}
       disabled={row.disabled}
       onSelect={() => {
         if (row.disabled) return;
@@ -273,17 +273,19 @@ function ActionRow({
       }}
       className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[selected=true]:bg-raised"
     >
-      <span className="min-w-0 flex-1 truncate">{row.label}</span>
+      <span className="min-w-0 flex-1 truncate">{row.title}</span>
       {row.disabled && row.disabledReason !== null && (
         <span className="shrink-0 text-ink-faint text-meta">{row.disabledReason}</span>
       )}
-      <span className="flex shrink-0 items-baseline gap-1 font-mono text-ink-faint text-meta">
-        {row.chords.map((chord, index) => (
-          <span key={chord}>
-            {index > 0 ? <span className="text-ink-faint"> or </span> : null}
-            <ChordGlyphs chord={chord} />
-          </span>
-        ))}
+      {/* ONE CHORD, the same one a tooltip's chip would show
+          (`primaryChord`, `ShortcutTip.tsx`) — not every bound chord joined
+          with "or". `newSession` alone holds two (`o`, `Mod-n`); the row
+          shows the first and `filterPaletteActions` still finds it by
+          either, the same split `InlineChord`'s own doc comment draws
+          between a box with room for a whole list and a control that shares
+          its line with a label. */}
+      <span className="shrink-0 font-mono text-ink-faint text-meta">
+        <ChordGlyphs chord={row.primaryChord} />
       </span>
     </Command.Item>
   );

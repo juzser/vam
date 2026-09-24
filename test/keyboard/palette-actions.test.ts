@@ -19,6 +19,7 @@ import {
   paletteHint,
   paletteMode,
 } from '../../src/renderer/keyboard/palette-actions.js';
+import { primaryChord as tooltipPrimaryChord } from '../../src/renderer/keyboard/ShortcutTip.js';
 
 describe('paletteMode', () => {
   it('is sessions with no prefix, including the empty query', () => {
@@ -66,12 +67,49 @@ describe('paletteHint', () => {
 });
 
 describe('buildPaletteActions', () => {
-  it('gives every row a non-empty chord and a non-empty label', () => {
+  it('gives every row a non-empty chord, a non-empty title, and a primary chord drawn from the same list', () => {
     const rows = buildPaletteActions(true);
     expect(rows.length).toBeGreaterThan(0);
     for (const row of rows) {
       expect(row.chords.length).toBeGreaterThan(0);
-      expect(row.label.length).toBeGreaterThan(0);
+      expect(row.title.length).toBeGreaterThan(0);
+      expect(row.chords).toContain(row.primaryChord);
+      expect(row.primaryChord).toBe(row.chords[0]);
+    }
+  });
+
+  it('titles are short, Title Case command names — not the key sheet’s sentences', () => {
+    // The exact wording the operator asked for, by id — falsifiable one row
+    // at a time rather than a shape assertion nothing could fail.
+    const byId = new Map(buildPaletteActions(true).map((row) => [row.id, row.title]));
+    expect(byId.get('newSession')).toBe('New Session');
+    expect(byId.get('newProject')).toBe('New Project…');
+    expect(byId.get('close')).toBe('Close Session');
+    expect(byId.get('rename')).toBe('Rename Session');
+    expect(byId.get('pickView:1')).toBe('View: Response');
+    expect(byId.get('pickView:2')).toBe('View: PRs');
+    expect(byId.get('pickView:3')).toBe('View: Terminal');
+    expect(byId.get('pickView:4')).toBe('View: Agents');
+    expect(byId.get('pickView:5')).toBe('View: Files');
+    expect(byId.get('splitPane:row')).toBe('Split: Side by Side');
+    expect(byId.get('splitPane:column')).toBe('Split: Stacked');
+    expect(byId.get('closeSplit')).toBe('Close Split');
+    expect(byId.get('search')).toBe('Search Sessions');
+    expect(byId.get('filterMenu')).toBe('Filter Sessions…');
+    expect(byId.get('settings')).toBe('Settings');
+    expect(byId.get('help')).toBe('Keyboard Shortcuts');
+    // None of them is the sheet's own sentence -- the defect this table
+    // exists to fix, pinned so it cannot come back by a well-meaning
+    // "just read describeAction" refactor.
+    for (const title of byId.values()) {
+      expect(title).not.toMatch(/ — /); // the sheet's own em-dash clause separator
+      expect(title.length).toBeLessThanOrEqual(24);
+    }
+  });
+
+  it('shows the SAME primary chord a tooltip chip would, for every row — the single source of truth the operator asked for', () => {
+    for (const row of buildPaletteActions(true)) {
+      expect(row.primaryChord).toBe(tooltipPrimaryChord(row.action));
     }
   });
 
@@ -142,14 +180,17 @@ describe('filterPaletteActions', () => {
     expect(filterPaletteActions(rows, '')).toHaveLength(rows.length);
   });
 
-  it('narrows by label', () => {
+  it('narrows by title', () => {
+    // Unlike the sheet's sentence, "Close Split" carries no word "session" at
+    // all, so this title alone disambiguates the two close-shaped rows —
+    // `mod-w` is no longer needed to isolate `close` from `closeSplit`.
     const hits = filterPaletteActions(rows, 'close session', false);
-    expect(hits.map((r) => r.id)).toContain('close');
-    expect(hits.every((r) => r.label.toLowerCase().includes('close'))).toBe(true);
+    expect(hits.map((r) => r.id)).toEqual(['close']);
+    expect(hits.every((r) => r.title.toLowerCase().includes('close'))).toBe(true);
   });
 
   it('requires every term to land', () => {
-    // "close" alone matches several rows (close session, close split); adding
+    // "close" alone matches several rows (Close Session, Close Split); adding
     // a second word that only one of them satisfies must narrow to it.
     const broad = filterPaletteActions(rows, 'close', false);
     const narrow = filterPaletteActions(rows, 'close split', false);

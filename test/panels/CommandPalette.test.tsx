@@ -161,38 +161,50 @@ describe('the command palette, switching between sessions and actions', () => {
     const items = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')].map(
       (el) => el.textContent ?? '',
     );
-    expect(items.some((text) => /close this session/i.test(text))).toBe(true);
+    expect(items.some((text) => /close session/i.test(text))).toBe(true);
     expect(items.some((text) => /new project/i.test(text))).toBe(false);
   });
 
-  it('draws a bound chord beside each action row', async () => {
+  it('draws the row’s short Title Case name, not the key sheet’s sentence', async () => {
     const input = open(true);
-    await userEvent.type(input, '/settings');
+    await userEvent.type(input, '/new project');
     const row = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')].find((el) =>
-      /^settings/i.test(el.textContent ?? ''),
+      /^New Project/.test(el.textContent ?? ''),
     );
     expect(row).toBeDefined();
-    expect(row?.textContent).toMatch(/[,]/); // `,` is settings' own bound chord
+    // The key sheet's own sentence for this action -- must not appear here.
+    expect(row?.textContent).not.toMatch(/choose a directory to start it in/i);
+  });
+
+  it('draws only the PRIMARY bound chord beside a row — not every chord joined with "or"', async () => {
+    const input = open(true);
+    await userEvent.type(input, '/close session');
+    const row = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')].find((el) =>
+      /^Close Session/.test(el.textContent ?? ''),
+    );
+    expect(row).toBeDefined();
+    // `close` holds two chords (`x` and `Mod-w`, in that table order) — only
+    // the primary one, `x`, paints; `Mod-w`'s own ⌘ must not appear.
+    expect(row?.textContent).toMatch(/x/);
+    expect(row?.textContent).not.toMatch(/⌘/);
+    expect(row?.textContent).not.toMatch(/\bor\b/i); // never a second chord joined by "or"
   });
 
   it('disables a session-scoped row with no session focused, and shows why', async () => {
-    // `mod-w` is `close`'s own bound chord and nothing else's — `closeSplit`
-    // ("close this split") shares every WORD of `close`'s label ("close this
-    // session"), so a query built from words alone can never isolate one from
-    // the other; the chord token can.
+    // The title alone disambiguates now: "Close Split" carries no "session".
     const input = open(false);
-    await userEvent.type(input, '/mod-w');
+    await userEvent.type(input, '/close session');
     const row = document.querySelector('[data-command-palette] [cmdk-item][aria-disabled="true"]');
     expect(row).not.toBeNull();
-    expect(row?.textContent).toMatch(/close this session/i);
+    expect(row?.textContent).toMatch(/close session/i);
     expect(row?.textContent).toMatch(/pick a session first/i);
   });
 
   it('enables the same row once a session is focused', async () => {
     const input = open(true);
-    await userEvent.type(input, '/mod-w');
+    await userEvent.type(input, '/close session');
     const row = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')].find((el) =>
-      /close this session/i.test(el.textContent ?? ''),
+      /close session/i.test(el.textContent ?? ''),
     );
     expect(row?.getAttribute('aria-disabled')).not.toBe('true');
   });
@@ -211,7 +223,7 @@ describe('the command palette, switching between sessions and actions', () => {
   it('never dispatches a disabled row, even on Enter', async () => {
     const seen: unknown[] = [];
     const input = open(false, (action) => seen.push(action));
-    await userEvent.type(input, '/mod-w');
+    await userEvent.type(input, '/close session');
     // The disabled row is the only match; Enter must not run it.
     await userEvent.keyboard('{Enter}');
     expect(seen).toEqual([]);

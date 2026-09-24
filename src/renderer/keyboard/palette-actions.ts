@@ -2,16 +2,25 @@
  * The command palette's ACTIONS half — VS Code's own idiom for one search
  * box: no prefix finds a destination (a session), `/` finds a verb.
  *
- * NOT A SECOND REGISTRY. The operator's own instruction: derive this from the
- * table the `?` sheet and `chords.ts` are already generated from, so a row
- * here can only exist because a binding exists, exactly the property
- * `buildKeySheet` already holds for the sheet (`keysheet.ts`'s own header
- * argues why that property matters — a hand-written list can promise a key
- * that is not bound, and this codebase has shipped that shape before). So
- * `buildPaletteActions` reads `effectiveBindings`/`describeAction` the same
- * two functions `ShortcutTip.tsx` and `KeySheet.tsx` already read, and a
+ * NOT A SECOND REGISTRY OF BINDINGS. The operator's own instruction: derive
+ * WHICH ACTIONS EXIST AND WHAT THEY ARE BOUND TO from the table the `?` sheet
+ * and `chords.ts` are already generated from, so a row here can only exist
+ * because a binding exists, exactly the property `buildKeySheet` already
+ * holds for the sheet (`keysheet.ts`'s own header argues why that property
+ * matters — a hand-written list can promise a key that is not bound, and
+ * this codebase has shipped that shape before). So `buildPaletteActions`
+ * reads `effectiveBindings`/`bindingChords`, the same functions
+ * `ShortcutTip.tsx` and `KeySheet.tsx` read for their own chords, and a
  * rebind or an unbind in settings changes what the palette offers on the
  * next open with no second list to keep in step.
+ *
+ * THE PALETTE'S OWN WORDING IS A SECOND TABLE, DELIBERATELY: each row's
+ * short Title Case name (`PaletteActionSpec.title`) lives in THIS file, not
+ * in `keysheet.ts`'s `describeAction`. That table writes SENTENCES for the
+ * `?` sheet's own column; a palette row reads beside a dozen others in a
+ * 560px list an operator is scanning at a glance, which is a different
+ * reader with a different need, and the fix for one wording being wrong for
+ * the other is not to share it.
  *
  * A CURATED SUBSET, though, unlike the sheet: `PALETTE_KINDS` names which
  * action KINDS are even candidates, and it is deliberately narrower than
@@ -49,7 +58,6 @@ import {
   type KeyAction,
   type KeyBindings,
 } from './chords.js';
-import { describeAction } from './keysheet.js';
 
 /** VS Code's own split: no prefix is a destination, `/` is a verb. */
 export type PaletteMode = 'sessions' | 'actions';
@@ -81,8 +89,34 @@ export function paletteHint(mode: PaletteMode): string {
 }
 
 /**
- * The candidate action KINDS, in the order the palette lists them absent a
- * query. Ordered create → destroy → view → layout → find → session-scoped →
+ * One candidate: the action, and what the PALETTE calls it — deliberately
+ * NOT `describeAction`'s label. That label is a SENTENCE, written for the `?`
+ * sheet's own column ("new project — choose a directory to start it in",
+ * "the Response view, in the focused pane") where a row has all the width in
+ * the world and reads beside a caption. A palette row reads beside a dozen
+ * others in a 560px list an operator is scanning at a glance — VS Code's own
+ * convention there is a short, Title Case COMMAND NAME ("New File", "Close
+ * Editor"), not a sentence, and this is that table.
+ *
+ * `title` LIVES HERE, NOT IN `keysheet.ts`. The sheet's captions stay exactly
+ * what they were — this module reads `chords.ts` for which actions exist and
+ * what they are bound to, and owns its own short name for each, so the two
+ * surfaces can each be worded for the reader who is actually looking at them
+ * without either editing the other's copy.
+ *
+ * AN ELLIPSIS NAMES A FURTHER STEP, VS CODE'S OWN CONVENTION: `New Project…`
+ * and `Move to Folder…` both end in a directory the operator still has to
+ * pick, `Filter Sessions…` and `Remote Access…` both open a surface with more
+ * than one thing to do next. Every other title is one press and done.
+ */
+type PaletteActionSpec = {
+  readonly action: KeyAction;
+  readonly title: string;
+};
+
+/**
+ * The candidates, in the order the palette lists them absent a query.
+ * Ordered create → destroy → view → layout → find → session-scoped →
  * toggles → overlays, which is roughly "what you reach for most" — not
  * alphabetical, and not the sheet's own five groups, because those group by
  * WHAT THE KEY ACTS ON for a reader walking the whole `?` table, while this
@@ -94,30 +128,30 @@ export function paletteHint(mode: PaletteMode): string {
  * table entries: each is its own destination, not a family the palette would
  * make the operator supply an argument for.
  */
-const PALETTE_ACTIONS: readonly KeyAction[] = [
-  { kind: 'newSession' },
-  { kind: 'newProject' },
-  { kind: 'close' },
-  { kind: 'rename' },
-  { kind: 'pickView', digit: 1 },
-  { kind: 'pickView', digit: 2 },
-  { kind: 'pickView', digit: 3 },
-  { kind: 'pickView', digit: 4 },
-  { kind: 'pickView', digit: 5 },
-  { kind: 'splitPane', orientation: 'row' },
-  { kind: 'splitPane', orientation: 'column' },
-  { kind: 'closeSplit' },
-  { kind: 'search' },
-  { kind: 'filterMenu' },
-  { kind: 'revealProject' },
-  { kind: 'moveToGroup' },
-  { kind: 'copy' },
-  { kind: 'toggleFocusView' },
-  { kind: 'resetPanes' },
-  { kind: 'settings' },
-  { kind: 'remote' },
-  { kind: 'errorLog' },
-  { kind: 'help' },
+const PALETTE_ACTIONS: readonly PaletteActionSpec[] = [
+  { action: { kind: 'newSession' }, title: 'New Session' },
+  { action: { kind: 'newProject' }, title: 'New Project…' },
+  { action: { kind: 'close' }, title: 'Close Session' },
+  { action: { kind: 'rename' }, title: 'Rename Session' },
+  { action: { kind: 'pickView', digit: 1 }, title: 'View: Response' },
+  { action: { kind: 'pickView', digit: 2 }, title: 'View: PRs' },
+  { action: { kind: 'pickView', digit: 3 }, title: 'View: Terminal' },
+  { action: { kind: 'pickView', digit: 4 }, title: 'View: Agents' },
+  { action: { kind: 'pickView', digit: 5 }, title: 'View: Files' },
+  { action: { kind: 'splitPane', orientation: 'row' }, title: 'Split: Side by Side' },
+  { action: { kind: 'splitPane', orientation: 'column' }, title: 'Split: Stacked' },
+  { action: { kind: 'closeSplit' }, title: 'Close Split' },
+  { action: { kind: 'search' }, title: 'Search Sessions' },
+  { action: { kind: 'filterMenu' }, title: 'Filter Sessions…' },
+  { action: { kind: 'revealProject' }, title: 'Reveal Project' },
+  { action: { kind: 'moveToGroup' }, title: 'Move to Folder…' },
+  { action: { kind: 'copy' }, title: 'Copy Commands' },
+  { action: { kind: 'toggleFocusView' }, title: 'Toggle Focus View' },
+  { action: { kind: 'resetPanes' }, title: 'Reset Pane Widths' },
+  { action: { kind: 'settings' }, title: 'Settings' },
+  { action: { kind: 'remote' }, title: 'Remote Access…' },
+  { action: { kind: 'errorLog' }, title: 'Error Log' },
+  { action: { kind: 'help' }, title: 'Keyboard Shortcuts' },
 ];
 
 /**
@@ -155,11 +189,23 @@ export const PALETTE_DISABLED_REASON = 'pick a session first';
 export type PaletteActionEntry = {
   readonly action: KeyAction;
   readonly id: string;
-  readonly label: string;
+  /** The palette's own short, Title Case name — see `PaletteActionSpec`. */
+  readonly title: string;
   /** The chords this action is bound to right now — never empty; an unbound
    *  candidate is filtered out entirely, the same rule `buildKeySheet` holds
-   *  for its own rows. */
+   *  for its own rows. Kept in full for `filterPaletteActions`, which still
+   *  matches ANY bound chord's token or painted symbol — only the row's own
+   *  PAINTED chip narrows to the primary one. */
   readonly chords: readonly string[];
+  /**
+   * The ONE chord the row shows — `chords[0]`, the identical computation
+   * `ShortcutTip.tsx`'s own `primaryChord` makes for a tooltip's inline chip.
+   * Inlined here rather than imported: that module pulls in React and Radix,
+   * and this one stays DOM-free so its own test suite can run with no
+   * renderer at all. `test/keyboard/palette-actions.test.ts` cross-checks the
+   * two functions agree, so a change to either is caught rather than trusted.
+   */
+  readonly primaryChord: string;
   readonly disabled: boolean;
   /** Why it is disabled, or `null` when it is not. Shown beside the row
    *  rather than left for the operator to press and find out — the sentence
@@ -177,16 +223,17 @@ export type PaletteActionEntry = {
  * gap look like an absence.
  *
  * Reads the SAME registry the key sheet and the tooltips do
- * (`activeBindings`/`bindingChords`/`describeAction`) — a rebind or an
- * unbind changes what this returns with no second list to maintain, and a
- * candidate `effectiveBindings` holds no chord for at all is dropped rather
- * than shown unreachable.
+ * (`activeBindings`/`bindingChords`) — a rebind or an unbind changes what
+ * this returns with no second list to maintain, and a candidate
+ * `effectiveBindings` holds no chord for at all is dropped rather than shown
+ * unreachable. Only the TITLE is this module's own (`PALETTE_ACTIONS`
+ * above) — everything else about a row is read live off the grammar.
  */
 export function buildPaletteActions(
   hasFocusedSession: boolean,
   overrides: KeyBindings = activeBindings(),
 ): readonly PaletteActionEntry[] {
-  return PALETTE_ACTIONS.flatMap((action): readonly PaletteActionEntry[] => {
+  return PALETTE_ACTIONS.flatMap(({ action, title }): readonly PaletteActionEntry[] => {
     const id = actionId(action);
     const chords = bindingChords(overrides, id);
     if (chords.length === 0) {
@@ -197,8 +244,9 @@ export function buildPaletteActions(
       {
         action,
         id,
-        label: describeAction(action).label,
+        title,
         chords,
+        primaryChord: chords[0] as string,
         disabled,
         disabledReason: disabled ? PALETTE_DISABLED_REASON : null,
       },
@@ -211,9 +259,10 @@ export function buildPaletteActions(
  * `filterSheet` (`keysheet.ts`) already states and this deliberately
  * matches: EVERY WORD HAS TO LAND, so "close session" finds the row that
  * closes a session rather than every row mentioning either word, and the
- * search reads a row's label, its chord tokens and its painted symbols, so
- * an operator who read `⌘W` off the sheet finds the same row by typing what
- * they saw.
+ * search reads a row's TITLE (not the sheet's longer sentence), its bound
+ * chord tokens and their painted symbols, so an operator who read `⌘W` off
+ * the sheet finds the same row by typing what they saw even though the row
+ * itself now paints only the primary chord.
  *
  * `query` here is already the text AFTER a leading `/` — callers pass
  * `actionQueryText(rawQuery)`, not the raw box contents, so this function
@@ -229,7 +278,7 @@ export function filterPaletteActions(
     return actions;
   }
   return actions.filter((entry) => {
-    const haystack = `${entry.label} ${entry.chords.join(' ')} ${entry.chords
+    const haystack = `${entry.title} ${entry.chords.join(' ')} ${entry.chords
       .map((chord) => chordSymbols(chord, mac))
       .join(' ')}`.toLowerCase();
     return terms.every((term) => haystack.includes(term));
