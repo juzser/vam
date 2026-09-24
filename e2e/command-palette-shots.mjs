@@ -123,6 +123,97 @@ for (const theme of ['dark', 'light']) {
   await page.waitForTimeout(100);
 }
 
+/**
+ * THE ACTIONS HALF, VS CODE'S OWN SPLIT — the operator, translated: "searching
+ * sessions has no prefix; searching actions starts with `/`". Every claim
+ * this makes is the same shape as the pixel check above: a rectangle, or a
+ * real keystroke's effect, neither of which `test/panels/CommandPalette.test.tsx`
+ * (jsdom's `getBoundingClientRect` is always zero) can ask.
+ */
+await page.evaluate(() => document.documentElement.classList.remove('light'));
+// A session focused first, so the session-scoped rows (`close this session`,
+// the five views, both splits…) paint ENABLED in the screenshot rather than
+// every one of them showing the disabled sentence — the more informative
+// picture, and the one an operator who just picked a session actually sees.
+await page.locator('[data-session-row]').first().click();
+await page.keyboard.press('Meta+k');
+const panel = page.locator('[data-command-palette]');
+await panel.waitFor({ state: 'visible', timeout: 5_000 });
+await page.waitForTimeout(150);
+
+{
+  const box = await panel.boundingBox();
+  await page.screenshot({ path: `${outDir}/command-palette-sessions.png`, clip: box });
+  console.log(`${outDir}/command-palette-sessions.png`);
+}
+
+await page.keyboard.type('/');
+await page.waitForSelector('[data-command-palette][data-palette-mode="actions"]', {
+  timeout: 2_000,
+});
+await page.waitForTimeout(100);
+
+const actionGeometry = await page.evaluate(() => {
+  const panelEl = document.querySelector('[data-command-palette]');
+  const hint = document.querySelector('[data-palette-hint]');
+  const rows = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')];
+  const rect = (el) => {
+    const r = el.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height };
+  };
+  return {
+    panel: panelEl ? rect(panelEl) : null,
+    hint: hint
+      ? { ...rect(hint), text: hint.textContent, scrollWidth: hint.scrollWidth, clientWidth: hint.clientWidth }
+      : null,
+    rowCount: rows.length,
+    rowTexts: rows.map((el) => el.textContent ?? ''),
+  };
+});
+
+check('action mode: at least one action row renders', actionGeometry.rowCount > 0, String(actionGeometry.rowCount));
+// Every row in the curated list has a bound chord (`buildPaletteActions`
+// drops any candidate with none), so the settings row — always bound to `,`
+// and never disabled — is a stand-in for "chords render at all".
+const settingsRow = actionGeometry.rowTexts.find((text) => /^settings/i.test(text));
+check('action mode: the settings row renders with its bound chord (,) beside it', settingsRow?.includes(',') ?? false, settingsRow);
+// A disabled row prints its reason -- with a session focused, that sentence
+// should not appear anywhere in the list.
+check(
+  'action mode: nothing reads disabled with a session focused',
+  !actionGeometry.rowTexts.some((text) => /pick a session first/i.test(text)),
+  actionGeometry.rowTexts.find((text) => /pick a session first/i.test(text)),
+);
+
+check('action mode: the hint line is on screen', (actionGeometry.hint?.width ?? 0) > 0 && (actionGeometry.hint?.height ?? 0) > 0, JSON.stringify(actionGeometry.hint));
+check(
+  'action mode: the hint names the way back to sessions',
+  /back to sessions/i.test(actionGeometry.hint?.text ?? ''),
+  actionGeometry.hint?.text,
+);
+check(
+  'action mode: the hint sits inside the panel, not clipped by its rounded-md overflow-hidden edge',
+  actionGeometry.panel !== null &&
+    actionGeometry.hint !== null &&
+    actionGeometry.hint.left >= actionGeometry.panel.left - 1 &&
+    actionGeometry.hint.right <= actionGeometry.panel.right + 1 &&
+    actionGeometry.hint.bottom <= actionGeometry.panel.bottom + 1,
+  JSON.stringify({ panel: actionGeometry.panel, hint: actionGeometry.hint }),
+);
+check(
+  'action mode: the hint text is not truncated -- it fits the width it is given',
+  (actionGeometry.hint?.scrollWidth ?? 1) <= (actionGeometry.hint?.clientWidth ?? 0) + 1,
+  `scrollWidth ${actionGeometry.hint?.scrollWidth}, clientWidth ${actionGeometry.hint?.clientWidth}`,
+);
+
+{
+  const box = await panel.boundingBox();
+  await page.screenshot({ path: `${outDir}/command-palette-actions.png`, clip: box });
+  console.log(`${outDir}/command-palette-actions.png`);
+}
+await page.keyboard.press('Escape');
+await page.waitForTimeout(100);
+
 await browser.close();
 if (failures.length > 0) {
   console.error(`\n${failures.length} check(s) failed.`);
