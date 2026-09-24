@@ -9,8 +9,8 @@
 
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { readPrefs, type StorageLike } from '../../src/renderer/prefs/prefs.js';
 import { useCanvasPrefs } from '../../src/renderer/canvas/canvas-prefs.js';
+import { readPrefs, type StorageLike } from '../../src/renderer/prefs/prefs.js';
 
 function fakeStorage(): StorageLike {
   const map = new Map<string, string>();
