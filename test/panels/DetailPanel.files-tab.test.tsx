@@ -533,8 +533,11 @@ describe('changed-on-disk — the refusal that must not look like a failure', ()
     expect(q('[data-files-conflict]')?.textContent).toContain('changed on disk');
     // THE OPERATOR'S TEXT IS STILL THERE. This is the assertion that matters
     // most in the whole feature: a conflict must never look like the edit
-    // vanished.
-    expect(editor.value).toBe('A=2 — my own edit');
+    // vanished. The trailing `\n` is the save-time normaliser
+    // (`files-save-normalize.ts`) adding the one final newline every save
+    // attempt gets, whether or not the write itself lands — nothing else
+    // about the operator's own text moved.
+    expect(editor.value).toBe('A=2 — my own edit\n');
 
     // Reload discards it, but only because the operator explicitly asked.
     read.mockResolvedValueOnce({
@@ -582,7 +585,9 @@ describe('dirty state', () => {
     expect(q('[data-files-dirty]')?.getAttribute('aria-label')).toBe('unsaved changes');
 
     await saveViaChord(editor);
-    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2', SIGNATURE());
+    // The save-time normaliser adds the one final newline every save gets
+    // (`files-save-normalize.ts`) — `A=2` had none.
+    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2\n', SIGNATURE());
     expect(q('[data-files-dirty]')).toBeNull();
   });
 
@@ -628,6 +633,79 @@ describe('dirty state', () => {
     // Back to .env — the unsaved text must still be there.
     await openRow('/work/atlas/.env');
     expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('A=UNSAVED');
+  });
+});
+
+/**
+ * THE OPERATOR'S SAVE-TIME ASK: "trim spaces and create an empty line at the
+ * bottom." `saveFile` (`FilesTab.tsx`) runs `normalizeForSave`
+ * (`files-save-normalize.ts`, its own unit tests hold the behaviour table) on
+ * `content` before it reaches `write` — this is the integration half: proof
+ * that what actually goes out over the bridge, and what the editor shows
+ * afterwards, is the normalised text, not the operator's raw keystrokes.
+ */
+describe('save-time normalisation', () => {
+  it('trims trailing whitespace and collapses blank lines before writing, and updates the buffer to match', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'kept', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'a  \nb\t\n\n\n' } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith('/work/atlas/notes.txt', 'a\nb\n', SIGNATURE());
+    // The buffer shows the NORMALISED text, not the operator's raw
+    // keystrokes — the dirty dot has to clear against something, and it must
+    // be what actually reached disk, or a reopened file would look dirty
+    // against its own just-saved content.
+    expect(editor.value).toBe('a\nb\n');
+    expect(q('[data-files-dirty]')).toBeNull();
+  });
+
+  it('leaves an already-normalised file’s save untouched — no needless rewrite of a clean buffer', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'a\nb\n', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'a\nb\nc\n' } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith('/work/atlas/notes.txt', 'a\nb\nc\n', SIGNATURE());
+    expect(editor.value).toBe('a\nb\nc\n');
   });
 });
 
@@ -817,7 +895,9 @@ describe('the keyboard model', () => {
       editor.dispatchEvent(event);
       await Promise.resolve();
     });
-    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2', SIGNATURE());
+    // The save-time normaliser adds the one final newline every save gets
+    // (`files-save-normalize.ts`) — `A=2` had none.
+    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2\n', SIGNATURE());
   });
 
   /**

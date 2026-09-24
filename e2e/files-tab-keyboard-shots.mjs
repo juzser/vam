@@ -47,6 +47,11 @@
  *     check) -- "a conflict still shows the operator's own edit" reddens.
  *   - delete the `beforeunload` effect in `FilesTab.tsx` -- "closing warns
  *     while a buffer is dirty" reddens.
+ *   - in the dirty dot's `className` (`FilesTab.tsx`), swap `bg-waiting` back
+ *     for `bg-ink-dim` and drop `mr-1.5` -- section 1.5's "paints the real
+ *     --vam-waiting value" and "a visible gap separates them" both redden,
+ *     the first because the dot's paint no longer matches the probe and the
+ *     second because the gap falls to 2px (this row's bare `gap-0.5`).
  *
  * Run by hand, or by `e2e/run-web-guards.mjs`:
  *   node e2e/files-tab-keyboard-shots.mjs http://localhost:5520 docs/ui
@@ -624,6 +629,104 @@ check(
   `editor reads ${JSON.stringify(afterBareKey)}`,
 );
 
+// ---------------------------------------------------------------------------
+// 1.5 THE DIRTY DOT'S OWN COLOUR, AND ITS GAP FROM FORMAT — the operator's
+// report on the toolbar's unsaved indicator: a distinct colour from the
+// toolbar's own icons (not the failed/error red either), and visible
+// separation from the prettier (Format) button beside it.
+//
+// ASSERTED AS PAINT AND AS A RECTANGLE, NEVER AS A CLASS NAME. A Tailwind v4
+// class naming a missing token emits NO rule at all — a class-name read would
+// have passed the whole time `bg-waiting` compiled to nothing — and the gap
+// lives partly in a container-query fold (`data-files-header`'s
+// `gap-0.5 @min-[380px]:gap-1.5`) a stylesheet read cannot see either. This
+// is the SAME `.env` the corner rectangle above measured, made dirty by the
+// bare-letter check just above, and it has no preview toggle (not markdown)
+// — so Format trails the dot directly, exactly the adjacency the operator's
+// report is about.
+
+check(
+  'the dirty dot is actually drawn — the buffer above really is dirty',
+  (await page.locator('[data-files-dirty]').count()) > 0,
+);
+
+const dotGap = await page.evaluate(() => {
+  const r = (sel) => {
+    const e = document.querySelector(sel);
+    if (e === null) return null;
+    const b = e.getBoundingClientRect();
+    return { left: b.left, right: b.right };
+  };
+  return { dot: r('[data-files-dirty]'), format: r('[data-files-format]') };
+});
+check(
+  'Format really does trail the dot directly for a .env — nothing else sits between them',
+  dotGap.dot !== null && dotGap.format !== null && dotGap.format.left >= dotGap.dot.right,
+  JSON.stringify(dotGap),
+);
+const dotFormatGap = (dotGap.format?.left ?? 0) - (dotGap.dot?.right ?? 0);
+check(
+  'and a visible gap separates them — at least one toolbar gap unit (the row’s own gap-1.5, 6px)',
+  dotFormatGap >= 6,
+  `measured ${dotFormatGap}px between the dot and Format`,
+);
+
+/** The real paint of a CSS custom property, off a throwaway probe node — the
+ *  same technique `tree-icon-shots.mjs` uses for the icon tones: a class name
+ *  naming a token proves nothing about what the cascade actually resolved. */
+const probeVar = (name) =>
+  page.evaluate((n) => {
+    const el = document.createElement('span');
+    el.style.backgroundColor = `var(${n})`;
+    document.body.appendChild(el);
+    const colour = getComputedStyle(el).backgroundColor;
+    el.remove();
+    return colour;
+  }, name);
+
+const dotPaint = {};
+for (const theme of ['dark', 'light']) {
+  await page.evaluate((t) => {
+    document.documentElement.classList.toggle('light', t === 'light');
+  }, theme);
+  await page.waitForTimeout(120);
+  const dot = await page.evaluate(() => {
+    const e = document.querySelector('[data-files-dirty]');
+    return e === null ? null : getComputedStyle(e).backgroundColor;
+  });
+  const icon = await page.evaluate(() => {
+    const e = document.querySelector('[data-files-format] svg');
+    return e === null ? null : getComputedStyle(e).color;
+  });
+  dotPaint[theme] = { dot, icon, waiting: await probeVar('--vam-waiting'), failed: await probeVar('--vam-failed') };
+  // THE OPERATOR'S OWN ASK, LOOKED AT — not just measured. Clipped to the
+  // header row alone (dot, gap, Format) rather than the whole pane: this is
+  // the one control the report is about, and a full-page shot would bury it.
+  await page.locator('[data-files-header]').screenshot({ path: `${outDir}/files-dirty-${theme}.png` });
+  console.log(`${outDir}/files-dirty-${theme}.png`);
+}
+// Restored before anything below relies on the file's own dark default.
+await page.evaluate(() => document.documentElement.classList.remove('light'));
+
+for (const theme of ['dark', 'light']) {
+  const p = dotPaint[theme];
+  check(
+    `${theme}: the dot paints the real --vam-waiting value — the token exists and a rule actually matched it`,
+    p.dot !== null && p.dot === p.waiting,
+    JSON.stringify(p),
+  );
+  check(
+    `${theme}: the dot is NOT painted in the toolbar icons' own ink`,
+    p.dot !== null && p.icon !== null && p.dot !== p.icon,
+    JSON.stringify(p),
+  );
+  check(
+    `${theme}: and it is not the failed/error red either`,
+    p.dot !== null && p.dot !== p.failed,
+    JSON.stringify(p),
+  );
+}
+
 /**
  * `Mod-d` IS THE ONE `isSelectOnly` CHORD IN THE WHOLE TABLE
  * (`keyboard/chords.ts`'s own `isSelectOnly`) — the sharpest lever there is
@@ -851,8 +954,11 @@ const conflictText = await page.locator('[data-files-conflict]').innerText();
 check('a changed-on-disk save shows the conflict banner', conflictText.includes('changed on disk'), conflictText);
 const editorDuringConflict = await editor.inputValue();
 check(
+  // The trailing `\n` is the save-time normaliser (`files-save-normalize.ts`)
+  // adding the one final newline every save attempt gets, whether or not the
+  // write itself lands — the operator's own text is still exactly there.
   'and the operator\'s own edit is still in the box — never silently overwritten or reverted',
-  editorDuringConflict === 'A=OPERATORS-OWN-EDIT',
+  editorDuringConflict === 'A=OPERATORS-OWN-EDIT\n',
   `editor reads ${JSON.stringify(editorDuringConflict)}`,
 );
 check(
