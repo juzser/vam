@@ -140,7 +140,12 @@ export function CommandPalette({
           autoFocus
           value={query}
           onValueChange={setQuery}
-          placeholder={mode === 'actions' ? 'action name…' : 'go to session… (/ for actions)'}
+          // UNCHANGED IN SESSION MODE, deliberately: `go to session…` is what
+          // `Canvas.keyboard.test.tsx`/`Canvas.overlay-keys.test.tsx` already
+          // find the box by, and the one-line hint below is where "/ for
+          // actions" belongs — repeating it in the placeholder too would be
+          // the same sentence twice for no reader who cannot already see it.
+          placeholder={mode === 'actions' ? 'action name…' : 'go to session…'}
           className="w-full border-line border-b bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-faint"
         />
         {/* THE ONE-LINE HINT, directly under the box, in the muted text token
