@@ -104,6 +104,14 @@ export const CHANNELS = {
    */
   usageGet: 'vam:usage:get',
   /**
+   * Codex's own usage, read from its rollout files rather than the network --
+   * see `src/main/usage/codex-reader.ts`. Answers bare too, a
+   * `CodexUsageSnapshot`, for the same reason `usageGet` does: a reading
+   * failure is not a `SourceError`, there is no source and no session to
+   * refuse anything on.
+   */
+  usageCodexGet: 'vam:usage:codex:get',
+  /**
    * The clipboard channel. Like `usageGet` it answers bare -- a `boolean`,
    * not an `IpcResult`: "did the text reach the clipboard" is the whole
    * answer, and there is no source to refuse anything in the words of.

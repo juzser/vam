@@ -68,6 +68,7 @@ import { revealScrollTop } from './reveal-row.js';
 // by its own neighbours instead (`PROVIDER_LANE_PX`). The comments below still
 // reason about that constant, which is a reference and not a dependency.
 import { StatusMark } from './status-mark.js';
+import { UsagePopover } from './UsagePopover.js';
 
 /**
  * What `pendingAction` holds while "new project" is running.
@@ -1010,7 +1011,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     jumpLabels = NO_JUMP_LABELS,
     phone = false,
     sourceReadout,
-    workspace,
     filter,
     filtering,
     onFilterChange,
@@ -1755,9 +1755,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             row in the column restating something that never varies, and the
             avatar already carries its initial for anyone who wants it. */}
         <div data-avatar-bar className="flex items-center gap-[7px]">
-          <span className="flex h-[24px] w-[24px] flex-none items-center justify-center rounded-full bg-line-strong font-mono text-meta text-ink-dim">
-            {workspace.slice(0, 1).toUpperCase()}
-          </span>
+          {/* THE ACCOUNT ICON, where the letter avatar used to sit -- the
+              operator's own request: replace the initial with an icon that
+              opens usage for every provider vam knows, reset times and all.
+              `UsagePopover` is self-contained (its own open state, its own
+              polling, its own dismissal wiring). See that component's own
+              header for the rest. */}
+          <UsagePopover />
           {/* Pushes the icons to the right edge on every surface. On a
               phone, and only there, it is ALSO where the connectivity dot
               lives now: `min-w-0`/`truncate` so the rare non-healthy arms

@@ -183,6 +183,19 @@ export type GettingStartedProps = {
    *     desktop app, on the machine this phone is connected to.
    */
   readonly phone?: boolean;
+  /**
+   * TRUE WHILE `onNewProject` IS RUNNING -- the directory dialog and the
+   * spawn that follows it (`Canvas.tsx`'s `newProject`, `pendingAction ===
+   * NEW_PROJECT_PENDING`). The sidebar's own New project button already
+   * wears this exact wait visibly (`SessionList.tsx`'s `pending()` helper:
+   * disabled, `aria-busy`, the breathing `data-pending` mark); this button
+   * offers the identical act and had worn none of it, which is the operator's
+   * own complaint made concrete: a native directory picker is the OS's
+   * feedback, not vam's, and it is gone for the ~10s of spawning that follows
+   * it, so THIS control is the only thing on screen that could have said so.
+   * `false`/absent draws the ordinary button.
+   */
+  readonly pending?: boolean;
 };
 
 /**
@@ -208,6 +221,7 @@ export function GettingStarted({
   foreignHiddenCount,
   onShowForeign,
   phone = false,
+  pending = false,
 }: GettingStartedProps) {
   const canCreate = newProjectDecline === null && hasDirectoryPicker;
   return (
@@ -249,6 +263,15 @@ export function GettingStarted({
           type="button"
           data-getting-started-new-project
           onClick={onNewProject}
+          disabled={pending}
+          aria-busy={pending}
+          // The SAME three channels the sidebar's own New project button
+          // already wears for this exact wait (`SessionList.tsx`'s
+          // `pending()`): `disabled`, `aria-busy`, and `data-pending`'s own
+          // breathing mark (`styles.css`) -- one idiom for "this button's
+          // act is running", not a second one invented for this screen.
+          data-pending={pending ? 'true' : undefined}
+          title={pending ? 'Starting a session in the chosen directory…' : undefined}
           className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90"
         >
           <FolderPlus size={12} strokeWidth={2} />
