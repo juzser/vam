@@ -8776,7 +8776,86 @@ export function DetailPanel(props: DetailPanelProps) {
                 }`}
                 style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
-                {/* WRAPPING, since the qualifier below can be a PHRASE where
+                {/* PHONE: the three lines below (count, the "as far back"
+                  caveat, and the read-more control) collapse to ONE compact
+                  row -- the operator's own report, "costs ~3 lines above
+                  every conversation" on the screen with the least of them to
+                  spare. SAME BEHAVIOUR (`readOlder`, unchanged) and SAME
+                  ACCESSIBILITY-NAME SEMANTICS: the full sentence every state
+                  below prints moves into `aria-label`, the same trade this
+                  file already makes for the Send button (a glyph plus a
+                  `Note` carries what a visible word used to) -- nothing here
+                  reads worse to a screen reader for reading shorter to an
+                  eye. Desktop is untouched: the `<>...</>` branch below is
+                  byte-identical to what stood here before this shipped. */}
+                {phone ? (
+                  (() => {
+                    const failedNote =
+                      failedRead !== null && failedRead > 0
+                        ? ` · ${failedRead} failed`
+                        : focusView && failedRead === null
+                          ? ' · failures not reported by this source'
+                          : '';
+                    const stateNote =
+                      pagerNow.phase === 'start'
+                        ? 'The session begins here — vam read back to its first turn.'
+                        : 'This is as far back as vam has read — not necessarily where the session began.';
+                    const compactBase = `${turnsRead} turns read${failedNote}. ${stateNote}`;
+                    if (columnMore === 'available' || columnMore === 'unavailable') {
+                      const errorNote =
+                        columnMore === 'unavailable' && pagerNow.error !== null
+                          ? ` vam could not read further back — ${pagerNow.error.code}: ${pagerNow.error.message}.`
+                          : '';
+                      return (
+                        <button
+                          type="button"
+                          data-column-start-compact
+                          data-column-more={columnMore}
+                          onClick={readOlder}
+                          aria-label={`${compactBase}${errorNote} ${
+                            columnMore === 'unavailable' ? 'Try again.' : 'Read earlier turns.'
+                          }`}
+                          className="vam-tap flex w-full cursor-pointer items-center gap-1 py-0.5 text-left font-mono text-meta text-ink-faint hover:text-ink-dim"
+                        >
+                          {columnMore === 'unavailable'
+                            ? 'Earlier turns — try again ↑'
+                            : 'Earlier turns ↑'}
+                        </button>
+                      );
+                    }
+                    return (
+                      <p
+                        data-column-start-compact
+                        data-column-more={columnMore ?? undefined}
+                        // `role="status"` for all three (not only "reading"):
+                        // the bare `<p>`'s implicit paragraph role supports no
+                        // accessible name at all, so `aria-label` below would
+                        // be silently dropped -- `status` is the one role
+                        // already in use on this line for the live case, and
+                        // it names the other two honestly enough (a fact
+                        // about the pager, read once on arrival) to reuse
+                        // rather than adding a second role for the same shape.
+                        role="status"
+                        aria-label={
+                          columnMore === 'reading'
+                            ? `${compactBase} Reading further back…`
+                            : columnMore === 'unsupported'
+                              ? `${compactBase} This source cannot read further back than its own window.`
+                              : compactBase
+                        }
+                        className="py-0.5 font-mono text-meta text-ink-faint"
+                      >
+                        {columnMore === 'reading'
+                          ? 'Reading earlier turns…'
+                          : columnMore === 'unsupported'
+                            ? "Earlier turns — can't read further back"
+                            : 'Session start ↑'}
+                      </p>
+                    );
+                  })()
+                ) : (
+                  <>
+                    {/* WRAPPING, since the qualifier below can be a PHRASE where
                   this row has only ever held tokens.
 
                   IT IS NOT WHAT STOPS THE OVERFLOW, and saying so would be the
@@ -8797,28 +8876,28 @@ export function DetailPanel(props: DetailPanelProps) {
                   its own two children, so a wrapped caveat sits at the block's
                   rhythm rather than flush against the line above it. The
                   horizontal 6px is unchanged. */}
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                  {/* "read", not a bare count: only the newest `TAIL_BYTES` is
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                      {/* "read", not a bare count: only the newest `TAIL_BYTES` is
                     ever opened, so on a session bigger than that window this
                     is what vam FOUND, not a provable total for the session's
                     whole life. Trailing, not leading: "read 7 turns" is an
                     imperative -- a command this line does not carry out --
                     while "7 turns read" is what it actually is, a count with
                     its qualifier attached. */}
-                  <span data-progress-count>{turnsRead} turns read</span>
-                  {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
+                      <span data-progress-count>{turnsRead} turns read</span>
+                      {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
                     its own `· N failed` on its own line below; this is the
                     total across the window, beside the count of that same
                     window, which is what lets the two share a line honestly.
                     `null` is "no turn read can report failures at all" and
                     draws nothing -- a confident "0 failed" over data nobody
                     looked at is the same lie as a false badge. */}
-                  {failedRead !== null && failedRead > 0 && (
-                    <span data-column-failed className="text-failed">
-                      · {failedRead} failed
-                    </span>
-                  )}
-                  {/* WHAT COLLAPSING PROMISES, AND WHERE THE PROMISE IS EMPTY.
+                      {failedRead !== null && failedRead > 0 && (
+                        <span data-column-failed className="text-failed">
+                          · {failedRead} failed
+                        </span>
+                      )}
+                      {/* WHAT COLLAPSING PROMISES, AND WHERE THE PROMISE IS EMPTY.
                     While every turn draws its line, the line claims nothing
                     about failure -- it says which turn it is. Collapsed, the
                     ABSENCE of a line is the claim: nothing here was worth
@@ -8848,78 +8927,80 @@ export function DetailPanel(props: DetailPanelProps) {
                     could not see, not a report that something went wrong.
                     Painting it as an alarm would make every source without the
                     surface look like a source on fire. */}
-                  {focusView && failedRead === null && (
-                    <span data-column-unreadable className="text-ink-dim">
-                      · failures not reported by this source
-                    </span>
-                  )}
-                </div>
-                {/* THE SENTENCE IS THE STATE, and there are exactly two of them
+                      {focusView && failedRead === null && (
+                        <span data-column-unreadable className="text-ink-dim">
+                          · failures not reported by this source
+                        </span>
+                      )}
+                    </div>
+                    {/* THE SENTENCE IS THE STATE, and there are exactly two of them
                   because there are exactly two things vam can honestly say
                   about the top of a column. The attribute above and this line
                   are read off the SAME fact, so a screen that says one thing to
                   a test and another to a person is not expressible here. */}
-                <p data-column-start-note className="text-ink-faint leading-[1.5]">
-                  {pagerNow.phase === 'start'
-                    ? 'The session begins here — vam read back to its first turn.'
-                    : 'This is as far back as vam has read — not necessarily where the session began.'}
-                </p>
-                {/* WHAT VAM CAN DO ABOUT THAT, or why it cannot. Absent
+                    <p data-column-start-note className="text-ink-faint leading-[1.5]">
+                      {pagerNow.phase === 'start'
+                        ? 'The session begins here — vam read back to its first turn.'
+                        : 'This is as far back as vam has read — not necessarily where the session began.'}
+                    </p>
+                    {/* WHAT VAM CAN DO ABOUT THAT, or why it cannot. Absent
                   entirely once the start is proven: there is nothing left to
                   ask for, so there is nothing to ask with. */}
-                {columnMore !== null && (
-                  <p
-                    data-column-more={columnMore}
-                    className="flex flex-wrap items-baseline gap-x-1.5 leading-[1.5]"
-                  >
-                    {columnMore === 'unsupported' ? (
-                      // A STATED REFUSAL, NOT A DEAD CONTROL. `history` absent
-                      // from the port is "this source has no way to page", which
-                      // is a different sentence from "there is nothing older" --
-                      // `pull-requests.ts`'s rule, at the one place in this pane
-                      // it can still be got wrong.
-                      <span data-column-more-note>
-                        This source cannot read further back than its own window.
-                      </span>
-                    ) : columnMore === 'reading' ? (
-                      // A STATUS, NEVER A DIMMED BUTTON: mid-flight a control is
-                      // either painted and inert or half-painted and live, and
-                      // both are states this pane must not have. It says what is
-                      // happening and claims nothing about what will be found --
-                      // no count, no progress bar, because vam does not know how
-                      // much is there.
-                      <span data-column-more-note role="status">
-                        Reading further back…
-                      </span>
-                    ) : (
-                      <>
-                        {columnMore === 'unavailable' && pagerNow.error !== null && (
-                          // THE SOURCE'S OWN WORDS, `code: message`, the same
-                          // shape every other refusal in this pane renders --
-                          // and the reason `SourceError` travels the bridge
-                          // verbatim (`sources/port.ts`'s `describeFailure`).
-                          <span data-column-more-error className="text-failed">
-                            vam could not read further back — {pagerNow.error.code}:{' '}
-                            {pagerNow.error.message}
+                    {columnMore !== null && (
+                      <p
+                        data-column-more={columnMore}
+                        className="flex flex-wrap items-baseline gap-x-1.5 leading-[1.5]"
+                      >
+                        {columnMore === 'unsupported' ? (
+                          // A STATED REFUSAL, NOT A DEAD CONTROL. `history` absent
+                          // from the port is "this source has no way to page", which
+                          // is a different sentence from "there is nothing older" --
+                          // `pull-requests.ts`'s rule, at the one place in this pane
+                          // it can still be got wrong.
+                          <span data-column-more-note>
+                            This source cannot read further back than its own window.
                           </span>
-                        )}
-                        <button
-                          type="button"
-                          data-column-more-ask
-                          onClick={readOlder}
-                          /* `vam-tap` FOR THE PHONE'S FLOOR, and it is opt-in
+                        ) : columnMore === 'reading' ? (
+                          // A STATUS, NEVER A DIMMED BUTTON: mid-flight a control is
+                          // either painted and inert or half-painted and live, and
+                          // both are states this pane must not have. It says what is
+                          // happening and claims nothing about what will be found --
+                          // no count, no progress bar, because vam does not know how
+                          // much is there.
+                          <span data-column-more-note role="status">
+                            Reading further back…
+                          </span>
+                        ) : (
+                          <>
+                            {columnMore === 'unavailable' && pagerNow.error !== null && (
+                              // THE SOURCE'S OWN WORDS, `code: message`, the same
+                              // shape every other refusal in this pane renders --
+                              // and the reason `SourceError` travels the bridge
+                              // verbatim (`sources/port.ts`'s `describeFailure`).
+                              <span data-column-more-error className="text-failed">
+                                vam could not read further back — {pagerNow.error.code}:{' '}
+                                {pagerNow.error.message}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              data-column-more-ask
+                              onClick={readOlder}
+                              /* `vam-tap` FOR THE PHONE'S FLOOR, and it is opt-in
                              by design (`styles.css`): the stylesheet sizes a
                              tap target, the component decides what one is.
                              Measured without it at 390px this link was
                              119.2x16.5 -- half a touch target, and the only
                              way to reach anything older than the last page. */
-                          className="vam-tap cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
-                        >
-                          {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
-                        </button>
-                      </>
+                              className="vam-tap cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                            >
+                              {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
+                            </button>
+                          </>
+                        )}
+                      </p>
                     )}
-                  </p>
+                  </>
                 )}
                 {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
                   out of the window between one poll and the next; falling
@@ -9824,7 +9905,9 @@ export function DetailPanel(props: DetailPanelProps) {
             {images.length > 0 && (
               <p
                 data-pasted-images
-                className={phone ? 'basis-full text-control text-ink-dim' : 'text-control text-ink-dim'}
+                className={
+                  phone ? 'basis-full text-control text-ink-dim' : 'text-control text-ink-dim'
+                }
               >
                 {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
                 vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
@@ -9835,7 +9918,9 @@ export function DetailPanel(props: DetailPanelProps) {
             {attachError !== null && (
               <p
                 data-attach-error
-                className={phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'}
+                className={
+                  phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'
+                }
               >
                 {attachError}
               </p>
@@ -9849,7 +9934,9 @@ export function DetailPanel(props: DetailPanelProps) {
             {dictateError !== null && (
               <p
                 data-dictate-error
-                className={phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'}
+                className={
+                  phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'
+                }
               >
                 {dictateError}
               </p>

@@ -232,7 +232,7 @@ describe('the desktop composer row is unchanged', () => {
   });
 });
 
-describe('AC-7\'s height half: the phone row is merged, not stacked (docs/design/phone-core-loop.md §4.1)', () => {
+describe("AC-7's height half: the phone row is merged, not stacked (docs/design/phone-core-loop.md §4.1)", () => {
   /**
    * jsdom/happy-dom compute no real layout (`getBoundingClientRect` is
    * always 0), so the actual pixel height this section closes -- 145px down
