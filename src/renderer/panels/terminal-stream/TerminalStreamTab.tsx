@@ -46,6 +46,13 @@ function mapScheme(scheme: ResolvedTerminalScheme): ITheme {
  *  browser build has no stream behind this tab either. */
 const NOT_AVAILABLE_TEXT = 'the terminal is only available in the vam desktop app';
 
+/** `TerminalTab.tsx`'s own `SCROLL_CHORDS` (`#459`) keys, Shift-held only:
+ *  VAM'S scrollback, never the running program's, intercepted before xterm's
+ *  own key handling sees them and mapped onto xterm's NATIVE scrollback
+ *  (`term.scrollPages`/`scrollToTop`/`scrollToBottom`) instead of a DOM
+ *  scroll. */
+const SCROLL_CHORD_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End']);
+
 /** The four ways `terminalStreamOpen` refuses (`main/terminal/stream-ipc.ts`'s
  *  own `StreamOpenRefusal`), named here rather than imported: that module
  *  reaches `node:crypto`, and this file is typechecked under
@@ -124,6 +131,21 @@ export function TerminalStreamTab(props: {
         // mark has to be set imperatively on the element it actually gives
         // back rather than rendered.
         term.textarea?.setAttribute(INSERT_STOP, '');
+        // `false` STOPS THE KEY REACHING XTERM'S OWN HANDLING (and so its
+        // `onData`) -- checked BEFORE that handling, exactly where
+        // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`
+        // for everything else, including keyup, so ordinary typing is
+        // unaffected.
+        term.attachCustomKeyEventHandler((event) => {
+          if (event.type !== 'keydown' || !event.shiftKey || !SCROLL_CHORD_KEYS.has(event.key)) {
+            return true;
+          }
+          if (event.key === 'PageUp') term.scrollPages(-1);
+          else if (event.key === 'PageDown') term.scrollPages(1);
+          else if (event.key === 'Home') term.scrollToTop();
+          else term.scrollToBottom();
+          return false;
+        });
         term.write(result.seed);
         fit.fit();
         termRef.current = term;

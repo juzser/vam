@@ -28,6 +28,10 @@ class FakeTerminal {
   // document, which is exactly what xterm.js hands back as `term.textarea`
   // once `open()` runs against a real container.
   textarea: HTMLTextAreaElement = document.createElement('textarea');
+  scrollPages = vi.fn();
+  scrollToTop = vi.fn();
+  scrollToBottom = vi.fn();
+  customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
     lastTerm = this;
@@ -42,6 +46,9 @@ class FakeTerminal {
   reset() {}
   onData(handler: (text: string) => void) {
     onDataHandler = handler;
+  }
+  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+    this.customKeyEventHandler = handler;
   }
   dispose() {
     disposeCalls.push(1);
@@ -241,6 +248,57 @@ describe('mounted with a bridge', () => {
     const landed = focusInsertStop(container);
     expect(landed).toBe(true);
     expect(document.activeElement).toBe(lastTerm?.textarea);
+  });
+
+  describe('scrollback chords (#459), Shift-held only', () => {
+    async function openAndGetHandler() {
+      withBridge({});
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const handler = lastTerm?.customKeyEventHandler;
+      if (handler === undefined) throw new Error('no handler attached');
+      return handler;
+    }
+
+    // `false` from `attachCustomKeyEventHandler` is what stops the key
+    // reaching xterm's own processing -- and so its `onData`, the channel
+    // that becomes `terminalStream.write` -- BEFORE it can leak through as
+    // typed input; a real xterm never calls `onData` for a key this handler
+    // declines, which is trusted here rather than re-implemented (this
+    // component mocks `Terminal` entirely, matching every other test in this
+    // file).
+    it.each([
+      ['PageUp', 'scrollPages', [-1]],
+      ['PageDown', 'scrollPages', [1]],
+      ['Home', 'scrollToTop', []],
+      ['End', 'scrollToBottom', []],
+    ] as const)('Shift+%s scrolls via term.%s and consumes the key', async (key, method, args) => {
+      const handler = await openAndGetHandler();
+      const consumed = handler({ type: 'keydown', shiftKey: true, key } as KeyboardEvent);
+      expect(consumed).toBe(false);
+      expect(lastTerm?.[method]).toHaveBeenCalledWith(...args);
+    });
+
+    it('does not consume the same key without Shift held', async () => {
+      const handler = await openAndGetHandler();
+      const consumed = handler({
+        type: 'keydown',
+        shiftKey: false,
+        key: 'PageUp',
+      } as KeyboardEvent);
+      expect(consumed).toBe(true);
+      expect(lastTerm?.scrollPages).not.toHaveBeenCalled();
+    });
+
+    it('does not act on keyup, only keydown', async () => {
+      const handler = await openAndGetHandler();
+      const consumed = handler({ type: 'keyup', shiftKey: true, key: 'Home' } as KeyboardEvent);
+      expect(consumed).toBe(true);
+      expect(lastTerm?.scrollToTop).not.toHaveBeenCalled();
+    });
   });
 
   it('types into the stream via write()', async () => {
