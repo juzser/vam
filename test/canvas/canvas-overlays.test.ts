@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 /**
  * The extracted OVERLAY-VISIBILITY hook, asserted through its own return
- * value -- not through `Canvas`'s DOM. Three cases carry the load-bearing
- * rules: opening the palette closes nothing else, `settingsSection` survives
- * a close and reopen (it records today's behaviour, not a chosen one), and
- * `confirmForceClose` holds its payload.
+ * value -- not through `Canvas`'s DOM. The load-bearing rules: `settingsSection`
+ * defaults to `appearance`; opening the palette closes nothing else;
+ * `settingsSection` survives a close and reopen (it records today's
+ * behaviour, not a chosen one); and `confirmForceClose` holds its payload.
  */
 
 import { act, renderHook } from '@testing-library/react';
@@ -12,6 +12,12 @@ import { describe, expect, it } from 'vitest';
 import { useCanvasOverlays } from '../../src/renderer/canvas/canvas-overlays.js';
 
 describe('useCanvasOverlays', () => {
+  it('settingsSection defaults to appearance', () => {
+    const { result } = renderHook(() => useCanvasOverlays());
+
+    expect(result.current.settingsSection).toBe('appearance');
+  });
+
   it('opening the palette closes nothing else', () => {
     const { result } = renderHook(() => useCanvasOverlays());
 
