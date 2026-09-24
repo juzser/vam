@@ -785,29 +785,49 @@ describe('SessionList projects header', () => {
 describe('SessionList filter popover', () => {
   const menu = (root: ParentNode) => root.querySelector('[data-filter-menu]') as HTMLElement;
 
-  it('opens at its roomy width, and never wider than the sidebar holding it', () => {
-    // The popover is anchored inside `data-projects-header`, whose padding box
-    // is the sidebar minus `px-3` on each side, so a 12px gutter on the free
-    // side bounds it at `width - 24`.
-    const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
-    expect(menu(container).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
-    cleanup();
+  /** Swaps `window.innerWidth` for the body of `run`, always restoring it --
+   *  the shape `Canvas.keyboard.test.tsx`'s own resize-from-the-keyboard
+   *  suite already uses for the same reason: `useViewportWidth` reads the
+   *  real global, so a deterministic assertion needs a real, restored one. */
+  const withInnerWidth = (value: number, run: () => void) => {
+    const real = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { value, configurable: true });
+    try {
+      run();
+    } finally {
+      if (real) Object.defineProperty(window, 'innerWidth', real);
+    }
+  };
 
-    const { container: narrow } = mountWith(twoProjects(), {
-      filterMenuOpen: true,
-      width: SIDEBAR_MIN,
+  it('opens at its roomy width, clamped to the WINDOW rather than the sidebar', () => {
+    // A wide viewport: the popover opens at its full ceiling regardless of
+    // how wide the sidebar itself is -- it floats past the column now,
+    // orca's own shape (`FILTER_POPOVER_WIDTH`'s own header), rather than
+    // clamping to `sidebar - 24` the way the first draft did.
+    withInnerWidth(1600, () => {
+      const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
+      expect(menu(container).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
+      cleanup();
+
+      // A NARROW SIDEBAR no longer narrows the popover at all.
+      const { container: narrowSidebar } = mountWith(twoProjects(), {
+        filterMenuOpen: true,
+        width: SIDEBAR_MIN,
+      });
+      expect(menu(narrowSidebar).style.width).toBe(`${FILTER_POPOVER_WIDTH}px`);
+      cleanup();
     });
-    const drawn = Number.parseInt(menu(narrow).style.width, 10);
-    expect(drawn).toBe(SIDEBAR_MIN - 24);
-    // Inside the sidebar, therefore inside the window: the sidebar starts at
-    // the window's left edge.
-    expect(drawn + 24).toBeLessThanOrEqual(SIDEBAR_MIN);
-    expect(drawn).toBeLessThan(FILTER_POPOVER_WIDTH);
-    cleanup();
 
-    // Roomier than the 212px it replaced, at the default sidebar width.
-    const { container: normal } = mountWith(twoProjects(), { filterMenuOpen: true, width: 264 });
-    expect(Number.parseInt(menu(normal).style.width, 10)).toBeGreaterThan(212);
+    // A NARROW WINDOW is what clamps it now, at `viewportWidth - 24` --
+    // still inside the browser viewport, which is the one edge this popover
+    // must never hang off (`FILTER_POPOVER_GUTTER`'s own header).
+    withInnerWidth(300, () => {
+      const { container } = mountWith(twoProjects(), { filterMenuOpen: true, width: 480 });
+      const drawn = Number.parseInt(menu(container).style.width, 10);
+      expect(drawn).toBe(300 - 24);
+      expect(drawn + 24).toBeLessThanOrEqual(300);
+      expect(drawn).toBeLessThan(FILTER_POPOVER_WIDTH);
+    });
   });
 
   /**
@@ -825,8 +845,7 @@ describe('SessionList filter popover', () => {
     const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
     expect(row).not.toBeNull();
     expect(row.getAttribute('aria-checked')).toBe('true');
-    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
-    expect(row.textContent).toContain('11');
+    expect(row.textContent).toContain('11 hidden');
   });
 
   it('turns the ended rule off without disturbing the other two', () => {
@@ -888,9 +907,12 @@ describe('SessionList filter popover', () => {
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
   });
 
-  it('says in the popover that the default is in force, with what it hides', () => {
+  it('shows what a default rule hides, inline after its label', () => {
     // Uncounted must not mean invisible: a hidden session that is neither
     // shown nor counted is indistinguishable from one that does not exist.
+    // There is no "default" badge to say the rule is one anybody chose --
+    // that is gone with the two-line layout it shared a row with -- but the
+    // count itself is still there, quietly, after the label.
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
@@ -898,8 +920,7 @@ describe('SessionList filter popover', () => {
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
     expect(row.getAttribute('aria-checked')).toBe('true');
-    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
-    expect(row.textContent).toContain('3');
+    expect(row.textContent).toContain('3 hidden');
     // And it is still the control that turns the default off.
     const seen: SessionFilters[] = [];
     cleanup();
@@ -922,21 +943,6 @@ describe('SessionList filter popover', () => {
     ]);
   });
 
-  it('drops the default tag from a rule the operator applied', () => {
-    const { container } = mountWith(twoProjects(), {
-      filterMenuOpen: true,
-      originFilters: {
-        hideAgentStarted: true,
-        onlyPrompted: true,
-        hideEnded: false,
-        hideForeign: true,
-        hideIdle: false,
-      },
-    });
-    const prompted = container.querySelector('[data-origin-toggle="prompted"]') as HTMLElement;
-    expect(prompted.querySelector('[data-filter-default]')).toBeNull();
-  });
-
   /**
    * THE FOURTH ROW -- `docs/design/vam-owns-the-session.md`'s own Stage 1
    * acceptance line, the popover half of it.
@@ -950,8 +956,7 @@ describe('SessionList filter popover', () => {
     const row = container.querySelector('[data-origin-toggle="foreign"]') as HTMLElement;
     expect(row).not.toBeNull();
     expect(row.getAttribute('aria-checked')).toBe('true');
-    expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
-    expect(row.textContent).toContain('11');
+    expect(row.textContent).toContain('11 hidden');
   });
 
   it('turns the foreign rule off without disturbing the other three', () => {

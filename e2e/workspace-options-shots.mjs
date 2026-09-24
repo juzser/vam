@@ -55,6 +55,36 @@ function withinViewport(rect, viewport, label, detailPrefix) {
   );
 }
 
+/**
+ * Does the Group-by control's OWN box actually hold its own pills -- not
+ * merely "are the pills somewhere inside the viewport", which a pill can
+ * satisfy while its immediate parent clips it to nothing.
+ *
+ * FALSIFIED, and what caught the falsification: `overflow-hidden` on
+ * `[data-group-by]` (added so `divide-x`'s dividers respect the group's own
+ * rounded corners) changes the CSS "automatic minimum size" a flex item
+ * gets from its content to zero -- so on a phone, where the popover's own
+ * height is capped and `overflow-y: auto`, the flex algorithm was free to
+ * shrink this ONE child (every sibling row, with no `overflow-hidden` of
+ * its own, refused to shrink below its content) to a 2px sliver while its
+ * four pills kept reporting the same correct 44px rects they always had --
+ * `getBoundingClientRect` does not know its own ancestor clipped it. The
+ * existing per-control "inside the viewport" and "clears 44px" checks both
+ * read the PILL's own rect and both passed throughout; only a rect-vs-rect
+ * comparison against the pills' immediate parent catches it.
+ */
+async function groupByHoldsItsPills(page) {
+  return page.evaluate(() => {
+    const container = document.querySelector('[data-group-by]');
+    if (container === null) return null;
+    const cb = container.getBoundingClientRect();
+    return [...document.querySelectorAll('[data-group-by-option]')].map((el) => {
+      const b = el.getBoundingClientRect();
+      return Math.round(b.top) >= Math.round(cb.top) - 1 && Math.round(b.bottom) <= Math.round(cb.bottom) + 1;
+    });
+  });
+}
+
 const browser = await chromium.launch();
 
 // ------------------------------------------------------------------ desktop
@@ -99,6 +129,13 @@ const browser = await chromium.launch();
       (r) => r.x >= 0 && r.y >= 0 && r.x + r.w <= viewport.width && r.y + r.h <= viewport.height,
     ),
     JSON.stringify(mainRects.filter((r) => r.x < 0 || r.y < 0 || r.x + r.w > viewport.width)),
+  );
+
+  const desktopGroupByHeld = await groupByHoldsItsPills(page);
+  check(
+    'the Group-by control is tall enough to actually show its own pills, not clipped by its own box',
+    desktopGroupByHeld !== null && desktopGroupByHeld.every(Boolean),
+    JSON.stringify(desktopGroupByHeld),
   );
 
   await page.screenshot({ path: `${outDir}/workspace-options-desktop.png` });
@@ -276,6 +313,18 @@ const browser = await chromium.launch();
   // the app carries once it sits under the phone shell's own class.
   const short = phoneRects.controls.filter((r) => r.h < 44);
   check('every control clears the 44px phone tap floor', short.length === 0, JSON.stringify(short));
+
+  // THE CHECK ABOVE READS EACH PILL'S OWN RECT, WHICH IS EXACTLY WHAT MISSED
+  // THE REAL BUG HERE: the phone popover's capped, scrolling height is what
+  // shrank `[data-group-by]` to a sliver (`groupByHoldsItsPills`'s own
+  // header) -- the pills inside it kept the correct 44px rects `short`
+  // above checks throughout.
+  const phoneGroupByHeld = await groupByHoldsItsPills(page);
+  check(
+    'the Group-by control is tall enough to actually show its own pills, not clipped by its own box',
+    phoneGroupByHeld !== null && phoneGroupByHeld.every(Boolean),
+    JSON.stringify(phoneGroupByHeld),
+  );
 
   await page.screenshot({ path: `${outDir}/workspace-options-phone.png` });
   console.log(`${outDir}/workspace-options-phone.png`);
