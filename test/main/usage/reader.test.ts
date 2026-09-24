@@ -44,6 +44,18 @@ describe('readUsage', () => {
     expect(typeof snapshot.observedAt).toBe('string');
   });
 
+  it('also carries the real body’s limits[] row, for the popover’s per-model breakdown', async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse(200, REAL_BODY));
+
+    const snapshot = await readUsage({ readToken: async () => 'a-fake-token', fetch: fetchSpy });
+
+    expect(snapshot.kind).toBe('ok');
+    if (snapshot.kind !== 'ok') throw new Error('unreachable');
+    expect(snapshot.limits).toEqual([
+      { id: 'session', label: '5-hour', window: { kind: 'unknown' } },
+    ]);
+  });
+
   it('sends the token as a bearer header and a user agent naming claude-code', async () => {
     const fetchSpy = vi.fn(async () => jsonResponse(200, REAL_BODY));
 
