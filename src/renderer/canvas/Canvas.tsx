@@ -135,26 +135,21 @@ import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
-import { DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
+import { DEFAULT_PANES, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
-  applyPalette,
   applyProjectIcons,
   applyRenames,
-  applyTheme,
   browserStorage,
   countDismissedSessions,
   createGroup,
   deleteGroup,
-  type EffectiveTheme,
+  type FocusChoice,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
   isSessionDismissed,
-  type Prefs,
-  paletteFor,
   prRepoFor,
-  readPrefs,
   removeProjectFromGroup,
   renameGroup,
   restoreAllDismissedSessions,
@@ -177,12 +172,8 @@ import {
   setSessionFilters,
   setTheme,
   setViewOptions,
-  type Theme,
-  watchOsTheme,
-  writePrefs,
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
-import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
 import type { SectionId } from '../settings/sections.js';
 import { capabilitiesFor } from '../sources/members.js';
 import {
@@ -193,6 +184,8 @@ import {
 } from '../sources/port.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
+import { useCanvasPrefs } from './canvas-prefs.js';
+import { useCanvasTheme } from './canvas-theme.js';
 import {
   adoptOrphans,
   canSplit,
@@ -1778,44 +1771,18 @@ function CanvasInner({
   const usageSnapshot = useUsageSnapshot(window.api?.usage?.get);
   const usage = describeUsage(usageSnapshot, new Date());
 
-  /**
-   * What you arranged, as opposed to what the factory reported. Read once —
-   * `localStorage` is synchronous and this is two small maps — and written on
-   * every change, so a reload finds the canvas as you left it.
-   */
   const storage = useMemo(() => browserStorage(), []);
-  const [prefs, setPrefs] = useState<Prefs>(() => readPrefs(storage));
-  const savePrefs = useCallback(
-    (next: Prefs) => {
-      setPrefs(next);
-      writePrefs(storage, next);
-    },
-    [storage],
-  );
-
-  /**
-   * The two pane widths, live. `viewportWidth` re-renders the clamp on every
-   * resize but never writes (epic.md §4.2 point 2). `liveWidths` holds a
-   * pane's in-progress drag value so the other pane's rendered width can
-   * react to it without touching storage; it is cleared and `savePrefs` is
-   * called only at drag end, never mid-drag (AC-2(c)).
-   */
-  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
-  useEffect(() => {
-    function onResize() {
-      setViewportWidth(window.innerWidth);
-    }
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const [liveWidths, setLiveWidths] = useState<{
-    sidebar: number | null;
-    detail: number | null;
-  }>({ sidebar: null, detail: null });
-
-  const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
-  const storedDetail = liveWidths.detail ?? prefs.panes.detail;
+  const {
+    prefs,
+    savePrefs,
+    viewportWidth,
+    storedSidebar,
+    storedDetail,
+    sidebarWidth,
+    detailWidth,
+    onPaneChange,
+    onPaneCommit,
+  } = useCanvasPrefs(storage);
   /**
    * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
    * so every environment without one -- jsdom, happy-dom, the tests -- keeps
@@ -1823,59 +1790,13 @@ function CanvasInner({
    */
   const phone = usePhoneViewport();
 
-  const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
-    { sidebar: storedSidebar, detail: storedDetail },
-    viewportWidth,
-  );
-
-  const onPaneChange = useCallback((pane: 'sidebar' | 'detail', width: number) => {
-    setLiveWidths((prev) => ({ ...prev, [pane]: width }));
-  }, []);
-
-  const onPaneCommit = useCallback(
-    (pane: 'sidebar' | 'detail', width: number) => {
-      setLiveWidths((prev) => ({ ...prev, [pane]: null }));
-      savePrefs(setPaneWidth(prefs, pane, width));
-    },
-    [prefs, savePrefs],
-  );
+  const { effective } = useCanvasTheme(prefs);
 
   /**
    * The factory's model with your icons on it. Done here, once, so the tab
    * strip does not have to know that an icon comes from somewhere
    * different than the rest of a session.
    */
-  // The class on <html> is what styles.css switches on, and prefs is the only
-  // source for it — so this effect, not the toggle's click handler, is what
-  // moves the document. A handler that also wrote the class would be a second
-  // writer, and the two disagree the first time prefs is restored from storage.
-  // `system` is a subscription, not a sample: without the listener the OS
-  // flipping at sunset leaves a dashboard on the appearance it had at mount,
-  // which is not what the overlay's own hint promises. Keeping the resolved
-  // value in state is what lets the sidebar's label and its click describe the
-  // screen rather than the store.
-  // The colour overrides move HERE too, in the same statement, because they are
-  // stored per theme: the class and the bucket in force are two halves of one
-  // appearance, and a flip that moved only the class would leave a light theme
-  // wearing dark's canvas until the next write. `writePrefs` covers an edit;
-  // only this covers the OS changing its mind with nothing else happening.
-  // The terminal's scheme is the third half of the same appearance and is
-  // stored per theme for the same reason, so it moves in the same statement:
-  // without this line an open terminal would keep its dark scheme after the
-  // OS flipped to light under `system`, with nothing else on screen wrong.
-  const [effective, setEffective] = useState<EffectiveTheme>('dark');
-  useEffect(() => {
-    const show = (theme: Theme) => {
-      const next = applyTheme(theme);
-      setEffective(next);
-      applyPalette(paletteFor(prefs.palette, next));
-      setActiveTerminalScheme(prefs.terminalScheme, next);
-    };
-    show(prefs.theme);
-    if (prefs.theme !== 'system') return;
-    return watchOsTheme(() => show('system'));
-  }, [prefs.theme, prefs.palette, prefs.terminalScheme]);
-
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
     // the sidebar, the tab strip and the detail panel all render `session.title`,
