@@ -410,7 +410,7 @@ export function orderedPaneTabs(
  * ordered array. `Canvas.tsx` folds this into `entries` itself (its final
  * step) rather than keeping it as a second, SessionList-local array, because
  * `entries` is also what `j`/`k`/`gt`/`gT`/`f` step through -- a display
- * order the keyboard disagreed with would be the exact defect class #475
+ * order the keyboard disagreed with would be the exact defect class PR 475
  * closed one layer up, for the foreign/dismissed filter. `allEntries`
  * (`orderedSessions(model)` untouched) still feeds tab membership, so this
  * never changes which sessions are tabs, only what order the sidebar and the

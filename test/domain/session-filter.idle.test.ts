@@ -67,9 +67,9 @@ describe('isIdle', () => {
 
 describe('isHiddenByIdleFilter', () => {
   it('hides an idle session once the operator turns the rule on', () => {
-    expect(isHiddenByIdleFilter(session({ status: 'idle' }), filters({ hideIdle: true }), 'all')).toBe(
-      true,
-    );
+    expect(
+      isHiddenByIdleFilter(session({ status: 'idle' }), filters({ hideIdle: true }), 'all'),
+    ).toBe(true);
   });
 
   it('leaves it be at the shipped default', () => {
@@ -77,7 +77,14 @@ describe('isHiddenByIdleFilter', () => {
   });
 
   it('never hides a session that is not idle', () => {
-    for (const status of ['running', 'waiting', 'done', 'failed', 'unstarted', 'terminal'] as const) {
+    for (const status of [
+      'running',
+      'waiting',
+      'done',
+      'failed',
+      'unstarted',
+      'terminal',
+    ] as const) {
       expect(isHiddenByIdleFilter(session({ status }), filters({ hideIdle: true }), 'all')).toBe(
         false,
       );

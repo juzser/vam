@@ -824,7 +824,7 @@ describe('SessionList filter popover', () => {
     });
     const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
     expect(row).not.toBeNull();
-    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.getAttribute('aria-checked')).toBe('true');
     expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
     expect(row.textContent).toContain('11');
   });
@@ -840,7 +840,13 @@ describe('SessionList filter popover', () => {
       fireEvent.click(container.querySelector('[data-origin-toggle="ended"]') as Element);
     });
     expect(seen).toEqual([
-      { hideAgentStarted: true, onlyPrompted: false, hideEnded: false, hideForeign: true, hideIdle: false },
+      {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: false,
+        hideForeign: true,
+        hideIdle: false,
+      },
     ]);
   });
 
@@ -891,7 +897,7 @@ describe('SessionList filter popover', () => {
       hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
-    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.getAttribute('aria-checked')).toBe('true');
     expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
     expect(row.textContent).toContain('3');
     // And it is still the control that turns the default off.
@@ -906,7 +912,13 @@ describe('SessionList filter popover', () => {
       fireEvent.click(live.querySelector('[data-origin-toggle="agent"]') as Element);
     });
     expect(seen).toEqual([
-      { hideAgentStarted: false, onlyPrompted: false, hideEnded: true, hideForeign: true, hideIdle: false },
+      {
+        hideAgentStarted: false,
+        onlyPrompted: false,
+        hideEnded: true,
+        hideForeign: true,
+        hideIdle: false,
+      },
     ]);
   });
 
@@ -937,7 +949,7 @@ describe('SessionList filter popover', () => {
     });
     const row = container.querySelector('[data-origin-toggle="foreign"]') as HTMLElement;
     expect(row).not.toBeNull();
-    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.getAttribute('aria-checked')).toBe('true');
     expect(row.querySelector('[data-filter-default]')?.textContent).toBe('default');
     expect(row.textContent).toContain('11');
   });
@@ -953,7 +965,13 @@ describe('SessionList filter popover', () => {
       fireEvent.click(container.querySelector('[data-origin-toggle="foreign"]') as Element);
     });
     expect(seen).toEqual([
-      { hideAgentStarted: true, onlyPrompted: false, hideEnded: true, hideForeign: false, hideIdle: false },
+      {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: true,
+        hideForeign: false,
+        hideIdle: false,
+      },
     ]);
   });
 

@@ -140,7 +140,7 @@ const EXCEPTIONS: ReadonlyArray<{
   {
     file: 'panels/SessionList.tsx',
     size: '13',
-    count: 5,
+    count: 6,
     why:
       'The sidebar\u2019s project and group titles, TWICE MOVED. Operator, in ' +
       'one breath the first time: "make the project and group titles bold and ' +
@@ -155,16 +155,23 @@ const EXCEPTIONS: ReadonlyArray<{
       'shared size. Still a named exception rather than the fifth step: 13 is ' +
       '`text-body`\u2019s number but not `text-body`\u2019s ROLE (a section ' +
       'heading, not read prose), and reusing the role would be the false ' +
-      'economy `docs/design/workspace-options.md` argues against. Five call ' +
+      'economy `docs/design/workspace-options.md` argues against. Six call ' +
       'sites, not one: the group heading name, the project heading name, the ' +
       'provisional project heading a session-in-flight draws before it has a ' +
       'real section to join (which has to match the real heading\u2019s size ' +
       'and weight exactly, or the row would visibly change size the moment ' +
-      'the session arrives and the two swap), and the two heading ICON slots ' +
-      '-- an emoji is text and takes its size from the slot it sits in, and ' +
+      'the session arrives and the two swap), the two heading ICON slots -- ' +
+      'an emoji is text and takes its size from the slot it sits in, and ' +
       '`HEADING_GLYPH_PX`\u2019s own history is what a heading whose picture ' +
       'and word disagree on size looks like, so the icon moved with the ' +
-      'caption both times rather than being left at `text-heading`.',
+      'caption both times rather than being left at `text-heading` -- and, ' +
+      'new with the same pass, `Group by: Status`\u2019s own section heading ' +
+      '(the bucket name -- "Needs you", "Running", "Sleeping", "Done"), which ' +
+      'sits at the SAME level the project/group heading does when THEY are ' +
+      'showing, and reads at their exact size and weight for the same reason ' +
+      'the provisional heading above does: an operator flipping `Group by` ' +
+      'must not see the level above the rows change size depending on which ' +
+      'grouping is chosen.',
   },
 ];
 

@@ -58,7 +58,10 @@ function entry(project: Project, session: Session): SessionEntry {
   return { project, session, group: null };
 }
 
-const view = (over: Partial<ViewOptions> = {}): ViewOptions => ({ ...DEFAULT_VIEW_OPTIONS, ...over });
+const view = (over: Partial<ViewOptions> = {}): ViewOptions => ({
+  ...DEFAULT_VIEW_OPTIONS,
+  ...over,
+});
 
 describe('DEFAULT_VIEW_OPTIONS', () => {
   it('is Project grouping and needs-you-first sorting -- today’s only behaviour, unchanged', () => {
@@ -168,18 +171,12 @@ describe('applyViewOrder — groupBy: none', () => {
   const beta = project('p-beta', 'beta');
 
   it('leaves the input order alone at the default sort', () => {
-    const input = [
-      entry(alpha, session('a1', 'a1')),
-      entry(beta, session('b1', 'b1')),
-    ];
+    const input = [entry(alpha, session('a1', 'a1')), entry(beta, session('b1', 'b1'))];
     expect(applyViewOrder(input, view({ groupBy: 'none' }))).toEqual(input);
   });
 
   it('sorts the WHOLE flat list by name, project boundaries and all', () => {
-    const input = [
-      entry(alpha, session('a1', 'Zebra')),
-      entry(beta, session('b1', 'Apple')),
-    ];
+    const input = [entry(alpha, session('a1', 'Zebra')), entry(beta, session('b1', 'Apple'))];
     const out = applyViewOrder(input, view({ groupBy: 'none', sortBy: 'name' }));
     expect(out.map((e) => e.session.title)).toEqual(['Apple', 'Zebra']);
   });

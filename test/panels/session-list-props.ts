@@ -8,7 +8,7 @@
  */
 
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
-import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { DEFAULT_VIEW_OPTIONS, type SessionEntry } from '../../src/renderer/domain/selectors.js';
 import type { SessionListProps } from '../../src/renderer/panels/SessionList.js';
 
 export function decision(id: string, output: string | null): Decision {
@@ -105,6 +105,8 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
       hideIdle: false,
     },
     onOriginFilters: noop,
+    viewOptions: DEFAULT_VIEW_OPTIONS,
+    onViewOptions: noop,
     hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
     foreignHiddenCount: 0,
     filter: '',

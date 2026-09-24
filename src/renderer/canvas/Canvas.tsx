@@ -71,8 +71,8 @@ import {
   withPending,
 } from '../domain/optimistic.js';
 import { cycleMatch, searchMatches } from '../domain/search.js';
-import type { SessionEntry } from '../domain/selectors.js';
-import { orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
+import type { SessionEntry, ViewOptions } from '../domain/selectors.js';
+import { applyViewOrder, orderedPaneTabs, orderedSessions } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import {
   countHiddenByForeignFilter,
@@ -171,6 +171,7 @@ import {
   setSessionDismissed,
   setSessionFilters,
   setTheme,
+  setViewOptions,
   type Theme,
   watchOsTheme,
   writePrefs,
@@ -2903,89 +2904,104 @@ function CanvasInner({
   );
 
   const entries = useMemo(() => {
-    // FIRST, and not only in the sidebar. A removed project whose cards stayed
-    // drawn would leave `j` stepping onto a session with no row -- the exact
-    // defect the note below this memo describes, reintroduced by a different
-    // route. The three views agree on the SET.
-    const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
-    const byText =
-      query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
-    const byStatus =
-      statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
-    // Both origin rules only ever exclude something vam POSITIVELY classified
-    // — see `session-filter.ts`. A session whose timeline has not arrived is
-    // `unknown` and survives both, because hiding what you did not check is
-    // how a filter loses work rather than narrowing it.
-    const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
-    // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
-    // to `CommandPalette` below, so the palette's groups are drawn from the
-    // list this line has already narrowed — which is why ended sessions are a
-    // filter here and not the third palette group
-    // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
-    // by this array and so would be empty in exactly the state it exists for.
-    //
-    // DISMISSED IS ALWAYS APPLIED, EVEN WHILE `vamListingGap` STANDS THE
-    // OTHER TWO DOWN. Dismissal is not a guess about ownership the way
-    // `isEnded`/`isForeign` are -- it is the operator's own explicit "get
-    // this off my screen", `docs/design/vam-owns-the-session.md` §5's "Dismiss
-    // is the safe fallback" -- so an unreadable tmux listing has no more
-    // reason to stand it down than it does `hiddenProjects` above.
-    // `isSessionDismissed` reads `session.activity` FRESH on every entry,
-    // which is what lifts a dismissal the moment a resumed session shows
-    // activity newer than what vam saw when it was hidden -- never a
-    // snapshot taken once and reused.
-    const byDismissed = byOrigin.filter(
-      (e) =>
-        !isSessionDismissed(
-          prefs,
-          e.session.source ?? e.project.source ?? 'unknown',
-          e.session.id,
-          e.session.activity,
-        ),
-    );
-    // TMUX ITSELF COULD NOT BE READ THIS LOAD: neither rule below can be
-    // trusted, because both proxy a fact only vam's own tmux spine can
-    // answer -- whether a row is currently vam's. `docs/design/vam-owns-the-
-    // session.md`'s own trap: "an unreadable tmux listing must not empty the
-    // sidebar. The fallback is to show everything, with the reason on
-    // screen." Standing BOTH rules down here, rather than one, is what makes
-    // that literally true rather than true for one axis and silently false
-    // for the other.
-    if (vamListingGap !== null) return byDismissed;
-    // AND THE SAME DISCIPLINE FOR ENDINGS AND FOR OWNERSHIP. `isEnded` is a
-    // fact a source has positively reported: the Codex source reads it off a
-    // writer lock it probed, and says `idle` rather than `done` wherever it
-    // could not look. `isForeign` is the same discipline for `vamControlled`
-    // — see `session-filter.ts` for why the two are separate rules rather
-    // than one boolean standing for both claims.
-    //
-    // THE DEMO IS EXEMPT FROM `hideForeign`, AND ONLY FROM THIS ONE RULE.
-    // `?demo=1`'s own fixture was built around the two OLDER origin rules by
-    // never tripping them at all -- no demo session carries `startedBy:
-    // 'agent'` or `ended: true`, so `hideAgentStarted` and `hideEnded` narrow
-    // nothing there and needed no carve-out. `vamControlled: false` cannot
-    // get the same treatment: `fixtures/demo.ts`'s `vam-build-1` row sets it
-    // DELIBERATELY, to demonstrate the UI a session vam did not start draws
-    // (no Submit, no terminal) -- the very thing `docs/design/reopening-a-
-    // session.md` and a dozen guards under `e2e/` read that row for. The same
-    // field now also drives `isForeign`, and there is no way to keep the one
-    // meaning without tripping the other. `demo`'s whole purpose is the
-    // public showcase "vam is public, and every real session on this machine
-    // is somebody's work" (`sidebar-seam-shots.mjs`'s own words) -- showing
-    // the FULL breadth of what a row can be, not one operator's own narrowed
-    // default -- so it is the demo that gives way, the same way
-    // `sendPromptFor` already branches on `source.kind === 'demo'` above.
-    const foreignFilterApplies = source.kind !== 'demo';
-    return byDismissed.filter(
-      (e) =>
-        !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
-        !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
-        (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
-    );
+    // THE FILTERED SET, in an IIFE so both of its own early-return branches
+    // (the listing-gap short-circuit below, and the ordinary tail) stay
+    // exactly as they were -- `applyViewOrder` is the one step every path
+    // through this memo now shares, applied ONCE, after the set is decided
+    // rather than threaded through each branch separately. `entries` is what
+    // `j`/`k`/`gt`/`gT`/`f` all step through (`sessionIds`, `stepProject`
+    // below), so the sidebar's Group-by/Sort-by choice has to land HERE, not
+    // as a second, SessionList-local reorder the keyboard would disagree
+    // with -- the same discipline PR 475 already holds for the foreign/
+    // dismissed filter one layer up. `allEntries` (tab membership) is never
+    // touched: a display preference must not change which sessions are tabs.
+    const filtered = ((): SessionEntry[] => {
+      // FIRST, and not only in the sidebar. A removed project whose cards stayed
+      // drawn would leave `j` stepping onto a session with no row -- the exact
+      // defect the note below this memo describes, reintroduced by a different
+      // route. The three views agree on the SET.
+      const visible = allEntries.filter((e) => !hiddenProjects.includes(e.project.id));
+      const byText =
+        query.trim() === '' ? visible : visible.filter((e) => matches.includes(e.session.id));
+      const byStatus =
+        statusFilter === 'all' ? byText : byText.filter((e) => e.session.status === statusFilter);
+      // Both origin rules only ever exclude something vam POSITIVELY classified
+      // — see `session-filter.ts`. A session whose timeline has not arrived is
+      // `unknown` and survives both, because hiding what you did not check is
+      // how a filter loses work rather than narrowing it.
+      const byOrigin = byStatus.filter((e) => !isHiddenByOriginFilters(e.session, prefs.filters));
+      // THIS IS ALSO WHAT THE COMMAND PALETTE SEES. `entries` is what is handed
+      // to `CommandPalette` below, so the palette's groups are drawn from the
+      // list this line has already narrowed — which is why ended sessions are a
+      // filter here and not the third palette group
+      // `docs/design/reopening-a-session.md` proposed. Such a group would be fed
+      // by this array and so would be empty in exactly the state it exists for.
+      //
+      // DISMISSED IS ALWAYS APPLIED, EVEN WHILE `vamListingGap` STANDS THE
+      // OTHER TWO DOWN. Dismissal is not a guess about ownership the way
+      // `isEnded`/`isForeign` are -- it is the operator's own explicit "get
+      // this off my screen", `docs/design/vam-owns-the-session.md` §5's "Dismiss
+      // is the safe fallback" -- so an unreadable tmux listing has no more
+      // reason to stand it down than it does `hiddenProjects` above.
+      // `isSessionDismissed` reads `session.activity` FRESH on every entry,
+      // which is what lifts a dismissal the moment a resumed session shows
+      // activity newer than what vam saw when it was hidden -- never a
+      // snapshot taken once and reused.
+      const byDismissed = byOrigin.filter(
+        (e) =>
+          !isSessionDismissed(
+            prefs,
+            e.session.source ?? e.project.source ?? 'unknown',
+            e.session.id,
+            e.session.activity,
+          ),
+      );
+      // TMUX ITSELF COULD NOT BE READ THIS LOAD: neither rule below can be
+      // trusted, because both proxy a fact only vam's own tmux spine can
+      // answer -- whether a row is currently vam's. `docs/design/vam-owns-the-
+      // session.md`'s own trap: "an unreadable tmux listing must not empty the
+      // sidebar. The fallback is to show everything, with the reason on
+      // screen." Standing BOTH rules down here, rather than one, is what makes
+      // that literally true rather than true for one axis and silently false
+      // for the other.
+      if (vamListingGap !== null) return byDismissed;
+      // AND THE SAME DISCIPLINE FOR ENDINGS AND FOR OWNERSHIP. `isEnded` is a
+      // fact a source has positively reported: the Codex source reads it off a
+      // writer lock it probed, and says `idle` rather than `done` wherever it
+      // could not look. `isForeign` is the same discipline for `vamControlled`
+      // — see `session-filter.ts` for why the two are separate rules rather
+      // than one boolean standing for both claims.
+      //
+      // THE DEMO IS EXEMPT FROM `hideForeign`, AND ONLY FROM THIS ONE RULE.
+      // `?demo=1`'s own fixture was built around the two OLDER origin rules by
+      // never tripping them at all -- no demo session carries `startedBy:
+      // 'agent'` or `ended: true`, so `hideAgentStarted` and `hideEnded` narrow
+      // nothing there and needed no carve-out. `vamControlled: false` cannot
+      // get the same treatment: `fixtures/demo.ts`'s `vam-build-1` row sets it
+      // DELIBERATELY, to demonstrate the UI a session vam did not start draws
+      // (no Submit, no terminal) -- the very thing `docs/design/reopening-a-
+      // session.md` and a dozen guards under `e2e/` read that row for. The same
+      // field now also drives `isForeign`, and there is no way to keep the one
+      // meaning without tripping the other. `demo`'s whole purpose is the
+      // public showcase "vam is public, and every real session on this machine
+      // is somebody's work" (`sidebar-seam-shots.mjs`'s own words) -- showing
+      // the FULL breadth of what a row can be, not one operator's own narrowed
+      // default -- so it is the demo that gives way, the same way
+      // `sendPromptFor` already branches on `source.kind === 'demo'` above.
+      const foreignFilterApplies = source.kind !== 'demo';
+      return byDismissed.filter(
+        (e) =>
+          !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
+          !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
+          (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
+      );
+    })();
+    return applyViewOrder(filtered, prefs.viewOptions);
     // `prefs` ITSELF, not only `prefs.filters`/`prefs.dismissedSessions`
     // separately: `isSessionDismissed` reads `prefs.dismissedSessions`, and a
     // dependency array naming a nested field the memo does not otherwise use
     // is a staleness bug waiting for the next field this filter chain grows.
+    // The same argument covers `prefs.viewOptions` now too.
   }, [allEntries, hiddenProjects, matches, query, statusFilter, prefs, vamListingGap, source.kind]);
 
   /**
@@ -6344,6 +6360,12 @@ function CanvasInner({
     [savePrefs, prefs],
   );
 
+  /** Written by the workspace-options popover's Group-by/Sort-by controls. */
+  const onSidebarViewOptions = useCallback(
+    (next: ViewOptions) => savePrefs(setViewOptions(prefs, next)),
+    [savePrefs, prefs],
+  );
+
   const onSidebarFilterCommit = useCallback(() => setFiltering(false), []);
 
   const onSidebarFilterCancel = useCallback(() => {
@@ -6618,6 +6640,8 @@ function CanvasInner({
     onFilterMenuToggle: setFilterMenuOpen,
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
+    viewOptions: prefs.viewOptions,
+    onViewOptions: onSidebarViewOptions,
     hiddenCounts: hiddenCounts,
     foreignHiddenCount: foreignHiddenCount,
     vamListingGap: vamListingGap,
