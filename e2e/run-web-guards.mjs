@@ -355,6 +355,16 @@ const GUARDS = [
   // viewport at both widths, never clipped. `usage-popover-shots.mjs`'s own
   // header holds the rest.
   'usage-popover-shots',
+  // THE PHONE CORE LOOP'S OWN TWO SCREENS (docs/design/phone-core-loop.md):
+  // the inline question (one shared scroller, no retired fixed card, every
+  // option clears 44px) and the composer with none open (exactly 4 controls,
+  // and now -- since the tools row merged onto the textarea's own line --
+  // AC-7's height half too, real-browser-measured at 95px, down from 145).
+  // Held out of this list until that merge shipped, per this file's own
+  // header note on why: unlike every other guard here, a real layout change
+  // was the only way to close it, not a class this list could paper over.
+  // `phone-question-shots.mjs`'s own header holds the measurement.
+  'phone-question-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

@@ -386,6 +386,19 @@ export function PhoneShell({
    */
   const [typing, setTyping] = useState(false);
   /**
+   * Is a question open on the session showing right now?
+   *
+   * `DetailPanel` derives this (`openQuestion`, its own state plus the
+   * pane-read fallback for a tool-approval prompt with no transcript
+   * record) and reports it up through `onQuestionOpenChange` -- see that
+   * prop's own doc for why this shell cannot derive it independently. Used
+   * below to collapse `SessionTabStrip` the same way `!typing` already does
+   * (docs/design/phone-core-loop.md §3.2): the strip's 45px is exactly what
+   * the operator's brief is about returning to the transcript the moment
+   * there is a question to read.
+   */
+  const [questionOpen, setQuestionOpen] = useState(false);
+  /**
    * Which view the icon row shows as on, and the request that puts the pane
    * there. Two pieces because they say different things: the pane owns its tab
    * and is ASKED to move (a fresh object per tap keeps a second ask an ask),
@@ -697,7 +710,7 @@ export function PhoneShell({
           step rail's old slot without being the step rail's return; see this
           file's header comment. The limits band that used to stand under it
           is gone from this screen entirely (see above `isTyping`). */}
-      {!typing && (
+      {!typing && !questionOpen && (
         <SessionTabStrip
           project={entry.project}
           sessions={projectPaneSessions}
@@ -743,6 +756,7 @@ export function PhoneShell({
           initialTab="Response"
           tabRequest={viewRequest}
           records={records}
+          onQuestionOpenChange={setQuestionOpen}
         />
       </div>
     </div>
