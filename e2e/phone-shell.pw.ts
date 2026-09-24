@@ -1888,6 +1888,17 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
    * region, because an EMPTY `OverlayScroll` was a `flex-1` sibling taking
    * the top half for itself. Each assertion below failed on that build for
    * the reason its own comment states.
+   *
+   * A SECOND ROUND, from a fresh pair of eyes on the regenerated screenshot:
+   * the fixes above still left a dark band along the very bottom edge,
+   * measured at y:832..844 -- `[data-phone-status-bar]` draws no background
+   * of its own when it has nothing to say (only the safe-area padding that
+   * keeps the last real row clear of the home indicator), so the surface
+   * showing through it was `[data-phone-shell]`'s own `bg-ground`
+   * (`rgb(13, 13, 13)`), a full shade darker than `[data-sidebar-pane]`'s
+   * `bg-sidebar` (`rgb(35, 35, 35)`) filling every row above it. Ground-
+   * truthed the same way: `footerBg` read `rgba(0, 0, 0, 0)` against
+   * `sidebarBg`'s opaque `rgb(35, 35, 35)` on the pre-fix build.
    */
   test('the getting-started screen: no colour leak, no empty top strip, and a centred block', async ({
     page,
@@ -1901,8 +1912,25 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
           ? null
           : { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) };
       };
+      // Walks UP from the topmost element at (x, y) to the first one that
+      // actually paints a background -- the same resolution a compositor
+      // does for a stack of solid colours with no partial transparency or
+      // imagery involved, which is the whole of this screen's own chrome.
+      // `elementFromPoint` alone would report the transparent `<footer>`
+      // itself and miss the surface showing through it.
+      const effectiveBgAt = (x: number, y: number): string | null => {
+        let el = document.elementFromPoint(x, y);
+        while (el !== null) {
+          const bg = getComputedStyle(el).backgroundColor;
+          if (bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
+          el = el.parentElement;
+        }
+        return null;
+      };
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
       return {
-        viewportHeight: window.innerHeight,
+        viewportHeight: vh,
         docScrollHeight: document.documentElement.scrollHeight,
         htmlBg: getComputedStyle(document.documentElement).backgroundColor,
         bodyBg: getComputedStyle(document.body).backgroundColor,
@@ -1917,6 +1945,23 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
         projectsHeaderBox: r2(document.querySelector('[data-projects-header]')),
         footerBox: r2(document.querySelector('[data-phone-status-bar]')),
         gettingStartedBox: r2(document.querySelector('[data-getting-started]')),
+        // THE LIST SURFACE'S OWN COLOUR, read once as the ground truth every
+        // other sample below is compared against -- never a literal
+        // `rgb(...)`, which would silently stop meaning anything the moment
+        // the token's value changed.
+        sidebarBg: getComputedStyle(
+          document.querySelector('[data-sidebar-pane]') as Element,
+        ).backgroundColor,
+        footerBg: getComputedStyle(
+          document.querySelector('[data-phone-status-bar]') as Element,
+        ).backgroundColor,
+        // THE BOTTOM 20px ROW, sampled at three x positions, and the point
+        // just above the footer's own top edge (still inside the sidebar
+        // pane proper) as the control every one of the three is compared
+        // against.
+        bottomRowBg: [10, 195, 380].map((x) => effectiveBgAt(x, vh - 1)),
+        underLastElementBg: effectiveBgAt(10, vh - 10),
+        controlBg: effectiveBgAt(10, vh - 30),
       };
     });
 
@@ -1958,6 +2003,26 @@ test.describe('the foreign-hidden quiet line on a phone list screen', () => {
     const freeCentre = (freeTop + freeBottom) / 2;
     const blockCentre = gettingStartedBox.y + gettingStartedBox.h / 2;
     expect(Math.abs(blockCentre - freeCentre), JSON.stringify(geometry)).toBeLessThanOrEqual(4);
+
+    // (d) THE BOTTOM BAND IS THE SAME SURFACE AS THE LIST ABOVE IT -- the
+    // status bar draws no background of its own when it has nothing to say,
+    // so what showed through used to be the SHELL's `bg-ground`, a full
+    // shade darker than the sidebar pane's own `bg-sidebar`. Computed style
+    // on the element itself, not a screenshot pixel: the two describe the
+    // identical fact here (a flat `background-color`, no imagery or partial
+    // transparency anywhere in this stack), and the computed value is exact
+    // where a screenshot would need a tolerance for AA/gamma noise.
+    expect(geometry.footerBg, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+    expect(geometry.footerBg).not.toBe('rgba(0, 0, 0, 0)');
+    // And the EFFECTIVE paint, walked from the real point a finger or an eye
+    // would land on -- the control point confirms the sidebar surface is
+    // what this page actually paints above the footer, so the three bottom-
+    // row samples matching it is the claim "no seam", not "no assertion".
+    expect(geometry.controlBg, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+    for (const sample of geometry.bottomRowBg) {
+      expect(sample, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+    }
+    expect(geometry.underLastElementBg, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
   });
 });
 
