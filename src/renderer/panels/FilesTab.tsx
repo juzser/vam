@@ -1740,7 +1740,48 @@ export function FilesTab({
                 hover — the dot is not inside another interactive element
                 here (unlike its twin in the tree row below, which is
                 already inside a focusable row and stays `aria-hidden`
-                there to avoid a second stop nested in one). */}
+                there to avoid a second stop nested in one).
+
+                `bg-waiting`, NOT `bg-ink-dim` — the operator's own report:
+                the dot needs "a different colour", one that is not the same
+                ink the toolbar's OWN icons already sit in (Format's `svg`
+                is `text-ink-dim`, and `bg-ink-dim` painted the dot in that
+                exact ink, so it read as another icon rather than a status).
+                Not `--color-failed` either — the operator did not call this
+                an error, and `styles.css`'s own status-colour comment
+                reserves red for that. `--color-waiting` is vam's one amber,
+                already spent in THIS SAME ROW for "something needs your
+                attention without being a failure" (the note strip below
+                this header draws `text-waiting` for exactly that job) —
+                reused here rather than given its own token the way
+                `--color-mode-auto`/`--color-filter-badge`/`--color-danger`
+                each were: those three exist because their MEANING (a
+                composer mode, a decorative badge, a destructive action) is
+                not a session state and would drift independently of one.
+                An unsaved file is the same shape of "costs you something to
+                ignore" `--color-waiting`'s own comment names, so there is no
+                second meaning here to protect against drifting apart from
+                the first. `token-contrast.test.ts` already holds this pair
+                against `panel`/`sidebar` at 3:1 (a glyph's floor, not
+                text's) since `text-waiting` is measured there; a fresh
+                measurement of the dot's own paint is
+                `e2e/files-tab-keyboard-shots.mjs`'s job, in both themes.
+
+                `mr-1.5` — A GAP FROM ITS OWN, on top of whatever this row's
+                container-query gap contributes (`data-files-header`'s
+                `gap-0.5 @min-[380px]:gap-1.5`, above). The operator's other
+                half of the same report: "a gap from the prettier button".
+                For a `.env` (no preview toggle, so Format trails the dot
+                directly) at the narrowest legal pane the row gap alone is
+                `gap-0.5` — 2px, measured, and easy to read as touching next
+                to a 24px bordered button. `1.5` is `gap-1.5`'s OWN unit —
+                the widest this row's gap ever is — spelled as a margin so
+                the separation never depends on which control follows or how
+                wide the container query has folded; a gap on the row alone
+                could not do that without widening `gap-0.5` for every pair
+                in the row, including the ones that are already fine.
+                Measured as a rectangle distance, not read off the class:
+                `e2e/files-tab-keyboard-shots.mjs`. */}
             {dirty && (
               <Note text={`Unsaved changes — press ${chordSymbols('Mod-s')} to save.`}>
                 <span
@@ -1749,7 +1790,7 @@ export function FilesTab({
                   tabIndex={0}
                   role="img"
                   aria-label="unsaved changes"
-                  className="flex-none rounded-full bg-ink-dim outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+                  className="mr-1.5 flex-none rounded-full bg-waiting outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
                   style={{ width: 6, height: 6 }}
                 />
               </Note>
@@ -2702,12 +2743,16 @@ function Tree({
                   // `tabIndex` and no `Note` of its own, and its label folds
                   // straight into the row's own accessible name instead
                   // (the row carries no `aria-label` of its own to override
-                  // that computation).
+                  // that computation). `bg-waiting`, the header dot's OWN
+                  // colour (that dot's own comment carries the argument) —
+                  // one indicator, one meaning, so its two draws share a
+                  // hue. No `mr-1.5` here: this dot is the row's trailing
+                  // mark, nothing in the row follows it to leave a gap from.
                   <span
                     data-files-dirty
                     role="img"
                     aria-label="unsaved changes"
-                    className="flex-none rounded-full bg-ink-dim"
+                    className="flex-none rounded-full bg-waiting"
                     style={{ width: 5, height: 5 }}
                   />
                 )}

@@ -650,7 +650,11 @@ describe('save-time normalisation', () => {
       async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
     );
     withBridge({
-      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/notes.txt'], truncated: false }),
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
       read: async () => ({ content: 'kept', isBinary: false, signature: SIGNATURE() }),
       write,
     });
@@ -680,7 +684,11 @@ describe('save-time normalisation', () => {
       async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
     );
     withBridge({
-      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/notes.txt'], truncated: false }),
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
       read: async () => ({ content: 'a\nb\n', isBinary: false, signature: SIGNATURE() }),
       write,
     });
