@@ -13,7 +13,7 @@
  * real one, and every request goes to 127.0.0.1. Nothing reaches a network.
  */
 
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, realpath, symlink, writeFile } from 'node:fs/promises';
 import type { Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,9 +26,23 @@ import {
   type RemoteServerOptions,
   startRemoteServer,
 } from '../../../src/main/remote/server.js';
+import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
 import type { MainSource } from '../../../src/main/sources/source.js';
 import type { Project } from '../../../src/renderer/domain/model.js';
 import type { TranscriptPage } from '../../../src/shared/history.js';
+
+/** A real git repository under `mkdtemp`, never a real path on the operator's disk. */
+async function gitRepo(prefix = 'vam-repo-'): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  await mkdir(join(dir, '.git'), { recursive: true });
+  return dir;
+}
+
+/** A project entry naming `dir`'s own canonical id -- how the stub's `load()` lists it. */
+async function projectFor(dir: string): Promise<Project> {
+  const id = projectIdOf(await realpath(dir));
+  return { id, name: 'demo', sessions: [] } as unknown as Project;
+}
 
 const PAIRED: Identity = { deviceId: 'device-1', name: 'the paired phone' };
 const TOKEN = 'a-token-this-server-minted';
@@ -411,6 +425,7 @@ describe('write routes', () => {
       prompt: 'go on then',
     });
     expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, value: null });
     expect(recordPrompt).toHaveBeenCalledWith('session-1', 'go on then');
   });
 
@@ -420,22 +435,22 @@ describe('write routes', () => {
     expect(await response.json()).toMatchObject({ ok: false, error: { code: 'not-implemented' } });
   });
 
-  it('starts a session in a project, and one in a directory', async () => {
+  it('starts a session in a project by id, with no canonicalisation and no guard', async () => {
     const createSession = vi.fn(async () => null);
-    const createSessionInDirectory = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ createSession, createSessionInDirectory }) });
-    await post(base, '/api/create-session', { projectId: 'p1', title: 'a run' });
-    await post(base, '/api/create-session-in', { cwd: '/somewhere/else', title: 'a run' });
+    const base = await start({ source: makeSource({ createSession }) });
+    const response = await post(base, '/api/create-session', { projectId: 'p1', title: 'a run' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, value: null });
+    expect(createSession).toHaveBeenCalledTimes(1);
     expect(createSession).toHaveBeenCalledWith('p1', 'a run', undefined);
-    expect(createSessionInDirectory).toHaveBeenCalledWith('/somewhere/else', 'a run', undefined);
   });
 
   it("refuses a relative directory, which would resolve against main's own cwd", async () => {
-    const createSessionInDirectory = vi.fn(async () => null);
-    const base = await start({ source: makeSource({ createSessionInDirectory }) });
+    const createSession = vi.fn(async () => null);
+    const base = await start({ source: makeSource({ createSession }) });
     const response = await post(base, '/api/create-session-in', { cwd: 'else', title: 'a run' });
     expect(response.status).toBe(400);
-    expect(createSessionInDirectory).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
   });
 
   it('drops a body far larger than any real prompt instead of buffering it', async () => {
@@ -452,6 +467,314 @@ describe('write routes', () => {
 
   it('rejects a GET on a write route', async () => {
     expect((await get(await start(), '/api/close-session')).status).toBe(405);
+  });
+});
+
+/**
+ * `write()`'s new `guard` parameter is opt-in, and only `/api/create-session-in`
+ * passes one -- see its own header. For each of the OTHER three write routes,
+ * a well-shaped call still 200s a resolved `null`, still forwards a resolved
+ * `SourceError` whole, and a shape failure still 400s before the source is
+ * touched: nine assertions, three per route, none of which the guard may move.
+ * `createSession`'s stub is now shared with `/api/create-session-in`, so every
+ * assertion below is per-request, with a fresh spy for each case, never a
+ * cumulative count.
+ */
+describe('the three guardless write routes are unchanged by the guard parameter', () => {
+  it('recordPrompt: null, a forwarded refusal, and a shape failure', async () => {
+    const ok = vi.fn(async () => null);
+    const okResponse = await post(
+      await start({ source: makeSource({ recordPrompt: ok }) }),
+      '/api/record-prompt',
+      { sessionId: 's1', prompt: 'go on' },
+    );
+    expect(okResponse.status).toBe(200);
+    expect(await okResponse.json()).toEqual({ ok: true, value: null });
+
+    const refusal: SourceError = { kind: 'refused', code: 'stub-refused', message: 'no' };
+    const refusedResponse = await post(
+      await start({ source: makeSource({ recordPrompt: async () => refusal }) }),
+      '/api/record-prompt',
+      { sessionId: 's1', prompt: 'go on' },
+    );
+    expect(refusedResponse.status).toBe(200);
+    expect(await refusedResponse.json()).toEqual({ ok: false, error: refusal });
+
+    const shapeSpy = vi.fn(async () => null);
+    const invalidResponse = await post(
+      await start({ source: makeSource({ recordPrompt: shapeSpy }) }),
+      '/api/record-prompt',
+      { sessionId: 42 },
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(shapeSpy).not.toHaveBeenCalled();
+
+    expect([okResponse.status, refusedResponse.status, invalidResponse.status]).not.toContain(403);
+  });
+
+  it('closeSession: null, a forwarded refusal, and a shape failure', async () => {
+    const ok = vi.fn(async () => null);
+    const okResponse = await post(
+      await start({ source: makeSource({ closeSession: ok }) }),
+      '/api/close-session',
+      { sessionId: 's1' },
+    );
+    expect(okResponse.status).toBe(200);
+    expect(await okResponse.json()).toEqual({ ok: true, value: null });
+
+    const refusal: SourceError = { kind: 'refused', code: 'stub-refused', message: 'no' };
+    const refusedResponse = await post(
+      await start({ source: makeSource({ closeSession: async () => refusal }) }),
+      '/api/close-session',
+      { sessionId: 's1' },
+    );
+    expect(refusedResponse.status).toBe(200);
+    expect(await refusedResponse.json()).toEqual({ ok: false, error: refusal });
+
+    const shapeSpy = vi.fn(async () => null);
+    const invalidResponse = await post(
+      await start({ source: makeSource({ closeSession: shapeSpy }) }),
+      '/api/close-session',
+      { sessionId: 42 },
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(shapeSpy).not.toHaveBeenCalled();
+
+    expect([okResponse.status, refusedResponse.status, invalidResponse.status]).not.toContain(403);
+  });
+
+  it('createSession: null, a forwarded refusal, and a shape failure -- no canonicalisation, no load(), no guard', async () => {
+    const ok = vi.fn(async () => null);
+    const okResponse = await post(
+      await start({ source: makeSource({ createSession: ok }) }),
+      '/api/create-session',
+      { projectId: 'p1', title: 'a run' },
+    );
+    expect(okResponse.status).toBe(200);
+    expect(await okResponse.json()).toEqual({ ok: true, value: null });
+    expect(ok).toHaveBeenCalledWith('p1', 'a run', undefined);
+
+    const refusal: SourceError = { kind: 'refused', code: 'stub-refused', message: 'no' };
+    const refusedResponse = await post(
+      await start({ source: makeSource({ createSession: async () => refusal }) }),
+      '/api/create-session',
+      { projectId: 'p1', title: 'a run' },
+    );
+    expect(refusedResponse.status).toBe(200);
+    expect(await refusedResponse.json()).toEqual({ ok: false, error: refusal });
+
+    const shapeSpy = vi.fn(async () => null);
+    const invalidResponse = await post(
+      await start({ source: makeSource({ createSession: shapeSpy }) }),
+      '/api/create-session',
+      { projectId: 42 },
+    );
+    expect(invalidResponse.status).toBe(400);
+    expect(shapeSpy).not.toHaveBeenCalled();
+
+    expect([okResponse.status, refusedResponse.status, invalidResponse.status]).not.toContain(403);
+  });
+});
+
+/**
+ * `POST /api/create-session-in`, confined to the operator's EXISTING project
+ * set -- see `confineToProjectSet` in `server.ts`. `projectIdOf(canonical)`
+ * is compared against the ids `load()` reports FOR THAT REQUEST; on a match,
+ * the route calls `source.createSession(projectId, title, provider)`, never
+ * `source.createSessionInDirectory(cwd, ...)`, so a caller-supplied path
+ * never reaches the spawn.
+ */
+describe('create-session-in: confined to the operator’s existing project set', () => {
+  it('admits a member repository by id and delegates to createSession, never createSessionInDirectory', async () => {
+    const repo = await gitRepo();
+    const project = await projectFor(repo);
+    const createSession = vi.fn(async () => null);
+    const createSessionInDirectory = vi.fn(async () => null);
+    const base = await start({
+      source: makeSource({
+        load: async () => [project],
+        createSession,
+        createSessionInDirectory,
+      }),
+    });
+    const response = await post(base, '/api/create-session-in', {
+      cwd: repo,
+      title: 'a run',
+      provider: 'claude',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, value: null });
+    expect(createSession).toHaveBeenCalledTimes(1);
+    expect(createSession).toHaveBeenCalledWith(project.id, 'a run', 'claude');
+    expect(createSessionInDirectory).not.toHaveBeenCalled();
+  });
+
+  it('admits a symlink into a member repository, and refuses one pointing out of it', async () => {
+    const repo = await gitRepo();
+    const project = await projectFor(repo);
+    const outside = await gitRepo();
+    const linkIn = join(tmpdir(), `vam-link-in-${Date.now()}`);
+    const linkOut = join(repo, 'escape-hatch');
+    await symlink(repo, linkIn);
+    await symlink(outside, linkOut);
+
+    const createSession = vi.fn(async () => null);
+    const createSessionInDirectory = vi.fn(async () => null);
+    const base = await start({
+      source: makeSource({ load: async () => [project], createSession, createSessionInDirectory }),
+    });
+
+    const inResponse = await post(base, '/api/create-session-in', { cwd: linkIn, title: 'a run' });
+    expect(inResponse.status).toBe(200);
+    expect(createSession).toHaveBeenCalledWith(project.id, 'a run', undefined);
+
+    const outResponse = await post(base, '/api/create-session-in', {
+      cwd: linkOut,
+      title: 'a run',
+    });
+    expect(outResponse.status).toBe(403);
+    expect(createSessionInDirectory).not.toHaveBeenCalled();
+  });
+
+  it('admits a two-hop symlink chain into a member repository', async () => {
+    const repo = await gitRepo();
+    const project = await projectFor(repo);
+    const firstHop = join(tmpdir(), `vam-link-hop1-${Date.now()}`);
+    const secondHop = join(tmpdir(), `vam-link-hop2-${Date.now()}`);
+    await symlink(repo, firstHop);
+    await symlink(firstHop, secondHop);
+
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      source: makeSource({ load: async () => [project], createSession }),
+    });
+
+    const response = await post(base, '/api/create-session-in', {
+      cwd: secondHop,
+      title: 'a run',
+    });
+    expect(response.status).toBe(200);
+    expect(createSession).toHaveBeenCalledWith(project.id, 'a run', undefined);
+  });
+
+  it(
+    'answers the byte-identical unauthorized-directory refusal for five different reasons, ' +
+      'and never reaches createSession or createSessionInDirectory',
+    async () => {
+      const memberRepo = await gitRepo();
+      const project = await projectFor(memberRepo);
+      const strangerRepo = await gitRepo();
+      const notARepo = await mkdtemp(join(tmpdir(), 'vam-not-a-repo-'));
+      const goneParent = await mkdtemp(join(tmpdir(), 'vam-gone-'));
+      const doesNotExist = join(goneParent, 'never-created');
+      const walled = await mkdtemp(join(tmpdir(), 'vam-walled-'));
+      const walledChild = join(walled, 'inside');
+      await mkdir(walledChild);
+      await chmod(walled, 0o000);
+
+      const cases: [string, Partial<MainSource>][] = [
+        [doesNotExist, {}],
+        [notARepo, {}],
+        [strangerRepo, {}],
+        [walledChild, {}],
+        [memberRepo, { createSession: undefined }],
+      ];
+
+      const bodies: unknown[] = [];
+      try {
+        for (const [cwd, over] of cases) {
+          const createSession = vi.fn(async () => null);
+          const createSessionInDirectory = vi.fn(async () => null);
+          const base = await start({
+            source: makeSource({
+              load: async () => [project],
+              createSession,
+              createSessionInDirectory,
+              ...over,
+            }),
+          });
+          const response = await post(base, '/api/create-session-in', { cwd, title: 'a run' });
+          expect(response.status, cwd).toBe(403);
+          expect(createSession, cwd).not.toHaveBeenCalled();
+          expect(createSessionInDirectory, cwd).not.toHaveBeenCalled();
+          bodies.push(await response.json());
+        }
+      } finally {
+        await chmod(walled, 0o755);
+      }
+
+      for (const body of bodies) {
+        expect(body).toEqual(bodies[0]);
+      }
+      expect(bodies[0]).toEqual({
+        ok: false,
+        error: {
+          kind: 'refused',
+          code: 'unauthorized-directory',
+          message: expect.any(String),
+        },
+      });
+      const serialized = JSON.stringify(bodies[0]);
+      for (const [path] of cases) {
+        expect(serialized).not.toContain(path);
+      }
+    },
+  );
+
+  it('audits a refusal with the device identity, and never the path', async () => {
+    const strangerRepo = await gitRepo();
+    const audit = vi.fn();
+    const base = await start({ source: makeSource({ load: async () => [] }), audit });
+    const response = await post(base, '/api/create-session-in', {
+      cwd: strangerRepo,
+      title: 'a run',
+    });
+    expect(response.status).toBe(403);
+    expect(audit).toHaveBeenCalledWith(expect.stringContaining(PAIRED.name));
+    expect(audit).toHaveBeenCalledWith(expect.stringContaining(PAIRED.deviceId));
+    const lastLine = audit.mock.calls.at(-1)?.[0] as string;
+    expect(lastLine).not.toContain(strangerRepo);
+  });
+
+  it('re-reads the project set per request rather than caching it', async () => {
+    const repo = await gitRepo();
+    const project = await projectFor(repo);
+    let listed: readonly Project[] = [];
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      source: makeSource({ load: async () => listed, createSession }),
+    });
+    const before = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
+    expect(before.status).toBe(403);
+    listed = [project];
+    const after = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
+    expect(after.status).toBe(200);
+    expect(createSession).toHaveBeenCalledTimes(1);
+    // A THIRD call, flipping the list back to empty: an off-by-one cache
+    // (one stale read behind, or latched permanently open after the first
+    // admission) would still show 200 here. Only a genuine per-request read
+    // refuses again.
+    listed = [];
+    const third = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
+    expect(third.status).toBe(403);
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the project list cannot be read', async () => {
+    const repo = await gitRepo();
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      source: makeSource({
+        load: async () => {
+          throw new Error('the project store is gone');
+        },
+        createSession,
+      }),
+    });
+    const response = await post(base, '/api/create-session-in', { cwd: repo, title: 'a run' });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: 'unauthorized-directory' } });
+    expect(createSession).not.toHaveBeenCalled();
   });
 });
 

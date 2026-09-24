@@ -134,18 +134,19 @@ import {
 } from '../prefs/files-tree-width.js';
 import { PANE_RESIZE_STEP } from '../prefs/panes.js';
 import type { SourceError } from '../sources/port.js';
+import { type Buffer, isDirty, useFileBuffers } from './files-buffers.js';
 import { applyTab, isMarkdownPath, lineStartOffset, relativeLabel } from './files-editor-text.js';
 import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
-import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
+import { EDITOR_KEYS, type FileTreeRow } from './files-tree.js';
+import { useFilesTreeState } from './files-tree-state.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { type PointerDragHandlers, RESIZE_HANDLE_RESET, usePointerDrag } from './pane-drag.js';
 import {
-  encodeUnsaved,
   NO_UNSAVED_FILES,
   publishUnsaved,
   releaseUnsaved,
@@ -351,33 +352,10 @@ export type FilesTabProps = {
   readonly openRequest?: FileOpenRequest | null;
 };
 
-type SaveState =
-  | { readonly kind: 'idle' }
-  | { readonly kind: 'saving' }
-  | { readonly kind: 'conflict' }
-  | { readonly kind: 'error'; readonly error: SourceError };
-
-type Buffer =
-  | { readonly kind: 'loading' }
-  | {
-      readonly kind: 'editable';
-      readonly content: string;
-      readonly savedContent: string;
-      readonly baseSignature: FileSignature | null;
-      /** Opened via `not-found` — nothing is on disk at this path yet. */
-      readonly isNew: boolean;
-      readonly save: SaveState;
-    }
-  | { readonly kind: 'binary'; readonly size: number }
-  | { readonly kind: 'refused'; readonly error: SourceError };
-
 type ListState =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly result: FileListResult }
   | { readonly kind: 'error'; readonly error: SourceError };
-
-const isDirty = (buffer: Buffer | undefined): boolean =>
-  buffer?.kind === 'editable' && buffer.content !== buffer.savedContent;
 
 const NO_BRIDGE: SourceError = {
   kind: 'unreachable',
@@ -399,19 +377,9 @@ export function FilesTab({
   onFilesTreeWidth,
   openRequest = null,
 }: FilesTabProps) {
-  const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
-  const [activeBySession, setActiveBySession] = useState<Record<string, string | null>>({});
   const [listing, setListing] = useState<Record<string, ListState>>({});
   const [newFileName, setNewFileName] = useState('');
   const [filter, setFilter] = useState('');
-  /**
-   * Which directories are open, by absolute path — so nothing has to be
-   * keyed by session: a path belongs to exactly one session's root, and a
-   * path from another root simply never matches a row here. Same for the
-   * cursor below.
-   */
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
-  const [cursorPath, setCursorPath] = useState<string | null>(null);
   /**
    * RENDERED, OR RAW — the operator's own toggle, and ONE flag for the whole
    * tab rather than one per file.
@@ -477,8 +445,20 @@ export function FilesTab({
     activeEditorSettings,
   );
 
-  const activePath = sessionId === null ? null : (activeBySession[sessionId] ?? null);
-  const activeBuffer = activePath === null ? undefined : buffers[activePath];
+  const currentListing = sessionId === null ? undefined : listing[sessionId];
+  const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
+  const root = ready?.root ?? null;
+
+  const {
+    buffers,
+    activePath,
+    activeBuffer,
+    unsavedKey,
+    openFile,
+    setContent,
+    saveFile,
+    reloadFile,
+  } = useFileBuffers({ sessionId, root, read, write });
 
   /**
    * Whether the open file COULD be previewed, and whether it IS.
@@ -491,10 +471,6 @@ export function FilesTab({
   const canPreview =
     activePath !== null && activeBuffer?.kind === 'editable' && isMarkdownPath(activePath);
   const showingPreview = preview && canPreview;
-
-  const currentListing = sessionId === null ? undefined : listing[sessionId];
-  const ready = currentListing?.kind === 'ready' ? currentListing.result : null;
-  const root = ready?.root ?? null;
 
   /**
    * THE ONE THING THAT CANNOT SURVIVE: THE APP CLOSING. Every OTHER exit this
@@ -528,19 +504,6 @@ export function FilesTab({
    * already dirty -- see `encodeUnsaved`. `useMemo` recomputes it on every
    * render; what it buys is a dependency React can compare by value.
    */
-  const unsavedKey = useMemo(
-    () =>
-      encodeUnsaved(
-        Object.entries(buffers)
-          .filter(([, buffer]) => isDirty(buffer))
-          // `relativeLabel` only where a root is known. A buffer belonging to
-          // another session's root falls through to the absolute path, which
-          // is that function's own documented fallback and is the more useful
-          // label in a dialog listing files from two directories.
-          .map(([path]) => ({ path, label: root === null ? path : relativeLabel(root, path) })),
-      ),
-    [buffers, root],
-  );
   const anyDirty = unsavedKey !== NO_UNSAVED_FILES;
   useEffect(() => {
     if (!anyDirty) return;
@@ -575,174 +538,6 @@ export function FilesTab({
     // this is what stops main from later asking about text that is gone.
     () => () => releaseUnsaved(unsavedSlot, reportUnsaved),
     [unsavedSlot, reportUnsaved],
-  );
-
-  /** The visible rows, in draw order. See `files-tree.ts`. */
-  const rows: readonly FileTreeRow[] = useMemo(
-    () =>
-      ready === null
-        ? []
-        : fileTreeRows({ root: ready.root, files: ready.files, expanded, filter }),
-    [ready, expanded, filter],
-  );
-  /**
-   * WHERE THE TREE'S CURSOR IS, derived rather than held — the same rule
-   * `keyboard/focus-scope.ts` makes about the cursor MODE, for the same
-   * reason. A stored index would go stale the moment a filter, an expand or
-   * a fresh listing changed the rows under it; a stored PATH that is no
-   * longer drawn simply falls back to the first row.
-   */
-  const cursorIndex = Math.max(
-    0,
-    rows.findIndex((row) => row.path === cursorPath),
-  );
-  const cursorRow = rows[cursorIndex] ?? null;
-
-  /**
-   * (Re-)loads `path` from disk, replacing whatever buffer it had. Used both
-   * by a fresh open and by an explicit reload — the two differ only in
-   * whether a buffer already existed, which `openFile` below checks before
-   * ever calling this.
-   */
-  const loadInto = useCallback(
-    async (path: string) => {
-      if (read === undefined) return;
-      setBuffers((prev) => ({ ...prev, [path]: { kind: 'loading' } }));
-      try {
-        const result = await read(path);
-        setBuffers((prev) => ({
-          ...prev,
-          [path]: result.isBinary
-            ? { kind: 'binary', size: result.signature.size }
-            : {
-                kind: 'editable',
-                content: result.content,
-                savedContent: result.content,
-                baseSignature: result.signature,
-                isNew: false,
-                save: { kind: 'idle' },
-              },
-        }));
-      } catch (reason) {
-        const error = reason as SourceError;
-        // `not-found` is not a failure here — it is the "create a new file"
-        // path `authorize.ts` was built to allow. An empty, editable buffer
-        // with `baseSignature: null` is exactly what `filesWrite` expects for
-        // a path that does not exist yet.
-        if (error.code === 'not-found') {
-          setBuffers((prev) => ({
-            ...prev,
-            [path]: {
-              kind: 'editable',
-              content: '',
-              savedContent: '',
-              baseSignature: null,
-              isNew: true,
-              save: { kind: 'idle' },
-            },
-          }));
-          return;
-        }
-        setBuffers((prev) => ({ ...prev, [path]: { kind: 'refused', error } }));
-      }
-    },
-    [read],
-  );
-
-  /**
-   * Switches the editor to `path` and, ONLY when nothing is open at that
-   * path yet, loads it. An already-open buffer — including a dirty one — is
-   * shown exactly as it stood, never refetched: this is the whole of how
-   * switching between files keeps unsaved text (see this file's header).
-   */
-  const openFile = useCallback(
-    (path: string) => {
-      if (sessionId === null) return;
-      setActiveBySession((prev) => ({ ...prev, [sessionId]: path }));
-      setBuffers((prev) => {
-        if (prev[path] !== undefined) return prev;
-        void loadInto(path);
-        return prev;
-      });
-    },
-    [sessionId, loadInto],
-  );
-
-  const setContent = useCallback((path: string, content: string) => {
-    setBuffers((prev) => {
-      const buffer = prev[path];
-      if (buffer?.kind !== 'editable') return prev;
-      return { ...prev, [path]: { ...buffer, content } };
-    });
-  }, []);
-
-  /**
-   * THE SAVE. `sentContent`/`baseSignature` are captured BEFORE the request
-   * goes out and used to build the next state AFTER it answers, never read
-   * fresh from `buffers` inside the resolve handler — the operator can keep
-   * typing while a save is in flight, and crediting whatever is live in
-   * state at resolve time as "saved" would silently mark text nobody ever
-   * asked vam to write as clean.
-   */
-  const saveFile = useCallback(
-    async (path: string) => {
-      const buffer = buffers[path];
-      if (buffer?.kind !== 'editable' || write === undefined) return;
-      const sentContent = buffer.content;
-      const baseSignature = buffer.baseSignature;
-      setBuffers((prev) => {
-        const b = prev[path];
-        return b?.kind === 'editable'
-          ? { ...prev, [path]: { ...b, save: { kind: 'saving' } } }
-          : prev;
-      });
-      try {
-        const result = await write(path, sentContent, baseSignature);
-        setBuffers((prev) => {
-          const b = prev[path];
-          if (b?.kind !== 'editable') return prev;
-          return {
-            ...prev,
-            [path]: {
-              ...b,
-              savedContent: sentContent,
-              baseSignature: result.signature,
-              isNew: false,
-              save: { kind: 'idle' },
-            },
-          };
-        });
-      } catch (reason) {
-        const error = reason as SourceError;
-        setBuffers((prev) => {
-          const b = prev[path];
-          if (b?.kind !== 'editable') return prev;
-          return {
-            ...prev,
-            [path]: {
-              ...b,
-              save:
-                error.code === 'changed-on-disk' ? { kind: 'conflict' } : { kind: 'error', error },
-            },
-          };
-        });
-      }
-    },
-    [buffers, write],
-  );
-
-  /**
-   * THE ONE ACTION THAT DISCARDS LOCAL TEXT ON PURPOSE — reloading a file
-   * whose `changed-on-disk` refusal said an agent (or the operator, in
-   * another program) moved underneath it. It re-runs `loadInto`, which
-   * replaces the buffer wholesale, and is reachable only from a labelled
-   * button next to the conflict banner — never a keystroke, never automatic.
-   */
-  const reloadFile = useCallback(
-    (path: string) => {
-      void loadInto(path);
-    },
-    [loadInto],
   );
 
   const fetchListing = useCallback(() => {
@@ -1027,13 +822,6 @@ export function FilesTab({
     [columnsWidth, commitTreeWidth, treeWidthNow],
   );
 
-  const focusCursorRow = useCallback((): boolean => {
-    const row = treeRef.current?.querySelector<HTMLElement>('[data-files-cursor]') ?? null;
-    if (row === null) return false;
-    row.focus();
-    return row.ownerDocument.activeElement === row;
-  }, []);
-
   /**
    * THE MIDDLE COLUMN, whichever of its two shapes is on screen.
    *
@@ -1081,17 +869,61 @@ export function FilesTab({
     if (activeBuffer?.kind !== 'loading') wantEditorFocus.current = false;
   });
 
-  /** Opens `path` in the editor and puts the tree's cursor on it. */
-  const openFromTree = useCallback(
-    (path: string, intoEditor: boolean) => {
-      setNote(null);
-      setCursorPath(path);
-      openFile(path);
-      if (intoEditor) wantEditorFocus.current = true;
-      else wantRowFocus.current = true;
-    },
-    [openFile],
-  );
+  const requestRowFocus = useCallback(() => {
+    wantRowFocus.current = true;
+  }, []);
+  const requestEditorFocus = useCallback(() => {
+    wantEditorFocus.current = true;
+  }, []);
+
+  /**
+   * FIND A FILE — the one act, and the one code path every surface in this tab
+   * reaches it by: `/` on the tree, and `Mod-p` from the tree, the editor, the
+   * preview and either text box. Four handlers, one function, because a second
+   * `filterRef.current?.focus()` written out somewhere else is how two of them
+   * come to disagree about what the key does.
+   *
+   * IT SELECTS, AND `focus()` DOES NOT DO THAT. Measured rather than assumed
+   * (`test/panels/DetailPanel.files-tab.test.tsx`): focusing an input leaves
+   * the caret exactly where it was, so a second press on a box that already
+   * holds `env` would have appended to a stale search instead of starting a
+   * new one. Selecting makes the next keystroke replace it and `Enter` on its
+   * own still take the operator to the first match of what is there.
+   *
+   * Declared BEFORE `useFilesTreeState` below, and that ordering is
+   * load-bearing: the hook's own `onTreeKeyDown` routes its `filter` step
+   * through this same function (see `files-tree-state.ts`) rather than
+   * reaching into `filterRef` a second time, so it needs `focusFilter` to
+   * already exist by the time it is called as an argument.
+   */
+  const focusFilter = useCallback(() => {
+    setNote(null);
+    const box = filterRef.current;
+    if (box === null) return;
+    box.focus();
+    box.select();
+  }, []);
+
+  const {
+    rows,
+    cursorRow,
+    expanded,
+    setCursorPath,
+    toggleDir,
+    openFromTree,
+    focusCursorRow,
+    onTreeKeyDown,
+  } = useFilesTreeState({
+    ready,
+    filter,
+    openFile,
+    setNote,
+    focusEditor,
+    focusFilter,
+    requestRowFocus,
+    requestEditorFocus,
+    treeRef,
+  });
 
   /**
    * THE LINE A REQUEST ASKED FOR, held until the file is actually there to
@@ -1161,17 +993,6 @@ export function FilesTab({
     area.scrollTop = Math.max(0, (pending.line - 1) * lineHeight - area.clientHeight / 2);
   });
 
-  const toggleDir = useCallback((path: string, open: boolean) => {
-    setNote(null);
-    setCursorPath(path);
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (open) next.add(path);
-      else next.delete(path);
-      return next;
-    });
-  }, []);
-
   /**
    * RENDERED OR RAW, AND WHERE THE KEYBOARD GOES WITH IT.
    *
@@ -1190,28 +1011,6 @@ export function FilesTab({
     setNote(null);
     setPreview((prev) => !prev);
     wantEditorFocus.current = true;
-  }, []);
-
-  /**
-   * FIND A FILE — the one act, and the one code path every surface in this tab
-   * reaches it by: `/` on the tree, and `Mod-p` from the tree, the editor, the
-   * preview and either text box. Four handlers, one function, because a second
-   * `filterRef.current?.focus()` written out somewhere else is how two of them
-   * come to disagree about what the key does.
-   *
-   * IT SELECTS, AND `focus()` DOES NOT DO THAT. Measured rather than assumed
-   * (`test/panels/DetailPanel.files-tab.test.tsx`): focusing an input leaves
-   * the caret exactly where it was, so a second press on a box that already
-   * holds `env` would have appended to a stale search instead of starting a
-   * new one. Selecting makes the next keystroke replace it and `Enter` on its
-   * own still take the operator to the first match of what is there.
-   */
-  const focusFilter = useCallback(() => {
-    setNote(null);
-    const box = filterRef.current;
-    if (box === null) return;
-    box.focus();
-    box.select();
   }, []);
 
   /**
@@ -1382,58 +1181,6 @@ export function FilesTab({
       canPreview,
       togglePreview,
     ],
-  );
-
-  /**
-   * THE TREE'S OWN KEYBOARD. `resolveTreeKey` decides; this only carries the
-   * decision out.
-   *
-   * `preventDefault` on exactly what it answered, and NOTHING else -- a
-   * `null` step falls through unprevented so `Alt-<digit>`, `Mod-k` and the
-   * rest of the grammar still work with the keyboard in here. It is
-   * deliberately not `stopPropagation`, for the reason `focus-scope.ts`
-   * states about the question list: swallowing everything would strand the
-   * keyboard in a list it could not leave.
-   */
-  const onTreeKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLElement>) => {
-      const key = normalizeKey(event);
-      if (key === null) return;
-      const step = resolveTreeKey({ key, rows, index: cursorIndex, expanded });
-      if (step === null) return;
-      event.preventDefault();
-      switch (step.kind) {
-        case 'move':
-          setNote(null);
-          setCursorPath(rows[step.index]?.path ?? null);
-          wantRowFocus.current = true;
-          return;
-        case 'expand':
-          toggleDir(step.path, true);
-          wantRowFocus.current = true;
-          return;
-        case 'collapse':
-          toggleDir(step.path, false);
-          wantRowFocus.current = true;
-          return;
-        case 'open':
-          openFromTree(step.path, step.focusEditor);
-          return;
-        case 'filter':
-          focusFilter();
-          return;
-        case 'editor':
-          setNote(focusEditor() ? null : 'no file is open — press Enter on one in the tree first');
-          return;
-        case 'leave':
-          (document.activeElement as HTMLElement | null)?.blur();
-          return;
-        case 'refuse':
-          setNote(step.message);
-          return;
-      }
-    },
-    [rows, cursorIndex, expanded, toggleDir, openFromTree, focusEditor, focusFilter],
   );
 
   /**

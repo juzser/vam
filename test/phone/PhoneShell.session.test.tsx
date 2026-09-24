@@ -251,6 +251,109 @@ describe('the phone session screen', () => {
     expect(document.querySelector('[data-question-submit]')).toBeNull();
   });
 
+  it('keeps a typed character in the composer: `detailProps` recomputes on a draft change', () => {
+    // Regression for the round-1 memoization bug: `detailProps` (the object
+    // handed straight to `PhoneShell`, unlike the split panes which go
+    // through `PaneDetail`'s own memo) must still recompute when the
+    // focused session's draft changes, or this controlled textarea reverts
+    // every keystroke to the stale cached value.
+    openSession();
+    // Proves this is exercising `detailProps` (handed straight to
+    // `PhoneShell`) and not `PaneDetail`'s own memo.
+    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-composer-bar]')).toHaveLength(1);
+    const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    act(() => {
+      fireEvent.focus(textarea);
+    });
+    act(() => {
+      fireEvent.change(textarea, { target: { value: 'a' } });
+    });
+    expect(textarea.value).toBe('a');
+  });
+
+  it('un-locks the composer textarea when the composing slice changes: `detailProps` recomputes on a compose', () => {
+    // Regression for the same round-1 bug, the `composing` slice rather than
+    // `draft`: the textarea is `readOnly={!composing}` (DetailPanel.tsx), so
+    // if `detailProps` failed to recompute when `composingBySession` changes,
+    // focusing the box would flip `composing` to `true` in state but the
+    // stale memoized props would still hand the panel `composing: false` --
+    // the box would stay readOnly and no keystroke could ever land.
+    openSession();
+    // Proves this is exercising `detailProps` (handed straight to
+    // `PhoneShell`) and not `PaneDetail`'s own memo.
+    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-composer-bar]')).toHaveLength(1);
+    const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
+    expect(textarea).not.toBeNull();
+    expect(textarea.readOnly).toBe(true);
+    act(() => {
+      fireEvent.focus(textarea);
+    });
+    expect(textarea.readOnly).toBe(false);
+  });
+
+  it('reflects an in-flight send on the record button: `detailProps` recomputes on the writing slice', async () => {
+    // Regression for the same round-1 bug, the `writing` slice: the record
+    // button is `disabled={sending}` / `aria-busy={sending}`
+    // (DetailPanel.tsx), fed by `writingBySession` through `sendPromptFor`'s
+    // `beginPaint`/`finally`. If `detailProps` failed to recompute on that
+    // slice, the button would never show as busy while the write was in
+    // flight, and would never release once it settled.
+    let resolveSend: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    });
+    render(
+      <Canvas
+        model={MODEL}
+        source={phoneSource({
+          recordPrompt: async () => {
+            await held;
+          },
+        })}
+      />,
+    );
+    act(() => {
+      fireEvent.click(rows()[0] as Element);
+    });
+    // Proves this is exercising `detailProps` (handed straight to
+    // `PhoneShell`) and not `PaneDetail`'s own memo.
+    expect(document.querySelector('[data-phone-shell="session"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-composer-bar]')).toHaveLength(1);
+    const textarea = document.querySelector('[data-composer-bar] textarea') as HTMLTextAreaElement;
+    act(() => {
+      fireEvent.focus(textarea);
+    });
+    act(() => {
+      fireEvent.change(textarea, { target: { value: 'go' } });
+    });
+    const button = document.querySelector('[data-prompt-record]') as HTMLButtonElement;
+    expect(button.getAttribute('aria-busy')).toBe('false');
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.disabled).toBe(true);
+    resolveSend?.();
+    await act(async () => {
+      await held;
+    });
+    expect(button.getAttribute('aria-busy')).toBe('false');
+    expect(button.disabled).toBe(false);
+  });
+
+  // The fourth slice the same memo carries, `actionIndex`, has no test beside
+  // these two: `buildActions` (`panels/actions.ts`) returns exactly one entry
+  // ("the prompt") in this build, so the pane's own `j`/`k` clamp always
+  // returns the index it was given (Canvas.tsx ~4890, "for a year it could
+  // never move") and there is no interaction that moves `actionIndex` off its
+  // `0` default. A DOM-observable regression for it would have to fabricate
+  // internal state rather than drive the UI, so it is left uncovered here
+  // rather than faked; it is still listed in the memo's own dependency array
+  // (Canvas.tsx ~6165) for the day `buildActions` grows a second entry.
+
   it('does not draw the composer at all on a read-only server', () => {
     render(
       <Canvas

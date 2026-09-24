@@ -1,0 +1,255 @@
+/**
+ * THE FILE-BUFFER CONCERN, extracted out of `FilesTab.tsx`'s own scope --
+ * which file is open per session, what each open file's in-memory text is,
+ * and the load/open/edit/save/reload cycle that keeps it in step with disk.
+ *
+ * This is a MOVE, not a rewrite: every rule below -- the save/dirty logic,
+ * the `changed-on-disk` conflict handling, the `not-found` "start a new
+ * file" path -- reads exactly as it did inside `FilesTab`. See that file's
+ * own header for the reasoning; this module only relocates the scope.
+ */
+
+import { useCallback, useMemo, useState } from 'react';
+import type { FileReadResult, FileSignature, FileWriteResult } from '../../main/files/types.js';
+import type { SourceError } from '../sources/port.js';
+import { relativeLabel } from './files-editor-text.js';
+import { encodeUnsaved } from './unsaved-files.js';
+
+export type SaveState =
+  | { readonly kind: 'idle' }
+  | { readonly kind: 'saving' }
+  | { readonly kind: 'conflict' }
+  | { readonly kind: 'error'; readonly error: SourceError };
+
+export type Buffer =
+  | { readonly kind: 'loading' }
+  | {
+      readonly kind: 'editable';
+      readonly content: string;
+      readonly savedContent: string;
+      readonly baseSignature: FileSignature | null;
+      /** Opened via `not-found` — nothing is on disk at this path yet. */
+      readonly isNew: boolean;
+      readonly save: SaveState;
+    }
+  | { readonly kind: 'binary'; readonly size: number }
+  | { readonly kind: 'refused'; readonly error: SourceError };
+
+export const isDirty = (buffer: Buffer | undefined): boolean =>
+  buffer?.kind === 'editable' && buffer.content !== buffer.savedContent;
+
+export interface UseFileBuffersParams {
+  readonly sessionId: string | null;
+  /** The active session's tree root, for labelling unsaved files — `null`
+   *  when nothing has been listed yet. */
+  readonly root: string | null;
+  readonly read: ((path: string) => Promise<FileReadResult>) | undefined;
+  readonly write:
+    | ((
+        path: string,
+        content: string,
+        baseSignature: FileSignature | null,
+      ) => Promise<FileWriteResult>)
+    | undefined;
+}
+
+export interface UseFileBuffersResult {
+  readonly buffers: Record<string, Buffer>;
+  readonly activePath: string | null;
+  readonly activeBuffer: Buffer | undefined;
+  /** The encoded set of dirty files across every open buffer — see
+   *  `unsaved-files.ts`'s own `encodeUnsaved` for why a string. */
+  readonly unsavedKey: string;
+  readonly loadInto: (path: string) => Promise<void>;
+  readonly openFile: (path: string) => void;
+  readonly setContent: (path: string, content: string) => void;
+  readonly saveFile: (path: string) => Promise<void>;
+  readonly reloadFile: (path: string) => void;
+}
+
+export function useFileBuffers({
+  sessionId,
+  root,
+  read,
+  write,
+}: UseFileBuffersParams): UseFileBuffersResult {
+  const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
+  const [activeBySession, setActiveBySession] = useState<Record<string, string | null>>({});
+
+  const activePath = sessionId === null ? null : (activeBySession[sessionId] ?? null);
+  const activeBuffer = activePath === null ? undefined : buffers[activePath];
+
+  const unsavedKey = useMemo(
+    () =>
+      encodeUnsaved(
+        Object.entries(buffers)
+          .filter(([, buffer]) => isDirty(buffer))
+          // `relativeLabel` only where a root is known. A buffer belonging to
+          // another session's root falls through to the absolute path, which
+          // is that function's own documented fallback and is the more useful
+          // label in a dialog listing files from two directories.
+          .map(([path]) => ({ path, label: root === null ? path : relativeLabel(root, path) })),
+      ),
+    [buffers, root],
+  );
+
+  /**
+   * (Re-)loads `path` from disk, replacing whatever buffer it had. Used both
+   * by a fresh open and by an explicit reload — the two differ only in
+   * whether a buffer already existed, which `openFile` below checks before
+   * ever calling this.
+   */
+  const loadInto = useCallback(
+    async (path: string) => {
+      if (read === undefined) return;
+      setBuffers((prev) => ({ ...prev, [path]: { kind: 'loading' } }));
+      try {
+        const result = await read(path);
+        setBuffers((prev) => ({
+          ...prev,
+          [path]: result.isBinary
+            ? { kind: 'binary', size: result.signature.size }
+            : {
+                kind: 'editable',
+                content: result.content,
+                savedContent: result.content,
+                baseSignature: result.signature,
+                isNew: false,
+                save: { kind: 'idle' },
+              },
+        }));
+      } catch (reason) {
+        const error = reason as SourceError;
+        // `not-found` is not a failure here — it is the "create a new file"
+        // path `authorize.ts` was built to allow. An empty, editable buffer
+        // with `baseSignature: null` is exactly what `filesWrite` expects for
+        // a path that does not exist yet.
+        if (error.code === 'not-found') {
+          setBuffers((prev) => ({
+            ...prev,
+            [path]: {
+              kind: 'editable',
+              content: '',
+              savedContent: '',
+              baseSignature: null,
+              isNew: true,
+              save: { kind: 'idle' },
+            },
+          }));
+          return;
+        }
+        setBuffers((prev) => ({ ...prev, [path]: { kind: 'refused', error } }));
+      }
+    },
+    [read],
+  );
+
+  /**
+   * Switches the editor to `path` and, ONLY when nothing is open at that
+   * path yet, loads it. An already-open buffer — including a dirty one — is
+   * shown exactly as it stood, never refetched: this is the whole of how
+   * switching between files keeps unsaved text (see `FilesTab.tsx`'s own
+   * header).
+   */
+  const openFile = useCallback(
+    (path: string) => {
+      if (sessionId === null) return;
+      setActiveBySession((prev) => ({ ...prev, [sessionId]: path }));
+      setBuffers((prev) => {
+        if (prev[path] !== undefined) return prev;
+        void loadInto(path);
+        return prev;
+      });
+    },
+    [sessionId, loadInto],
+  );
+
+  const setContent = useCallback((path: string, content: string) => {
+    setBuffers((prev) => {
+      const buffer = prev[path];
+      if (buffer?.kind !== 'editable') return prev;
+      return { ...prev, [path]: { ...buffer, content } };
+    });
+  }, []);
+
+  /**
+   * THE SAVE. `sentContent`/`baseSignature` are captured BEFORE the request
+   * goes out and used to build the next state AFTER it answers, never read
+   * fresh from `buffers` inside the resolve handler — the operator can keep
+   * typing while a save is in flight, and crediting whatever is live in
+   * state at resolve time as "saved" would silently mark text nobody ever
+   * asked vam to write as clean.
+   */
+  const saveFile = useCallback(
+    async (path: string) => {
+      const buffer = buffers[path];
+      if (buffer?.kind !== 'editable' || write === undefined) return;
+      const sentContent = buffer.content;
+      const baseSignature = buffer.baseSignature;
+      setBuffers((prev) => {
+        const b = prev[path];
+        return b?.kind === 'editable'
+          ? { ...prev, [path]: { ...b, save: { kind: 'saving' } } }
+          : prev;
+      });
+      try {
+        const result = await write(path, sentContent, baseSignature);
+        setBuffers((prev) => {
+          const b = prev[path];
+          if (b?.kind !== 'editable') return prev;
+          return {
+            ...prev,
+            [path]: {
+              ...b,
+              savedContent: sentContent,
+              baseSignature: result.signature,
+              isNew: false,
+              save: { kind: 'idle' },
+            },
+          };
+        });
+      } catch (reason) {
+        const error = reason as SourceError;
+        setBuffers((prev) => {
+          const b = prev[path];
+          if (b?.kind !== 'editable') return prev;
+          return {
+            ...prev,
+            [path]: {
+              ...b,
+              save:
+                error.code === 'changed-on-disk' ? { kind: 'conflict' } : { kind: 'error', error },
+            },
+          };
+        });
+      }
+    },
+    [buffers, write],
+  );
+
+  /**
+   * THE ONE ACTION THAT DISCARDS LOCAL TEXT ON PURPOSE — reloading a file
+   * whose `changed-on-disk` refusal said an agent (or the operator, in
+   * another program) moved underneath it. It re-runs `loadInto`, which
+   * replaces the buffer wholesale, and is reachable only from a labelled
+   * button next to the conflict banner — never a keystroke, never automatic.
+   */
+  const reloadFile = useCallback(
+    (path: string) => {
+      void loadInto(path);
+    },
+    [loadInto],
+  );
+
+  return {
+    buffers,
+    activePath,
+    activeBuffer,
+    unsavedKey,
+    loadInto,
+    openFile,
+    setContent,
+    saveFile,
+    reloadFile,
+  };
+}

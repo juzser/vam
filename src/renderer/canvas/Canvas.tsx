@@ -34,6 +34,7 @@
 import { Box, Factory, FlaskConical, type LucideIcon, Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
+  memo,
   type DragEvent as ReactDragEvent,
   type ReactNode,
   useCallback,
@@ -1549,6 +1550,56 @@ function SplitLayout({
     </div>
   );
 }
+
+/**
+ * One pane's `DetailPanel` props, memoized on that pane's OWN inputs so a
+ * keystroke in a SIBLING pane -- which replaces the whole
+ * `draftsBySession`/`composingBySession`/`writingBySession`/
+ * `actionIndexBySession` maps, see `mapsRef` above `buildDetailProps` --
+ * does not rebuild this pane's props object and defeat `DetailPanel`'s own
+ * `memo()`.
+ *
+ * `draft`/`composing`/`writing`/`actionIndex` are this pane's own slice of
+ * those four maps, read by the CALLER (`renderLeaf`) and passed down as
+ * plain values purely so THIS memo's dependency array can key on them --
+ * `buildDetailProps` itself does not take them as arguments; it reads the
+ * maps through `mapsRef.current` at call time, which is why it is safe for
+ * this component to omit those four maps from its own dependency list and
+ * still recompute exactly when this pane's own slice changes.
+ */
+const PaneDetail = memo(function PaneDetail({
+  buildDetailProps,
+  entry,
+  sessionId,
+  paneId,
+  isFocused,
+  draft,
+  composing,
+  writing,
+  actionIndex,
+}: {
+  buildDetailProps: (
+    entry: SessionEntry | null,
+    sessionId: string | null,
+    paneId: string,
+    isFocused: boolean,
+  ) => ComponentProps<typeof DetailPanel>;
+  entry: SessionEntry | null;
+  sessionId: string | null;
+  paneId: string;
+  isFocused: boolean;
+  draft: string;
+  composing: boolean;
+  writing: boolean;
+  actionIndex: number;
+}) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draft`/`composing`/`writing`/`actionIndex` are not read inside the callback -- `buildDetailProps` reads its own copies through `mapsRef` -- they are listed ONLY so this pane's memo recomputes exactly when this pane's own slice of the four maps changes, which is the whole point of passing them down as plain values (see the component doc comment above)
+  const paneProps = useMemo(
+    () => buildDetailProps(entry, sessionId, paneId, isFocused),
+    [buildDetailProps, entry, sessionId, paneId, isFocused, draft, composing, writing, actionIndex],
+  );
+  return <DetailPanel {...paneProps} />;
+});
 
 function CanvasInner({
   model: factoryModel,
@@ -3784,9 +3835,39 @@ function CanvasInner({
    * shell always made, just no longer needing a zero-argument wrapper of
    * its own now that its one caller passes the entry directly.
    */
+  /**
+   * A RENDER-TIME MIRROR of the four per-session maps `buildDetailProps` and
+   * `sendPromptFor` read, so neither has to list them in its own dependency
+   * array.
+   *
+   * `setDraftFor` replaces the WHOLE `draftsBySession` map on every keystroke
+   * in ANY pane, so a `useCallback` that lists it directly takes a new
+   * identity on a keystroke it has nothing to do with -- and `sendPromptFor`
+   * is itself a dependency of `buildDetailProps`, so that identity change
+   * would ripple into every split pane's per-pane props memo, defeating even
+   * a SIBLING pane's `DetailPanel` memo for a keystroke in this one.
+   * Assigned in the render body, NOT in an effect: both callbacks read
+   * `mapsRef.current` at CALL time (after the keystroke that triggered the
+   * render has already committed), and an effect would not have written the
+   * current values yet when an event handler fires synchronously within the
+   * same render pass in some paths.
+   */
+  const mapsRef = useRef({
+    draftsBySession,
+    composingBySession,
+    writingBySession,
+    actionIndexBySession,
+  });
+  mapsRef.current = {
+    draftsBySession,
+    composingBySession,
+    writingBySession,
+    actionIndexBySession,
+  };
   const sendPromptFor = useCallback(
     async (entry: SessionEntry | null) => {
-      const entryDraft = entry === null ? '' : (draftsBySession[entry.session.id] ?? '');
+      const entryDraft =
+        entry === null ? '' : (mapsRef.current.draftsBySession[entry.session.id] ?? '');
       if (entry === null || entryDraft.trim() === '') {
         return;
       }
@@ -3802,7 +3883,7 @@ function CanvasInner({
         setStatus('still connecting to the source — there is nothing to send to yet');
         return;
       }
-      if (writingBySession[entry.session.id] ?? false) {
+      if (mapsRef.current.writingBySession[entry.session.id] ?? false) {
         return;
       }
       const text = entryDraft;
@@ -3913,9 +3994,9 @@ function CanvasInner({
       }
     },
     [
-      draftsBySession,
+      // `draftsBySession` and `writingBySession` are read through `mapsRef`
+      // above, deliberately absent here -- see the comment on `mapsRef`.
       source,
-      writingBySession,
       sourceModel,
       setDraftFor,
       setComposingFor,
@@ -5881,6 +5962,13 @@ function CanvasInner({
    * the keyboard there first — the same "clicking into it is how you focus
    * it" contract a real click already has everywhere else in this shell.
    */
+  /**
+   * `buildDetailProps` reads the four per-session maps through `mapsRef`
+   * (declared above, beside `sendPromptFor`, for the same reason), so it can
+   * stop listing them in its own dependency array -- every split pane's
+   * per-pane props memo lists `buildDetailProps` as a dependency, so an
+   * identity change here would defeat every sibling pane's memo too.
+   */
   const buildDetailProps = useCallback(
     (
       entry: SessionEntry | null,
@@ -5888,10 +5976,12 @@ function CanvasInner({
       paneId: string,
       isFocused: boolean,
     ): ComponentProps<typeof DetailPanel> => {
-      const paneDraft = sessionId === null ? '' : (draftsBySession[sessionId] ?? '');
-      const paneComposing = sessionId === null ? false : (composingBySession[sessionId] ?? false);
-      const paneWriting = sessionId === null ? false : (writingBySession[sessionId] ?? false);
-      const paneActionIndex = sessionId === null ? 0 : (actionIndexBySession[sessionId] ?? 0);
+      const maps = mapsRef.current;
+      const paneDraft = sessionId === null ? '' : (maps.draftsBySession[sessionId] ?? '');
+      const paneComposing =
+        sessionId === null ? false : (maps.composingBySession[sessionId] ?? false);
+      const paneWriting = sessionId === null ? false : (maps.writingBySession[sessionId] ?? false);
+      const paneActionIndex = sessionId === null ? 0 : (maps.actionIndexBySession[sessionId] ?? 0);
       /**
        * WHERE THIS PROJECT'S PULL REQUESTS ARE READ FROM, and the two acts
        * that change it -- built HERE because this is where `prefs` and
@@ -6038,10 +6128,10 @@ function CanvasInner({
       };
     },
     [
-      draftsBySession,
-      composingBySession,
-      writingBySession,
-      actionIndexBySession,
+      // `draftsBySession`, `composingBySession`, `writingBySession` and
+      // `actionIndexBySession` are read through `mapsRef` above, deliberately
+      // NOT listed here: each one is replaced whole on any pane's keystroke,
+      // and listing them would take this callback's identity with it.
       sendFailureBySession,
       viewBySession,
       viewSeed,
@@ -6066,9 +6156,19 @@ function CanvasInner({
    * room for a split, and the chord grammar that would create one is
    * already off there — see the `onKeyDown` effect's own guard).
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draft`/`composing`/`writing`/`actionIndex` below are not read directly here -- `buildDetailProps` reads its own copies through `mapsRef` -- they are listed ONLY so this memo recomputes exactly when the FOCUSED session's slice of the four maps changes, mirroring `PaneDetail`'s own memo above for the same reason: PhoneShell is handed this object directly (no per-pane wrapper), so without these deps a keystroke in the phone composer would never recompute it.
   const detailProps = useMemo(
     () => buildDetailProps(focusedEntry, focusedSessionId, focusedPaneId, true),
-    [buildDetailProps, focusedEntry, focusedSessionId, focusedPaneId],
+    [
+      buildDetailProps,
+      focusedEntry,
+      focusedSessionId,
+      focusedPaneId,
+      focusedSessionId === null ? undefined : draftsBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : composingBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : writingBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : actionIndexBySession[focusedSessionId],
+    ],
   );
 
   /**
@@ -6192,7 +6292,28 @@ function CanvasInner({
           {starting !== null && starting.paneId === leaf.id ? (
             <StartingSession projectName={starting.projectName} />
           ) : (
-            <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
+            <PaneDetail
+              buildDetailProps={buildDetailProps}
+              entry={entry}
+              sessionId={leaf.sessionId}
+              paneId={leaf.id}
+              isFocused={isFocused}
+              // This pane's OWN slice of the four per-session maps, read
+              // here (not inside `PaneDetail`) so a keystroke in ANOTHER
+              // pane -- which replaces the whole map by reference -- still
+              // hands `PaneDetail` the SAME primitive values for this
+              // pane's session, and its `memo()` bails out.
+              draft={leaf.sessionId === null ? '' : (draftsBySession[leaf.sessionId] ?? '')}
+              composing={
+                leaf.sessionId === null ? false : (composingBySession[leaf.sessionId] ?? false)
+              }
+              writing={
+                leaf.sessionId === null ? false : (writingBySession[leaf.sessionId] ?? false)
+              }
+              actionIndex={
+                leaf.sessionId === null ? 0 : (actionIndexBySession[leaf.sessionId] ?? 0)
+              }
+            />
           )}
           {dropTarget !== null && dropTarget.paneId === leaf.id && (
             <DropZoneOverlay zone={dropTarget.zone} />
@@ -6222,12 +6343,23 @@ function CanvasInner({
       newTabInPane,
       newSessionDecline,
       dropTarget,
-      // The strip's two indicator inputs. `buildDetailProps` above already
-      // re-derives on every draft keystroke, so `draftsBySession` costs this
-      // hook nothing it was not paying. Without them the strip would draw a
-      // stale pencil. (The indicator LIST is a constant now, so it is not a
-      // dependency: see `prefs/tab-indicators.ts`.)
+      // `draftsBySession` feeds the strip's pencil indicator directly
+      // (`drafts={draftsBySession}` above) AND is read here, per leaf, to
+      // pass `PaneDetail` this pane's own draft as a plain string --
+      // `buildDetailProps` no longer depends on any of these four maps
+      // (they are read through `mapsRef` there instead), so listing them
+      // here is what keeps THIS closure from handing `PaneDetail` a stale
+      // slice. `composingBySession`, `writingBySession` and
+      // `actionIndexBySession` are the other three for the same reason.
+      // Recreating `renderLeaf` itself on every keystroke costs nothing:
+      // `PaneDetail`'s own `memo()` compares the PRIMITIVE values it
+      // receives, not this function's identity. (The indicator LIST is a
+      // constant now, so it is not a dependency: see
+      // `prefs/tab-indicators.ts`.)
       draftsBySession,
+      composingBySession,
+      writingBySession,
+      actionIndexBySession,
       pending,
     ],
   );
