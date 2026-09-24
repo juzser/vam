@@ -100,6 +100,7 @@ describe('describeCodexUsage', () => {
       label: '5-hour',
       percent: 11,
       countdown: '1h 15m',
+      resetsAt: '2026-09-24T11:15:00.000Z',
     });
     expect(result.secondary).toEqual({ state: 'unknown', label: 'Weekly' });
   });

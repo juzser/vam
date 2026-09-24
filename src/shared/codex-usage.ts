@@ -120,6 +120,9 @@ export type CodexWindowDisplay =
       readonly label: string;
       readonly percent: number;
       readonly countdown: string;
+      /** ISO, alongside `countdown` -- the popover draws both, "resets in
+       *  1h 15m (14:40)", the same pairing the task brief itself gives. */
+      readonly resetsAt: string;
     }
   | { readonly state: 'reset'; readonly label: string }
   | { readonly state: 'unknown'; readonly label: string };
@@ -154,6 +157,7 @@ function describeWindow(window: CodexRawWindow, label: string, now: Date): Codex
     label,
     percent: window.percent,
     countdown: formatCountdown(window.resetsAt, now),
+    resetsAt: window.resetsAt,
   };
 }
 
@@ -169,7 +173,7 @@ function codexReasonText(reason: CodexUsageUnknownReason): string {
 /** `HH:MM`, local wall clock -- built with `getHours`/`getMinutes` (local, not
  *  UTC) rather than `toLocaleTimeString`, so the format is fixed 24-hour and
  *  does not depend on ICU locale data being present in the runtime. */
-function clockTime(iso: string): string {
+export function clockTime(iso: string): string {
   const date = new Date(iso);
   const hh = String(date.getHours()).padStart(2, '0');
   const mm = String(date.getMinutes()).padStart(2, '0');
