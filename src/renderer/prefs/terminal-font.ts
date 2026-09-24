@@ -72,6 +72,54 @@ export const DEFAULT_TERMINAL_FONT_SIZE = 12.5;
 export const TERMINAL_LINE_HEIGHT = 1.55;
 
 /**
+ * THE FONT STACK, spelled out for xterm.js's `fontFamily` option -- copied
+ * from `styles.css`'s own `--font-mono`, held to it by
+ * `terminal-font.test.ts` the same way `terminal-scheme.ts`'s hex tables are
+ * held to the stylesheet's ramp. A copy is unavoidable here for the reason
+ * that test's own sibling gives: `--font-mono` lives inside an `@theme
+ * inline` block, which inlines the literal into the `font-mono` utility
+ * class rather than also emitting it onto `:root` -- there is no custom
+ * property a script could read back at runtime, unlike the scheme's own
+ * custom-property names (`terminal-scheme.ts`'s own `TERMINAL_SCHEME_VARS`).
+ *
+ * `TerminalTab.tsx` never needs this constant: its screen is real DOM text
+ * and the `font-mono` class reaches the token directly, the way every other
+ * mono surface in this renderer does. `TerminalStreamTab.tsx`'s screen is a
+ * DOM tree xterm.js builds and paints itself -- it takes a literal
+ * font-family string and never sees a class name at all, so this is the one
+ * thing standing between the two screens reading as the same face.
+ */
+export const TERMINAL_FONT_FAMILY =
+  "'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace";
+
+/**
+ * XTERM.JS'S OWN `lineHeight` OPTION, CORRECTED SO ITS RENDERED ROW COMES
+ * OUT THE SAME PIXEL HEIGHT AS `TerminalTab.tsx`'s CSS ROW -- and it is NOT
+ * `TERMINAL_LINE_HEIGHT` again, because the two numbers mean different
+ * things to the two renderers. CSS's unitless `line-height: 1.55` on a
+ * `<pre>` is ALWAYS `font-size * 1.55`, exactly, by spec -- 19.375px at
+ * 12.5px type, measured by `e2e/terminal-stream-frame-shots.mjs`'s own
+ * `off.lineHeightPx`. xterm.js's `lineHeight` is a multiplier over the
+ * FACE'S OWN MEASURED GLYPH-BOX HEIGHT instead, which for Geist Mono is
+ * already taller than its font-size -- so passing `TERMINAL_LINE_HEIGHT`
+ * (1.55) straight through rendered a 23px row against that SAME 19.375px
+ * target, an 18.6% mismatch the same guard caught before this constant
+ * existed.
+ *
+ * `1.55 * (19.375 / 23)`, held to three digits after the point -- ONE
+ * MEASURED RATIO, in the register `TerminalTab.tsx`'s own `RULER_TEXT`
+ * comment already uses for a font metric ("Geist Mono at 10.5px measures
+ * 6.6015625px here"), not a formula derived from xterm's private
+ * `_core._renderService` (the surface `@xterm/addon-fit`'s own `FitAddon`
+ * reaches for, with its own header's "TODO: Remove reliance on private
+ * API" -- this file does not add a second dependency on it). Both
+ * renderers scale linearly with font-size for one face, so this ratio holds
+ * across `TERMINAL_FONT_SIZES` within the guard's own two-pixel tolerance;
+ * it would need re-measuring only if the face itself changed.
+ */
+export const TERMINAL_STREAM_LINE_HEIGHT = 1.306;
+
+/**
  * A stored value, reduced to one of the offered sizes.
  *
  * EXACT OR DEFAULT, not nearest, and that is the one decision in this

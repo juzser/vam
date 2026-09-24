@@ -560,7 +560,14 @@ export type TerminalStreamApi = {
     projectId: string,
     rowId?: string,
   ): Promise<
-    | { readonly ok: true; readonly streamId: string; readonly seed: string }
+    | {
+        readonly ok: true;
+        readonly streamId: string;
+        readonly seed: string;
+        /** The resolved tmux session name -- see `StreamOpenResult`'s own
+         *  comment in `main/terminal/stream-ipc.ts`. */
+        readonly name: string;
+      }
     | {
         readonly ok: false;
         readonly reason: 'bad-request' | 'unavailable' | 'unresolved-session' | 'unsupported-tmux';

@@ -524,3 +524,92 @@ remote/web build -- so requirement 4 ("Phone: unchanged") holds for the
 streaming path too: there is no `window.api` at all in the web/phone bundle,
 so `TerminalStreamTab.tsx` never mounts a working pane there regardless of
 the `streamingTerminal` setting's value.
+
+## Frame parity, 14. Still not the default -- but must look the same when it is on
+
+The operator's own decision (translated): "Keep tmux; turn streaming on by
+default after testing -- but the terminal frame, when xterm is on, needs the
+radius and must look the same as the tmux view when it's off." This item is
+DONE: `TerminalStreamTab.tsx`'s frame/chrome/text/colours now match
+`TerminalTab.tsx`'s byte-for-byte where the two renderers can agree at all,
+falsified by `e2e/terminal-stream-frame-shots.mjs` in a real browser rather
+than eyeballed -- `streamingTerminal` STAYS DEFAULT OFF; this is chrome
+parity for the beta, not the flip itself, which the operator will test first.
+
+**Measured, both columns, real Chromium, same fixture (a tmux-shaped
+`RED`/`GRN`/`BLU` SGR line and a plain sentence), `getComputedStyle`/
+`getBoundingClientRect` throughout -- never the source, per this repo's own
+"assert the property, not its proxy" lesson:**
+
+| property | OFF -- `TerminalTab.tsx` (`[data-terminal-pane]`) | ON -- `TerminalStreamTab.tsx` (`[data-terminal-stream]`) |
+|---|---|---|
+| border-radius | `9px` | `9px` |
+| border | `1px` `rgb(68, 68, 68)` | `1px` `rgb(68, 68, 68)` |
+| background-color | `rgb(30, 31, 41)` | `rgb(30, 31, 41)` |
+| padding (T/R/B/L) | `8px 12px 8px 12px` | `8px 12px 8px 12px` |
+| clips to the radius | n/a (`overflow: auto`, a `<pre>`, no square canvas under it) | `overflow: hidden` -- xterm's own square-cornered rows/cursor clipped to the frame |
+| font-family | `"Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace` | same, copied into `TERMINAL_FONT_FAMILY` (`prefs/terminal-font.ts`) -- xterm takes a literal string, never a class |
+| font-size | `12.5px` (the operator's `terminalFontSize`) | `12.5px`, same store |
+| rendered row height | `19.375px` (CSS `line-height: 1.55`, exact) | `19px` (xterm's own `lineHeight` option, corrected -- see below) |
+| a red SGR sample | `rgb(252, 59, 68)` | `rgb(252, 59, 68)` -- both read `activeTerminalScheme()` |
+| branch / session name | drawn on a one-row status rule under the pane | same rule, same order, same classes (`[data-terminal-stream-status]`) |
+| cursor | steady block, never blinks (this file's own design: a poll cannot honestly animate liveness) | steady block, `cursorBlink: false` set to MATCH -- this pane really is live, but the operator's ask is that the two screens look the same |
+| Insert/Select marks | `insertScopeMark`+`insertStopMark` on the pane, the hidden `<textarea>` forwarded to | `insertScopeMark` on the pane, `INSERT_STOP` on xterm's own `term.textarea` directly (already shipped, task-breakdown item 4) |
+
+**The one real gap, named rather than hidden: `backgroundOpacity` under 1.**
+`terminalSchemeStyle()` composites the scheme's background with the
+operator's opacity slider (`prefs/terminal-scheme.ts`) as a translucent
+`rgba()`, painted on `TerminalTab.tsx`'s pane directly. `TerminalStreamTab.tsx`
+now paints its OWN frame (`[data-terminal-stream]`'s `style`) with that exact
+same composite -- but xterm.js's `ITheme.background` is passed the OPAQUE hex
+(`mapScheme` still drops `backgroundOpacity`), because xterm's DOM/canvas
+renderer painting a truly translucent cell background was not attempted or
+verified for this task. At the shipped default (`backgroundOpacity: 1`,
+opaque) the two are pixel-identical, which is the row the comparison table
+above measures and the case the operator will actually see; an operator who
+has moved the slider off 1 would see the padding ring go translucent while
+the text area under it stays opaque -- a real, narrow, follow-up gap.
+
+**Why the row height needed a SEPARATE constant
+(`TERMINAL_STREAM_LINE_HEIGHT`, not `TERMINAL_LINE_HEIGHT` again).** The two
+renderers give the SAME NUMBER two different meanings. CSS's unitless
+`line-height: 1.55` on `TerminalTab.tsx`'s `<pre>` is always exactly
+`font-size * 1.55` -- 19.375px at 12.5px type, by spec, no exceptions.
+xterm.js's `lineHeight` option is a multiplier over the FACE'S OWN MEASURED
+GLYPH-BOX HEIGHT instead, which for Geist Mono is already taller than its
+font-size; passing `1.55` straight through rendered a 23px row against that
+same 19.375px target -- an 18.6% mismatch this guard caught before the
+correction existed. `TERMINAL_STREAM_LINE_HEIGHT` (`prefs/terminal-font.ts`)
+is `1.55 * (19.375 / 23) = 1.306`, ONE MEASURED CONSTANT in the same register
+`TerminalTab.tsx`'s own `RULER_TEXT` comment already uses for a font metric,
+not a formula derived from xterm's private `_core._renderService` (the
+surface `@xterm/addon-fit` itself depends on, with its own "TODO: Remove
+reliance on private API" -- this repo does not add a second dependency on
+it). Both renderers scale linearly with font-size for one face, so the ratio
+holds across `TERMINAL_FONT_SIZES` within this guard's own two-pixel
+tolerance; it would need re-measuring only if the face itself changed.
+
+**The tmux session name, which `TerminalStreamTab.tsx` could not draw at all
+until this task.** `StreamOpenResult` (`main/terminal/stream-ipc.ts`) now
+carries `name: match.name` alongside `seed` -- the SAME `targetSession`
+pairing `terminal/ipc.ts`'s `read` channel resolves for `TerminalTab.tsx`'s
+own `view.name`. Threaded through `preload/api.ts`'s `TerminalStreamApi.open`
+type and drawn on the new status rule; `null` until the stream actually opens
+(`TerminalTab.tsx`'s own `view` starts `null` for the identical
+never-invent-an-identity reason).
+
+**Screenshots**, dark and light, `docs/ui as outDir`, written by
+`e2e/terminal-stream-frame-shots.mjs`: `docs/ui/terminal-streaming-off.png` /
+`docs/ui/terminal-streaming-on.png` (dark, the pair the comparison table
+above was measured against) and `docs/ui/terminal-streaming-off-light.png` /
+`docs/ui/terminal-streaming-on-light.png`.
+
+**Not attempted in this task.** A custom overlay scrollbar for xterm's own
+scrollback (`TerminalTab.tsx`'s `OverlayScroll` thumb has no DOM element on
+the streaming side to attach to -- xterm's native scrollbar is hidden via
+`[data-terminal-stream] .xterm-viewport` in `styles.css` instead, so at least
+no square-edged native bar cuts across the rounded frame); a pixel comparison
+of the cursor's own colour against the scheme's `cursor` token (the block/
+no-blink STYLE is measured, its colour is not, separately from the ANSI
+colours already falsified above); and multi-pane handling (task-breakdown
+item 13, still open, unrelated to frame parity).

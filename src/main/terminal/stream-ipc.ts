@@ -62,7 +62,17 @@ export type StreamOpenRefusal =
   | { readonly ok: false; readonly reason: 'unsupported-tmux' };
 
 export type StreamOpenResult =
-  | { readonly ok: true; readonly streamId: string; readonly seed: string }
+  | {
+      readonly ok: true;
+      readonly streamId: string;
+      readonly seed: string;
+      /** The resolved tmux session name -- `match.name`, the SAME pairing
+       * `targetSession` gives `terminal/ipc.ts`'s `read` channel, whose
+       * answer's `view.name` is what `TerminalTab.tsx` draws on its own
+       * status rule. `TerminalStreamTab.tsx` has no other way to know it:
+       * the stream carries bytes, not the name they came from. */
+      readonly name: string;
+    }
   | StreamOpenRefusal;
 
 export function registerTerminalStreamIpc(
@@ -136,7 +146,7 @@ export function registerTerminalStreamIpc(
       try {
         const seed = await client.connect();
         clients.set(streamId, client);
-        return { ok: true, streamId, seed };
+        return { ok: true, streamId, seed, name: match.name };
       } catch {
         client.dispose();
         return { ok: false, reason: 'unavailable' };

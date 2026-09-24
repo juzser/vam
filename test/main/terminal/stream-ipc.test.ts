@@ -116,6 +116,17 @@ describe('registerTerminalStreamIpc', () => {
     expect(result).toMatchObject({ ok: true, seed: 'hello-screen' });
   });
 
+  it('returns the resolved tmux session name alongside the seed -- what TerminalStreamTab draws on its status rule, the same name TerminalTab reads off `view.name`', async () => {
+    const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient('hello-screen');
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const result = await call(CHANNELS.terminalStreamOpen, ATLAS);
+    expect(result).toMatchObject({ ok: true, name: 'vam-atlas-a1b2c3' });
+  });
+
   it('pushes data/seed/down through webContents.send, keyed by streamId', async () => {
     const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
     const { ipcMain, call } = fakeIpcMain();

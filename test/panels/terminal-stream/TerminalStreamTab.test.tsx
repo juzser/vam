@@ -13,6 +13,10 @@
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { focusInsertStop } from '../../../src/renderer/keyboard/focus-scope.js';
+import {
+  TERMINAL_FONT_FAMILY,
+  TERMINAL_STREAM_LINE_HEIGHT,
+} from '../../../src/renderer/prefs/terminal-font.js';
 
 const writeCalls: string[] = [];
 const disposeCalls: number[] = [];
@@ -88,7 +92,7 @@ function withBridge(over: {
     projectId: string,
     rowId?: string,
   ) => Promise<
-    | { ok: true; streamId: string; seed: string }
+    | { ok: true; streamId: string; seed: string; name: string }
     | {
         ok: false;
         reason: 'bad-request' | 'unavailable' | 'unresolved-session' | 'unsupported-tmux';
@@ -107,7 +111,14 @@ function withBridge(over: {
     value: {
       terminal: { resize },
       terminalStream: {
-        open: over.open ?? (async () => ({ ok: true, streamId: 'stream-1', seed: 'hello' })),
+        open:
+          over.open ??
+          (async () => ({
+            ok: true,
+            streamId: 'stream-1',
+            seed: 'hello',
+            name: 'vam-stub-a1b2c3',
+          })),
         close: over.close ?? close,
         write: over.write ?? vi.fn(),
         onData: over.onData ?? (() => () => {}),
@@ -209,7 +220,12 @@ describe('mounted with a bridge', () => {
       open: async (projectId, rowId) => {
         expect(projectId).toBe('p1');
         expect(rowId).toBe('s1');
-        return { ok: true, streamId: 'stream-1', seed: 'the actual seed text' };
+        return {
+          ok: true,
+          streamId: 'stream-1',
+          seed: 'the actual seed text',
+          name: 'vam-stub-a1b2c3',
+        };
       },
     });
     render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
@@ -389,6 +405,79 @@ describe('mounted with a bridge', () => {
   });
 });
 
+describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)', () => {
+  it('draws the same bordered, rounded, clipped pane frame TerminalTab.tsx draws -- border-line, rounded-[9px], overflow-hidden, the focus-visible ring', async () => {
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const pane = q('[data-terminal-stream]');
+    const className = pane?.className ?? '';
+    for (const token of [
+      'rounded-[9px]',
+      'border',
+      'border-line',
+      'overflow-hidden',
+      'has-[:focus-visible]:outline',
+      'has-[:focus-visible]:outline-line-strong',
+    ]) {
+      expect(className, className).toContain(token);
+    }
+  });
+
+  it('configures the real Terminal with the shared font family, TerminalTab.tsx’s own line-height ratio and a steady (non-blinking) block cursor', async () => {
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(lastTerm?.options.fontFamily).toBe(TERMINAL_FONT_FAMILY);
+    expect(lastTerm?.options.lineHeight).toBe(TERMINAL_STREAM_LINE_HEIGHT);
+    // TerminalTab.tsx's own header: "IT DOES NOT BLINK" -- a steady block
+    // reads as the same surface either way the setting is flipped.
+    expect(lastTerm?.options.cursorBlink).toBe(false);
+  });
+
+  it('draws a status rule under the pane with the branch and the resolved tmux session name, the same facts TerminalTab.tsx draws and in the same order', async () => {
+    withBridge({
+      open: async () => ({ ok: true, streamId: 'stream-1', seed: 'hi', name: 'vam-atlas-a1b2c3' }),
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch="work/atlas-fit" />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(q('[data-terminal-stream-branch]')?.textContent).toBe('work/atlas-fit');
+    expect(q('[data-terminal-stream-badge]')?.textContent).toBe('vam-atlas-a1b2c3');
+  });
+
+  it('draws no branch and no name until the stream has actually opened -- no invented identity', async () => {
+    let resolveOpen:
+      | ((value: { ok: true; streamId: string; seed: string; name: string }) => void)
+      | undefined;
+    withBridge({
+      open: () =>
+        new Promise((resolve) => {
+          resolveOpen = resolve;
+        }),
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch="work/atlas-fit" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(q('[data-terminal-stream-badge]')).toBeNull();
+    await act(async () => {
+      resolveOpen?.({ ok: true, streamId: 'stream-1', seed: 'hi', name: 'vam-atlas-a1b2c3' });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(q('[data-terminal-stream-badge]')?.textContent).toBe('vam-atlas-a1b2c3');
+  });
+});
+
 describe('visibility-driven connect/disconnect', () => {
   it('closes the stream when the window is hidden and opens a fresh one, reseeded, when it returns', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
@@ -396,7 +485,12 @@ describe('visibility-driven connect/disconnect', () => {
     const { close } = withBridge({
       open: async () => {
         openCount += 1;
-        return { ok: true, streamId: `stream-${openCount}`, seed: `seed-${openCount}` };
+        return {
+          ok: true,
+          streamId: `stream-${openCount}`,
+          seed: `seed-${openCount}`,
+          name: `vam-stub-${openCount}`,
+        };
       },
     });
     try {
@@ -438,7 +532,12 @@ describe('visibility-driven connect/disconnect', () => {
 
   it('does not connect at mount while the window starts hidden', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
-    const openSpy = vi.fn(async () => ({ ok: true as const, streamId: 's1', seed: 'x' }));
+    const openSpy = vi.fn(async () => ({
+      ok: true as const,
+      streamId: 's1',
+      seed: 'x',
+      name: 'vam-stub-a1b2c3',
+    }));
     withBridge({ open: openSpy });
     try {
       visibility.mockReturnValue('hidden');
