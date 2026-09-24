@@ -67,6 +67,7 @@ async function webRootFixture(): Promise<string> {
   await mkdir(join(root, 'assets'));
   await writeFile(join(root, 'assets', 'app.js'), 'export const vam = 1;\n');
   await writeFile(join(root, 'favicon.png'), 'not really a png');
+  await writeFile(join(root, 'icon.svg'), '<svg></svg>');
   return root;
 }
 
@@ -167,6 +168,19 @@ describe('what the exemption covers', () => {
     // the exemption is a SHAPE and not "whatever happens to be static". The
     // cost is a missing tab icon before pairing, and nothing else.
     expect((await fetch(`${base}/favicon.png`)).status).toBe(401);
+    // `icon.svg` IS IN THE SHAPE, unlike `favicon.png` beside it. The
+    // difference is where each is read from: the tab icon is fetched by the
+    // browser itself, before any script of vam's has run, so nothing can ever
+    // carry a token to it and the miss is cosmetic and unavoidable either way.
+    // `icon.svg` is read by `GettingStarted.tsx`'s own `<img>`, INSIDE the
+    // authenticated app, on the one screen a freshly-paired phone is most
+    // likely to be looking at -- and an `<img src>` carries no bearer header
+    // for this server to check, so behind the token it is not "missing before
+    // pairing" the way the favicon is, it is broken AFTER pairing, every time,
+    // on every browser. Named exactly, the same way `/` and `/index.html`
+    // are -- not "every top-level file", which is the shape this exemption
+    // exists to refuse.
+    expect((await fetch(`${base}/icon.svg`)).status).toBe(200);
   });
 
   /**

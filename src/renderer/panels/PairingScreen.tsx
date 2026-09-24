@@ -85,7 +85,15 @@ export function PairingScreen({
           Pairing code
           <input
             value={code}
-            onChange={(event) => setCode(event.target.value)}
+            // The desktop shows the code GROUPED, `XXXX-XXXX` (`PairingPanel.
+            // tsx`'s own `grouped`) -- "a group of four is what a person
+            // holds while looking away." Typed back exactly as shown, the
+            // hyphen used to occupy one of the eight `maxLength` slots and
+            // push a real character off the end, so `ABCD-2345` arrived as
+            // `ABCD-234` -- never a valid code. Stripped here rather than at
+            // submission: the field's own `maxLength` must count only the
+            // characters the server will ever see.
+            onChange={(event) => setCode(event.target.value.replace(/[^0-9A-Za-z]/g, ''))}
             // See the header: the alphabet is upper-case and has no words in
             // it, so every helpful keyboard feature is an unhelpful one here.
             autoCapitalize="characters"
@@ -108,7 +116,15 @@ export function PairingScreen({
             aria-label="device name"
             // The desktop asks "allow this device?" by NAME, and approving
             // "an unnamed device" is a poor thing to be asked.
-            className="vam-tap rounded-[8px] border border-line-strong bg-card px-3 py-2 text-body text-ink outline-none focus:border-ink-faint"
+            //
+            // 16px, not `text-body` (13px): iOS Safari zooms the
+            // page on focus for any control under that size and does not undo it
+            // cleanly (`styles.css`'s own `[data-phone-shell] input` rule,
+            // word for word). This screen mounts before any shell exists --
+            // there is nothing paired yet to host one -- so that selector
+            // never reaches it, and the gap is unconditional: a desktop
+            // browser can land here too, and 16px costs it nothing.
+            className="vam-tap rounded-[8px] border border-line-strong bg-card px-3 py-2 text-[16px] text-ink outline-none focus:border-ink-faint"
           />
         </label>
 

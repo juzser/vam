@@ -160,7 +160,9 @@ if (!/decides its own next step|a hand on each step|writes the list before/.test
 // pair of mechanisms -- the line this control writes into the prompt, and the
 // chord that presses the session's own -- because an operator who knows only
 // one is left believing the other is broken.
-if (!/prompt/.test(tip) || !/⇧Tab|Shift\+Tab/.test(tip)) {
+// `chordSymbols('Shift-Tab')` now paints this, not a hand-typed literal --
+// `⇧ ⇥` on a Mac (space-joined, `Tab`'s own glyph), `Shift+Tab` off one.
+if (!/prompt/.test(tip) || !/⇧ ⇥|Shift\+Tab/.test(tip)) {
   throw new Error(
     `the mode tooltip lost one of its two mechanisms: ${JSON.stringify(tip)} — it must still ` +
       'say that picking here goes into the prompt AND that a chord cycles the session’s own.',

@@ -201,11 +201,24 @@ describe('the text the phone list screen is made of', () => {
       }
     }
 
+    // NOT A BARE `<li>` ANY MORE. `SessionList.tsx`'s own `showGettingStarted`
+    // and `showStartingProvisional` used to mount at once -- an empty
+    // `OverlayScroll` (carrying this exact "No sessions yet" `<li>`) beside
+    // `GettingStarted`, both `flex-1` siblings splitting the free height
+    // between them. Exclusive now: with no session, no filter and no
+    // provisional project, `GettingStarted` is the WHOLE of the empty state,
+    // the `<li>` never mounts, and a `querySelector('li')` here would find
+    // nothing -- this file's own header line about a sweep that finds
+    // nothing being green over an empty corpus, reached the hard way.
     cleanup();
     render(<SessionList {...baseProps([])} phone width={undefined} />);
-    const empty = document.querySelector('li');
+    const empty = document.querySelector('[data-getting-started]');
+    expect(empty, 'the phone empty state').not.toBeNull();
     expect(empty?.textContent?.trim(), 'the empty state').not.toBe('');
-    expect(empty?.className).not.toContain('text-ink-faint');
+    const faint = [...(empty?.querySelectorAll('[class]') ?? [])].find((node) =>
+      node.className.includes('text-ink-faint'),
+    );
+    expect(faint?.outerHTML, 'no descendant of the empty state is text-ink-faint').toBeUndefined();
   });
 });
 

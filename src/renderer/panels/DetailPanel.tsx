@@ -137,10 +137,10 @@ import type {
 } from '../domain/model.js';
 import type { SessionEntry } from '../domain/selectors.js';
 import { t } from '../i18n/strings.js';
-import { normalizeKey } from '../keyboard/chords.js';
+import { chordSymbols, normalizeKey } from '../keyboard/chords.js';
 import { insertScopeMark, insertStopMark } from '../keyboard/focus-scope.js';
 import { questionKeys, resolveQuestionKey } from '../keyboard/question-keys.js';
-import { ShortcutTip } from '../keyboard/ShortcutTip.js';
+import { ChordGlyphs, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import {
   activeFocusView,
   drawsProgressLine,
@@ -3975,56 +3975,83 @@ function modelSwitchNote(result: ModelSwitchResult, title: string, choice: strin
  * than their textarea siblings already claim (`Esc → sidebar`, the send
  * arrow) -- the one place this spec asks for exact wording rather than
  * leaving it to the coder.
+ *
+ * `chord` IS A `chords.ts` TOKEN, NOT A GLYPH -- this shipped as seven
+ * literal unicode captions (`⏎`, `⌫`, `⇧⇥`, `␣`) typed straight in, painted
+ * unconditionally on every platform including the Android phone this same
+ * bundle is served to over Tailscale. A second table nobody kept in sync
+ * with the first: `Esc` was a hard-coded WORD even on an iPhone, where every
+ * other surface in this app paints `chords.ts`'s own `⎋`, and `⇧⇥` carried no
+ * space where the rest of the app has painted one between every glyph since
+ * the operator asked for it. `chord`/`suffix` let the button ask
+ * `chordSymbols`/`ChordGlyphs` the same question every other chord in the
+ * app asks, so this strip can no longer drift from that one table.
  */
 const KEY_STRIP: readonly {
   readonly id: string;
   readonly key: PaneKey;
-  readonly caption: string;
+  readonly chord: string;
+  readonly suffix: string;
   readonly ariaLabel: string;
 }[] = [
   {
     id: 'escape',
     key: { kind: 'escape' },
-    caption: 'Esc → agent',
+    chord: 'Escape',
+    suffix: ' → agent',
     ariaLabel: 'press Escape in the session',
   },
   {
     id: 'enter',
     key: { kind: 'enter', shift: false },
-    caption: '⏎ → agent',
+    chord: 'Enter',
+    suffix: ' → agent',
     ariaLabel: 'press Enter in the session',
   },
   {
     id: 'backspace',
     key: { kind: 'backspace' },
-    caption: '⌫',
+    chord: 'Backspace',
+    suffix: '',
     ariaLabel: 'press Backspace in the session',
   },
   {
     id: 'back-tab',
     key: { kind: 'back-tab' },
-    caption: '⇧⇥',
+    chord: 'Shift-Tab',
+    suffix: '',
     ariaLabel: 'press Shift-Tab in the session',
   },
   {
     id: 'space',
     key: { kind: 'text', text: ' ' },
-    caption: '␣',
+    chord: ' ',
+    suffix: '',
     ariaLabel: 'press Space in the session',
   },
   {
     id: 'up',
     key: { kind: 'nav', nav: 'up' },
-    caption: '↑',
+    chord: 'ArrowUp',
+    suffix: '',
     ariaLabel: 'press the up arrow in the session',
   },
   {
     id: 'down',
     key: { kind: 'nav', nav: 'down' },
-    caption: '↓',
+    chord: 'ArrowDown',
+    suffix: '',
     ariaLabel: 'press the down arrow in the session',
   },
 ];
+
+/** The strip button's plain-text caption -- what `sendKey` reports in the
+ *  shared "sent"/"sending…" banner, where a component has no home. Read off
+ *  the SAME token the button paints, through the SAME `chordSymbols`, so the
+ *  banner and the button can never name the key two different ways. */
+function stripCaption(item: (typeof KEY_STRIP)[number]): string {
+  return `${chordSymbols(item.chord)}${item.suffix}`;
+}
 
 function QuestionCard({
   questions,
@@ -6045,14 +6072,20 @@ export function DetailPanel(props: DetailPanelProps) {
     // THE DELIVERY, NOT THE MODE. vam presses the session's own chord into the
     // pane and never reads back which mode the agent landed in, so naming one
     // here would be a claim nothing checked.
+    //
+    // `chordSymbols('Shift-Tab')` RATHER THAN A LITERAL `⇧Tab` -- this used
+    // to hard-code the Mac spelling unconditionally, on a desktop control
+    // every platform vam ships reaches. `keysheet.ts`'s own Files-tab row
+    // already asked `chordSymbols` this exact question; this caption now
+    // asks it too, rather than answering a second way.
     pressPaneKey(
       { kind: 'back-tab' },
-      '⇧Tab sent — vam does not read the mode back',
-      '⇧Tab · sending…',
+      `${chordSymbols('Shift-Tab')} sent — vam does not read the mode back`,
+      `${chordSymbols('Shift-Tab')} · sending…`,
     );
   /** One keystroke-strip button's press, over the shared bridge above. */
   const sendKey = (item: (typeof KEY_STRIP)[number]) =>
-    pressPaneKey(item.key, `${item.caption} sent`, `${item.caption} · sending…`);
+    pressPaneKey(item.key, `${stripCaption(item)} sent`, `${stripCaption(item)} · sending…`);
   /**
    * Switch this session's model -- ONE CALL, because the whole policy lives in
    * main now (`main/terminal/model-switch.ts`).
@@ -9049,7 +9082,8 @@ export function DetailPanel(props: DetailPanelProps) {
                     data-tap-pill
                     className="flex h-[30px] min-w-[30px] shrink-0 items-center justify-center whitespace-nowrap rounded-[8px] border border-line-strong bg-card px-1.5 font-mono text-control text-ink-quiet active:bg-line-strong"
                   >
-                    {item.caption}
+                    <ChordGlyphs chord={item.chord} />
+                    {item.suffix}
                   </span>
                 </button>
               ))}
@@ -10269,7 +10303,7 @@ export function DetailPanel(props: DetailPanelProps) {
               {canCycleMode && (
                 <div data-popover-root="mode" className="flex-none">
                   <Note
-                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ⇧Tab cycles the session’s own.`}
+                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
                   >
                     <button
                       type="button"
@@ -10277,7 +10311,7 @@ export function DetailPanel(props: DetailPanelProps) {
                       onKeyDown={dismissPopoverOnEscape}
                       aria-haspopup="listbox"
                       aria-expanded={modePickerOpen}
-                      aria-label={`mode: ${currentMode} — change, or ⇧Tab to cycle the session's own`}
+                      aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
                       onClick={() => togglePopover('mode')}
                       className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                     >
