@@ -346,6 +346,15 @@ const GUARDS = [
   // own header holds the measurement and why `codex/resume.ts` is not a
   // fourth phase.
   'shell-first-ctrlc-survives',
+  // THE USAGE POPOVER: the account icon that replaced the sidebar's letter
+  // avatar, and the panel it opens, at 1280px and at 390px. Stubs
+  // `window.api` for the same reason `getting-started-shots.mjs` and
+  // `prs-tab-shots.mjs` do -- the demo fixture has no bridge behind it, so it
+  // could never reach real provider data -- and measures what no unit
+  // environment can: the panel's own painted rectangle stays inside the
+  // viewport at both widths, never clipped. `usage-popover-shots.mjs`'s own
+  // header holds the rest.
+  'usage-popover-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
