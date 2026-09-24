@@ -523,14 +523,32 @@ describe('SessionList avatar bar', () => {
     expect(bar).not.toBeNull();
     expect(theme.closest('[data-avatar-bar]')).toBe(bar);
 
-    // The avatar survives as a glyph; the workspace NAME does not come back.
-    expect(bar?.textContent).toContain('V');
+    // The workspace NAME does not come back.
     expect(bar?.textContent).not.toContain('vam');
 
     for (const button of [settings, theme]) {
       expect(button.className).toContain('h-[26px]');
       expect(button.className).toContain('w-[26px]');
     }
+  });
+
+  it('replaces the letter avatar with an account icon that opens the usage popover', () => {
+    // The operator's own request: an account icon in the letter avatar's
+    // place, same corner, opening usage rather than naming the workspace.
+    mount(entriesOf([]));
+
+    const usage = screen.getByLabelText('usage');
+    const bar = usage.closest('[data-avatar-bar]');
+    expect(bar).not.toBeNull();
+    expect(usage.tagName).toBe('BUTTON');
+    // No initial letter left anywhere in the bar's text.
+    expect(bar?.textContent?.trim()).toBe('');
+
+    expect(document.querySelector('[data-usage-panel]')).toBeNull();
+    act(() => {
+      usage.click();
+    });
+    expect(document.querySelector('[data-usage-panel]')).not.toBeNull();
   });
 });
 

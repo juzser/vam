@@ -86,6 +86,7 @@ import {
   NotepadText,
   Paperclip,
   Play,
+  Plus,
   Sparkles,
   SquareTerminal,
   TriangleAlert,
@@ -148,6 +149,10 @@ import {
   drawsUnfoldControl,
   subscribeFocusView,
 } from '../prefs/progress.js';
+import {
+  activeStreamingTerminal,
+  subscribeStreamingTerminal,
+} from '../prefs/streaming-terminal.js';
 // `SUBMIT_KEY_LABELS` and `DEFAULT_PROMPT_SUBMIT_KEY` are no longer imported
 // here: this file's only reader of either was the send-key caption under the
 // prompt input, which is gone with the row it sat on (see the comment at the
@@ -226,6 +231,16 @@ const LazyMarkdown = lazy(() => import('./LazyMarkdown.js'));
 // absent/false) ever needs. `FileOpenRequest` stays a TYPE-ONLY import
 // above -- only the component VALUE needs to move behind `lazy()`.
 const LazyFilesTab = lazy(() => import('./FilesTab.js').then((m) => ({ default: m.FilesTab })));
+
+// `TerminalStreamTab`, in its own lazy chunk -- the same split as
+// `LazyFilesTab` above, at the same bundle-budget boundary: it carries
+// xterm.js, which is not small, and most sessions never turn the
+// `streamingTerminal` beta on (see `prefs/streaming-terminal.ts`).
+const LazyTerminalStreamTab = lazy(() =>
+  import('./terminal-stream/TerminalStreamTab.js').then((m) => ({
+    default: m.TerminalStreamTab,
+  })),
+);
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -972,6 +987,28 @@ export type DetailPanelProps = {
     readonly clear: () => void;
   };
   readonly phone?: boolean;
+  /**
+   * REPORTS `openQuestion` -- this pane's own "is there a live
+   * `AskUserQuestion` on screen right now" fact -- to a caller that has no
+   * other route to it.
+   *
+   * `PhoneShell`'s session-tab strip needs this: the spec (docs/design/
+   * phone-core-loop.md §3.2) collapses that strip "whenever a question is
+   * open", the same `!typing` condition it already uses for the keyboard.
+   * But `openQuestion` is derived HERE, from `entry.session.questions` AND
+   * the pane-read fallback (`paneAsk`, a tool-approval prompt with no
+   * transcript record) -- both of which are this component's own state, not
+   * anything a re-hosting shell reads on its own. A callback is the
+   * established route for exactly this shape of fact: `onSuggest` (below)
+   * already reports a different piece of this same card's derived state
+   * upward for the SAME reason (the composer's Tab-completion ghost).
+   *
+   * Called on every render where the value could have changed (`useEffect`,
+   * keyed on the value itself), never assumed to fire once. Optional: every
+   * caller that does not re-host this pane inside chrome of its own (the
+   * desktop split) has nothing that needs telling.
+   */
+  readonly onQuestionOpenChange?: (open: boolean) => void;
   readonly resizeHandle: ReactNode;
   /**
    * Can this source record a prompt at all? Optional, and `undefined` means
@@ -1038,6 +1075,37 @@ export type DetailPanelProps = {
    * whether there is anything for it to do.
    */
   readonly onResumeInPane?: () => void;
+  /**
+   * THE WAIT BETWEEN THE PRESS AND THE AGENT REGISTERING -- for Start session
+   * or Resume, whichever this pane's row last pressed. `Canvas.tsx` owns it
+   * (`startingPaneByKey`, keyed by `entry.session.pane` so it survives the
+   * `unstarted`/`terminal` id changing identity the moment the agent
+   * registers -- see that state's own comment) because a `StartSession`-local
+   * `useState` would not: this same `DetailPanel` instance is reused across
+   * every tab a pane holds (`Canvas.tsx`'s own comment on `renderLeaf`), so a
+   * wait that lived in this component's own state would follow the pane to
+   * whichever OTHER session the operator switched to next, or vanish the
+   * moment they switched away and back.
+   *
+   * Operator: "after clicking Start session ... there needs to be a loading
+   * state while the session is being created." `null`/absent draws the
+   * ordinary picker; present freezes it and the Start/Resume buttons until
+   * the caller clears it (the row left `unstarted`/`terminal`, or the write
+   * itself was refused) or `timedOut` turns the spinner into a quiet link to
+   * the Terminal view (see `StartTimeoutHint`) -- vam has nothing further to
+   * wait ON, and a spinner with no end is worse than admitting that.
+   */
+  readonly startingPane?: StartingPaneWait | null;
+  /**
+   * SWITCH THIS PANE TO ITS TERMINAL TAB -- the escape hatch
+   * `StartTimeoutHint` offers once `startingPane.timedOut` is true. Built by
+   * the caller from `onTabChange`/`pickTab` (`DetailPanel`'s own, further
+   * down) rather than threaded in as a raw setter, so this component never
+   * has to know the tab bar's own vocabulary. ABSENT, NOT DISABLED when the
+   * Terminal tab itself is withdrawn (no `terminal` capability) -- a link
+   * promising a view that is not on the bar would land exactly nowhere.
+   */
+  readonly onShowTerminal?: () => void;
   /**
    * THE GETTING-STARTED SCREEN'S OWN DATA (`GettingStarted.tsx`) — present
    * only when the CALLER (`Canvas.tsx`) has confirmed vam has no session to
@@ -2754,6 +2822,19 @@ function AgentDetail({
 }
 
 /**
+ * WHAT A PANE'S ROW IS WAITING ON, between a press and the agent registering
+ * -- `Canvas.tsx`'s `startingPaneByKey`, and the shape crossing the boundary
+ * `startingPane`'s own comment (`DetailPanelProps`) explains at length. Two
+ * shapes because the two acts need different words once they are drawn
+ * (`ProviderStartControls`/`TerminalOnlyStart`'s own Resume button): Start
+ * names the provider it typed, Resume does not need to -- there is only ever
+ * one command a resume pane can type.
+ */
+export type StartingPaneWait =
+  | { readonly kind: 'start'; readonly provider: ProviderId; readonly timedOut: boolean }
+  | { readonly kind: 'resume'; readonly timedOut: boolean };
+
+/**
  * THE PROVIDER PICKER AND THE START BUTTON, on their own -- the one act
  * every "nothing is running here" screen offers, extracted so there is
  * exactly one implementation of it rather than one per screen that draws it.
@@ -2785,17 +2866,38 @@ function ProviderStartControls({
   chosen,
   onChosenChange,
   onStart,
+  disabled = false,
+  starting = null,
 }: {
   readonly chosen: ProviderId;
   readonly onChosenChange: (id: ProviderId) => void;
   readonly onStart: (id: ProviderId) => void;
+  /**
+   * FROZEN WHILE THIS PANE'S ROW IS WAITING -- for Start OR for Resume, the
+   * screen's other act: only one write may be in flight against a pane at
+   * once, so the picker freezes for the OTHER act's wait too, not only its
+   * own. See `starting` below for the fact that IS its own.
+   */
+  readonly disabled?: boolean;
+  /**
+   * Non-null only while THIS control's own press is what the pane is
+   * waiting on -- swaps "Start session" for a spinner naming the provider
+   * being started. Null while `disabled` for the OTHER act's wait instead
+   * (Resume), so this button never claims to be starting a provider it did
+   * not start. `spinning` false past the operator's own timeout
+   * (`StartSession`/`TerminalOnlyStart`'s own comment): the label stays
+   * honest but the animation -- which promises an end no one can see -- does
+   * not run forever.
+   */
+  readonly starting?: { readonly label: string; readonly spinning: boolean } | null;
 }) {
   return (
     <>
       <fieldset
         data-start-providers
         aria-label="which agent to start"
-        className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1"
+        disabled={disabled}
+        className="flex items-center gap-1 rounded-[10px] border border-line-strong bg-card p-1 disabled:cursor-progress disabled:opacity-60"
       >
         {PROVIDERS.map((provider) => {
           const selected = provider.id === chosen;
@@ -2824,12 +2926,67 @@ function ProviderStartControls({
         type="button"
         data-start-session-button
         onClick={() => onStart(chosen)}
-        className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90"
+        disabled={disabled}
+        aria-busy={starting !== null}
+        className="vam-tap flex cursor-pointer items-center gap-1.5 rounded-[8px] bg-ink px-3.5 py-1.5 text-control text-panel hover:opacity-90 disabled:cursor-progress disabled:opacity-70"
       >
-        <Play size={12} strokeWidth={2} />
-        Start session
+        {starting !== null ? (
+          <>
+            <LoaderCircle
+              size={12}
+              strokeWidth={1.8}
+              className={starting.spinning ? 'vam-spin' : undefined}
+            />
+            {starting.label}
+          </>
+        ) : (
+          <>
+            <Play size={12} strokeWidth={2} />
+            Start session
+          </>
+        )}
       </button>
     </>
+  );
+}
+
+/**
+ * THE ESCAPE HATCH, past the operator's own 30s timeout.
+ *
+ * Operator: a spinner that could be wrong forever is worse than one that
+ * admits it. `tmux new-session -d`/`typeIntoOwnPane` return once the KEYS are
+ * typed, not once an agent answers, and most of the time that is seconds --
+ * but "most of the time" is not "always", and vam has no second signal to
+ * wait on once the ordinary window has passed. So past it the spinner stops
+ * (`ProviderStartControls`' own `spinning`) and this quiet sentence takes
+ * over: not a failure (nothing failed; the write landed), just a way out that
+ * does not depend on guessing right.
+ *
+ * SHARED BY BOTH START SCREENS because it says the exact same thing about the
+ * exact same fact, the same reason `StartShortcuts` below is shared by both.
+ */
+function StartTimeoutHint({
+  onShowTerminal,
+}: {
+  readonly onShowTerminal: (() => void) | undefined;
+}) {
+  return (
+    <p data-start-timeout-hint className="max-w-[36ch] text-meta text-ink-quiet">
+      {onShowTerminal === undefined ? (
+        'Still starting — check the Terminal view.'
+      ) : (
+        <>
+          {'Still starting — '}
+          <button
+            type="button"
+            onClick={onShowTerminal}
+            className="vam-tap cursor-pointer underline decoration-line-strong underline-offset-2 hover:text-ink"
+          >
+            check the Terminal view
+          </button>
+        </>
+      )}
+    </p>
   );
 }
 
@@ -2868,12 +3025,17 @@ function StartSession({
   paneName,
   defaultProvider,
   onStart,
+  startingPane = null,
+  onShowTerminal,
 }: {
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
+  readonly startingPane?: StartingPaneWait | null;
+  readonly onShowTerminal?: () => void;
 }) {
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  const starting = startingPane ?? null;
   return (
     <div
       data-start-session
@@ -2899,8 +3061,22 @@ function StartSession({
         </p>
       </div>
       {onStart !== undefined && (
-        <ProviderStartControls chosen={chosen} onChosenChange={setChosen} onStart={onStart} />
+        <ProviderStartControls
+          chosen={chosen}
+          onChosenChange={setChosen}
+          onStart={onStart}
+          disabled={starting !== null}
+          starting={
+            starting?.kind === 'start'
+              ? {
+                  label: `Starting ${resolveProvider(starting.provider).label}…`,
+                  spinning: !starting.timedOut,
+                }
+              : null
+          }
+        />
       )}
+      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -2968,6 +3144,8 @@ function TerminalOnlyStart({
   onStart,
   resumeCommand,
   onResumeInPane,
+  startingPane = null,
+  onShowTerminal,
 }: {
   readonly title: string;
   readonly paneName: string;
@@ -2976,12 +3154,15 @@ function TerminalOnlyStart({
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly resumeCommand: string | undefined;
   readonly onResumeInPane: (() => void) | undefined;
+  readonly startingPane?: StartingPaneWait | null;
+  readonly onShowTerminal?: () => void;
 }) {
   // `ProviderStartControls` is CONTROLLED (see its own header) -- this
   // screen's own mark above stays `source`, the session's PAST agent, never
   // this restart picker's current pick, so this state exists only to give
   // that shared component the two props it now needs.
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
+  const starting = startingPane ?? null;
   return (
     <div
       data-terminal-only-start
@@ -3010,18 +3191,45 @@ function TerminalOnlyStart({
       </div>
       <StartShortcuts testId="terminal-only-shortcuts" rows={TERMINAL_ONLY_SHORTCUT_ROWS} />
       {onStart !== undefined && (
-        <ProviderStartControls chosen={chosen} onChosenChange={setChosen} onStart={onStart} />
+        <ProviderStartControls
+          chosen={chosen}
+          onChosenChange={setChosen}
+          onStart={onStart}
+          disabled={starting !== null}
+          starting={
+            starting?.kind === 'start'
+              ? {
+                  label: `Starting ${resolveProvider(starting.provider).label}…`,
+                  spinning: !starting.timedOut,
+                }
+              : null
+          }
+        />
       )}
       {resumeCommand !== undefined && onResumeInPane !== undefined && (
         <button
           type="button"
           data-resume-in-pane
           onClick={onResumeInPane}
-          className="vam-tap cursor-pointer text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink"
+          disabled={starting !== null}
+          aria-busy={starting?.kind === 'resume'}
+          className="vam-tap flex cursor-pointer items-center gap-1.5 text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink disabled:cursor-progress disabled:no-underline disabled:opacity-70"
         >
-          Resume “{title}”
+          {starting?.kind === 'resume' ? (
+            <>
+              <LoaderCircle
+                size={12}
+                strokeWidth={1.8}
+                className={starting.timedOut ? undefined : 'vam-spin'}
+              />
+              Resuming…
+            </>
+          ) : (
+            <>Resume “{title}”</>
+          )}
         </button>
       )}
+      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -3882,12 +4090,65 @@ function stripCaption(item: (typeof KEY_STRIP)[number]): string {
   return `${chordSymbols(item.chord)}${item.suffix}`;
 }
 
+/**
+ * THE PERSISTENT-PERMISSION KEYWORD TABLE -- one list, read in one place,
+ * for the one thing it is allowed to do: put a subtle marker on an option
+ * row and ask for a second tap before marking it. DEVIATION, approved
+ * (docs/design/phone-core-loop.md §3.3, §3.7 PR4).
+ *
+ * IT READS OPTION TEXT, and that is against this file's own discipline
+ * everywhere else (`answer.ts`: "nothing here reads mtime, status… the
+ * mistakes the placeholder picker was built on" -- vam displays what a tool
+ * wrote, it does not interpret it). This is the one approved exception,
+ * because the two options the operator flagged are not symmetric in risk:
+ * "Yes, don't ask again" changes a STANDING POLICY for the rest of the
+ * session, and a phone reply is typically a fast, half-attentive tap.
+ *
+ * WHY, so a future reader does not widen it believing it is inert: this is
+ * a STRING MATCH ON A LABEL, not a classification vam has any authority
+ * over. It must never become a gate -- `answer.ts` still sends whatever the
+ * card marks, on the same Submit, exactly as before. It only slows the FIRST
+ * tap on a matching row down to an arm-then-confirm, and only the row's own
+ * decoration says why.
+ *
+ * CASE-INSENSITIVE, SUBSTRING: Claude Code's own option vocabulary varies
+ * the exact phrasing around a fixed core ("Yes, and do not ask again for
+ * scripts/rebuild-index.sh" -- `fixtures/demo.ts`'s `DEMO_PROMPT`, the
+ * ACTUAL wording `factory-sse-1` draws in the `?demo=1` fixture this spec's
+ * own screenshots use), so the match has to find the phrase inside a longer
+ * sentence, not equal it. BOTH the contraction and the expanded form are
+ * listed rather than guessed at: a model may write either.
+ */
+const PERSISTENT_PERMISSION_KEYWORDS: readonly string[] = [
+  "don't ask again",
+  'do not ask again',
+  'always allow',
+  'allow all',
+  'skip',
+  'bypass',
+];
+
+/** Whether an option's own label names a persistent-permission choice --
+ *  see the table above for what this may and may not be used for. */
+function isPersistentPermissionOption(label: string): boolean {
+  const lower = label.toLowerCase();
+  return PERSISTENT_PERMISSION_KEYWORDS.some((keyword) => lower.includes(keyword));
+}
+
+/** How long an armed persistent-permission row waits for its confirming tap
+ *  before disarming on its own -- long enough that a genuine second tap is
+ *  never raced by it, short enough that a row does not stay "armed" (and
+ *  therefore one accidental tap away from marking itself) for the rest of
+ *  the operator's visit to this question. */
+const ARM_TIMEOUT_MS = 3000;
+
 function QuestionCard({
   questions,
   firstOptionRef,
   onChat,
   onAnswer,
   onSuggest,
+  phone = false,
 }: {
   /**
    * THE WHOLE SET asked by one `AskUserQuestion` call, in asking order.
@@ -3921,6 +4182,17 @@ function QuestionCard({
    * branch.
    */
   readonly onSuggest?: (label: string | null) => void;
+  /**
+   * Draws the phone-inline skin instead of the desktop's fixed-block card
+   * (docs/design/phone-core-loop.md §3.3): the same internals (state,
+   * handlers, `AnswerRequest` construction, ARIA structure) -- ONLY the root
+   * element's own classes change, from a bordered `bg-card` box to a
+   * left-edge accent bar that inherits the transcript's own turn spacing,
+   * because the card is now a message IN that transcript rather than a
+   * panel pulled out of it. `false` (desktop, and every existing caller) is
+   * byte-identical to before this prop existed.
+   */
+  readonly phone?: boolean;
 }) {
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
@@ -3934,6 +4206,21 @@ function QuestionCard({
    */
   const keys = questionKeys();
   const [marks, setMarks] = useState<Readonly<Record<string, readonly string[]>>>({});
+  /**
+   * WHICH OPTION A PHONE TAP HAS ARMED, NOT YET CONFIRMED -- the double-tap
+   * for a persistent-permission option (`isPersistentPermissionOption`'s own
+   * doc has the argument). `null` at rest, and a real tap on the row a
+   * SECOND time (`toggle`, below) is what confirms it. Scoped to `phone`
+   * only, and to a REAL tap only (`viaPointer`) -- desktop and every
+   * keyboard route are byte-identical to before this existed.
+   */
+  const [armedLabel, setArmedLabel] = useState<string | null>(null);
+  const armTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disarm = () => {
+    if (armTimeout.current !== null) clearTimeout(armTimeout.current);
+    armTimeout.current = null;
+    setArmedLabel(null);
+  };
   /** What the last Submit came back with, and whether one is in flight. */
   const [outcome, setOutcome] = useState<AnswerResult | null>(null);
   const [sending, setSending] = useState(false);
@@ -4076,6 +4363,14 @@ function QuestionCard({
   useEffect(() => {
     setFocusedLabel(null);
   }, [question?.id]);
+  // A step change is a different question -- an arm standing from the last
+  // one would confirm on a row that never asked for a second tap. Same
+  // discipline the effect just above states, for a different piece of state.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `disarm` is a fresh closure every render; only `question?.id` should re-run this.
+  useEffect(() => {
+    disarm();
+    return disarm;
+  }, [question?.id]);
   /** Whether it moved. The caller needs the answer: a step that clamped is a
    *  keystroke the card did not use, and `h` means something else when it is
    *  not walking (see `onKeys`). */
@@ -4214,6 +4509,20 @@ function QuestionCard({
   };
 
   const toggle = (label: string, viaPointer = false) => {
+    // ARM, DO NOT MARK -- the first real tap on a persistent-permission row,
+    // on phone. `viaPointer` is already exactly "a real tap, not a keyboard
+    // route" (see the option button's own `onClick`), which is also the
+    // right scope for this: the deviation is about a fast, half-attentive
+    // finger, not about a keyboard grammar that already types out an
+    // explicit key per step. Confirmed on the SECOND tap of the SAME row,
+    // which falls through to the ordinary mark below.
+    if (phone && viaPointer && isPersistentPermissionOption(label) && armedLabel !== label) {
+      setArmedLabel(label);
+      if (armTimeout.current !== null) clearTimeout(armTimeout.current);
+      armTimeout.current = setTimeout(disarm, ARM_TIMEOUT_MS);
+      return;
+    }
+    if (armedLabel === label) disarm();
     // The refusal named a missing mark. Marking anything is the operator
     // answering it, so it stops being on screen -- a refusal that outlives
     // its cause is the next thing to be ignored.
@@ -4464,10 +4773,25 @@ function QuestionCard({
          row's own marker) rather than on any of THOSE elements: a container
          query never applies to the element that declares the container
          (`AgentsTab`'s `data-pr-row` carries the same comment). */
-      className={[
-        '@container flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
-        waiting ? 'border-waiting' : 'border-line-strong',
-      ].join(' ')}
+      className={
+        phone
+          ? /* PHONE: no bordered card, no `bg-card` box -- the card IS a
+               message in the transcript now (docs/design/phone-core-loop.md
+               §3.3), so it takes the transcript's own turn rhythm (`gap-1.5`,
+               the same gap `TurnBlock`s stack with) instead of a panel pulled
+               out of it. The amber "needs you" accent moves from an
+               all-around border to a LEFT-EDGE bar -- `border-l-2`, the same
+               `border-waiting` token the desktop card already wears, only
+               worn on one edge instead of four; nothing new, only moved. */
+            [
+              '@container flex flex-col gap-1.5 border-l-2 py-1 pl-2.5',
+              waiting ? 'border-waiting' : 'border-line',
+            ].join(' ')
+          : [
+              '@container flex flex-col gap-1.5 rounded-[10px] border bg-card px-2.5 py-2',
+              waiting ? 'border-waiting' : 'border-line-strong',
+            ].join(' ')
+      }
     >
       {/* The strip, and ONLY when there is more than one question: a step
           counter over a single question is furniture that says nothing. It
@@ -4624,78 +4948,106 @@ function QuestionCard({
                     : 'flex flex-col gap-1'
                 }
               >
-                {question.options.map((option, index) => (
-                  <button
-                    key={option.label}
-                    ref={index === 0 ? firstOptionRef : undefined}
-                    type="button"
-                    role="option"
-                    aria-selected={picked.includes(option.label)}
-                    data-question-option
-                    data-question-number={NUMBERED_OPTIONS[index]}
-                    data-picked={picked.includes(option.label) ? 'true' : undefined}
-                    onClick={(event) => toggle(option.label, event.detail > 0)}
-                    onFocus={() => setFocusedLabel(option.label)}
-                    className={[
-                      // `group` is what lets the quiet spans below hear about a
-                      // hover on this button -- see `OPTION_QUIET_INK`.
-                      'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
-                      picked.includes(option.label)
-                        ? `border-running ${OPTION_FILL}`
-                        : `border-line hover:${OPTION_FILL}`,
-                    ].join(' ')}
-                  >
-                    <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
-                      {NUMBERED_OPTIONS[index] !== undefined && (
-                        <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
-                          {NUMBERED_OPTIONS[index]}
-                        </span>
-                      )}
-                      <span data-question-label className="min-w-0">
-                        {option.label}
-                      </span>
-                      {(option.preview ?? null) !== null && (
-                        <span
-                          data-question-preview-hint
-                          className={`ml-auto flex-none text-meta ${OPTION_QUIET_INK}`}
-                        >
-                          {sideBySide ? (
-                            <>
-                              <span className="hidden @min-[720px]:inline">preview →</span>
-                              <span className="@min-[720px]:hidden">preview ↓</span>
-                            </>
-                          ) : (
-                            'preview ↓'
-                          )}
-                        </span>
-                      )}
-                    </span>
-                    {option.description !== null && (
-                      // UNDER THE LABEL, NOT UNDER THE NUMBER. MEASURED on
-                      // Claude Code 2.1.280: "fixed multi-select option
-                      // descriptions being indented under the option number
-                      // instead of under the label". A row with no indent at
-                      // all starts flush with the NUMBER above it, which is
-                      // the shape the fix ended -- so a spacer reserves the
-                      // number's own column, tabular-nums and the same
-                      // `gap-1.5` as the row it lines up with, rather than a
-                      // guessed pixel amount. `aria-hidden` and no text of its
-                      // own: it costs nothing in the accessible name or in a
-                      // reader that walks `textContent`, only the width.
-                      <span className="flex max-w-full items-baseline gap-1.5">
+                {question.options.map((option, index) => {
+                  // DEVIATION, approved (docs/design/phone-core-loop.md
+                  // §3.3, §3.7 PR4) -- see `isPersistentPermissionOption`'s
+                  // own doc for the table and the argument. `phone` only:
+                  // desktop draws this row exactly as it always has.
+                  const risky = phone && isPersistentPermissionOption(option.label);
+                  const armed = risky && armedLabel === option.label;
+                  return (
+                    <button
+                      key={option.label}
+                      ref={index === 0 ? firstOptionRef : undefined}
+                      type="button"
+                      role="option"
+                      aria-selected={picked.includes(option.label)}
+                      data-question-option
+                      data-question-number={NUMBERED_OPTIONS[index]}
+                      data-picked={picked.includes(option.label) ? 'true' : undefined}
+                      data-question-risk={risky ? 'true' : undefined}
+                      data-question-armed={armed ? 'true' : undefined}
+                      onClick={(event) => toggle(option.label, event.detail > 0)}
+                      onFocus={() => setFocusedLabel(option.label)}
+                      className={[
+                        // `group` is what lets the quiet spans below hear about a
+                        // hover on this button -- see `OPTION_QUIET_INK`.
+                        'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                        picked.includes(option.label)
+                          ? `border-running ${OPTION_FILL}`
+                          : armed
+                            ? 'border-waiting'
+                            : `border-line hover:${OPTION_FILL}`,
+                      ].join(' ')}
+                    >
+                      <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
                         {NUMBERED_OPTIONS[index] !== undefined && (
-                          <span
-                            aria-hidden="true"
-                            className="inline-block w-[1ch] flex-none text-meta tabular-nums"
-                          />
+                          <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
+                            {NUMBERED_OPTIONS[index]}
+                          </span>
                         )}
-                        <span data-question-description className="min-w-0 text-meta text-ink-dim">
-                          {option.description}
+                        <span data-question-label className="min-w-0">
+                          {option.label}
                         </span>
+                        {(option.preview ?? null) !== null && (
+                          <span
+                            data-question-preview-hint
+                            className={`ml-auto flex-none text-meta ${OPTION_QUIET_INK}`}
+                          >
+                            {sideBySide ? (
+                              <>
+                                <span className="hidden @min-[720px]:inline">preview →</span>
+                                <span className="@min-[720px]:hidden">preview ↓</span>
+                              </>
+                            ) : (
+                              'preview ↓'
+                            )}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </button>
-                ))}
+                      {/* THE MARKER: a thin `text-waiting` suffix, never a
+                          dialog -- see the deviation's own argument for why a
+                          second modal defeats the fast-reply brief this whole
+                          spec serves. Two words while at rest, so the risk is
+                          visible before the first tap; the SECOND tap's own
+                          words while armed, so the row itself explains what
+                          it is waiting for rather than leaving the operator
+                          to guess why nothing happened. */}
+                      {risky && (
+                        <span data-question-risk-note className="text-meta text-waiting">
+                          {armed ? 'tap again to confirm' : "won't ask again this session"}
+                        </span>
+                      )}
+                      {option.description !== null && (
+                        // UNDER THE LABEL, NOT UNDER THE NUMBER. MEASURED on
+                        // Claude Code 2.1.280: "fixed multi-select option
+                        // descriptions being indented under the option number
+                        // instead of under the label". A row with no indent at
+                        // all starts flush with the NUMBER above it, which is
+                        // the shape the fix ended -- so a spacer reserves the
+                        // number's own column, tabular-nums and the same
+                        // `gap-1.5` as the row it lines up with, rather than a
+                        // guessed pixel amount. `aria-hidden` and no text of its
+                        // own: it costs nothing in the accessible name or in a
+                        // reader that walks `textContent`, only the width.
+                        <span className="flex max-w-full items-baseline gap-1.5">
+                          {NUMBERED_OPTIONS[index] !== undefined && (
+                            <span
+                              aria-hidden="true"
+                              className="inline-block w-[1ch] flex-none text-meta tabular-nums"
+                            />
+                          )}
+                          <span
+                            data-question-description
+                            className="min-w-0 text-meta text-ink-dim"
+                          >
+                            {option.description}
+                          </span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
               {/* THE PANEL: the FULL preview of `activeOption` -- focused,
                   else marked, else the first option that has one -- never the
@@ -5585,10 +5937,12 @@ export function DetailPanel(props: DetailPanelProps) {
     records,
     prRepo,
     phone = false,
+    onQuestionOpenChange,
     defaultProvider,
     onSetDefaultProvider,
     onStartSession,
     onResumeInPane,
+    startingPane = null,
     gettingStarted,
     paneFocused = true,
   } = props;
@@ -6161,6 +6515,17 @@ export function DetailPanel(props: DetailPanelProps) {
   const tabs = visibleTabs(terminal !== false, files === true, phone);
   const current = tabs.includes(tab) ? tab : 'Response';
 
+  /**
+   * `StartTimeoutHint`'s own escape hatch: switch THIS pane to Terminal,
+   * through `pickTab` -- the one function that also reports the choice
+   * upward (`onTabChange`) and remembers it locally when uncontrolled -- so
+   * the link behaves exactly like clicking the Terminal icon by hand rather
+   * than being a second, poorer route to the same tab. ABSENT when Terminal
+   * itself is withdrawn (`tabs` above already answers that): a link past a
+   * 30s wait promising a view that is not on the bar would land nowhere.
+   */
+  const onShowTerminal = tabs.includes('Terminal') ? () => pickTab('Terminal') : undefined;
+
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**
@@ -6225,6 +6590,16 @@ export function DetailPanel(props: DetailPanelProps) {
     box.scrollTop = edge === 'top' ? 0 : box.scrollHeight;
     syncJumps(box);
   };
+
+  /**
+   * `questionInlineRef`/`questionInViewport` -- see the deviation's own
+   * comment beside `openStepCount`, just below, where `openQuestion` first
+   * exists: this state is declared here (with `jumpTo`, `outRef`) but the
+   * effect that DRIVES it has to live after `openQuestion` is computed, so
+   * it sits beside `openStepCount` instead.
+   */
+  const questionInlineRef = useRef<HTMLDivElement>(null);
+  const [questionInViewport, setQuestionInViewport] = useState(true);
 
   /**
    * WHERE THE READER WAS, taken the instant before a page is prepended and
@@ -6479,7 +6854,24 @@ export function DetailPanel(props: DetailPanelProps) {
    * a copy of the mode: the mode lives in the draft, which is the text that
    * actually gets recorded.
    */
-  type ToolsPopover = 'provider' | 'model' | 'mode';
+  /**
+   * `'phone-overflow'` JOINED THE THREE FOR THE SAME REASON A FOURTH NEVER
+   * DID BEFORE IT: it is one more name this one slot can hold, not a second
+   * kind of state. The phone composer diet (operator: "model/mode pickers
+   * leave the phone composer, reachable from an overflow") pulled the
+   * provider/model/mode TOGGLE buttons out of the tools row on phone (see
+   * `!phone &&` around each, below) but left their popovers -- the actual
+   * listboxes -- exactly where they were, unconditional on `phone`. The "+"
+   * button opens this sheet; a row inside it (`data-composer-overflow-model`
+   * etc.) opens one of the other three by calling `setOpenPopover` directly,
+   * which is a DRILL-DOWN for free: the single-slot rule above already closes
+   * whichever popover was open the moment another one is asked for, so
+   * tapping "Model" inside the sheet closes the sheet and opens the model
+   * listbox in the same breath, with no extra state and no extra dismissal
+   * wiring -- the existing outside-pointerdown effect and `dismissPopoverOnEscape`
+   * already key off `openPopover` and know nothing else changed.
+   */
+  type ToolsPopover = 'provider' | 'model' | 'mode' | 'phone-overflow';
   const [openPopover, setOpenPopover] = useState<ToolsPopover | null>(null);
   /** A toggle in one place: the same click that opens closes, as it always did. */
   const togglePopover = (name: ToolsPopover) =>
@@ -6487,6 +6879,7 @@ export function DetailPanel(props: DetailPanelProps) {
   const providerPickerOpen = openPopover === 'provider';
   const modePickerOpen = openPopover === 'mode';
   const modelPickerOpen = openPopover === 'model';
+  const phoneOverflowOpen = openPopover === 'phone-overflow';
   /**
    * AND A POINTER LANDING ANYWHERE ELSE CLOSES IT -- the other half of the
    * report, and the half that had no code at all: nothing anywhere listened
@@ -7242,6 +7635,55 @@ export function DetailPanel(props: DetailPanelProps) {
    * lands in the same place, and Esc still does the one thing it did.
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
+  /** How many of the newest call's steps are still open -- what the phone's
+   *  "jump to question" pill counts (below). `QuestionCard`'s own `pending`
+   *  is the SAME filter, scoped inside that component where its Submit copy
+   *  reads it; this is the one outside reader. */
+  const openStepCount = newestQuestions.filter((one) => one.answer === null).length;
+  /**
+   * DEVIATION, approved (docs/design/phone-core-loop.md §3.2, §3.7 PR4). The
+   * inline question reintroduces the classic chat-app problem the FIXED card
+   * never had: it can scroll out of view while the operator reads older
+   * history above it. `questionInlineRef` (declared with `outRef`, above)
+   * marks the mounted card; `outRef` is the scroller it can leave. `true`
+   * (visible) at rest, so a phone with no open question never renders the
+   * pill this drives -- this effect only runs while there is a card to
+   * watch.
+   */
+  useEffect(() => {
+    const root = outRef.current;
+    const target = questionInlineRef.current;
+    if (!phone || !openQuestion || root === null || target === null) {
+      setQuestionInViewport(true);
+      return;
+    }
+    // A fresh observer per (root, target) pair rather than one long-lived
+    // instance re-pointed at a new target: `IntersectionObserver.observe`
+    // does not forget a PREVIOUS target on a second call, so re-observing
+    // would accumulate one stale callback per question the operator has
+    // answered this session.
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[entries.length - 1];
+        if (entry !== undefined) setQuestionInViewport(entry.isIntersecting);
+      },
+      // `root`: the SCROLLER, not the viewport -- the default target for a
+      // plain `IntersectionObserver` is the browser viewport, which this
+      // element never leaves (it is `position: sticky` inside a pane that
+      // itself never scrolls the WINDOW). What it leaves is `outRef`'s own
+      // scrolled content, so that is what has to be the root.
+      { root, threshold: 0 },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [phone, openQuestion]);
+  // See `onQuestionOpenChange`'s own doc: this is the one route a re-hosting
+  // shell (`PhoneShell`) has to this fact, which is derived here and nowhere
+  // else. Fires on every value change, including a session switch (`entry`
+  // changing changes `newestQuestions`, which changes this).
+  useEffect(() => {
+    onQuestionOpenChange?.(openQuestion);
+  }, [openQuestion, onQuestionOpenChange]);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
   /** What `QuestionCard` says the open step would answer with -- see `onSuggest`. */
   const [suggestion, setSuggestion] = useState<string | null>(null);
@@ -7464,6 +7906,18 @@ export function DetailPanel(props: DetailPanelProps) {
     subscribeNarrowViews,
     activeNarrowViews,
     activeNarrowViews,
+  );
+  /**
+   * WHETHER THE TERMINAL TAB STREAMS, or still polls -- `prefs/streaming-
+   * terminal.ts`'s own store, read the same way `narrowViews` above is: this
+   * component mounts once per split leaf with no prefs object drilled down
+   * to it, and a beta flag opened by a keystroke has no dialogue to be
+   * passed through.
+   */
+  const streamingTerminal = useSyncExternalStore(
+    subscribeStreamingTerminal,
+    activeStreamingTerminal,
+    activeStreamingTerminal,
   );
   /**
    * HOW WIDE ONE CHARACTER OF THIS PANE'S PROSE REALLY IS, in pixels — or
@@ -8068,31 +8522,49 @@ export function DetailPanel(props: DetailPanelProps) {
              the tab's laziness: while another tab is showing, the component
              does not exist, so no timer runs and no `capture-pane` is spawned.
              `window.api` exists only in the Electron shell (App.tsx); in the
-             browser build the tab says so instead of asking. */
-          <TerminalTab
-            projectId={entry?.project.id ?? null}
-            rowId={entry?.session.id}
-            read={globalThis.window?.api?.terminal?.read}
-            /* The pane fits because tmux is TOLD the size: `capture-pane`
-               returns a screen tmux already composed at the session's own
-               size, which no style on this side can re-wrap. */
-            resize={globalThis.window?.api?.terminal?.resize}
-            /* Typing. Passed here beside the other two rather than reached for
-               inside the tab, so all three halves of the bridge this tab uses
-               are visible at the one call site: a member wired invisibly is
-               one refactor away from being dropped with nothing to notice.
-               `undefined` in the browser build, where the tab says so instead
-               of taking keys it cannot deliver. */
-            send={globalThis.window?.api?.terminal?.send}
-            /* THE BRANCH, for the rule under the screen. Passed from here
-               rather than read inside the tab for the reason the three
-               members above are: this panel is where the session is in scope,
-               and a fact reached for invisibly is a fact a later edit drops
-               with nothing to notice. `null` when there is no session and when
-               the source cannot say -- `TerminalTab` draws nothing for either,
-               and its `branch` prop says why that is not a dash. */
-            branch={entry?.session.branch ?? null}
-          />
+             browser build the tab says so instead of asking.
+
+             `streamingTerminal` PICKS BETWEEN TWO TABS, not a mode inside one:
+             the beta is xterm.js over a persistent `tmux -C` connection
+             (`docs/design/terminal-streaming.md`), and `TerminalTab`'s props
+             below must stay byte-for-byte what they were -- this flag is an
+             opt-in a later operator can turn off without touching the tab it
+             was reading before. */
+          streamingTerminal ? (
+            <Suspense fallback={null}>
+              <LazyTerminalStreamTab
+                projectId={entry?.project.id ?? null}
+                rowId={entry?.session.id}
+                branch={entry?.session.branch ?? null}
+              />
+            </Suspense>
+          ) : (
+            <TerminalTab
+              projectId={entry?.project.id ?? null}
+              rowId={entry?.session.id}
+              read={globalThis.window?.api?.terminal?.read}
+              /* The pane fits because tmux is TOLD the size: `capture-pane`
+                 returns a screen tmux already composed at the session's own
+                 size, which no style on this side can re-wrap. */
+              resize={globalThis.window?.api?.terminal?.resize}
+              /* Typing. Passed here beside the other two rather than reached
+                 for inside the tab, so all three halves of the bridge this
+                 tab uses are visible at the one call site: a member wired
+                 invisibly is one refactor away from being dropped with
+                 nothing to notice. `undefined` in the browser build, where
+                 the tab says so instead of taking keys it cannot deliver. */
+              send={globalThis.window?.api?.terminal?.send}
+              /* THE BRANCH, for the rule under the screen. Passed from here
+                 rather than read inside the tab for the reason the three
+                 members above are: this panel is where the session is in
+                 scope, and a fact reached for invisibly is a fact a later
+                 edit drops with nothing to notice. `null` when there is no
+                 session and when the source cannot say -- `TerminalTab`
+                 draws nothing for either, and its `branch` prop says why
+                 that is not a dash. */
+              branch={entry?.session.branch ?? null}
+            />
+          )
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />
         ) : current === 'PRs' ? (
@@ -8129,6 +8601,8 @@ export function DetailPanel(props: DetailPanelProps) {
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
             onStart={onStartSession}
+            startingPane={startingPane}
+            onShowTerminal={onShowTerminal}
           />
         ) : entry !== null && entry.session.status === 'terminal' ? (
           <TerminalOnlyStart
@@ -8139,6 +8613,8 @@ export function DetailPanel(props: DetailPanelProps) {
             onStart={onStartSession}
             resumeCommand={entry.session.resumeCommand}
             onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
+            startingPane={startingPane}
+            onShowTerminal={onShowTerminal}
           />
         ) : entry === null && gettingStarted !== undefined ? (
           // THE APP HAS NO SESSION TO SHOW ANYWHERE -- `Canvas.tsx`'s own
@@ -8149,7 +8625,16 @@ export function DetailPanel(props: DetailPanelProps) {
           // OTHER sessions exist elsewhere; this screen is what replaces it
           // the one time there is truly nothing in the whole app to point at.
           <GettingStarted {...gettingStarted} />
-        ) : orderedTurns.length === 0 ? (
+        ) : orderedTurns.length === 0 &&
+          // NOT while phone has an inline question to draw (§3.2-3.3): a
+          // fresh session whose only "step" so far IS the question (nothing
+          // else has been read into `orderedTurns` yet, or the transcript's
+          // tail simply has not caught up) must not let "no steps yet"
+          // swallow the one thing on this screen the operator can act on.
+          // Falling through to the column branch below with an empty
+          // `orderedTurns` draws a scroller holding nothing BUT the inline
+          // question, which is still one scrollable region per AC-1.
+          !(phone && current === 'Response' && newestQuestion !== null) ? (
           entry === null && !phone ? // SAID ONCE (audit F9). A desktop pane always has a tab strip
           // above it, and an empty strip already says "no sessions open —
           // pick one from the sidebar". This line said the same thing in
@@ -8335,7 +8820,86 @@ export function DetailPanel(props: DetailPanelProps) {
                 }`}
                 style={cornerOverlay ? { paddingRight: cornerReserve } : undefined}
               >
-                {/* WRAPPING, since the qualifier below can be a PHRASE where
+                {/* PHONE: the three lines below (count, the "as far back"
+                  caveat, and the read-more control) collapse to ONE compact
+                  row -- the operator's own report, "costs ~3 lines above
+                  every conversation" on the screen with the least of them to
+                  spare. SAME BEHAVIOUR (`readOlder`, unchanged) and SAME
+                  ACCESSIBILITY-NAME SEMANTICS: the full sentence every state
+                  below prints moves into `aria-label`, the same trade this
+                  file already makes for the Send button (a glyph plus a
+                  `Note` carries what a visible word used to) -- nothing here
+                  reads worse to a screen reader for reading shorter to an
+                  eye. Desktop is untouched: the `<>...</>` branch below is
+                  byte-identical to what stood here before this shipped. */}
+                {phone ? (
+                  (() => {
+                    const failedNote =
+                      failedRead !== null && failedRead > 0
+                        ? ` · ${failedRead} failed`
+                        : focusView && failedRead === null
+                          ? ' · failures not reported by this source'
+                          : '';
+                    const stateNote =
+                      pagerNow.phase === 'start'
+                        ? 'The session begins here — vam read back to its first turn.'
+                        : 'This is as far back as vam has read — not necessarily where the session began.';
+                    const compactBase = `${turnsRead} turns read${failedNote}. ${stateNote}`;
+                    if (columnMore === 'available' || columnMore === 'unavailable') {
+                      const errorNote =
+                        columnMore === 'unavailable' && pagerNow.error !== null
+                          ? ` vam could not read further back — ${pagerNow.error.code}: ${pagerNow.error.message}.`
+                          : '';
+                      return (
+                        <button
+                          type="button"
+                          data-column-start-compact
+                          data-column-more={columnMore}
+                          onClick={readOlder}
+                          aria-label={`${compactBase}${errorNote} ${
+                            columnMore === 'unavailable' ? 'Try again.' : 'Read earlier turns.'
+                          }`}
+                          className="vam-tap flex w-full cursor-pointer items-center gap-1 py-0.5 text-left font-mono text-meta text-ink-faint hover:text-ink-dim"
+                        >
+                          {columnMore === 'unavailable'
+                            ? 'Earlier turns — try again ↑'
+                            : 'Earlier turns ↑'}
+                        </button>
+                      );
+                    }
+                    return (
+                      <p
+                        data-column-start-compact
+                        data-column-more={columnMore ?? undefined}
+                        // `role="status"` for all three (not only "reading"):
+                        // the bare `<p>`'s implicit paragraph role supports no
+                        // accessible name at all, so `aria-label` below would
+                        // be silently dropped -- `status` is the one role
+                        // already in use on this line for the live case, and
+                        // it names the other two honestly enough (a fact
+                        // about the pager, read once on arrival) to reuse
+                        // rather than adding a second role for the same shape.
+                        role="status"
+                        aria-label={
+                          columnMore === 'reading'
+                            ? `${compactBase} Reading further back…`
+                            : columnMore === 'unsupported'
+                              ? `${compactBase} This source cannot read further back than its own window.`
+                              : compactBase
+                        }
+                        className="py-0.5 font-mono text-meta text-ink-faint"
+                      >
+                        {columnMore === 'reading'
+                          ? 'Reading earlier turns…'
+                          : columnMore === 'unsupported'
+                            ? "Earlier turns — can't read further back"
+                            : 'Session start ↑'}
+                      </p>
+                    );
+                  })()
+                ) : (
+                  <>
+                    {/* WRAPPING, since the qualifier below can be a PHRASE where
                   this row has only ever held tokens.
 
                   IT IS NOT WHAT STOPS THE OVERFLOW, and saying so would be the
@@ -8356,28 +8920,28 @@ export function DetailPanel(props: DetailPanelProps) {
                   its own two children, so a wrapped caveat sits at the block's
                   rhythm rather than flush against the line above it. The
                   horizontal 6px is unchanged. */}
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                  {/* "read", not a bare count: only the newest `TAIL_BYTES` is
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                      {/* "read", not a bare count: only the newest `TAIL_BYTES` is
                     ever opened, so on a session bigger than that window this
                     is what vam FOUND, not a provable total for the session's
                     whole life. Trailing, not leading: "read 7 turns" is an
                     imperative -- a command this line does not carry out --
                     while "7 turns read" is what it actually is, a count with
                     its qualifier attached. */}
-                  <span data-progress-count>{turnsRead} turns read</span>
-                  {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
+                      <span data-progress-count>{turnsRead} turns read</span>
+                      {/* THE FOLD MAY COST DETAIL, NEVER ALARM. Every turn carries
                     its own `· N failed` on its own line below; this is the
                     total across the window, beside the count of that same
                     window, which is what lets the two share a line honestly.
                     `null` is "no turn read can report failures at all" and
                     draws nothing -- a confident "0 failed" over data nobody
                     looked at is the same lie as a false badge. */}
-                  {failedRead !== null && failedRead > 0 && (
-                    <span data-column-failed className="text-failed">
-                      · {failedRead} failed
-                    </span>
-                  )}
-                  {/* WHAT COLLAPSING PROMISES, AND WHERE THE PROMISE IS EMPTY.
+                      {failedRead !== null && failedRead > 0 && (
+                        <span data-column-failed className="text-failed">
+                          · {failedRead} failed
+                        </span>
+                      )}
+                      {/* WHAT COLLAPSING PROMISES, AND WHERE THE PROMISE IS EMPTY.
                     While every turn draws its line, the line claims nothing
                     about failure -- it says which turn it is. Collapsed, the
                     ABSENCE of a line is the claim: nothing here was worth
@@ -8407,78 +8971,80 @@ export function DetailPanel(props: DetailPanelProps) {
                     could not see, not a report that something went wrong.
                     Painting it as an alarm would make every source without the
                     surface look like a source on fire. */}
-                  {focusView && failedRead === null && (
-                    <span data-column-unreadable className="text-ink-dim">
-                      · failures not reported by this source
-                    </span>
-                  )}
-                </div>
-                {/* THE SENTENCE IS THE STATE, and there are exactly two of them
+                      {focusView && failedRead === null && (
+                        <span data-column-unreadable className="text-ink-dim">
+                          · failures not reported by this source
+                        </span>
+                      )}
+                    </div>
+                    {/* THE SENTENCE IS THE STATE, and there are exactly two of them
                   because there are exactly two things vam can honestly say
                   about the top of a column. The attribute above and this line
                   are read off the SAME fact, so a screen that says one thing to
                   a test and another to a person is not expressible here. */}
-                <p data-column-start-note className="text-ink-faint leading-[1.5]">
-                  {pagerNow.phase === 'start'
-                    ? 'The session begins here — vam read back to its first turn.'
-                    : 'This is as far back as vam has read — not necessarily where the session began.'}
-                </p>
-                {/* WHAT VAM CAN DO ABOUT THAT, or why it cannot. Absent
+                    <p data-column-start-note className="text-ink-faint leading-[1.5]">
+                      {pagerNow.phase === 'start'
+                        ? 'The session begins here — vam read back to its first turn.'
+                        : 'This is as far back as vam has read — not necessarily where the session began.'}
+                    </p>
+                    {/* WHAT VAM CAN DO ABOUT THAT, or why it cannot. Absent
                   entirely once the start is proven: there is nothing left to
                   ask for, so there is nothing to ask with. */}
-                {columnMore !== null && (
-                  <p
-                    data-column-more={columnMore}
-                    className="flex flex-wrap items-baseline gap-x-1.5 leading-[1.5]"
-                  >
-                    {columnMore === 'unsupported' ? (
-                      // A STATED REFUSAL, NOT A DEAD CONTROL. `history` absent
-                      // from the port is "this source has no way to page", which
-                      // is a different sentence from "there is nothing older" --
-                      // `pull-requests.ts`'s rule, at the one place in this pane
-                      // it can still be got wrong.
-                      <span data-column-more-note>
-                        This source cannot read further back than its own window.
-                      </span>
-                    ) : columnMore === 'reading' ? (
-                      // A STATUS, NEVER A DIMMED BUTTON: mid-flight a control is
-                      // either painted and inert or half-painted and live, and
-                      // both are states this pane must not have. It says what is
-                      // happening and claims nothing about what will be found --
-                      // no count, no progress bar, because vam does not know how
-                      // much is there.
-                      <span data-column-more-note role="status">
-                        Reading further back…
-                      </span>
-                    ) : (
-                      <>
-                        {columnMore === 'unavailable' && pagerNow.error !== null && (
-                          // THE SOURCE'S OWN WORDS, `code: message`, the same
-                          // shape every other refusal in this pane renders --
-                          // and the reason `SourceError` travels the bridge
-                          // verbatim (`sources/port.ts`'s `describeFailure`).
-                          <span data-column-more-error className="text-failed">
-                            vam could not read further back — {pagerNow.error.code}:{' '}
-                            {pagerNow.error.message}
+                    {columnMore !== null && (
+                      <p
+                        data-column-more={columnMore}
+                        className="flex flex-wrap items-baseline gap-x-1.5 leading-[1.5]"
+                      >
+                        {columnMore === 'unsupported' ? (
+                          // A STATED REFUSAL, NOT A DEAD CONTROL. `history` absent
+                          // from the port is "this source has no way to page", which
+                          // is a different sentence from "there is nothing older" --
+                          // `pull-requests.ts`'s rule, at the one place in this pane
+                          // it can still be got wrong.
+                          <span data-column-more-note>
+                            This source cannot read further back than its own window.
                           </span>
-                        )}
-                        <button
-                          type="button"
-                          data-column-more-ask
-                          onClick={readOlder}
-                          /* `vam-tap` FOR THE PHONE'S FLOOR, and it is opt-in
+                        ) : columnMore === 'reading' ? (
+                          // A STATUS, NEVER A DIMMED BUTTON: mid-flight a control is
+                          // either painted and inert or half-painted and live, and
+                          // both are states this pane must not have. It says what is
+                          // happening and claims nothing about what will be found --
+                          // no count, no progress bar, because vam does not know how
+                          // much is there.
+                          <span data-column-more-note role="status">
+                            Reading further back…
+                          </span>
+                        ) : (
+                          <>
+                            {columnMore === 'unavailable' && pagerNow.error !== null && (
+                              // THE SOURCE'S OWN WORDS, `code: message`, the same
+                              // shape every other refusal in this pane renders --
+                              // and the reason `SourceError` travels the bridge
+                              // verbatim (`sources/port.ts`'s `describeFailure`).
+                              <span data-column-more-error className="text-failed">
+                                vam could not read further back — {pagerNow.error.code}:{' '}
+                                {pagerNow.error.message}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              data-column-more-ask
+                              onClick={readOlder}
+                              /* `vam-tap` FOR THE PHONE'S FLOOR, and it is opt-in
                              by design (`styles.css`): the stylesheet sizes a
                              tap target, the component decides what one is.
                              Measured without it at 390px this link was
                              119.2x16.5 -- half a touch target, and the only
                              way to reach anything older than the last page. */
-                          className="vam-tap cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
-                        >
-                          {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
-                        </button>
-                      </>
+                              className="vam-tap cursor-pointer text-ink-dim underline decoration-dotted hover:text-ink"
+                            >
+                              {columnMore === 'unavailable' ? 'Try again' : 'Read earlier turns'}
+                            </button>
+                          </>
+                        )}
+                      </p>
                     )}
-                  </p>
+                  </>
                 )}
                 {/* THE PICK IS GONE, BUT NOT THE ANSWER TO IT. A turn can fall
                   out of the window between one poll and the next; falling
@@ -8539,6 +9105,37 @@ export function DetailPanel(props: DetailPanelProps) {
                   onAnswerMenu={openAnswerMenu}
                 />
               ))}
+              {/* PHONE, RESPONSE VIEW ONLY (docs/design/phone-core-loop.md
+                §3.2-3.3): the pending question, drawn as the NEWEST item in
+                THIS SAME scroller instead of `DetailPanel`'s fixed footer
+                block below (`data-question-bar`, `!phone` there). AC-1: one
+                scrollable container holds both a prior turn's text and
+                `[data-question-option]`. `sticky bottom-0` (not `flex-none`,
+                per AC-2) so it reads as "the thing demanding attention" at
+                the bottom of the scroll content without being pinned
+                outside it -- scrolling UP into history lets it scroll out
+                of view like any other message, which is what the jump-to-
+                question pill (§3.2 deviation) answers. `QuestionCard`'s own
+                internals are UNCHANGED -- `phone` only swaps its root
+                classes; see that prop's own doc. */}
+              {phone && current === 'Response' && newestQuestion !== null && (
+                <div
+                  ref={questionInlineRef}
+                  data-question-bar-inline
+                  {...insertScopeMark}
+                  className="sticky bottom-0 flex flex-col bg-pane pt-1.5"
+                >
+                  <QuestionCard
+                    key={setId}
+                    questions={newestQuestions}
+                    firstOptionRef={firstOptionRef}
+                    onChat={startChat}
+                    onAnswer={questionOnAnswer}
+                    onSuggest={setSuggestion}
+                    phone
+                  />
+                </div>
+              )}
             </div>
             {/* THE JUMPS, FLOATING OVER THE COLUMN — what is left of the bar
                 that used to hold them, and of two more controls that went with
@@ -8618,19 +9215,46 @@ export function DetailPanel(props: DetailPanelProps) {
               )}
               {/* At the bottom edge, where the newest turn is. `bottom-1`
                   rather than flush, so the chip is not cut by the pane's own
-                  seam with the composer below it. */}
-              {jumps.below && (
+                  seam with the composer below it.
+
+                  PHONE, WITH AN OPEN QUESTION SCROLLED OUT OF VIEW: this
+                  slot draws the "jump to question" pill instead of the bare
+                  chevron -- DEVIATION, approved (docs/design/
+                  phone-core-loop.md §3.2, §3.7 PR4). Same corner, same
+                  `jumpTo('bottom')` (the question is always the newest item
+                  in the scroller, so scrolling to bottom IS scrolling to it
+                  -- no second scroll mechanism), a more specific label
+                  instead of a bare chevron: an operator who has scrolled up
+                  to read history should be told WHY jumping back down
+                  matters, not just that something is there. Never BOTH
+                  controls at once in one corner. */}
+              {phone && openQuestion && !questionInViewport && current === 'Response' ? (
                 <button
                   type="button"
-                  data-out-to-bottom
-                  aria-label="scroll to the newest turn"
+                  data-jump-to-question
+                  aria-label={`${openStepCount} question${openStepCount === 1 ? '' : 's'} pending — jump to it`}
                   onClick={() => jumpTo('bottom')}
-                  className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
+                  className="vam-tap pointer-events-auto absolute right-0 bottom-1 flex h-11 items-center justify-center"
                 >
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
-                    <ChevronsDown size={14} strokeWidth={1.8} />
+                  <span className="flex h-7 items-center gap-1 rounded-full border border-waiting bg-card px-2 text-control text-waiting shadow-sm">
+                    <ChevronsDown size={14} strokeWidth={1.8} aria-hidden="true" />
+                    {openStepCount}
                   </span>
                 </button>
+              ) : (
+                jumps.below && (
+                  <button
+                    type="button"
+                    data-out-to-bottom
+                    aria-label="scroll to the newest turn"
+                    onClick={() => jumpTo('bottom')}
+                    className="pointer-events-auto absolute right-0 bottom-1 flex h-11 w-11 cursor-pointer items-center justify-center"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-card text-ink-dim shadow-sm hover:bg-line-strong hover:text-ink">
+                      <ChevronsDown size={14} strokeWidth={1.8} />
+                    </span>
+                  </button>
+                )
               )}
             </div>
           </div>
@@ -8755,16 +9379,29 @@ export function DetailPanel(props: DetailPanelProps) {
         room for a question card floating over it, and the question this
         card answers is the AGENT's, unrelated to a file the operator opened
         to read or edit by hand. */}
-      {current !== 'Terminal' && current !== 'Files' && newestQuestion !== null && (
-        <div
-          data-question-bar
-          // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
-          // here holds the keyboard, the app IS in Insert. That is the whole
-          // definition of the mode now, which is why there is no flag left
-          // that could disagree with it. The card's options are also the
-          // LANDING `I` aims at, by being the first stop in document order.
-          {...insertScopeMark}
-          /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
+      {/* NOT ON PHONE'S RESPONSE VIEW (docs/design/phone-core-loop.md
+        §3.2-3.3): the fixed block this comment describes is exactly what the
+        spec moves there -- `QuestionCard` mounts INLINE, as the newest item
+        inside the transcript's own scroller, instead of here. See
+        `data-question-bar-inline` below. Every OTHER view (Agents, on
+        phone -- PRs is already cut from phone by `visibleTabs`) keeps this
+        fixed block: it has no transcript scroller of its own to inline
+        into, and the operator's brief is about the reply loop, not about
+        withdrawing the card from a roster view that never had one to
+        replace. Desktop is unchanged either way. */}
+      {(!phone || current !== 'Response') &&
+        current !== 'Terminal' &&
+        current !== 'Files' &&
+        newestQuestion !== null && (
+          <div
+            data-question-bar
+            // AN INSERT SCOPE (`keyboard/focus-scope.ts`): while anything in
+            // here holds the keyboard, the app IS in Insert. That is the whole
+            // definition of the mode now, which is why there is no flag left
+            // that could disagree with it. The card's options are also the
+            // LANDING `I` aims at, by being the first stop in document order.
+            {...insertScopeMark}
+            /* NARROWED WITH THE TRANSCRIPT, on the operator's own instruction --
              see the body's comment. The SEAM is what makes this more than
              symmetry: `border-t` above draws the rule between the answer and
              the question, and a rule spanning the whole pane under a 470px
@@ -8775,39 +9412,39 @@ export function DetailPanel(props: DetailPanelProps) {
              Agents view, which the flag does not cap (`narrowsAsProse`), and
              the seam argument runs the other way there: a 890px card under a
              1336px navigator is the same line pointing at nothing. */
-          className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
-            bodyMaxWidth === undefined ? '' : 'mx-auto w-full'
-          }`}
-          style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
-        >
-          {/* The factory's governance queue — findings awaiting a waiver, and
+            className={`flex flex-none flex-col gap-2.5 border-line border-t bg-pane px-3.5 py-3 ${
+              bodyMaxWidth === undefined ? '' : 'mx-auto w-full'
+            }`}
+            style={bodyMaxWidth === undefined ? undefined : { maxWidth: bodyMaxWidth }}
+          >
+            {/* The factory's governance queue — findings awaiting a waiver, and
             lesson candidates — used to stand here. The operator asked for it
             to go, and it is gone from `buildActions` too: it went on
             contributing keyboard stops and a live `Enter` to this pane long
             after the rows themselves stopped being drawn. */}
-          {/* The `!` typeahead, above the box it completes into -- where the
+            {/* The `!` typeahead, above the box it completes into -- where the
             standing command strip used to be, and only while it is being
             asked for. The strip drew every proposed command on every turn
             that mentioned one; this draws the same list, from the same
             extraction, at the moment the operator types the glyph it belongs
             to. */}
-          {/* The question the session is asking, where the placeholder picker
+            {/* The question the session is asking, where the placeholder picker
             used to stand -- the newest one, because a card per question would
             turn a pane into a queue. It answers nothing; see `QuestionCard`.
             A session that asked none, or asked outside the tail vam reads
             (`TAIL_BYTES`), draws nothing here rather than an empty box. */}
-          {newestQuestion !== null && (
-            <QuestionCard
-              key={setId}
-              questions={newestQuestions}
-              firstOptionRef={firstOptionRef}
-              onChat={startChat}
-              onAnswer={questionOnAnswer}
-              onSuggest={setSuggestion}
-            />
-          )}
-        </div>
-      )}
+            {newestQuestion !== null && (
+              <QuestionCard
+                key={setId}
+                questions={newestQuestions}
+                firstOptionRef={firstOptionRef}
+                onChat={startChat}
+                onAnswer={questionOnAnswer}
+                onSuggest={setSuggestion}
+              />
+            )}
+          </div>
+        )}
       {/* The composer, in its own block so that it can stand down while a
         question is open without the card standing down with it. Its top border
         is the seam between the two, and belongs to whichever of them is
@@ -8849,7 +9486,13 @@ export function DetailPanel(props: DetailPanelProps) {
             // `relative` is the anchor for `SUGGEST_LAYER`, which floats the
             // typeaheads OVER the transcript instead of pushing this block
             // down the pane. See that constant for the measurement behind it.
-            'relative flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
+            'relative flex flex-none flex-col bg-pane px-3.5',
+            // PHONE: the bar's own chrome shrinks from `gap-2.5 py-3` (10/24px)
+            // to `gap-1.5 py-2` (6/16px) -- half of AC-7's height budget
+            // (docs/design/phone-core-loop.md §3.4/§4.1). Desktop keeps the
+            // original figures untouched; this is the one place the shared
+            // padding class the §4.1 postmortem named finally splits in two.
+            phone ? 'gap-1.5 py-2' : 'gap-2.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
             // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
             // -- see the body's comment for the decision and the seam argument
@@ -9029,17 +9672,33 @@ export function DetailPanel(props: DetailPanelProps) {
             {...insertStopMark}
             tabIndex={-1}
             className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 outline-none',
+              'flex rounded-[10px] border bg-card outline-none',
+              // PHONE: ONE row, not two (docs/design/phone-core-loop.md §3.4
+              // PR 1's own follow-up, §4.1's postmortem). `flex-row flex-wrap
+              // items-end` turns this box into the merged control row's own
+              // flex context -- the textarea's wrapper and `data-prompt-tools`
+              // both go `display: contents` below so their children (the "+",
+              // the box, mic, Send) become direct items of THIS row instead of
+              // two stacked ones. `items-end` anchors the fixed-size controls
+              // to the textarea's OWN baseline as it grows upward, the same
+              // shape iMessage/Claude's own composer draws. Desktop keeps the
+              // original two-row `flex-col`, untouched.
+              phone
+                ? 'flex-row flex-wrap items-end gap-x-2 gap-y-1.5 px-2.5 py-1.5'
+                : 'flex-col gap-2.5 px-3 py-2.5',
               active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >
             {/* Multiline, because a prompt is prose and a one-line slot hides
             everything but the tail of it. The mockup's own composer is a
-            104px-tall block of 12.5px/1.55 text, not an input. */}
-            <div className="flex items-start gap-2">
+            104px-tall block of 12.5px/1.55 text, not an input. PHONE: this
+            wrapper contributes no box of its own (`display: contents`) so its
+            one child -- the textarea -- becomes a direct item of the merged
+            row `data-prompt-box` now lays out; see that div's own comment. */}
+            <div className={phone ? 'contents' : 'flex items-start gap-2'}>
               <textarea
                 ref={inputRef}
-                rows={2}
+                rows={phone ? 1 : 2}
                 value={draft}
                 readOnly={!composing}
                 onFocus={onCompose}
@@ -9260,14 +9919,40 @@ export function DetailPanel(props: DetailPanelProps) {
                    shell keeps -- and it is the one control on the screen that
                    exists to be tapped. The class is `.vam-phone`-scoped
                    (`styles.css`), so the desktop box is untouched, and
-                   `max-h-[120px]` still caps the grown height. */
-                className="vam-no-scrollbar vam-tap max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
+                   `max-h-[120px]` still caps the grown height.
+
+                   PHONE ONLY: `[field-sizing:content]` (Chromium 123+, well
+                   under Electron 44's own) is a NATIVE platform feature, not
+                   a resize handler this file would otherwise own and keep in
+                   step with every edit/paste/backspace path above -- the
+                   textarea's own intrinsic height follows its content, `rows`
+                   drops to 1 (still floored at 44px by `vam-tap`, still
+                   capped by `max-h`), and once five lines' worth is typed
+                   `max-h-[132px]` plus `overflow-y-auto` (scrollbar hidden by
+                   `vam-no-scrollbar`, still scrollable) takes over, exactly
+                   the "grows upward to a max, then scrolls" §3.4 asks for. */
+                className={[
+                  'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                  phone ? '[field-sizing:content] max-h-[132px]' : 'max-h-[120px]',
+                ].join(' ')}
                 aria-label="prompt to session"
               />
             </div>
 
+            {/* PHONE: `basis-full` on each of these three -- and on the chips
+              and the mode caption further down -- so a rare message forces
+              its OWN line in the merged row's `flex-wrap` rather than
+              cramming in beside the textarea; see `data-prompt-box`'s own
+              comment for the row these now belong to. Desktop is untouched,
+              still `flex-col`, where a bare block already took its own line
+              for free. */}
             {images.length > 0 && (
-              <p data-pasted-images className="text-control text-ink-dim">
+              <p
+                data-pasted-images
+                className={
+                  phone ? 'basis-full text-control text-ink-dim' : 'text-control text-ink-dim'
+                }
+              >
                 {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
                 vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
                 the image.
@@ -9275,7 +9960,12 @@ export function DetailPanel(props: DetailPanelProps) {
             )}
 
             {attachError !== null && (
-              <p data-attach-error className="text-control text-waiting">
+              <p
+                data-attach-error
+                className={
+                  phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'
+                }
+              >
                 {attachError}
               </p>
             )}
@@ -9286,16 +9976,27 @@ export function DetailPanel(props: DetailPanelProps) {
               microphone permission refusal is the kind of reuse that reads
               fine until somebody greps for it. */}
             {dictateError !== null && (
-              <p data-dictate-error className="text-control text-waiting">
+              <p
+                data-dictate-error
+                className={
+                  phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'
+                }
+              >
                 {dictateError}
               </p>
             )}
 
             {/* The tools row: attach, provider, model, mode — everything the
-              prompt carries besides its text, on one line under the box. The
-              hook is what lets a test say "beside the model field" without a
-              layout engine. */}
-            <div data-prompt-tools className="flex items-center gap-2">
+              prompt carries besides its text, on one line under the box.
+              PHONE: this contributes no box of its own either (`display:
+              contents`) -- its children (the "+", the mic, Send, and the rare
+              chip/caption rows) become direct items of the SAME merged row
+              the textarea now sits in, ordered by `data-composer-overflow`'s
+              own `order-first` and the rare rows' own `order-10 basis-full`
+              below. The hook is what lets a test say "beside the model field"
+              without a layout engine, on desktop, where this is still a real
+              flex row of its own. */}
+            <div data-prompt-tools className={phone ? 'contents' : 'flex items-center gap-2'}>
               {/* THE OFFER, AS A CONTROL, because on a phone `Tab` is not one.
                 See the placeholder above for the whole rule. Three things
                 decide the shape:
@@ -9332,7 +10033,11 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-prompt-suggestion-use
                   aria-label={`use the suggested reply: ${promptSuggestion}`}
                   onClick={() => onDraftChange(promptSuggestion)}
-                  className="vam-tap flex min-w-0 shrink cursor-pointer items-center justify-center"
+                  // `order-10 basis-full`: this offer is rare enough (a
+                  // draft-less focus) that it earns its own line below the
+                  // merged [+, textarea, mic, Send] row rather than crowding
+                  // it -- see `data-prompt-box`'s own comment.
+                  className="vam-tap order-10 flex min-w-0 shrink basis-full cursor-pointer items-center justify-start"
                 >
                   <span
                     aria-hidden="true"
@@ -9355,6 +10060,158 @@ export function DetailPanel(props: DetailPanelProps) {
                   </span>
                 </button>
               )}
+              {/* PHONE COMPOSER DIET (docs/design/phone-core-loop.md §3.4):
+                  one "+" replaces FIVE resident icons (attach, attach-image,
+                  provider, model, mode) with ONE, leaving the phone row at
+                  textarea + "+" + mic + Send -- 4 controls, not 6..9. Nothing
+                  each row does is new: every action below is the SAME
+                  handler/state the desktop's own resident control already
+                  calls (`fileRef.current?.click()`, `pickImage()`,
+                  `setOpenPopover('provider' | 'model' | 'mode')`), reached
+                  through one extra tap instead of a resident icon. Desktop is
+                  untouched -- this whole block is `phone &&`.
+
+                  `order-first` (docs/design/phone-core-loop.md §4.1's
+                  follow-up): the merged row's ONE reorder -- everything else
+                  keeps its natural DOM order, which already reads textarea,
+                  mic, Send, so only the "+" needs pulling to the front of the
+                  row it used to open alone. */}
+              {phone && (
+                <div data-popover-root="phone-overflow" className="order-first flex-none">
+                  <button
+                    type="button"
+                    data-composer-overflow
+                    onKeyDown={dismissPopoverOnEscape}
+                    aria-haspopup="menu"
+                    aria-expanded={phoneOverflowOpen}
+                    aria-label="more composer tools — attach, model, mode"
+                    onClick={() => togglePopover('phone-overflow')}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
+                  >
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                    >
+                      <Plus size={12} strokeWidth={1.7} />
+                    </span>
+                  </button>
+                  {phoneOverflowOpen && (
+                    <div
+                      data-composer-overflow-menu
+                      role="menu"
+                      aria-label="composer tools"
+                      onKeyDown={dismissPopoverOnEscape}
+                      className={COMPOSER_POPOVER_MENU}
+                      style={
+                        suggestMaxHeight === null ? undefined : { maxHeight: suggestMaxHeight }
+                      }
+                    >
+                      <button
+                        type="button"
+                        data-composer-overflow-attach
+                        role="menuitem"
+                        onClick={() => {
+                          setOpenPopover(null);
+                          fileRef.current?.click();
+                        }}
+                        className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                      >
+                        <Paperclip size={12} strokeWidth={1.7} aria-hidden="true" />
+                        Attach file
+                      </button>
+                      {pickImageAttachment !== undefined && entry !== null && (
+                        <button
+                          type="button"
+                          data-composer-overflow-attach-image
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenPopover(null);
+                            void pickImage();
+                          }}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          <ImageIcon size={12} strokeWidth={1.7} aria-hidden="true" />
+                          Attach image
+                        </button>
+                      )}
+                      {CAN_CHOOSE_PROVIDER && onSetDefaultProvider !== undefined && (
+                        <button
+                          type="button"
+                          data-composer-overflow-provider
+                          role="menuitem"
+                          aria-haspopup="listbox"
+                          onClick={() => setOpenPopover('provider')}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          Provider: {currentProvider.label}
+                        </button>
+                      )}
+                      {modelControl === 'picker' && (
+                        <button
+                          type="button"
+                          data-composer-overflow-model
+                          role="menuitem"
+                          aria-haspopup="listbox"
+                          onClick={() => setOpenPopover('model')}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          Model: {modelButtonLabel(running?.name ?? null)}
+                        </button>
+                      )}
+                      {/* DISABLED, NOT ABSENT -- same rule the desktop's own
+                          disabled model row states at length above: a model is
+                          a fact about the session whether or not vam can reach
+                          it. No listbox to open, so this row is informational
+                          only, same as its desktop twin. */}
+                      {modelControl === 'disabled' && (
+                        <div data-composer-overflow-model className="px-2 py-1">
+                          <p className="text-control text-ink-faint">
+                            Model: {recordedModel ?? 'model'}
+                          </p>
+                          <p className="text-meta text-ink-faint">vam cannot switch models here.</p>
+                        </div>
+                      )}
+                      {modelControl === 'request' && (
+                        <div
+                          data-composer-overflow-model-request
+                          className="flex items-center gap-1.5 px-2 py-1"
+                        >
+                          <label
+                            htmlFor="phone-model-request"
+                            className="text-control text-ink-dim"
+                          >
+                            Model
+                          </label>
+                          <input
+                            id="phone-model-request"
+                            data-model-request
+                            value={readModelRequest(draft)}
+                            onChange={(event) =>
+                              onDraftChange(setModelRequest(draft, event.target.value))
+                            }
+                            placeholder="model"
+                            aria-label="model requested in this prompt"
+                            className={`vam-tap min-w-0 flex-1 rounded-[6px] border border-line-strong bg-transparent px-1.5 font-mono text-control text-ink placeholder:text-ink-quiet ${FOCUS_RING}`}
+                          />
+                        </div>
+                      )}
+                      {canCycleMode && (
+                        <button
+                          type="button"
+                          data-composer-overflow-mode
+                          role="menuitem"
+                          aria-haspopup="listbox"
+                          onClick={() => setOpenPopover('mode')}
+                          className="vam-tap flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                        >
+                          Mode: {currentMode}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* The attachment button, doing the only honest thing there is to
               do here: vam's write is a string, so the file is read in the
               renderer and its text becomes part of the prompt that gets
@@ -9368,36 +10225,46 @@ export function DetailPanel(props: DetailPanelProps) {
                 onChange={(event) => void takeFile(event.currentTarget)}
                 className="hidden"
               />
-              <Note text="puts the file’s text into the prompt text — vam uploads nothing">
-                <button
-                  type="button"
-                  data-attach
-                  aria-label="attach a text file to this prompt"
-                  onClick={() => fileRef.current?.click()}
-                  className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
-                >
-                  {/* HIT ON THE ELEMENT, PAINT ON THE SKIN -- the same shape
-                  the phone's other class-A controls take, and the last one
-                  still painting its border on the 44 box. The button keeps its
-                  box and centres; the border, the ground and the radius move
-                  inward, where the phone rule can shrink them to 30 without
-                  touching the touch target (`styles.css`). */}
-                  <span
-                    aria-hidden="true"
-                    data-tap-skin
-                    className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+              {/* PHONE: this trigger moves into the "+" overflow
+                  (`data-composer-overflow`) below -- see its own comment.
+                  Desktop keeps the resident icon, unchanged. */}
+              {!phone && (
+                <Note text="puts the file’s text into the prompt text — vam uploads nothing">
+                  <button
+                    type="button"
+                    data-attach
+                    aria-label="attach a text file to this prompt"
+                    onClick={() => fileRef.current?.click()}
+                    className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                   >
-                    <Paperclip size={12} strokeWidth={1.7} />
-                  </span>
-                </button>
-              </Note>
+                    {/* HIT ON THE ELEMENT, PAINT ON THE SKIN -- the same shape
+                    the phone's other class-A controls take, and the last one
+                    still painting its border on the 44 box. The button keeps its
+                    box and centres; the border, the ground and the radius move
+                    inward, where the phone rule can shrink them to 30 without
+                    touching the touch target (`styles.css`). */}
+                    <span
+                      aria-hidden="true"
+                      data-tap-skin
+                      className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                    >
+                      <Paperclip size={12} strokeWidth={1.7} />
+                    </span>
+                  </button>
+                </Note>
+              )}
               {attachedName !== null && (
                 <span
                   data-attach-chip
                   // `line-strong`, not `raised`: this chip sits inside
                   // `data-prompt-box`, which is `bg-card` -- the same
                   // inversion the answer options wore. See `OPTION_FILL`.
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
+                  // PHONE: `order-10 basis-full`, the same rare-row treatment
+                  // as the suggestion offer above -- see `data-prompt-box`.
+                  className={[
+                    'flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim',
+                    phone ? 'order-10 basis-full' : '',
+                  ].join(' ')}
                 >
                   <span className="truncate">{attachedName}</span>
                   <button
@@ -9420,7 +10287,9 @@ export function DetailPanel(props: DetailPanelProps) {
               on its own line in the prompt text -- Claude Code reads the
               bytes itself off that path; vam still uploads nothing. See
               `state/artifacts/vam-image-attach/findings.md`. */}
-              {pickImageAttachment !== undefined && entry !== null && (
+              {/* PHONE: this trigger moves into the "+" overflow too -- same
+                  note as the text-attach button above. */}
+              {!phone && pickImageAttachment !== undefined && entry !== null && (
                 <Note text="puts an image’s path into the prompt — it must sit inside this session’s own directory; vam uploads nothing">
                   <button
                     type="button"
@@ -9443,7 +10312,12 @@ export function DetailPanel(props: DetailPanelProps) {
                 <span
                   data-attach-image-chip
                   // The same card, the same inversion -- see `data-attach-chip`.
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
+                  // PHONE: same rare-row treatment as that chip -- see
+                  // `data-prompt-box`.
+                  className={[
+                    'flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim',
+                    phone ? 'order-10 basis-full' : '',
+                  ].join(' ')}
                 >
                   <span className="truncate">{attachedImage}</span>
                   <button
@@ -9501,33 +10375,40 @@ export function DetailPanel(props: DetailPanelProps) {
                    only one of them would dismiss on a press inside the very
                    thing being pressed. */
                 <div data-popover-root="provider" className="flex-none">
-                  <Note text="the agent NEW sessions start with — not this one, which is already running">
-                    <button
-                      type="button"
-                      data-provider-picker-toggle
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-haspopup="listbox"
-                      aria-expanded={providerPickerOpen}
-                      aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
-                      onClick={() => togglePopover('provider')}
-                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
-                    >
-                      <span
-                        aria-hidden="true"
-                        data-tap-skin
-                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                  {/* PHONE: the toggle moves into the "+" overflow's "Provider"
+                      row, which opens this SAME listbox by setting the shared
+                      `openPopover` state directly -- see `data-composer-overflow`
+                      below. This wrapper and the listbox stay unconditional so
+                      that row has something to open. */}
+                  {!phone && (
+                    <Note text="the agent NEW sessions start with — not this one, which is already running">
+                      <button
+                        type="button"
+                        data-provider-picker-toggle
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-haspopup="listbox"
+                        aria-expanded={providerPickerOpen}
+                        aria-label={`default provider for new sessions: ${currentProvider.label} — change`}
+                        onClick={() => togglePopover('provider')}
+                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center text-ink-dim hover:text-ink"
                       >
-                        {(() => {
-                          const mark = PROVIDER_MARKS[currentProvider.id];
-                          return mark === undefined ? (
-                            <Box size={12} strokeWidth={1.7} />
-                          ) : (
-                            <mark.Glyph size={12} />
-                          );
-                        })()}
-                      </span>
-                    </button>
-                  </Note>
+                        <span
+                          aria-hidden="true"
+                          data-tap-skin
+                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                        >
+                          {(() => {
+                            const mark = PROVIDER_MARKS[currentProvider.id];
+                            return mark === undefined ? (
+                              <Box size={12} strokeWidth={1.7} />
+                            ) : (
+                              <mark.Glyph size={12} />
+                            );
+                          })()}
+                        </span>
+                      </button>
+                    </Note>
+                  )}
                   {providerPickerOpen && (
                     <div
                       data-provider-picker
@@ -9628,7 +10509,13 @@ export function DetailPanel(props: DetailPanelProps) {
               cannot falsify is a rule nobody chose, so it is not here.
               `e2e/model-picker-shots.mjs` measures that the note really
               opens both ways, and what the dimmed label paints. */}
-              {modelControl === 'request' && (
+              {/* PHONE: a record-only source's free-text `model:` line has no
+                  popover to reopen from an overflow row -- it IS the control
+                  -- so it moves into the "+" sheet whole, as
+                  `data-composer-overflow-model-request` below, rather than
+                  splitting a toggle from a menu the way the picker/mode
+                  controls do. */}
+              {!phone && modelControl === 'request' && (
                 <Note text="vam cannot switch models here — the factory chooses; this writes your request into the prompt">
                   <input
                     data-model-request
@@ -9725,21 +10612,27 @@ export function DetailPanel(props: DetailPanelProps) {
                       line. `modelRunningClause` holds the two sentences and
                       the argument for keeping them apart; the short of it is
                       that "running" is a claim only the footer supports. */}
-                  <Note
-                    text={
-                      running === null
-                        ? MODEL_PICKER_NOTE
-                        : `${modelRunningClause(running)} · ${MODEL_PICKER_NOTE}`
-                    }
-                  >
-                    <button
-                      type="button"
-                      data-model-picker
-                      data-model-picker-state="picker"
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-haspopup="listbox"
-                      aria-expanded={modelPickerOpen}
-                      /* LABELLED WITH THE MODEL THE PANE REPORTS, and with the
+                  {/* PHONE: the toggle moves into the "+" overflow's "Model"
+                      row, which opens this SAME listbox (`modelPickerOpen`,
+                      below) by setting the shared `openPopover` state
+                      directly. This `Note`+`button` is desktop-only; the
+                      wrapper and the listbox stay unconditional. */}
+                  {!phone && (
+                    <Note
+                      text={
+                        running === null
+                          ? MODEL_PICKER_NOTE
+                          : `${modelRunningClause(running)} · ${MODEL_PICKER_NOTE}`
+                      }
+                    >
+                      <button
+                        type="button"
+                        data-model-picker
+                        data-model-picker-state="picker"
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-haspopup="listbox"
+                        aria-expanded={modelPickerOpen}
+                        /* LABELLED WITH THE MODEL THE PANE REPORTS, and with the
                          old word when there is none.
 
                          WHAT CHANGED. This said "model" and nothing else,
@@ -9769,9 +10662,9 @@ export function DetailPanel(props: DetailPanelProps) {
                          eye is told rather than only what the control does --
                          and it carries the qualifier too, because a screen
                          reader has no tooltip to hover for the rest of it. */
-                      aria-label={modelButtonName(running)}
-                      onClick={() => togglePopover('model')}
-                      /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
+                        aria-label={modelButtonName(running)}
+                        onClick={() => togglePopover('model')}
+                        /* IT MAY SHRINK NOW, AND IT IS THE ONLY THING IN THE ROW
                          THAT CAN -- because it is the only thing in the row
                          whose width is not vam's to choose. Everything else
                          here is a 24px glyph; this wears whatever the CLI
@@ -9793,22 +10686,23 @@ export function DetailPanel(props: DetailPanelProps) {
                          status line does when its pane is narrow, and the
                          whole name stays one hover or one Tab away in the
                          accessible name above and the note around it. */
-                      className="vam-tap flex h-6 min-w-0 shrink cursor-pointer items-center text-ink-dim hover:text-ink"
-                    >
-                      <span
-                        aria-hidden="true"
-                        data-tap-skin
-                        className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                        className="vam-tap flex h-6 min-w-0 shrink cursor-pointer items-center text-ink-dim hover:text-ink"
                       >
-                        <span data-model-label className="truncate">
-                          {modelButtonLabel(running?.name ?? null)}
-                        </span>
-                        {/* The chevron never gives way: a picker with no
+                        <span
+                          aria-hidden="true"
+                          data-tap-skin
+                          className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-card px-1.5 font-mono text-control hover:bg-line-strong"
+                        >
+                          <span data-model-label className="truncate">
+                            {modelButtonLabel(running?.name ?? null)}
+                          </span>
+                          {/* The chevron never gives way: a picker with no
                             affordance left on it is a label. */}
-                        <ChevronDown size={11} strokeWidth={2} className="flex-none" />
-                      </span>
-                    </button>
-                  </Note>
+                          <ChevronDown size={11} strokeWidth={2} className="flex-none" />
+                        </span>
+                      </button>
+                    </Note>
+                  )}
                   {modelPickerOpen && (
                     <div
                       data-model-picker-menu
@@ -10007,7 +10901,11 @@ export function DetailPanel(props: DetailPanelProps) {
                   )}
                 </div>
               )}
-              {modelControl === 'disabled' && (
+              {/* PHONE: moves into the "+" overflow as a plain (still
+                  disabled) row -- `data-composer-overflow-model` below,
+                  same recordedModel/note text, no separate popover to
+                  reopen since this state has never had one. */}
+              {!phone && modelControl === 'disabled' && (
                 /* THE NAME WHEN THE SOURCE KEEPS ONE, AND THE OLD WORD WHEN
                    IT DOES NOT.
 
@@ -10115,34 +11013,40 @@ export function DetailPanel(props: DetailPanelProps) {
               thing that can disagree with the text actually recorded. */}
               {canCycleMode && (
                 <div data-popover-root="mode" className="flex-none">
-                  <Note
-                    text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
-                  >
-                    <button
-                      type="button"
-                      data-mode-toggle
-                      onKeyDown={dismissPopoverOnEscape}
-                      aria-haspopup="listbox"
-                      aria-expanded={modePickerOpen}
-                      aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
-                      onClick={() => togglePopover('mode')}
-                      className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
+                  {/* PHONE: the toggle moves into the "+" overflow's "Mode"
+                      row, which opens this SAME listbox by setting the shared
+                      `openPopover` state directly -- see the model toggle's
+                      own comment above for the identical pattern. */}
+                  {!phone && (
+                    <Note
+                      text={`mode: ${currentMode} — ${MODE_SKIN[currentMode].means}. Your pick goes into the prompt; ${chordSymbols('Shift-Tab')} cycles the session’s own.`}
                     >
-                      {/* The glyph carries the ink now (`MODE_SKIN`), so the
-                          button no longer sets one: `text-ink-dim
-                          hover:text-ink` here would have been a second opinion
-                          about the same pixels, settled by source order rather
-                          than by intent. The hover affordance stays on the
-                          chip, which is where it was already drawn. */}
-                      <span
-                        aria-hidden="true"
-                        data-tap-skin
-                        className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                      <button
+                        type="button"
+                        data-mode-toggle
+                        onKeyDown={dismissPopoverOnEscape}
+                        aria-haspopup="listbox"
+                        aria-expanded={modePickerOpen}
+                        aria-label={`mode: ${currentMode} — change, or ${chordSymbols('Shift-Tab')} to cycle the session's own`}
+                        onClick={() => togglePopover('mode')}
+                        className="vam-tap flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                       >
-                        <ModeGlyph mode={currentMode} />
-                      </span>
-                    </button>
-                  </Note>
+                        {/* The glyph carries the ink now (`MODE_SKIN`), so the
+                            button no longer sets one: `text-ink-dim
+                            hover:text-ink` here would have been a second opinion
+                            about the same pixels, settled by source order rather
+                            than by intent. The hover affordance stays on the
+                            chip, which is where it was already drawn. */}
+                        <span
+                          aria-hidden="true"
+                          data-tap-skin
+                          className="flex h-6 w-6 items-center justify-center rounded-[6px] border border-line-strong bg-card hover:bg-line-strong"
+                        >
+                          <ModeGlyph mode={currentMode} />
+                        </span>
+                      </button>
+                    </Note>
+                  )}
                   {modePickerOpen && (
                     <div
                       data-mode-picker
@@ -10200,8 +11104,15 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-mode-cycle
                   data-mode-cycle-state={cycleNote.kind}
                   data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
+                  // PHONE: same rare-row treatment as the chips/suggestion
+                  // above -- `order-10 basis-full` earns its own line rather
+                  // than fighting the merged row's own `min-w-0 flex-1`
+                  // textarea for space. Desktop keeps `flex-1`, which is what
+                  // pushes it against the spacer beside the plain `<span>`
+                  // below.
                   className={[
-                    'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
+                    'truncate whitespace-nowrap font-mono text-meta',
+                    phone ? 'order-10 basis-full' : 'min-w-0 flex-1',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
                   /*
@@ -10220,7 +11131,13 @@ export function DetailPanel(props: DetailPanelProps) {
                   {cycleNote.text}
                 </span>
               )}
-              <span className="min-w-0 flex-1" />
+              {/* PHONE: hidden, not merely unstyled. The merged row has one
+                  `flex-1` already -- the textarea itself -- and a second one
+                  here would split the row's remaining space between the two,
+                  starving the textarea by half. Desktop keeps it: it is what
+                  pushes the mic/Send pair to the tools row's own right edge,
+                  the row this spacer was written for and still lives in. */}
+              <span className={phone ? 'hidden' : 'min-w-0 flex-1'} />
               {/* THE MICROPHONE, next to Send because that is where the
               operator asked for it and because it belongs to the same act:
               these two are what a finished prompt is handed to.

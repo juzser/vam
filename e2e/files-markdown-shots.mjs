@@ -529,12 +529,52 @@ await page.screenshot({ path: `${outDir}/files-md-raw.png` });
 console.log(`${outDir}/files-md-raw.png`);
 
 // ---------------------------------------------------------------------------
+// 2.5 THE DIRTY INDICATOR — an edit, the dot it draws, and the way back.
+//
+// Round-tripped through the SAME editor rather than a fresh file: capture the
+// exact loaded text with `inputValue()`, append one character at the very END
+// (never touching a heading, a list or a fence section 4 below still has to
+// find), read the dot, then `fill()` the captured text straight back. No
+// constant is duplicated and section 4 sees the identical document either way.
+const editorRaw = page.locator('[data-files-editor]');
+const beforeEdit = await editorRaw.inputValue();
+await editorRaw.click();
+await editorRaw.press('End');
+await page.keyboard.type('x');
+const dirtyDot = await page.evaluate(() => {
+  const e = document.querySelector('[data-files-dirty]');
+  if (e === null) return null;
+  const b = e.getBoundingClientRect();
+  return {
+    width: Math.round(b.width),
+    height: Math.round(b.height),
+    label: e.getAttribute('aria-label'),
+    role: e.getAttribute('role'),
+  };
+});
+check(
+  'an edit draws the dirty indicator — sized, and named for a screen reader, not just a hue',
+  dirtyDot !== null &&
+    dirtyDot.width > 0 &&
+    dirtyDot.height > 0 &&
+    dirtyDot.label === 'unsaved changes' &&
+    dirtyDot.role === 'img',
+  JSON.stringify(dirtyDot),
+);
+await editorRaw.fill(beforeEdit);
+check(
+  'and the dot clears once the buffer matches what was loaded again',
+  (await page.locator('[data-files-dirty]').count()) === 0,
+);
+
+// ---------------------------------------------------------------------------
 // 3. THE TOGGLE'S OWN BOX, at the widest the view pill ever is.
 //
 // ASSERTED AS A RECTANGLE, NEVER AS A CLICK. The sibling guard's header
 // records why: the Save button really did sit 18px under the pill while every
 // click-based check passed, because Playwright clicks an element's CENTRE.
-// This row has one more control in it now.
+// Save is gone now — an indicator replaced it (2.5 above) — so this row holds
+// the preview toggle and Format alone.
 
 const corner = await page.evaluate(() => {
   const r = (sel) => {
@@ -547,13 +587,13 @@ const corner = await page.evaluate(() => {
       top: Math.round(b.top),
       bottom: Math.round(b.bottom),
       width: Math.round(b.width),
+      height: Math.round(b.height),
     };
   };
   return {
     overlay: r('[data-view-overlay]'),
     preview: r('[data-files-preview]'),
     format: r('[data-files-format]'),
-    save: r('[data-files-save]'),
     header: r('[data-files-header]'),
     icons: document.querySelectorAll('[data-view-overlay] [data-view]').length,
   };
@@ -571,18 +611,29 @@ check(
 check(
   'and every control in the row clears the view pill entirely, not just at its centre',
   corner.overlay !== null &&
-    [corner.preview, corner.format, corner.save].every(
-      (b) => b !== null && b.right <= corner.overlay.left,
-    ),
+    [corner.preview, corner.format].every((b) => b !== null && b.right <= corner.overlay.left),
   JSON.stringify(corner),
 );
 check(
-  'and none of them is taller than the row that reserves the corner’s height',
+  'and neither is taller than the row that reserves the corner’s height',
   corner.header !== null &&
-    [corner.preview, corner.format, corner.save].every(
+    [corner.preview, corner.format].every(
       (b) => b !== null && b.top >= corner.header.top && b.bottom <= corner.header.bottom,
     ),
   JSON.stringify(corner),
+);
+/**
+ * THE OPERATOR'S OWN COMPLAINT: "Save, prettier and preview-mode buttons are
+ * not the same size." Save is gone; what is left is asserted EQUAL now,
+ * to the pixel, rather than the loose few-pixel tolerance this section used
+ * to carry — `FilesTab.tsx`'s own comment on Format's `h-6 w-6` box (the same
+ * fixed square `DetailPanel.tsx`'s view-icon pill draws every one of its five
+ * buttons in) is what makes an exact match possible rather than aspirational.
+ */
+check(
+  'the preview toggle and Format now share ONE height, to the pixel — the operator’s own complaint',
+  corner.preview !== null && corner.format !== null && corner.preview.height === corner.format.height,
+  `preview ${corner.preview?.height}px vs format ${corner.format?.height}px`,
 );
 
 // A TWO-SEGMENT CONTROL WITH TEXT LABELS, not the old icon-only button —
@@ -1153,7 +1204,9 @@ check(
  * wrapped onto a second line or spilled past the pane's right edge would
  * still pass a click-based check (Playwright clicks the centre) and would
  * still show every label's `textContent`, which is why this asserts geometry
- * rather than presence.
+ * rather than presence. Save is gone (2.5 above); this row holds the preview
+ * toggle and Format alone, at the SAME height everywhere now — section 3's
+ * own comment on `h-6` names the fix and the operator complaint it answers.
  */
 await treeRow('/work/demo/README.md').click();
 await page.waitForFunction(
@@ -1166,14 +1219,18 @@ const narrowHeader = await page.evaluate(() => {
     const e = document.querySelector(sel);
     if (e === null) return null;
     const b = e.getBoundingClientRect();
-    return { left: Math.round(b.left), right: Math.round(b.right), top: Math.round(b.top) };
+    return {
+      left: Math.round(b.left),
+      right: Math.round(b.right),
+      top: Math.round(b.top),
+      height: Math.round(b.height),
+    };
   };
   return {
     pane: r('[data-action-pane]'),
     overlay: r('[data-view-overlay]'),
     preview: r('[data-files-preview]'),
     format: r('[data-files-format]'),
-    save: r('[data-files-save]'),
     path: r('[data-files-path]'),
   };
 });
@@ -1182,21 +1239,21 @@ check(
   narrowHeader.pane !== null &&
     narrowHeader.preview !== null &&
     narrowHeader.format !== null &&
-    narrowHeader.save !== null &&
     narrowHeader.preview.right <= narrowHeader.pane.right &&
     narrowHeader.format.right <= narrowHeader.pane.right &&
-    narrowHeader.save.right <= narrowHeader.pane.right &&
-    // Not wrapped onto a second line — a loose tolerance, not exact equality:
-    // the segmented control's own button is a few px shorter than Format's
-    // (tighter padding at this width), so `items-center` lands their tops a
-    // couple of pixels apart even sitting on the very same row.
-    Math.abs(narrowHeader.preview.top - narrowHeader.format.top) <= 6,
+    // NOT WRAPPED ONTO A SECOND LINE, asserted as EXACT equality now: both
+    // controls are the identical `h-6` fixed box (Format's own comment),
+    // never independently padded, so there is no longer a legitimate few-px
+    // drift for a tolerance to paper over — a real wrap or a size regression
+    // is the only way their tops could differ again.
+    narrowHeader.preview.top === narrowHeader.format.top &&
+    narrowHeader.preview.height === narrowHeader.format.height,
   JSON.stringify(narrowHeader),
 );
 check(
-  'and none of the three controls sits under the floating view-icon pill',
+  'and neither control sits under the floating view-icon pill',
   narrowHeader.overlay !== null &&
-    [narrowHeader.preview, narrowHeader.format, narrowHeader.save].every(
+    [narrowHeader.preview, narrowHeader.format].every(
       (b) => b !== null && b.right <= narrowHeader.overlay.left,
     ),
   JSON.stringify(narrowHeader),

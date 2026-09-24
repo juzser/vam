@@ -77,6 +77,24 @@ function check(label, ok, detail) {
 }
 
 /**
+ * PRESSES THE SAVE CHORD — there is no Save button any more (the operator's
+ * own instruction: an indicator, not a button; `FilesTab.tsx`'s own
+ * dirty-indicator comment carries why), so every save below is `Mod-s` on
+ * whatever already has the keyboard, exactly like `Meta+KeyZ` a few sections
+ * down for undo. `data-files-save-state`, the save machine's own idle/saving/
+ * conflict/error report, moved with it: it is `[data-files-header]`'s
+ * attribute now rather than a button's, since a button was the only DOM node
+ * that carried it before.
+ */
+const saveChord = () => page.keyboard.press('Meta+KeyS');
+const waitForSaveIdle = () =>
+  page.waitForFunction(
+    () => document.querySelector('[data-files-header]')?.getAttribute('data-files-save-state') === 'idle',
+    null,
+    { timeout: 5_000 },
+  );
+
+/**
  * A COMPLETE `PreloadSourceApi` stub -- one project, one session, every
  * capability false -- plus `files`, an in-memory filesystem defined ENTIRELY
  * inside the page so the conflict scenario below (a save whose baseline no
@@ -459,13 +477,17 @@ await page.evaluate(() => document.activeElement?.blur());
  *
  * This is where the reservation was nearly lost. The tree's clearance is the
  * height of the header row above it, and that row holds the open file's path
- * and its Save button: WITH a file open it comes to 26px, WITHOUT one it
- * comes to 16px, and the pill reaches 30px into this tab either way. So a
- * check that only ever measured the tab with a file open would pass on an
- * accidental 2px while the state a pane actually LANDS in -- nothing open --
- * had its first tree row 8px under the icons. Measured, both, with the
- * reservation deliberately removed. `cornerReserveHeight` is what makes the
- * row 34px in both states, and this is the half of the guard that says so.
+ * and its own toolbar controls (a Save button, when this measurement was
+ * first taken -- since replaced by the dirty indicator, this file's own
+ * `saveChord` comment carries why): WITH a file open the row's NATURAL
+ * height came to 26px, WITHOUT one it came to 16px, and the pill reaches
+ * 30px into this tab either way. So a check that only ever measured the tab
+ * with a file open would pass on an accidental 2px while the state a pane
+ * actually LANDS in -- nothing open -- had its first tree row 8px under the
+ * icons. Measured, both, with the reservation deliberately removed.
+ * `cornerReserveHeight` is what makes the row 34px in both states regardless
+ * of which controls it holds, and this is the half of the guard that says
+ * so.
  */
 const emptyCorner = await page.evaluate(() => {
   const r = (sel) => {
@@ -507,7 +529,12 @@ const pillBox = await page.evaluate(() => {
   };
   return {
     overlay: r('[data-view-overlay]'),
-    save: r('[data-files-save]'),
+    // Save is gone (the operator's own instruction: an indicator, not a
+    // button — `FilesTab.tsx`'s dirty-indicator comment carries why). Format
+    // is this row's trailing control now, and this is the same rectangle
+    // question the Save button's own 18px bug (this section's own header)
+    // was written to catch, asked of its replacement.
+    format: r('[data-files-format]'),
     path: r('[data-files-path]'),
     tree: r('[data-files-tree]'),
     editorColumn: r('[data-files-editor-column]'),
@@ -520,9 +547,11 @@ check(
   `it carries ${pillBox.icons}`,
 );
 check(
-  'the Save button clears the view pill entirely, not just at its centre',
-  pillBox.save !== null && pillBox.overlay !== null && pillBox.save.right <= pillBox.overlay.left,
-  `save ends at ${pillBox.save?.right}, pill starts at ${pillBox.overlay?.left}`,
+  'the Format button clears the view pill entirely, not just at its centre',
+  pillBox.format !== null &&
+    pillBox.overlay !== null &&
+    pillBox.format.right <= pillBox.overlay.left,
+  `format ends at ${pillBox.format?.right}, pill starts at ${pillBox.overlay?.left}`,
 );
 check(
   'and so does the file path beside it',
@@ -807,12 +836,8 @@ check(
 
 await editor.click();
 await editor.fill('A=1\nj');
-await page.locator('[data-files-save]').click();
-await page.waitForFunction(
-  () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-  null,
-  { timeout: 5_000 },
-);
+await saveChord();
+await waitForSaveIdle();
 
 // An agent writes the file between this save and the operator's next one.
 await page.evaluate(() => {
@@ -820,7 +845,7 @@ await page.evaluate(() => {
 });
 await editor.click();
 await editor.fill('A=OPERATORS-OWN-EDIT');
-await page.locator('[data-files-save]').click();
+await saveChord();
 await page.waitForSelector('[data-files-conflict]', { timeout: 5_000 });
 const conflictText = await page.locator('[data-files-conflict]').innerText();
 check('a changed-on-disk save shows the conflict banner', conflictText.includes('changed on disk'), conflictText);
@@ -871,12 +896,8 @@ await editor.fill('A=UNSAVED-ON-CLOSE');
 const armedWhileDirty = await beforeUnloadPrevented();
 check('closing warns the moment a buffer is dirty', armedWhileDirty === true, `defaultPrevented was ${armedWhileDirty}`);
 
-await page.locator('[data-files-save]').click();
-await page.waitForFunction(
-  () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-  null,
-  { timeout: 5_000 },
-).catch(() => {});
+await saveChord();
+await waitForSaveIdle().catch(() => {});
 const disarmedAfterSave = await beforeUnloadPrevented();
 check('and the warning stands down once the save actually lands', disarmedAfterSave === false);
 
@@ -1524,14 +1545,9 @@ await page.setViewportSize({ width: 1100, height: 800 });
 await page.waitForTimeout(200);
 
 // Leave the buffer clean so nothing is pending when the browser closes.
-await page.locator('[data-files-save]').click();
-await page
-  .waitForFunction(
-    () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-    null,
-    { timeout: 5_000 },
-  )
-  .catch(() => {});
+await editor.click();
+await saveChord();
+await waitForSaveIdle().catch(() => {});
 
 // ---------------------------------------------------------------------------
 // 7. THE PICTURE THE README USES.
@@ -1544,14 +1560,8 @@ await page
 // now is.
 await editor.click();
 await editor.fill('API_URL=http://localhost:8787\nLOG_LEVEL=debug\n');
-await page.locator('[data-files-save]').click();
-await page
-  .waitForFunction(
-    () => document.querySelector('[data-files-save]')?.getAttribute('data-files-save-state') === 'idle',
-    null,
-    { timeout: 5_000 },
-  )
-  .catch(() => {});
+await saveChord();
+await waitForSaveIdle().catch(() => {});
 await treeRow('/work/demo/src').click();
 await page.waitForFunction(
   () => document.querySelectorAll('[data-files-row]').length > 2,

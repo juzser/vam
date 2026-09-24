@@ -66,9 +66,11 @@ import { createControlTmuxRunner } from './sources/tmux/control.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
+import { registerTerminalStreamIpc } from './terminal/stream-ipc.js';
 import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
-import { registerUsageIpc } from './usage/ipc.js';
+import { readCodexUsage } from './usage/codex-reader.js';
+import { registerCodexUsageIpc, registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
 import { lockZoom } from './zoom.js';
 
@@ -309,6 +311,16 @@ function registerContentSecurityPolicy(): void {
 let terminalTmuxRunner: ReturnType<typeof createControlTmuxRunner> | null = null;
 
 /**
+ * Every open Terminal-tab STREAMING connection, so `before-quit` below can
+ * dispose them alongside `terminalTmuxRunner`'s own connection -- the same
+ * "no orphan `tmux -C` process may survive app quit" requirement, for the
+ * SECOND persistent client this app now keeps. `null` until `createWindow()`
+ * registers it (it needs a window's own `webContents` to push to, the same
+ * reason `registerStreamIpc` below is registered there and not here).
+ */
+let terminalStreamRegistration: ReturnType<typeof registerTerminalStreamIpc> | null = null;
+
+/**
  * THE GUARD ON CMD-Q, and the one piece of renderer state main keeps a copy of.
  *
  * The Files tab holds unsaved edits in renderer memory and nowhere else, and
@@ -400,6 +412,19 @@ function createWindow(): void {
     url: streamUrl,
     createEventSource: (url) => createNodeEventSource(url) as unknown as EventSource,
   });
+  // SAME REASON AS ABOVE -- it needs THIS window's `webContents` to push
+  // `%output`/reseed/down events to. Guarded on `terminalTmuxRunner` rather
+  // than asserted: `app.whenReady()` always sets it before calling
+  // `createWindow()` (below), but nothing here forces that ordering to stay
+  // true, and skipping registration is a strictly safer failure than a
+  // non-null assertion that turns out wrong.
+  if (terminalTmuxRunner !== null) {
+    terminalStreamRegistration = registerTerminalStreamIpc(
+      ipcMain,
+      window.webContents,
+      terminalTmuxRunner,
+    );
+  }
   // SAME REASON AS ABOVE -- it needs this window's `webContents` to push to.
   // Nothing recorded before this call is lost: `recordMainFailure`
   // (`./errors/log.js`) buffers unconditionally, and the renderer's own
@@ -695,6 +720,11 @@ void app.whenReady().then(async () => {
   // module's -- main-process-only because a Keychain read is not a thing the
   // renderer, the least trusted process here, may ever perform.
   registerUsageIpc(ipcMain, () => readUsage());
+  // A filesystem scan of ~/.codex/sessions rather than a network call, but
+  // the same rule: main-process-only, read only when the renderer asks, and
+  // never on a floor the renderer itself controls (`codex-reader.ts`,
+  // `usage/ipc.ts`).
+  registerCodexUsageIpc(ipcMain, () => readCodexUsage());
   // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
   // carrying no token, no query and nothing about this machine's sessions,
   // projects or paths. Nothing is awaited -- the window is created below
@@ -884,6 +914,9 @@ app.on('before-quit', (event) => {
   // it -- left alive, that session (and the whole tmux server, if it held
   // nothing else) would otherwise outlive the app indefinitely.
   terminalTmuxRunner?.dispose();
+  // Every open streaming connection, closed the same best-effort way --
+  // see `terminalStreamRegistration`'s own note.
+  terminalStreamRegistration?.dispose();
 });
 
 app.on('window-all-closed', () => {

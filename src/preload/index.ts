@@ -26,6 +26,7 @@ import {
   createRemoteApi,
   createStreamSubscribe,
   createTerminalApi,
+  createTerminalStreamApi,
   createUpdateApi,
   createUsageApi,
 } from './api.js';
@@ -55,6 +56,9 @@ contextBridge.exposeInMainWorld('api', {
   // `src/main/pr/ipc.ts`.
   prs: createPrsApi(ipcRenderer),
   terminal: createTerminalApi(ipcRenderer),
+  // The Terminal tab's streaming half, behind the `streamingTerminal` pref
+  // and currently drawn by nothing -- see `src/preload/api.ts`'s own header.
+  terminalStream: createTerminalStreamApi(ipcRenderer),
   dialog: createDialogApi(ipcRenderer),
   // The file-editor tab's read and write, authorised against every live
   // session's own working directory in main before a byte moves either way.

@@ -11,7 +11,12 @@
  * is what main actually registers.
  */
 
-import { parseUsage, type UsageSnapshot, type UsageUnknownReason } from '../../shared/usage.js';
+import {
+  parseLimits,
+  parseUsage,
+  type UsageSnapshot,
+  type UsageUnknownReason,
+} from '../../shared/usage.js';
 import { readTokenFromKeychain } from './keychain.js';
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -82,7 +87,8 @@ export async function readUsage(
 
   try {
     const windows = parseUsage(body);
-    return { kind: 'ok', windows, observedAt: new Date().toISOString() };
+    const limits = parseLimits(body);
+    return { kind: 'ok', windows, observedAt: new Date().toISOString(), limits };
   } catch {
     // `parseUsage` never throws today (§ its own doc comment); this is the
     // 'unavailable' bucket for whatever this reader did not anticipate.

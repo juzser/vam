@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import {
   describeUsage,
   formatCountdown,
+  parseLimits,
   parseUsage,
   type UsageSnapshot,
 } from '../../src/shared/usage.js';
@@ -116,6 +117,84 @@ describe('parseUsage', () => {
     });
     expect(windows.fiveHour).toEqual({ kind: 'unknown' });
     expect(windows.sevenDay).toEqual({ kind: 'unknown' });
+  });
+});
+
+describe('parseLimits', () => {
+  it('reads the session window off the real limits[] shape', () => {
+    const result = parseLimits(REAL_BODY);
+    expect(result).toEqual([
+      {
+        id: 'session',
+        label: '5-hour',
+        window: { kind: 'known', percent: 40, resetsAt: '2026-09-03T11:40:00.429991+00:00' },
+      },
+    ]);
+  });
+
+  it('labels weekly_all as Weekly, with no model suffix', () => {
+    const result = parseLimits({
+      limits: [{ kind: 'weekly_all', percent: 12, resets_at: '2026-09-08T06:00:00Z' }],
+    });
+    expect(result).toEqual([
+      {
+        id: 'weekly_all',
+        label: 'Weekly',
+        window: { kind: 'known', percent: 12, resetsAt: '2026-09-08T06:00:00Z' },
+      },
+    ]);
+  });
+
+  it('reads a per-model weekly_scoped entry, naming the model', () => {
+    const result = parseLimits({
+      limits: [
+        {
+          kind: 'weekly_scoped',
+          percent: 55,
+          resets_at: '2026-09-08T06:00:00Z',
+          scope: { model: { display_name: 'Opus' } },
+        },
+      ],
+    });
+    expect(result).toEqual([
+      {
+        id: 'weekly_scoped',
+        label: 'Weekly · Opus',
+        window: { kind: 'known', percent: 55, resetsAt: '2026-09-08T06:00:00Z' },
+      },
+    ]);
+  });
+
+  it('falls back to a generic label when weekly_scoped carries no model name', () => {
+    const result = parseLimits({
+      limits: [{ kind: 'weekly_scoped', percent: 10, resets_at: '2026-09-08T06:00:00Z' }],
+    });
+    expect(result[0]?.label).toBe('Weekly · model');
+  });
+
+  it('skips an entry with no percent, rather than inventing 0', () => {
+    const result = parseLimits({
+      limits: [{ kind: 'session', resets_at: '2026-09-08T06:00:00Z' }],
+    });
+    expect(result).toEqual([{ id: 'session', label: '5-hour', window: { kind: 'unknown' } }]);
+  });
+
+  it('returns an empty array, never throwing, when limits is absent or malformed', () => {
+    for (const body of [{}, { limits: null }, { limits: 'nope' }, null, undefined, 42]) {
+      expect(() => parseLimits(body)).not.toThrow();
+      expect(parseLimits(body)).toEqual([]);
+    }
+  });
+
+  it('skips an entry whose kind is missing, keeping the rest', () => {
+    const result = parseLimits({
+      limits: [
+        { percent: 10, resets_at: '2026-09-08T06:00:00Z' },
+        { kind: 'weekly_all', percent: 20, resets_at: '2026-09-08T06:00:00Z' },
+      ],
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('weekly_all');
   });
 });
 

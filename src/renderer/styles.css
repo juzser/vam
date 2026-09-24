@@ -2820,8 +2820,9 @@ html {
   opacity: 1;
 }
 
-/* THE THREE ELEMENTS THAT CAN END A PHONE SCREEN, and there were three all
- * along -- the rule only ever named one.
+/* THE ELEMENTS THAT CAN END A PHONE SCREEN -- FOUR NOW, and there were three
+ * all along before this rule named a fourth -- the rule only ever named one
+ * to begin with.
  *
  * `viewport-fit=cover` is in `index.html`, so this resolves to the real
  * indicator; without it, it resolves to 0 and the last row sits under the bar.
@@ -2836,9 +2837,18 @@ html {
  *    flat 12px that a 34px indicator eats;
  *  - the LIST's status bar, which sat flush at the screen's edge with no
  *    padding at all, and which is where the failures button lives: "the
- *    surface most wanted at the worst moment". */
+ *    surface most wanted at the worst moment";
+ *  - `data-question-bar-inline` (docs/design/phone-core-loop.md §3.2-3.3):
+ *    the Response view's inline question, `sticky bottom-0` inside the
+ *    transcript's own scroller now rather than the fixed `data-question-bar`
+ *    footer -- but it is STILL the bottom of the screen whenever the
+ *    composer stands down, and its own last row is the same option-to-tap
+ *    the fixed card's rule was written for. Missing this selector would have
+ *    been the exact regression the rule above already fixed once, on the
+ *    new mount point. */
 [data-phone-shell] [data-composer-bar],
 [data-phone-shell] [data-question-bar],
+[data-phone-shell] [data-question-bar-inline],
 [data-phone-shell] [data-phone-status-bar] {
   padding-bottom: max(12px, env(safe-area-inset-bottom));
 }

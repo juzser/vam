@@ -83,8 +83,15 @@ export const CONTROL_SESSION_NAME = 'vamctl';
  * practice; recognising the LITERAL keeps the check honest either way). */
 const LIST_SESSIONS_FORMAT = `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`;
 
-/** A vam session target, exactly as `target()`/`paneTarget()` in `argv.ts` build it. */
-const SAFE_TARGET_RE = /^=vam-[A-Za-z0-9_-]+:?$/;
+/** A vam session target, exactly as `target()`/`paneTarget()` in `argv.ts` build
+ * it. Exported so `terminal/stream/client.ts` can validate ITS OWN
+ * hand-built target string against the exact same allowlist every other
+ * control-mode line goes through here -- that file builds raw lines directly
+ * (an attached streaming connection, not a `TmuxRun`), so it never passes
+ * through `encodeSegment` below to get this check for free; reusing the
+ * regex is a single source of truth for "what a safe tmux session target
+ * looks like" rather than a second, driftable copy. */
+export const SAFE_TARGET_RE = /^=vam-[A-Za-z0-9_-]+:?$/;
 
 /** A plain bounded integer -- history depth, a column or row count. */
 const SAFE_INT_RE = /^-?\d{1,6}$/;
@@ -141,8 +148,19 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
  */
 const MUTATING_VERBS: ReadonlySet<string> = new Set(['send-keys', 'resize-window']);
 
-/** `Buffer.from(text, 'utf8')`, one lowercase hex pair per byte. */
-function hexBytes(text: string): readonly string[] {
+/**
+ * `Buffer.from(text, 'utf8')`, one lowercase hex pair per byte.
+ *
+ * Exported for reuse by the streaming client (`terminal/stream/client.ts`):
+ * `encodeSegment` below uses it for the operator's own text and the wheel
+ * report's raw SGR bytes; the streaming client uses it for xterm's own
+ * `onData` text, which is a JS string of raw bytes/escape sequences the same
+ * shape `sendTextArgv`'s text always was. Both go out through the identical
+ * `send-keys -H` encoding for the identical reason -- tmux's control-mode
+ * grammar performs shell-like expansion even inside quotes (see the module
+ * note above) -- so this is the one place that reasoning is written, not two.
+ */
+export function hexBytes(text: string): readonly string[] {
   const bytes = Buffer.from(text, 'utf8');
   const out: string[] = [];
   for (const byte of bytes) out.push(byte.toString(16).padStart(2, '0'));
@@ -301,14 +319,108 @@ function isReplyHeader(header: string): boolean {
   return Number.isInteger(parsed) && (parsed & REPLY_FLAG) === REPLY_FLAG;
 }
 
+/** Turn one `%output` line's ALREADY-STRIPPED payload (the text after the
+ * pane id) back into the bytes tmux actually printed, as a JS string whose
+ * char codes are those bytes -- safe to feed straight into `xterm.write()`,
+ * which expects exactly that (a `Uint8Array` or a string of raw bytes/ESC
+ * sequences, not a decoded document).
+ *
+ * THE ESCAPE RULE, exactly as documented by the operator's own brief and
+ * matching what `encodeSegment`'s own `hexBytes` assumes about tmux's
+ * control-mode grammar: `\` escapes itself as `\\`, and any byte tmux printed
+ * that is BELOW 32 (a control byte -- CR, LF, ESC, BEL, ...) is escaped as
+ * `\ooo`, three octal digits. Nothing else is ever escaped -- raw UTF-8 text,
+ * including multi-byte sequences, passes through literally -- which is why
+ * this only ever looks for a leading `\`. Ported from the terminal-streaming
+ * spike's own `decodeOutputPayload` (`vam/terminal-stream-spike`,
+ * `src/main/terminal/stream/protocol.ts`), unchanged.
+ */
+export function decodeOutputPayload(payload: string): string {
+  let out = '';
+  let i = 0;
+  while (i < payload.length) {
+    const ch = payload[i];
+    if (ch === '\\') {
+      if (payload[i + 1] === '\\') {
+        out += '\\';
+        i += 2;
+        continue;
+      }
+      const octal = payload.slice(i + 1, i + 4);
+      if (/^[0-7]{3}$/.test(octal)) {
+        out += String.fromCharCode(Number.parseInt(octal, 8));
+        i += 4;
+        continue;
+      }
+      // Malformed escape (truncated at the end of a line, or a `\` tmux
+      // never actually sends unescaped): kept literal rather than dropped,
+      // so a decode bug is visible garbage on screen instead of silently
+      // eaten bytes.
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+/** One line of `%output %<pane-id> <payload>` (the pane id keeps its own
+ * leading `%`, exactly as tmux writes it, e.g. `%3`) parsed apart, or `null`
+ * if the line does not match that exact shape. */
+function parseOutputLine(line: string): { paneId: string; payload: string } | null {
+  const match = /^%output (%\d+) ?(.*)$/.exec(line);
+  if (match === null) return null;
+  const paneId = match[1];
+  const payload = match[2];
+  if (paneId === undefined || payload === undefined) return null;
+  return { paneId, payload };
+}
+
+/** One line of `%extended-output %<pane-id> <age> : <payload>` -- tmux's
+ * flow-control-carrying variant of `%output`, sent while a client is paused
+ * and catching up: the same pane-id/payload shape as a plain `%output`, with
+ * an extra `<age>` (and possibly other tokens) before a literal `: `
+ * separator this file does not otherwise need to read. Matched with a LAZY
+ * `.*?` up to the FIRST `: `, since the payload after it may itself contain
+ * a colon once decoded -- the metadata before the separator never does. A
+ * review finding: this event kind was previously undocumented and unhandled
+ * despite the design doc claiming otherwise; it is parsed here into the
+ * IDENTICAL `{ paneId, payload }` shape `parseOutputLine` returns, so
+ * `feedEvents` below can decode and forward it through the SAME `kind:
+ * 'output'` event -- one code path for both, in the caller and here. */
+function parseExtendedOutputLine(line: string): { paneId: string; payload: string } | null {
+  const match = /^%extended-output (%\d+) .*?: (.*)$/.exec(line);
+  if (match === null) return null;
+  const paneId = match[1];
+  const payload = match[2];
+  if (paneId === undefined || payload === undefined) return null;
+  return { paneId, payload };
+}
+
+/** One event `ControlFramer.feedEvents` can hand back -- a block (the same
+ * shape `ControlBlock` always was, now tagged `kind: 'block'`), a decoded
+ * `%output` notification, or any other unsolicited line this file does not
+ * otherwise model. */
+export type ControlFramerEvent =
+  | ({ readonly kind: 'block' } & ControlBlock)
+  | { readonly kind: 'output'; readonly paneId: string; readonly data: string }
+  | { readonly kind: 'other'; readonly line: string };
+
 /**
  * Incremental parser for tmux's control-mode stdout: `%begin <time> <n>
  * <flags>\n`…lines…`%end`/`%error <time> <n> <flags>\n`, with unsolicited
- * notifications (`%output`, `%session-changed`, …) appearing OUTSIDE a block
- * and simply dropped -- this file has nothing to do with them, and
- * `control.ts` never asks for the streaming path they would otherwise imply
- * (the operator's own decision to keep poll/capture; see the module's
- * caller).
+ * notifications (`%output`, `%session-changed`, …) appearing OUTSIDE a block.
+ *
+ * `feed()` -- `control.ts`'s own caller -- still only ever sees blocks, in
+ * the exact shape it always returned: every OTHER line stays dropped for
+ * that caller, because `control.ts`'s `vamctl` connection never asks for
+ * streaming and a notification arriving on it is noise by definition. Streaming
+ * (`terminal/stream/client.ts`) calls `feedEvents()` instead, on a SECOND
+ * `ControlFramer` instance it attaches to the session it is actually
+ * viewing -- the SAME state machine, reused, not a second parser maintaining
+ * its own copy of the block-vs-notification and A3 header-matching rules
+ * below. `%output`'s payload is decoded through `decodeOutputPayload` (this
+ * file, above) the moment its line closes, so a streaming caller never has to
+ * re-derive tmux's escape grammar either.
  *
  * FEEDS ARE NOT LINES. A `child_process` `'data'` event lands wherever the
  * pipe buffer happened to fill, so this buffers a possibly-partial trailing
@@ -349,9 +461,15 @@ export class ControlFramer {
    * close it (A3). Meaningless while `#open` is `null`. */
   #openHeader = '';
 
-  feed(chunk: string): ControlBlock[] {
+  /**
+   * The full state machine: every block AND every unsolicited notification
+   * (`%output`, decoded, or `other` for anything else), in arrival order.
+   * `feed()` below is a thin filter over this, kept as the ONE place the
+   * `%begin`/`%end`/`%error`/A3 logic is written.
+   */
+  feedEvents(chunk: string): ControlFramerEvent[] {
     this.#buffer += chunk;
-    const blocks: ControlBlock[] = [];
+    const events: ControlFramerEvent[] = [];
     for (;;) {
       const newline = this.#buffer.indexOf('\n');
       if (newline === -1) break;
@@ -361,14 +479,33 @@ export class ControlFramer {
         if (line.startsWith('%begin ')) {
           this.#open = [];
           this.#openHeader = line.slice('%begin '.length);
+          continue;
         }
-        // Every other line outside a block is a notification this file has
-        // no use for -- dropped, not buffered, so it can never be mistaken
-        // for the body of a block that has not started yet.
+        if (line.startsWith('%output ') || line.startsWith('%extended-output ')) {
+          const parsed = line.startsWith('%output ')
+            ? parseOutputLine(line)
+            : parseExtendedOutputLine(line);
+          events.push(
+            parsed === null
+              ? { kind: 'other', line }
+              : {
+                  kind: 'output',
+                  paneId: parsed.paneId,
+                  data: decodeOutputPayload(parsed.payload),
+                },
+          );
+          continue;
+        }
+        // Every other line outside a block is a notification `feed()`'s own
+        // caller has no use for -- `feedEvents()` still surfaces it as
+        // `other` rather than dropping it, so a streaming caller can see
+        // what it is choosing to ignore.
+        events.push({ kind: 'other', line });
         continue;
       }
       if (line === `%end ${this.#openHeader}` || line === `%error ${this.#openHeader}`) {
-        blocks.push({
+        events.push({
+          kind: 'block',
           ok: line.startsWith('%end '),
           body: this.#open.map((l) => `${l}\n`).join(''),
           reply: isReplyHeader(this.#openHeader),
@@ -378,6 +515,18 @@ export class ControlFramer {
         continue;
       }
       this.#open.push(line);
+    }
+    return events;
+  }
+
+  /** `control.ts`'s own caller: blocks only, in the exact `ControlBlock`
+   * shape (no `kind` discriminant) it has always returned -- unchanged by
+   * `feedEvents()` existing alongside it. */
+  feed(chunk: string): ControlBlock[] {
+    const blocks: ControlBlock[] = [];
+    for (const event of this.feedEvents(chunk)) {
+      if (event.kind !== 'block') continue;
+      blocks.push({ ok: event.ok, body: event.body, reply: event.reply });
     }
     return blocks;
   }
