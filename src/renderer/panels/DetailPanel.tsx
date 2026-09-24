@@ -973,6 +973,28 @@ export type DetailPanelProps = {
     readonly clear: () => void;
   };
   readonly phone?: boolean;
+  /**
+   * REPORTS `openQuestion` -- this pane's own "is there a live
+   * `AskUserQuestion` on screen right now" fact -- to a caller that has no
+   * other route to it.
+   *
+   * `PhoneShell`'s session-tab strip needs this: the spec (docs/design/
+   * phone-core-loop.md §3.2) collapses that strip "whenever a question is
+   * open", the same `!typing` condition it already uses for the keyboard.
+   * But `openQuestion` is derived HERE, from `entry.session.questions` AND
+   * the pane-read fallback (`paneAsk`, a tool-approval prompt with no
+   * transcript record) -- both of which are this component's own state, not
+   * anything a re-hosting shell reads on its own. A callback is the
+   * established route for exactly this shape of fact: `onSuggest` (below)
+   * already reports a different piece of this same card's derived state
+   * upward for the SAME reason (the composer's Tab-completion ghost).
+   *
+   * Called on every render where the value could have changed (`useEffect`,
+   * keyed on the value itself), never assumed to fire once. Optional: every
+   * caller that does not re-host this pane inside chrome of its own (the
+   * desktop split) has nothing that needs telling.
+   */
+  readonly onQuestionOpenChange?: (open: boolean) => void;
   readonly resizeHandle: ReactNode;
   /**
    * Can this source record a prompt at all? Optional, and `undefined` means
@@ -5586,6 +5608,7 @@ export function DetailPanel(props: DetailPanelProps) {
     records,
     prRepo,
     phone = false,
+    onQuestionOpenChange,
     defaultProvider,
     onSetDefaultProvider,
     onStartSession,
@@ -7261,6 +7284,13 @@ export function DetailPanel(props: DetailPanelProps) {
    * lands in the same place, and Esc still does the one thing it did.
    */
   const openQuestion = newestQuestions.some((one) => one.answer === null);
+  // See `onQuestionOpenChange`'s own doc: this is the one route a re-hosting
+  // shell (`PhoneShell`) has to this fact, which is derived here and nowhere
+  // else. Fires on every value change, including a session switch (`entry`
+  // changing changes `newestQuestions`, which changes this).
+  useEffect(() => {
+    onQuestionOpenChange?.(openQuestion);
+  }, [openQuestion, onQuestionOpenChange]);
   const [chattingAbout, setChattingAbout] = useState<string | null>(null);
   /** What `QuestionCard` says the open step would answer with -- see `onSuggest`. */
   const [suggestion, setSuggestion] = useState<string | null>(null);
