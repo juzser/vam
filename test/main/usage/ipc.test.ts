@@ -6,7 +6,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
-import { MIN_READ_INTERVAL_MS, registerUsageIpc } from '../../../src/main/usage/ipc.js';
+import {
+  MIN_READ_INTERVAL_MS,
+  registerCodexUsageIpc,
+  registerUsageIpc,
+} from '../../../src/main/usage/ipc.js';
 import { createUsageApi } from '../../../src/preload/api.js';
 
 function fakeIpcMain() {
@@ -180,6 +184,85 @@ describe('registerUsageIpc rate limiting', () => {
 });
 
 /**
+ * `registerCodexUsageIpc`: the same bare-answer, throttled contract as
+ * `registerUsageIpc`, on its own channel -- reused rather than duplicated at
+ * length: the full rate-limiting family (burst collapse, in-flight join,
+ * floor elapsing, a failing read throttled too) is proven once above against
+ * the shared internal cache, and this block pins that the Codex channel wires
+ * to it rather than re-running all five cases a second time.
+ */
+describe('registerCodexUsageIpc', () => {
+  it('answers with exactly the snapshot getSnapshot returned, no envelope', async () => {
+    const ipcMain = fakeIpcMain();
+    const snapshot = {
+      kind: 'ok' as const,
+      limits: {
+        primary: { kind: 'known' as const, percent: 11, windowMinutes: 300, resetsAt: 't1' },
+        secondary: { kind: 'unknown' as const },
+      },
+      observedAt: '2026-09-24T09:12:00Z',
+    };
+    registerCodexUsageIpc(ipcMain, async () => snapshot);
+
+    const result = await ipcMain.invoke(CHANNELS.usageCodexGet);
+
+    expect(result).toEqual(snapshot);
+    expect(Object.keys(result as object).sort()).toEqual(['kind', 'limits', 'observedAt']);
+  });
+
+  it('answers unavailable rather than throwing when getSnapshot itself throws', async () => {
+    const ipcMain = fakeIpcMain();
+    registerCodexUsageIpc(ipcMain, async () => {
+      throw new Error('unexpected');
+    });
+
+    const result = await ipcMain.invoke(CHANNELS.usageCodexGet);
+
+    expect(result).toEqual({ kind: 'unknown', reason: 'unavailable' });
+  });
+
+  it('throttles a burst of calls on its own floor, independent of the Claude channel', async () => {
+    const ipcMain = fakeIpcMain();
+    let claudeReads = 0;
+    let codexReads = 0;
+    const now = 1_000_000;
+    registerUsageIpc(
+      ipcMain,
+      async () => {
+        claudeReads += 1;
+        return {
+          kind: 'ok' as const,
+          windows: {
+            fiveHour: { kind: 'unknown' as const },
+            sevenDay: { kind: 'unknown' as const },
+          },
+          observedAt: 'claude',
+        };
+      },
+      () => now,
+    );
+    registerCodexUsageIpc(
+      ipcMain,
+      async () => {
+        codexReads += 1;
+        return { kind: 'unknown' as const, reason: 'no-session' as const };
+      },
+      () => now,
+    );
+
+    for (let i = 0; i < 10; i += 1) {
+      await ipcMain.invoke(CHANNELS.usageGet);
+      await ipcMain.invoke(CHANNELS.usageCodexGet);
+    }
+
+    // Each channel reads once for the whole burst -- and, since they cache
+    // independently, one calling ten times did not consume the other's floor.
+    expect(claudeReads).toBe(1);
+    expect(codexReads).toBe(1);
+  });
+});
+
+/**
  * The preload half, end to end over a fake channel pair.
  *
  * A test-quality audit found `createUsageApi` had no direct coverage: it was
@@ -228,5 +311,32 @@ describe('createUsageApi over a real channel pair', () => {
     // catch is renaming `CHANNELS.usageGet` itself, since both sides read the
     // one constant; that rename is a refactor no test here should oppose.
     expect(asked).toEqual([CHANNELS.usageGet]);
+  });
+
+  it('getCodex reaches the Codex handler on its own channel, unchanged', async () => {
+    const ipcMain = fakeIpcMain();
+    const snapshot = { kind: 'unknown' as const, reason: 'no-session' as const };
+    registerCodexUsageIpc(ipcMain, async () => snapshot);
+
+    const usage = createUsageApi({
+      invoke: async (channel: string, ...args: unknown[]) => ipcMain.invoke(channel, ...args),
+    });
+
+    expect(typeof usage.getCodex).toBe('function');
+    await expect(usage.getCodex()).resolves.toEqual(snapshot);
+  });
+
+  it('getCodex asks the Codex usage channel and no other', async () => {
+    const asked: string[] = [];
+    const usage = createUsageApi({
+      invoke: async (channel: string) => {
+        asked.push(channel);
+        return { kind: 'unknown', reason: 'unavailable' };
+      },
+    });
+
+    await usage.getCodex();
+
+    expect(asked).toEqual([CHANNELS.usageCodexGet]);
   });
 });

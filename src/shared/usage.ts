@@ -25,9 +25,36 @@ export type UsageWindows = {
  */
 export type UsageUnknownReason = 'unavailable' | 'no-token' | 'unauthorized' | 'request-failed';
 
+/**
+ * One row of the real body's `limits[]` array -- the per-model breakdown the
+ * two named windows above do not carry. `id` is the endpoint's own `kind`
+ * field (`'session' | 'weekly_all' | 'weekly_scoped'`, and whatever a future
+ * release adds), kept as the free string it actually is rather than narrowed,
+ * so an id this module has no label for still round-trips as itself.
+ */
+export type ClaudeLimitWindow = {
+  readonly id: string;
+  readonly label: string;
+  readonly window: UsageWindow;
+};
+
 /** What crosses the IPC boundary: main's whole answer to `usage.get()`. */
 export type UsageSnapshot =
-  | { readonly kind: 'ok'; readonly windows: UsageWindows; readonly observedAt: string }
+  | {
+      readonly kind: 'ok';
+      readonly windows: UsageWindows;
+      readonly observedAt: string;
+      /**
+       * Optional, not because it is unimportant, but because every existing
+       * caller and fixture built an `'ok'` snapshot before this field existed
+       * -- an object literal missing a REQUIRED field is a compile error at
+       * every one of those sites, for a field the status bar cell (the
+       * original, unchanged consumer) never reads. `reader.ts` populates it
+       * from the real body; a caller that has none simply omits it, and
+       * `snapshot.limits ?? []` is how the popover reads either.
+       */
+      readonly limits?: readonly ClaudeLimitWindow[];
+    }
   | { readonly kind: 'unknown'; readonly reason: UsageUnknownReason };
 
 /**
@@ -48,7 +75,7 @@ export const STALE_AFTER_MS = POLL_INTERVAL_MS * 3;
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
@@ -83,6 +110,66 @@ export function parseUsage(body: unknown): UsageWindows {
     fiveHour: parseWindow(obj?.five_hour),
     sevenDay: parseWindow(obj?.seven_day),
   };
+}
+
+/**
+ * One `limits[]` entry's window: `percent` and `resets_at`, exactly the same
+ * two fields and the same rejection rules as `parseWindow` above -- but a
+ * different source object, so it is not `parseWindow` itself (that reads
+ * `utilization`, this reads `percent`; the real body uses both names for the
+ * same kind of number in two different places).
+ */
+function limitWindowOf(entry: Record<string, unknown>): UsageWindow {
+  const { percent, resets_at: resetsAt } = entry;
+  if (typeof percent !== 'number' || !Number.isFinite(percent)) return { kind: 'unknown' };
+  if (typeof resetsAt !== 'string' || resetsAt.length === 0) return { kind: 'unknown' };
+  if (Number.isNaN(new Date(resetsAt).getTime())) return { kind: 'unknown' };
+  return { kind: 'known', percent, resetsAt };
+}
+
+/**
+ * The label a popover draws for one `limits[]` row. `session` and
+ * `weekly_all` restate the two named windows above under the popover's own
+ * words; `weekly_scoped` is the one row those two cannot draw at all -- a
+ * per-model weekly ceiling, named after the model when the endpoint says
+ * which one and after nothing invented when it does not.
+ */
+function labelForLimit(kind: string, entry: Record<string, unknown>): string {
+  if (kind === 'session') return '5-hour';
+  if (kind === 'weekly_all') return 'Weekly';
+  if (kind === 'weekly_scoped') {
+    const scope = asRecord(entry.scope);
+    const model = asRecord(scope?.model);
+    const displayName = model?.display_name;
+    return typeof displayName === 'string' && displayName !== ''
+      ? `Weekly · ${displayName}`
+      : 'Weekly · model';
+  }
+  return kind;
+}
+
+/**
+ * The real body's `limits[]` array, tolerating everything `parseUsage` above
+ * already tolerates: absent, `null`, the wrong type, an entry with no `kind`,
+ * an entry with no usable window. A row this module cannot label at all
+ * (`kind` missing or not a string) is DROPPED rather than shown with an
+ * invented name -- unlike `parseWindow`'s fields, which come back `unknown`
+ * so their PRESENCE (a window nobody can read) stays visible, a row with no
+ * identity is not a window, it is noise the endpoint should not have sent.
+ */
+export function parseLimits(body: unknown): readonly ClaudeLimitWindow[] {
+  const obj = asRecord(body);
+  const arr = obj?.limits;
+  if (!Array.isArray(arr)) return [];
+  const out: ClaudeLimitWindow[] = [];
+  for (const raw of arr) {
+    const entry = asRecord(raw);
+    if (entry === null) continue;
+    const kind = entry.kind;
+    if (typeof kind !== 'string' || kind === '') continue;
+    out.push({ id: kind, label: labelForLimit(kind, entry), window: limitWindowOf(entry) });
+  }
+  return out;
 }
 
 /**

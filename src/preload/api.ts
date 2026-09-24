@@ -42,6 +42,7 @@ import type { Project } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
 import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
+import type { CodexUsageSnapshot } from '../shared/codex-usage.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { NotifyVerdict } from '../shared/notify.js';
@@ -236,22 +237,29 @@ export function createPreloadApi(ipc: InvokerLike): DesktopSourceApi {
   return { ...reads, ...writes, ...history, ...governance };
 }
 
-/** The bridge's usage member: one read, no write, no argument. */
+/** The bridge's usage member: two reads (Claude, Codex), no write, no argument. */
 export type UsageApi = {
   get(): Promise<UsageSnapshot>;
+  /** Codex's own reading -- `getCodex` rather than a `provider` argument on
+   *  `get`, because the two snapshots are different shapes (`UsageSnapshot`
+   *  vs `CodexUsageSnapshot`) read by different main-process modules, and one
+   *  overloaded method would have to union them for no caller that actually
+   *  wants both back in one shape. */
+  getCodex(): Promise<CodexUsageSnapshot>;
 };
 
 /**
- * `usage.get` forwards straight to `vam:usage:get` -- no `unwrap`, because
- * that channel answers with a bare `UsageSnapshot`, never an `IpcResult`
- * (see `src/main/usage/ipc.ts`). The cast is the one place this file trusts
- * main: `ipcRenderer.invoke`'s return type is `unknown` by construction, and
- * `UsageSnapshot`'s own two-branch shape is what a caller can safely narrow
- * on regardless of what actually arrived.
+ * `usage.get`/`usage.getCodex` forward straight to `vam:usage:get`/`vam:usage
+ * :codex:get` -- no `unwrap`, because both channels answer with a bare
+ * snapshot, never an `IpcResult` (see `src/main/usage/ipc.ts`). The cast is
+ * the one place this file trusts main: `ipcRenderer.invoke`'s return type is
+ * `unknown` by construction, and each snapshot's own two-branch shape is what
+ * a caller can safely narrow on regardless of what actually arrived.
  */
 export function createUsageApi(ipc: InvokerLike): UsageApi {
   return {
     get: () => ipc.invoke(CHANNELS.usageGet) as Promise<UsageSnapshot>,
+    getCodex: () => ipc.invoke(CHANNELS.usageCodexGet) as Promise<CodexUsageSnapshot>,
   };
 }
 

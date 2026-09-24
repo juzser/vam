@@ -69,7 +69,8 @@ import { registerTerminalIpc } from './terminal/ipc.js';
 import { registerTerminalStreamIpc } from './terminal/stream-ipc.js';
 import { checkForUpdate } from './update/check.js';
 import { registerUpdateIpc } from './update/ipc.js';
-import { registerUsageIpc } from './usage/ipc.js';
+import { readCodexUsage } from './usage/codex-reader.js';
+import { registerCodexUsageIpc, registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
 import { lockZoom } from './zoom.js';
 
@@ -719,6 +720,11 @@ void app.whenReady().then(async () => {
   // module's -- main-process-only because a Keychain read is not a thing the
   // renderer, the least trusted process here, may ever perform.
   registerUsageIpc(ipcMain, () => readUsage());
+  // A filesystem scan of ~/.codex/sessions rather than a network call, but
+  // the same rule: main-process-only, read only when the renderer asks, and
+  // never on a floor the renderer itself controls (`codex-reader.ts`,
+  // `usage/ipc.ts`).
+  registerCodexUsageIpc(ipcMain, () => readCodexUsage());
   // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
   // carrying no token, no query and nothing about this machine's sessions,
   // projects or paths. Nothing is awaited -- the window is created below

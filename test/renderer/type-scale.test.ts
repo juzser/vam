@@ -105,6 +105,19 @@ const EXCEPTIONS: ReadonlyArray<{
       'one thing in vam that is deliberately set at display size.',
   },
   {
+    file: 'panels/PairingScreen.tsx',
+    size: '16',
+    count: 1,
+    why:
+      'The device-name field, and not a reading size at all: iOS Safari zooms ' +
+      'the page on focus for any control under 16px and does not undo it ' +
+      'cleanly, which `styles.css`’s own `[data-phone-shell] input` rule ' +
+      'already holds the floor for everywhere a shell exists. This screen ' +
+      'mounts BEFORE any shell does -- there is nothing paired yet to host one ' +
+      '-- so that selector cannot reach it, and a desktop browser can land ' +
+      'here too, so the floor is unconditional rather than a phone-only class.',
+  },
+  {
     file: 'phone/PhoneShell.tsx',
     size: '18',
     count: 1,
