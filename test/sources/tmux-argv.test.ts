@@ -20,6 +20,7 @@ import {
   capturePaneArgv,
   hasSessionArgv,
   killSessionArgv,
+  listClientsArgv,
   listSessionsArgv,
   newSessionArgv,
   promptKeystrokes,
@@ -321,6 +322,7 @@ describe('tmux argv', () => {
       ['newSessionArgv', newSessionArgv({ name: 'vam-a1b2c3', cwd: '/w', command: ['claude'] })],
       ['capturePaneArgv', capturePaneArgv('vam-a1b2c3')],
       ['listSessionsArgv', listSessionsArgv()],
+      ['listClientsArgv', listClientsArgv('vamctl')],
     ] as const) {
       const at = argv.indexOf('-F');
       expect(at, `${name} carries a -F`).toBeGreaterThan(-1);
@@ -388,6 +390,27 @@ describe('killSessionArgv', () => {
 
   it('never builds a bare target tmux could resolve by prefix', () => {
     expect(killSessionArgv('vam-a1')).not.toContain('vam-a1');
+  });
+});
+
+describe('listClientsArgv', () => {
+  /**
+   * Same target-SESSION shape as `killSessionArgv` -- `=<name>`, no pane
+   * colon -- and the format asks for exactly one field, the attached
+   * client's own pid, one per line.
+   */
+  it('is exactly `list-clients -t =<name> -F #{client_pid}`', () => {
+    expect(listClientsArgv('vamctl')).toEqual([
+      'list-clients',
+      '-t',
+      '=vamctl',
+      '-F',
+      '#{client_pid}',
+    ]);
+  });
+
+  it('never builds a bare target tmux could resolve by prefix', () => {
+    expect(listClientsArgv('vam-a1')).not.toContain('vam-a1');
   });
 });
 

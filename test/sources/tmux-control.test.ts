@@ -8,14 +8,14 @@
 
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { listSessionsArgv } from '../../src/main/sources/tmux/argv.js';
+import { capturePaneArgv, listSessionsArgv } from '../../src/main/sources/tmux/argv.js';
 import {
   CONTROL_TIMEOUT_MS,
   type ControlChildProcess,
   createControlTmuxRunner,
   RECONNECT_BACKOFF_MS,
 } from '../../src/main/sources/tmux/control.js';
-import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
+import type { TmuxRun, TmuxRunResult } from '../../src/main/sources/tmux/spawn.js';
 
 /** A real, recognised argv (`list-sessions -F <the real format string>`) --
  * used throughout rather than a hand-typed fixture, so these tests exercise
@@ -50,6 +50,21 @@ function fakeFallback(): TmuxRun & { calls: (readonly string[])[] } {
   const run = (async (argv: readonly string[]) => {
     calls.push(argv);
     return { failure: null, stdout: '', stderr: '' };
+  }) as TmuxRun & { calls: (readonly string[])[] };
+  run.calls = calls;
+  return run;
+}
+
+/** A fake `TmuxRun` whose answer depends on the argv -- the A9 `list-
+ * clients` tests below need `list-clients` and `kill-session` told apart
+ * rather than both answered identically, the way `fakeFallback` does. */
+function fallbackAnswering(
+  answer: (argv: readonly string[]) => TmuxRunResult,
+): TmuxRun & { calls: (readonly string[])[] } {
+  const calls: (readonly string[])[] = [];
+  const run = (async (argv: readonly string[]) => {
+    calls.push(argv);
+    return answer(argv);
   }) as TmuxRun & { calls: (readonly string[])[] };
   run.calls = calls;
   return run;
@@ -95,7 +110,7 @@ describe('createControlTmuxRunner', () => {
       '4',
       'cat',
     ]);
-    children[0]?.data('%begin 1 1 0\nvam-a1b2c3\n%end 1 1 0\n');
+    children[0]?.data('%begin 1 1 1\nvam-a1b2c3\n%end 1 1 1\n');
     await expect(promise).resolves.toEqual({ failure: null, stdout: 'vam-a1b2c3\n', stderr: '' });
   });
 
@@ -104,7 +119,7 @@ describe('createControlTmuxRunner', () => {
     const promise = run(['send-keys', '-t', '=vam-a1b2c3:', '-l', '--', 'a']);
     await tick();
     expect(children[0]?.written).toEqual(['send-keys -t =vam-a1b2c3: -H 61\n']);
-    children[0]?.data('%begin 1 1 0\n%end 1 1 0\n');
+    children[0]?.data('%begin 1 1 1\n%end 1 1 1\n');
     await promise;
   });
 
@@ -112,12 +127,12 @@ describe('createControlTmuxRunner', () => {
     const { run, spawnChild, children } = harness();
     const p1 = run(LS);
     await tick();
-    children[0]?.data('%begin 1 1 0\na\n%end 1 1 0\n');
+    children[0]?.data('%begin 1 1 1\na\n%end 1 1 1\n');
     await p1;
     const p2 = run(LS);
     await tick();
     expect(spawnChild).toHaveBeenCalledTimes(1);
-    children[0]?.data('%begin 1 2 0\nb\n%end 1 2 0\n');
+    children[0]?.data('%begin 1 2 1\nb\n%end 1 2 1\n');
     await p2;
   });
 
@@ -129,8 +144,8 @@ describe('createControlTmuxRunner', () => {
     expect(spawnChild).toHaveBeenCalledTimes(2);
     expect(spawnChild.mock.calls[0]?.[1].slice(0, 2)).toEqual(['-L', 'sock-a']);
     expect(spawnChild.mock.calls[1]?.[1].slice(0, 2)).toEqual(['-L', 'sock-b']);
-    children[1]?.data('%begin 1 1 0\nb\n%end 1 1 0\n');
-    children[0]?.data('%begin 1 1 0\na\n%end 1 1 0\n');
+    children[1]?.data('%begin 1 1 1\nb\n%end 1 1 1\n');
+    children[0]?.data('%begin 1 1 1\na\n%end 1 1 1\n');
     await expect(pA).resolves.toMatchObject({ stdout: 'a\n' });
     await expect(pB).resolves.toMatchObject({ stdout: 'b\n' });
   });
@@ -152,7 +167,7 @@ describe('createControlTmuxRunner', () => {
       '=vam-a1b2c3:',
     ]);
     await tick();
-    children[0]?.data('%begin 1 1 0\n@vam-cursor 1 8 0 0 0\n%end 1 1 0\n');
+    children[0]?.data('%begin 1 1 1\n@vam-cursor 1 8 0 0 0\n%end 1 1 1\n');
     // Not yet: only one of the two expected blocks has arrived.
     let settled = false;
     void promise.then(() => {
@@ -160,7 +175,7 @@ describe('createControlTmuxRunner', () => {
     });
     await tick();
     expect(settled).toBe(false);
-    children[0]?.data('%begin 1 2 0\nsh-3.2$\n\n%end 1 2 0\n');
+    children[0]?.data('%begin 1 2 1\nsh-3.2$\n\n%end 1 2 1\n');
     await expect(promise).resolves.toEqual({
       failure: null,
       stdout: '@vam-cursor 1 8 0 0 0\nsh-3.2$\n\n',
@@ -174,11 +189,11 @@ describe('createControlTmuxRunner', () => {
     const p2 = run(LS);
     await tick();
     expect(children[0]?.written).toHaveLength(1);
-    children[0]?.data('%begin 1 1 0\na\n%end 1 1 0\n');
+    children[0]?.data('%begin 1 1 1\na\n%end 1 1 1\n');
     await p1;
     await tick();
     expect(children[0]?.written).toHaveLength(2);
-    children[0]?.data('%begin 1 2 0\nb\n%end 1 2 0\n');
+    children[0]?.data('%begin 1 2 1\nb\n%end 1 2 1\n');
     await p2;
   });
 
@@ -241,7 +256,7 @@ describe('createControlTmuxRunner', () => {
     const p2 = run(LS);
     await tick();
     expect(spawnChild).toHaveBeenCalledTimes(2);
-    children[1]?.data('%begin 1 1 0\nok\n%end 1 1 0\n');
+    children[1]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
     await expect(p2).resolves.toMatchObject({ stdout: 'ok\n' });
   });
 
@@ -264,7 +279,7 @@ describe('createControlTmuxRunner', () => {
     const p3 = run(LS);
     await tick();
     expect(spawnChild).toHaveBeenCalledTimes(2);
-    children[1]?.data('%begin 1 1 0\nok\n%end 1 1 0\n');
+    children[1]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
     await expect(p3).resolves.toMatchObject({ stdout: 'ok\n' });
   });
 
@@ -289,8 +304,8 @@ describe('createControlTmuxRunner', () => {
     expect(newChild).not.toBe(oldChild);
     // The late reply to `p1`, arriving on the OLD child -- gated out, since
     // it is no longer `this.#child`.
-    oldChild?.data('%begin 1 1 0\nstale\n%end 1 1 0\n');
-    newChild?.data('%begin 1 1 0\nfresh\n%end 1 1 0\n');
+    oldChild?.data('%begin 1 1 1\nstale\n%end 1 1 1\n');
+    newChild?.data('%begin 1 1 1\nfresh\n%end 1 1 1\n');
     await expect(p2).resolves.toMatchObject({ stdout: 'fresh\n' });
   });
 
@@ -310,7 +325,7 @@ describe('createControlTmuxRunner', () => {
     clock += RECONNECT_BACKOFF_MS + 1;
     const p2 = run(LS);
     await tick();
-    children[1]?.data('%begin 1 1 0\na\n%end 1 1 0\n');
+    children[1]?.data('%begin 1 1 1\na\n%end 1 1 1\n');
     await p2;
     // The real process's exit finally arrives, long after this client moved on.
     oldChild?.emit('exit', null, 'SIGTERM');
@@ -318,7 +333,7 @@ describe('createControlTmuxRunner', () => {
     const p3 = run(LS);
     await tick();
     expect(spawnChild).toHaveBeenCalledTimes(2);
-    children[1]?.data('%begin 1 2 0\nb\n%end 1 2 0\n');
+    children[1]?.data('%begin 1 2 1\nb\n%end 1 2 1\n');
     await expect(p3).resolves.toMatchObject({ stdout: 'b\n' });
   });
 
@@ -333,6 +348,278 @@ describe('createControlTmuxRunner', () => {
     void runner(LS);
     await tick();
     runner.dispose();
+    // `dispose()` now awaits `list-clients` before it kills its OWN
+    // connection too (the review fix on A9, below) -- no longer the same
+    // synchronous turn.
+    await tick();
     expect(child.killed).toBe(true);
+  });
+
+  describe('A1 -- the unsolicited startup block', () => {
+    it('discards tmux’s own unsolicited %begin/%end on connect instead of pairing it with the first command', async () => {
+      // MEASURED against a real tmux 3.7b: this block -- flags 0 -- arrives
+      // BEFORE any reply this client's own command earns, on every `-C`
+      // connect. The OLD, buggy behaviour paired it with the first real
+      // command positionally, which is the bug this pins.
+      const { run, children } = harness();
+      const promise = run(LS);
+      await tick();
+      children[0]?.data('%begin 1790226903 279 0\n%end 1790226903 279 0\n');
+      let settled = false;
+      void promise.then(() => {
+        settled = true;
+      });
+      await tick();
+      expect(settled).toBe(false);
+      children[0]?.data('%begin 1790226959 286 1\nvam-a1b2c3\n%end 1790226959 286 1\n');
+      await expect(promise).resolves.toEqual({
+        failure: null,
+        stdout: 'vam-a1b2c3\n',
+        stderr: '',
+      });
+    });
+
+    it('discards a FRESH startup block on every reconnect, not just the very first connect', async () => {
+      vi.useFakeTimers();
+      let clock = 0;
+      const { run, children } = harness(() => clock);
+      const p1 = run(LS);
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS);
+      await p1;
+      clock += RECONNECT_BACKOFF_MS + 1;
+      const p2 = run(LS);
+      await tick();
+      // The reconnect's own unsolicited block -- discarded exactly like the
+      // first connection's, not paired with p2's own reply.
+      children[1]?.data('%begin 2 292 0\n%end 2 292 0\n');
+      let settled = false;
+      void p2.then(() => {
+        settled = true;
+      });
+      await tick();
+      expect(settled).toBe(false);
+      children[1]?.data('%begin 2 296 1\nok\n%end 2 296 1\n');
+      await expect(p2).resolves.toMatchObject({ stdout: 'ok\n' });
+    });
+
+    it('drops a compound command’s TRUE last block for nothing when a non-reply block arrives mid-flight, never mismatching it onto the next call', async () => {
+      // A stray non-reply block appearing WHILE a two-block command is
+      // pending -- not only at the very start of the connection -- must
+      // still never count toward that command's `needed`, and must never
+      // leak into the NEXT command's own collection either.
+      const { run, children } = harness();
+      const promise = run(capturePaneArgv('vam-a1b2c3'));
+      await tick();
+      children[0]?.data('%begin 1 1 1\ncursor\n%end 1 1 1\n');
+      // A non-reply block sneaks in between the two real blocks.
+      children[0]?.data('%begin 1 5 0\n%end 1 5 0\n');
+      children[0]?.data('%begin 1 2 1\nscreen\n%end 1 2 1\n');
+      await expect(promise).resolves.toEqual({
+        failure: null,
+        stdout: 'cursor\nscreen\n',
+        stderr: '',
+      });
+      const p2 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 3 1\nnext\n%end 1 3 1\n');
+      await expect(p2).resolves.toMatchObject({ stdout: 'next\n' });
+    });
+  });
+
+  describe('A2 -- a mutating command must never be re-run after it may have been written', () => {
+    it('refuses to re-run a send-keys that timed out, and never asks fallback for it', async () => {
+      vi.useFakeTimers();
+      const clock = 0;
+      const { run, children, fallback } = harness(() => clock);
+      const promise = run(['send-keys', '-t', '=vam-a1b2c3:', 'Enter']);
+      await tick();
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS);
+      const result = await promise;
+      expect(result.failure).not.toBeNull();
+      // NEVER re-sent -- the whole point of A2.
+      expect(fallback.calls).toEqual([]);
+      expect(children[0]?.killed).toBe(true);
+    });
+
+    it('refuses to re-run a send-keys whose connection died mid-flight, and never asks fallback for it', async () => {
+      const { run, children, fallback } = harness();
+      const promise = run(['send-keys', '-t', '=vam-a1b2c3:', 'Enter']);
+      await tick();
+      children[0]?.emit('exit', 1, null);
+      const result = await promise;
+      expect(result.failure).not.toBeNull();
+      expect(fallback.calls).toEqual([]);
+    });
+
+    it('a hex-encoded literal keystroke (-H) is ALSO refused a re-run -- the exact shape a real Z takes', async () => {
+      vi.useFakeTimers();
+      const clock = 0;
+      const { run, fallback } = harness(() => clock);
+      const promise = run(['send-keys', '-t', '=vam-a1b2c3:', '-l', '--', 'Z']);
+      await tick();
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS);
+      const result = await promise;
+      expect(result.failure).not.toBeNull();
+      expect(fallback.calls).toEqual([]);
+    });
+
+    it('a resize-window that timed out is ALSO refused a re-run', async () => {
+      vi.useFakeTimers();
+      const clock = 0;
+      const { run, fallback } = harness(() => clock);
+      const promise = run(['resize-window', '-t', '=vam-a1b2c3:', '-x', '80', '-y', '24']);
+      await tick();
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS);
+      const result = await promise;
+      expect(result.failure).not.toBeNull();
+      expect(fallback.calls).toEqual([]);
+    });
+
+    it('a PURE READ that timed out is still safe to re-run through fallback -- unaffected by A2', async () => {
+      vi.useFakeTimers();
+      const clock = 0;
+      const { run, fallback } = harness(() => clock);
+      const promise = run(LS);
+      await tick();
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS);
+      const result = await promise;
+      expect(result).toEqual({ failure: null, stdout: '', stderr: '' });
+      expect(fallback.calls).toEqual([LS]);
+    });
+
+    it('frees the queue for the NEXT command as soon as a stuck connection is abandoned, without waiting for the lost command’s own fallback to finish', async () => {
+      vi.useFakeTimers();
+      let clock = 0;
+      let releaseFallback: (() => void) | undefined;
+      const fallback = vi.fn(
+        () =>
+          new Promise<TmuxRunResult>((resolve) => {
+            releaseFallback = () => resolve({ failure: null, stdout: 'fallback\n', stderr: '' });
+          }),
+      ) as unknown as TmuxRun;
+      const children: FakeChild[] = [];
+      const spawnChild = vi.fn((_binary: string, _argv: readonly string[]) => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      });
+      const run = createControlTmuxRunner('tmux', { fallback, spawnChild, now: () => clock });
+
+      const p1 = run(LS);
+      await tick();
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS);
+      // p1 has given up on the connection and is now awaiting `fallback`,
+      // which this test deliberately has not resolved yet.
+      expect(fallback).toHaveBeenCalledTimes(1);
+      clock += RECONNECT_BACKOFF_MS + 1;
+      const p2 = run(LS);
+      await tick();
+      // p2 already reconnected on a SECOND child -- it did not wait for p1's
+      // own fallback call to finish first.
+      expect(spawnChild).toHaveBeenCalledTimes(2);
+      children[1]?.data('%begin 1 1 1\nfresh\n%end 1 1 1\n');
+      await expect(p2).resolves.toMatchObject({ stdout: 'fresh\n' });
+      releaseFallback?.();
+      await expect(p1).resolves.toMatchObject({ stdout: 'fallback\n' });
+    });
+  });
+
+  describe('A9 -- the vamctl housekeeping session must not outlive the app', () => {
+    it('dispose() also asks tmux to kill the vamctl session, best-effort, through the fallback runner', async () => {
+      const { run, children, fallback } = harness();
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls).toContainEqual(['kill-session', '-t', '=vamctl']);
+      expect(children[0]?.killed).toBe(true);
+    });
+
+    it('prefixes the vamctl kill with the SAME -L/-S the pool client used', async () => {
+      const { run, children, fallback } = harness();
+      const p1 = run(['-L', 'sock-a', ...LS]);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls).toContainEqual(['-L', 'sock-a', 'kill-session', '-t', '=vamctl']);
+    });
+
+    it('never kills a vamctl session for a server this pool never actually connected to', async () => {
+      const { run, fallback } = harness();
+      // No real call ever made -- the pool has no clients at all.
+      run.dispose();
+      await tick();
+      expect(fallback.calls).toEqual([]);
+    });
+
+    /** A `harness()`-shaped pool, but with a fallback that answers
+     * `list-clients` and `kill-session` differently -- the three tests
+     * below all share this setup, varying only what `list-clients` says. */
+    function harnessWithListClients(listClientsAnswer: TmuxRunResult) {
+      const children: FakeChild[] = [];
+      const spawnChild = vi.fn((_binary: string, _argv: readonly string[]) => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      });
+      const fallback = fallbackAnswering((argv) =>
+        argv[0] === 'list-clients' ? listClientsAnswer : { failure: null, stdout: '', stderr: '' },
+      );
+      const run = createControlTmuxRunner('tmux', { fallback, spawnChild, now: () => 0 });
+      return { run, spawnChild, fallback, children };
+    }
+
+    it('does NOT kill vamctl when another client is still attached -- a second vam instance on the same default server', async () => {
+      // `list-clients` reporting TWO pids while this instance itself holds
+      // one live connection means at least one of them is somebody else's.
+      const { run, children, fallback } = harnessWithListClients({
+        failure: null,
+        stdout: '11111\n22222\n',
+        stderr: '',
+      });
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls.some((argv) => argv[0] === 'list-clients')).toBe(true);
+      expect(fallback.calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+    });
+
+    it('kills vamctl when list-clients reports nobody left attached', async () => {
+      const { run, children, fallback } = harnessWithListClients({
+        failure: null,
+        stdout: '',
+        stderr: '',
+      });
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls).toContainEqual(['kill-session', '-t', '=vamctl']);
+    });
+
+    it('does NOT kill vamctl when list-clients itself errors -- no such session, no server, etc.', async () => {
+      const { run, children, fallback } = harnessWithListClients({
+        failure: { message: 'no server running', code: 1, killed: false, signal: null },
+        stdout: '',
+        stderr: 'no server running',
+      });
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls.some((argv) => argv[0] === 'list-clients')).toBe(true);
+      expect(fallback.calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+    });
   });
 });
