@@ -1059,3 +1059,27 @@ function setOptionArgv(name: string, key: string, value: string): readonly strin
 export function killSessionArgv(name: string): readonly string[] {
   return ['kill-session', '-t', target(name)];
 }
+
+/**
+ * Every client currently attached to a session, one pid per line -- used
+ * only to check the `vamctl` housekeeping session for OTHER attached
+ * clients before killing it on quit (`control.ts`'s own A9 fix). A SECOND
+ * vam instance on the SAME default tmux server -- a packaged build run
+ * alongside a dev build, or an Electron test harness launched while the
+ * operator's own app is open -- would otherwise have its `vamctl` session
+ * pulled out from under it, and its own in-flight command answered with a
+ * refusal it never asked for.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket: one attached control
+ * client answers with its own pid, two answer with two, none answers with
+ * the EMPTY string (exit 0, not a failure -- the same "unset reads as
+ * empty, never an error" shape this file's other formats follow), and a
+ * session that does not exist at all answers `can't find session: <name>`
+ * and exits 1.
+ *
+ * TARGET SYNTAX matches `killSessionArgv`'s own note: a target-SESSION, so
+ * `=name` with no trailing `:`.
+ */
+export function listClientsArgv(name: string): readonly string[] {
+  return ['list-clients', '-t', target(name), '-F', '#{client_pid}'];
+}

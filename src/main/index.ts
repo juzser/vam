@@ -879,7 +879,10 @@ app.on('before-quit', (event) => {
   // stop the quit, and a persistent tmux client left running one more
   // instant is an idle process, not a correctness problem. A tab reopened
   // before the app actually exits just reconnects (`control.ts`'s own
-  // degrade-and-retry).
+  // degrade-and-retry). `dispose()` now ALSO asks tmux to kill the `vamctl`
+  // housekeeping session itself (A9), not only this client's connection to
+  // it -- left alive, that session (and the whole tmux server, if it held
+  // nothing else) would otherwise outlive the app indefinitely.
   terminalTmuxRunner?.dispose();
 });
 

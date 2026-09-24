@@ -39,6 +39,16 @@
  * off by `RECONNECT_BACKOFF_MS` so a genuinely missing `tmux` binary cannot
  * turn every keystroke into a repeated connection attempt.
  *
+ * THE ONE EXCEPTION: a MUTATING command (`send-keys`, `resize-window`) whose
+ * connection is lost AFTER it was written -- a timeout, or the child dying
+ * mid-flight -- is never re-run through `fallback` (A2, `#settleAfterLoss`).
+ * This file cannot tell "tmux never saw it" apart from "tmux saw it and ran
+ * it", and re-running it either way risks REPEATING an effect rather than
+ * merely re-asking a question -- MEASURED: a paused server plus a 10s
+ * timeout delivered one keystroke twice. Every read-only verb this file
+ * recognises stays fully degrade-never-block; only the two that change
+ * something on the far end refuse to guess.
+ *
  * ── ONE CLIENT PER SERVER ───────────────────────────────────────────────────
  * Keyed by `splitServerPrefix`'s own key (`control-protocol.ts`): production
  * runs the default server (`main/index.ts` calls `createTmuxRunner()` with no
@@ -54,9 +64,18 @@
  * its timeout) has resolved, so there is exactly one `#pending` entry to
  * match a `%begin`/`%end` pair against and never a question of which command
  * a reply belongs to.
+ *
+ * THE CHAIN'S OWN LINK FREES EARLIER THAN THE CALLER'S ANSWER DOES, though
+ * (the other half of A2). Once this file gives up on a connection -- kills
+ * it and, for a read, still owes its caller a `fallback` call -- the NEXT
+ * queued command is free to try a fresh connection immediately rather than
+ * wait out that fallback's own round trip too: a command already lost costs
+ * the queue at most `CONTROL_TIMEOUT_MS`, once, never doubled onto whatever
+ * `fallback` for the LOST command happens to take.
  */
 
 import { spawn } from 'node:child_process';
+import { killSessionArgv, listClientsArgv } from './argv.js';
 import {
   CONTROL_SESSION_NAME,
   type ControlBlock,
@@ -65,7 +84,13 @@ import {
   reconstructResult,
   splitServerPrefix,
 } from './control-protocol.js';
-import { createTmuxRunner, type TmuxRun, type TmuxRunResult } from './spawn.js';
+import {
+  createTmuxRunner,
+  type SpawnFailure,
+  TIMEOUT_SIGNAL,
+  type TmuxRun,
+  type TmuxRunResult,
+} from './spawn.js';
 
 /**
  * How long a reply may take before this gives up on the persistent
@@ -84,6 +109,26 @@ export const CONTROL_TIMEOUT_MS = 10_000;
  */
 export const RECONNECT_BACKOFF_MS = 2_000;
 
+/**
+ * A2's two synthetic failures -- what a MUTATING command (`send-keys`,
+ * `resize-window`) is answered with when this file gives up on the
+ * connection it was written to, instead of re-running it through `fallback`
+ * (see `#settleAfterLoss`). Both read exactly the way `classifyTmuxFailure`
+ * (`spawn.ts`) already reads an ordinary `execFile` loss -- `failure.message`
+ * is never actually used by that classifier (its own doc note), only
+ * `killed`/`signal`, so these two only need to set those honestly.
+ */
+const MUTATION_TIMEOUT_FAILURE: SpawnFailure = {
+  message: 'a mutating control-mode command did not get a reply in time',
+  killed: true,
+  signal: TIMEOUT_SIGNAL,
+};
+const MUTATION_CONNECTION_LOST_FAILURE: SpawnFailure = {
+  message: 'the control-mode connection to tmux died before a mutating command’s reply arrived',
+  killed: true,
+  signal: null,
+};
+
 /** The housekeeping session's harmless, never-drawn size. */
 const CONTROL_WINDOW_SIZE = { columns: 10, rows: 4 } as const;
 
@@ -100,6 +145,11 @@ export type SpawnControlChild = (binary: string, argv: readonly string[]) => Con
 
 /** The real spawn, wrapping `node:child_process` behind this file's narrow shape. */
 export const spawnRealControlChild: SpawnControlChild = (binary, argv) => spawn(binary, [...argv]);
+
+/** What `createControlTmuxRunner`'s own `encodeControlLine` call already
+ * turned an argv into -- named here so `ControlClient`'s methods do not
+ * each repeat the inline object shape. */
+type EncodedLine = { readonly line: string; readonly blocks: number; readonly mutating: boolean };
 
 type Pending = {
   readonly needed: number;
@@ -144,21 +194,42 @@ class ControlClient {
    * `argv` is the ORIGINAL, unencoded call -- kept only so a fallback can
    * still run the real thing; `encoded` is what `createControlTmuxRunner`
    * already turned it into, so this never re-derives it.
+   *
+   * THE CHAIN NOW TRACKS "THIS CONNECTION IS FREE FOR THE NEXT COMMAND", NOT
+   * "THIS CALLER HAS ITS ANSWER" (the queue half of A2). `#runOne` calls the
+   * `release` callback the MOMENT it is done with the connection -- which,
+   * for a command that loses its reply, is BEFORE any fallback it still owes
+   * its own caller has even started, not after that fallback (its own
+   * up-to-`CONTROL_TIMEOUT_MS` `execFile`) finishes. Without this split, one
+   * stuck keystroke would hold every keystroke typed after it behind its
+   * OWN full timeout PLUS its fallback's -- up to double `CONTROL_TIMEOUT_MS`
+   * -- before the first of them reached tmux at all. The chosen bound is
+   * exactly `CONTROL_TIMEOUT_MS` per stuck command: this file has no earlier
+   * signal that a command is lost than its own timeout, and does not invent
+   * one.
    */
-  run(argv: readonly string[], encoded: { line: string; blocks: number }): Promise<TmuxRunResult> {
-    const result = this.#chain.then(() => this.#runOne(argv, encoded));
+  run(argv: readonly string[], encoded: EncodedLine): Promise<TmuxRunResult> {
+    let release: () => void = () => {};
+    const freed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const previous = this.#chain;
+    this.#chain = freed;
     // A settled promise, always -- `#runOne` never rejects, it falls back --
-    // so the chain can never wedge on one bad call.
-    this.#chain = result;
-    return result;
+    // so the caller's own returned promise can never wedge on one bad call.
+    return previous.then(() => this.#runOne(argv, encoded, release));
   }
 
   async #runOne(
     argv: readonly string[],
-    encoded: { line: string; blocks: number },
+    encoded: EncodedLine,
+    release: () => void,
   ): Promise<TmuxRunResult> {
     const connected = await this.#ensureConnected();
-    if (!connected || this.#child === null) return this.#fallback(argv);
+    if (!connected || this.#child === null) {
+      release();
+      return this.#fallback(argv);
+    }
     const child = this.#child;
     return new Promise<TmuxRunResult>((resolve) => {
       this.#timeoutHandle = setTimeout(() => {
@@ -177,23 +248,62 @@ class ControlClient {
           this.#deadUntil = this.#now() + RECONNECT_BACKOFF_MS;
         }
         child.kill();
-        this.#fallback(argv).then(resolve);
+        release();
+        resolve(this.#settleAfterLoss(argv, encoded, MUTATION_TIMEOUT_FAILURE));
       }, CONTROL_TIMEOUT_MS);
       this.#pending = {
         needed: encoded.blocks,
         collected: [],
-        finish: resolve,
-        onDown: () => this.#fallback(argv).then(resolve),
+        finish: (result) => {
+          release();
+          resolve(result);
+        },
+        onDown: () => {
+          release();
+          resolve(this.#settleAfterLoss(argv, encoded, MUTATION_CONNECTION_LOST_FAILURE));
+        },
       };
       try {
         child.stdin.write(`${encoded.line}\n`);
       } catch {
+        // NEVER WRITTEN, so A2 does not apply here regardless of `mutating`:
+        // a synchronous throw out of `stream.write()` means node rejected
+        // the call before any byte reached the pipe -- there is nothing for
+        // this to have doubled.
         this.#pending = null;
         if (this.#timeoutHandle !== undefined) clearTimeout(this.#timeoutHandle);
         this.#timeoutHandle = undefined;
+        release();
         this.#fallback(argv).then(resolve);
       }
     });
+  }
+
+  /**
+   * What to answer once THIS command's own connection is gone -- killed
+   * after a timeout, or dead on its own (`#onDown`) -- and this file no
+   * longer knows whether tmux ever ran it (A2).
+   *
+   * THE MUTATING CASE: `send-keys`/`resize-window` may ALREADY have reached
+   * tmux before the connection was lost; re-running it through `fallback`
+   * cannot tell "never arrived" apart from "arrived and ran", so it can
+   * DOUBLE an effect -- MEASURED: pausing the server mid-keystroke and
+   * letting this timeout fire delivered the same byte twice (`5a 5a` for one
+   * `Z`, this task's own repro). A failure is surfaced instead: honest
+   * ("this file does not know"), never a guess in either direction.
+   *
+   * THE READ CASE stays safe to retry: `capture-pane`, `list-sessions` and
+   * `display-message` only ever ASK, so running the exact same read again
+   * through `fallback` answers the same question a different way, never
+   * repeats an effect.
+   */
+  async #settleAfterLoss(
+    argv: readonly string[],
+    encoded: EncodedLine,
+    failure: SpawnFailure,
+  ): Promise<TmuxRunResult> {
+    if (!encoded.mutating) return this.#fallback(argv);
+    return { failure, stdout: '', stderr: '' };
   }
 
   async #ensureConnected(): Promise<boolean> {
@@ -252,7 +362,18 @@ class ControlClient {
   }
 
   #onData(chunk: string): void {
-    const blocks = this.#framer.feed(chunk);
+    // A1: DROP EVERY BLOCK THAT IS NOT A REPLY TO A COMMAND THIS CLIENT
+    // WROTE, unconditionally -- not only the very first block this
+    // connection ever produces. MEASURED against a real tmux 3.7b: the
+    // `%begin`/`%end` block it emits unsolicited on every `-C` connect (new
+    // AND reconnected) carries `reply: false` (`control-protocol.ts`'s own
+    // `isReplyHeader`); pairing it with the first real command positionally
+    // -- what this file used to do -- shifts EVERY later reply onto the
+    // PREVIOUS command's answer for the life of the connection. Filtering on
+    // the flag itself, rather than special-casing "the first block", also
+    // catches a stray non-reply block arriving at any OTHER point in the
+    // connection's life, which a position-based fix would not.
+    const blocks = this.#framer.feed(chunk).filter((block) => block.reply);
     if (blocks.length === 0) return;
     const pending = this.#pending;
     // A reply with nothing left listening for it -- the command it answers
@@ -278,10 +399,91 @@ class ControlClient {
     pending?.onDown();
   }
 
-  /** Best-effort teardown -- app shutdown, or a test that spawned a real one. */
+  /**
+   * Best-effort teardown -- app shutdown, or a test that spawned a real one.
+   *
+   * A9: ALSO ASKS TMUX TO KILL THE `vamctl` SESSION ITSELF, not only this
+   * client's own connection to it. `new-session -A` never marks it
+   * `destroy-unattached`, so detaching this client -- all `#child?.kill()`
+   * ever did -- left the SESSION, and with it the whole tmux SERVER if it
+   * held nothing else, running forever after vam quit: a real, unbounded
+   * process leak, never cleaned up by anything else in this codebase.
+   *
+   * ONLY WHEN NOBODY ELSE IS STILL ATTACHED (review fix on top of A9). The
+   * default server is shared by every vam PROCESS on the machine, not just
+   * this one -- a packaged build run alongside a dev build, or an Electron
+   * test harness launched while the operator's own app is open, would have
+   * its `vamctl` session pulled out from under it by an earlier, cruder
+   * version of this method: its own in-flight command answered with a
+   * refusal it never asked for, and a reconnect it never needed to make.
+   * `#teardown` asks `list-clients` BEFORE it kills anything at all --
+   * including this file's OWN connection -- and only kills the session when
+   * it was the last one there.
+   *
+   * The PUBLIC method stays synchronous, still: it snapshots `this.#child`
+   * and clears the field here (so a caller made right after `dispose()`
+   * sees a client with nothing connected, exactly as before), and hands the
+   * actual child object to `#teardown` to kill once it is done asking.
+   */
   dispose(): void {
-    this.#child?.kill();
+    const child = this.#child;
     this.#child = null;
+    void this.#teardown(child);
+  }
+
+  /**
+   * `list-clients -t =vamctl` FIRST, and its answer FULLY AWAITED, before
+   * this method kills `child` -- THIS file's own connection -- at all. A
+   * REAL, MEASURED race is why the ordering has to be this strict, not
+   * merely "started before": `list-clients` runs as its own `execFile`
+   * child (fork+exec, then a socket round trip to the tmux server), which
+   * is slower than the OS delivering `SIGTERM` to an ALREADY-CONNECTED
+   * `tmux -C` client and that client closing its own socket in response.
+   * An earlier version of this method fired both at once (`list-clients`
+   * awaited, `child.kill()` called immediately after, in the same
+   * synchronous turn) on the theory that "captured before either runs"
+   * would be enough -- reproduced wrong on a real tmux 3.7b, two-client
+   * case: the kill signal reached tmux and dropped THIS client from
+   * `list-clients`' own bookkeeping before the `list-clients` process
+   * itself had even connected, so the query undercounted by exactly the
+   * one client this method was about to kill, and killed a session a
+   * SECOND client was still genuinely attached to. Waiting for the FULL
+   * answer before sending `child` a single byte is what actually closes
+   * that: `child` cannot disconnect from something this method has not
+   * yet told it to.
+   *
+   * An error from `list-clients` -- no such session, no server -- already
+   * means there is nothing to kill; never guessed further from stderr text,
+   * and never a reason to kill on the strength of a call that did not
+   * actually succeed. `fallback` is used rather than `child` itself: by the
+   * time an app-quit caller reaches here `child` may already be dead
+   * (`#onDown` already nulled `this.#child` before `dispose()` ever ran,
+   * and this was called with `null`), and a dead connection cannot be
+   * asked anything -- but the `list-clients`/`kill-session` pair costs
+   * nothing to attempt on their own regardless.
+   *
+   * A RESIDUAL RACE THIS DOES NOT CLOSE, named rather than hidden: a THIRD
+   * party (a session created by hand, or a genuinely new vam instance)
+   * could attach between this file's own `list-clients` answer and its
+   * `kill-session` call. Nothing short of a kill-if-last-client primitive
+   * tmux does not have could close that window; it is far narrower than
+   * the bug this fixes, and this file's own `dispose()` is already
+   * documented best-effort.
+   */
+  async #teardown(child: ControlChildProcess | null): Promise<void> {
+    const listed = await this.#fallback([
+      ...this.#prefix,
+      ...listClientsArgv(CONTROL_SESSION_NAME),
+    ]);
+    child?.kill();
+    if (listed.failure !== null) return;
+    const attached = listed.stdout.split('\n').filter((line) => line.trim() !== '').length;
+    // `child !== null` means THIS client's own connection was one of
+    // whatever `list-clients` just reported (it was still fully attached --
+    // not yet killed, see the ordering note above), so it is subtracted
+    // back out before asking whether anyone ELSE is left.
+    if (attached > (child !== null ? 1 : 0)) return;
+    void this.#fallback([...this.#prefix, ...killSessionArgv(CONTROL_SESSION_NAME)]);
   }
 }
 

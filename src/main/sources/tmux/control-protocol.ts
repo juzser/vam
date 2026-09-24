@@ -124,6 +124,23 @@ const SAFE_LITERALS: ReadonlySet<string> = new Set([
   ...'abcdefghijklmnopqrstuvwxyz'.split('').map((letter) => `C-${letter}`),
 ]);
 
+/**
+ * Verbs this file only ever sends when the SESSION or the SERVER'S IDEA of
+ * the pane is about to CHANGE -- `send-keys` (a keystroke) and `resize-
+ * window` (the window's own size). Every other verb `encodeSegment`
+ * recognises only ever ASKS what is already true: `capture-pane`/`display-
+ * message` read the pane, `list-sessions` reads the listing.
+ *
+ * WHY THIS MATTERS (A2, `control.ts`'s own note). A mutating command already
+ * WRITTEN to tmux's stdin may have reached the server even when THIS file
+ * never sees its reply -- the reply timed out, or the connection died right
+ * after the write. Re-running it through a fallback spawn cannot tell "never
+ * arrived" apart from "arrived and ran", so it can REPEAT an effect: a
+ * keystroke delivered twice, a window resized twice. A pure read asked twice
+ * only answers the same question again, which is always safe.
+ */
+const MUTATING_VERBS: ReadonlySet<string> = new Set(['send-keys', 'resize-window']);
+
 /** `Buffer.from(text, 'utf8')`, one lowercase hex pair per byte. */
 function hexBytes(text: string): readonly string[] {
   const bytes = Buffer.from(text, 'utf8');
@@ -187,7 +204,7 @@ function encodeSegment(tokens: readonly string[]): readonly string[] | null {
  */
 export function encodeControlLine(
   argv: readonly string[],
-): { readonly line: string; readonly blocks: number } | null {
+): { readonly line: string; readonly blocks: number; readonly mutating: boolean } | null {
   const segments: string[][] = [[]];
   for (const token of argv) {
     if (token === ';') {
@@ -203,7 +220,18 @@ export function encodeControlLine(
     if (one === null) return null;
     encoded.push([...one]);
   }
-  return { line: encoded.map((segment) => segment.join(' ')).join(' ; '), blocks: encoded.length };
+  return {
+    line: encoded.map((segment) => segment.join(' ')).join(' ; '),
+    blocks: encoded.length,
+    // Read off the ORIGINAL (pre-encode) segments, not the encoded ones: a
+    // `send-keys -l --` segment is rewritten to `-H <hex...>` by
+    // `encodeSegment` above, but its first token is always still
+    // `send-keys` either way -- this is simpler and exhaustive, since every
+    // segment that reaches this point already matched one of
+    // `SAFE_LITERALS`' five verbs (anything else made `encodeSegment`
+    // return `null`, well above this line).
+    mutating: segments.some((segment) => MUTATING_VERBS.has(segment[0] ?? '')),
+  };
 }
 
 /**
@@ -234,8 +262,44 @@ export function splitServerPrefix(argv: readonly string[]): {
   return { key: 'default', prefix: [], rest: argv };
 }
 
-/** One `%begin`…`%end`/`%error` reply, its body the lines between them. */
-export type ControlBlock = { readonly ok: boolean; readonly body: string };
+/**
+ * One `%begin`…`%end`/`%error` reply, its body the lines between them.
+ *
+ * `reply` -- A1's own fix, see `isReplyHeader` below -- is `true` when this
+ * block answers a command THIS control connection actually wrote, and
+ * `false` for a block tmux generated on its own initiative (the unsolicited
+ * block it emits on every `-C` connect). `control.ts`'s `#onData` drops
+ * every block this is `false` for, unconditionally, rather than only
+ * special-casing the first block it ever sees on a connection: tmux's own
+ * flag names the distinction directly, so there is no need to special-case
+ * a POSITION when the block itself already says what it is.
+ */
+export type ControlBlock = { readonly ok: boolean; readonly body: string; readonly reply: boolean };
+
+/**
+ * The bit that marks a `%begin`/`%end`/`%error` header as a reply to a
+ * command THIS client actually wrote (A1). MEASURED against a real tmux
+ * 3.7b, on a private `-L` socket (this task's own report, reproduced by its
+ * own cross-review): the block tmux emits unsolicited on EVERY `-C`
+ * connect -- a brand-new session and a reconnect to an existing one alike --
+ * carries flags `0`; every block answering `list-sessions`, `capture-pane`
+ * or a chained multi-command line this file's own client wrote carried
+ * flags `1`, command numbers incrementing normally. The man page calls this
+ * field "currently not used" -- stale against 3.7b's observed behaviour,
+ * which this file trusts because it was reproduced, not merely read.
+ */
+const REPLY_FLAG = 1;
+
+/** `<time> <command-number> <flags>` -- the text after `%begin `/`%end `/
+ * `%error `, unparsed -- to whether flags' bit 0 is set. An unparsable or
+ * missing flags field reads as `false` (not a reply): the safe default,
+ * since treating a block this file does not understand AS a reply is the
+ * direction A1's bug ran in. */
+function isReplyHeader(header: string): boolean {
+  const flags = header.split(' ').at(-1);
+  const parsed = flags === undefined ? Number.NaN : Number(flags);
+  return Number.isInteger(parsed) && (parsed & REPLY_FLAG) === REPLY_FLAG;
+}
 
 /**
  * Incremental parser for tmux's control-mode stdout: `%begin <time> <n>
@@ -252,6 +316,23 @@ export type ControlBlock = { readonly ok: boolean; readonly body: string };
  * `tmux-control-protocol.test.ts` drives it split mid-line and split mid-
  * keyword to pin exactly that.
  *
+ * A BLOCK CLOSES ONLY ON ITS OWN HEADER (A3), not on any line merely SHAPED
+ * like a close. Pane text is not escaped by this grammar the way a
+ * command's ARGUMENTS are (`encodeSegment`'s own note on why `send-keys`
+ * text is hex-encoded instead of quoted) -- a pane printing a line that
+ * itself starts `%end ` or `%begin ` used to truncate the block early, or be
+ * read as starting a nested one, either way corrupting every reply after it
+ * for the life of the connection. `%begin <time> <n> <flags>` and its
+ * matching `%end`/`%error` always share the IDENTICAL header text (tmux's
+ * own pairing, not this file's invention), so this holds that text from the
+ * opening line and requires an EXACT match to close -- a same-shaped-but-
+ * different line, or pane text that merely starts with the right word, is
+ * content. Ported from the terminal-streaming spike's own `StreamFramer`
+ * (`vam/terminal-stream-spike`, `src/main/terminal/stream/protocol.ts`),
+ * proven there against the identical grammar; kept here, in
+ * `src/main/sources/tmux/`, as the ONE shared block-framer so that work can
+ * import this instead of maintaining its own duplicate once it lands.
+ *
  * ONE FRAMER, ONE CONNECTION, said plainly because it is what keeps a REPLY
  * from ever crossing between them. `control.ts` builds a fresh `ControlFramer`
  * for every child it spawns and never reuses one across a reconnect; a block
@@ -263,6 +344,10 @@ export type ControlBlock = { readonly ok: boolean; readonly body: string };
 export class ControlFramer {
   #buffer = '';
   #open: string[] | null = null;
+  /** The `<time> <n> <flags>` text after `%begin ` for the block currently
+   * open -- the ONLY thing an `%end`/`%error` line may be matched against to
+   * close it (A3). Meaningless while `#open` is `null`. */
+  #openHeader = '';
 
   feed(chunk: string): ControlBlock[] {
     this.#buffer += chunk;
@@ -273,18 +358,23 @@ export class ControlFramer {
       const line = this.#buffer.slice(0, newline);
       this.#buffer = this.#buffer.slice(newline + 1);
       if (this.#open === null) {
-        if (line.startsWith('%begin ')) this.#open = [];
+        if (line.startsWith('%begin ')) {
+          this.#open = [];
+          this.#openHeader = line.slice('%begin '.length);
+        }
         // Every other line outside a block is a notification this file has
         // no use for -- dropped, not buffered, so it can never be mistaken
         // for the body of a block that has not started yet.
         continue;
       }
-      if (line.startsWith('%end ') || line.startsWith('%error ')) {
+      if (line === `%end ${this.#openHeader}` || line === `%error ${this.#openHeader}`) {
         blocks.push({
           ok: line.startsWith('%end '),
           body: this.#open.map((l) => `${l}\n`).join(''),
+          reply: isReplyHeader(this.#openHeader),
         });
         this.#open = null;
+        this.#openHeader = '';
         continue;
       }
       this.#open.push(line);
