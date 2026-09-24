@@ -1,0 +1,95 @@
+<!doctype html>
+<!--
+  MEASUREMENT HARNESS FOR terminal-stream-latency-shots.mjs -- NOT PART OF
+  THE APP, and not committed as a screenshot-producing guard in its own
+  right. Mirrors the spike's own `spike/stream-harness.html` (read-only
+  reference in terminal-stream-spike), but wires the REAL `@xterm/xterm`
+  package this branch now depends on (served from `node_modules/`, not a
+  vendored copy) to a REAL `StreamClient`
+  (`src/main/terminal/stream/client.ts`), bridged the same
+  `page.exposeFunction`/`page.evaluate` way `terminal-typing-latency-
+  shots.mjs` stubs `window.api` for the polling path.
+
+  Served over `http://127.0.0.1:<port>/...` by the Node harness (a `file://`
+  origin fails Chromium's module-script CORS check for the `@xterm/xterm`
+  import -- measured by the spike, same reason its own harness used a static
+  server instead of `file://`).
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #111; }
+      #pane { width: 1100px; height: 700px; }
+    </style>
+  </head>
+  <body>
+    <div id="pane"></div>
+    <script type="module">
+      import { Terminal } from '/node_modules/@xterm/xterm/lib/xterm.mjs';
+      import { FitAddon } from '/node_modules/@xterm/addon-fit/lib/addon-fit.mjs';
+
+      const term = new Terminal({
+        convertEol: false,
+        scrollback: 2000,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 13,
+        cursorBlink: false,
+        allowProposedApi: true,
+      });
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      term.open(document.getElementById('pane'));
+      fit.fit();
+      window.__term = term;
+
+      // Paint timestamps: xterm's own `onRender`, chained through one rAF --
+      // see terminal-typing-latency-shots.mjs's module header on why
+      // "painted" means after the browser actually laid the frame out, and
+      // the spike's own stream-harness.html on why `baseY` (not row 0) is
+      // the true top of the VIEWPORT once anything has scrolled.
+      window.__paints = [];
+      term.onRender(() => {
+        requestAnimationFrame(() => {
+          const buf = term.buffer.active;
+          let text = '';
+          for (let y = 0; y < term.rows; y += 1) {
+            text += `${buf.getLine(buf.baseY + y)?.translateToString(true) ?? ''}\n`;
+          }
+          window.__paints.push({
+            epoch: performance.timeOrigin + performance.now(),
+            t: performance.now(),
+            text,
+          });
+        });
+      });
+
+      window.__keydowns = [];
+      term.textarea.addEventListener(
+        'keydown',
+        (e) => {
+          if (!e.isComposing) window.__keydowns.push({ t: performance.now(), key: e.key });
+        },
+        true,
+      );
+
+      // Bridged to a real StreamClient by the Node harness -- see
+      // terminal-stream-latency-shots.mjs for the Node side of each of these.
+      window.__streamStart = async () => {
+        const seed = await window.__realConnect();
+        term.write(seed);
+      };
+      window.__deliverOutput = (chunk) => {
+        term.write(chunk);
+      };
+      // The SHIPPED `StreamClient.write(text: string)` takes the raw string
+      // xterm's own `onData` hands back -- unlike the spike's prototype,
+      // which took a byte array (`hexBytes` runs INSIDE the shipped
+      // client's own `write`, not at the call site).
+      term.onData((data) => {
+        window.__realWrite(data);
+      });
+    </script>
+  </body>
+</html>
