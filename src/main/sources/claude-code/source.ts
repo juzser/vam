@@ -313,6 +313,14 @@ export async function loadClaudeCodeProjects(
   // means vam asked the CLI and could not be told, which the session carries
   // as `slashCommandGap` so the short list says why it is short.
   builtinCommands: BuiltinCommandList | null = null,
+  // Injectable for the same reason as `branchOf`: a test controls when each
+  // session's transcript read resolves, to prove the reads below run
+  // concurrently rather than one after another. Defaults to the real reader.
+  readTranscriptOf: (
+    path: string,
+    sessionId: string,
+    nowMs: number,
+  ) => Promise<TranscriptRead> = readTranscript,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -323,15 +331,25 @@ export async function loadClaudeCodeProjects(
   // project.
   const { panes, facts: processFacts } = await readPublishedPanesAndProcessFacts(sessionsRoot);
 
-  // Read each transcript once, however many processes resumed it.
-  const reads = new Map<string, TranscriptRead>();
-  for (const sessionId of new Set(agents.map((a) => a.sessionId))) {
-    const path = index.get(sessionId);
-    reads.set(
-      sessionId,
-      path === undefined ? NO_TRANSCRIPT : await readTranscript(path, sessionId, nowMs),
-    );
-  }
+  // Read each transcript once, however many processes resumed it -- and all
+  // of them AT ONCE: one session's read never waits on another's. Each
+  // mapper iteration keeps its own try/catch, so one session's rejection
+  // lands that session's NO_TRANSCRIPT sentinel and never fails the batch.
+  const reads = new Map<string, TranscriptRead>(
+    await Promise.all(
+      [...new Set(agents.map((a) => a.sessionId))].map(
+        async (sessionId): Promise<[string, TranscriptRead]> => {
+          const path = index.get(sessionId);
+          if (path === undefined) return [sessionId, NO_TRANSCRIPT];
+          try {
+            return [sessionId, await readTranscriptOf(path, sessionId, nowMs)];
+          } catch {
+            return [sessionId, NO_TRANSCRIPT];
+          }
+        },
+      ),
+    ),
+  );
 
   const grouped = new Map<string, { cwd: string; sessions: Session[] }>();
   for (const agent of agents) {
