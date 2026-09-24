@@ -181,6 +181,7 @@ import { FORMAT_OFFER, formatFile } from './files-format.js';
 import { type EditorLang, highlightEditor, highlightLangFor } from './files-highlight.js';
 import { FileRowIcon } from './files-icons.js';
 import { FILES_MARKDOWN, FILES_MARKDOWN_URL_TRANSFORM } from './files-markdown.js';
+import { normalizeForSave } from './files-save-normalize.js';
 import { EDITOR_KEYS, type FileTreeRow, fileTreeRows, resolveTreeKey } from './files-tree.js';
 import { SYNTAX_CLASS } from './highlight.js';
 import { Note } from './Note.js';
@@ -758,8 +759,30 @@ export function FilesTab({
     async (path: string) => {
       const buffer = buffers[path];
       if (buffer?.kind !== 'editable' || write === undefined) return;
-      const sentContent = buffer.content;
+      // TRIM TRAILING WHITESPACE, ONE FINAL NEWLINE — the operator's save-time
+      // ask (`files-save-normalize.ts`'s own header carries the behaviour
+      // table and why it does not carve out `.env`/`.ini` the way Format
+      // does). Computed from the buffer captured above, never re-read from
+      // `buffers` after this point — same rule `sentContent`/`baseSignature`
+      // already followed, for the same reason: the operator can keep typing
+      // while this save is in flight.
+      const sentContent = normalizeForSave(buffer.content);
       const baseSignature = buffer.baseSignature;
+      // ONLY WHEN NORMALISING ACTUALLY CHANGED SOMETHING: an already-clean
+      // buffer gets no caret reset and no extra render. The caret is clamped
+      // into the (possibly shorter) normalised text the same way
+      // `formatActive` keeps it in place across a reflow — trimming a
+      // trailing blank run out from under the cursor must not throw it into
+      // whitespace that no longer exists. This also has to happen BEFORE
+      // `write` goes out, not after it resolves: the dirty dot compares
+      // `content` against `savedContent`, and if the operator keeps typing
+      // during the round trip, THEIR further edits — not this normalised
+      // snapshot — must be what the resolve handler leaves in `content`.
+      if (sentContent !== buffer.content) {
+        const caret = Math.min(textareaRef.current?.selectionStart ?? 0, sentContent.length);
+        pendingSelection.current = { path, start: caret, end: caret };
+        setContent(path, sentContent);
+      }
       setBuffers((prev) => {
         const b = prev[path];
         return b?.kind === 'editable'
@@ -798,7 +821,7 @@ export function FilesTab({
         });
       }
     },
-    [buffers, write],
+    [buffers, write, setContent],
   );
 
   /**
