@@ -9,18 +9,61 @@
  *
  * It lists destinations, not just names: what is waiting on you sorts to the
  * top, because that is what the canvas is for.
+ *
+ * TWO MODES NOW, VS CODE'S OWN SPLIT, at the operator's request: no prefix
+ * finds a SESSION (unchanged from the paragraph above), a leading `/` finds
+ * an ACTION. `keyboard/palette-actions.ts` owns every decision about WHICH
+ * actions and whether one is disabled; this file is the box and the two
+ * lists, same division `keysheet.ts`/`KeySheet.tsx` already draw between
+ * "what a query matches" and "a box and a list".
+ *
+ * THE INPUT IS CONTROLLED, where it used to be `cmdk`'s own uncontrolled
+ * state, for exactly one reason: the mode is a function of the query
+ * (`paletteMode`), so this component has to read the query on every
+ * keystroke to know which list to draw. `shouldFilter` still hands session
+ * search to `cmdk`'s own fuzzy scorer, UNCHANGED from before this file had
+ * two modes — only the action list is filtered by hand
+ * (`filterPaletteActions`), because `cmdk`'s scorer would otherwise be asked
+ * to match an action's row against a query that still carries the leading
+ * `/` no row's `value` contains.
  */
 
 import { Command } from 'cmdk';
+import { useState } from 'react';
 import { projectMergeKey, type SessionEntry } from '../domain/selectors.js';
+import type { KeyAction } from '../keyboard/chords.js';
+import {
+  actionQueryText,
+  buildPaletteActions,
+  filterPaletteActions,
+  type PaletteActionEntry,
+  paletteHint,
+  paletteMode,
+} from '../keyboard/palette-actions.js';
+import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 
 export type PaletteProps = {
   readonly entries: readonly SessionEntry[];
   readonly onPick: (sessionId: string) => void;
+  /** Run one action row — the same function the bound chord itself calls,
+   *  reached through `runAction` in `Canvas.tsx`. */
+  readonly onRunAction: (action: KeyAction) => void;
+  /** Whether a session is focused right now — the one fact
+   *  `buildPaletteActions` needs to decide which rows it can run. */
+  readonly hasFocusedSession: boolean;
   readonly onClose: () => void;
 };
 
-export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
+export function CommandPalette({
+  entries,
+  onPick,
+  onRunAction,
+  hasFocusedSession,
+  onClose,
+}: PaletteProps) {
+  const [query, setQuery] = useState('');
+  const mode = paletteMode(query);
+
   const waiting = entries.filter(({ session }) => session.status === 'waiting');
   const rest = entries.filter(({ session }) => session.status !== 'waiting');
 
@@ -41,6 +84,11 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
   };
   const waitingLabels = waiting.map(shouldLabel);
   const restLabels = rest.map(shouldLabel);
+
+  const actionRows =
+    mode === 'actions'
+      ? filterPaletteActions(buildPaletteActions(hasFocusedSession), actionQueryText(query))
+      : [];
 
   return (
     <div className="absolute inset-0 z-50 flex items-start justify-center pt-24">
@@ -69,7 +117,14 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
            `e2e/command-palette-shots.mjs` measures the painted pixel now, so
            a class that names nothing cannot pass again. */
         data-command-palette
+        data-palette-mode={mode}
         className="relative w-[min(560px,90vw)] overflow-hidden rounded-md border border-line bg-panel"
+        // SESSION SEARCH KEEPS `cmdk`'s OWN SCORER, unchanged from before this
+        // component had two modes; the action list is pre-filtered by hand and
+        // drawn as-is, so `cmdk` is told to stand down rather than score a
+        // query that still carries a leading `/` no action row's `value`
+        // holds.
+        shouldFilter={mode === 'sessions'}
         onKeyDown={(event) => {
           // The window listener ignores keys typed in an input, so Escape has
           // to be caught here or the overlay would have no keyboard way out —
@@ -83,35 +138,59 @@ export function CommandPalette({ entries, onPick, onClose }: PaletteProps) {
       >
         <Command.Input
           autoFocus
-          placeholder="go to session…"
+          value={query}
+          onValueChange={setQuery}
+          placeholder={mode === 'actions' ? 'action name…' : 'go to session… (/ for actions)'}
           className="w-full border-line border-b bg-transparent px-3 py-2 text-ink outline-none placeholder:text-ink-faint"
         />
+        {/* THE ONE-LINE HINT, directly under the box, in the muted text token
+            every other secondary line in this shell already wears
+            (`text-ink-faint`, the same class `Command.Empty` below and
+            `placeholder:` above both use) — short enough that
+            `e2e/command-palette-shots.mjs` can assert it never clips at
+            390px, which is the narrowest legal pane this shell draws. */}
+        <p data-palette-hint className="truncate px-3 pt-1 pb-1.5 text-ink-faint text-meta">
+          {paletteHint(mode)}
+        </p>
         <Command.List className="vam-no-scrollbar max-h-72 overflow-y-auto p-1">
-          <Command.Empty className="px-3 py-4 text-ink-faint">No match</Command.Empty>
+          {mode === 'actions' ? (
+            <>
+              <Command.Empty className="px-3 py-4 text-ink-faint">No matching action</Command.Empty>
+              <Command.Group heading="actions" className="px-1 text-ink-faint text-meta">
+                {actionRows.map((row) => (
+                  <ActionRow key={row.id} row={row} onRunAction={onRunAction} />
+                ))}
+              </Command.Group>
+            </>
+          ) : (
+            <>
+              <Command.Empty className="px-3 py-4 text-ink-faint">No match</Command.Empty>
 
-          {waiting.length > 0 && (
-            <Command.Group heading="needs you" className="px-1 text-ink-faint text-meta">
-              {waiting.map((entry, i) => (
-                <PaletteRow
-                  key={entry.session.id}
-                  entry={entry}
-                  onPick={onPick}
-                  showProjectName={waitingLabels[i] ?? true}
-                />
-              ))}
-            </Command.Group>
+              {waiting.length > 0 && (
+                <Command.Group heading="needs you" className="px-1 text-ink-faint text-meta">
+                  {waiting.map((entry, i) => (
+                    <PaletteRow
+                      key={entry.session.id}
+                      entry={entry}
+                      onPick={onPick}
+                      showProjectName={waitingLabels[i] ?? true}
+                    />
+                  ))}
+                </Command.Group>
+              )}
+
+              <Command.Group heading="all sessions" className="px-1 text-ink-faint text-meta">
+                {rest.map((entry, i) => (
+                  <PaletteRow
+                    key={entry.session.id}
+                    entry={entry}
+                    onPick={onPick}
+                    showProjectName={restLabels[i] ?? true}
+                  />
+                ))}
+              </Command.Group>
+            </>
           )}
-
-          <Command.Group heading="all sessions" className="px-1 text-ink-faint text-meta">
-            {rest.map((entry, i) => (
-              <PaletteRow
-                key={entry.session.id}
-                entry={entry}
-                onPick={onPick}
-                showProjectName={restLabels[i] ?? true}
-              />
-            ))}
-          </Command.Group>
         </Command.List>
       </Command>
     </div>
@@ -155,6 +234,52 @@ function PaletteRow({
       {session.runningAgents > 0 && (
         <span className="ml-auto text-running">●{session.runningAgents}</span>
       )}
+    </Command.Item>
+  );
+}
+
+/**
+ * One action row: its label, its bound chord(s), and — DISABLED RATHER THAN
+ * HIDDEN when it needs a session nothing has focused, the operator's own
+ * choice between the two named in `palette-actions.ts`'s own header. A row
+ * an operator cannot run yet still says the command exists and what it is
+ * waiting for, the same "never fail silently" rule `Canvas.tsx`'s own switch
+ * keeps for every refusal it already has a sentence for.
+ *
+ * `cmdk` itself withholds `onSelect` and keyboard selection from a
+ * `disabled` item, so the guard inside `onSelect` below is redundant against
+ * a mouse or a keyboard — it exists only so this row never dispatches by
+ * accident if that contract ever changes under it.
+ */
+function ActionRow({
+  row,
+  onRunAction,
+}: {
+  readonly row: PaletteActionEntry;
+  readonly onRunAction: (action: KeyAction) => void;
+}) {
+  return (
+    <Command.Item
+      value={`${row.label} ${row.id}`}
+      disabled={row.disabled}
+      onSelect={() => {
+        if (row.disabled) return;
+        onRunAction(row.action);
+      }}
+      className="flex cursor-pointer items-baseline gap-2 rounded px-2 py-1 text-ink text-body data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-[selected=true]:bg-raised"
+    >
+      <span className="min-w-0 flex-1 truncate">{row.label}</span>
+      {row.disabled && row.disabledReason !== null && (
+        <span className="shrink-0 text-ink-faint text-meta">{row.disabledReason}</span>
+      )}
+      <span className="flex shrink-0 items-baseline gap-1 font-mono text-ink-faint text-meta">
+        {row.chords.map((chord, index) => (
+          <span key={chord}>
+            {index > 0 ? <span className="text-ink-faint"> or </span> : null}
+            <ChordGlyphs chord={chord} />
+          </span>
+        ))}
+      </span>
     </Command.Item>
   );
 }

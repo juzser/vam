@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { NO_BINDINGS, type KeyBindings } from '../../src/renderer/keyboard/chords.js';
+import { type KeyBindings, NO_BINDINGS } from '../../src/renderer/keyboard/chords.js';
 import {
   actionQueryText,
   buildPaletteActions,
