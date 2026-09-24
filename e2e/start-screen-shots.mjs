@@ -366,7 +366,12 @@ async function loadingStateShot({ viewport, phone, outName }) {
   }
   await page.waitForSelector('[data-start-session]');
   await page.locator('[data-start-session-button]').click();
-  await page.waitForSelector('[data-start-session-button][aria-busy="true"]', { timeout: 5_000 });
+  // 20s, not this suite's usual 5s: the button freezes on a synchronous
+  // `setState` inside the click handler -- normally sub-20ms -- but a
+  // machine running many concurrent guard suites has measured that exact
+  // shape starved to 5022ms before now (a documented finding, not a guess);
+  // a tight bound here would flag starvation as a broken feature.
+  await page.waitForSelector('[data-start-session-button][aria-busy="true"]', { timeout: 20_000 });
 
   const shape = await page.evaluate(() => {
     const button = document.querySelector('[data-start-session-button]');
