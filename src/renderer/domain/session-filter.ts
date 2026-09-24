@@ -67,6 +67,16 @@ export type SessionFilters = {
    * that -- but it is not vam's either, and only this rule can say so.
    */
   readonly hideForeign: boolean;
+  /**
+   * THE FIFTH TOGGLE: sessions the source reports `idle` -- alive, attached,
+   * simply between turns. Orca calls the same state "sleeping" and ships it
+   * hidden by default; this one does not, on the same rule every new toggle
+   * in this file follows -- `docs/design/workspace-options.md` -- a fresh
+   * preference must change nothing for an operator who has not touched it
+   * yet. OFF by default, one click away, exactly the shape `hideEnded` had
+   * before the operator asked for it on.
+   */
+  readonly hideIdle: boolean;
 };
 
 /**
@@ -83,6 +93,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
   onlyPrompted: false,
   hideEnded: true,
   hideForeign: true,
+  hideIdle: false,
 };
 
 /**
@@ -263,4 +274,34 @@ export function countHiddenByForeignFilter(
   filters: SessionFilters,
 ): number {
   return sessions.filter((session) => isHiddenByForeignFilter(session, filters)).length;
+}
+
+/**
+ * Toggle E's predicate -- exactly the `idle` status, never its two quiet
+ * neighbours. `unstarted` (nothing started in the pane) and `terminal` (the
+ * agent exited, the conversation survives) share `idle`'s neutral colour and
+ * its quiet, but "sleeping" names an AGENT between turns, which only `idle`
+ * is (`model.ts`'s own `SessionStatus` header draws the three apart).
+ */
+export function isIdle(session: Session): boolean {
+  return session.status === 'idle';
+}
+
+/**
+ * Does the sleeping rule remove this session from the list?
+ *
+ * Same shape as `isHiddenByEndedFilter`: an explicit status choice stands it
+ * down, because naming a status is a narrower, more deliberate act than never
+ * having touched a default -- and it is what keeps this rule from fighting a
+ * status pill the popover might grow for `idle` later, the same way `hideEnded`
+ * would have fought `Done` had it not stood down for it.
+ */
+export function isHiddenByIdleFilter(
+  session: Session,
+  filters: SessionFilters,
+  status: StatusFilter,
+): boolean {
+  if (!filters.hideIdle) return false;
+  if (status !== 'all') return false;
+  return isIdle(session);
 }

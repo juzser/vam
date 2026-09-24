@@ -23,6 +23,12 @@
 
 import { DEFAULT_PROVIDER_ID, type ProviderId, readProviderId } from '../../shared/providers.js';
 import type { CanvasModel, SourceId } from '../domain/model.js';
+import {
+  DEFAULT_VIEW_OPTIONS,
+  type GroupBy,
+  type SortBy,
+  type ViewOptions,
+} from '../domain/selectors.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
@@ -327,6 +333,13 @@ export type Prefs = {
    * session that may have stopped existing.
    */
   readonly filters: SessionFilters;
+  /**
+   * The sidebar's Group-by/Sort-by choice -- orca's own two controls, the
+   * cheap half of them (`docs/design/workspace-options.md`). Exempt from the
+   * icon TTL for the same reason `filters` is: it describes how the person
+   * wants the list READ, not a session that may have stopped existing.
+   */
+  readonly viewOptions: ViewOptions;
   /**
    * Source id → the ids of that source's projects you folded shut.
    *
@@ -709,6 +722,7 @@ export const EMPTY_PREFS: Prefs = {
   projectNames: {},
   prRepos: {},
   filters: DEFAULT_SESSION_FILTERS,
+  viewOptions: DEFAULT_VIEW_OPTIONS,
   collapsedProjects: {},
   hiddenProjects: {},
   dismissedSessions: {},
@@ -858,6 +872,9 @@ function parsePrefs(
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
+    // Same shape as `filters` above, and per field within itself: a garbage
+    // `groupBy` must not cost a good `sortBy` beside it.
+    viewOptions: readViewOptions((parsed as { viewOptions?: unknown }).viewOptions),
     // Not pruned either, and per-source defensive: one garbage bucket cannot
     // unfold the projects another source folded. Old-id migrated like every
     // other source-keyed field: a fold made under the old id is still a fold.
@@ -1356,13 +1373,14 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign } = (
+  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle } = (
     typeof raw === 'object' && raw !== null ? raw : {}
   ) as {
     hideAgentStarted?: unknown;
     onlyPrompted?: unknown;
     hideEnded?: unknown;
     hideForeign?: unknown;
+    hideIdle?: unknown;
   };
   return {
     hideAgentStarted:
@@ -1380,12 +1398,41 @@ function readFilters(raw: unknown): SessionFilters {
     // default rather than as "off".
     hideForeign:
       typeof hideForeign === 'boolean' ? hideForeign : DEFAULT_SESSION_FILTERS.hideForeign,
+    // Same per-field fallback again: every store predating this toggle has no
+    // such key, and reads back as the shipped default, which is OFF -- so an
+    // upgrade never hides a sleeping session nobody asked to hide.
+    hideIdle: typeof hideIdle === 'boolean' ? hideIdle : DEFAULT_SESSION_FILTERS.hideIdle,
   };
 }
 
 /** Written by the filter popover's toggles. */
 export function setSessionFilters(prefs: Prefs, filters: SessionFilters): Prefs {
   return { ...prefs, filters };
+}
+
+const GROUP_BY_VALUES: readonly GroupBy[] = ['project', 'status', 'none'];
+const SORT_BY_VALUES: readonly SortBy[] = ['needs-you', 'name'];
+
+/** Per FIELD, like `readFilters`: a garbage `groupBy` must not cost a good
+ *  `sortBy` beside it, and vice versa. */
+function readViewOptions(raw: unknown): ViewOptions {
+  const { groupBy, sortBy } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
+    groupBy?: unknown;
+    sortBy?: unknown;
+  };
+  return {
+    groupBy: GROUP_BY_VALUES.includes(groupBy as GroupBy)
+      ? (groupBy as GroupBy)
+      : DEFAULT_VIEW_OPTIONS.groupBy,
+    sortBy: SORT_BY_VALUES.includes(sortBy as SortBy)
+      ? (sortBy as SortBy)
+      : DEFAULT_VIEW_OPTIONS.sortBy,
+  };
+}
+
+/** Written by the workspace-options popover's Group-by/Sort-by controls. */
+export function setViewOptions(prefs: Prefs, viewOptions: ViewOptions): Prefs {
+  return { ...prefs, viewOptions };
 }
 
 /** No legacy flat shape to migrate: every top-level entry here is already

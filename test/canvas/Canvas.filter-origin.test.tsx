@@ -100,10 +100,10 @@ describe('hiding sessions nobody sat down to', () => {
     render(<Canvas model={MODEL} />);
     openMenu();
     const agent = toggle('agent');
-    expect(agent?.getAttribute('aria-pressed')).toBe('true');
+    expect(agent?.getAttribute('aria-checked')).toBe('true');
     if (agent) fireEvent.click(agent);
 
-    expect(toggle('agent')?.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle('agent')?.getAttribute('aria-checked')).toBe('false');
     expect(rowIds()).toEqual(['made-by-agent', 'silent', 'spoken', 'unclassified']);
   });
 
@@ -111,7 +111,7 @@ describe('hiding sessions nobody sat down to', () => {
     render(<Canvas model={MODEL} />);
     openMenu();
     const prompted = toggle('prompted');
-    expect(prompted?.getAttribute('aria-pressed')).toBe('false');
+    expect(prompted?.getAttribute('aria-checked')).toBe('false');
     if (prompted) fireEvent.click(prompted);
 
     // `silent` goes (counted, zero). `unclassified` stays (never counted) —
@@ -138,7 +138,7 @@ describe('hiding sessions nobody sat down to', () => {
 
     render(<Canvas model={MODEL} />);
     openMenu();
-    expect(toggle('agent')?.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle('agent')?.getAttribute('aria-checked')).toBe('false');
     expect(rowIds()).toHaveLength(4);
   });
 });

@@ -83,6 +83,15 @@ const SPIN_PERIOD = 1100;
  */
 const BEFORE_HEADING_PX = 15;
 const BEFORE_ROW_PX = 13;
+/**
+ * THE SECOND MOVE, workspace-options: "make the project and group title font
+ * size in the sidebar 1px smaller" -- again, against what THAT pass shipped
+ * (`BEFORE_HEADING_PX - 1`) rather than a fresh literal, for the same reason
+ * the first pass recorded its own before-number instead of retyping 14. The
+ * row title is untouched this time -- only the two headings moved -- so
+ * `BEFORE_ROW_PX` still names what the row is checked against below.
+ */
+const AFTER_463_HEADING_PX = BEFORE_HEADING_PX - 1;
 
 /**
  * Two groups, seeded the way a real one arrives.
@@ -317,18 +326,24 @@ console.log('type sizes:', JSON.stringify(sizes));
 // recorded above -- the shipped sizes, minus exactly one -- and the weight
 // `getComputedStyle().fontWeight` reports, which `font-semibold` /
 // `font-normal` are only a CLAIM about until a browser resolves them.
+//
+// THE HEADING CHECK READS `AFTER_463_HEADING_PX - 1` NOW, not
+// `BEFORE_HEADING_PX - 1`: the workspace-options pass moved the two headings
+// a SECOND pixel down (15 -> 14 -> 13), and the row title did not move again
+// -- it is still checked against `BEFORE_ROW_PX - 1`, the first pass's own
+// number.
 {
   const headingsAfter = [...sizes.projects, ...sizes.groups];
   check(
     'every project heading now reads one pixel below its old size',
     sizes.projects.length > 0 &&
-      sizes.projects.every((h) => h.name === BEFORE_HEADING_PX - 1),
-    `expected ${BEFORE_HEADING_PX - 1}, got ${JSON.stringify(sizes.projects.map((h) => h.name))}`,
+      sizes.projects.every((h) => h.name === AFTER_463_HEADING_PX - 1),
+    `expected ${AFTER_463_HEADING_PX - 1}, got ${JSON.stringify(sizes.projects.map((h) => h.name))}`,
   );
   check(
     'and so does every group heading',
-    sizes.groups.length > 0 && sizes.groups.every((h) => h.name === BEFORE_HEADING_PX - 1),
-    `expected ${BEFORE_HEADING_PX - 1}, got ${JSON.stringify(sizes.groups.map((h) => h.name))}`,
+    sizes.groups.length > 0 && sizes.groups.every((h) => h.name === AFTER_463_HEADING_PX - 1),
+    `expected ${AFTER_463_HEADING_PX - 1}, got ${JSON.stringify(sizes.groups.map((h) => h.name))}`,
   );
   check(
     'every session title now reads one pixel below its old size',

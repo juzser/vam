@@ -21,6 +21,11 @@
  */
 
 import {
+  Archive,
+  ArrowLeft,
+  Bell,
+  Bot,
+  Check,
   ChevronDown,
   ChevronRight,
   Filter,
@@ -28,7 +33,9 @@ import {
   FolderPlus,
   GitBranch,
   LoaderCircle,
+  MessageSquare,
   Monitor,
+  Moon,
   MoreHorizontal,
   Plus,
   RotateCcw,
@@ -36,6 +43,7 @@ import {
   Settings,
   Smartphone,
   Sun,
+  Terminal,
   Trash2,
 } from 'lucide-react';
 import {
@@ -48,7 +56,14 @@ import {
   useState,
 } from 'react';
 import type { Group, Project, SessionStatus } from '../domain/model.js';
-import type { SessionEntry } from '../domain/selectors.js';
+import type {
+  GroupBy,
+  SessionEntry,
+  SortBy,
+  StatusBucket,
+  ViewOptions,
+} from '../domain/selectors.js';
+import { STATUS_BUCKET_LABELS, statusBucketOf } from '../domain/selectors.js';
 import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filter.js';
 import type { KeyAction } from '../keyboard/chords.js';
@@ -60,6 +75,7 @@ import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { GettingStarted } from './GettingStarted.js';
 import { IconMark, parseIcon } from './icon-value.js';
+import { Note } from './Note.js';
 import { OverlayScroll } from './OverlayScroll.js';
 import { type RemovalPlan, removalPlan } from './remove-project.js';
 import { revealScrollTop } from './reveal-row.js';
@@ -364,23 +380,33 @@ function splitBranch(branch: string): { head: string; tail: string } {
 export const BRANCH_TAIL_MAX_CHARS = 20;
 
 /**
- * How wide the filter popover opens when the sidebar has room for it.
+ * How wide the filter popover opens, on a viewport with room for it.
  *
- * It replaces a fixed 212px, which was cramped enough that the two origin
- * rows truncated their own labels — and which, at the 200px sidebar minimum,
- * hung 36px off the LEFT EDGE OF THE WINDOW: the popover is anchored
- * `right-0` inside `data-projects-header`, whose padding box ends 12px short
- * of the sidebar's right edge, and the sidebar starts at the window's.
+ * It replaces a fixed 212px, then a second draft clamped to `sidebar - 24` --
+ * both cramped enough that a Filters row's own label truncated ("Hide a…",
+ * "Hide s…"). Orca's own panel is not sized to its sidebar at all: it FLOATS
+ * over the canvas, wider than the column that opened it. The operator's own
+ * review of the first draft: "let it float wider than the sidebar like orca
+ * (≈300–320px, still clamped to the viewport)".
  *
- * So this is a ceiling, not a width. The floor is the column itself: the
- * drawn width is `min(this, sidebar - 24)` — a 12px gutter on each side —
- * which keeps the popover inside the sidebar, and therefore inside the
- * window, at every width the resizer allows (`SIDEBAR_MIN` = 200 gives 176,
- * the default 264 gives 240, and from 312 up it opens at its full 288).
- * Growing past the column would put it over the canvas, which is not a wider
- * popover so much as a popover somewhere else.
+ * So this is a ceiling, and the floor is the WINDOW now, not the column: the
+ * anchor moved from `right-0` (pinned to the sidebar's own right edge,
+ * growing LEFT -- which is what clamped it to the sidebar in the first
+ * place, on pain of hanging off the window's own left edge at a narrow
+ * sidebar) to `left-3` inside `data-projects-header` (pinned near the
+ * header's own left inset, growing RIGHT, into the canvas -- orca's own
+ * direction, and the one direction a 320px popover can take from a column
+ * that is sometimes narrower than that without ever going negative). The
+ * drawn width is `min(this, viewportWidth - 24)`, a 12px gutter on each
+ * side of the WINDOW rather than the sidebar -- see `FILTER_POPOVER_GUTTER`.
+ *
+ * 320 is the smallest step that reads every label in full at the demo
+ * fixture's own longest row even before this pass shortened the labels
+ * further (`Note`'s own strings now carry what "Hide sessions vam did not
+ * start" used to say on the row itself); still comfortably inside a phone's
+ * 390px minus the same 24px gutter (366).
  */
-export const FILTER_POPOVER_WIDTH = 288;
+export const FILTER_POPOVER_WIDTH = 320;
 
 /**
  * How long the restore strip stays on screen after a hide, in either
@@ -393,7 +419,12 @@ export const FILTER_POPOVER_WIDTH = 288;
  */
 export const RESTORE_STRIP_VISIBLE_MS = 8_000;
 
-/** `px-3` on each side of `data-projects-header`, mirrored as a gutter. */
+/**
+ * 12px on each side of the WINDOW, not the sidebar -- the popover floats
+ * past its own column now (`FILTER_POPOVER_WIDTH`'s own header), so what it
+ * must stay clear of is the browser viewport's edges, the same figure
+ * `left-3` on `data-filter-menu` already spends on its own left inset.
+ */
 const FILTER_POPOVER_GUTTER = 24;
 
 /**
@@ -599,6 +630,31 @@ function useFilterPopoverCap(
   return cap;
 }
 
+/**
+ * The browser viewport's own width, live -- `Canvas.tsx`'s own
+ * `viewportWidth` state, duplicated here rather than threaded down as a
+ * prop: this pane is `memo`'d against 40-odd already-stable props
+ * (`SessionList`'s own doc comment), and a value that changes on every
+ * window resize is the one kind of prop that would defeat that memo for the
+ * WHOLE pane rather than only the popover reading it.
+ *
+ * What it is FOR: the filter popover no longer clamps its width to the
+ * sidebar column (`FILTER_POPOVER_WIDTH`'s own header) -- it floats past it,
+ * the way orca's own does, so what bounds it now is the window it must stay
+ * inside of, not the column it opened from.
+ */
+function useViewportWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    function onResize() {
+      setWidth(window.innerWidth);
+    }
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return width;
+}
+
 export type SessionListProps = {
   readonly entries: readonly SessionEntry[];
   /** True while the first read of the source is still out (`useSourceModel`)
@@ -718,6 +774,9 @@ export type SessionListProps = {
   /** The two origin toggles, and what each one costs you. */
   readonly originFilters: SessionFilters;
   readonly onOriginFilters: (next: SessionFilters) => void;
+  /** The popover's Group-by/Sort-by choice, and how the operator changes it. */
+  readonly viewOptions: ViewOptions;
+  readonly onViewOptions: (next: ViewOptions) => void;
   /** How many sessions each rule matches, over the UNFILTERED workspace. A
    * toggle that hid things without saying how many would be a disappearance. */
   readonly hiddenCounts: {
@@ -725,6 +784,7 @@ export type SessionListProps = {
     readonly unprompted: number;
     readonly ended: number;
     readonly foreign: number;
+    readonly idle: number;
   };
   /**
    * HOW MANY ROWS `hideForeign` IS HIDING RIGHT NOW -- NOT `hiddenCounts.
@@ -996,6 +1056,179 @@ export type SessionListProps = {
 };
 
 /**
+ * One glyph per `Group by: Status` bucket -- the same words the status pill
+ * row and the popover's own status marks use, drawn once here rather than a
+ * fourth place inventing a mapping of its own. `Bell`/`LoaderCircle` are the
+ * exact glyphs `status-mark.tsx` already draws for `waiting`/`running`;
+ * `Moon` is orca's own icon for "sleeping"; `Check` reads "over" the way the
+ * `Done` status pill's tone already does.
+ */
+function StatusBucketIcon({ bucket }: { readonly bucket: StatusBucket }): ReactNode {
+  switch (bucket) {
+    case 'needs-you':
+      return <Bell size={13} strokeWidth={1.7} />;
+    case 'running':
+      // Static, deliberately -- unlike the status MARK's own spinner
+      // (`status-mark.tsx`), which has its own reduced-motion handling this
+      // small heading glyph does not duplicate. The bucket's word already
+      // says "Running"; the icon is a caption, not a live indicator.
+      return <LoaderCircle size={13} strokeWidth={1.7} />;
+    case 'sleeping':
+      return <Moon size={13} strokeWidth={1.7} />;
+    case 'done':
+      return <Check size={13} strokeWidth={1.7} />;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Every section header in the filter popover -- "Group by", "Status",
+ * "Filters", "Hidden projects" -- shares this one string, so the four of
+ * them cannot drift apart from each other one at a time. Sentence case,
+ * muted, no mono font and no letter-spacing: the operator's own review of
+ * the first draft (which set all four in `font-mono uppercase
+ * tracking-[0.12em]`, an eyebrow label) against orca's own screenshot,
+ * where "Group by" and "Filters" read as ordinary dimmed words.
+ */
+const SECTION_HEADER = 'text-meta text-ink-dim';
+
+/** The thin rule between one block of the popover and the next -- orca's own
+ *  separators, drawn as a plain top border rather than a margin, so the
+ *  `gap-2` the popover's own flex column already carries reads as the space
+ *  on EITHER side of the rule instead of needing a second constant tuned to
+ *  look right beside it. */
+const SECTION_RULE = 'border-line border-t';
+
+/** Why the PR cell of the Group-by control is disabled -- `title`'s own
+ *  string, read on hover (`GROUP_BY_PILLS`'s own comment explains why not a
+ *  `Note`). `docs/design/workspace-options.md`'s own words for the gap: a
+ *  session can carry zero, one or several open pull requests, so there is
+ *  no single bucket key the way there is for `Status`, and orca's own
+ *  single "PR" bucket bakes in a policy -- one appearance or several? does
+ *  "no PR" get a bucket of its own? -- nobody has decided yet. */
+const PR_GROUPING_TITLE =
+  'Grouping by PR needs a bucketing policy that is not decided yet -- a session can carry zero, one or several open PRs';
+
+/**
+ * The Group-by segmented control's four pills, orca's own order and words.
+ * `pr` is not a `GroupBy` value -- there is nothing for the popover to WRITE
+ * when it is pressed, which `disabled: true` enforces at the type the click
+ * handler reads rather than merely in prose. See `docs/design/workspace-
+ * options.md` for why grouping by pull request is not offered yet.
+ */
+const GROUP_BY_PILLS: readonly {
+  readonly value: GroupBy | 'pr';
+  readonly label: string;
+  readonly disabled: boolean;
+}[] = [
+  { value: 'none', label: 'None', disabled: false },
+  { value: 'status', label: 'Status', disabled: false },
+  { value: 'pr', label: 'PR', disabled: true },
+  { value: 'project', label: 'Project', disabled: false },
+];
+
+/** In the drill-in's own order, top to bottom -- `needs-you` first because
+ *  it is the shipped default, the same reason it heads `STATUS_BUCKET_ORDER`. */
+const SORT_BY_OPTIONS: readonly SortBy[] = ['needs-you', 'name'];
+
+const SORT_BY_LABELS: Readonly<Record<SortBy, string>> = {
+  'needs-you': 'Needs you first',
+  name: 'Name',
+};
+
+/**
+ * THE DRILL-IN: a back affordance, a radiogroup, arrow-key roving focus.
+ *
+ * A separate component rather than inline JSX in `SessionList` itself, for
+ * the one thing that needs its own lifecycle: focus lands on the back button
+ * the moment this mounts, so a keyboard operator who pressed "Sort by" does
+ * not have to Tab past it to reach the two options -- the same "where the
+ * keyboard goes when a layer opens" contract `SessionList`'s own popover-
+ * open effect already keeps for the popover as a whole.
+ */
+function SortByMenu({
+  value,
+  onBack,
+  onChange,
+}: {
+  readonly value: SortBy;
+  readonly onBack: () => void;
+  readonly onChange: (next: SortBy) => void;
+}): ReactNode {
+  const backRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    backRef.current?.focus();
+  }, []);
+
+  /** ArrowDown/ArrowUp, wrapping -- two options is short enough that
+   *  wrapping reads as a single ring rather than a dead end at either end. */
+  const moveFocus = (from: SortBy, delta: 1 | -1) => {
+    const index = SORT_BY_OPTIONS.indexOf(from);
+    const next = SORT_BY_OPTIONS[(index + delta + SORT_BY_OPTIONS.length) % SORT_BY_OPTIONS.length];
+    backRef.current
+      ?.closest('[data-sort-by-menu]')
+      ?.querySelector<HTMLButtonElement>(`[data-sort-by-option="${next}"]`)
+      ?.focus();
+  };
+
+  return (
+    <div data-sort-by-menu className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          ref={backRef}
+          data-popover-back
+          aria-label="back to workspace options"
+          onClick={onBack}
+          className="vam-tap flex h-[24px] w-[24px] flex-none cursor-pointer items-center justify-center rounded-[6px] text-ink-faint hover:text-ink"
+        >
+          <ArrowLeft size={14} strokeWidth={1.8} />
+        </button>
+        <span className="text-body font-semibold text-ink">Sort by</span>
+      </div>
+      <div role="radiogroup" aria-label="Sort by" className="flex flex-col gap-1">
+        {SORT_BY_OPTIONS.map((option) => {
+          const on = option === value;
+          return (
+            // A `<button role="radio">` group is the ARIA Authoring
+            // Practices Guide's OWN alternative to `<input type="radio">`,
+            // not a workaround: this row is a full hit target with a label
+            // AND a trailing check glyph, styled like every other popover
+            // row, which a native radio's fixed circle cannot become.
+            // biome-ignore lint/a11y/useSemanticElements: see above
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              data-sort-by-option={option}
+              onClick={() => onChange(option)}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+                  return;
+                }
+                event.preventDefault();
+                moveFocus(option, event.key === 'ArrowDown' ? 1 : -1);
+              }}
+              className={[
+                'vam-tap flex w-full cursor-pointer items-center justify-between gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
+                on
+                  ? 'border-line-loud bg-raised text-ink'
+                  : 'border-line text-ink-dim hover:border-line-strong',
+              ].join(' ')}
+            >
+              <span className="min-w-0 flex-1 truncate">{SORT_BY_LABELS[option]}</span>
+              {on && <Check size={14} strokeWidth={1.8} className="flex-none" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
  * `React.memo`: `draft` (the composer's text) lives one level up in
  * `Canvas`, so a keystroke re-renders `Canvas` and would otherwise
  * re-render this whole pane too. `Canvas` carries the matching half --
@@ -1024,6 +1257,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onFilterMenuToggle,
     originFilters,
     onOriginFilters,
+    viewOptions,
+    onViewOptions,
     hiddenCounts,
     foreignHiddenCount,
     vamListingGap = null,
@@ -1116,6 +1351,23 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const menuWasOpen = useRef(false);
   const filterPopoverCap = useFilterPopoverCap(filterMenuOpen, menuRef);
+  const viewportWidth = useViewportWidth();
+
+  /**
+   * Which face of the popover is showing -- the main options view, or the
+   * Sort-by drill-in. Reset to `'main'` on every CLOSE, not merely on open,
+   * so a popover the operator drilled into and dismissed with Escape or a
+   * click outside reopens at the top rather than wherever they left it --
+   * the same "always the front page" contract a fresh mount already gives a
+   * dialog that unmounts between opens; this one does not unmount, so the
+   * reset has to be explicit.
+   */
+  const [optionsView, setOptionsView] = useState<'main' | 'sort-by'>('main');
+  useEffect(() => {
+    if (!filterMenuOpen) {
+      setOptionsView('main');
+    }
+  }, [filterMenuOpen]);
 
   /**
    * Where the keyboard goes when the popover opens, and where it comes back
@@ -1530,29 +1782,74 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     originFilters.hideEnded ||
     originFilters.hideForeign;
 
-  // Sized against the column when there is one. With no width the pane fills
-  // its host, and the popover opens at its full 288 -- which still clears the
-  // gutter on the narrowest phone this shell is drawn on.
-  const popoverWidth =
-    width === undefined
-      ? FILTER_POPOVER_WIDTH
-      : Math.min(FILTER_POPOVER_WIDTH, width - FILTER_POPOVER_GUTTER);
+  // Sized against the WINDOW, not the column (`FILTER_POPOVER_WIDTH`'s own
+  // header). On the desktop that is a CEILING: `min(320, viewportWidth -
+  // 24)`, which lets the popover float past a sidebar narrower than 320 + 24
+  // without ever exceeding the window. On a phone there is no sidebar to
+  // float past and no reason to leave a phone screen's own width on the
+  // table beside a 320px card -- the operator's own words for it, "on phone
+  // full-width minus gutters" -- so the ceiling does not apply there.
+  const popoverWidth = phone
+    ? Math.max(0, viewportWidth - FILTER_POPOVER_GUTTER)
+    : Math.min(FILTER_POPOVER_WIDTH, viewportWidth - FILTER_POPOVER_GUTTER);
 
-  // `entries` arrives project-major (see the file doc comment), so one pass
-  // collapsing consecutive same-project runs is a grouping, not a sort. Each
-  // section also remembers the GROUP its entries came in under -- `null` for
-  // the top level, which is every section until the operator makes a group.
+  /**
+   * `entries` arrives project-major (see the file doc comment) UNLESS
+   * `viewOptions.groupBy` says otherwise -- `Canvas.tsx` folds
+   * `applyViewOrder` into `entries` itself, so this pane never re-sorts, it
+   * only re-BUCKETS the same already-ordered array. `hidden` is applied
+   * HERE, to `entries` directly, rather than to a `section` afterward as it
+   * used to be: a `Status`/`None` section can hold several projects at once,
+   * so "is THIS section's one project hidden" stopped being a question a
+   * section could even answer.
+   *
+   * `project` on a `Status`/`None` section is a real `Project` -- the first
+   * entry's -- kept ONLY so the section still has something to key its `<li>`
+   * and its rows' fallback `source` off; nothing here ever reads it as "the
+   * project this section is about", because for those two modes there is no
+   * such thing. The heading JSX below is what enforces that: it branches on
+   * `viewOptions.groupBy` before it ever reaches for `section.project` as a
+   * subject rather than a key.
+   */
+  const visibleEntries = entries.filter((entry) => !hidden.includes(entry.project.id));
   const sections: {
     readonly project: Project;
     readonly items: readonly SessionEntry[];
     readonly group: Group | null;
+    readonly bucket: StatusBucket | null;
   }[] = [];
-  for (const entry of entries) {
-    const current = sections[sections.length - 1];
-    if (current !== undefined && current.project.id === entry.project.id) {
-      (current.items as SessionEntry[]).push(entry);
-    } else {
-      sections.push({ project: entry.project, items: [entry], group: entry.group ?? null });
+  if (viewOptions.groupBy === 'status') {
+    // One pass collapsing consecutive same-bucket runs -- `applyViewOrder`'s
+    // own contract is that a `status` grouping arrives bucket-contiguous, the
+    // same promise `orderedSessions` makes for `project`.
+    for (const entry of visibleEntries) {
+      const bucket = statusBucketOf(entry.session);
+      const current = sections[sections.length - 1];
+      if (current !== undefined && current.bucket === bucket) {
+        (current.items as SessionEntry[]).push(entry);
+      } else {
+        sections.push({ project: entry.project, items: [entry], group: null, bucket });
+      }
+    }
+  } else if (viewOptions.groupBy === 'none') {
+    // One section, everything in it -- there is no heading to key runs by.
+    const first = visibleEntries[0];
+    if (first !== undefined) {
+      sections.push({ project: first.project, items: visibleEntries, group: null, bucket: null });
+    }
+  } else {
+    for (const entry of visibleEntries) {
+      const current = sections[sections.length - 1];
+      if (current !== undefined && current.project.id === entry.project.id) {
+        (current.items as SessionEntry[]).push(entry);
+      } else {
+        sections.push({
+          project: entry.project,
+          items: [entry],
+          group: entry.group ?? null,
+          bucket: null,
+        });
+      }
     }
   }
 
@@ -1610,14 +1907,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   }, [removedKey]);
   const showRestoreStrip = stripVisible && removed.length > 0;
 
-  /** The same sections, each carrying the two flags its heading renders from. */
-  const folded = sections
-    .filter((section) => !hidden.includes(section.project.id))
-    .map((section) => ({
-      ...section,
-      isCollapsed: collapsed.includes(section.project.id),
-      isRevealed: revealed === section.project.id,
-    }));
+  /**
+   * The same sections, each carrying the two flags its heading renders from.
+   * `hidden` is no longer filtered here -- `visibleEntries` above already
+   * took it out, per ENTRY, which is the only grain that is correct once a
+   * section can hold more than one project. Fold/reveal are real ONLY under
+   * `Group by: Project`: a `Status`/`None` section's own `project` is a
+   * placeholder key, and reading the operator's project-collapse list
+   * against it would fold or hover-reveal an entire status bucket because
+   * some UNRELATED project it happens to be keyed by was folded once.
+   */
+  const folded = sections.map((section) => ({
+    ...section,
+    isCollapsed: viewOptions.groupBy === 'project' && collapsed.includes(section.project.id),
+    isRevealed: viewOptions.groupBy === 'project' && revealed === section.project.id,
+  }));
 
   /**
    * What the list draws, top to bottom: group headings and project sections in
@@ -1719,14 +2023,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
       drawn.push({ kind: 'section', section });
     }
   }
-  for (const group of groups) {
-    // Only the genuinely EMPTY ones. A group whose members exist but were
-    // narrowed away by search or removed from the sidebar has nothing under
-    // it here, and a heading over nothing is not information -- while a group
-    // the operator just made and has put nothing in yet is the one thing they
-    // are looking for.
-    if (!drawnGroups.has(group.id) && group.projects.length === 0) {
-      drawn.push({ kind: 'group', group, count: 0 });
+  // Folders are a `Group by: Project` concept -- `Status`/`None` regroup
+  // globally and have no use for an empty one's placeholder heading either.
+  if (viewOptions.groupBy === 'project') {
+    for (const group of groups) {
+      // Only the genuinely EMPTY ones. A group whose members exist but were
+      // narrowed away by search or removed from the sidebar has nothing under
+      // it here, and a heading over nothing is not information -- while a group
+      // the operator just made and has put nothing in yet is the one thing they
+      // are looking for.
+      if (!drawnGroups.has(group.id) && group.projects.length === 0) {
+        drawn.push({ kind: 'group', group, count: 0 });
+      }
     }
   }
 
@@ -2028,151 +2336,380 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
             ref={menuRef}
             data-filter-menu
             role="dialog"
-            aria-label="session filters"
+            aria-label="workspace options"
+            onKeyDown={(event) => {
+              // Escape peels ONE layer, drill-in first: back out of the
+              // submenu rather than closing the whole popover under it. The
+              // global `cancel` chord (Canvas.tsx) still closes the popover
+              // from the MAIN view -- this only claims the key while a
+              // submenu is open, via the same `preventDefault` contract
+              // that chord already stands down for: "React dispatches at
+              // its root container, which is BELOW this window listener, so
+              // by the time a key arrives here the pane has already had its
+              // say."
+              if (event.key === 'Escape' && optionsView !== 'main') {
+                event.preventDefault();
+                setOptionsView('main');
+              }
+            }}
             style={
               filterPopoverCap === null
                 ? { width: popoverWidth }
                 : { width: popoverWidth, maxHeight: filterPopoverCap, overflowY: 'auto' }
             }
-            className="absolute top-[36px] right-0 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-card p-2.5 shadow-lg"
+            className="absolute top-[36px] left-3 z-20 flex flex-col gap-2 rounded-[9px] border border-line-strong bg-card p-2.5 shadow-lg"
           >
-            <span className="font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-              Status
-            </span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {STATUS_FILTERS.map(([key, label]) => {
-                const on = statusFilter === key;
-                const count = statusTally[key];
-                const loud = key === 'waiting' && count > 0;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    data-status-pill={key}
-                    aria-pressed={on}
-                    onClick={() => onStatusFilter(key)}
-                    className={[
-                      'cursor-pointer rounded-full border bg-ground px-2.5 py-1 font-mono text-control',
-                      on
-                        ? 'border-line-loud bg-raised text-ink'
-                        : loud
-                          ? 'border-waiting-tint text-waiting'
-                          : 'border-line text-ink-dim hover:border-line-strong',
-                    ].join(' ')}
-                  >
-                    {label} {count}
-                  </button>
-                );
-              })}
-            </div>
+            {optionsView === 'sort-by' ? (
+              <SortByMenu
+                value={viewOptions.sortBy}
+                onBack={() => setOptionsView('main')}
+                onChange={(sortBy) => {
+                  onViewOptions({ ...viewOptions, sortBy });
+                  setOptionsView('main');
+                }}
+              />
+            ) : (
+              <>
+                {/* orca calls the same idea "Workspace options"; vam's own
+                    list is titled "Projects" a few pixels above this button,
+                    so the popover's own heading names the CONTROLS rather
+                    than repeating that word. `text-heading`, the same size
+                    every other panel's own `<h2>` title carries
+                    (`KeySheet.tsx`, `ErrorLogPanel.tsx`) -- bold like orca's
+                    own, which reads noticeably larger than the rows under
+                    it, not merely heavier. */}
+                <span className="text-heading font-semibold text-ink">Workspace options</span>
 
-            <span className="mt-0.5 font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-              Origin
-            </span>
-            {/* Each row says what it takes away. A count is the difference
-                between narrowing a list and losing something out of it. */}
-            {(
-              [
-                [
-                  'agent',
-                  'Hide agent/test sessions',
-                  originFilters.hideAgentStarted,
-                  hiddenCounts.agent,
-                  DEFAULT_SESSION_FILTERS.hideAgentStarted,
-                ],
-                [
-                  'prompted',
-                  'Only ones I have prompted',
-                  originFilters.onlyPrompted,
-                  hiddenCounts.unprompted,
-                  DEFAULT_SESSION_FILTERS.onlyPrompted,
-                ],
-                // ON BY DEFAULT, and the count beside it is the whole reason a
-                // toggle was accepted in place of a hard removal: "the filter
-                // should get a toggle to show/hide those recent sessions".
-                // Turning it off is how a finished session is found again, and
-                // the row it brings back is the one that carries Reopen.
-                [
-                  'ended',
-                  'Hide ended sessions',
-                  originFilters.hideEnded,
-                  hiddenCounts.ended,
-                  DEFAULT_SESSION_FILTERS.hideEnded,
-                ],
-                // THE FOURTH ROW: `docs/design/vam-owns-the-session.md`, the
-                // operator's own ask distilled -- "it should only show the
-                // sessions that vam creates." ON BY DEFAULT for the same
-                // reason `ended` is: the count beside it is what keeps a
-                // hidden session from being indistinguishable from one that
-                // does not exist.
-                [
-                  'foreign',
-                  'Hide sessions vam did not start',
-                  originFilters.hideForeign,
-                  hiddenCounts.foreign,
-                  DEFAULT_SESSION_FILTERS.hideForeign,
-                ],
-              ] as const
-            ).map(([key, label, on, hides, byDefault]) => (
-              <button
-                key={key}
-                type="button"
-                data-origin-toggle={key}
-                aria-pressed={on}
-                onClick={() =>
-                  onOriginFilters(
-                    key === 'agent'
-                      ? { ...originFilters, hideAgentStarted: !on }
-                      : key === 'ended'
-                        ? { ...originFilters, hideEnded: !on }
-                        : key === 'foreign'
-                          ? { ...originFilters, hideForeign: !on }
-                          : { ...originFilters, onlyPrompted: !on },
-                  )
-                }
-                className={[
-                  // `vam-tap`, and `py-1.5` restored: measured on the phone
-                  // project at 390x844, these rows painted ~28px tall without
-                  // it -- under the 44px floor the rest of the phone UI keeps
-                  // (`.vam-phone .vam-tap` in styles.css). "No 44x44 sweep
-                  // covers this popover" was the previous fix's argument for
-                  // shrinking them instead, and that reasoning ran backwards:
-                  // no sweep covering it means nobody MEASURED it, not that
-                  // the floor holds. `vam-tap` is what every other text-row
-                  // menu item in this file already wears (the group menu's
-                  // "Rename project" / "Change project icon", a few hundred
-                  // lines down) for exactly this reason.
-                  'vam-tap flex w-full cursor-pointer items-center gap-2 rounded-[7px] border px-2 py-1.5 text-left text-control',
-                  on
-                    ? 'border-line-loud bg-raised text-ink'
-                    : 'border-line text-ink-dim hover:border-line-strong',
-                ].join(' ')}
-              >
-                <span
-                  className={[
-                    'h-[7px] w-[7px] flex-none rounded-full',
-                    on ? 'bg-running' : 'bg-line-strong',
-                  ].join(' ')}
-                />
-                <span className="min-w-0 flex-1 truncate">{label}</span>
-                {/* The one place the operator can learn that a rule they
-                    never chose is in force — the badge deliberately does not
-                    count it. Only while it is ON and still at its shipped
-                    value: once they turn it off and back on it is their
-                    choice, and this stops claiming otherwise. */}
-                {on && byDefault && (
-                  <span
-                    data-filter-default
-                    className="flex-none rounded-full border border-line px-1.5 font-mono text-meta text-ink-faint uppercase tracking-[0.08em]"
-                  >
-                    default
+                {/* SENTENCE CASE, MUTED -- not the mono/uppercase/tracked
+                    eyebrow every section header here used to be. Orca's own
+                    "Group by" and "Filters" read as ordinary words, dimmed,
+                    not as a label wearing letter-spacing. `SECTION_HEADER`
+                    below is the one class string every section header in
+                    this popover shares, so the four of them can never drift
+                    apart from each other again. */}
+                <span className={SECTION_HEADER}>Group by</span>
+                {/* `role="radiogroup"`/`role="radio"`, orca's own segmented
+                    control read as a set of mutually exclusive choices
+                    rather than four independent buttons. `PR` is disabled
+                    rather than omitted -- see `docs/design/workspace-
+                    options.md` for why grouping by pull request has no
+                    design yet, and the operator asked to see orca's own
+                    shape, four pills wide. `divide-x` draws the thin rule
+                    BETWEEN cells orca's own screenshot carries and the
+                    first draft did not: unselected cells there were
+                    distinguished from each other by nothing but a gap. */}
+                <div
+                  data-group-by
+                  role="radiogroup"
+                  aria-label="Group by"
+                  // `flex-shrink-0`, EXPLICIT: every other row in this
+                  // popover's own flex column refuses to shrink below its
+                  // content by the CSS default (a flex item's automatic
+                  // minimum size is its content size) -- but `overflow-
+                  // hidden` below (needed to clip `divide-x`'s dividers to
+                  // the group's own rounded corners) changes that default
+                  // FOR THIS ONE CHILD: an item with non-visible overflow
+                  // gets an automatic minimum size of ZERO instead. On a
+                  // phone, where the popover's own height is capped and
+                  // `overflow-y: auto` (`useFilterPopoverCap`), that made
+                  // this the one row the flex algorithm was free to shrink
+                  // when content ran long -- measured collapsing to a 2px
+                  // sliver, border and all, while every sibling kept its
+                  // full height. Falsified: remove this class, reload the
+                  // phone screenshot, watch the segmented control vanish
+                  // again.
+                  className="flex flex-shrink-0 items-stretch divide-x divide-line overflow-hidden rounded-[8px] border border-line bg-ground"
+                >
+                  {GROUP_BY_PILLS.map(({ value, label, disabled }) => {
+                    const on = !disabled && viewOptions.groupBy === value;
+                    return (
+                      // Same APG-sanctioned `role="radio"` button pattern as
+                      // the Sort-by drill-in's own options -- a segmented
+                      // pill control has no native-input equivalent that
+                      // keeps its shape, and one pill is `disabled` with its
+                      // own `title`, which a hidden native radio cannot
+                      // surface as a hover tooltip the way `<button
+                      // disabled>` does. `disabled` (not merely styled to
+                      // look it) is also why this reaches for `title` and
+                      // not `Note`/`ShortcutTip`: a disabled element takes
+                      // neither a pointer event nor keyboard focus in any
+                      // browser, so Radix's trigger would never open on it
+                      // either way, and `title` is the one tooltip
+                      // mechanism that still answers a plain hover.
+                      // biome-ignore lint/a11y/useSemanticElements: see above
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        data-group-by-option={value}
+                        disabled={disabled}
+                        title={disabled ? PR_GROUPING_TITLE : undefined}
+                        onClick={
+                          disabled || value === 'pr'
+                            ? undefined
+                            : () => onViewOptions({ ...viewOptions, groupBy: value })
+                        }
+                        className={[
+                          'vam-tap flex-1 px-1.5 py-1 text-center font-mono text-control',
+                          disabled
+                            ? 'cursor-not-allowed text-ink-faint opacity-50'
+                            : on
+                              ? 'cursor-pointer bg-raised text-ink'
+                              : 'cursor-pointer text-ink-dim hover:text-ink',
+                        ].join(' ')}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className={SECTION_RULE} />
+
+                {/* The drill-in row -- orca's own "Sort by  Agent Activity ›"
+                    shape: label left, value and a chevron right, no border
+                    or fill of its own (orca's own rows carry neither; only
+                    the Group-by SEGMENTED control above is a bordered
+                    control, because a segmented control has cells to
+                    separate and a plain row has nothing to separate from
+                    itself). Only two members offered (`SORT_BY_LABELS`'s
+                    own header), so a submenu is more ceremony than a flat
+                    two-pill row would need, and it is built anyway: task B
+                    asks for at least one real drill-in with a back
+                    affordance and keyboard support, and Sort by is the
+                    control that is actually a CHOICE among named options
+                    rather than a toggle, which is what a drill-in is for. */}
+                <button
+                  type="button"
+                  data-sort-by-open
+                  onClick={() => setOptionsView('sort-by')}
+                  className="vam-tap flex w-full cursor-pointer items-center gap-2 rounded-[7px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                >
+                  <span className="min-w-0 flex-1 truncate">Sort by</span>
+                  <span className="flex-none truncate text-ink-faint">
+                    {SORT_BY_LABELS[viewOptions.sortBy]}
                   </span>
-                )}
-                <span className="flex-none font-mono text-meta text-ink-faint">−{hides}</span>
-              </button>
-            ))}
+                  <ChevronRight size={12} strokeWidth={1.8} className="flex-none text-ink-faint" />
+                </button>
 
-            {/* WHY "ended" AND "foreign" JUST STOPPED NARROWING, if they did.
+                <div className={SECTION_RULE} />
+
+                {/* ITS OWN SECTION, WITH ITS OWN HEADER -- the operator's own
+                    review of the first draft: the status pills read as an
+                    orphan between Sort by and Filters, with nothing saying
+                    what they were. Nothing else about them moved: same four
+                    pills, same `STATUS_FILTERS`, same counts. */}
+                <span className={SECTION_HEADER}>Status</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {STATUS_FILTERS.map(([key, label]) => {
+                    const on = statusFilter === key;
+                    const count = statusTally[key];
+                    const loud = key === 'waiting' && count > 0;
+                    return (
+                      <button
+                        key={key}
+                        type="button"
+                        data-status-pill={key}
+                        aria-pressed={on}
+                        onClick={() => onStatusFilter(key)}
+                        className={[
+                          'cursor-pointer rounded-full border bg-ground px-2.5 py-1 font-mono text-control',
+                          on
+                            ? 'border-line-loud bg-raised text-ink'
+                            : loud
+                              ? 'border-waiting-tint text-waiting'
+                              : 'border-line text-ink-dim hover:border-line-strong',
+                        ].join(' ')}
+                      >
+                        {label} {count}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className={SECTION_RULE} />
+
+                <span className={SECTION_HEADER}>Filters</span>
+                {/*
+              orca's own row shape: a leading icon, the label, a switch on
+              the right, FLAT -- no bordered card, no fill, of its own. Only
+              the switch says on or off now; a row used to also carry a
+              border and a background for the same fact, which orca's own
+              rows do not (every row there reads identically except for its
+              switch). `role="switch"`/`aria-checked` replace the plain
+              button's `aria-pressed` -- a filter row IS a two-state toggle,
+              which `switch` names and `pressed` (built for a momentary
+              "is this tool active" button) does not. The row stays the
+              WHOLE hit target (orca's own rows are fully clickable, not
+              just their track), so `vam-tap`'s 44px floor still applies
+              without a second, narrower target inside it.
+
+              THE "DEFAULT" BADGE IS GONE, and so is the two-line layout it
+              shared a row with -- the operator's own review of the first
+              draft. What a rule takes away still says so, but quietly and
+              inline: "· N hidden" in a muted ink, after the label, and only
+              when N is greater than zero -- an operator who has narrowed
+              nothing sees no dangling "· 0 hidden" on every row. The
+              LABELS themselves are shorter for the same reason width
+              stopped being the reason they truncated: the longer sentence
+              each one used to spell out now lives in `Note`'s own tooltip,
+              reachable on hover AND on keyboard focus (`Note.tsx`'s own
+              header: a `title` opens on neither, on a tool driven from the
+              keyboard).
+
+              `data-origin-toggle` is UNCHANGED, so every existing reader of
+              this popover (five unit files, `Canvas.filter-origin.test.tsx`,
+              `Canvas.filter-reach.test.tsx`) still finds the same rows at
+              the same keys; `data-filter-default` is gone with the badge it
+              named.
+            */}
+                {(
+                  [
+                    [
+                      'agent',
+                      Bot,
+                      'Hide agent-started',
+                      'Hide sessions a factory role started for itself — QA runs, orchestrators and the like, not one you began yourself.',
+                      originFilters.hideAgentStarted,
+                      hiddenCounts.agent,
+                    ],
+                    [
+                      'prompted',
+                      MessageSquare,
+                      'Only prompted by me',
+                      'Show only sessions where you typed the first prompt yourself, not one an agent or skill started for you.',
+                      originFilters.onlyPrompted,
+                      hiddenCounts.unprompted,
+                    ],
+                    // ON BY DEFAULT, and the count beside it is the whole reason a
+                    // toggle was accepted in place of a hard removal: "the filter
+                    // should get a toggle to show/hide those recent sessions".
+                    // Turning it off is how a finished session is found again, and
+                    // the row it brings back is the one that carries Reopen.
+                    [
+                      'ended',
+                      Archive,
+                      'Hide ended',
+                      'Hide conversations the source has measured as finished — nothing left running or waiting on you.',
+                      originFilters.hideEnded,
+                      hiddenCounts.ended,
+                    ],
+                    // THE FOURTH ROW: `docs/design/vam-owns-the-session.md`, the
+                    // operator's own ask distilled -- "it should only show the
+                    // sessions that vam creates." ON BY DEFAULT for the same
+                    // reason `ended` is: the count beside it is what keeps a
+                    // hidden session from being indistinguishable from one that
+                    // does not exist. `Terminal`, orca's own glyph for its
+                    // "Hide CLI-created" row, the closest thing it has to this.
+                    [
+                      'foreign',
+                      Terminal,
+                      'Hide sessions started outside vam',
+                      'Hide sessions vam did not start itself, opened by hand outside vam’s own control.',
+                      originFilters.hideForeign,
+                      hiddenCounts.foreign,
+                    ],
+                    // THE FIFTH ROW, new with this pass -- orca's "Hide
+                    // sleeping", `Moon` and all. OFF by shipped default; see
+                    // `session-filter.ts`'s own header for `hideIdle`.
+                    [
+                      'idle',
+                      Moon,
+                      'Hide sleeping',
+                      'Hide sessions that are alive and attached, simply between turns — what orca calls sleeping.',
+                      originFilters.hideIdle,
+                      hiddenCounts.idle,
+                    ],
+                  ] as const
+                ).map(([key, Icon, label, note, on, hides]) => (
+                  <Note key={key} text={note}>
+                    <button
+                      type="button"
+                      data-origin-toggle={key}
+                      role="switch"
+                      aria-checked={on}
+                      onClick={() =>
+                        onOriginFilters(
+                          key === 'agent'
+                            ? { ...originFilters, hideAgentStarted: !on }
+                            : key === 'ended'
+                              ? { ...originFilters, hideEnded: !on }
+                              : key === 'foreign'
+                                ? { ...originFilters, hideForeign: !on }
+                                : key === 'idle'
+                                  ? { ...originFilters, hideIdle: !on }
+                                  : { ...originFilters, onlyPrompted: !on },
+                        )
+                      }
+                      className={[
+                        // `vam-tap`, and `py-1.5` restored: measured on the phone
+                        // project at 390x844, these rows painted ~28px tall without
+                        // it -- under the 44px floor the rest of the phone UI keeps
+                        // (`.vam-phone .vam-tap` in styles.css). "No 44x44 sweep
+                        // covers this popover" was the previous fix's argument for
+                        // shrinking them instead, and that reasoning ran backwards:
+                        // no sweep covering it means nobody MEASURED it, not that
+                        // the floor holds. `vam-tap` is what every other text-row
+                        // menu item in this file already wears (the group menu's
+                        // "Rename project" / "Change project icon", a few hundred
+                        // lines down) for exactly this reason -- and the same flat
+                        // hover fill those rows carry, now that this row is flat
+                        // too.
+                        'vam-tap flex w-full cursor-pointer items-center gap-2 rounded-[7px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink',
+                      ].join(' ')}
+                    >
+                      <Icon size={14} strokeWidth={1.7} className="flex-none text-ink-faint" />
+                      {/* The label and its count are grouped and NEITHER
+                          carries `flex-1` -- a group that grew to fill the
+                          row (the first draft's shape) put empty space
+                          BETWEEN a short label and its count, since the
+                          growing box's content stayed left-aligned while the
+                          box itself stretched to the switch. The spacer
+                          after this group is what fills the row instead, so
+                          the group hugs its own content -- label and count
+                          close together -- and only shrinks, via `min-w-0`
+                          on the label itself, when the two together do not
+                          fit: on the longest label ("Hide sessions started
+                          outside vam") that is the label that gives way, not
+                          the count silently clipped to "1 …" the way a
+                          single shared truncating span once did. The full
+                          sentence is one hover or Tab away in `Note`'s own
+                          tooltip regardless. */}
+                      <span className="flex min-w-0 items-baseline gap-1">
+                        <span className="min-w-0 truncate">{label}</span>
+                        {/* Quiet, and absent rather than a dangling "0": the
+                            one place the operator can still see what a rule
+                            is holding back, now inline instead of a second
+                            line and a badge. */}
+                        {hides > 0 && (
+                          <span className="flex-none whitespace-nowrap text-ink-faint">
+                            · {hides} hidden
+                          </span>
+                        )}
+                      </span>
+                      <span className="flex-1" />
+                      {/* The switch itself, purely a picture: `aria-checked`
+                      above on the button is the fact, this is the paint. */}
+                      <span
+                        aria-hidden="true"
+                        className={[
+                          'relative h-[16px] w-[28px] flex-none rounded-full transition-colors',
+                          on ? 'bg-running' : 'bg-line-strong',
+                        ].join(' ')}
+                      >
+                        <span
+                          className={[
+                            'absolute top-[2px] h-[12px] w-[12px] rounded-full bg-ground transition-transform',
+                            on ? 'translate-x-[14px]' : 'translate-x-[2px]',
+                          ].join(' ')}
+                        />
+                      </span>
+                    </button>
+                  </Note>
+                ))}
+
+                {/* WHY "ended" AND "foreign" JUST STOPPED NARROWING, if they did.
                 `docs/design/vam-owns-the-session.md`'s own trap: "an
                 unreadable tmux listing must not empty the sidebar." Both
                 rules read a fact vam's own tmux spine has to answer for --
@@ -2181,16 +2718,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 every row rather than trusting a default it cannot back up.
                 This says why, in the one place an operator would otherwise
                 read the toggles as simply not working. */}
-            {vamListingGap !== null && (
-              <span
-                data-vam-listing-gap
-                className="rounded-[7px] border border-failed bg-card px-2 py-1.5 text-control text-failed"
-              >
-                {vamListingGap}
-              </span>
-            )}
+                {vamListingGap !== null && (
+                  <span
+                    data-vam-listing-gap
+                    className="rounded-[7px] border border-failed bg-card px-2 py-1.5 text-control text-failed"
+                  >
+                    {vamListingGap}
+                  </span>
+                )}
 
-            {/* A15.3: the UNTIMED twin of the restore strip below. That strip
+                {/* A15.3: the UNTIMED twin of the restore strip below. That strip
                 shows for a while and then goes; a project it named does not
                 stop being hidden just because the receipt for hiding it
                 expired, so this section carries the exact same list for as
@@ -2199,26 +2736,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 nothing is hidden: an always-there heading over a list that is
                 usually blank would be a section for a state that is rarely
                 true. */}
-            {removed.length > 0 && (
-              <>
-                <span className="mt-0.5 font-mono text-meta text-ink-dim uppercase tracking-[0.12em]">
-                  Hidden projects
-                </span>
-                <div data-filter-hidden-projects className="flex flex-wrap items-center gap-1.5">
-                  {removed.map((project) => (
-                    <button
-                      key={project.id}
-                      type="button"
-                      data-restore-project={project.id}
-                      aria-label={`restore ${project.name}`}
-                      onClick={() => onHideProject(project, false)}
-                      className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-line px-1.5 py-0.5 text-control text-ink-faint hover:border-line-strong hover:text-ink"
+                {removed.length > 0 && (
+                  <>
+                    <div className={SECTION_RULE} />
+                    <span className={SECTION_HEADER}>Hidden projects</span>
+                    <div
+                      data-filter-hidden-projects
+                      className="flex flex-wrap items-center gap-1.5"
                     >
-                      <RotateCcw size={10} strokeWidth={1.8} />
-                      {project.name}
-                    </button>
-                  ))}
-                </div>
+                      {removed.map((project) => (
+                        <button
+                          key={project.id}
+                          type="button"
+                          data-restore-project={project.id}
+                          aria-label={`restore ${project.name}`}
+                          onClick={() => onHideProject(project, false)}
+                          className="flex cursor-pointer items-center gap-1 rounded-[6px] border border-line px-1.5 py-0.5 text-control text-ink-faint hover:border-line-strong hover:text-ink"
+                        >
+                          <RotateCcw size={10} strokeWidth={1.8} />
+                          {project.name}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -2287,7 +2828,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     been rewritten. See the real heading below for why it is
                     14px and semibold on a 20px line rather than plain
                     `text-heading`. */}
-                  <span className="truncate text-[14px] font-semibold leading-[20px] text-ink-dim">
+                  <span className="truncate text-[13px] font-semibold leading-[20px] text-ink-dim">
                     {starting.projectName}
                   </span>
                 </div>
@@ -2359,7 +2900,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         `size`) is the name's own, so the picture is never the
                         smaller thing beside it -- see `HEADING_GLYPH_PX`,
                         which owns the argument for all three numbers and the
-                        measured inks. THAT NAME IS NOW 14, NOT `text-heading`
+                        measured inks. THAT NAME IS NOW 13, NOT `text-heading`
                         (15): the size moved with it below, or this slot would
                         reintroduce the exact inversion `HEADING_GLYPH_PX`'s
                         own comment was written to close -- the level above
@@ -2371,7 +2912,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         prose. */}
                       <span
                         data-group-icon={group.id}
-                        className="flex h-[20px] w-[20px] flex-none items-center justify-center text-[14px] leading-none text-ink-faint"
+                        className="flex h-[20px] w-[20px] flex-none items-center justify-center text-[13px] leading-none text-ink-faint"
                       >
                         {/* `text-ink-faint` on the span is the EMOJI's ink and
                           the placeholder's; a chosen glyph carries its own
@@ -2394,27 +2935,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                          operator asked for both levels in one breath each
                          time. The register is untouched: upper case and
                          tracking are what separate this level from the
-                         project's, and at 14px a name the column cannot hold
+                         project's, and at 13px a name the column cannot hold
                          still clips to an ellipsis before the count and the
                          controls, which do not move -- measured, at the
                          default width, with a 531px name in a 117px box.
 
-                         BOLD AND ONE PIXEL SMALLER THAN `text-heading`, and
-                         not `text-heading` itself. Operator, in one breath:
-                         "make the project and group titles bold and 1px
-                         smaller; the session name regular weight and also 1px
-                         smaller." `font-semibold` (600) rather than a new
-                         `font-bold` (700): it is the weight every OTHER bold
-                         heading in the renderer already uses beside
-                         `text-heading` (`SettingsOverlay.tsx`,
+                         BOLD AND TWO PIXELS SMALLER THAN `text-heading`, and
+                         not `text-heading` itself. Operator, in one breath,
+                         twice: first "make the project and group titles bold
+                         and 1px smaller; the session name regular weight and
+                         also 1px smaller" (landing at 14), then, in the
+                         workspace-options pass, "make the project and group
+                         title font size in the sidebar 1px smaller" again
+                         (landing at 13, this size). `font-semibold` (600)
+                         rather than a new `font-bold` (700): it is the weight
+                         every OTHER bold heading in the renderer already uses
+                         beside `text-heading` (`SettingsOverlay.tsx`,
                          `ErrorLogPanel.tsx`, `KeySheet.tsx`,
                          `ErrorBoundary.tsx`), and it measures visibly heavier
                          than the row's own regular weight on the face this
                          actually resolves to -- Geist is asked for but never
                          loaded (no `@font-face`, no package), so every one of
                          these headings paints in the `-apple-system` fallback,
-                         where 600 already reads apart from 400 by design. 14
-                         is one pixel below `--text-heading` (15) and does not
+                         where 600 already reads apart from 400 by design. 13
+                         is two pixels below `--text-heading` (15) and does not
                          land on any of the scale's other three steps, so it is
                          a named exception in `type-scale.test.ts` rather than
                          a fifth step -- see `EXCEPTIONS` there for the count
@@ -2424,7 +2968,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                          project heading's, below) moves: only the ink shrinks,
                          not the row. `e2e/sidebar-tree-shots.mjs` reads both
                          the size and the weight off the paint. */
-                        <span className="truncate text-[14px] font-semibold leading-[20px] text-ink uppercase tracking-[0.12em]">
+                        <span className="truncate text-[13px] font-semibold leading-[20px] text-ink uppercase tracking-[0.12em]">
                           {group.name}
                         </span>
                       )}
@@ -2611,9 +3155,15 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                 );
               }
               const { isCollapsed, isRevealed, ...section } = item.section;
+              // `section.project.id` alone collides under `Status`: two
+              // buckets can easily share the same FIRST entry's project (one
+              // project with both a waiting and a done session, say), and
+              // `section.project` there is only ever a placeholder key, never
+              // a claim that the two sections are "the same project".
+              const sectionKey = section.bucket ?? section.project.id;
               return (
                 <li
-                  key={section.project.id}
+                  key={sectionKey}
                   {...(section.group === null ? {} : { 'data-in-group': section.group.id })}
                   // The indent the level above buys, on the container rather
                   // than per row -- the same decision `data-project-rows` already
@@ -2623,53 +3173,69 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   style={section.group === null ? undefined : { paddingLeft: SIDEBAR_STEP }}
                   className="flex flex-col gap-[5px]"
                 >
-                  {/* A caption, not a stop. A plain <div>, so nothing can focus it
+                  {/*
+                    THE HEADING, ONE OF THREE SHAPES -- the real, interactive
+                    project heading below under `Group by: Project`; a plain,
+                    non-interactive status heading (icon, label, count, no
+                    menu -- there is no single project a "rename" or "remove"
+                    could act on) under `Status`; nothing at all under `None`,
+                    where the rows are the whole story. `section.project`
+                    below this branch is always a REAL, meaningful project --
+                    it is only ever a placeholder key in the two branches that
+                    never reach for it as a subject, which is the invariant
+                    `sections`' own comment states.
+                  */}
+                  {viewOptions.groupBy === 'project' ? (
+                    <>
+                      {/* A caption, not a stop. A plain <div>, so nothing can focus it
                 and `j` never lands on a heading. */}
-                  {/* `min-h` reserves the add button's own height. The heading is
+                      {/* `min-h` reserves the add button's own height. The heading is
                   otherwise as tall as its tallest child, so the row -- and
                   every row under it -- would jump a few pixels each time focus
                   moved between projects and the add came or went. */}
-                  {/* biome-ignore lint/a11y/noStaticElementInteractions: the hover is
+                      {/* biome-ignore lint/a11y/noStaticElementInteractions: the hover is
                   a pure reveal, and the keyboard has its own path to the same
                   controls -- `p`. The rule exists to catch mouse-ONLY
                   interaction; giving this heading a role or a tabindex to
                   satisfy it would put a stop in the list that `j` lands on,
                   which is the thing the comment above deliberately avoids. */}
-                  <div
-                    data-project-heading
-                    data-project-id={section.project.id}
-                    {...(isRevealed ? { 'data-project-revealed': 'true' } : {})}
-                    onMouseEnter={() => setRevealed(section.project.id)}
-                    onMouseLeave={() =>
-                      setRevealed((current) => (current === section.project.id ? null : current))
-                    }
-                    className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
-                  >
-                    {/* No chord picks a PROJECT icon — `icon` (`s`) picks the
+                      <div
+                        data-project-heading
+                        data-project-id={section.project.id}
+                        {...(isRevealed ? { 'data-project-revealed': 'true' } : {})}
+                        onMouseEnter={() => setRevealed(section.project.id)}
+                        onMouseLeave={() =>
+                          setRevealed((current) =>
+                            current === section.project.id ? null : current,
+                          )
+                        }
+                        className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
+                      >
+                        {/* No chord picks a PROJECT icon — `icon` (`s`) picks the
                       focused SESSION's, which is a different subject — so the
                       tip is the label alone. It replaces a native `title`,
                       which no browser opens on keyboard focus. */}
-                    <ShortcutTip label="Change project icon">
-                      {/* Same slot as the group's above -- 20px, the name's own
-                        line, the SAME size as the emoji (14, not
+                        <ShortcutTip label="Change project icon">
+                          {/* Same slot as the group's above -- 20px, the name's own
+                        line, the SAME size as the emoji (13, not
                         `text-heading` -- see the group heading's own comment
                         for why the two must move together) -- and the same
                         `HEADING_GLYPH_PX` for the glyph, because a level is
                         not a third kind of icon. `vam-hit-24` hangs
                         the hit area off an `::after` and the phone floor is a
                         `min-`, so neither box moves with this one. */}
-                      <button
-                        type="button"
-                        data-project-icon={section.project.id}
-                        onClick={() => onPickIcon(section.project)}
-                        aria-label={`change icon for ${section.project.name}`}
-                        className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-[14px] leading-none text-ink-faint hover:text-ink-dim"
-                      >
-                        <IconMark
-                          value={parseIcon(section.project.icon)}
-                          size={HEADING_GLYPH_PX}
-                          fallback={
-                            /* A monitor, not a middot. The glyph has to read as "this
+                          <button
+                            type="button"
+                            data-project-icon={section.project.id}
+                            onClick={() => onPickIcon(section.project)}
+                            aria-label={`change icon for ${section.project.name}`}
+                            className="vam-tap vam-hit-24 flex h-[20px] w-[20px] flex-none cursor-pointer items-center justify-center text-[13px] leading-none text-ink-faint hover:text-ink-dim"
+                          >
+                            <IconMark
+                              value={parseIcon(section.project.icon)}
+                              size={HEADING_GLYPH_PX}
+                              fallback={
+                                /* A monitor, not a middot. The glyph has to read as "this
                            is a machine you can name" — the middot read as a bullet
                            and gave a clickable control no affordance at all. It is
                            a placeholder in the literal sense: the picker replaces
@@ -2678,19 +3244,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                            what a value this build cannot draw falls back to, so an
                            icon named by a newer vam looks like "none picked"
                            rather than like a printed storage key. */
-                            <Monitor
-                              data-project-icon-placeholder
-                              size={HEADING_GLYPH_PX}
-                              strokeWidth={1.7}
+                                <Monitor
+                                  data-project-icon-placeholder
+                                  size={HEADING_GLYPH_PX}
+                                  strokeWidth={1.7}
+                                />
+                              }
                             />
-                          }
-                        />
-                      </button>
-                    </ShortcutTip>
-                    {projectDraft?.id === section.project.id ? (
-                      projectEditor
-                    ) : (
-                      /* NOT UPPER CASE, and not letter-spaced. Both are a
+                          </button>
+                        </ShortcutTip>
+                        {projectDraft?.id === section.project.id ? (
+                          projectEditor
+                        ) : (
+                          /* NOT UPPER CASE, and not letter-spaced. Both are a
                        caption's loudest register, and this heading was wearing
                        them directly under a group heading wearing the same --
                        so the two levels shouted in one voice and the eye had
@@ -2733,19 +3299,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        The same guard reads `fontFamily` off every heading
                        name against the row title's and asserts they agree.
 
-                       BOLD AND ONE PIXEL SMALLER THAN `text-heading`, and the
+                       BOLD AND TWO PIXELS SMALLER THAN `text-heading`, and the
                        session name a pixel smaller and regular. Operator, in
-                       one breath: "make the project and group titles bold and
-                       1px smaller; the session name regular weight and also
-                       1px smaller." See the group heading above for the full
-                       argument -- `font-semibold` (600) because it is the
-                       weight every other bold heading in the renderer already
-                       pairs with `text-heading`, and because Geist is asked
-                       for but never loaded (no `@font-face`, no package), so
-                       this paints in the `-apple-system` fallback, where 600
-                       already reads apart from the row's 400 by design; 14
-                       because it is one pixel below `--text-heading` (15) and
-                       lands on none of the scale's other three steps, so it
+                       one breath, twice: first "make the project and group
+                       titles bold and 1px smaller; the session name regular
+                       weight and also 1px smaller" (landing at 14), then, in
+                       the workspace-options pass, one pixel further. See the
+                       group heading above for the full argument --
+                       `font-semibold` (600) because it is the weight every
+                       other bold heading in the renderer already pairs with
+                       `text-heading`, and because Geist is asked for but never
+                       loaded (no `@font-face`, no package), so this paints in
+                       the `-apple-system` fallback, where 600 already reads
+                       apart from the row's 400 by design; 13 because it is two
+                       pixels below `--text-heading` (15) and lands on none of
+                       the scale's other three steps, so it
                        is a named exception in `type-scale.test.ts`'s
                        `EXCEPTIONS` rather than a fifth step; `leading-[20px]`
                        because it is the same line `text-heading` carried, so
@@ -2760,74 +3328,76 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                        (`data-row-cursor`) all still mark it; dropping the
                        extra weight is what makes "regular" true of every row,
                        not only the ones nobody has picked. */
-                      <span className="truncate text-[14px] font-semibold leading-[20px] text-ink-dim">
-                        {section.project.name}
-                      </span>
-                    )}
-                    <span className="font-mono text-meta text-ink-faint">
-                      {section.items.length}
-                    </span>
-                    <span className="flex-1" />
+                          <span className="truncate text-[13px] font-semibold leading-[20px] text-ink-dim">
+                            {section.project.name}
+                          </span>
+                        )}
+                        <span className="font-mono text-meta text-ink-faint">
+                          {section.items.length}
+                        </span>
+                        <span className="flex-1" />
 
-                    {/* Revealed, never conditional. The row's close button is
+                        {/* Revealed, never conditional. The row's close button is
                     removed from the DOM until hover, and that is right for a
                     control with a keyboard twin (`x`); these two have none, so
                     removing them would leave the fold reachable by pointer
                     only. Transparent-but-present keeps Tab working, and
                     `focus:opacity-100` means the tab stop you land on is a
                     thing you can see. */}
-                    <button
-                      type="button"
-                      ref={(node) => {
-                        if (node === null) {
-                          foldRefs.current.delete(section.project.id);
-                        } else {
-                          foldRefs.current.set(section.project.id, node);
-                        }
-                      }}
-                      data-project-collapse={section.project.id}
-                      aria-expanded={!isCollapsed}
-                      aria-label={`${isCollapsed ? 'expand' : 'collapse'} ${section.project.name}`}
-                      onClick={() => toggleCollapse(section.project)}
-                      className={[
-                        'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
-                        isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
-                      ].join(' ')}
-                    >
-                      {isCollapsed ? (
-                        <ChevronRight size={12} strokeWidth={1.8} />
-                      ) : (
-                        <ChevronDown size={12} strokeWidth={1.8} />
-                      )}
-                    </button>
+                        <button
+                          type="button"
+                          ref={(node) => {
+                            if (node === null) {
+                              foldRefs.current.delete(section.project.id);
+                            } else {
+                              foldRefs.current.set(section.project.id, node);
+                            }
+                          }}
+                          data-project-collapse={section.project.id}
+                          aria-expanded={!isCollapsed}
+                          aria-label={`${isCollapsed ? 'expand' : 'collapse'} ${section.project.name}`}
+                          onClick={() => toggleCollapse(section.project)}
+                          className={[
+                            'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
+                            isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
+                          ].join(' ')}
+                        >
+                          {isCollapsed ? (
+                            <ChevronRight size={12} strokeWidth={1.8} />
+                          ) : (
+                            <ChevronDown size={12} strokeWidth={1.8} />
+                          )}
+                        </button>
 
-                    <button
-                      type="button"
-                      ref={(node) => {
-                        if (node === null) {
-                          projectMenuRefs.current.delete(section.project.id);
-                        } else {
-                          projectMenuRefs.current.set(section.project.id, node);
-                        }
-                      }}
-                      data-project-menu={section.project.id}
-                      aria-haspopup="menu"
-                      aria-expanded={openMenu === section.project.id}
-                      aria-label={`more actions for ${section.project.name}`}
-                      onClick={() =>
-                        setOpenMenu((current) =>
-                          current === section.project.id ? null : section.project.id,
-                        )
-                      }
-                      className={[
-                        'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
-                        isRevealed || openMenu === section.project.id ? 'opacity-100' : 'opacity-0',
-                      ].join(' ')}
-                    >
-                      <MoreHorizontal size={12} strokeWidth={1.8} />
-                    </button>
+                        <button
+                          type="button"
+                          ref={(node) => {
+                            if (node === null) {
+                              projectMenuRefs.current.delete(section.project.id);
+                            } else {
+                              projectMenuRefs.current.set(section.project.id, node);
+                            }
+                          }}
+                          data-project-menu={section.project.id}
+                          aria-haspopup="menu"
+                          aria-expanded={openMenu === section.project.id}
+                          aria-label={`more actions for ${section.project.name}`}
+                          onClick={() =>
+                            setOpenMenu((current) =>
+                              current === section.project.id ? null : section.project.id,
+                            )
+                          }
+                          className={[
+                            'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
+                            isRevealed || openMenu === section.project.id
+                              ? 'opacity-100'
+                              : 'opacity-0',
+                          ].join(' ')}
+                        >
+                          <MoreHorizontal size={12} strokeWidth={1.8} />
+                        </button>
 
-                    {/* THE `+` THAT USED TO STAND HERE IS IN THE MENU NOW, and
+                        {/* THE `+` THAT USED TO STAND HERE IS IN THE MENU NOW, and
                   the whole argument for that is the column it left. Every
                   heading carried three controls -- fold, menu, add -- over a
                   narrow list whose rows are mostly quiet, and the operator
@@ -2848,7 +3418,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   boxes standing over the session names, and no box now stands
                   there at all. */}
 
-                    {/* There is still no "Project settings": vam has no
+                        {/* There is still no "Project settings": vam has no
                     per-project setting to open.
 
                     "Remove project" USED TO BE ABSENT FOR A REASON THAT HAS
@@ -2874,21 +3444,21 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     keeps its floor, and one item at 44px beside four at 28
                     would be a menu that looks broken -- so the floor is the
                     menu's, not the item's. */}
-                    {openMenu === section.project.id && (
-                      <div
-                        ref={projectPanelRef}
-                        data-project-menu-panel={section.project.id}
-                        role="menu"
-                        aria-label={`${section.project.name} actions`}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            setOpenMenu(null);
-                          }
-                        }}
-                        className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
-                      >
-                        {/* FIRST, and first is a decision rather than an
+                        {openMenu === section.project.id && (
+                          <div
+                            ref={projectPanelRef}
+                            data-project-menu-panel={section.project.id}
+                            role="menu"
+                            aria-label={`${section.project.name} actions`}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Escape') {
+                                event.preventDefault();
+                                setOpenMenu(null);
+                              }
+                            }}
+                            className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
+                          >
+                            {/* FIRST, and first is a decision rather than an
                           accident of when it was added. Everything else in
                           this menu arranges the project or ends it; this is
                           the only item that makes something, and the panel
@@ -2922,89 +3492,115 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           whenever it matters -- printing it here would read as
                           "press this instead" for a key that does something
                           else. */}
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-project-menu-item="new-session"
-                          onClick={() => {
-                            onAddInProject(section.project);
-                            setOpenMenu(null);
-                          }}
-                          className="vam-tap flex cursor-pointer flex-col justify-center gap-0.5 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                        >
-                          New session
-                          {newSessionDecline !== null && (
-                            <span data-new-session-decline className="text-ink-faint text-meta">
-                              {newSessionDecline}
-                            </span>
-                          )}
-                        </button>
-                        {/* "Rename repo", not "Rename project" -- the group
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-project-menu-item="new-session"
+                              onClick={() => {
+                                onAddInProject(section.project);
+                                setOpenMenu(null);
+                              }}
+                              className="vam-tap flex cursor-pointer flex-col justify-center gap-0.5 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            >
+                              New session
+                              {newSessionDecline !== null && (
+                                <span data-new-session-decline className="text-ink-faint text-meta">
+                                  {newSessionDecline}
+                                </span>
+                              )}
+                            </button>
+                            {/* "Rename repo", not "Rename project" -- the group
                           menu already owns that label one level up (UI
                           "project" is the code's `Group`), and the
                           click-outside-menus fix resolved the identical
                           collision on the two `+` buttons by keeping "repo"
                           for this exact layer rather than repeating a word
                           two menus now disagree about. */}
-                        {onRenameProject !== undefined && (
-                          <button
-                            type="button"
-                            role="menuitem"
-                            data-project-menu-item="rename"
-                            onClick={() => {
-                              setProjectDraftName(section.project.name);
-                              setProjectDraft(section.project);
-                              setOpenMenu(null);
-                            }}
-                            className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                          >
-                            Rename repo
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-project-menu-item="collapse"
-                          onClick={() => {
-                            toggleCollapse(section.project);
-                            setOpenMenu(null);
-                          }}
-                          className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                        >
-                          {isCollapsed ? 'Expand project' : 'Collapse project'}
-                        </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-project-menu-item="icon"
-                          onClick={() => {
-                            onPickIcon(section.project);
-                            setOpenMenu(null);
-                          }}
-                          className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                        >
-                          Change project icon
-                        </button>
-                        {/* Last, and the only red thing in the menu. The icon is
+                            {onRenameProject !== undefined && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-project-menu-item="rename"
+                                onClick={() => {
+                                  setProjectDraftName(section.project.name);
+                                  setProjectDraft(section.project);
+                                  setOpenMenu(null);
+                                }}
+                                className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                              >
+                                Rename repo
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-project-menu-item="collapse"
+                              onClick={() => {
+                                toggleCollapse(section.project);
+                                setOpenMenu(null);
+                              }}
+                              className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            >
+                              {isCollapsed ? 'Expand project' : 'Collapse project'}
+                            </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-project-menu-item="icon"
+                              onClick={() => {
+                                onPickIcon(section.project);
+                                setOpenMenu(null);
+                              }}
+                              className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            >
+                              Change project icon
+                            </button>
+                            {/* Last, and the only red thing in the menu. The icon is
                         LEFT of the label, where the two items above have
                         nothing, because this is the one item you must not
                         press by mistake. */}
-                        <button
-                          type="button"
-                          role="menuitem"
-                          data-project-menu-item="remove"
-                          onClick={() => {
-                            setConfirming(section.project);
-                            setOpenMenu(null);
-                          }}
-                          className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-danger hover:bg-line-strong"
-                        >
-                          <Trash2 size={12} strokeWidth={1.8} />
-                          Remove project
-                        </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-project-menu-item="remove"
+                              onClick={() => {
+                                setConfirming(section.project);
+                                setOpenMenu(null);
+                              }}
+                              className="vam-tap flex cursor-pointer items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-control text-danger hover:bg-line-strong"
+                            >
+                              <Trash2 size={12} strokeWidth={1.8} />
+                              Remove project
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    </>
+                  ) : section.bucket !== null ? (
+                    /**
+                     * THE STATUS HEADING -- a caption, not a control. No
+                     * menu, no rename, no icon picker: there is no single
+                     * project underneath a bucket for any of those to act
+                     * on. `data-status-heading` carries the bucket id itself
+                     * (`STATUS_BUCKET_ORDER`'s own values), which is what the
+                     * "one heading per non-empty bucket, in this order" claim
+                     * is checked against.
+                     */
+                    <div
+                      data-status-heading={section.bucket}
+                      className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5"
+                    >
+                      <span className="flex h-[20px] w-[20px] flex-none items-center justify-center text-ink-faint">
+                        <StatusBucketIcon bucket={section.bucket} />
+                      </span>
+                      <span className="truncate text-[13px] font-semibold leading-[20px] text-ink-dim">
+                        {STATUS_BUCKET_LABELS[section.bucket]}
+                      </span>
+                      <span className="font-mono text-meta text-ink-faint">
+                        {section.items.length}
+                      </span>
+                    </div>
+                  ) : null}
 
                   {/* The indent lives on ONE container per project, not on each
                   row. A margin per row would have to be repeated on the
@@ -3027,8 +3623,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                   see `SIDEBAR_STEP`. */}
                   {!isCollapsed && (
                     <div
-                      data-project-rows={section.project.id}
-                      style={{ paddingLeft: SIDEBAR_STEP }}
+                      {...(viewOptions.groupBy === 'project'
+                        ? { 'data-project-rows': section.project.id }
+                        : viewOptions.groupBy === 'status'
+                          ? { 'data-status-rows': section.bucket }
+                          : { 'data-flat-rows': true })}
+                      // No heading to indent FROM under `Status`/`None` -- see
+                      // the heading branch above.
+                      style={
+                        viewOptions.groupBy === 'project'
+                          ? { paddingLeft: SIDEBAR_STEP }
+                          : undefined
+                      }
                       className="flex flex-col gap-[5px]"
                     >
                       {/* A SESSION THAT DOES NOT EXIST YET, and says so.
@@ -3037,20 +3643,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         none of them. No status pill, no age, no title -- vam
                         knows none of those yet and a placeholder wearing
                         invented ones is the content this pane has spent
-                        several rounds having removed. */}
-                      {starting?.projectId === section.project.id && (
-                        <div
-                          data-session-starting
-                          aria-live="polite"
-                          className="flex items-center gap-2 rounded-[9px] border border-line border-dashed px-3 py-2 text-control text-ink-faint"
-                        >
-                          <span className="h-1.5 w-1.5 flex-none rounded-full bg-line-strong vam-breathe" />
-                          <span className="min-w-0 truncate">
-                            starting a session in {section.project.name}…
-                          </span>
-                        </div>
-                      )}
-                      {section.items.map(({ session }) => {
+                        several rounds having removed.
+
+                        `Group by: Project` ONLY: a session being started has
+                        no status yet, so it cannot coherently sit under a
+                        `Status` bucket, and `None` has no heading for the
+                        text below to name -- it simply does not draw while
+                        either mode is active, which the top-level provisional
+                        row above the tree (`starting.projectId === null`'s
+                        own branch) does not cover either. */}
+                      {viewOptions.groupBy === 'project' &&
+                        starting?.projectId === section.project.id && (
+                          <div
+                            data-session-starting
+                            aria-live="polite"
+                            className="flex items-center gap-2 rounded-[9px] border border-line border-dashed px-3 py-2 text-control text-ink-faint"
+                          >
+                            <span className="h-1.5 w-1.5 flex-none rounded-full bg-line-strong vam-breathe" />
+                            <span className="min-w-0 truncate">
+                              starting a session in {section.project.name}…
+                            </span>
+                          </div>
+                        )}
+                      {section.items.map((entry) => {
+                        const { session } = entry;
                         const isFocused = session.id === focusedSessionId;
                         // The one key that jumps here, or nothing when no jump
                         // is armed -- and nothing, too, for a row past the end
@@ -3090,7 +3706,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                         // about THIS row. `null` is an entry that names neither
                         // -- a fixture, or a model assembled before sources
                         // existed -- and it draws the lane with nothing in it.
-                        const rowSource = session.source ?? section.project.source ?? null;
+                        // `entry.project`, NOT `section.project`: under
+                        // `Status`/`None` one section can hold several
+                        // projects, and `section.project` there is only ever
+                        // a placeholder key -- this row's OWN project is the
+                        // one whose source fallback is actually correct.
+                        const rowSource = session.source ?? entry.project.source ?? null;
 
                         return (
                           <div key={session.id}>

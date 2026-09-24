@@ -390,7 +390,7 @@ const browser = await chromium.launch();
   await openFilterPopover(page);
   const toggle = page.locator('[data-origin-toggle="foreign"]');
   check('the popover offers a row for foreign sessions', (await toggle.count()) === 1, `${await toggle.count()}`);
-  check('it is on by default', (await toggle.getAttribute('aria-pressed')) === 'true', await toggle.getAttribute('aria-pressed'));
+  check('it is on by default', (await toggle.getAttribute('aria-checked')) === 'true', await toggle.getAttribute('aria-checked'));
   check(
     'and says how many it is holding back, over the unfiltered workspace',
     (await toggle.textContent())?.includes('11') === true,

@@ -210,6 +210,7 @@ const GUARDS = [
   'files-tree-resize-shots',
   'terminal-ime-shots',
   'sidebar-tree-shots',
+  'workspace-options-shots',
   'sidebar-seam-shots',
   'terminal-chrome-shots',
   'terminal-scheme-shots',

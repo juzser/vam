@@ -191,11 +191,14 @@ describe('the text the phone list screen is made of', () => {
       );
     }
 
-    // The filter popover's two captions -- the phone's only text-search route
-    // reaches this surface, so they are on the critical path too.
+    // The popover's own captions -- the phone's only text-search route
+    // reaches this surface, so they are on the critical path too. "Origin"
+    // is "Filters" now (the workspace-options pass rebuilt the popover in
+    // orca's shape); "Group by" is new with the same pass and checked here
+    // for the same reason the sweep's own header states: found, not assumed.
     cleanup();
     render(<SessionList {...baseProps(entries())} phone width={undefined} filterMenuOpen />);
-    for (const text of ['Status', 'Origin']) {
+    for (const text of ['Status', 'Filters', 'Group by']) {
       for (const node of named(text)) {
         expect(node.className, text).not.toContain('text-ink-faint');
       }

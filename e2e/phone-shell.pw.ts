@@ -1113,10 +1113,11 @@ test.describe('the phone search route', () => {
    * The fix keeps it anchored and caps it from its own measured geometry
    * (`useFilterPopoverCap`), so what this test asserts is REACH, not position:
    * the popover fits the viewport, and every control in it is on screen at
-   * some scroll offset of its own scroller. Both ends are checked, because a
-   * cap without a scroller would clip the same controls the old layout pushed
-   * off the bottom -- silently, and this test would not have seen the
-   * difference if it only looked at the top.
+   * some scroll offset of its own scroller. The whole scroll range is
+   * sampled, not just its two ends, because a cap without a scroller would
+   * clip the same controls the old layout pushed off the bottom -- silently,
+   * and this test would not have seen the difference if it only looked at
+   * the top.
    *
    * THE ANDROID CASE, reproduced exactly: there the layout viewport really
    * does shrink. On iOS the same controls are covered rather than off-screen,
@@ -1168,11 +1169,34 @@ test.describe('the phone search route', () => {
             bottom: Math.round(b.bottom),
           };
         });
-      const atTop = read();
-      el.scrollTop = el.scrollHeight;
-      const atBottom = read();
+      // Sampled across the WHOLE scroll range, not just the two extremes.
+      // Two samples were enough while the popover's content fit within
+      // about two of its own client heights -- a control below the fold at
+      // scrollTop=0 was always still on screen at scrollTop=max. Content
+      // added since (the Group-by/Sort-by rows above the status pills, the
+      // taller two-line filter rows below them) pushed scrollHeight past
+      // 3x clientHeight, and the status pills now sit in a band that is
+      // below the fold at scrollTop=0 AND already scrolled past at
+      // scrollTop=max while still being fully reachable at every offset in
+      // between -- a real position, not a bug, that a 2-point sample
+      // cannot see. The step (16px) is well under any control's own
+      // height, so no reachable window -- at minimum `clientHeight -
+      // controlHeight` wide -- can fall entirely between two samples.
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      const STEP = 16;
+      const offsets =
+        maxScroll === 0
+          ? [0]
+          : [...Array(Math.floor(maxScroll / STEP) + 1).keys()].map((i) =>
+              Math.min(i * STEP, maxScroll),
+            ).concat(maxScroll);
+      const samples = offsets.map((offset) => {
+        el.scrollTop = offset;
+        return read();
+      });
       el.scrollTop = 0;
       const r = el.getBoundingClientRect();
+      const atTop = samples[0];
       return {
         viewport: window.innerHeight,
         rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
@@ -1180,22 +1204,20 @@ test.describe('the phone search route', () => {
         overflowY: getComputedStyle(el).overflowY,
         scrolls: el.scrollHeight > el.clientHeight + 2,
         controls: atTop.length,
-        // A control is reachable when SOME scroll offset puts it fully on
-        // screen. Only the two extremes are sampled, which is enough: the
-        // popover is one column, so a control the bottom cannot reach is
-        // taller than the scroller or outside it.
+        // A control is reachable when SOME sampled scroll offset puts it
+        // fully on screen. A control that passes at none of them is either
+        // taller than the scroller or outside it -- a real regression, not
+        // a sampling gap.
         unreachable: atTop
-          .map((c, i) => ({ c, end: atBottom[i] }))
-          .filter(
-            ({ c, end }) =>
-              !(c.top >= 0 && c.bottom <= window.innerHeight) &&
-              !(
-                end !== undefined &&
-                end.top >= 0 &&
-                end.bottom <= window.innerHeight
-              ),
+          .map((c, i) =>
+            samples.some((s) => {
+              const at = s[i];
+              return at !== undefined && at.top >= 0 && at.bottom <= window.innerHeight;
+            })
+              ? null
+              : `${c.label} @ ${c.bottom}`,
           )
-          .map(({ c, end }) => `${c.label} @ ${c.bottom} (at full scroll: ${end?.bottom ?? '?'})`),
+          .filter((label): label is string => label !== null),
       };
     });
 
