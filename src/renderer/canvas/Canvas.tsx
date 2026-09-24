@@ -93,6 +93,7 @@ import {
   EMPTY_CHORD,
   isSelectOnly,
   isSelectOnlyChord,
+  type KeyAction,
   normalizeKey,
   resolveChord,
 } from '../keyboard/chords.js';
@@ -5206,247 +5207,27 @@ function CanvasInner({
     [entries, focusedEntry, focusSession],
   );
 
-  useEffect(() => {
-    // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
-    // that does not exist, `Mod-<digit>` resolves against panes that are not
-    // drawn, and a soft keyboard fires `keydown` for ordinary typing behind a
-    // focus guard already known to leak. An armed grammar there is how `x`
-    // closes a session nobody meant to close.
-    if (phone) return;
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target;
-      const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
-      // A Cmd/Ctrl chord is never text entry — no layout produces a character
-      // from one — so a box that is capturing letters has no claim on it. That
-      // matters for exactly the case the digit chords were added for: the
-      // operator is in the prompt box, which is where the reason to look at
-      // another tab comes from, so a shortcut dead there is dead. Unmodified,
-      // everything still belongs to the box: the palette's filtering, the
-      // search line, the prompt's `!` typeahead and its Enter and Escape.
-      if (typing && !(event.metaKey || event.ctrlKey)) {
-        return; // the palette, the search line and the prompt own their own keys
-      }
-
-      /**
-       * AND THE SAME CONCESSION TO A FOCUSED BUTTON, for Enter and Space.
-       *
-       * A button has an activation behaviour of its own, and this listener
-       * cancelled it: `Enter` resolves as the `open` chord, `preventDefault`
-       * follows, and the browser's click never fires. So `ViewIcons`' comment
-       * promised "Enter and Space activate it" while only Space worked (audit
-       * F5), and a tab's `×` closed on Space and did nothing on Enter (audit
-       * F4). Both are the same swallow, and this is the same shape of rule the
-       * `typing` guard above already is: a control that has the focus has
-       * first claim on the keys that operate it.
-       *
-       * Scoped to those two keys and to a real button, so nothing else is
-       * given away — `Enter` anywhere but on a control is still `open`, and
-       * `j` on a focused button is still `move`.
-       */
-      const onButton =
-        target instanceof HTMLElement && target.closest('button, [role="button"]') !== null;
-      if (onButton && (event.key === 'Enter' || event.key === ' ')) {
-        return;
-      }
-
-      /**
-       * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
-       *
-       * The options list of an open question is a real widget with its own
-       * `hjkl`, its own digits and its own Enter, and it calls
-       * `preventDefault` on precisely the keys it handled. React dispatches at
-       * its root container, which is BELOW this window listener, so by the
-       * time a key arrives here the pane has already had its say — and this is
-       * how the two cursor modes stay out of each other's way without either
-       * side enumerating the other's keys.
-       *
-       * It is deliberately not `stopPropagation` on the other side. The list
-       * handles some keys and not others, and the ones it does not handle
-       * (`Escape`, `Mod-Shift-h`, `Mod-0`) are exactly the ways OUT of it:
-       * swallowing everything would strand the keyboard in a list it could
-       * not leave.
-       */
-      if (event.defaultPrevented) {
-        return;
-      }
-
-      // A bare modifier is a hand moving, not a keystroke. Letting it through
-      // would abandon a half-typed chord the moment you reached for Cmd and
-      // thought better of it.
-      const key = normalizeKey(event);
-      if (key === null) {
-        return;
-      }
-
-      /**
-       * One rule for every overlay, rather than one flag per overlay.
-       *
-       * While the palette, the key sheet or the settings overlay is on screen
-       * it owns the keyboard: the canvas hears Escape and nothing else. Only
-       * the palette used to be safe, and only by accident — it contains an
-       * input, and the check above steps aside for inputs. The sheet and the
-       * settings overlay contain none, so `j` moved a cursor nobody could see
-       * and `zc` closed the canvas under the sheet that was describing it. Any
-       * overlay added later inherits this by joining `overlayOpen`, which is
-       * the point of writing it as one condition.
-       *
-       * Escape is the exception because it is the way out: `cancel` below is
-       * what closes all three, and a full-screen overlay whose only exit was
-       * the mouse would be a trap on a keyboard-first tool.
-       *
-       * Deliberately, a chord that OPENS an overlay does nothing while another
-       * is open — `?` over settings leaves settings alone. Overlays are
-       * full-screen, so stacking them hides the one underneath and makes
-       * Escape ambiguous: you could no longer tell what one press would close.
-       * Esc peels one layer at a time, and one layer is all there is.
-       */
-      if (overlayOpen && key !== 'Escape') {
-        return;
-      }
-
-      // Jump mode eats the very next key, so a label can safely reuse a letter
-      // that means something else in normal mode.
-      if (jumping && key !== 'Escape') {
-        event.preventDefault();
-        const hit = [...labels.entries()].find(([, label]) => label === key);
-        setJumping(false);
-        if (hit === undefined) {
-          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
-          // it is is what lets a label reuse a bound letter, and it left a
-          // mistyped label indistinguishable from a dead application: the
-          // labels vanished, the cursor stayed, and nothing said why. The
-          // dismissal itself is right and stays — the labels are off the
-          // screen by the time the key is read, so waiting for a second guess
-          // would be waiting with nothing left to read the guess off.
-          setStatus(`nothing is labelled "${key}" — jump cancelled`);
-          return;
-        }
-        setStatus(null);
-        setFocusedSessionId(hit[0]);
-        return;
-      }
-
-      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
-      // `resolveChord` clears the one-key memory, so after it runs there is no
-      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
-      // below turns on exactly that difference (`isSelectOnlyChord`).
-      const typed: Chord = { prefix: chord.current.pending ?? '', key };
-      const step = resolveChord(chord.current, key);
-      chord.current = step.state;
-      const action = step.action;
-      if (action === null) {
-        // Swallow a chord's first key so `g` cannot reach the browser.
-        if (step.state.pending !== null) {
-          event.preventDefault();
-        }
-        /**
-         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
-         *
-         * `resolveChord` abandons `gx` rather than letting `x` mean what a
-         * bare `x` means, which is the right call and is not what changed:
-         * `gx` closing the focused session would be the expensive mistake.
-         * What changed is that not ACTING was being spelled as not SAYING
-         * ANYTHING, so two keystrokes produced an unchanged screen and no way
-         * to tell an unbound pair from a frozen app.
-         *
-         * The plain `action === null` around it stays silent on purpose. Every
-         * unbound letter, function key and media key on the board arrives
-         * here, and a bar that answered all of them would be a bar nobody is
-         * still reading when a real refusal lands. `abandoned` is the narrow
-         * case: a prefix was typed, so the operator was deliberately spelling
-         * something out.
-         */
-        if (step.abandoned !== null) {
-          setStatus(
-            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
-          );
-        }
-        return;
-      }
-      /**
-       * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
-       * arrives, and never of React state.
-       *
-       * `keyboard/focus-scope.ts` carries the rule and the four findings that
-       * produced it. What is worth saying HERE is why it is read at the top of
-       * the handler rather than closed over: this listener is registered by an
-       * effect, so a `mode` variable in scope is whatever the last render put
-       * there — and the whole class of bug being removed is a mode that had
-       * stopped being true. `document.activeElement` cannot be stale.
-       *
-       * READ BEFORE `preventDefault`, not after, and that ordering is the
-       * whole of the stand-down below: a chord this grammar declines has to be
-       * declined BEFORE the default is cancelled, or the key is dead in the
-       * text box either way — swallowed silently instead of acted on, which is
-       * the worse of the two.
-       */
+  /**
+   * Every `KeyAction` the grammar can produce, run — the ONE place a
+   * resolved action becomes an effect, reached by the real `keydown`
+   * listener below and by the command palette's action rows
+   * (`CommandPalette.tsx`, `keyboard/palette-actions.ts`) alike, so a row
+   * there runs exactly what its chord would rather than a second
+   * implementation the two could drift apart from.
+   *
+   * `cursorMode` is read here, live, for the same reason `onKeyDown` used
+   * to read it inline: a mode variable closed over from render would be
+   * whatever the last render put there, and `document.activeElement`
+   * cannot be stale. The palette calls this while its own search box has
+   * the DOM focus, which is a real, live answer too — none of the curated
+   * palette actions branch on cursor mode (see `palette-actions.ts`), so
+   * this is unobserved from that caller and exists only for the actions
+   * still reached by keyboard alone.
+   */
+  const runAction = useCallback(
+    (action: KeyAction) => {
       const cursorMode = cursorModeAt(document.activeElement);
-
-      /**
-       * A CHORD THE SURFACE UNDER THE CARET ALREADY OWNS IS NOT THIS
-       * GRAMMAR'S — the typing guard's own argument, one step further on.
-       *
-       * That guard lets `Mod-` chords past a focused INPUT|TEXTAREA because "a
-       * Cmd/Ctrl chord is never text entry — no layout produces a character
-       * from one", which is true OF CHARACTERS and says nothing about editing
-       * commands. `Ctrl-D` is delete-forward in every macOS text view,
-       * `Ctrl-U` deletes to the start of the line, and `Ctrl-D` is EOF in a
-       * shell. Taking those globally would break editing in the composer to
-       * add a scroll gesture (`isSelectOnly`, `keyboard/chords.ts`).
-       *
-       * ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, which is also what
-       * reaches the TERMINAL PANE: it is a `section` carrying
-       * `data-insert-scope`, invisible to any INPUT|TEXTAREA test, and the one
-       * surface where `Ctrl-D` means most. It already hands every Ctrl chord
-       * back to this listener untouched, so this is the only thing standing
-       * between a terminal and a scroll gesture it never asked for.
-       *
-       * NO REFUSAL IS SPOKEN. The key was not declined, it was never claimed —
-       * a status line here would answer a keystroke the operator aimed at the
-       * box they are typing in.
-       */
-      /**
-       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
-       * ACT is welcome under a caret but whose SPELLING is not.
-       *
-       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
-       * chord — no layout makes a character out of one — and reaching the
-       * Terminal view from inside the prompt box is deliberate, tested and
-       * captioned. A bare `3` is text: it types a digit into every box on
-       * screen, and it is the question card's own option mark
-       * (`resolveQuestionKey`). One is the grammar's in both modes and the
-       * other in Select alone, which is why this predicate reads the CHORD and
-       * `isSelectOnly` above reads the ACTION. Widening either to cover both
-       * would take a working binding away.
-       *
-       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
-       * this handler reads INPUT|TEXTAREA — which is every text box in the
-       * shell, the composer, the palette filter, the search line, a rename
-       * field, the Files filter, and the terminal's own hidden compose box —
-       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
-       * whose keys go into somebody's running agent. That pane claims its own
-       * printable keys while it has a bridge to send them down and hands them
-       * back when it has none, so without this a bridgeless build would answer
-       * a digit aimed at an agent by switching the view under it.
-       *
-       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
-       * one. The `typing` clause at the top already returns for a focused
-       * INPUT|TEXTAREA — the composer, the palette filter, the session search
-       * line, a rename field, the Files tab's filter and its "new file" box
-       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
-       * lean on the tag name alone). Those boxes keep their digit whether or
-       * not this line exists; what only this line can reach is an insert scope
-       * that is no text box.
-       *
-       * The silence above applies unchanged: the key was never claimed.
-       */
-      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
-        return;
-      }
-
-      event.preventDefault();
       setStatus(null);
-
       switch (action.kind) {
         case 'move': {
           if (
@@ -6159,53 +5940,305 @@ function CanvasInner({
           return;
         }
       }
+    },
+    [
+      phone,
+      focusedEntry,
+      focusedSessionId,
+      focusedPaneId,
+      focusedPaneTabs,
+      drawnTabsAcrossPanes,
+      newTabInPane,
+      projectTabIds,
+      sessionIds,
+      entries,
+      matches,
+      query,
+      copyAllCommands,
+      beginComposing,
+      beginSessionRename,
+      closeSession,
+      createSession,
+      newProject,
+      stepProject,
+      focusSession,
+      // `mode` is deliberately NOT here any more, and its absence is the change:
+      // this listener asks `cursorModeAt(document.activeElement)` when a key
+      // arrives instead of closing over a rendered value. A dependency would
+      // re-register the listener on every focus change for a fact it no longer
+      // reads.
+      actionIndex,
+      setActionIndex,
+      setComposing,
+      actions,
+      prefs,
+      savePrefs,
+      terminalTab,
+      filesTab,
+      splitFocused,
+      closeFocusedSplit,
+      stepFocusedSplit,
+      setFocusedSessionId,
+      setViewFor,
+    ],
+  );
+
+  useEffect(() => {
+    // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
+    // that does not exist, `Mod-<digit>` resolves against panes that are not
+    // drawn, and a soft keyboard fires `keydown` for ordinary typing behind a
+    // focus guard already known to leak. An armed grammar there is how `x`
+    // closes a session nobody meant to close.
+    if (phone) return;
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target;
+      const typing = target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(target.tagName);
+      // A Cmd/Ctrl chord is never text entry — no layout produces a character
+      // from one — so a box that is capturing letters has no claim on it. That
+      // matters for exactly the case the digit chords were added for: the
+      // operator is in the prompt box, which is where the reason to look at
+      // another tab comes from, so a shortcut dead there is dead. Unmodified,
+      // everything still belongs to the box: the palette's filtering, the
+      // search line, the prompt's `!` typeahead and its Enter and Escape.
+      if (typing && !(event.metaKey || event.ctrlKey)) {
+        return; // the palette, the search line and the prompt own their own keys
+      }
+
+      /**
+       * AND THE SAME CONCESSION TO A FOCUSED BUTTON, for Enter and Space.
+       *
+       * A button has an activation behaviour of its own, and this listener
+       * cancelled it: `Enter` resolves as the `open` chord, `preventDefault`
+       * follows, and the browser's click never fires. So `ViewIcons`' comment
+       * promised "Enter and Space activate it" while only Space worked (audit
+       * F5), and a tab's `×` closed on Space and did nothing on Enter (audit
+       * F4). Both are the same swallow, and this is the same shape of rule the
+       * `typing` guard above already is: a control that has the focus has
+       * first claim on the keys that operate it.
+       *
+       * Scoped to those two keys and to a real button, so nothing else is
+       * given away — `Enter` anywhere but on a control is still `open`, and
+       * `j` on a focused button is still `move`.
+       */
+      const onButton =
+        target instanceof HTMLElement && target.closest('button, [role="button"]') !== null;
+      if (onButton && (event.key === 'Enter' || event.key === ' ')) {
+        return;
+      }
+
+      /**
+       * A KEY SOMETHING ELSE HAS ALREADY ANSWERED IS NOT THIS GRAMMAR'S.
+       *
+       * The options list of an open question is a real widget with its own
+       * `hjkl`, its own digits and its own Enter, and it calls
+       * `preventDefault` on precisely the keys it handled. React dispatches at
+       * its root container, which is BELOW this window listener, so by the
+       * time a key arrives here the pane has already had its say — and this is
+       * how the two cursor modes stay out of each other's way without either
+       * side enumerating the other's keys.
+       *
+       * It is deliberately not `stopPropagation` on the other side. The list
+       * handles some keys and not others, and the ones it does not handle
+       * (`Escape`, `Mod-Shift-h`, `Mod-0`) are exactly the ways OUT of it:
+       * swallowing everything would strand the keyboard in a list it could
+       * not leave.
+       */
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      // A bare modifier is a hand moving, not a keystroke. Letting it through
+      // would abandon a half-typed chord the moment you reached for Cmd and
+      // thought better of it.
+      const key = normalizeKey(event);
+      if (key === null) {
+        return;
+      }
+
+      /**
+       * One rule for every overlay, rather than one flag per overlay.
+       *
+       * While the palette, the key sheet or the settings overlay is on screen
+       * it owns the keyboard: the canvas hears Escape and nothing else. Only
+       * the palette used to be safe, and only by accident — it contains an
+       * input, and the check above steps aside for inputs. The sheet and the
+       * settings overlay contain none, so `j` moved a cursor nobody could see
+       * and `zc` closed the canvas under the sheet that was describing it. Any
+       * overlay added later inherits this by joining `overlayOpen`, which is
+       * the point of writing it as one condition.
+       *
+       * Escape is the exception because it is the way out: `cancel` below is
+       * what closes all three, and a full-screen overlay whose only exit was
+       * the mouse would be a trap on a keyboard-first tool.
+       *
+       * Deliberately, a chord that OPENS an overlay does nothing while another
+       * is open — `?` over settings leaves settings alone. Overlays are
+       * full-screen, so stacking them hides the one underneath and makes
+       * Escape ambiguous: you could no longer tell what one press would close.
+       * Esc peels one layer at a time, and one layer is all there is.
+       */
+      if (overlayOpen && key !== 'Escape') {
+        return;
+      }
+
+      // Jump mode eats the very next key, so a label can safely reuse a letter
+      // that means something else in normal mode.
+      if (jumping && key !== 'Escape') {
+        event.preventDefault();
+        const hit = [...labels.entries()].find(([, label]) => label === key);
+        setJumping(false);
+        if (hit === undefined) {
+          // A KEY THAT LABELS NOTHING, ANSWERED. Eating the next key whatever
+          // it is is what lets a label reuse a bound letter, and it left a
+          // mistyped label indistinguishable from a dead application: the
+          // labels vanished, the cursor stayed, and nothing said why. The
+          // dismissal itself is right and stays — the labels are off the
+          // screen by the time the key is read, so waiting for a second guess
+          // would be waiting with nothing left to read the guess off.
+          setStatus(`nothing is labelled "${key}" — jump cancelled`);
+          return;
+        }
+        setStatus(null);
+        setFocusedSessionId(hit[0]);
+        return;
+      }
+
+      // WHICH KEYSTROKE THIS WAS, kept because the step is about to forget it.
+      // `resolveChord` clears the one-key memory, so after it runs there is no
+      // way left to tell a bare `0` from the `0` of `z0` — and the stand-down
+      // below turns on exactly that difference (`isSelectOnlyChord`).
+      const typed: Chord = { prefix: chord.current.pending ?? '', key };
+      const step = resolveChord(chord.current, key);
+      chord.current = step.state;
+      const action = step.action;
+      if (action === null) {
+        // Swallow a chord's first key so `g` cannot reach the browser.
+        if (step.state.pending !== null) {
+          event.preventDefault();
+        }
+        /**
+         * A HALF-TYPED CHORD THAT DIED, ANSWERED — and only that.
+         *
+         * `resolveChord` abandons `gx` rather than letting `x` mean what a
+         * bare `x` means, which is the right call and is not what changed:
+         * `gx` closing the focused session would be the expensive mistake.
+         * What changed is that not ACTING was being spelled as not SAYING
+         * ANYTHING, so two keystrokes produced an unchanged screen and no way
+         * to tell an unbound pair from a frozen app.
+         *
+         * The plain `action === null` around it stays silent on purpose. Every
+         * unbound letter, function key and media key on the board arrives
+         * here, and a bar that answered all of them would be a bar nobody is
+         * still reading when a real refusal lands. `abandoned` is the narrow
+         * case: a prefix was typed, so the operator was deliberately spelling
+         * something out.
+         */
+        if (step.abandoned !== null) {
+          setStatus(
+            `"${chordText(step.abandoned)}" is not a chord — the ${step.abandoned.prefix} was dropped`,
+          );
+        }
+        return;
+      }
+      /**
+       * WHICH MODE THIS KEYSTROKE IS IN — asked of the DOM, at the moment it
+       * arrives, and never of React state.
+       *
+       * `keyboard/focus-scope.ts` carries the rule and the four findings that
+       * produced it. What is worth saying HERE is why it is read at the top of
+       * the handler rather than closed over: this listener is registered by an
+       * effect, so a `mode` variable in scope is whatever the last render put
+       * there — and the whole class of bug being removed is a mode that had
+       * stopped being true. `document.activeElement` cannot be stale.
+       *
+       * READ BEFORE `preventDefault`, not after, and that ordering is the
+       * whole of the stand-down below: a chord this grammar declines has to be
+       * declined BEFORE the default is cancelled, or the key is dead in the
+       * text box either way — swallowed silently instead of acted on, which is
+       * the worse of the two.
+       */
+      const cursorMode = cursorModeAt(document.activeElement);
+
+      /**
+       * A CHORD THE SURFACE UNDER THE CARET ALREADY OWNS IS NOT THIS
+       * GRAMMAR'S — the typing guard's own argument, one step further on.
+       *
+       * That guard lets `Mod-` chords past a focused INPUT|TEXTAREA because "a
+       * Cmd/Ctrl chord is never text entry — no layout produces a character
+       * from one", which is true OF CHARACTERS and says nothing about editing
+       * commands. `Ctrl-D` is delete-forward in every macOS text view,
+       * `Ctrl-U` deletes to the start of the line, and `Ctrl-D` is EOF in a
+       * shell. Taking those globally would break editing in the composer to
+       * add a scroll gesture (`isSelectOnly`, `keyboard/chords.ts`).
+       *
+       * ASKED OF THE CURSOR MODE, NOT OF THE TAG NAME, which is also what
+       * reaches the TERMINAL PANE: it is a `section` carrying
+       * `data-insert-scope`, invisible to any INPUT|TEXTAREA test, and the one
+       * surface where `Ctrl-D` means most. It already hands every Ctrl chord
+       * back to this listener untouched, so this is the only thing standing
+       * between a terminal and a scroll gesture it never asked for.
+       *
+       * NO REFUSAL IS SPOKEN. The key was not declined, it was never claimed —
+       * a status line here would answer a keystroke the operator aimed at the
+       * box they are typing in.
+       */
+      /**
+       * AND THE SAME STAND-DOWN ASKED OF THE KEYSTROKE, for a binding whose
+       * ACT is welcome under a caret but whose SPELLING is not.
+       *
+       * `pickView` holds two chords and they are not alike. `Ctrl-Alt-3` is a
+       * chord — no layout makes a character out of one — and reaching the
+       * Terminal view from inside the prompt box is deliberate, tested and
+       * captioned. A bare `3` is text: it types a digit into every box on
+       * screen, and it is the question card's own option mark
+       * (`resolveQuestionKey`). One is the grammar's in both modes and the
+       * other in Select alone, which is why this predicate reads the CHORD and
+       * `isSelectOnly` above reads the ACTION. Widening either to cover both
+       * would take a working binding away.
+       *
+       * IT IS WHAT REACHES THE TERMINAL PANE. The typing guard at the top of
+       * this handler reads INPUT|TEXTAREA — which is every text box in the
+       * shell, the composer, the palette filter, the search line, a rename
+       * field, the Files filter, and the terminal's own hidden compose box —
+       * and misses the terminal PANE, a `section` carrying `data-insert-scope`
+       * whose keys go into somebody's running agent. That pane claims its own
+       * printable keys while it has a bridge to send them down and hands them
+       * back when it has none, so without this a bridgeless build would answer
+       * a digit aimed at an agent by switching the view under it.
+       *
+       * AND IT IS THE SECOND GUARD ON EVERY OTHER TEXT SURFACE, not the only
+       * one. The `typing` clause at the top already returns for a focused
+       * INPUT|TEXTAREA — the composer, the palette filter, the session search
+       * line, a rename field, the Files tab's filter and its "new file" box
+       * (`FilesTab.tsx` records that those two are deliberately UNMARKED and
+       * lean on the tag name alone). Those boxes keep their digit whether or
+       * not this line exists; what only this line can reach is an insert scope
+       * that is no text box.
+       *
+       * The silence above applies unchanged: the key was never claimed.
+       */
+      if (cursorMode === 'insert' && (isSelectOnly(action) || isSelectOnlyChord(typed))) {
+        return;
+      }
+
+      event.preventDefault();
+
+      runAction(action);
     }
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
-    phone,
-    focusedEntry,
-    focusedSessionId,
-    focusedPaneId,
-    focusedPaneTabs,
-    drawnTabsAcrossPanes,
-    newTabInPane,
-    projectTabIds,
-    sessionIds,
-    entries,
-    jumping,
-    labels,
-    matches,
-    query,
-    copyAllCommands,
-    beginComposing,
-    beginSessionRename,
-    closeSession,
-    createSession,
-    newProject,
-    stepProject,
-    focusSession,
-    // `mode` is deliberately NOT here any more, and its absence is the change:
-    // this listener asks `cursorModeAt(document.activeElement)` when a key
-    // arrives instead of closing over a rendered value. A dependency would
-    // re-register the listener on every focus change for a fact it no longer
-    // reads.
-    actionIndex,
-    setActionIndex,
-    setComposing,
-    actions,
-    prefs,
-    savePrefs,
-    terminalTab,
-    filesTab,
-    overlayOpen,
-    splitFocused,
-    closeFocusedSplit,
-    stepFocusedSplit,
-    setFocusedSessionId,
-    setViewFor,
-  ]);
+    // A SHORT LIST NOW, and deliberately so: everything the switch itself used
+    // to close over moved to `runAction` along with it, so this effect's own
+    // body only reads `phone` (the guard at its top), `jumping`/`labels` (the
+    // jump-mode branch), `overlayOpen` (the overlay guard) and
+    // `setFocusedSessionId` (the jump-hit branch) directly — plus `runAction`
+    // itself, since calling a stale one would run last render's closures.
+    // `mode` is deliberately NOT here, and never was: this listener asks
+    // `cursorModeAt(document.activeElement)` when a key arrives instead of
+    // closing over a rendered value, so a dependency would re-register the
+    // listener on every focus change for a fact it no longer reads.
+  }, [runAction, phone, jumping, labels, overlayOpen, setFocusedSessionId]);
 
   // `sidebarProps` feeds a `React.memo`-wrapped `SessionList`; a fresh
   // inline arrow on any one of its 40+ props defeats the whole shallow
@@ -7150,6 +7183,15 @@ function CanvasInner({
             focusSession(sessionId);
             setPaletteOpen(false);
           }}
+          // ONE DISPATCH, not a second one: a row runs `runAction` — the same
+          // function `Ctrl-K`'s own keydown listener calls once it has
+          // resolved a chord — so an action picked here can never come to
+          // mean something different from its bound key.
+          onRunAction={(action) => {
+            runAction(action);
+            setPaletteOpen(false);
+          }}
+          hasFocusedSession={focusedEntry !== null}
           onClose={() => setPaletteOpen(false)}
         />
       )}
