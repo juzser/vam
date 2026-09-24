@@ -67,6 +67,22 @@ describe('useSessionListDrafts', () => {
     expect(result.current.groupDraftName).toBe('');
   });
 
+  it('committing a group rename draft invokes onRenameGroup, not onCreateGroup', () => {
+    const { result, onCreateGroup, onRenameGroup } = setup();
+
+    act(() => {
+      result.current.setGroupDraftName('  Renamed Group  ');
+      result.current.setGroupDraft({ kind: 'rename', group });
+    });
+    act(() => result.current.commitGroupDraft());
+
+    expect(onRenameGroup).toHaveBeenCalledTimes(1);
+    expect(onRenameGroup).toHaveBeenCalledWith(group, 'Renamed Group');
+    expect(onCreateGroup).not.toHaveBeenCalled();
+    expect(result.current.groupDraft).toBe(null);
+    expect(result.current.groupDraftName).toBe('');
+  });
+
   it('committing an empty or whitespace-only group name creates nothing and renames nothing', () => {
     const { result, onCreateGroup, onRenameGroup } = setup();
 
@@ -136,5 +152,26 @@ describe('useSessionListDrafts', () => {
     expect(onRenameProject).toHaveBeenCalledWith(project, '');
     expect(result.current.projectDraft).toBe(null);
     expect(result.current.projectDraftName).toBe('');
+  });
+
+  it('commitProjectDraft with no open draft is a no-op', () => {
+    const { result, onRenameProject } = setup();
+
+    act(() => result.current.commitProjectDraft());
+
+    expect(onRenameProject).not.toHaveBeenCalled();
+    expect(result.current.projectDraft).toBe(null);
+    expect(result.current.projectDraftName).toBe('');
+  });
+
+  it('commitGroupDraft with no open draft is a no-op', () => {
+    const { result, onCreateGroup, onRenameGroup } = setup();
+
+    act(() => result.current.commitGroupDraft());
+
+    expect(onCreateGroup).not.toHaveBeenCalled();
+    expect(onRenameGroup).not.toHaveBeenCalled();
+    expect(result.current.groupDraft).toBe(null);
+    expect(result.current.groupDraftName).toBe('');
   });
 });
