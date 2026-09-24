@@ -758,6 +758,7 @@ describe('SessionList projects header', () => {
         onlyPrompted: false,
         hideEnded: false,
         hideForeign: true,
+        hideIdle: false,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
@@ -770,6 +771,7 @@ describe('SessionList projects header', () => {
         onlyPrompted: true,
         hideEnded: false,
         hideForeign: true,
+        hideIdle: false,
       },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -818,7 +820,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 0, unprompted: 0, ended: 11, foreign: 0 },
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 11, foreign: 0, idle: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
     expect(row).not.toBeNull();
@@ -838,7 +840,7 @@ describe('SessionList filter popover', () => {
       fireEvent.click(container.querySelector('[data-origin-toggle="ended"]') as Element);
     });
     expect(seen).toEqual([
-      { hideAgentStarted: true, onlyPrompted: false, hideEnded: false, hideForeign: true },
+      { hideAgentStarted: true, onlyPrompted: false, hideEnded: false, hideForeign: true, hideIdle: false },
     ]);
   });
 
@@ -854,7 +856,7 @@ describe('SessionList filter popover', () => {
     // rules the badge counts -- even though it does narrow the list.
     const { container } = mountWith(twoProjects(), {
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
     });
     expect(container.querySelector('[data-filter-badge]')).toBeNull();
     cleanup();
@@ -874,6 +876,7 @@ describe('SessionList filter popover', () => {
         onlyPrompted: true,
         hideEnded: false,
         hideForeign: true,
+        hideIdle: false,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -885,7 +888,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
     expect(row.getAttribute('aria-pressed')).toBe('true');
@@ -903,7 +906,7 @@ describe('SessionList filter popover', () => {
       fireEvent.click(live.querySelector('[data-origin-toggle="agent"]') as Element);
     });
     expect(seen).toEqual([
-      { hideAgentStarted: false, onlyPrompted: false, hideEnded: true, hideForeign: true },
+      { hideAgentStarted: false, onlyPrompted: false, hideEnded: true, hideForeign: true, hideIdle: false },
     ]);
   });
 
@@ -915,6 +918,7 @@ describe('SessionList filter popover', () => {
         onlyPrompted: true,
         hideEnded: false,
         hideForeign: true,
+        hideIdle: false,
       },
     });
     const prompted = container.querySelector('[data-origin-toggle="prompted"]') as HTMLElement;
@@ -929,7 +933,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 11 },
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 11, idle: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="foreign"]') as HTMLElement;
     expect(row).not.toBeNull();
@@ -949,7 +953,7 @@ describe('SessionList filter popover', () => {
       fireEvent.click(container.querySelector('[data-origin-toggle="foreign"]') as Element);
     });
     expect(seen).toEqual([
-      { hideAgentStarted: true, onlyPrompted: false, hideEnded: true, hideForeign: false },
+      { hideAgentStarted: true, onlyPrompted: false, hideEnded: true, hideForeign: false, hideIdle: false },
     ]);
   });
 

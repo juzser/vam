@@ -81,7 +81,9 @@ import {
   isForeign,
   isHiddenByEndedFilter,
   isHiddenByForeignFilter,
+  isHiddenByIdleFilter,
   isHiddenByOriginFilters,
+  isIdle,
   isUnprompted,
 } from '../domain/session-filter.js';
 import { ErrorLogPanel } from '../errors/ErrorLogPanel.js';
@@ -2977,6 +2979,7 @@ function CanvasInner({
     return byDismissed.filter(
       (e) =>
         !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
+        !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
         (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
     );
     // `prefs` ITSELF, not only `prefs.filters`/`prefs.dismissedSessions`
@@ -3047,6 +3050,7 @@ function CanvasInner({
       unprompted: allEntries.filter((e) => isUnprompted(e.session)).length,
       ended: allEntries.filter((e) => isEnded(e.session)).length,
       foreign: allEntries.filter((e) => isForeign(e.session)).length,
+      idle: allEntries.filter((e) => isIdle(e.session)).length,
     }),
     [allEntries],
   );

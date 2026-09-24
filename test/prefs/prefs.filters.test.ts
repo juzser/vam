@@ -39,6 +39,9 @@ describe('the session-origin filters, persisted', () => {
       hideEnded: true,
       // Only vam's own sessions, by default: see `session-filter.ts`.
       hideForeign: true,
+      // A fresh toggle must change nothing for an operator who never touched
+      // it -- see `session-filter.ts`'s own header for `hideIdle`.
+      hideIdle: false,
     });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
@@ -52,6 +55,7 @@ describe('the session-origin filters, persisted', () => {
         onlyPrompted: true,
         hideEnded: false,
         hideForeign: false,
+        hideIdle: true,
       }),
     );
     expect(readPrefs(s).filters).toEqual({
@@ -59,6 +63,7 @@ describe('the session-origin filters, persisted', () => {
       onlyPrompted: true,
       hideEnded: false,
       hideForeign: false,
+      hideIdle: true,
     });
   });
 
@@ -94,6 +99,7 @@ describe('the session-origin filters, persisted', () => {
       // are kept, and the keys this payload predates take the shipped default.
       hideEnded: true,
       hideForeign: true,
+      hideIdle: false,
     });
   });
 
@@ -106,6 +112,7 @@ describe('the session-origin filters, persisted', () => {
       // predates this rule, which must read back as the shipped default.
       hideEnded: true,
       hideForeign: true,
+      hideIdle: false,
     });
   });
 
@@ -116,6 +123,23 @@ describe('the session-origin filters, persisted', () => {
       onlyPrompted: false,
       hideEnded: true,
       hideForeign: false,
+      hideIdle: false,
     });
+  });
+
+  it('keeps a stored choice to hide sleeping sessions, per field like every other rule', () => {
+    const raw = '{"filters":{"hideIdle":true}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      hideEnded: true,
+      hideForeign: true,
+      hideIdle: true,
+    });
+  });
+
+  it('takes only a real boolean for hideIdle -- garbage falls back to the default', () => {
+    const raw = '{"filters":{"hideIdle":"yes"}}';
+    expect(readPrefs(store(raw)).filters.hideIdle).toBe(false);
   });
 });

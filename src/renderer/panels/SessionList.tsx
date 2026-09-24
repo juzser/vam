@@ -724,6 +724,7 @@ export type SessionListProps = {
     readonly unprompted: number;
     readonly ended: number;
     readonly foreign: number;
+    readonly idle: number;
   };
   /**
    * HOW MANY ROWS `hideForeign` IS HIDING RIGHT NOW -- NOT `hiddenCounts.

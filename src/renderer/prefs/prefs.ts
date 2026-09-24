@@ -1330,13 +1330,14 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign } = (
+  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle } = (
     typeof raw === 'object' && raw !== null ? raw : {}
   ) as {
     hideAgentStarted?: unknown;
     onlyPrompted?: unknown;
     hideEnded?: unknown;
     hideForeign?: unknown;
+    hideIdle?: unknown;
   };
   return {
     hideAgentStarted:
@@ -1354,6 +1355,10 @@ function readFilters(raw: unknown): SessionFilters {
     // default rather than as "off".
     hideForeign:
       typeof hideForeign === 'boolean' ? hideForeign : DEFAULT_SESSION_FILTERS.hideForeign,
+    // Same per-field fallback again: every store predating this toggle has no
+    // such key, and reads back as the shipped default, which is OFF -- so an
+    // upgrade never hides a sleeping session nobody asked to hide.
+    hideIdle: typeof hideIdle === 'boolean' ? hideIdle : DEFAULT_SESSION_FILTERS.hideIdle,
   };
 }
 
