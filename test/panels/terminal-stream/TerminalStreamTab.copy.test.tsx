@@ -76,9 +76,9 @@ describe('Cmd+C (Meta+C), against a real Terminal', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const textarea = document.querySelector('[data-terminal-stream] textarea') as
-      | HTMLTextAreaElement
-      | null;
+    const textarea = document.querySelector(
+      '[data-terminal-stream] textarea',
+    ) as HTMLTextAreaElement | null;
     if (textarea === null) throw new Error('no textarea rendered');
     textarea.focus();
 
@@ -104,9 +104,9 @@ describe('Cmd+C (Meta+C), against a real Terminal', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    const textarea = document.querySelector('[data-terminal-stream] textarea') as
-      | HTMLTextAreaElement
-      | null;
+    const textarea = document.querySelector(
+      '[data-terminal-stream] textarea',
+    ) as HTMLTextAreaElement | null;
     if (textarea === null) throw new Error('no textarea rendered');
     textarea.focus();
     write.mockClear();
