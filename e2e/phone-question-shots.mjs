@@ -19,21 +19,27 @@
  * session already used for this by `composer-bar-shots.mjs` ("a session
  * with no open question, so the composer is the block on screen").
  *
- * NOT wired into `e2e/run-web-guards.mjs` yet, unlike every other asserting
- * script in this directory -- deliberately, and the reason is a real,
- * measured, currently-open gap: AC-7's HEIGHT half (composer bar <= 108px)
- * is not met. Cutting the tools row from 6 controls to 4 (this file's other
- * assertion, which passes) does not by itself shrink a single non-wrapping
- * flex row's height -- `data-composer-bar`/`data-prompt-box` measure 145px
- * today exactly as before the diet, because the row was never wrapping to
- * begin with (390px comfortably fits even 6 44px icons on one line) and
- * their padding/gap classes are shared with desktop, so shrinking them
- * phone-only needs new conditional classes that were not part of PR1's
- * scope. Closing this needs either merging the tools row onto the
- * textarea's own line (a real layout change, unverified visually under
- * this session's time budget) or a planner call to revise the 108px
- * target. Run by hand until then:
- *   node e2e/phone-question-shots.mjs http://localhost:5520 docs/ui
+ * WIRED into `e2e/run-web-guards.mjs` now that AC-7's HEIGHT half closed too
+ * (docs/design/phone-core-loop.md §4.1's own postmortem, followed up):
+ * `data-prompt-box` merges the textarea and the tools row onto one flex line
+ * on phone (`display: contents` on both wrappers, the "+" pulled to the
+ * front via `order-first`), which is what a control-count cut alone could
+ * not do to a row that was never wrapping. Measured here, both themes:
+ * `data-composer-bar` is **95px**, down from the pre-merge 145px -- comfortably
+ * under AC-7's 108px hard ceiling, though not the ≤76px stretch target the
+ * follow-up chased: a real, falsified floor, not a padding oversight --
+ * `field-sizing: content` (the native auto-grow this uses instead of a hand-
+ * rolled resize handler) computes an EMPTY, single-row textarea's own
+ * intrinsic content height at ~3 lines' worth (60px at the phone's forced
+ * 16px/20px font/line-height) in this Chromium, regardless of `rows` or
+ * removing the attribute entirely -- verified by hand, not assumed:
+ * `field-sizing: fixed` with the same `rows={1}` measures 44px (the
+ * `vam-tap` floor) for the identical box, isolating the 16px gap to that one
+ * property's own sizing algorithm. Trading it for a JS `onInput` resize
+ * handler would likely close the last 19px, but that is custom code
+ * replacing a native platform feature for a target this spec calls a
+ * "target", not an AC -- the ≤108px hard ceiling (AC-7 itself) is what
+ * ships, with the real number on record rather than a looser assertion.
  */
 import { chromium } from 'playwright-core';
 
@@ -154,9 +160,15 @@ for (const theme of ['light', 'dark']) {
   console.log(`  ${theme}: ${JSON.stringify(composer)}`);
   check(`${theme}: the composer bar is on screen`, composer !== null, JSON.stringify(composer));
   if (composer !== null) {
+    // AC-7's hard ceiling, kept as the FLOOR of this range: recomputed from a
+    // real measurement (95px, both themes, see this file's own header),
+    // never loosened back toward the pre-merge 145px. The lower bound is a
+    // regression trip-wire of its own -- a row that measured under 85px
+    // would mean a control silently stopped drawing, not a further trim
+    // nobody chose.
     check(
-      `${theme}: composer height clears the AC-7 108px target (from 145px)`,
-      composer.height <= 108,
+      `${theme}: composer height is the merged row's real figure (95px, from 145px), not just under AC-7's 108px ceiling`,
+      composer.height <= 108 && composer.height >= 85,
       `${composer.height}px`,
     );
     // Textarea + "+" + mic + Send: everything else (attach, provider, model,

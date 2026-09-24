@@ -567,6 +567,9 @@ NOT wired into `e2e/run-web-guards.mjs`'s mandatory `GUARDS` list, so
 this one known, tracked gap does not perma-red an otherwise-passing gate
 for unrelated future changes — see that script's own header comment.
 
+**Closed in the follow-up pass, §4.7 below**: the merge this paragraph
+describes shipped, measured at 95px, and the guard now runs in CI.
+
 ### 4.2 PR 2 — tab-strip collapse while a question is open
 
 Shipped exactly as designed: `PhoneShell.tsx` gained
@@ -697,3 +700,105 @@ retired, none a regression in new coverage:
 
 All ten verified individually via targeted `-g` reruns, then the full
 suite reran clean (§5).
+
+### 4.7 PR 5 — the composer row merge, AC-7's height half, closed
+
+The gap §4.1 disclosed and flagged rather than guessed at: cutting the
+tools row to 4 controls did not shrink a row that was never wrapping,
+because the textarea's own row and the tools row beneath it were two
+separate `flex-col` children of `data-prompt-box`, each paying its own
+chrome. Closing it needed the "genuine layout change" §4.1 named and did
+not attempt — merging both onto the textarea's own line, iMessage/Claude
+mobile-shaped: `[+] [textarea, growing] [mic] [Send]`.
+
+Shipped without moving a single handler or duplicating a single control:
+`data-prompt-box` becomes phone's own merged flex row (`flex-row
+flex-wrap items-end`, `phone`-gated; desktop keeps its original
+`flex-col`, untouched), and the textarea's wrapper and `data-prompt-tools`
+both go `display: contents` on phone, so their real children — the same
+`<textarea>`, the same "+" (`data-composer-overflow`), the same mic
+(`data-prompt-dictate`) and Send (`data-prompt-record`) buttons this
+file's PR 1 already built — become that ONE row's direct flex items
+instead of two stacked rows' worth. The "+" is pulled to the front with
+`order-first` (the only reorder needed; everything else already reads
+textarea-then-mic-then-Send in DOM order). Rare rows that used to live in
+the tools row — the prompt-suggestion offer, the attach/attach-image
+chips, the mode-cycle caption, the pasted-image/attach/dictate error
+lines — get `order-10 basis-full` so they still show, in full, but on
+their own line below rather than crowding the idle row; the desktop-only
+spacer `<span>` that used to push mic/Send to the tools row's own right
+edge is `hidden` on phone (a second `flex-1` beside the textarea's own
+would have split the row's width between the two and starved it).
+
+Growth is a native platform feature, not a hand-rolled resize handler:
+`[field-sizing:content]` (Chromium 123+, well under Electron 44's own,
+and Playwright's bundled Chromium too) makes the textarea's own height
+follow its content; `rows` drops from `2` to `1` (moot once `field-
+sizing` is `content`, but a sane fallback if it were ever unsupported),
+and `max-h-[132px]` plus `overflow-y-auto` (scrollbar hidden by the
+already-shipped `vam-no-scrollbar`, still scrollable) caps the growth and
+lets five-or-so lines' worth scroll internally rather than pushing the
+composer bar itself down the screen. Bar and box chrome shrink phone-only
+too (`py-3`→`py-2`, `py-2.5`→`py-1.5`), the rest of the gap §4.1's own
+arithmetic located.
+
+**Measured, both themes, real Chromium (`e2e/phone-question-shots.mjs`,
+now wired into `run-web-guards.mjs`)**: `data-composer-bar` is **95px**,
+down from the pre-merge **145px** — comfortably inside AC-7's 108px hard
+ceiling, with 13px to spare.
+
+**The ≤76px stretch target this pass was ASKED to aim for was not
+reached, and the reason is a real, falsified measurement, not a guess.**
+Composer chrome (bar padding + box padding) accounts for only ~32px of
+the 95; the remaining ~63px is the merged row itself, and the row's
+height is set by the textarea, not by the 44px-floored buttons beside it.
+Isolated by hand: an EMPTY, single-row textarea under `field-sizing:
+content` measures **60px** of real content height at the phone's forced
+16px font / 20px line-height (`--text-body--line-height`) — roughly
+three lines' worth, not one — and this holds with `rows={1}` set, with
+the `rows` attribute removed entirely, and across every line-height this
+session tried down to `16px` (`48px` result) before the phone's line-
+height stopped being legible. The SAME box under `field-sizing: fixed`
+with the identical `rows={1}` measures **44px** (the `vam-tap` floor) —
+isolating the extra ~16-19px to `field-sizing: content`'s own intrinsic-
+sizing algorithm for an empty `<textarea>` in this Chromium, not to any
+padding, gap or `min-height` this pass could still trim. Closing the
+remaining gap would mean trading the native feature for a JS `onInput`
+resize handler that measures `scrollHeight` by hand — real, working code,
+but custom code replacing a native one for a figure the operator's own
+brief called a *target*, not the acceptance criterion (`≤108px` is AC-7
+itself, and it is met with margin) — so it was not written this pass.
+Flagged here, honestly, the same way §4.1 flagged its own gap rather than
+rounding a number to make a checkbox green.
+
+### 4.8 The transcript's top block, collapsed to one line on phone
+
+The second follow-up: "N turns read / This is as far back as vam has
+read — not necessarily where the session began. / Read earlier turns"
+(§3.2's audit measured this as part of the chrome the inline-question
+work returned space from) costs three lines above every conversation on
+the screen with the least of them to spare.
+
+Collapsed on phone to one `[data-column-start-compact]` row across all
+five states `moreState` (`transcript-history.ts`) can return: a real
+`<button>` — same `readOlder` handler, same cursor argument, unchanged —
+reading "Earlier turns ↑" when there is more to read, or "Earlier turns
+— try again ↑" after a refusal; a `role="status"` line reading "Reading
+earlier turns…", "Earlier turns — can't read further back", or "Session
+start ↑" for the three states with nothing to tap. Nothing here narrows
+what an operator can be TOLD, only what is PAINTED: the full sentence
+every one of the five states used to print in full moves into
+`aria-label` — the count, the caveat, the source's own error words where
+there are any, the same glyph-plus-`aria-label` trade this composer's own
+Send button already makes (§3.4's design, PR 1's shipped form). Desktop
+(`phone` unset) renders the original three-block markup, byte-for-byte —
+the whole change is one `phone ? (...) : (<>...</>)` branch, and the
+`<>...</>` side is the pre-existing JSX, untouched.
+
+Verified in `test/panels/DetailPanel.phone-earlier-turns.test.tsx`
+(6 tests: the compact row's shape and accessible name in each of the five
+`moreState` outcomes, and that the OLD three-block hooks —
+`[data-progress-count]`, `[data-column-start-note]`,
+`[data-column-more-ask]`, `[data-column-more-note]` — are gone from the
+DOM on phone, not merely hidden) and falsified (forcing the phone branch
+off reddens all six before the branch is restored).
