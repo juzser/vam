@@ -538,6 +538,139 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
   };
 }
 
+/**
+ * The Terminal tab's STREAMING bridge member -- the preload half of
+ * `terminalStreamOpen`/`Close`/`Write` and the three pushes main sends
+ * unprompted (`CHANNELS.terminalStreamData`/`Seed`/`Down`). Separate from
+ * `TerminalApi` above rather than folded into it: every member there is a
+ * one-shot `invoke`, and these three pushes need `createStreamSubscribe`'s
+ * own listener-identity discipline instead.
+ */
+export type TerminalStreamApi = {
+  /**
+   * See `CHANNELS.terminalStreamOpen`'s own header for the full refusal set.
+   * Written out here rather than imported from `main/terminal/stream-ipc.js`
+   * (whose own `StreamOpenResult` names the same shape): that module reaches
+   * `node:crypto`/`Buffer` for its OWN runtime, and this file is typechecked
+   * under `tsconfig.web.json` too (`src/renderer/App.tsx` imports it for
+   * types), which carries no `node` types at all -- the same trap
+   * `./files/types.js`'s own header names for `FileListResult` and friends.
+   */
+  open(
+    projectId: string,
+    rowId?: string,
+  ): Promise<
+    | { readonly ok: true; readonly streamId: string; readonly seed: string }
+    | {
+        readonly ok: false;
+        readonly reason: 'bad-request' | 'unavailable' | 'unresolved-session' | 'unsupported-tmux';
+      }
+  >;
+  /**
+   * Fire-and-forget, like `FilesApi.reportUnsaved` -- there is no answer the
+   * renderer could act on, and `terminalStreamClose` is idempotent on main's
+   * side, so a dropped rejection costs nothing more than a logged line.
+   */
+  close(streamId: string): void;
+  /** Fire-and-forget for the same reason `close` is -- what tmux did with the
+   *  bytes arrives on `onData` regardless. */
+  write(streamId: string, bytes: Uint8Array): void;
+  /**
+   * `CHANNELS.terminalStreamData` is SHARED across every currently-open
+   * stream -- main pushes `(streamId, chunk)` on one channel, not one
+   * channel per stream -- so the returned listener here filters by
+   * `streamId` before ever calling the caller's own `listener`. Returns an
+   * idempotent unsubscribe, same shape `createStreamSubscribe` returns.
+   */
+  onData(streamId: string, listener: (chunk: string) => void): () => void;
+  /** Same shared-channel filtering as `onData`, over `terminalStreamSeed`. */
+  onSeed(streamId: string, listener: (seed: string) => void): () => void;
+  /** Same shared-channel filtering as `onData`, over `terminalStreamDown`. */
+  onDown(streamId: string, listener: (event: TerminalStreamDownEvent) => void): () => void;
+};
+
+/**
+ * `StreamClient`'s own `StreamDownEvent` (`main/terminal/stream/client.ts`),
+ * written out here for the same reason `open`'s result union is (see that
+ * member's own comment) rather than imported: `reconnecting` while a
+ * backed-off retry is still pending, a TERMINAL `gave-up` once `StreamClient`
+ * has stopped trying for good and nothing further will arrive on this
+ * `streamId`.
+ */
+export type TerminalStreamDownEvent =
+  | { readonly kind: 'reconnecting'; readonly attempt: number }
+  | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
+
+/**
+ * Builds one filtered listener over a channel SHARED by every open stream:
+ * registers a stable closure with `ipc.on`, discards any push whose first
+ * argument is not this `streamId`, and returns an idempotent unsubscribe
+ * that removes the SAME closure reference -- `createStreamSubscribe`'s own
+ * AC-19 discipline, generalised to a channel with a per-event discriminator.
+ */
+function createFilteredStreamListener<TRest extends readonly unknown[]>(
+  ipc: ListenerLike,
+  channel: string,
+  streamId: string,
+  onMatch: (...rest: TRest) => void,
+): () => void {
+  const listener = (_event: unknown, ...args: unknown[]) => {
+    if (args[0] !== streamId) return;
+    onMatch(...(args.slice(1) as unknown as TRest));
+  };
+  ipc.on(channel, listener);
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    ipc.removeListener(channel, listener);
+  };
+}
+
+/**
+ * `open` forwards straight to `terminalStreamOpen` -- no `unwrap`, because
+ * that channel answers bare (`StreamOpenResult` names its own refusals, see
+ * `main/terminal/stream-ipc.ts`). `close`/`write` take `reportUnsaved`'s own
+ * fire-and-forget posture. `onData`/`onSeed`/`onDown` are built with
+ * `createFilteredStreamListener` rather than `createStreamSubscribe`, since
+ * each push carries a `streamId` a plain tick has no room for.
+ */
+export function createTerminalStreamApi(ipc: InvokerLike & ListenerLike): TerminalStreamApi {
+  return {
+    open: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalStreamOpen, projectId)
+        : ipc.invoke(CHANNELS.terminalStreamOpen, projectId, rowId)) as ReturnType<
+        TerminalStreamApi['open']
+      >,
+    close: (streamId) => {
+      ipc.invoke(CHANNELS.terminalStreamClose, streamId).catch((error: unknown) => {
+        console.error('vam: terminal stream close failed:', error);
+      });
+    },
+    write: (streamId, bytes) => {
+      ipc.invoke(CHANNELS.terminalStreamWrite, streamId, bytes).catch((error: unknown) => {
+        console.error('vam: terminal stream write failed:', error);
+      });
+    },
+    onData: (streamId, listener) =>
+      createFilteredStreamListener<[string]>(ipc, CHANNELS.terminalStreamData, streamId, (chunk) =>
+        listener(chunk),
+      ),
+    onSeed: (streamId, listener) =>
+      createFilteredStreamListener<[string]>(ipc, CHANNELS.terminalStreamSeed, streamId, (seed) =>
+        listener(seed),
+      ),
+    onDown: (streamId, listener) =>
+      createFilteredStreamListener<[TerminalStreamDownEvent]>(
+        ipc,
+        CHANNELS.terminalStreamDown,
+        streamId,
+        (event) => listener(event),
+      ),
+  };
+}
+
 /** The bridge's dialog member: one ask, answered by a path or by `null`. */
 export type DialogApi = {
   chooseDirectory(): Promise<string | null>;

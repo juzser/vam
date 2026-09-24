@@ -222,6 +222,13 @@ const EN = {
     'ask the agent for shorter, clearer answers — vam types the request into the session, it never rewrites what it draws',
   'settings.behaviour.conciseOutput.on': 'on',
   'settings.behaviour.conciseOutput.off': 'off',
+  // THE STREAMING TERMINAL, BETA: a second Terminal tab, driven by xterm.js
+  // over a persistent connection instead of the shipping poll. Off by
+  // default until it has seen real use.
+  'settings.behaviour.streamingTerminal.label': 'streaming terminal (beta)',
+  'settings.behaviour.streamingTerminal.hint': 'a live xterm.js pane instead of periodic capture',
+  'settings.behaviour.streamingTerminal.on': 'on',
+  'settings.behaviour.streamingTerminal.off': 'off',
   // DESKTOP NOTIFICATIONS. The label names the thing, not the mechanism; the
   // hint names the one status it is about in the application's own phrase
   // for it ("needs you", the sidebar's word for `waiting`). The note is a

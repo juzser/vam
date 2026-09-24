@@ -45,6 +45,11 @@ import { DEFAULT_NOTIFY_WAITING, readNotifyWaiting } from './notify.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
 import {
+  DEFAULT_STREAMING_TERMINAL,
+  readStreamingTerminal,
+  setActiveStreamingTerminal,
+} from './streaming-terminal.js';
+import {
   DEFAULT_PROMPT_SUBMIT_KEY,
   type PromptSubmitKey,
   readPromptSubmitKey,
@@ -682,6 +687,19 @@ export type Prefs = {
    * (`Canvas.tsx`) is the one-way street back out to this field.
    */
   readonly filesMarkdownView: FilesMarkdownView;
+  /**
+   * WHICH TERMINAL TAB DRAWS: the shipping `capture-pane` poll, or the beta
+   * `TerminalStreamTab.tsx` over a persistent xterm.js connection
+   * (`docs/design/terminal-streaming.md`). `prefs/streaming-terminal.ts`
+   * carries the default and the store `DetailPanel.tsx` reads to choose
+   * between the two, the same `terminalFontSize` reason: `DetailPanel`
+   * carries no `prefs` prop, so the live value has to reach it as module
+   * state rather than a prop drilled down from `Canvas.tsx`.
+   *
+   * GLOBAL, like `terminalFontSize`: which implementation draws a pane is
+   * not a fact about the session in it.
+   */
+  readonly streamingTerminal: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -714,6 +732,7 @@ export const EMPTY_PREFS: Prefs = {
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
   notifyWaiting: DEFAULT_NOTIFY_WAITING,
   filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
+  streamingTerminal: DEFAULT_STREAMING_TERMINAL,
 };
 
 /**
@@ -983,6 +1002,13 @@ function parsePrefs(
     // operator who never found the old one.
     filesMarkdownView: readFilesMarkdownView(
       (parsed as { filesMarkdownView?: unknown }).filesMarkdownView,
+    ),
+    // Per field like every line above it, and normalised like `conciseOutput`:
+    // only a literal `true` is on, so a payload this vam cannot read leaves
+    // the shipping Terminal tab in place rather than switching an operator
+    // onto the beta on the strength of a hand-edited value.
+    streamingTerminal: readStreamingTerminal(
+      (parsed as { streamingTerminal?: unknown }).streamingTerminal,
     ),
   };
 }
@@ -1530,6 +1556,14 @@ export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
  *  own into a pane somebody's agent is reading. */
 export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, conciseOutput: readConciseOutput(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it: the switch can only send a boolean, but a hand-edited payload
+ *  can send anything, and only a literal `true` may switch the Terminal tab
+ *  onto the unreviewed implementation. */
+export function setStreamingTerminal(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, streamingTerminal: readStreamingTerminal(on) };
 }
 
 /** Normalised on the way in as well as on the way out, like every setter
@@ -2519,6 +2553,7 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
   setActiveNarrowViews(prefs.narrowViews);
   setActiveFilesMarkdownView(prefs.filesMarkdownView);
+  setActiveStreamingTerminal(prefs.streamingTerminal);
   /**
    * AND TWO PREFERENCES CROSS INTO MAIN, because the thing each one changes
    * happens there: `gh` is spawned by `main/sources/claude-code/source.ts`,

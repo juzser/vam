@@ -350,6 +350,68 @@ export const CHANNELS = {
    */
   terminalSwitchModel: 'vam:terminal:switch-model',
   /**
+   * OPEN the Terminal tab's STREAMING connection -- a second, persistent
+   * `tmux -C` attached directly to the session the operator is viewing, so
+   * `%output` can feed xterm.js instead of `terminalRead` polling
+   * `capture-pane` on a timer (`docs/design/terminal-streaming.md`). Resolved
+   * the SAME way `terminalRead`/`terminalSend` are, by
+   * `listVamSessions`+`targetSession`, so a stream can never attach to a
+   * session those channels would have refused -- see
+   * `terminal/stream-ipc.ts`. Answers `{ok:true, streamId, seed}` (the first
+   * screen rides this response directly) or a typed `{ok:false, reason}`,
+   * never a throw across the bridge: a refused session, an unresolvable
+   * pairing and a `tmux -V` below this feature's minimum are all facts, not
+   * exceptions.
+   */
+  terminalStreamOpen: 'vam:terminal:stream:open',
+  /**
+   * CLOSE one streaming connection opened by `terminalStreamOpen`, by its
+   * `streamId`. Idempotent -- an already-closed or unknown id is a no-op:
+   * this push-based cleanup call may race the connection's own natural
+   * teardown (the child dying on its own), the same posture
+   * `stream/register.ts`'s ref-counted unsubscribe takes, though this is not
+   * ref-counted -- one `StreamClient` per `streamId`.
+   */
+  terminalStreamClose: 'vam:terminal:stream:close',
+  /**
+   * ONE keystroke (or a paste, or an escape sequence -- whatever xterm's own
+   * `onData` handed the renderer) into the pane a streaming connection is
+   * attached to. Silently ignored for an unknown/closed `streamId`: a
+   * keystroke arriving a tick after `terminalStreamClose` is not an error.
+   * Fire-and-forget like `terminalSend`, for the identical reason -- what
+   * tmux did with it arrives as `%output` on `terminalStreamData` regardless.
+   */
+  terminalStreamWrite: 'vam:terminal:stream:write',
+  /**
+   * PUSH: decoded `%output` for one open stream, `(streamId, chunk)`. Main
+   * sends unprompted, the same shape `vam:stream:change` already uses for a
+   * push channel, keyed per stream here rather than global.
+   */
+  terminalStreamData: 'vam:terminal:stream:data',
+  /**
+   * PUSH: a fresh screen for one open stream, `(streamId, seed)` -- fired on
+   * reconnect and on tmux's own `%pause`/`%continue` flow-control
+   * notification, NEVER on the stream's initial open (whose seed already
+   * rides `terminalStreamOpen`'s own response). The renderer is expected to
+   * replace its xterm buffer wholesale on this event rather than append.
+   */
+  terminalStreamSeed: 'vam:terminal:stream:seed',
+  /**
+   * PUSH, `(streamId, event)`: this stream's connection dropped, where
+   * `event` is `StreamClient`'s own `StreamDownEvent` (`terminal/stream/
+   * client.ts`) -- `{kind:'reconnecting', attempt}` while a backed-off retry
+   * is still pending (a `terminalStreamSeed` follows once one lands), or a
+   * TERMINAL `{kind:'gave-up', reason:'max-attempts'|'session-gone'}` once
+   * this client has stopped trying for good (a review finding: the payload
+   * used to be dropped entirely, so a renderer had no way to tell the two
+   * apart -- see `StreamClient`'s own `MAX_RECONNECT_ATTEMPTS`). Purely
+   * informational either way -- nothing on this side waits for an
+   * acknowledgement -- but `gave-up` is the renderer's one signal that
+   * NOTHING further will arrive on this `streamId` until it opens a fresh
+   * one itself.
+   */
+  terminalStreamDown: 'vam:terminal:stream:down',
+  /**
    * The directory picker. Answers BARE -- a path or `null` -- never an
    * `IpcResult`: "which directory" has exactly two answers and a cancelled
    * dialog is one of them, not a failure to report in a source's words. There
