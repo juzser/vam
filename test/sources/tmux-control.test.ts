@@ -55,6 +55,21 @@ function fakeFallback(): TmuxRun & { calls: (readonly string[])[] } {
   return run;
 }
 
+/** A fake `TmuxRun` whose answer depends on the argv -- the A9 `list-
+ * clients` tests below need `list-clients` and `kill-session` told apart
+ * rather than both answered identically, the way `fakeFallback` does. */
+function fallbackAnswering(
+  answer: (argv: readonly string[]) => TmuxRunResult,
+): TmuxRun & { calls: (readonly string[])[] } {
+  const calls: (readonly string[])[] = [];
+  const run = (async (argv: readonly string[]) => {
+    calls.push(argv);
+    return answer(argv);
+  }) as TmuxRun & { calls: (readonly string[])[] };
+  run.calls = calls;
+  return run;
+}
+
 /** Let every already-queued microtask (the client's own promise chain,
  * chiefly) run before the next assertion looks at its side effects. */
 const tick = async (n = 3): Promise<void> => {
@@ -333,6 +348,10 @@ describe('createControlTmuxRunner', () => {
     void runner(LS);
     await tick();
     runner.dispose();
+    // `dispose()` now awaits `list-clients` before it kills its OWN
+    // connection too (the review fix on A9, below) -- no longer the same
+    // synchronous turn.
+    await tick();
     expect(child.killed).toBe(true);
   });
 
@@ -535,6 +554,72 @@ describe('createControlTmuxRunner', () => {
       run.dispose();
       await tick();
       expect(fallback.calls).toEqual([]);
+    });
+
+    /** A `harness()`-shaped pool, but with a fallback that answers
+     * `list-clients` and `kill-session` differently -- the three tests
+     * below all share this setup, varying only what `list-clients` says. */
+    function harnessWithListClients(listClientsAnswer: TmuxRunResult) {
+      const children: FakeChild[] = [];
+      const spawnChild = vi.fn((_binary: string, _argv: readonly string[]) => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      });
+      const fallback = fallbackAnswering((argv) =>
+        argv[0] === 'list-clients' ? listClientsAnswer : { failure: null, stdout: '', stderr: '' },
+      );
+      const run = createControlTmuxRunner('tmux', { fallback, spawnChild, now: () => 0 });
+      return { run, spawnChild, fallback, children };
+    }
+
+    it('does NOT kill vamctl when another client is still attached -- a second vam instance on the same default server', async () => {
+      // `list-clients` reporting TWO pids while this instance itself holds
+      // one live connection means at least one of them is somebody else's.
+      const { run, children, fallback } = harnessWithListClients({
+        failure: null,
+        stdout: '11111\n22222\n',
+        stderr: '',
+      });
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls.some((argv) => argv[0] === 'list-clients')).toBe(true);
+      expect(fallback.calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+    });
+
+    it('kills vamctl when list-clients reports nobody left attached', async () => {
+      const { run, children, fallback } = harnessWithListClients({
+        failure: null,
+        stdout: '',
+        stderr: '',
+      });
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls).toContainEqual(['kill-session', '-t', '=vamctl']);
+    });
+
+    it('does NOT kill vamctl when list-clients itself errors -- no such session, no server, etc.', async () => {
+      const { run, children, fallback } = harnessWithListClients({
+        failure: { message: 'no server running', code: 1, killed: false, signal: null },
+        stdout: '',
+        stderr: 'no server running',
+      });
+      const p1 = run(LS);
+      await tick();
+      children[0]?.data('%begin 1 1 1\nok\n%end 1 1 1\n');
+      await p1;
+      run.dispose();
+      await tick();
+      expect(fallback.calls.some((argv) => argv[0] === 'list-clients')).toBe(true);
+      expect(fallback.calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
     });
   });
 });

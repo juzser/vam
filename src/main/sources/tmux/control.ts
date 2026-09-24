@@ -75,7 +75,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { killSessionArgv } from './argv.js';
+import { killSessionArgv, listClientsArgv } from './argv.js';
 import {
   CONTROL_SESSION_NAME,
   type ControlBlock,
@@ -408,14 +408,81 @@ class ControlClient {
    * ever did -- left the SESSION, and with it the whole tmux SERVER if it
    * held nothing else, running forever after vam quit: a real, unbounded
    * process leak, never cleaned up by anything else in this codebase.
-   * Fire-and-forget through `#fallback` rather than THIS connection: by the
-   * time an app-quit caller reaches here the persistent child may already be
-   * dead, backed off, or mid-command, and none of those states should block
-   * or skip a kill that costs nothing to attempt on its own connection.
+   *
+   * ONLY WHEN NOBODY ELSE IS STILL ATTACHED (review fix on top of A9). The
+   * default server is shared by every vam PROCESS on the machine, not just
+   * this one -- a packaged build run alongside a dev build, or an Electron
+   * test harness launched while the operator's own app is open, would have
+   * its `vamctl` session pulled out from under it by an earlier, cruder
+   * version of this method: its own in-flight command answered with a
+   * refusal it never asked for, and a reconnect it never needed to make.
+   * `#teardown` asks `list-clients` BEFORE it kills anything at all --
+   * including this file's OWN connection -- and only kills the session when
+   * it was the last one there.
+   *
+   * The PUBLIC method stays synchronous, still: it snapshots `this.#child`
+   * and clears the field here (so a caller made right after `dispose()`
+   * sees a client with nothing connected, exactly as before), and hands the
+   * actual child object to `#teardown` to kill once it is done asking.
    */
   dispose(): void {
-    this.#child?.kill();
+    const child = this.#child;
     this.#child = null;
+    void this.#teardown(child);
+  }
+
+  /**
+   * `list-clients -t =vamctl` FIRST, and its answer FULLY AWAITED, before
+   * this method kills `child` -- THIS file's own connection -- at all. A
+   * REAL, MEASURED race is why the ordering has to be this strict, not
+   * merely "started before": `list-clients` runs as its own `execFile`
+   * child (fork+exec, then a socket round trip to the tmux server), which
+   * is slower than the OS delivering `SIGTERM` to an ALREADY-CONNECTED
+   * `tmux -C` client and that client closing its own socket in response.
+   * An earlier version of this method fired both at once (`list-clients`
+   * awaited, `child.kill()` called immediately after, in the same
+   * synchronous turn) on the theory that "captured before either runs"
+   * would be enough -- reproduced wrong on a real tmux 3.7b, two-client
+   * case: the kill signal reached tmux and dropped THIS client from
+   * `list-clients`' own bookkeeping before the `list-clients` process
+   * itself had even connected, so the query undercounted by exactly the
+   * one client this method was about to kill, and killed a session a
+   * SECOND client was still genuinely attached to. Waiting for the FULL
+   * answer before sending `child` a single byte is what actually closes
+   * that: `child` cannot disconnect from something this method has not
+   * yet told it to.
+   *
+   * An error from `list-clients` -- no such session, no server -- already
+   * means there is nothing to kill; never guessed further from stderr text,
+   * and never a reason to kill on the strength of a call that did not
+   * actually succeed. `fallback` is used rather than `child` itself: by the
+   * time an app-quit caller reaches here `child` may already be dead
+   * (`#onDown` already nulled `this.#child` before `dispose()` ever ran,
+   * and this was called with `null`), and a dead connection cannot be
+   * asked anything -- but the `list-clients`/`kill-session` pair costs
+   * nothing to attempt on their own regardless.
+   *
+   * A RESIDUAL RACE THIS DOES NOT CLOSE, named rather than hidden: a THIRD
+   * party (a session created by hand, or a genuinely new vam instance)
+   * could attach between this file's own `list-clients` answer and its
+   * `kill-session` call. Nothing short of a kill-if-last-client primitive
+   * tmux does not have could close that window; it is far narrower than
+   * the bug this fixes, and this file's own `dispose()` is already
+   * documented best-effort.
+   */
+  async #teardown(child: ControlChildProcess | null): Promise<void> {
+    const listed = await this.#fallback([
+      ...this.#prefix,
+      ...listClientsArgv(CONTROL_SESSION_NAME),
+    ]);
+    child?.kill();
+    if (listed.failure !== null) return;
+    const attached = listed.stdout.split('\n').filter((line) => line.trim() !== '').length;
+    // `child !== null` means THIS client's own connection was one of
+    // whatever `list-clients` just reported (it was still fully attached --
+    // not yet killed, see the ordering note above), so it is subtracted
+    // back out before asking whether anyone ELSE is left.
+    if (attached > (child !== null ? 1 : 0)) return;
     void this.#fallback([...this.#prefix, ...killSessionArgv(CONTROL_SESSION_NAME)]);
   }
 }
