@@ -88,6 +88,17 @@ const MODEL: CanvasModel = {
   ],
 };
 
+/** `MODEL`'s one project, with a different session list -- spelled out
+ *  rather than `{ ...MODEL.projects[0], sessions }`, which `noUncheckedIndexed
+ *  Access` types as possibly `undefined`. */
+function modelWith(sessions: readonly Session[]): CanvasModel {
+  return {
+    projects: [
+      { id: 'claude-code:blacksmith', name: 'blacksmith', source: 'claude-code', sessions },
+    ],
+  };
+}
+
 function seed(prefs: Record<string, unknown>) {
   localStorage.setItem('vam.prefs.v1', JSON.stringify(prefs));
 }
@@ -157,17 +168,10 @@ describe('the tab strip shows exactly the sessions the sidebar shows for a proje
     act(() => {
       rerender(
         <Canvas
-          model={{
-            projects: [
-              {
-                ...MODEL.projects[0],
-                sessions: [
-                  session('vam-started', { title: 'vam-started' }),
-                  session('will-turn-foreign', { title: 'will-turn-foreign' }),
-                ],
-              },
-            ],
-          }}
+          model={modelWith([
+            session('vam-started', { title: 'vam-started' }),
+            session('will-turn-foreign', { title: 'will-turn-foreign' }),
+          ])}
           source={realSource()}
         />,
       );
@@ -177,20 +181,10 @@ describe('the tab strip shows exactly the sessions the sidebar shows for a proje
     act(() => {
       rerender(
         <Canvas
-          model={{
-            projects: [
-              {
-                ...MODEL.projects[0],
-                sessions: [
-                  session('vam-started', { title: 'vam-started' }),
-                  session('will-turn-foreign', {
-                    title: 'will-turn-foreign',
-                    vamControlled: false,
-                  }),
-                ],
-              },
-            ],
-          }}
+          model={modelWith([
+            session('vam-started', { title: 'vam-started' }),
+            session('will-turn-foreign', { title: 'will-turn-foreign', vamControlled: false }),
+          ])}
           source={realSource()}
         />,
       );

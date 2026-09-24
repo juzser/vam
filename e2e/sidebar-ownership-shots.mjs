@@ -80,6 +80,13 @@
  *     sidebar's own quiet line (`SessionList.tsx`'s `[data-foreign-hidden]`)
  *     is what keeps that from reading as an empty, broken app: it names how
  *     many and why, and `Show` brings both back with no popover in between.
+ *  6. THE TAB STRIP AGREES WITH THE SIDEBAR, FOR ONE PROJECT: the operator's
+ *     later report, on the same fixture family but with the live and the
+ *     foreign sessions in the SAME project this time (`mixedOwnershipProjects`)
+ *     -- ownership hid two of three rows from the sidebar and the pane strip
+ *     drew all three as tabs anyway. `[data-session-tab]`'s count now has to
+ *     equal `[data-session-row]`'s, both at the shipped default and once the
+ *     toggle brings the foreign rows back.
  *
  * FALSIFIED BY HAND, twice, at the UNIT level (`test/canvas/Canvas.demo-
  * foreign.test.tsx`, `test/domain/session-filter.foreign.test.ts`) rather
@@ -244,6 +251,66 @@ function noServerProjects() {
       name: 'alpha',
       source: 'claude-code',
       sessions: [session('claude:a1', 'session one'), session('claude:a2', 'session two')],
+    },
+  ];
+}
+
+/**
+ * ONE PROJECT, MIXED OWNERSHIP -- unlike `ownershipProjects` above, which
+ * puts the live session and the foreign ones in two DIFFERENT projects
+ * (`claude-code:alpha` / `codex:alpha`), so a pane's tab strip (scoped by
+ * exact project id, never `projectMergeKey`) could never have drawn the
+ * foreign rows as tabs regardless of the bug this fixture exists to catch.
+ * The operator's own report needs the SAME project id: a session vam just
+ * started, alongside one still running outside vam entirely.
+ */
+function mixedOwnershipProjects() {
+  return [
+    {
+      id: 'claude-code:blacksmith',
+      name: 'blacksmith',
+      source: 'claude-code',
+      sessions: [
+        {
+          id: 'claude:vam-started',
+          title: 'vam-started',
+          epic: null,
+          branch: 'main',
+          status: 'idle',
+          runningAgents: 0,
+          activity: null,
+          age: '1m',
+          decisions: [],
+          source: 'claude-code',
+          vamControlled: true,
+        },
+        {
+          id: 'claude:elsewhere-1',
+          title: 'elsewhere-1',
+          epic: null,
+          branch: 'main',
+          status: 'idle',
+          runningAgents: 0,
+          activity: null,
+          age: '9m',
+          decisions: [],
+          source: 'claude-code',
+          vamControlled: false,
+        },
+        {
+          id: 'claude:elsewhere-2',
+          title: 'elsewhere-2',
+          epic: null,
+          branch: 'main',
+          status: 'idle',
+          runningAgents: 0,
+          activity: null,
+          age: '14m',
+          decisions: [],
+          source: 'claude-code',
+          vamControlled: false,
+        },
+      ],
     },
   ];
 }
@@ -451,6 +518,61 @@ const browser = await chromium.launch();
     `${await page.locator('[data-foreign-hidden]').count()}`,
   );
   await page.screenshot({ path: `${outDir}/sidebar-ownership-no-server-shown.png` });
+
+  await page.close();
+}
+
+// ---------------------------------------------------------------------------
+// STATE 6: the tab strip agrees with the sidebar, for the SAME project.
+//
+// The operator's report this state pins: "when I start a new project in a
+// particular repo while sessions of that repo are running elsewhere, the
+// sidebar shows only the session I just created, but the tab strip shows
+// every session from the other sources." `mixedOwnershipProjects` is that
+// scenario -- one project, one vam-controlled row and two foreign ones --
+// and the DOM fact a unit test cannot promise on its own: that the built
+// bundle's pane strip (`[data-session-tab]`) draws exactly as many tabs as
+// the sidebar draws rows (`[data-session-row]`) for that project, at the
+// shipped default AND once the operator turns `hideForeign` back off.
+// ---------------------------------------------------------------------------
+{
+  const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript((caps) => {
+    window.__ownershipCapabilities = caps;
+  }, CAPABILITIES);
+  await page.addInitScript(install, mixedOwnershipProjects());
+  await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-session-row]', { timeout: 10_000 });
+  await page.waitForSelector('[data-session-tab]', { timeout: 10_000 });
+
+  const tabCount = (p) => p.evaluate(() => document.querySelectorAll('[data-session-tab]').length);
+
+  const defaultRows = await rowCount(page);
+  const defaultTabs = await tabCount(page);
+  console.log(`  mixed-ownership default: ${defaultRows} sidebar row(s), ${defaultTabs} tab(s)`);
+  check('the foreign case: one sidebar row, hideForeign at its shipped default', defaultRows === 1, `${defaultRows}`);
+  check(
+    'and the tab strip draws exactly that many tabs -- not the two foreign ones it used to adopt',
+    defaultTabs === defaultRows,
+    `${defaultTabs} tabs for ${defaultRows} row(s)`,
+  );
+  await page.screenshot({ path: `${outDir}/sidebar-ownership-tabs-follow-filter-default.png` });
+
+  await openFilterPopover(page);
+  await page.locator('[data-origin-toggle="foreign"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length === 3, {
+    timeout: 5_000,
+  });
+  await page.waitForFunction(() => document.querySelectorAll('[data-session-tab]').length === 3, {
+    timeout: 5_000,
+  });
+  const toggledRows = await rowCount(page);
+  const toggledTabs = await tabCount(page);
+  console.log(`  mixed-ownership, hideForeign off: ${toggledRows} sidebar row(s), ${toggledTabs} tab(s)`);
+  check('the toggle brings all three rows back', toggledRows === 3, `${toggledRows}`);
+  check('and the tab strip grows to match, not just the sidebar', toggledTabs === toggledRows, `${toggledTabs}`);
+  await page.screenshot({ path: `${outDir}/sidebar-ownership-tabs-follow-filter-toggled.png` });
 
   await page.close();
 }
