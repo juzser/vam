@@ -375,6 +375,27 @@ function parseOutputLine(line: string): { paneId: string; payload: string } | nu
   return { paneId, payload };
 }
 
+/** One line of `%extended-output %<pane-id> <age> : <payload>` -- tmux's
+ * flow-control-carrying variant of `%output`, sent while a client is paused
+ * and catching up: the same pane-id/payload shape as a plain `%output`, with
+ * an extra `<age>` (and possibly other tokens) before a literal `: `
+ * separator this file does not otherwise need to read. Matched with a LAZY
+ * `.*?` up to the FIRST `: `, since the payload after it may itself contain
+ * a colon once decoded -- the metadata before the separator never does. A
+ * review finding: this event kind was previously undocumented and unhandled
+ * despite the design doc claiming otherwise; it is parsed here into the
+ * IDENTICAL `{ paneId, payload }` shape `parseOutputLine` returns, so
+ * `feedEvents` below can decode and forward it through the SAME `kind:
+ * 'output'` event -- one code path for both, in the caller and here. */
+function parseExtendedOutputLine(line: string): { paneId: string; payload: string } | null {
+  const match = /^%extended-output (%\d+) .*?: (.*)$/.exec(line);
+  if (match === null) return null;
+  const paneId = match[1];
+  const payload = match[2];
+  if (paneId === undefined || payload === undefined) return null;
+  return { paneId, payload };
+}
+
 /** One event `ControlFramer.feedEvents` can hand back -- a block (the same
  * shape `ControlBlock` always was, now tagged `kind: 'block'`), a decoded
  * `%output` notification, or any other unsolicited line this file does not
@@ -460,8 +481,10 @@ export class ControlFramer {
           this.#openHeader = line.slice('%begin '.length);
           continue;
         }
-        if (line.startsWith('%output ')) {
-          const parsed = parseOutputLine(line);
+        if (line.startsWith('%output ') || line.startsWith('%extended-output ')) {
+          const parsed = line.startsWith('%output ')
+            ? parseOutputLine(line)
+            : parseExtendedOutputLine(line);
           events.push(
             parsed === null
               ? { kind: 'other', line }

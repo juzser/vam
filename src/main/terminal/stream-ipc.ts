@@ -127,7 +127,12 @@ export function registerTerminalStreamIpc(
       });
       client.onData((chunk) => webContents.send(CHANNELS.terminalStreamData, streamId, chunk));
       client.onSeed((seed) => webContents.send(CHANNELS.terminalStreamSeed, streamId, seed));
-      client.onDown(() => webContents.send(CHANNELS.terminalStreamDown, streamId));
+      // THE EVENT RIDES ALONG NOW (a review finding: this used to be
+      // payload-free, so a renderer had no way to tell "still trying" from
+      // "gave up for good" -- see `StreamClient`'s own `StreamDownEvent`).
+      // A plain object, JSON-shaped, crosses `webContents.send`'s structured
+      // clone with no further work.
+      client.onDown((event) => webContents.send(CHANNELS.terminalStreamDown, streamId, event));
       try {
         const seed = await client.connect();
         clients.set(streamId, client);

@@ -10,7 +10,12 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RECONNECT_BACKOFF_MS } from '../../src/main/sources/tmux/control.js';
-import { type ControlChildProcess, StreamClient } from '../../src/main/terminal/stream/client.js';
+import {
+  type ControlChildProcess,
+  MAX_RECONNECT_ATTEMPTS,
+  MAX_RECONNECT_BACKOFF_MS,
+  StreamClient,
+} from '../../src/main/terminal/stream/client.js';
 
 class FakeChild extends EventEmitter implements ControlChildProcess {
   readonly written: string[] = [];
@@ -75,6 +80,18 @@ async function answerCapturePane(child: FakeChild, seed: string, time = 2): Prom
 async function connectWith(child: FakeChild, paneId = '%3', seed = 'seed'): Promise<void> {
   await answerListPanes(child, paneId);
   await answerCapturePane(child, seed);
+}
+
+/** A `%error`-closed block -- tmux's own shape for "can't find session: x",
+ * the reply this codebase's other tmux tests already use for the identical
+ * real-tmux error text (`tmux-control-protocol.test.ts`). */
+async function answerCapturePaneWithError(
+  child: FakeChild,
+  errorText: string,
+  time = 2,
+): Promise<void> {
+  child.data(`%begin ${time} ${time} 1\n${errorText}\n%error ${time} ${time} 1\n`);
+  await tick();
 }
 
 describe('StreamClient', () => {
@@ -210,5 +227,150 @@ describe('StreamClient', () => {
 
     child.data('%output %3 after-dispose\n');
     expect(received).toEqual([]);
+  });
+
+  // ── Review finding: the target must go through the SAME allowlist every
+  // other control-mode caller does before this file builds a single raw
+  // line with it (`control-protocol.ts`'s own `SAFE_TARGET_RE`). ────────────
+  describe('target validation (review finding)', () => {
+    it('refuses to attach when the target carries a `;` -- a second tmux command', async () => {
+      const { client, spawnChild } = harness('vam-a1b2c3; kill-server');
+      await expect(client.connect()).rejects.toThrow();
+      expect(spawnChild).not.toHaveBeenCalled();
+    });
+
+    it('refuses a target carrying a space or a quote the same way', async () => {
+      const { client: withSpace, spawnChild: spawnSpace } = harness('vam-a1b2c3 evil');
+      await expect(withSpace.connect()).rejects.toThrow();
+      expect(spawnSpace).not.toHaveBeenCalled();
+
+      const { client: withQuote, spawnChild: spawnQuote } = harness('vam-a1b2c3"');
+      await expect(withQuote.connect()).rejects.toThrow();
+      expect(spawnQuote).not.toHaveBeenCalled();
+    });
+
+    it('still accepts an ordinary vam session name, unaffected by the new check', async () => {
+      const { client, children } = harness('vam-atlas-a1b2c3');
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await connectWith(child, '%3', 'seed-text');
+      expect(await connecting).toBe('seed-text\n');
+    });
+  });
+
+  // ── Review finding: %extended-output (tmux's flow-control-carrying
+  // variant of %output) was undocumented-but-claimed-done; decode it the
+  // same way %output is. ─────────────────────────────────────────────────
+  it('decodes %extended-output the same way as %output, reusing the one framer', async () => {
+    const { client, children } = harness();
+    const connecting = client.connect();
+    const child = at(children, 0);
+    await connectWith(child, '%3', 'seed');
+    await connecting;
+
+    const received: string[] = [];
+    client.onData((chunk) => received.push(chunk));
+    // tmux's own shape: %extended-output %<pane> <age> <flags> : <payload>,
+    // the payload escaped the identical way %output's is.
+    child.data('%extended-output %3 120 : caught\\040up\n');
+    expect(received).toEqual(['caught up']);
+  });
+
+  // ── Review finding: an unbounded fixed-interval reconnect loop. ─────────
+  describe('reconnect backoff, cap and give-up (review finding)', () => {
+    it('grows the delay between attempts, capped, and gives up after MAX_RECONNECT_ATTEMPTS', async () => {
+      vi.useFakeTimers();
+      const { client, children, spawnChild } = harness();
+      const connecting = client.connect();
+      const first = at(children, 0);
+      await connectWith(first, '%3', 'seed');
+      await connecting;
+
+      const downEvents: unknown[] = [];
+      client.onDown((event) => downEvents.push(event));
+
+      let spawns = 1;
+      let delay = RECONNECT_BACKOFF_MS;
+      for (let attempt = 0; attempt < MAX_RECONNECT_ATTEMPTS; attempt += 1) {
+        const current = at(children, spawns - 1);
+        current.emit('exit');
+        await tick();
+        // Advancing by LESS than the expected delay must not spawn yet --
+        // this is what actually distinguishes "grows" from "stayed fixed".
+        if (delay > 1) {
+          await vi.advanceTimersByTimeAsync(delay - 1);
+          expect(spawnChild).toHaveBeenCalledTimes(spawns);
+        }
+        await vi.advanceTimersByTimeAsync(1);
+        spawns += 1;
+        expect(spawnChild).toHaveBeenCalledTimes(spawns);
+        delay = Math.min(delay * 2, MAX_RECONNECT_BACKOFF_MS);
+      }
+
+      // One more drop after the cap: no further reconnect is ever scheduled.
+      const last = at(children, spawns - 1);
+      last.emit('exit');
+      await tick();
+      await vi.advanceTimersByTimeAsync(MAX_RECONNECT_BACKOFF_MS * 10);
+      expect(spawnChild).toHaveBeenCalledTimes(spawns);
+
+      expect(downEvents.at(-1)).toEqual({ kind: 'gave-up', reason: 'max-attempts' });
+    });
+
+    it('gives up immediately, without exhausting attempts, when the session is gone', async () => {
+      vi.useFakeTimers();
+      const { client, children, spawnChild } = harness();
+      const connecting = client.connect();
+      const first = at(children, 0);
+      await connectWith(first, '%3', 'seed');
+      await connecting;
+
+      const downEvents: unknown[] = [];
+      const seeds: string[] = [];
+      client.onDown((event) => downEvents.push(event));
+      client.onSeed((seed) => seeds.push(seed));
+
+      first.emit('exit');
+      await tick();
+      await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
+      expect(spawnChild).toHaveBeenCalledTimes(2);
+      const second = at(children, 1);
+      await answerCapturePaneWithError(second, "can't find session: vam-atlas-a1b2c3");
+
+      // No reseed -- the reconnect never got a real screen.
+      expect(seeds).toEqual([]);
+      expect(downEvents.at(-1)).toEqual({ kind: 'gave-up', reason: 'session-gone' });
+
+      // And no further attempt, however long is waited -- well under
+      // MAX_RECONNECT_ATTEMPTS worth of backoff.
+      await vi.advanceTimersByTimeAsync(MAX_RECONNECT_BACKOFF_MS * 10);
+      expect(spawnChild).toHaveBeenCalledTimes(2);
+    });
+
+    it('resets the attempt count after a genuinely successful reconnect', async () => {
+      vi.useFakeTimers();
+      const { client, children, spawnChild } = harness();
+      const connecting = client.connect();
+      const first = at(children, 0);
+      await connectWith(first, '%3', 'seed');
+      await connecting;
+
+      // One failed drop, one successful reconnect.
+      first.emit('exit');
+      await tick();
+      await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
+      const second = at(children, 1);
+      await answerCapturePane(second, 'reconnect-seed', 5);
+
+      // A SECOND drop, now: if the attempt counter had not reset, this
+      // would use the SECOND backoff step (RECONNECT_BACKOFF_MS * 2) rather
+      // than the first again.
+      second.emit('exit');
+      await tick();
+      await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS - 1);
+      expect(spawnChild).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(spawnChild).toHaveBeenCalledTimes(3);
+    });
   });
 });

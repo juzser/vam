@@ -389,11 +389,18 @@ export const CHANNELS = {
    */
   terminalStreamSeed: 'vam:terminal:stream:seed',
   /**
-   * PUSH, payload-free beyond the `streamId`: this stream's connection just
-   * dropped and a reconnect attempt is pending. Purely informational -- the
-   * renderer may use it to show "reconnecting", but nothing on this side
-   * waits for an acknowledgement, and a `terminalStreamSeed` follows once the
-   * reconnect lands.
+   * PUSH, `(streamId, event)`: this stream's connection dropped, where
+   * `event` is `StreamClient`'s own `StreamDownEvent` (`terminal/stream/
+   * client.ts`) -- `{kind:'reconnecting', attempt}` while a backed-off retry
+   * is still pending (a `terminalStreamSeed` follows once one lands), or a
+   * TERMINAL `{kind:'gave-up', reason:'max-attempts'|'session-gone'}` once
+   * this client has stopped trying for good (a review finding: the payload
+   * used to be dropped entirely, so a renderer had no way to tell the two
+   * apart -- see `StreamClient`'s own `MAX_RECONNECT_ATTEMPTS`). Purely
+   * informational either way -- nothing on this side waits for an
+   * acknowledgement -- but `gave-up` is the renderer's one signal that
+   * NOTHING further will arrive on this `streamId` until it opens a fresh
+   * one itself.
    */
   terminalStreamDown: 'vam:terminal:stream:down',
   /**

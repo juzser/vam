@@ -65,7 +65,11 @@ function fakeWebContents() {
 function fakeClient(seed = 'seed-text') {
   const dataListeners: ((chunk: string) => void)[] = [];
   const seedListeners: ((seed: string) => void)[] = [];
-  const downListeners: (() => void)[] = [];
+  // `unknown`, not `StreamDownEvent`: this test file asserts the WIRING
+  // (main forwards whatever `StreamClient` hands it), not `StreamClient`'s
+  // own event shape, so it never imports that type -- `tmux-stream-
+  // client.test.ts` is where `StreamDownEvent`'s own shape is pinned.
+  const downListeners: ((event: unknown) => void)[] = [];
   const written: string[] = [];
   let disposed = false;
   const client = {
@@ -77,7 +81,7 @@ function fakeClient(seed = 'seed-text') {
       seedListeners.push(l);
       return () => {};
     },
-    onDown: (l: () => void) => {
+    onDown: (l: (event: unknown) => void) => {
       downListeners.push(l);
       return () => {};
     },
@@ -125,7 +129,7 @@ describe('registerTerminalStreamIpc', () => {
     };
     fake.dataListeners[0]?.('a chunk');
     fake.seedListeners[0]?.('a fresh seed');
-    fake.downListeners[0]?.();
+    fake.downListeners[0]?.({ kind: 'reconnecting', attempt: 1 });
 
     expect(sent).toContainEqual({
       channel: CHANNELS.terminalStreamData,
@@ -135,7 +139,13 @@ describe('registerTerminalStreamIpc', () => {
       channel: CHANNELS.terminalStreamSeed,
       args: [opened.streamId, 'a fresh seed'],
     });
-    expect(sent).toContainEqual({ channel: CHANNELS.terminalStreamDown, args: [opened.streamId] });
+    // THE EVENT ITSELF RIDES ALONG (a review finding: this used to be
+    // payload-free, so a renderer had no way to tell "still trying" apart
+    // from "gave up for good").
+    expect(sent).toContainEqual({
+      channel: CHANNELS.terminalStreamDown,
+      args: [opened.streamId, { kind: 'reconnecting', attempt: 1 }],
+    });
   });
 
   it('write decodes the bridged Uint8Array back to text and forwards it', async () => {

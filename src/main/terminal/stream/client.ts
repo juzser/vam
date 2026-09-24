@@ -28,6 +28,27 @@
  * program's own redraw for its new size simply arrives as ordinary `%output`
  * on this already-open connection. Nobody should re-add `refresh-client -C`
  * here without re-reading why it was left out.
+ *
+ * ── THE TARGET IS VALIDATED, NOT TRUSTED (a review finding) ────────────────
+ * Every other control-mode caller in this codebase builds its line through
+ * `control-protocol.ts`'s `encodeSegment`, which refuses (falls back to a
+ * real spawn) anything that does not match `SAFE_TARGET_RE`. THIS file does
+ * not go through that function at all -- it is an ATTACHED connection, not a
+ * `TmuxRun` call -- so nothing stopped `#target` from being interpolated
+ * straight into a hand-built control-mode line. In production `#target`
+ * always comes from `targetSession` (`terminal/pane.ts`), which only ever
+ * returns a name `listVamSessions` read off a REAL tmux `list-sessions`, and
+ * every name vam itself creates already passes `vamSessionName`'s own
+ * `UNSAFE_NAME` filter -- so this was not reachable through vam's own UI.
+ * It is still fixed here: tmux's control-mode line grammar performs
+ * shell-like expansion (`control-protocol.ts`'s own module note), so a
+ * session name carrying a `;`, a quote or a space -- however it got there,
+ * including a session an operator created by hand outside vam and then
+ * tagged to look like one of vam's own -- could inject a second command
+ * onto a line this file writes verbatim. `#targetValid` is checked ONCE, in
+ * `connect()`, before anything is ever spawned; every other method that
+ * builds a line only ever runs downstream of a successful `connect()`, so
+ * one check at that single entry point covers the whole class.
  */
 
 import { StringDecoder } from 'node:string_decoder';
@@ -41,22 +62,62 @@ import {
   ControlFramer,
   type ControlFramerEvent,
   hexBytes,
+  SAFE_TARGET_RE,
 } from '../../sources/tmux/control-protocol.js';
+import { NO_SESSION } from '../../sources/tmux/spawn.js';
 
 export type { ControlChildProcess, SpawnControlChild } from '../../sources/tmux/control.js';
 
 /** `=<name>:` -- the session target, exactly `argv.ts`'s own `target()`. */
 const paneTarget = (name: string): string => `=${name}:`;
 
+/**
+ * How many consecutive failed reconnect attempts this file makes before it
+ * gives up on a dropped connection entirely (a review finding: the loop was
+ * unbounded). Five, the same order of magnitude `control.ts`'s own
+ * `CONTROL_TIMEOUT_MS`/`RECONNECT_BACKOFF_MS` pair picks its numbers at --
+ * enough to ride out a brief blip (the operator's laptop sleeping for a few
+ * seconds, a loaded machine) without retrying forever against a server that
+ * is genuinely gone. Once given up, THIS `StreamClient` instance stays down
+ * for good; `stream-ipc.ts` mints a brand new one -- with its own fresh
+ * attempt counter -- the next time the renderer's own visibility-driven
+ * reconnect (`TerminalStreamTab.tsx`) opens a stream again.
+ */
+export const MAX_RECONNECT_ATTEMPTS = 5;
+
+/**
+ * The ceiling the exponential backoff (`RECONNECT_BACKOFF_MS * 2^attempt`)
+ * is clamped to, so the LAST couple of attempts before giving up do not
+ * each wait minutes. Eight times the base backoff -- generous headroom
+ * over a laptop waking from sleep, short of making the operator wait
+ * through a full minute before the pane visibly gives up.
+ */
+export const MAX_RECONNECT_BACKOFF_MS = RECONNECT_BACKOFF_MS * 8;
+
+/** What `onDown` hands its listeners -- a transient drop this file is still
+ * trying to recover from, or a permanent give-up and why. */
+export type StreamDownEvent =
+  | { readonly kind: 'reconnecting'; readonly attempt: number }
+  | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
+
 export type StreamClientOptions = {
   readonly binary?: string;
   readonly prefix: readonly string[];
-  /** The resolved tmux session name -- see `terminal/pane.ts:targetSession`. */
+  /** The resolved tmux session name -- see `terminal/pane.ts:targetSession`.
+   * Validated against `SAFE_TARGET_RE` before this file ever spawns
+   * anything -- see the module header. */
   readonly target: string;
   readonly spawnChild?: SpawnControlChild;
 };
 
-type PendingBlock = { readonly resolve: (body: string) => void };
+/** One control-mode block reply -- `ok` carries the SAME distinction
+ * `ControlBlock` always has (a `%end` vs a `%error`), which the reconnect
+ * logic below reads to tell "the session is gone" (a real `%error` body)
+ * apart from "the connection dropped again mid-reconnect" (flushed with an
+ * empty body by `#handleDown`, which already owns rescheduling for that
+ * case -- see `#reconnect`'s own note). */
+type BlockResult = { readonly ok: boolean; readonly body: string };
+type PendingBlock = { readonly resolve: (result: BlockResult) => void };
 
 /**
  * One connection, attached to the session's window, for as long as the
@@ -75,9 +136,24 @@ export class StreamClient {
   #blockQueue: PendingBlock[] = [];
   #dataListeners = new Set<(chunk: string) => void>();
   #seedListeners = new Set<(seed: string) => void>();
-  #downListeners = new Set<() => void>();
+  #downListeners = new Set<(event: StreamDownEvent) => void>();
   #disposed = false;
   #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  /** How many reconnect attempts have been scheduled in a row since the
+   * last SUCCESSFUL (re)connection -- drives the exponential backoff and
+   * the `MAX_RECONNECT_ATTEMPTS` cutoff (a review finding: this loop used
+   * to be unbounded, fixed-interval). Reset to `0` on every successful
+   * reseed, whether the initial `connect()` or a later `#reconnect()`. */
+  #reconnectAttempts = 0;
+  /** `true` once this client has given up reconnecting for good (either
+   * `MAX_RECONNECT_ATTEMPTS` was reached, or a reconnect attempt learned
+   * the session itself is gone) -- from here on this instance is inert:
+   * no more spawns, no more `onDown` events. A fresh `StreamClient` (a
+   * fresh `open()` from the renderer) is the only way back. */
+  #givenUp = false;
+  /** `true` once `#target` failed `SAFE_TARGET_RE` -- checked once, in
+   * `connect()`, before anything is ever spawned (module header). */
+  #targetValid: boolean;
   /** `false` until `capture-pane`'s own reply has landed for the CURRENT
    * connection. `%output` for the resolved pane is dropped while this is
    * `false`: it describes activity already folded into the seed text. */
@@ -94,6 +170,7 @@ export class StreamClient {
     this.#prefix = options.prefix;
     this.#target = options.target;
     this.#spawnChild = options.spawnChild ?? spawnRealControlChild;
+    this.#targetValid = SAFE_TARGET_RE.test(paneTarget(this.#target));
   }
 
   get paneId(): string | null {
@@ -106,13 +183,30 @@ export class StreamClient {
    * what `xterm.write()` wants).
    */
   async connect(): Promise<string> {
+    // THE ONE VALIDATION GATE (module header) -- refused BEFORE anything is
+    // spawned, so an unsafe target never reaches tmux's control-mode line
+    // parser at all.
+    if (!this.#targetValid) {
+      throw new Error(
+        `StreamClient refuses to attach: "${this.#target}" is not a safe tmux session target`,
+      );
+    }
     const child = this.#spawn();
     this.#wire(child);
     const panes = await this.#send(`list-panes -t ${paneTarget(this.#target)} -F "#{pane_id}"`);
-    const paneId = panes.split('\n').find((line) => line.length > 0);
+    if (!panes.ok) {
+      throw new Error(`could not list panes for ${this.#target}: ${panes.body.trim()}`);
+    }
+    const paneId = panes.body.split('\n').find((line) => line.length > 0);
     if (paneId === undefined) throw new Error(`no panes for ${this.#target}`);
     this.#paneId = paneId;
-    return this.#reseed();
+    const seed = await this.#reseed();
+    if (!seed.ok) {
+      throw new Error(
+        `could not capture the initial screen for ${this.#target}: ${seed.body.trim()}`,
+      );
+    }
+    return seed.body;
   }
 
   /** Decoded `%output` for this client's own pane. Returns an unsubscribe. */
@@ -129,10 +223,13 @@ export class StreamClient {
     return () => this.#seedListeners.delete(listener);
   }
 
-  /** Fired whenever the connection drops, before this client starts trying
-   * to reconnect -- so the IPC layer can tell the renderer "reconnecting".
+  /** Fired whenever the connection drops (a `reconnecting` event, before
+   * this client tries again) and once more, finally, if it ever gives up
+   * for good (a `gave-up` event, `MAX_RECONNECT_ATTEMPTS` reached or the
+   * session found to be gone) -- so the IPC layer, and through it the
+   * renderer, can show something truer than a silently frozen pane.
    * Returns an unsubscribe. */
-  onDown(listener: () => void): () => void {
+  onDown(listener: (event: StreamDownEvent) => void): () => void {
     this.#downListeners.add(listener);
     return () => this.#downListeners.delete(listener);
   }
@@ -191,11 +288,13 @@ export class StreamClient {
   /** A fresh `capture-pane` for the resolved pane, delivered as `%output`
    * can be trusted from again -- used by the initial `connect()` (whose
    * result IS the first seed) and by every later reseed (`%continue`,
-   * reconnect), which instead push through `onSeed`. */
-  async #reseed(): Promise<string> {
-    const seed = await this.#send(`capture-pane -p -e -J -t ${paneTarget(this.#target)}`);
-    this.#seeded = true;
-    return seed;
+   * reconnect), which instead push through `onSeed`. `ok` is carried
+   * through unchanged: a `%error` here (the session is gone) must not be
+   * mistaken for a real screen by a caller that only reads `.body`. */
+  async #reseed(): Promise<BlockResult> {
+    const result = await this.#send(`capture-pane -p -e -J -t ${paneTarget(this.#target)}`);
+    if (result.ok) this.#seeded = true;
+    return result;
   }
 
   #write(line: string): void {
@@ -207,11 +306,11 @@ export class StreamClient {
     }
   }
 
-  /** One command, awaiting its `%begin`/`%end` block in order -- a FIFO
-   * queue, since more than one of these can be in flight before the first
-   * `%output` can arrive at all. */
-  #send(line: string): Promise<string> {
-    return new Promise<string>((resolve) => {
+  /** One command, awaiting its `%begin`/`%end`/`%error` block in order -- a
+   * FIFO queue, since more than one of these can be in flight before the
+   * first `%output` can arrive at all. */
+  #send(line: string): Promise<BlockResult> {
+    return new Promise<BlockResult>((resolve) => {
       this.#blockQueue.push({ resolve });
       this.#write(line);
     });
@@ -232,7 +331,7 @@ export class StreamClient {
       // life it arrives, never paired with a command this file wrote.
       if (!event.reply) return;
       const pending = this.#blockQueue.shift();
-      pending?.resolve(event.body);
+      pending?.resolve({ ok: event.ok, body: event.body });
       return;
     }
     if (event.kind === 'output') {
@@ -244,7 +343,17 @@ export class StreamClient {
     // and the two this file DOES act on: %pause/%continue (%unpause is
     // tmux's alternate spelling; coded for defensively since this was not
     // independently verified against a real tmux's exact wire text for this
-    // task -- see the module header).
+    // task -- see the module header). `%extended-output` is NOT handled
+    // here: `control-protocol.ts`'s `feedEvents()` already decodes it into
+    // the SAME `kind: 'output'` event `%output` produces (a review finding
+    // -- this file used to claim that handling in the design doc without
+    // actually doing it), so it rides the branch above, with the identical
+    // pane-id/seeded/paused gating. Dropping it while `#paused` is
+    // deliberate, not an oversight: this file's own flow-control answer is
+    // "trust nothing printed during a pause, reseed on `%continue`" rather
+    // than reconstructing the gap from `%extended-output`'s age-tagged
+    // chunks, and that policy should apply uniformly to every shape of pane
+    // output, not just the plain one.
     this.#handlePauseOrContinue(event.line);
   }
 
@@ -260,23 +369,56 @@ export class StreamClient {
       // RESEED rather than trust nothing was missed while paused -- `%output`
       // that arrived during the pause was dropped above (see the module
       // header), so a fresh `capture-pane` is the only way to know the
-      // screen is caught up.
-      void this.#reseed().then((seed) => {
-        for (const listener of this.#seedListeners) listener(seed);
+      // screen is caught up. A failed reseed here (the session vanished
+      // between the pause and the resume) is left for the NEXT drop to
+      // discover through the ordinary reconnect path -- rare enough
+      // (`%continue` implies the connection was never lost) not to earn its
+      // own give-up branch.
+      void this.#reseed().then((result) => {
+        if (!result.ok) return;
+        for (const listener of this.#seedListeners) listener(result.body);
       });
     }
   }
 
   #handleDown(): void {
     this.#child = null;
-    for (const pending of this.#blockQueue.splice(0)) pending.resolve('');
-    if (this.#disposed) return;
-    for (const listener of this.#downListeners) listener();
+    for (const pending of this.#blockQueue.splice(0)) pending.resolve({ ok: false, body: '' });
+    if (this.#disposed || this.#givenUp) return;
+    // THE CAP (a review finding: this loop was unbounded). Checked BEFORE
+    // scheduling anything: reaching the cap is a permanent state change,
+    // never one more `reconnecting` tick.
+    if (this.#reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this.#giveUp('max-attempts');
+      return;
+    }
+    const attempt = this.#reconnectAttempts;
+    this.#reconnectAttempts += 1;
+    for (const listener of this.#downListeners) {
+      listener({ kind: 'reconnecting', attempt: this.#reconnectAttempts });
+    }
+    // EXPONENTIAL, CAPPED (a review finding: this used to be one fixed
+    // `RECONNECT_BACKOFF_MS` forever). `attempt` (pre-increment, `0` on the
+    // very first drop) keeps the FIRST wait exactly `RECONNECT_BACKOFF_MS`,
+    // unchanged from before this fix -- only the SECOND and later attempts
+    // back off further.
+    const delay = Math.min(RECONNECT_BACKOFF_MS * 2 ** attempt, MAX_RECONNECT_BACKOFF_MS);
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = undefined;
-      if (this.#disposed) return;
+      if (this.#disposed || this.#givenUp) return;
       void this.#reconnect();
-    }, RECONNECT_BACKOFF_MS);
+    }, delay);
+  }
+
+  /** Permanent: no more spawns, no more scheduled attempts, from here on.
+   * Cancels whatever timer `#handleDown` may already have set (relevant
+   * only for the `session-gone` path below, discovered from a REPLY rather
+   * than another drop) and tells `onDown`'s listeners plainly why. */
+  #giveUp(reason: 'max-attempts' | 'session-gone'): void {
+    this.#givenUp = true;
+    if (this.#reconnectTimer !== undefined) clearTimeout(this.#reconnectTimer);
+    this.#reconnectTimer = undefined;
+    for (const listener of this.#downListeners) listener({ kind: 'gave-up', reason });
   }
 
   /**
@@ -287,12 +429,46 @@ export class StreamClient {
    * it, so there is nothing to resubmit (design doc's own Risks section;
    * `control.ts`'s A2 note on why a mutating command must never be blindly
    * re-run applies here for the identical reason).
+   *
+   * A FAILED reseed here splits three ways (a review finding on the
+   * unbounded loop, closed together with the cap above).
+   *
+   * AN EMPTY body means the reply was synthesised by `#handleDown`'s own
+   * queue-flush (`#wire`'s new child died again before replying at all) --
+   * that `#handleDown` call has ALREADY run (a child's `'exit'`/`'error'`
+   * fires before this `await` resumes) and already decided whether to
+   * schedule the next attempt or give up; nothing further happens here, or
+   * that decision would be double-made.
+   *
+   * A NON-EMPTY body means the connection stayed up long enough to ask and
+   * tmux actually answered `%error` -- this attempt's own child is still
+   * alive and is killed here either way, since neither branch below reuses
+   * it. If the text matches `NO_SESSION` ("can't find session/pane/
+   * window"), the session itself is gone and this gives up FOR GOOD,
+   * immediately, never spending the remaining attempts on a server that
+   * will never answer differently. Any OTHER real error text is treated
+   * as "try again" -- `#handleDown` is called explicitly (nothing else
+   * would, since this child never actually died) to run the same
+   * cap/backoff decision an ordinary connection drop would.
    */
   async #reconnect(): Promise<void> {
     const child = this.#spawn();
     this.#wire(child);
-    const seed = await this.#reseed();
-    if (this.#disposed) return;
-    for (const listener of this.#seedListeners) listener(seed);
+    const result = await this.#reseed();
+    if (this.#disposed || this.#givenUp) return;
+    if (!result.ok) {
+      if (result.body === '') return;
+      const stillCurrent = this.#child === child;
+      if (stillCurrent) this.#child = null;
+      child.kill();
+      if (NO_SESSION.test(result.body)) {
+        this.#giveUp('session-gone');
+      } else if (stillCurrent) {
+        this.#handleDown();
+      }
+      return;
+    }
+    this.#reconnectAttempts = 0;
+    for (const listener of this.#seedListeners) listener(result.body);
   }
 }
