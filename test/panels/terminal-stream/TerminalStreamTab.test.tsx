@@ -329,3 +329,68 @@ describe('mounted with a bridge', () => {
     expect(disposeCalls).toHaveLength(1);
   });
 });
+
+describe('visibility-driven connect/disconnect', () => {
+  it('closes the stream when the window is hidden and opens a fresh one, reseeded, when it returns', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    let openCount = 0;
+    const { close } = withBridge({
+      open: async () => {
+        openCount += 1;
+        return { ok: true, streamId: `stream-${openCount}`, seed: `seed-${openCount}` };
+      },
+    });
+    try {
+      visibility.mockReturnValue('visible');
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(openCount).toBe(1);
+      expect(writeCalls).toContain('seed-1');
+      // THE SAME `Terminal` INSTANCE, not a recreated one -- this component's
+      // own choice to keep it alive across hide/show, documented at the
+      // effect.
+      const termBeforeHide = lastTerm;
+
+      visibility.mockReturnValue('hidden');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(close).toHaveBeenCalledWith('stream-1');
+      // No dispose: the instance survives, only the stream closed.
+      expect(disposeCalls).toHaveLength(0);
+
+      visibility.mockReturnValue('visible');
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(openCount).toBe(2);
+      // NEVER a resume of the old streamId -- a brand new one.
+      expect(writeCalls).toContain('seed-2');
+      expect(lastTerm).toBe(termBeforeHide);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('does not connect at mount while the window starts hidden', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get');
+    const openSpy = vi.fn(async () => ({ ok: true as const, streamId: 's1', seed: 'x' }));
+    withBridge({ open: openSpy });
+    try {
+      visibility.mockReturnValue('hidden');
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(openSpy).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+});

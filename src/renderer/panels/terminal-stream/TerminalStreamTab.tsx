@@ -2,13 +2,13 @@
  * The Terminal tab's STREAMING half: xterm.js over `window.api.terminalStream`
  * instead of `TerminalTab.tsx`'s `capture-pane` poll.
  *
- * MINIMAL CORE ONLY, for this pass (`docs/design/terminal-streaming.md`):
- * open, seed, live data, typed input, resize-driven refit and a theme/font
- * that tracks the shared prefs stores. Insert/select-mode marks, scrollback
- * chords, visibility-driven reconnect, paste refusal and IME composition are
- * a later task's scope, not this one's — this component's lifecycle is
- * exactly React's own mount/unmount, driven by `DetailPanel`'s tab switch,
- * with nothing else deciding when the stream opens or closes.
+ * PARITY PASS (`docs/design/terminal-streaming.md`, task-breakdown items
+ * 4-6): open, seed, live data, typed input, resize-driven refit, a
+ * theme/font that tracks the shared prefs stores, insert/select-mode marks,
+ * scrollback chords and visibility-driven connect/disconnect. Paste refusal
+ * and IME composition are covered separately (see this file's own commits).
+ * The `Terminal` instance's lifecycle is React's mount/unmount; the STREAM's
+ * lifecycle is additionally gated on `document.visibilityState`, below.
  *
  * RESIZE IS NOT PART OF THE STREAM PROTOCOL. The EXISTING
  * `window.api.terminal.resize` channel (the one `TerminalTab.tsx` already
@@ -95,25 +95,59 @@ export function TerminalStreamTab(props: {
       return;
     }
     const container = containerRef.current;
+    // NARROWED ONCE, HELD BY THE FUNCTIONS BELOW. `teardownStream`/`connect`
+    // are function DECLARATIONS, and TypeScript does not carry a narrowing
+    // of an outer `const`/parameter across a function boundary -- these two
+    // locals are what let `openBridge.open`/`.close` type-check without
+    // reaching for a non-null assertion.
+    const openBridge = bridge;
+    const openProjectId = projectId;
     let cancelled = false;
     let unsubscribeData: (() => void) | undefined;
     let unsubscribeSeed: (() => void) | undefined;
     let resizeObserver: ResizeObserver | undefined;
     let frame: number | undefined;
 
-    setRefusal(null);
-    bridge
-      .open(projectId, rowId)
-      .then((result) => {
-        if (cancelled) return;
-        if (!result.ok) {
-          setRefusal(result.reason);
-          return;
-        }
-        const { streamId } = result;
-        streamIdRef.current = streamId;
+    // THE RESOURCE LIVES WHILE MOUNTED **AND** VISIBLE. A hidden-but-mounted
+    // pane closes its stream outright (design doc, "Control-client lifetime
+    // per view") rather than leaving a `tmux -C` child running for a window
+    // nobody can see; becoming visible again always opens a FRESH stream --
+    // never a resume of the old `streamId`, which `StreamClient` cannot
+    // resume anyway -- and reseeds, since a hidden pane's screen may be
+    // stale and there is no cheap way to know it is not (mirrors
+    // `StreamClient`'s own reconnect posture).
+    //
+    // THE `Terminal` INSTANCE ITSELF IS KEPT ACROSS A HIDE/SHOW CYCLE,
+    // deliberately, rather than disposed and recreated: only the stream
+    // (the open connection, its data/seed subscriptions) is torn down and
+    // rebuilt. Disposing xterm too would also drop its scrollback and
+    // force a full re-measure for no benefit -- reseeding already replaces
+    // everything the operator can see, and the keyboard/resize wiring below
+    // is set up once and stays valid for the instance's whole life.
+    function teardownStream() {
+      unsubscribeData?.();
+      unsubscribeSeed?.();
+      unsubscribeData = undefined;
+      unsubscribeSeed = undefined;
+      const streamId = streamIdRef.current;
+      streamIdRef.current = null;
+      if (streamId !== null) openBridge.close(streamId);
+    }
 
-        const term = new Terminal({
+    async function connect() {
+      setRefusal(null);
+      const result = await openBridge.open(openProjectId, rowId);
+      if (cancelled) return;
+      if (!result.ok) {
+        setRefusal(result.reason);
+        return;
+      }
+      const { streamId } = result;
+      streamIdRef.current = streamId;
+
+      let term = termRef.current;
+      if (term === null) {
+        term = new Terminal({
           theme: mapScheme(activeTerminalScheme()),
           fontSize: activeTerminalFontSize(),
           scrollback: 5000,
@@ -127,63 +161,93 @@ export function TerminalStreamTab(props: {
         // the first `data-insert-stop` inside the nearest `data-insert-scope`
         // (the container, marked below) and calls `.focus()` on it -- for
         // every other pane that is an element rendered in JSX; xterm.js
-        // creates its own `<textarea>` inside `container` on `open()`, so the
-        // mark has to be set imperatively on the element it actually gives
-        // back rather than rendered.
+        // creates its own `<textarea>` inside `container` on `open()`, so
+        // the mark has to be set imperatively on the element it actually
+        // gives back rather than rendered.
         term.textarea?.setAttribute(INSERT_STOP, '');
         // `false` STOPS THE KEY REACHING XTERM'S OWN HANDLING (and so its
         // `onData`) -- checked BEFORE that handling, exactly where
         // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`
         // for everything else, including keyup, so ordinary typing is
         // unaffected.
-        term.attachCustomKeyEventHandler((event) => {
+        const liveTerm = term;
+        liveTerm.attachCustomKeyEventHandler((event) => {
           if (event.type !== 'keydown' || !event.shiftKey || !SCROLL_CHORD_KEYS.has(event.key)) {
             return true;
           }
-          if (event.key === 'PageUp') term.scrollPages(-1);
-          else if (event.key === 'PageDown') term.scrollPages(1);
-          else if (event.key === 'Home') term.scrollToTop();
-          else term.scrollToBottom();
+          if (event.key === 'PageUp') liveTerm.scrollPages(-1);
+          else if (event.key === 'PageDown') liveTerm.scrollPages(1);
+          else if (event.key === 'Home') liveTerm.scrollToTop();
+          else liveTerm.scrollToBottom();
           return false;
         });
-        term.write(result.seed);
-        fit.fit();
+        // WRITES ALWAYS TARGET THE CURRENT STREAM, read from the ref at
+        // call time rather than closed over here -- this handler is wired
+        // ONCE for the instance's whole life, but `streamIdRef` changes on
+        // every reconnect. `null` (hidden, disconnected) drops the
+        // keystroke rather than sending it nowhere.
+        liveTerm.onData((text) => {
+          const currentStreamId = streamIdRef.current;
+          if (currentStreamId !== null) {
+            openBridge.write(currentStreamId, new TextEncoder().encode(text));
+          }
+        });
         termRef.current = term;
         fitRef.current = fit;
-        window.api?.terminal?.resize(projectId, term.cols, term.rows, rowId);
-
-        term.onData((text) => bridge.write(streamId, new TextEncoder().encode(text)));
-        unsubscribeData = bridge.onData(streamId, (chunk) => term.write(chunk));
-        unsubscribeSeed = bridge.onSeed(streamId, (seed) => {
-          term.reset();
-          term.write(seed);
-        });
-
         resizeObserver = new ResizeObserver(() => {
           if (frame !== undefined) cancelAnimationFrame(frame);
           frame = requestAnimationFrame(() => {
             fit.fit();
-            window.api?.terminal?.resize(projectId, term.cols, term.rows, rowId);
+            const current = termRef.current;
+            if (current !== null) {
+              window.api?.terminal?.resize(openProjectId, current.cols, current.rows, rowId);
+            }
           });
         });
         resizeObserver.observe(container);
-      })
-      .catch((error: unknown) => {
+      } else {
+        // A RECONNECT, NOT A FIRST CONNECT: always reseed, on the same
+        // "assume nothing was missed" posture the design doc names for
+        // `StreamClient`'s own reconnect.
+        term.reset();
+      }
+      term.write(result.seed);
+      fitRef.current?.fit();
+      window.api?.terminal?.resize(openProjectId, term.cols, term.rows, rowId);
+
+      unsubscribeData = openBridge.onData(streamId, (chunk) => term?.write(chunk));
+      unsubscribeSeed = openBridge.onSeed(streamId, (seed) => {
+        term?.reset();
+        term?.write(seed);
+      });
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        teardownStream();
+      } else {
+        void connect().catch((error: unknown) => {
+          console.error('vam: terminal stream reconnect failed:', error);
+        });
+      }
+    };
+
+    if (document.visibilityState !== 'hidden') {
+      connect().catch((error: unknown) => {
         console.error('vam: terminal stream open failed:', error);
       });
+    }
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelled = true;
-      unsubscribeData?.();
-      unsubscribeSeed?.();
+      document.removeEventListener('visibilitychange', onVisibility);
+      teardownStream();
       resizeObserver?.disconnect();
       if (frame !== undefined) cancelAnimationFrame(frame);
-      const streamId = streamIdRef.current;
-      if (streamId !== null) bridge.close(streamId);
       termRef.current?.dispose();
       termRef.current = null;
       fitRef.current = null;
-      streamIdRef.current = null;
     };
   }, [bridge, projectId, rowId]);
 
