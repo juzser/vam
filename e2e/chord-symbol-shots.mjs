@@ -375,6 +375,81 @@ for (const each of PLATFORMS) {
     console.log(`${outDir}/chord-symbols-settings-${each.name}.png`);
   }
 
+  /* ── TWO MORE TIGHT SITES, NOW THAT `ChordGlyphs` PAINTS FLAT ────────── */
+  //
+  // The Send key option's look replaced #468's enlarged-modifier one
+  // (`ShortcutTip.tsx`'s `ChordGlyphs`), and a shrink is the direction that
+  // never clips — but "never" is a claim, not a measurement, and the sidebar
+  // footer and a command-palette row are both a control sharing its line
+  // with a label rather than a box with room to spare (`ShortcutTip.tsx`'s
+  // own distinction). A zero-size box here is a chord painted nowhere; a box
+  // wider than its row is one running into the label beside it.
+  await page.keyboard.press('Escape');
+  await settle(
+    page,
+    () => document.querySelector('[data-settings-overlay]') === null,
+    `${each.name}: settings closes again`,
+  );
+
+  const footer = await page.evaluate(() => {
+    const button = document.querySelector('[data-sidebar-add]');
+    const chip = button?.querySelector('[data-inline-chord]');
+    if (button === null || chip === null || button === undefined || chip === undefined) {
+      return null;
+    }
+    const buttonBox = button.getBoundingClientRect();
+    const chipBox = chip.getBoundingClientRect();
+    return {
+      text: chip.textContent,
+      painted: chipBox.width > 0 && chipBox.height > 0,
+      // The chip has to be INSIDE the button it shares a line with, not
+      // spilling past its right edge into whatever sits beside the strip.
+      insideButton: chipBox.right <= buttonBox.right + 0.5,
+    };
+  });
+  check(
+    `${each.name}: the sidebar footer's chord chip paints and fits its row`,
+    footer !== null && footer.painted && footer.insideButton,
+    JSON.stringify(footer),
+  );
+
+  await page.keyboard.press('Meta+k');
+  const paletteOpen = await settle(
+    page,
+    () => document.querySelector('[data-command-palette]') !== null,
+    `${each.name}: the command palette opens`,
+  );
+  if (paletteOpen) {
+    // Sessions is the default half of VS Code's own split (the operator's
+    // ask: "searching sessions has no prefix; searching actions starts with
+    // `/`") -- the settings row with its bound chord lives in the OTHER
+    // half.
+    await page.keyboard.type('/');
+    await page.waitForSelector('[data-command-palette][data-palette-mode="actions"]', {
+      timeout: 5_000,
+    });
+    await page.waitForSelector('[cmdk-item]', { timeout: 5_000 });
+    const row = await page.evaluate(() => {
+      const items = [...document.querySelectorAll('[data-command-palette] [cmdk-item]')];
+      const settingsItem = items.find((item) => /^settings/i.test(item.textContent ?? ''));
+      const chip = settingsItem?.querySelector('span:last-child') ?? null;
+      if (settingsItem === undefined || chip === null) return null;
+      const rowBox = settingsItem.getBoundingClientRect();
+      const chipBox = chip.getBoundingClientRect();
+      return {
+        text: chip.textContent,
+        painted: chipBox.width > 0 && chipBox.height > 0,
+        insideRow: chipBox.right <= rowBox.right + 0.5 && chipBox.bottom <= rowBox.bottom + 0.5,
+      };
+    });
+    check(
+      `${each.name}: the palette's settings row prints its chord and fits the row`,
+      row !== null && row.painted && row.insideRow,
+      JSON.stringify(row),
+    );
+    await page.keyboard.press('Escape');
+  }
+
   await page.close();
 }
 
