@@ -2264,6 +2264,22 @@ describe('a view is reported when it is PICKED, never from a render', () => {
   });
 
   /**
+   * THE OPERATOR'S ASK: "change the Agents view icon to a robot." The phone's
+   * own icon row (`PhoneShell.tsx`'s `VIEW_ICON`) already drew `Bot` for this
+   * view; the desktop corner overlay drew `Users` instead, the same
+   * "not-yet-a-robot" placeholder lucide ships for a person icon. Pinned
+   * here so the two shells cannot drift apart again — a class assertion,
+   * not a snapshot, because `lucide-bot`/`lucide-users` is the one thing
+   * `aria-label` ("Agents view") does not tell a sighted operator apart.
+   */
+  it('draws the Agents view as a robot, matching the phone’s own icon', () => {
+    draw({ paneFocused: true });
+    const icon = document.querySelector('[data-view="agents"] svg');
+    expect(icon?.getAttribute('class')).toContain('lucide-bot');
+    expect(icon?.getAttribute('class')).not.toContain('lucide-users');
+  });
+
+  /**
    * ONE report per ASK, and the ask is the object. `tabRequest` is how
    * `PhoneShell`'s icon row moves the pane, and it does not reset to null --
    * so a report that fired on every render would re-assert a view the

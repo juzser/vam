@@ -68,6 +68,7 @@
 
 import {
   ArrowUp,
+  Bot,
   Box,
   Check,
   ChevronDown,
@@ -90,7 +91,6 @@ import {
   Sparkles,
   SquareTerminal,
   TriangleAlert,
-  Users,
   X,
 } from 'lucide-react';
 import {
@@ -1285,12 +1285,17 @@ function ModeGlyph({ mode }: { readonly mode: Mode }) {
   );
 }
 
-/** One glyph per view — chosen for what each shows, not decoration. */
+/**
+ * One glyph per view — chosen for what each shows, not decoration. `Agents`
+ * draws `Bot`, matching `phone/PhoneShell.tsx`'s own `VIEW_ICON` — the
+ * operator's ask, and the two shells drifting apart otherwise (this one
+ * drew `Users`, lucide's generic person glyph, for the same view).
+ */
 const VIEW_ICON: Readonly<Record<Tab, typeof MessageSquare>> = {
   Response: MessageSquare,
   PRs: GitPullRequest,
   Terminal: SquareTerminal,
-  Agents: Users,
+  Agents: Bot,
   Files: FileText,
 };
 
