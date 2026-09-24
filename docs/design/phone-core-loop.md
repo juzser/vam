@@ -498,3 +498,202 @@ brief reopens that scope.
    (b) the advisory `text-meta` risk suffix on options matching the
    literal keyword set. Ship together only if the planner approves both;
    otherwise split into 4a/4b so one can land without the other.
+
+## 4. SHIPPED
+
+Landed as five commits on `vam/phone-core-loop` (cut from
+`origin/smith/vam/0.2-tab-shell` at `540b52f6`, which already carries PR
+#474's phone fixes): `e39bceb9` (this doc), `b7268de4` (PR 1, composer
+diet), `bec52a08` (PR 2, tab-strip collapse), `b74dcbdb` (PR 3, inline
+`QuestionCard`), `583e934f` (PR 4a+4b together — see deviation below).
+Followed by an e2e-repair pass (uncommitted at the time of writing this
+section, committed next) fixing ten pre-existing Playwright tests that
+asserted the shapes this spec deliberately retired.
+
+### 4.1 PR 1 — composer diet
+
+Shipped as designed: on phone, the resident attach / attach-image /
+provider / model / mode controls are now wrapped `{!phone && (...)}` and
+replaced by a single `data-composer-overflow` "+" button that opens a
+`data-composer-overflow-menu` sheet with rows for each. Desktop's own JSX
+(and its `data-*-toggle` hooks) is untouched — only wrapped, never
+duplicated — and every row's `onClick` calls the *same*
+`setOpenPopover('provider' | 'model' | 'mode')` the desktop toggles call,
+so the popover that opens is the identical, unconditional popover JSX
+either route reaches. Composer row: 6 controls (textarea, attach,
+provider, model/mode, notes, Send) → 4 (textarea, "+", mic, Send) on
+phone; desktop keeps its 6.
+
+**Deviation from the doc's literal wording**: §3.7 PR 1 says "collapse
+attach + notes behind a single '+'"; shipped consolidates attach
+(file + image) *and* provider *and* model *and* mode behind the one "+",
+not just attach + notes — the doc's own §3.4 table already flagged
+provider/model/mode as leaving the resident row "reachable via an
+overflow/settings," and one sheet reusing the existing `openPopover`
+state machine was strictly less code than two separate collapse points.
+
+AC-7's CONTROL-COUNT half (exactly 4 controls: textarea, "+", mic, Send)
+is shipped and verified — `test/panels/DetailPanel.phone-composer.test.tsx`
+(12 tests, green) and `e2e/phone-question-shots.mjs`'s real-browser census.
+
+**AC-7's HEIGHT half is NOT met, and this section originally claimed
+otherwise** (the `b7268de4` commit message says "≤108px … per AC-7" —
+that line was written from the design doc's own arithmetic, not from a
+real measurement, and it was wrong). Measured in a real browser
+(`e2e/phone-question-shots.mjs`, `crosscheck-2`, no question open):
+`data-composer-bar` is still **145px**, identical to the pre-PR1
+baseline, in both themes. Root cause: `data-composer-bar` and
+`data-prompt-box`'s padding/gap classes (`py-3`, `py-2.5`, `gap-2.5`) are
+shared with desktop, unconditional on `phone`, and the tools row was
+never wrapping at 390px even with 6 icons — so cutting icon COUNT could
+not by itself shrink a ROW that was already one line. 145px decomposes
+as bar `py-3` (24px) + box `py-2.5` (20px) + textarea row (44px, itself
+already at the 44px touch floor, `rows={2}`, shared with desktop) + the
+`gap-2.5` between the textarea row and the tools row (10px, rounds
+against the 145 with a couple of border/measurement px) + tools row
+(44px) — two 44px rows plus their chrome. No combination of shrinking
+that chrome down to phone-only-safe values closes a 37px gap (the chrome
+budget alone would have to fall under ~20px, i.e. near-zero padding,
+which is a real visible regression a screenshot would show, not a
+tasteful trim). Closing AC-7's height half needs a genuine layout change
+— merging the tools row onto the textarea's own line rather than a
+second row beneath it — which is bigger and riskier than PR1's scope and
+was not attempted in this session for lack of time to verify it visually
+and against every downstream keyboard/geometry e2e assertion that reads
+`data-composer-bar`'s height. Flagged here for the planner/next pass
+rather than shipped hastily. `e2e/phone-question-shots.mjs` asserts the
+real 145px measurement (and fails on it, honestly) but is deliberately
+NOT wired into `e2e/run-web-guards.mjs`'s mandatory `GUARDS` list, so
+this one known, tracked gap does not perma-red an otherwise-passing gate
+for unrelated future changes — see that script's own header comment.
+
+### 4.2 PR 2 — tab-strip collapse while a question is open
+
+Shipped exactly as designed: `PhoneShell.tsx` gained
+`const [questionOpen, setQuestionOpen] = useState(false)`, wired from a
+new `DetailPanel` prop `onQuestionOpenChange`, and
+`{!typing && (<SessionTabStrip .../>)}` became
+`{!typing && !questionOpen && (<SessionTabStrip .../>)}`. No deviation.
+
+One second-order effect this surfaced: the demo fixture's own top-ranked
+session (`factory-sse-1`) is `waiting` on a tool-approval prompt that the
+existing (pre-dating this spec) footer logic already treats as an "open
+question" for `QuestionCard`-rendering purposes — so on that session the
+strip now correctly collapses too, not only for a real `AskUserQuestion`.
+Several pre-existing `e2e/phone-*.pw.ts` tests assumed the strip was
+always visible on that session; fixed to open a session with no open
+question instead (§5).
+
+### 4.3 PR 3 — QuestionCard inline
+
+Shipped as designed. `QuestionCard` gained one new prop,
+`phone = false`, that changes *only* the root `className` (the bordered
+desktop card vs. a left-edge `border-l-2` accent bar on phone) — no
+change to any state, handler, or the JSX of the interactive rows. On
+phone's Response view, the newest open question mounts as
+`data-question-bar-inline` inside `data-detail-column`, the same scroller
+`orderedTurns` already renders into, `sticky bottom-0` so it settles at
+the bottom of that shared scroll region rather than floating separately.
+The old fixed-footer mount (`data-question-bar`) is now conditioned
+`(!phone || current !== 'Response')`, so it still renders for phone's
+Agents view and for desktop everywhere — unchanged there.
+
+AC-6 (identical `AnswerRequest`) is asserted directly:
+`test/panels/DetailPanel.phone-question-inline.test.tsx` renders the same
+question through both the phone and desktop mount points and asserts the
+captured `onAnswer` payloads with `.toEqual()`, not just "both call
+onAnswer."
+
+**Measured**: the retired fixed footer cost a separate 313px band
+(desktop-shaped card + disclosure sentence + border, per §3.2's audit);
+today's inline mount is content-sized, no fixed height, and the combined
+out+question scroller measures **≥650px** of visible content at a 291px
+SHRUNK keyboard (390×844 shell, per the `bands().column` measurement in
+`e2e/phone-core-loop.pw.ts`'s "the answer survives the keyboard" tests,
+asserted at all three `KEYBOARDS` heights) — up from the 426px transcript
++ 313px separately-capped card (739px combined, but two regions, per
+§3.3's audit) the design doc measured before this PR.
+
+### 4.4 PR 4 — jump pill + persistent-permission marker
+
+**4a, jump-to-question pill — one approved deviation from the doc's own
+literal CSS.** §3.3 suggested `sticky bottom-2 self-end`; shipped uses
+`absolute` positioning pinned to the non-scrolling `data-detail-column`
+wrapper instead (the same proven pattern the codebase's own
+`data-out-to-bottom` chevron already uses). Reasoning documented in code:
+a `sticky` element only holds position within its own natural flow range
+and scrolls away like a normal element once the scroll passes that range
+— it does not stay reachable from anywhere in a long scroll the way "jump
+to a question that scrolled off" needs. An `IntersectionObserver` (rooted
+at `data-detail-column`, not the viewport) drives `questionInViewport`;
+the pill (`data-jump-to-question`) renders only when phone + an open
+question + not in viewport + on the Response view, and replaces (never
+joins) the existing `data-out-to-bottom` "jump to latest" chevron in that
+same corner — one jump control at a time, per the doc's own AC.
+
+**4b, persistent-permission risk marker — shipped, with one wording
+addition beyond the doc's own examples.** §3.3/§3.7 named
+`"don't ask again"` (with the apostrophe, the doc's own prose spelling)
+as a trigger phrase; the real demo fixture and the real
+`AskUserQuestion` option wording use the expanded, unapostrophized
+`"do not ask again"` (`src/renderer/fixtures/demo.ts`, "Yes, and do not
+ask again for scripts/rebuild-index.sh"). Both forms are kept in the one
+`PERSISTENT_PERMISSION_KEYWORDS` table (`DetailPanel.tsx`, immediately
+above `QuestionCard`) alongside `"always allow"`, `"allow all"`,
+`"skip"`, `"bypass"`, with the required comment explaining this is a
+narrow, approved exception to "never interpret agent text" and naming
+why (arming a second confirmation tap on a persistent-permission grant is
+worth reading option text for). First tap on a matching option arms it
+(`data-question-armed`, shows "tap again to confirm") rather than
+answering; a second tap within `ARM_TIMEOUT_MS` (3000ms) confirms and
+proceeds through the *same* `toggle()` path every other option already
+used; a bare timeout disarms with no visible side effect. Non-matching
+options are completely unaffected — one tap, as before.
+
+### 4.5 What did not change
+
+`AnswerRequest`/`answer.ts` — zero edits. Desktop `QuestionCard`,
+`DetailPanel` footer block, composer row — unchanged except for the
+`phone &&` / `!phone &&` conditionals that gate the phone-only branches;
+every desktop JSX node that existed before this spec still renders,
+unconditionally, exactly as before. `KEY_STRIP` (the keystroke strip) —
+untouched, still a resident phone affordance for the Agents view's edge
+cases, per the doc's own instruction to leave it as a collapsed "keys"
+affordance rather than remove it.
+
+### 4.6 Pre-existing e2e fallout, root-caused and fixed
+
+Running the full phone Playwright suite once (both `phone-core-loop.pw.ts`
+and `phone-shell.pw.ts`) after PR 4 surfaced ten pre-existing test
+failures — all of them tests asserting a shape this spec deliberately
+retired, none a regression in new coverage:
+
+- Three "the answer survives the keyboard" cases and the 44px census test
+  (`phone-core-loop.pw.ts`) still read the retired fixed
+  `data-question-bar` footer on the Response view; updated to read the
+  new `data-detail-column` shared scroller and the composer-overflow
+  route to provider/model, per §4.1/§4.3 above.
+- "the composer draws the provider picker…" and "the session strip is
+  tabs and nothing else…" (`phone-core-loop.pw.ts`) opened a session
+  whose composer or tab strip is now correctly withdrawn/collapsed by
+  this spec (an open question); redirected to a session without one.
+- `styles.css`'s safe-area `padding-bottom` rule named the retired
+  `data-question-bar` selector, not its `data-question-bar-inline`
+  replacement — a real regression (the home-indicator inset was silently
+  dropped for the inline mount) caught by "what ends a phone screen
+  clears the home indicator" (`phone-shell.pw.ts`); fixed by adding
+  `data-question-bar-inline` alongside the other three selectors in that
+  rule.
+- "the strip names itself as a region…" (`phone-shell.pw.ts`) opened the
+  demo fixture's top-ranked session (`factory-sse-1`, an open
+  tool-approval prompt, §4.2 above) via a helper mismatch; redirected to
+  `crosscheck-2`, the same project's other session, which carries no open
+  question.
+- Both "composer's popovers" tests (`phone-shell.pw.ts`) asserted the
+  now-phone-hidden `[data-provider-picker-toggle]` directly; updated to
+  open the "+" sheet first and tap `[data-composer-overflow-provider]`,
+  the phone route to the same underlying `[data-provider-picker]`
+  popover (§4.1).
+
+All ten verified individually via targeted `-g` reruns, then the full
+suite reran clean (§5).
