@@ -219,4 +219,67 @@ describe('the desktop composer row is unchanged', () => {
     expect(q('[data-mode-toggle]')).not.toBeNull();
     expect(q('[data-composer-overflow]')).toBeNull();
   });
+
+  it('keeps the textarea and the tools row as two real, separate flex rows', () => {
+    draw({ phone: false, width: 700 });
+    const box = q<HTMLElement>('[data-prompt-box]');
+    const textareaRow = q<HTMLElement>('textarea[aria-label="prompt to session"]')?.parentElement;
+    const toolsRow = q<HTMLElement>('[data-prompt-tools]');
+    expect(box?.className).toContain('flex-col');
+    expect(box?.className).not.toContain('flex-row');
+    expect(textareaRow?.className).not.toContain('contents');
+    expect(toolsRow?.className).not.toContain('contents');
+  });
+});
+
+describe('AC-7\'s height half: the phone row is merged, not stacked (docs/design/phone-core-loop.md §4.1)', () => {
+  /**
+   * jsdom/happy-dom compute no real layout (`getBoundingClientRect` is
+   * always 0), so the actual pixel height this section closes -- 145px down
+   * to the real, measured figure -- is only provable in a browser
+   * (`e2e/phone-question-shots.mjs`, wired into `run-web-guards.mjs` once
+   * this shipped). What a unit test CAN pin is the shape that height change
+   * depends on: one merged flex row rather than two stacked ones, in the
+   * exact box each side must carry it in.
+   */
+  it('data-prompt-box becomes the merged row: flex-row, flex-wrap, no flex-col', () => {
+    draw();
+    const box = q<HTMLElement>('[data-prompt-box]');
+    expect(box?.className).toContain('flex-row');
+    expect(box?.className).toContain('flex-wrap');
+    expect(box?.className).not.toContain('flex-col');
+  });
+
+  it('the textarea row and the tools row both disclaim their own box (display: contents), so their children join ONE row', () => {
+    draw();
+    const textareaRow = q<HTMLElement>('textarea[aria-label="prompt to session"]')?.parentElement;
+    const toolsRow = q<HTMLElement>('[data-prompt-tools]');
+    expect(textareaRow?.className).toBe('contents');
+    expect(toolsRow?.className).toBe('contents');
+  });
+
+  it('the "+" is pulled to the front of the merged row (order-first), the textarea keeps growing (flex-1)', () => {
+    draw();
+    const plus = q<HTMLElement>('[data-popover-root="phone-overflow"]');
+    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(plus?.className).toContain('order-first');
+    expect(textarea?.className).toContain('flex-1');
+  });
+
+  it('the textarea grows by its own content (field-sizing: content) and caps rather than filling the composer forever', () => {
+    draw();
+    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(textarea?.className).toContain('[field-sizing:content]');
+    expect(textarea?.className).toMatch(/max-h-\[132px\]/);
+    expect(textarea?.getAttribute('rows')).toBe('1');
+  });
+
+  it("the row's own second flex-1 spacer is hidden, so it cannot split growth with the textarea", () => {
+    draw();
+    // The spacer is the lone empty `<span>` directly inside `data-prompt-tools`.
+    const spacer = [...(q<HTMLElement>('[data-prompt-tools]')?.children ?? [])].find(
+      (el) => el.tagName === 'SPAN' && el.textContent === '' && el.children.length === 0,
+    );
+    expect(spacer?.className).toBe('hidden');
+  });
 });

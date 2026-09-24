@@ -9361,7 +9361,13 @@ export function DetailPanel(props: DetailPanelProps) {
             // `relative` is the anchor for `SUGGEST_LAYER`, which floats the
             // typeaheads OVER the transcript instead of pushing this block
             // down the pane. See that constant for the measurement behind it.
-            'relative flex flex-none flex-col gap-2.5 bg-pane px-3.5 py-3',
+            'relative flex flex-none flex-col bg-pane px-3.5',
+            // PHONE: the bar's own chrome shrinks from `gap-2.5 py-3` (10/24px)
+            // to `gap-1.5 py-2` (6/16px) -- half of AC-7's height budget
+            // (docs/design/phone-core-loop.md §3.4/§4.1). Desktop keeps the
+            // original figures untouched; this is the one place the shared
+            // padding class the §4.1 postmortem named finally splits in two.
+            phone ? 'gap-1.5 py-2' : 'gap-2.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
             // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
             // -- see the body's comment for the decision and the seam argument
@@ -9541,17 +9547,33 @@ export function DetailPanel(props: DetailPanelProps) {
             {...insertStopMark}
             tabIndex={-1}
             className={[
-              'flex flex-col gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 outline-none',
+              'flex rounded-[10px] border bg-card outline-none',
+              // PHONE: ONE row, not two (docs/design/phone-core-loop.md §3.4
+              // PR 1's own follow-up, §4.1's postmortem). `flex-row flex-wrap
+              // items-end` turns this box into the merged control row's own
+              // flex context -- the textarea's wrapper and `data-prompt-tools`
+              // both go `display: contents` below so their children (the "+",
+              // the box, mic, Send) become direct items of THIS row instead of
+              // two stacked ones. `items-end` anchors the fixed-size controls
+              // to the textarea's OWN baseline as it grows upward, the same
+              // shape iMessage/Claude's own composer draws. Desktop keeps the
+              // original two-row `flex-col`, untouched.
+              phone
+                ? 'flex-row flex-wrap items-end gap-x-2 gap-y-1.5 px-2.5 py-1.5'
+                : 'flex-col gap-2.5 px-3 py-2.5',
               active && actionIndex === 0 ? 'border-waiting' : 'border-line-loud',
             ].join(' ')}
           >
             {/* Multiline, because a prompt is prose and a one-line slot hides
             everything but the tail of it. The mockup's own composer is a
-            104px-tall block of 12.5px/1.55 text, not an input. */}
-            <div className="flex items-start gap-2">
+            104px-tall block of 12.5px/1.55 text, not an input. PHONE: this
+            wrapper contributes no box of its own (`display: contents`) so its
+            one child -- the textarea -- becomes a direct item of the merged
+            row `data-prompt-box` now lays out; see that div's own comment. */}
+            <div className={phone ? 'contents' : 'flex items-start gap-2'}>
               <textarea
                 ref={inputRef}
-                rows={2}
+                rows={phone ? 1 : 2}
                 value={draft}
                 readOnly={!composing}
                 onFocus={onCompose}
@@ -9772,14 +9794,38 @@ export function DetailPanel(props: DetailPanelProps) {
                    shell keeps -- and it is the one control on the screen that
                    exists to be tapped. The class is `.vam-phone`-scoped
                    (`styles.css`), so the desktop box is untouched, and
-                   `max-h-[120px]` still caps the grown height. */
-                className="vam-no-scrollbar vam-tap max-h-[120px] min-w-0 flex-1 resize-none bg-transparent text-body text-ink outline-none placeholder:text-ink-faint"
+                   `max-h-[120px]` still caps the grown height.
+
+                   PHONE ONLY: `[field-sizing:content]` (Chromium 123+, well
+                   under Electron 44's own) is a NATIVE platform feature, not
+                   a resize handler this file would otherwise own and keep in
+                   step with every edit/paste/backspace path above -- the
+                   textarea's own intrinsic height follows its content, `rows`
+                   drops to 1 (still floored at 44px by `vam-tap`, still
+                   capped by `max-h`), and once five lines' worth is typed
+                   `max-h-[132px]` plus `overflow-y-auto` (scrollbar hidden by
+                   `vam-no-scrollbar`, still scrollable) takes over, exactly
+                   the "grows upward to a max, then scrolls" §3.4 asks for. */
+                className={[
+                  'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
+                  phone ? '[field-sizing:content] max-h-[132px]' : 'max-h-[120px]',
+                ].join(' ')}
                 aria-label="prompt to session"
               />
             </div>
 
+            {/* PHONE: `basis-full` on each of these three -- and on the chips
+              and the mode caption further down -- so a rare message forces
+              its OWN line in the merged row's `flex-wrap` rather than
+              cramming in beside the textarea; see `data-prompt-box`'s own
+              comment for the row these now belong to. Desktop is untouched,
+              still `flex-col`, where a bare block already took its own line
+              for free. */}
             {images.length > 0 && (
-              <p data-pasted-images className="text-control text-ink-dim">
+              <p
+                data-pasted-images
+                className={phone ? 'basis-full text-control text-ink-dim' : 'text-control text-ink-dim'}
+              >
                 {images.length === 1 ? '1 image' : `${images.length} images`} pasted and kept here —
                 vam writes text to a session, so only the {'`[image #N]`'} placeholder is sent, not
                 the image.
@@ -9787,7 +9833,10 @@ export function DetailPanel(props: DetailPanelProps) {
             )}
 
             {attachError !== null && (
-              <p data-attach-error className="text-control text-waiting">
+              <p
+                data-attach-error
+                className={phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'}
+              >
                 {attachError}
               </p>
             )}
@@ -9798,16 +9847,25 @@ export function DetailPanel(props: DetailPanelProps) {
               microphone permission refusal is the kind of reuse that reads
               fine until somebody greps for it. */}
             {dictateError !== null && (
-              <p data-dictate-error className="text-control text-waiting">
+              <p
+                data-dictate-error
+                className={phone ? 'basis-full text-control text-waiting' : 'text-control text-waiting'}
+              >
                 {dictateError}
               </p>
             )}
 
             {/* The tools row: attach, provider, model, mode — everything the
-              prompt carries besides its text, on one line under the box. The
-              hook is what lets a test say "beside the model field" without a
-              layout engine. */}
-            <div data-prompt-tools className="flex items-center gap-2">
+              prompt carries besides its text, on one line under the box.
+              PHONE: this contributes no box of its own either (`display:
+              contents`) -- its children (the "+", the mic, Send, and the rare
+              chip/caption rows) become direct items of the SAME merged row
+              the textarea now sits in, ordered by `data-composer-overflow`'s
+              own `order-first` and the rare rows' own `order-10 basis-full`
+              below. The hook is what lets a test say "beside the model field"
+              without a layout engine, on desktop, where this is still a real
+              flex row of its own. */}
+            <div data-prompt-tools className={phone ? 'contents' : 'flex items-center gap-2'}>
               {/* THE OFFER, AS A CONTROL, because on a phone `Tab` is not one.
                 See the placeholder above for the whole rule. Three things
                 decide the shape:
@@ -9844,7 +9902,11 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-prompt-suggestion-use
                   aria-label={`use the suggested reply: ${promptSuggestion}`}
                   onClick={() => onDraftChange(promptSuggestion)}
-                  className="vam-tap flex min-w-0 shrink cursor-pointer items-center justify-center"
+                  // `order-10 basis-full`: this offer is rare enough (a
+                  // draft-less focus) that it earns its own line below the
+                  // merged [+, textarea, mic, Send] row rather than crowding
+                  // it -- see `data-prompt-box`'s own comment.
+                  className="vam-tap order-10 flex min-w-0 shrink basis-full cursor-pointer items-center justify-start"
                 >
                   <span
                     aria-hidden="true"
@@ -9876,9 +9938,15 @@ export function DetailPanel(props: DetailPanelProps) {
                   calls (`fileRef.current?.click()`, `pickImage()`,
                   `setOpenPopover('provider' | 'model' | 'mode')`), reached
                   through one extra tap instead of a resident icon. Desktop is
-                  untouched -- this whole block is `phone &&`. */}
+                  untouched -- this whole block is `phone &&`.
+
+                  `order-first` (docs/design/phone-core-loop.md §4.1's
+                  follow-up): the merged row's ONE reorder -- everything else
+                  keeps its natural DOM order, which already reads textarea,
+                  mic, Send, so only the "+" needs pulling to the front of the
+                  row it used to open alone. */}
               {phone && (
-                <div data-popover-root="phone-overflow" className="flex-none">
+                <div data-popover-root="phone-overflow" className="order-first flex-none">
                   <button
                     type="button"
                     data-composer-overflow
@@ -10060,7 +10128,12 @@ export function DetailPanel(props: DetailPanelProps) {
                   // `line-strong`, not `raised`: this chip sits inside
                   // `data-prompt-box`, which is `bg-card` -- the same
                   // inversion the answer options wore. See `OPTION_FILL`.
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
+                  // PHONE: `order-10 basis-full`, the same rare-row treatment
+                  // as the suggestion offer above -- see `data-prompt-box`.
+                  className={[
+                    'flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim',
+                    phone ? 'order-10 basis-full' : '',
+                  ].join(' ')}
                 >
                   <span className="truncate">{attachedName}</span>
                   <button
@@ -10108,7 +10181,12 @@ export function DetailPanel(props: DetailPanelProps) {
                 <span
                   data-attach-image-chip
                   // The same card, the same inversion -- see `data-attach-chip`.
-                  className="flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim"
+                  // PHONE: same rare-row treatment as that chip -- see
+                  // `data-prompt-box`.
+                  className={[
+                    'flex h-6 min-w-0 items-center gap-1 rounded-[6px] border border-line-strong bg-line-strong px-1.5 font-mono text-meta text-ink-dim',
+                    phone ? 'order-10 basis-full' : '',
+                  ].join(' ')}
                 >
                   <span className="truncate">{attachedImage}</span>
                   <button
@@ -10895,8 +10973,15 @@ export function DetailPanel(props: DetailPanelProps) {
                   data-mode-cycle
                   data-mode-cycle-state={cycleNote.kind}
                   data-mode-refusal={cycleNote.kind === 'refused' ? 'true' : undefined}
+                  // PHONE: same rare-row treatment as the chips/suggestion
+                  // above -- `order-10 basis-full` earns its own line rather
+                  // than fighting the merged row's own `min-w-0 flex-1`
+                  // textarea for space. Desktop keeps `flex-1`, which is what
+                  // pushes it against the spacer beside the plain `<span>`
+                  // below.
                   className={[
-                    'min-w-0 flex-1 truncate whitespace-nowrap font-mono text-meta',
+                    'truncate whitespace-nowrap font-mono text-meta',
+                    phone ? 'order-10 basis-full' : 'min-w-0 flex-1',
                     cycleNote.kind === 'refused' ? 'text-waiting' : 'text-ink-dim',
                   ].join(' ')}
                   /*
@@ -10915,7 +11000,13 @@ export function DetailPanel(props: DetailPanelProps) {
                   {cycleNote.text}
                 </span>
               )}
-              <span className="min-w-0 flex-1" />
+              {/* PHONE: hidden, not merely unstyled. The merged row has one
+                  `flex-1` already -- the textarea itself -- and a second one
+                  here would split the row's remaining space between the two,
+                  starving the textarea by half. Desktop keeps it: it is what
+                  pushes the mic/Send pair to the tools row's own right edge,
+                  the row this spacer was written for and still lives in. */}
+              <span className={phone ? 'hidden' : 'min-w-0 flex-1'} />
               {/* THE MICROPHONE, next to Send because that is where the
               operator asked for it and because it belongs to the same act:
               these two are what a finished prompt is handed to.
