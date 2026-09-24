@@ -180,10 +180,10 @@ export function primaryChord(action: KeyAction, overrides = activeBindings()): s
  * THE SEND KEY OPTION'S OWN LOOK — BUT THAT LOOK IS A FONT, MEASURED, NOT
  * ONLY A SIZE. Pull request 468 painted a modifier glyph at `text-[1.3em]`,
  * one size larger than the key beside it, on the operator's OWN finding that
- * a `⇧⌘P` chip read cramped at one size. #471 answered a newer ask — "the
- * icons in the Send key option under Sessions settings are the best" — by
- * dropping the wrapper span entirely, so every glyph fell back to the chip's
- * own ambient font at the key's own size.
+ * a `⇧⌘P` chip read cramped at one size. Pull request 471 answered a newer
+ * ask — "the icons in the Send key option under Sessions settings are the
+ * best" — by dropping the wrapper span entirely, so every glyph fell back to
+ * the chip's own ambient font at the key's own size.
  *
  * That held for `SettingsOverlay.tsx`'s Send key buttons themselves — their
  * ambient font already IS the body sans stack (`text-control`, no
