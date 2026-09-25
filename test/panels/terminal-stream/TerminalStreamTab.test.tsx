@@ -28,6 +28,12 @@ const disposeCalls: number[] = [];
 const loadedAddons: unknown[] = [];
 let lastTerm: FakeTerminal | undefined;
 let onDataHandler: ((text: string) => void) | undefined;
+/** `false` (the default): `FakeTerminal#write`'s own callback fires
+ * synchronously, standing in for xterm parsing a small write instantly --
+ * every EXISTING test's own small strings. `true`: the callback is queued
+ * onto `lastTerm.writeCallbacks` instead, for the backpressure tests below
+ * to fire on their own schedule, simulating xterm still being mid-parse. */
+let deferWriteCallbacks = false;
 
 class FakeTerminal {
   cols = 80;
@@ -41,6 +47,10 @@ class FakeTerminal {
   scrollPages = vi.fn();
   scrollToTop = vi.fn();
   scrollToBottom = vi.fn();
+  /** Callbacks `write()` deferred rather than firing synchronously -- only
+   * populated while `deferWriteCallbacks` is `true` (see its own comment).
+   * FIFO, matching real xterm's own in-order parse. */
+  writeCallbacks: Array<() => void> = [];
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
   // The one field of the real `Terminal.modes` getter the paste handler
   // reads -- a plain, test-settable property standing in for xterm's own
@@ -61,8 +71,11 @@ class FakeTerminal {
   open(container: HTMLElement) {
     container.appendChild(this.textarea);
   }
-  write(text: string) {
+  write(text: string, callback?: () => void) {
     writeCalls.push(text);
+    if (callback === undefined) return;
+    if (deferWriteCallbacks) this.writeCallbacks.push(callback);
+    else callback();
   }
   reset() {}
   onData(handler: (text: string) => void) {
@@ -96,9 +109,8 @@ vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 
 // Imported AFTER the mocks above are registered (vitest hoists `vi.mock`
 // calls, so this ordering in source is fine either way, but kept explicit).
-const { TerminalStreamTab } = await import(
-  '../../../src/renderer/panels/terminal-stream/TerminalStreamTab.js'
-);
+const { TerminalStreamTab, TERMINAL_STREAM_HIGH_WATER_MARK, TERMINAL_STREAM_LOW_WATER_MARK } =
+  await import('../../../src/renderer/panels/terminal-stream/TerminalStreamTab.js');
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];
@@ -185,6 +197,7 @@ beforeEach(() => {
   loadedAddons.length = 0;
   lastTerm = undefined;
   onDataHandler = undefined;
+  deferWriteCallbacks = false;
   FakeResizeObserver.instances = [];
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   setActiveTerminalScheme(DEFAULT_TERMINAL_SCHEME_PREF, 'dark');
@@ -685,6 +698,121 @@ describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)'
       await Promise.resolve();
     });
     expect(q('[data-terminal-stream-badge]')?.textContent).toBe('vam-atlas-a1b2c3');
+  });
+});
+
+describe('renderer-side backpressure (coordinator follow-up: bytes handed to xterm vs. parsed)', () => {
+  it('never trips the high-water mark for an ordinary small chunk', async () => {
+    let capturedListener: ((chunk: string) => void) | undefined;
+    withBridge({
+      onData: (_streamId, listener) => {
+        capturedListener = listener;
+        return () => {};
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    writeCalls.length = 0;
+    act(() => {
+      capturedListener?.('an ordinary line of output\r\n');
+    });
+    expect(writeCalls).toEqual(['an ordinary line of output\r\n']);
+  });
+
+  it('stops handing further chunks to xterm once pending (unparsed) bytes cross the high-water mark', async () => {
+    deferWriteCallbacks = true;
+    let capturedListener: ((chunk: string) => void) | undefined;
+    withBridge({
+      onData: (_streamId, listener) => {
+        capturedListener = listener;
+        return () => {};
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(capturedListener).toBeDefined();
+
+    // xterm never gets to PARSE this (its callback is deferred, per
+    // `deferWriteCallbacks`) -- crosses the high-water mark on its own.
+    const big = 'x'.repeat(TERMINAL_STREAM_HIGH_WATER_MARK + 1);
+    act(() => {
+      capturedListener?.(big);
+    });
+    expect(writeCalls).toContain(big);
+
+    writeCalls.length = 0;
+    act(() => {
+      capturedListener?.('dropped chunk');
+    });
+    expect(writeCalls).toEqual([]);
+  });
+
+  it('keeps dropping while pending bytes are still above the low-water mark, even after some drain', async () => {
+    deferWriteCallbacks = true;
+    let capturedListener: ((chunk: string) => void) | undefined;
+    let openCount = 0;
+    const { close } = withBridge({
+      open: async () => {
+        openCount += 1;
+        return {
+          ok: true,
+          streamId: `stream-${openCount}`,
+          seed: `seed-${openCount}`,
+          name: `vam-stub-${openCount}`,
+        };
+      },
+      onData: (_streamId, listener) => {
+        capturedListener = listener;
+        return () => {};
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openCount).toBe(1);
+
+    // Two chunks, summing to just over the high-water mark -- so draining
+    // only the FIRST one's callback leaves pending bytes still above the
+    // low-water mark (a quarter of the high one), proving the hysteresis
+    // gap is real rather than one shared threshold.
+    const chunk1 = 'a'.repeat(TERMINAL_STREAM_HIGH_WATER_MARK / 2);
+    const chunk2 = 'b'.repeat(TERMINAL_STREAM_HIGH_WATER_MARK / 2 + 1);
+    // The premise this whole test rests on: chunk2 ALONE must still be
+    // above the low-water mark, or draining only chunk1 would already
+    // trigger the reconnect and the "still dropping" assertion below would
+    // hold by accident rather than by the hysteresis gap actually working.
+    expect(chunk2.length).toBeGreaterThan(TERMINAL_STREAM_LOW_WATER_MARK);
+    act(() => {
+      capturedListener?.(chunk1);
+      capturedListener?.(chunk2);
+    });
+
+    await act(async () => {
+      const first = lastTerm?.writeCallbacks.shift();
+      first?.();
+      await Promise.resolve();
+    });
+    // Still above TERMINAL_STREAM_LOW_WATER_MARK -- no reconnect yet.
+    expect(openCount).toBe(1);
+    expect(close).not.toHaveBeenCalled();
+
+    await act(async () => {
+      for (const cb of lastTerm?.writeCallbacks.splice(0) ?? []) cb();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Now drained under the low-water mark -- the reconnect (drop and
+    // reseed) fires.
+    expect(close).toHaveBeenCalledWith('stream-1');
+    expect(openCount).toBe(2);
   });
 });
 
