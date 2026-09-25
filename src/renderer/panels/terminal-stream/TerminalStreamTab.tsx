@@ -5,10 +5,13 @@
  * PARITY PASS (`docs/design/terminal-streaming.md`, task-breakdown items
  * 4-6): open, seed, live data, typed input, resize-driven refit, a
  * theme/font that tracks the shared prefs stores, insert/select-mode marks,
- * scrollback chords and visibility-driven connect/disconnect. Paste refusal
- * and IME composition are covered separately (see this file's own commits).
- * The `Terminal` instance's lifecycle is React's mount/unmount; the STREAM's
- * lifecycle is additionally gated on `document.visibilityState`, below.
+ * scrollback chords and visibility-driven connect/disconnect. Paste WAS
+ * refused outright; the operator asked for it back, and it now goes through
+ * `terminal-paste.ts`'s shared sanitiser and xterm's own bracketed-paste mode
+ * (see the paste listener below). IME composition is covered separately (see
+ * this file's own commits). The `Terminal` instance's lifecycle is React's
+ * mount/unmount; the STREAM's lifecycle is additionally gated on
+ * `document.visibilityState`, below.
  *
  * RESIZE IS NOT PART OF THE STREAM PROTOCOL. The EXISTING
  * `window.api.terminal.resize` channel (the one `TerminalTab.tsx` already
@@ -36,6 +39,7 @@ import {
   subscribeTerminalScheme,
   terminalSchemeStyle,
 } from '../../prefs/terminal-scheme.js';
+import { preparePastedText } from '../terminal-paste.js';
 
 /**
  * The scheme's twenty-three colours plus `backgroundOpacity`, reduced to what
@@ -234,17 +238,54 @@ export function TerminalStreamTab(props: {
         // the mark has to be set imperatively on the element it actually
         // gives back rather than rendered.
         term.textarea?.setAttribute(INSERT_STOP, '');
-        // SILENT, MATCHING `TerminalTab.tsx` EXACTLY -- its own `onInput`
-        // drops `insertFromPaste`/`insertFromDrop` with no visible message,
-        // "this channel is bounded precisely so that it cannot become one".
-        // xterm.js listens for `paste` on this same textarea and, by
-        // default, sends the clipboard text through as input; the CAPTURE
-        // phase is what lets this handler run and refuse BEFORE that.
-        term.textarea?.addEventListener(
+        // `liveTerm`, NOT `term`, IS WHAT THE CLOSURES BELOW CAPTURE --
+        // `attachCustomKeyEventHandler`'s callback, `onData`'s callback and
+        // this paste listener are all invoked LATER, after this whole `if`
+        // block has finished running, and TypeScript does not narrow a `let`
+        // captured by a function defined here across that gap. Declared once
+        // and reused by every one of them, rather than each closing over
+        // `term` and fighting the same narrowing individually.
+        const liveTerm = term;
+        // A REAL PASTE, HANDLED HERE RATHER THAN LEFT TO XTERM'S OWN DEFAULT.
+        // xterm.js listens for `paste` on this same textarea and, left alone,
+        // sends the clipboard text through as `onData` itself -- wrapped in
+        // bracketed-paste codes if the pane asked for them, but with NO
+        // escaping of an embedded END marker inside the clipboard text
+        // (`terminal-paste.ts`'s own header explains why that matters). The
+        // CAPTURE phase is what lets this handler run and cancel xterm's own
+        // BEFORE it acts; `stopImmediatePropagation` on top of
+        // `preventDefault` is belt and braces against xterm's own listener
+        // (added earlier, inside `open()`) ever running for the same event.
+        //
+        // NO PERMISSION IS NEEDED TO READ `event.clipboardData` -- it is
+        // handed over because the operator pressed the keys (or used the
+        // Edit menu's Paste), not read via `navigator.clipboard`, whose
+        // permission this app's policy denies (`composer-paste.ts` carries
+        // the same argument for the prompt box's own image paste).
+        //
+        // BRACKETING IS THIS COMPONENT'S OWN DECISION, unlike the
+        // capture-pane renderer's `sendPasteArgv`, which leaves it to tmux's
+        // `paste-buffer -p`: there is no tmux verb on this path at all, only
+        // a write of raw bytes to the control-mode connection, so xterm's own
+        // `modes.bracketedPasteMode` -- the SAME fact tmux tracks per pane,
+        // read here instead of there -- is what this component consults
+        // before deciding whether to wrap.
+        liveTerm.textarea?.addEventListener(
           'paste',
           (event) => {
             event.preventDefault();
             event.stopImmediatePropagation();
+            const raw = event.clipboardData?.getData('text/plain') ?? '';
+            if (raw === '') return;
+            const text = preparePastedText(raw);
+            if (text === '') return;
+            const payload = liveTerm.modes.bracketedPasteMode
+              ? `\x1b[200~${text}\x1b[201~`
+              : text;
+            const currentStreamId = streamIdRef.current;
+            if (currentStreamId !== null) {
+              openBridge.write(currentStreamId, new TextEncoder().encode(payload));
+            }
           },
           { capture: true },
         );
@@ -253,7 +294,6 @@ export function TerminalStreamTab(props: {
         // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`
         // for everything else, including keyup, so ordinary typing is
         // unaffected.
-        const liveTerm = term;
         liveTerm.attachCustomKeyEventHandler((event) => {
           if (event.type !== 'keydown' || !event.shiftKey || !SCROLL_CHORD_KEYS.has(event.key)) {
             return true;

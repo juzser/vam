@@ -36,6 +36,11 @@ class FakeTerminal {
   scrollToTop = vi.fn();
   scrollToBottom = vi.fn();
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
+  // The one field of the real `Terminal.modes` getter the paste handler
+  // reads -- a plain, test-settable property standing in for xterm's own
+  // computed one. Defaults to `false`: most panes are not running a program
+  // that asked for bracketed paste.
+  modes: { bracketedPasteMode: boolean } = { bracketedPasteMode: false };
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
     lastTerm = this;
@@ -342,38 +347,107 @@ describe('mounted with a bridge', () => {
     });
   });
 
-  it('refuses a paste silently, matching TerminalTab.tsx: no message, nothing written', async () => {
-    const write = vi.fn();
-    withBridge({ write });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    const textarea = lastTerm?.textarea;
-    if (textarea === undefined) throw new Error('no textarea');
+  describe('a real paste', () => {
     // A minimal fake `clipboardData` -- a real `ClipboardEvent`/`DataTransfer`
     // is awkward to instantiate in happy-dom (no precedent for it in this
     // file's own paste-adjacent tests, which drive the hidden-input path via
     // a plain `input` event with `inputType` instead).
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: () => 'a whole pasted paragraph' },
+    function pasteEvent(text: string): Event {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } });
+      return event;
+    }
+
+    it('cancels the browser default and xterm’s own paste handling', async () => {
+      withBridge({});
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined) throw new Error('no textarea');
+      const event = pasteEvent('a whole pasted paragraph');
+      const preventDefault = vi.spyOn(event, 'preventDefault');
+      const stopImmediatePropagation = vi.spyOn(event, 'stopImmediatePropagation');
+      act(() => {
+        textarea.dispatchEvent(event);
+      });
+      expect(preventDefault).toHaveBeenCalled();
+      expect(stopImmediatePropagation).toHaveBeenCalled();
     });
-    const preventDefault = vi.spyOn(event, 'preventDefault');
-    const stopImmediatePropagation = vi.spyOn(event, 'stopImmediatePropagation');
-    act(() => {
-      textarea.dispatchEvent(event);
+
+    it('writes the sanitised clipboard text, unwrapped, when the pane has not asked for bracketed paste', async () => {
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined || lastTerm === undefined) throw new Error('no textarea');
+      lastTerm.modes.bracketedPasteMode = false;
+      act(() => {
+        textarea.dispatchEvent(pasteEvent('line one\r\nline two'));
+      });
+      // CRLF -> one CR, exactly `terminal-paste.ts`'s own `preparePastedText`.
+      expect(write).toHaveBeenCalledWith(
+        'stream-1',
+        new TextEncoder().encode('line one\rline two'),
+      );
     });
-    expect(preventDefault).toHaveBeenCalled();
-    expect(stopImmediatePropagation).toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalledWith(
-      'stream-1',
-      new TextEncoder().encode('a whole pasted paragraph'),
-    );
-    // No visible refusal text either -- TerminalTab.tsx's own posture, a
-    // silent drop.
-    expect(q('[data-terminal-stream-refused]')).toBeNull();
+
+    it('wraps the write in bracketed-paste codes when the pane HAS asked for it', async () => {
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined || lastTerm === undefined) throw new Error('no textarea');
+      lastTerm.modes.bracketedPasteMode = true;
+      act(() => {
+        textarea.dispatchEvent(pasteEvent('hello'));
+      });
+      expect(write).toHaveBeenCalledWith(
+        'stream-1',
+        new TextEncoder().encode('\x1b[200~hello\x1b[201~'),
+      );
+    });
+
+    it('does nothing for an empty clipboard', async () => {
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined) throw new Error('no textarea');
+      act(() => {
+        textarea.dispatchEvent(pasteEvent(''));
+      });
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it('draws no refusal text -- a real paste is not a refusal', async () => {
+      withBridge({});
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined) throw new Error('no textarea');
+      act(() => {
+        textarea.dispatchEvent(pasteEvent('hello'));
+      });
+      expect(q('[data-terminal-stream-refused]')).toBeNull();
+    });
   });
 
   it('types into the stream via write()', async () => {
