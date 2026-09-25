@@ -120,7 +120,7 @@ const browser = await chromium.launch();
   });
   check(
     'the main view drew its pills and rows, so the rectangle check below is about something',
-    mainRects.length >= 4 + 1 + 4 + 5,
+    mainRects.length >= 4 + 1 + 4 + 6,
     `${mainRects.length} controls found`,
   );
   check(
@@ -138,8 +138,26 @@ const browser = await chromium.launch();
     JSON.stringify(desktopGroupByHeld),
   );
 
-  await page.screenshot({ path: `${outDir}/workspace-options-desktop.png` });
-  console.log(`${outDir}/workspace-options-desktop.png`);
+  // THE SIXTH FILTER ROW: "Hide agent worktrees", on by default -- the
+  // operator's own report ("I see a worktree-agent showing when I press New
+  // session"). The demo fixture carries no agent-worktree session, so the
+  // count reads 0 hidden; the row and its ON state are what this pins.
+  const agentWorktreeToggle = page.locator('[data-origin-toggle="agent-worktree"]');
+  check(
+    'Hide agent worktrees ships on by default',
+    (await agentWorktreeToggle.getAttribute('aria-checked')) === 'true',
+  );
+
+  await page.screenshot({ path: `${outDir}/workspace-options-desktop-dark.png` });
+  console.log(`${outDir}/workspace-options-desktop-dark.png`);
+
+  // THE SAME POPOVER, LIGHT THEME -- the operator's own ask: look at both.
+  await page.evaluate(() => document.documentElement.classList.add('light'));
+  await page.waitForTimeout(120);
+  await page.screenshot({ path: `${outDir}/workspace-options-desktop-light.png` });
+  console.log(`${outDir}/workspace-options-desktop-light.png`);
+  await page.evaluate(() => document.documentElement.classList.remove('light'));
+  await page.waitForTimeout(120);
 
   // ---------------------------------------------------- Group by really changes the list
   await page.click('[data-group-by-option="status"]');
@@ -212,8 +230,10 @@ const browser = await chromium.launch();
     };
     return {
       back: r(document.querySelector('[data-popover-back]')),
+      created: r(document.querySelector('[data-sort-by-option="created"]')),
       needsYou: r(document.querySelector('[data-sort-by-option="needs-you"]')),
       name: r(document.querySelector('[data-sort-by-option="name"]')),
+      createdChecked: document.querySelector('[data-sort-by-option="created"]')?.getAttribute('aria-checked'),
       focused: document.activeElement?.getAttribute('data-popover-back') !== null,
       groupByGone: document.querySelector('[data-group-by]') === null,
     };
@@ -221,26 +241,49 @@ const browser = await chromium.launch();
   console.log('sort-by drill-in:', JSON.stringify(drillIn));
   check('the drill-in replaces the main view entirely', drillIn.groupByGone);
   check('focus lands on the back button the moment it opens', drillIn.focused);
+  check('Created is checked -- the shipped default', drillIn.createdChecked === 'true', drillIn.createdChecked ?? 'null');
   withinViewport(drillIn.back, viewport, 'the back button is a real rectangle inside the viewport', 'back');
+  withinViewport(
+    drillIn.created,
+    viewport,
+    'the first (new, default) radio is a real rectangle inside the viewport',
+    'created',
+  );
   withinViewport(
     drillIn.needsYou,
     viewport,
-    'the first radio is a real rectangle inside the viewport',
+    'the second radio is a real rectangle inside the viewport',
     'needs-you',
   );
-  withinViewport(drillIn.name, viewport, 'the second radio is a real rectangle inside the viewport', 'name');
+  withinViewport(drillIn.name, viewport, 'the third radio is a real rectangle inside the viewport', 'name');
+
+  // THE SORT MENU, BOTH THEMES -- the operator's own ask.
+  await page.screenshot({ path: `${outDir}/sort-by-menu-dark.png` });
+  console.log(`${outDir}/sort-by-menu-dark.png`);
+  await page.evaluate(() => document.documentElement.classList.add('light'));
+  await page.waitForTimeout(120);
+  await page.screenshot({ path: `${outDir}/sort-by-menu-light.png` });
+  console.log(`${outDir}/sort-by-menu-light.png`);
+  await page.evaluate(() => document.documentElement.classList.remove('light'));
+  await page.waitForTimeout(120);
 
   // Arrow-key roving focus, for real, on the real DOM -- Tab from the back
   // button to the first radio first, the way a keyboard operator actually
-  // arrives there (focus opens on the back button, not on a radio).
+  // arrives there (focus opens on the back button, not on a radio). THREE
+  // options now: Created (new default), Needs you, Name.
   await page.keyboard.press('Tab');
   const onFirstRadio = await page.evaluate(
     () => document.activeElement?.getAttribute('data-sort-by-option'),
   );
-  check('Tab from the back button lands on the first radio', onFirstRadio === 'needs-you', onFirstRadio ?? 'null');
+  check('Tab from the back button lands on the first radio', onFirstRadio === 'created', onFirstRadio ?? 'null');
+  await page.keyboard.press('ArrowDown');
+  const onSecondRadio = await page.evaluate(
+    () => document.activeElement?.getAttribute('data-sort-by-option'),
+  );
+  check('ArrowDown moves focus to the second radio', onSecondRadio === 'needs-you', onSecondRadio ?? 'null');
   await page.keyboard.press('ArrowDown');
   const movedTo = await page.evaluate(() => document.activeElement?.getAttribute('data-sort-by-option'));
-  check('ArrowDown moves focus to the second radio', movedTo === 'name', movedTo ?? 'null');
+  check('a second ArrowDown moves focus to the third radio', movedTo === 'name', movedTo ?? 'null');
 
   await page.click('[data-sort-by-option="name"]');
   await page.waitForSelector('[data-group-by]');
@@ -299,7 +342,7 @@ const browser = await chromium.launch();
   });
   check(
     'the phone popover drew its controls, so the floor check below is about something',
-    phoneRects.controls.length >= 4 + 1 + 5,
+    phoneRects.controls.length >= 4 + 1 + 6,
     `${phoneRects.controls.length} controls found`,
   );
   check(

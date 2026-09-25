@@ -65,27 +65,51 @@ operator decision on the bucketing policy — not a data gap.
 
 ## Sort by: Agent Activity ›
 
-**Implemented, with one of orca's options, `Name`, standing in for the
-other.** vam's `Session` carries `age: string | null` — but it is a
+**Implemented, with two of orca's options standing in for it: `Name`, and
+now `Created`.** vam's `Session` carries `age: string | null` — but it is a
 PRE-FORMATTED display string ("2m", "6h", "3d"), produced by the adapter for
 right-aligned display, not a raw timestamp. Sorting by it as a string would
 sort "2m" before "3d" before "6h" (lexicographic, not chronological) — worse
 than not offering the option at all. `activity: string | null` is a
 one-line description ("Editing 3 files"), not orderable at all. So "Agent
-Activity" (recency-based sort) is not cheap: it needs a new source fact (a
-raw, comparable timestamp), which is a source-adapter change across
-`claude-code`/`codex`, not a domain-layer one.
+Activity" itself (recency-based sort) is still not cheap: it needs a raw,
+comparable LAST-ACTIVITY timestamp no source carries yet, which is a
+source-adapter change across `claude-code`/`codex`, not a domain-layer one.
 
-What IS cheap and already shipped as the default: `orderedSessions`' own
-order, "needs-you first" — waiting sessions float up, then running, then
+`orderedSessions`' own order, "needs-you first", is still offered
+(`sortBy: 'needs-you'`) — waiting sessions float up, then running, then
 sleeping, then done, with projects ranked by their own most-urgent session.
-That is functionally close to what an activity sort is FOR (surface what
-needs attention), and it is what every existing operator already sees, so it
-is the default (`sortBy: 'needs-you'`, a no-op against today's shipped
-order). The second, genuinely new option is `Name` — `Session.title` is
-already a string every session carries, sorted alphabetically within
-whatever grouping is active. `Created` (another plausible orca-adjacent
-option) has the identical blocker as Activity: no raw timestamp.
+It shipped first and is no longer the default: the operator's own report was
+that it makes the sidebar "jump around" as a session's status changes mid-
+session, which is a real cost `Name` and `Created` do not have.
+
+**`Created` IS THE NEW DEFAULT, and it needed a fact `Sort by` did not have
+before: `Session.createdAt`.** Unlike a last-activity timestamp, a creation
+time turned out to be cheap once measured per source: `claude-code` reads a
+transcript's own file BIRTHTIME — free off the same `stat()` the age read
+already pays for, never the file's first line (`transcript.ts`'s own header:
+a transcript is read as a bounded TAIL and deliberately never opens the
+head of a file that can run to 157 MB) — falling back to the process's own
+start time before a transcript exists, and to tmux's `session_created` for a
+pane with no transcript at all. `codex` reads the instant Codex itself
+embeds in a rollout's own file name (`rollout-<iso>-<uuid>.jsonl`), never
+`recency_at_ms` (`docs/design/vam-owns-the-session.md`'s own trap: a
+recency moves every poll and is not a start time). Sorted oldest-first — a
+session list reads top to bottom like a log, and the newest arrival taking
+the TOP would itself be a row that keeps moving everything below it, the
+same complaint under a different name — and tied, when two sessions read
+identically, by id, deterministically.
+
+Existing installs move onto `Created` too, once, through a `sortByMigrated`
+ratchet (`prefs.ts`) shaped exactly like the streaming-terminal default's
+own migration (PR 495): a stored `needs-you` cannot be told apart from the
+OLD default simply never having been touched, so it moves once; a stored
+`Name` is unambiguous evidence of a real choice (the old default was never
+`Name`) and survives untouched even before the ratchet marks itself
+consumed.
+
+`Name` is `Session.title`, sorted alphabetically within whatever grouping is
+active — unchanged from when it first shipped.
 
 **Why Sort by never reorders projects or buckets, only what is inside one.**
 Orca draws "Sort by" and "Project order" as two separate controls. vam offers
@@ -190,13 +214,26 @@ two are indistinguishable in today's data. Needs a new source fact (a
 - **Group by:** `Project` (default, unchanged), `Status` (new), `None` (new).
   `PR` shown disabled in the segmented control, matching orca's own four-pill
   shape, with no functionality behind it yet.
-- **Sort by:** `Needs you first` (default, today's only order, unchanged),
-  `Name` (new). Both apply within whatever `Group by` already bucketed,
-  never across buckets or projects.
-- **Filters:** the four existing rows (`hideAgentStarted`, `onlyPrompted`,
+- **Sort by:** `Created` (new, and now the DEFAULT for every install —
+  existing ones migrate onto it once, through `sortByMigrated`), `Needs you
+  first` (today's original order, still offered), `Name`. All three apply
+  within whatever `Group by` already bucketed, never across buckets or
+  projects. `Session.createdAt` is the new source fact behind `Created`,
+  read per source without an extra IO cost (`claude-code`: transcript
+  birthtime off the existing `stat()`, or tmux `session_created` with no
+  transcript yet; `codex`: the instant embedded in the rollout's own file
+  name).
+- **Filters:** the four original rows (`hideAgentStarted`, `onlyPrompted`,
   `hideEnded`, `hideForeign`) rebuilt as orca-shaped icon + label + switch
   rows (`role="switch"`, `aria-checked`), same pref keys, same defaults, same
-  counts. One new row, `hideIdle` ("Hide sleeping"), OFF by default.
+  counts. `hideIdle` ("Hide sleeping") followed, OFF by default. A sixth row,
+  `hideAgentWorktrees` ("Hide agent worktrees"), hides a Claude Code agent's
+  own throwaway `.claude/worktrees/agent-<id>` checkout (`isolation:
+  "worktree"`, unrelated to vam's own worktree feature, PR 496) — ON by
+  default, `hideForeign`'s own shape rather than `hideIdle`'s (see
+  `session-filter.ts`), and the one rule in this popover that stands down for
+  a `waiting` session: it is vam's own session, and one asking the operator
+  something must stay reachable regardless of the toggle.
 - **Heading size:** the sidebar's project/group titles move one further
   pixel down (14px → 13px, still semibold), a separate, unrelated operator
   ask folded into the same pass; see `type-scale.test.ts`'s own `EXCEPTIONS`
@@ -210,9 +247,9 @@ two are indistinguishable in today's data. Needs a new source fact (a
 2. **A `defaultBranch` source fact** — unlocks BOTH "Hide default branch" and
    "Except default branch" at once; the cheapest single follow-up on this
    list, since both toggles become a one-line predicate once the fact exists.
-3. **A raw, comparable activity timestamp** — unlocks a genuine "Agent
-   Activity" sort (and a "Created" sort as a free second option once the
-   adapters carry any timestamp at all).
+3. **A raw, comparable LAST-ACTIVITY timestamp** — unlocks a genuine "Agent
+   Activity" sort; `Created` shipped separately, off a creation timestamp
+   rather than a last-activity one.
 4. **A `detachedHead` source fact** — unlocks "Hide detached HEAD".
 5. **Show → Projects, Project order, Card layout, Show properties** — each
    is a real, separate feature (a new selection UI, a persisted manual order,
