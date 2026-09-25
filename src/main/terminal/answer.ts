@@ -287,9 +287,22 @@ async function deliver(run: TmuxRun, name: string, request: AnswerRequest): Prom
     // answered. So `includes` alone is satisfied by screens that are talking
     // ABOUT the question rather than asking it, and the review's own
     // Submit/Cancel rows would then be searched for the operator's option.
-    const asked = lines.findIndex((line) => line.includes(step.question));
+    //
+    // JOINED, NOT PER-LINE -- measured against a real picker
+    // (`lesson-screens.ts`) that a pane narrower than the question WRAPS it
+    // across two lines with no space inserted at the break, and vam only
+    // narrows a session's pane once its Terminal tab is opened: a question
+    // answered from the Response view alone can sit at whatever width the
+    // pane was last left, and a per-line `includes` refused a screen that was
+    // showing exactly the question it was asked about. Joining the rows above
+    // the first one with nothing (never a space, which the real break did not
+    // insert either) puts the whole question back next to itself whatever
+    // the terminal folded it into, at the cost of nothing this check already
+    // risked: `includes` on a review screen was always a wider net than a
+    // single line's worth.
     const firstRow = lines.findIndex((line) => ROW.test(line));
-    if (asked === -1 || (firstRow !== -1 && asked > firstRow)) {
+    const above = (firstRow === -1 ? lines : lines.slice(0, firstRow)).join('');
+    if (!above.includes(step.question)) {
       return { kind: 'wrong-question', question: step.question };
     }
     const picker = readPicker(text);

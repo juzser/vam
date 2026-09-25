@@ -170,4 +170,12 @@ describe('AC-6: the same tap sequence produces the identical AnswerRequest eithe
     expect(desktopRequest).toEqual(expected);
     expect(phoneRequest).toEqual(desktopRequest);
   });
+
+  it('draws the same picked Check and Submit chord chip inline as the fixed card does', () => {
+    draw({ phone: true, answer: answering({ kind: 'sent', answer: 'Crimson' }) });
+    fireEvent.click(all('[data-question-option]')[0] as Element, { detail: 1 });
+    const picked = all('[data-question-option]')[0];
+    expect(picked?.querySelector('[data-question-picked-mark]')).not.toBeNull();
+    expect(q('[data-question-submit]')?.querySelector('[data-question-submit-key]')).not.toBeNull();
+  });
 });

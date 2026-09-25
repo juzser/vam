@@ -2364,15 +2364,30 @@ function CanvasInner({
    * and the `Alt+<digit>` they press -- come through here, so neither can
    * drift into answering only one of them, which is what happened the first
    * time the chord was wired past it.
+   *
+   * LEAVING TERMINAL ALSO ASKS FOR A FRESH READ, for the same reason as every
+   * other write in this file (`source.onWrote()`, six times over): the
+   * operator's report was that the Response view kept showing a question's
+   * options after they had answered it directly in the Terminal pane, by
+   * hand -- out of band from anything vam itself wrote, so nothing here would
+   * otherwise know to look again before the source's own poll got around to
+   * it. `prev` reads the SAME fallback the pane's own `tab` prop does
+   * (`viewBySession[sessionId] ?? viewSeed`), so a session sitting on
+   * Terminal only because that is the seed it opened on is still caught
+   * leaving it, not just one that was switched there explicitly.
    */
   const setViewFor = useCallback(
     (sessionId: string, view: DetailTab) => {
+      const prev = viewBySession[sessionId] ?? viewSeed;
       setViewBySession((current) =>
         current[sessionId] === view ? current : { ...current, [sessionId]: view },
       );
       if (view !== prefs.detailTab) savePrefs(setDetailTab(prefs, view));
+      if (prev === 'Terminal' && view !== 'Terminal' && source.kind === 'session') {
+        source.onWrote();
+      }
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, viewBySession, viewSeed, source],
   );
   const setDraftFor = useCallback((sessionId: string, value: string) => {
     setDraftsBySession((current) => ({ ...current, [sessionId]: value }));

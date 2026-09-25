@@ -157,12 +157,14 @@ describe('Mod-Enter submits from anywhere on the card', () => {
   });
 });
 
-describe('the progress line hints Enter once the set is complete', () => {
-  it('is silent about a hint while a mark is still missing, and gains one once nothing is', () => {
+describe('the progress line falls silent once the set is complete', () => {
+  it('names what is missing while a mark is still short, and says nothing once nothing is', () => {
     draw(QUESTION, { answer: answering({ kind: 'sent', answer: 'Crimson' }) });
-    expect(q('[data-question-progress]')?.textContent).not.toContain('Enter submits');
+    expect(q('[data-question-progress]')?.textContent).toContain('not marked yet');
     fireEvent.click(options()[0] as HTMLElement);
-    expect(q('[data-question-progress]')?.textContent).toContain('Enter submits');
+    // No hint text left here once the set is ready -- the Submit button
+    // itself now carries its own key, in `[data-question-submit-key]`.
+    expect(q('[data-question-progress]')?.textContent).toBe('');
   });
 });
 
