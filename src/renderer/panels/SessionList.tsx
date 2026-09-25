@@ -1184,11 +1184,13 @@ const GROUP_BY_PILLS: readonly {
   { value: 'project', label: 'Project', disabled: false },
 ];
 
-/** In the drill-in's own order, top to bottom -- `needs-you` first because
- *  it is the shipped default, the same reason it heads `STATUS_BUCKET_ORDER`. */
-const SORT_BY_OPTIONS: readonly SortBy[] = ['needs-you', 'name'];
+/** In the drill-in's own order, top to bottom -- `created` first because it
+ *  is the shipped default (`selectors.ts`'s `DEFAULT_VIEW_OPTIONS`), the same
+ *  reason `needs-you` used to head this list before it was. */
+const SORT_BY_OPTIONS: readonly SortBy[] = ['created', 'needs-you', 'name'];
 
 const SORT_BY_LABELS: Readonly<Record<SortBy, string>> = {
+  created: 'Oldest first',
   'needs-you': 'Needs you first',
   name: 'Name',
 };
@@ -1199,7 +1201,7 @@ const SORT_BY_LABELS: Readonly<Record<SortBy, string>> = {
  * A separate component rather than inline JSX in `SessionList` itself, for
  * the one thing that needs its own lifecycle: focus lands on the back button
  * the moment this mounts, so a keyboard operator who pressed "Sort by" does
- * not have to Tab past it to reach the two options -- the same "where the
+ * not have to Tab past it to reach the offered options -- the same "where the
  * keyboard goes when a layer opens" contract `SessionList`'s own popover-
  * open effect already keeps for the popover as a whole.
  */
@@ -1217,8 +1219,8 @@ function SortByMenu({
     backRef.current?.focus();
   }, []);
 
-  /** ArrowDown/ArrowUp, wrapping -- two options is short enough that
-   *  wrapping reads as a single ring rather than a dead end at either end. */
+  /** ArrowDown/ArrowUp, wrapping -- a short list of options is short enough
+   *  that wrapping reads as a single ring rather than a dead end at either end. */
   const moveFocus = (from: SortBy, delta: 1 | -1) => {
     const index = SORT_BY_OPTIONS.indexOf(from);
     const next = SORT_BY_OPTIONS[(index + delta + SORT_BY_OPTIONS.length) % SORT_BY_OPTIONS.length];
