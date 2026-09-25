@@ -22,7 +22,7 @@ import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
 import { FIXTURE_SOURCE } from '../../src/main/sources/fixture-source.js';
 import type { MainSource } from '../../src/main/sources/source.js';
 import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
-import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
+import type { TmuxRun, TmuxSession } from '../../src/main/sources/tmux/spawn.js';
 import { PROVIDERS } from '../../src/shared/providers.js';
 
 function recordingTmux(stderr = ''): TmuxRun & { calls: (readonly string[])[] } {
@@ -168,6 +168,119 @@ describe('o, on the Claude Code source', () => {
       name: 'vam-new-work-a1b2c3',
     });
     expect(failure?.code).toBe('session-exists');
+  });
+});
+
+/**
+ * D2 -- `+`/`n` IS REFUSED IN A PROJECT THAT HAS ONLY PANE ROWS.
+ *
+ * THE DEFECT. `createSessionInProject` looked up the project's directory only
+ * among LIVE AGENTS. A project right after Start -- a shell-first pane with no
+ * agent typed into it yet (`create-session.ts`'s own header, Stage 2) -- has
+ * no live agent at all, so the lookup answered `unknown-project` for a
+ * project vam's own Terminal tab is drawing that very moment.
+ *
+ * THE FIX. A pane vam already knows about answers the same question a live
+ * agent's `cwd` does, using the SAME project identity the sidebar groups by
+ * (`source.ts`'s own grouping: the pane's `@vam-project` tag first, its live
+ * `cwd` re-hashed only when the tag is unset) -- consulted ONLY as a fallback,
+ * so a project with a live agent never changes behaviour.
+ */
+describe('o, in a project that has only pane rows', () => {
+  const paneFor = (over: Partial<TmuxSession> = {}): TmuxSession => ({
+    project: projectIdOf('/w/orchard'),
+    name: 'vam-orchard-a1b2c3',
+    command: 'zsh',
+    cwd: '/w/orchard',
+    ...over,
+  });
+
+  it('creates a session in the pane-only project’s directory', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInProject({
+      agents: [],
+      projectId: projectIdOf('/w/orchard'),
+      title: 'new work',
+      run,
+      name: 'vam-new-work-a1b2c3',
+      panes: [paneFor()],
+    });
+
+    expect(failure).toBeNull();
+    expect(run.calls[0]?.slice(0, 8)).toEqual([
+      'new-session',
+      '-d',
+      '-P',
+      '-F',
+      '#{pane_pid}',
+      '-s',
+      'vam-new-work-a1b2c3',
+      '-c',
+    ]);
+    expect(run.calls[0]?.[8]).toBe('/w/orchard');
+  });
+
+  it('still refuses an unknown project when no pane answers it either', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInProject({
+      agents: [],
+      projectId: projectIdOf('/w/orchard'),
+      title: 'new work',
+      run,
+      panes: [paneFor({ project: projectIdOf('/w/elsewhere'), cwd: '/w/elsewhere' })],
+    });
+
+    expect(failure?.code).toBe('unknown-project');
+    expect(run.calls).toEqual([]);
+  });
+
+  it('refuses rather than guesses when two panes in the project disagree on directory', async () => {
+    // The same project TAG on two panes whose live cwd has since drifted
+    // apart -- one pane's shell `cd`'d elsewhere after creation. Nothing in
+    // that shape says which directory is the project's, so this is refused
+    // exactly like any other ambiguity in this file, never guessed.
+    const run = recordingTmux();
+    const failure = await createSessionInProject({
+      agents: [],
+      projectId: projectIdOf('/w/orchard'),
+      title: 'new work',
+      run,
+      panes: [paneFor(), paneFor({ name: 'vam-orchard-d4e5f6', cwd: '/w/orchard/sub' })],
+    });
+
+    expect(failure?.code).toBe('unknown-project');
+    expect(run.calls).toEqual([]);
+  });
+
+  it('prefers a live agent’s own cwd over any pane, unchanged from before', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInProject({
+      agents: [agent('/w/demo')],
+      projectId: projectIdOf('/w/demo'),
+      title: 'new work',
+      run,
+      name: 'vam-new-work-a1b2c3',
+      // A pane for the SAME project naming a different directory must never
+      // be consulted while a live agent already answers it.
+      panes: [paneFor({ project: projectIdOf('/w/demo'), cwd: '/w/demo/decoy' })],
+    });
+
+    expect(failure).toBeNull();
+    expect(run.calls[0]?.[8]).toBe('/w/demo');
+  });
+
+  it('ignores a pane with no cwd to offer, and still refuses', async () => {
+    const run = recordingTmux();
+    const failure = await createSessionInProject({
+      agents: [],
+      projectId: projectIdOf('/w/orchard'),
+      title: 'new work',
+      run,
+      panes: [{ project: projectIdOf('/w/orchard'), name: 'vam-orchard-a1b2c3' }],
+    });
+
+    expect(failure?.code).toBe('unknown-project');
+    expect(run.calls).toEqual([]);
   });
 });
 

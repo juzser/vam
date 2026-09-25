@@ -888,16 +888,27 @@ export const CLAUDE_CODE_SOURCE: MainSource = {
    * is the only thing that maps a project id back to a directory, and a
    * canvas drawn minutes ago may name a project whose last session has since
    * exited.
+   *
+   * THE TMUX LISTING IS ALSO RE-ASKED, and only ever consulted as
+   * `createSessionInProject`'s own fallback: a project right after Start is
+   * all pane rows and no live agent yet (D2), so the live list alone answers
+   * `unknown-project` for a directory vam's own Terminal tab is drawing that
+   * moment. A listing vam could not obtain degrades to no panes offered,
+   * never to a thrown error -- exactly the project's live-agent path already
+   * did before this fallback existed, and exactly what `unknown-project`
+   * already says honestly for a project neither can place.
    */
   createSession: async (projectId, title, provider) => {
     const agentsResult = await listLiveAgents();
     if (agentsResult.kind === 'unavailable') return agentsUnavailableError(agentsResult);
+    const listed = await listVamSessions(createTmuxRunner());
     return createSessionInProject({
       provider,
       agents: agentsResult.agents,
       projectId,
       title,
       run: createTmuxRunner(),
+      panes: listed.kind === 'ok' ? listed.sessions : [],
     });
   },
   /** No agent list to consult: the operator named the directory themselves. */
