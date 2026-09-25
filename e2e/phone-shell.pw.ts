@@ -127,7 +127,35 @@ async function controls(page: Page): Promise<Box[]> {
 const undersized = (boxes: readonly Box[]) =>
   boxes.filter((b) => b.w < 44 || b.h < 44).map((b) => `${b.w}x${b.h}  ${b.hooks || b.tag}  "${b.label}"`);
 
+/**
+ * PINNED TO `needs-you`, DELIBERATELY, MERGED rather than overwritten. The
+ * demo fixture's sessions carry no `createdAt`, so `Created` (the shipped
+ * default since the sort-by-created feature) orders them alphabetically by
+ * id instead of `needs-you`'s order -- which every test in this file that
+ * reads "the first row" or "the fixture's top-ranked session" (`openFirstSession`,
+ * and the comments beside it) was calibrated against. A MERGE, not a bare
+ * `setItem`, because some callers register their own init script (e.g.
+ * `focusView: true`) BEFORE calling `openDemo` -- init scripts run in
+ * registration order, so this one reads what that one already wrote and
+ * layers `sortBy` on top rather than erasing it.
+ */
+async function pinSortByNeedsYou(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const raw = localStorage.getItem('vam.prefs.v1');
+    const existing = raw === null ? {} : JSON.parse(raw);
+    localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({
+        ...existing,
+        viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+        sortByMigrated: true,
+      }),
+    );
+  });
+}
+
 async function openDemo(page: Page): Promise<void> {
+  await pinSortByNeedsYou(page);
   await page.goto('/?demo=1');
   await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
   // The rows are the fixture's, not a load state's.
@@ -1732,6 +1760,11 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     );
     await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
     await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    // `needs-you` pinned: the comment above `PROJECTS` says the tab order
+    // below depends on `waiting < running < done` -- `orderedInProject`'s
+    // `needs-you` rank -- not on `Created`'s alphabetical-by-id fallback
+    // these `createdAt`-less stub sessions would otherwise get.
+    await pinSortByNeedsYou(page);
     await page.goto('/');
     await expect(page.locator('[data-phone-shell] [data-session-row]').first()).toBeVisible();
   };
