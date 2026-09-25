@@ -254,6 +254,44 @@ describe('useSourceModel', () => {
     expect(pending).toHaveLength(2);
   });
 
+  it('a periodic poll in flight does not swallow a return signal -- the poll is not the operator coming back', async () => {
+    // S2: the coalescing window above must only ever absorb the SECOND half
+    // of a focus/visibilitychange pair -- never a genuinely separate reason
+    // to read again that happens to land inside it. A periodic tick is not a
+    // return signal; if the operator alt-tabs back in while that tick's own
+    // read is still in flight, `focus` must be QUEUED behind it (this file's
+    // ordinary "does not drop a write's reload" rule), not dropped as if it
+    // were the poll's own echo.
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const { source, pending } = gatedSource();
+    const { latest } = mount(source);
+    await act(async () => pending[0]?.resolve(projects('first')));
+    expect(pending).toHaveLength(1);
+
+    // The periodic tick issues a poll that is NOT a return signal.
+    await act(async () => {
+      vi.advanceTimersByTime(SOURCE_POLL_INTERVAL_MS);
+    });
+    expect(pending).toHaveLength(2);
+
+    // 150ms later -- well inside COALESCE_WINDOW_MS -- the operator returns.
+    // The in-flight load was the periodic tick, not a return signal, so this
+    // one must not be mistaken for its own echo.
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(pending).toHaveLength(2);
+
+    // The periodic poll's stale answer lands; the queued return-signal
+    // reload must fire right behind it, not wait for the next 10s tick.
+    await act(async () => pending[1]?.resolve(projects('stale')));
+    expect(pending).toHaveLength(3);
+    await act(async () => pending[2]?.resolve(projects('fresh')));
+    expect(latest()?.model.projects[0]?.name).toBe('fresh');
+  });
+
   it('does not touch state after unmount', async () => {
     const { source, pending } = gatedSource();
     const { seen } = mount(source);

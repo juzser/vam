@@ -165,6 +165,18 @@ export function useSourceModel(source: SessionSource | null): {
   /** When the current in-flight load STARTED -- read only by the RETURN
    *  SIGNAL coalescing window above (C10), never by the generic queue. */
   const inFlightSince = useRef(0);
+  /** Whether the CURRENT in-flight load was itself started by a return
+   *  signal (S2, a review finding on C10 above). The coalescing window must
+   *  only ever absorb the second half of a focus/visibilitychange PAIR --
+   *  never a periodic tick's own read that a return signal happens to land
+   *  inside. Without this a return signal arriving while an ordinary
+   *  10s-cadence poll was in flight was silently dropped instead of queued,
+   *  because the window only ever checked WHEN the in-flight load started,
+   *  never WHY -- so a poll that began reading a few hundred milliseconds
+   *  before the operator alt-tabbed back in ate the return signal, and the
+   *  view the operator came back to see stayed stale until the next
+   *  scheduled tick, up to 40s away while hidden. */
+  const inFlightIsReturn = useRef(false);
   const issued = useRef(0);
   /** The previous successful load's `projects`, serialised -- `null` until
    *  the first one lands, so that answer alone can never look "unchanged". */
@@ -183,9 +195,16 @@ export function useSourceModel(source: SessionSource | null): {
         return;
       }
       if (inFlight.current) {
-        if (isReturnSignal && performance.now() - inFlightSince.current < COALESCE_WINDOW_MS) {
+        if (
+          isReturnSignal &&
+          inFlightIsReturn.current &&
+          performance.now() - inFlightSince.current < COALESCE_WINDOW_MS
+        ) {
           // The other half of a focus/visibilitychange pair -- dropped, not
-          // queued: see this file's header.
+          // queued: see this file's header. Gated on `inFlightIsReturn` too
+          // (S2): the in-flight load must ALSO have been a return signal, or
+          // this is a return landing on top of an unrelated poll/write, and
+          // must queue like any other overlap.
           return;
         }
         // Queued rather than dropped -- see this file's header. Still never
@@ -195,6 +214,7 @@ export function useSourceModel(source: SessionSource | null): {
       }
       inFlight.current = true;
       inFlightSince.current = performance.now();
+      inFlightIsReturn.current = isReturnSignal;
       issued.current += 1;
       const seq = issued.current;
       // Only the newest ISSUED load may write. Without this a slow load
@@ -292,11 +312,15 @@ export function useSourceModel(source: SessionSource | null): {
   // the worked argument. The backed-off visible value is handed over ONLY
   // while visible; hidden always gets the base, whatever the streak is.
   const intervalMs = documentHidden ? SOURCE_POLL_INTERVAL_MS : visibleIntervalMs;
-  // Also marked a RETURN SIGNAL (C10): `useVisibilityInterval`'s own
-  // "BECOMING VISIBLE" immediate call and `focus` above fire for the same
-  // event, and this is what lets `load` tell that apart from a periodic
-  // tick landing (harmlessly) inside another load's coalescing window.
-  const onVisible = useCallback(() => load(true), [load]);
+  // A RETURN SIGNAL ONLY WHEN `useVisibilityInterval` SAYS SO (S2, a review
+  // finding on C10): its own `resumedFromHidden` argument is `true` only for
+  // the hidden -> visible transition's own immediate call, matching `focus`
+  // above -- `false` for the initial mount call and every ordinary interval
+  // tick. Forwarding it directly is what lets `load` tell a genuine return
+  // apart from a routine poll that happens to still be in flight when one
+  // lands -- previously this always passed `true`, so an in-flight periodic
+  // tick could swallow a real return instead of queuing behind it.
+  const onVisible = useCallback((resumedFromHidden: boolean) => load(resumedFromHidden), [load]);
   useVisibilityInterval(source !== null, intervalMs, { slowBy: HIDDEN_SLOWDOWN }, onVisible);
 
   return { model, error, loading, reload: load };
