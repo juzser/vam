@@ -40,7 +40,11 @@ describe('parseWorktreeListPorcelain — `-z` (NUL-separated)', () => {
   });
 
   it('parses a DETACHED HEAD, which carries no branch line at all', () => {
-    const output = z(['worktree /repo-worktrees/pinned', 'HEAD cccccccccccccccccccccccccccccccccccccccc', 'detached']);
+    const output = z([
+      'worktree /repo-worktrees/pinned',
+      'HEAD cccccccccccccccccccccccccccccccccccccccc',
+      'detached',
+    ]);
     const [entry] = parseWorktreeListPorcelain(output, '\0');
     expect(entry).toMatchObject({ detached: true, branchRef: null });
   });
@@ -53,7 +57,12 @@ describe('parseWorktreeListPorcelain — `-z` (NUL-separated)', () => {
 
   it('parses `locked` with and without a reason', () => {
     const output = z(
-      ['worktree /repo-worktrees/a', 'HEAD dddddddddddddddddddddddddddddddddddddddd', 'branch refs/heads/a', 'locked'],
+      [
+        'worktree /repo-worktrees/a',
+        'HEAD dddddddddddddddddddddddddddddddddddddddd',
+        'branch refs/heads/a',
+        'locked',
+      ],
       [
         'worktree /repo-worktrees/b',
         'HEAD eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
@@ -104,11 +113,15 @@ describe('parseWorktreeListPorcelain — plain porcelain (older git, no `-z`)', 
       'worktree /repo-worktrees/feat\nHEAD bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nbranch refs/heads/feat\n\n';
     const entries = parseWorktreeListPorcelain(output, '\n');
     expect(entries).toHaveLength(2);
-    expect(entries[1]).toMatchObject({ path: '/repo-worktrees/feat', branchRef: 'refs/heads/feat' });
+    expect(entries[1]).toMatchObject({
+      path: '/repo-worktrees/feat',
+      branchRef: 'refs/heads/feat',
+    });
   });
 
   it('tolerates a missing trailing blank line on the last record', () => {
-    const output = 'worktree /repo\nHEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbranch refs/heads/main';
+    const output =
+      'worktree /repo\nHEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbranch refs/heads/main';
     const entries = parseWorktreeListPorcelain(output, '\n');
     expect(entries).toHaveLength(1);
     expect(entries[0]?.path).toBe('/repo');
