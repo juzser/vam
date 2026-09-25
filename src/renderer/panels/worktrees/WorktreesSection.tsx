@@ -277,49 +277,69 @@ export function WorktreesSection({
             <div
               key={worktree.worktreeId}
               data-worktree-row={worktree.worktreeId}
-              className="flex items-center gap-[7px] rounded-[7px] px-1.5 py-1 text-control hover:bg-line"
+              className="flex flex-col gap-0.5 rounded-[7px] px-1.5 py-1 text-control hover:bg-line"
             >
-              <span data-worktree-name className="min-w-0 truncate text-ink-dim">
-                {displayName(worktree.path)}
-              </span>
-              {worktree.branch !== null && (
-                <span data-worktree-branch className="truncate font-mono text-ink-faint text-meta">
-                  {worktree.branch}
+              {/* Line 1: the name gets the row's FULL width, same idiom as
+                  `data-row-title` on a session row -- the delete button is
+                  the only thing sharing this line, so `min-w-0 truncate`
+                  here actually has room to matter instead of collapsing to
+                  a couple of characters (the bug a real screenshot caught:
+                  packing name, branch, "Start a session here" and delete
+                  onto ONE line left name/branch a couple of px wide each). */}
+              <div className="flex items-center gap-[7px]">
+                <span data-worktree-name className="min-w-0 flex-1 truncate text-ink-dim">
+                  {displayName(worktree.path)}
                 </span>
-              )}
-              {worktree.locked && (
-                <span data-worktree-locked className="text-ink-faint text-meta">
-                  locked
-                </span>
-              )}
-              <span className="flex-1" />
-              {sessionCount > 0 ? (
-                <span data-worktree-session-count className="font-mono text-ink-faint text-meta">
-                  {sessionCount}
-                </span>
-              ) : (
                 <button
                   type="button"
-                  data-worktree-start-here={worktree.worktreeId}
-                  onClick={() => void startHere(worktree)}
-                  className="cursor-pointer whitespace-nowrap rounded-[5px] px-1 font-mono text-control text-ink-faint hover:text-ink"
+                  data-worktree-delete={worktree.worktreeId}
+                  aria-label={`delete worktree ${displayName(worktree.path)}`}
+                  onClick={() => {
+                    setDeleteError(null);
+                    setDeleteDirty(false);
+                    setPendingDelete(worktree);
+                  }}
+                  className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
                 >
-                  Start a session here
+                  ×
                 </button>
-              )}
-              <button
-                type="button"
-                data-worktree-delete={worktree.worktreeId}
-                aria-label={`delete worktree ${displayName(worktree.path)}`}
-                onClick={() => {
-                  setDeleteError(null);
-                  setDeleteDirty(false);
-                  setPendingDelete(worktree);
-                }}
-                className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
-              >
-                ×
-              </button>
+              </div>
+              {/* Line 2: branch + lock tag, own full-width line to truncate
+                  against; the start-here/session-count control sits at the
+                  far end, same right-alignment as a session row's age. */}
+              <div className="flex items-center gap-[7px]">
+                {worktree.branch !== null && (
+                  <span
+                    data-worktree-branch
+                    className="min-w-0 truncate font-mono text-ink-faint text-meta"
+                  >
+                    {worktree.branch}
+                  </span>
+                )}
+                {worktree.locked && (
+                  <span data-worktree-locked className="flex-none text-ink-faint text-meta">
+                    locked
+                  </span>
+                )}
+                <span className="flex-1" />
+                {sessionCount > 0 ? (
+                  <span
+                    data-worktree-session-count
+                    className="flex-none font-mono text-ink-faint text-meta"
+                  >
+                    {sessionCount}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    data-worktree-start-here={worktree.worktreeId}
+                    onClick={() => void startHere(worktree)}
+                    className="flex-none cursor-pointer whitespace-nowrap rounded-[5px] px-1 font-mono text-control text-ink-faint hover:text-ink"
+                  >
+                    Start a session here
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

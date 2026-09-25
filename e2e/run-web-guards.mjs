@@ -328,6 +328,15 @@ const GUARDS = [
   // Regenerates `docs/ui/hidden-sessions-note-{dark,light}.png`.
   // `hidden-sessions-note-shots.mjs`'s own header holds the falsification.
   'hidden-sessions-note-shots',
+  // THE WORKTREES SIDEBAR: the "Worktrees" sub-list, its create form and its
+  // delete confirmation, in both themes. Stubs `window.api.worktrees` for
+  // the same reason `sidebar-ownership-shots.mjs` stubs the rest of the
+  // bridge -- this feature reads `window.api` directly rather than taking
+  // callback props, so only a real stub (never a mocked prop) exercises the
+  // actual wiring. Regenerates `docs/ui/worktrees-{sidebar,create,
+  // delete-confirm}-{dark,light}.png`. `worktrees-shots.mjs`'s own header
+  // holds the falsification.
+  'worktrees-shots',
   // DISMISS, THROUGH THE REAL PRELOAD CONTRACT AND A REAL CLICK -- the
   // operator's own report, "some sessions cannot be closed and report a
   // failure — they stay there forever." Stubs `window.api` and throws
