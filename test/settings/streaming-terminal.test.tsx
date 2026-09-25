@@ -3,8 +3,9 @@
 /**
  * THE STREAMING TERMINAL SWITCH, at the surface the operator touches. A
  * shape `test/settings/concise-output.test.tsx` already holds at length; this
- * file only asserts that the row exists, is off by default and writes its
- * choice.
+ * file only asserts that the row exists, is on by default now
+ * (`docs/design/terminal-streaming.md`'s "Flipping the default") and writes
+ * its choice.
  */
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
@@ -45,17 +46,24 @@ function open(prefs: Prefs = EMPTY_PREFS) {
 const toggle = () => document.querySelector<HTMLElement>('[data-switch="streaming-terminal"]');
 
 describe('the streaming terminal switch', () => {
-  it('is off by default', () => {
+  it('is on by default', () => {
     open();
-    expect(toggle()?.getAttribute('aria-checked')).toBe('false');
-    expect(toggle()?.textContent).toBe('off');
+    expect(toggle()?.getAttribute('aria-checked')).toBe('true');
+    expect(toggle()?.textContent).toBe('on');
   });
 
   it('writes the choice, disturbing no neighbour', () => {
-    const { onChange } = open({ ...EMPTY_PREFS, conciseOutput: true });
+    const { onChange } = open({ ...EMPTY_PREFS, conciseOutput: true, streamingTerminal: false });
     fireEvent.click(toggle() as HTMLElement);
     const next = onChange.mock.calls[0]?.[0] as Prefs;
     expect(next.streamingTerminal).toBe(true);
     expect(next.conciseOutput).toBe(true);
+  });
+
+  it('an explicit off sticks, unaffected by the migration', () => {
+    const { onChange } = open({ ...EMPTY_PREFS, streamingTerminal: true });
+    fireEvent.click(toggle() as HTMLElement);
+    const next = onChange.mock.calls[0]?.[0] as Prefs;
+    expect(next.streamingTerminal).toBe(false);
   });
 });
