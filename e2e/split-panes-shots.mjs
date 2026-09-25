@@ -34,6 +34,25 @@ page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
 page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('CONSOLE ERROR:', msg.text());
 });
+// PINNED TO `needs-you`, DELIBERATELY. This whole script's claim is "a
+// pane's tab strip draws in the SIDEBAR's order" -- true of `allEntries`
+// (`orderedSessions`' own, untouched order every pane strip reads,
+// `selectors.ts`'s own header on `orderedPaneTabs`) only when `sortBy`
+// agrees with it. `Created`, the shipped default since the sort-by-created
+// feature, sorts alphabetically-by-id among sessions with no `createdAt` --
+// exactly what every demo fixture session is -- which disagrees with
+// `allEntries` on purpose (`Canvas.tsx`'s own header: tab order must not
+// move because of a sidebar DISPLAY preference). Seeded before the first
+// navigation, the same seam `sortByMigrated`'s own tests use.
+await page.addInitScript(() => {
+  localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({
+      viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+      sortByMigrated: true,
+    }),
+  );
+});
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-tab-strip]');
 

@@ -57,6 +57,23 @@ function check(label, ok, detail) {
   failures.push(label);
 }
 
+// PINNED TO `needs-you`, DELIBERATELY. `factory-sse-1` must be the sidebar's
+// first entry for the app to auto-select it with no explicit row click --
+// true under `needs-you`, the order this file was measured against, but not
+// under `Created` (the shipped default since the sort-by-created feature),
+// which sorts the demo fixture's `createdAt`-less sessions alphabetically by
+// id instead. Seeded before the only navigation, same seam
+// `split-panes-shots.mjs` and `view-width-shots.mjs` pin it with.
+await page.addInitScript(() => {
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({
+      viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+      sortByMigrated: true,
+    }),
+  );
+});
+
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-column-turn]');
 

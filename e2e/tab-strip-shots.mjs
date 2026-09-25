@@ -39,9 +39,29 @@ import { chromium } from 'playwright-core';
 const origin = process.argv[2] ?? 'http://localhost:5521';
 const outDir = process.argv[3] ?? 'docs/ui';
 
+// PINNED TO `needs-you`, DELIBERATELY, ON EVERY PAGE THIS FILE OPENS. The
+// demo fixture's sessions carry no `createdAt`, so `Created` (the shipped
+// default since the sort-by-created feature) orders them alphabetically by
+// id instead of `needs-you`'s order -- which this whole file was measured
+// against, including which project is "on screen at first paint" with no
+// explicit row click. Same seam `split-panes-shots.mjs` and
+// `view-width-shots.mjs` pin it with.
+function pinSortByNeedsYou(target) {
+  return target.addInitScript(() => {
+    globalThis.localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({
+        viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+        sortByMigrated: true,
+      }),
+    );
+  });
+}
+
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1100, height: 620 } });
 page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await pinSortByNeedsYou(page);
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-tab-strip]');
 await page.locator('[data-session-row="factory-sse-1"]').click();
@@ -265,6 +285,7 @@ console.log(`${outDir}/tab-strip-marks.png`);
  */
 const narrow = await browser.newPage({ viewport: { width: 620, height: 620 } });
 narrow.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await pinSortByNeedsYou(narrow);
 await narrow.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await narrow.waitForSelector('[data-session-tab]');
 await narrow.waitForTimeout(250);
@@ -865,6 +886,7 @@ if (drafted.some((t) => t.rowHeight !== ROW_HEIGHT_PX)) {
 // which runs to the pane's edge and is mostly ground.
 const wide = await browser.newPage({ viewport: { width: 1100, height: 620 }, deviceScaleFactor: 2 });
 wide.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+await pinSortByNeedsYou(wide);
 await wide.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await wide.waitForSelector('[data-tab-strip]');
 await draftOnTheFailedTab(wide);
