@@ -381,6 +381,27 @@ const GUARDS = [
   // was the only way to close it, not a class this list could paper over.
   // `phone-question-shots.mjs`'s own header holds the measurement.
   'phone-question-shots',
+  // STREAMING-PATH LATENCY, against the SHIPPED `StreamClient` and a real
+  // tmux control-mode connection -- the operator's own ask, translated:
+  // "the terminal latency/resource measurement scripts are not in the
+  // automatic checks -- fix it." Placed LAST, after every other guard's own
+  // Chromium has already closed: it needs the same real, private-socket
+  // tmux this job already installs for `terminal-echo-scroll-shots.mjs` and
+  // `terminal-typing-latency-shots.mjs` above, and its own p95 bounds carry
+  // headroom for a loaded machine, not a QUIET one -- running it last (never
+  // parallel; this whole list is sequential, this file's own header
+  // explains why) is the cheapest way to give it the quietest tail of the
+  // run rather than adding a second CI job for one guard.
+  // `terminal-stream-latency-shots.mjs`'s own header holds the calibration,
+  // the bounds and their headroom, and the falsification.
+  //
+  // THE ONE-LINE HOOK for the streaming resource guard (CPU/memory/client
+  // count, `e2e/terminal-stream-resource-shots.mjs`, `vam/stream-default`):
+  // once that branch lands, add `'terminal-stream-resource-shots',` as the
+  // next entry, right here -- it measures the same shipped `StreamClient`
+  // the same way (a private tmux socket, its own throwaway harness), so it
+  // belongs in this same "runs last, alone" slot, not a new CI job.
+  'terminal-stream-latency-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);
