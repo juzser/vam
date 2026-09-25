@@ -61,8 +61,10 @@ import { prRepoOverride } from './sources/claude-code/pr-repos.js';
 import { projectIdOf } from './sources/claude-code/project-id.js';
 import { CLAUDE_CODE_SOURCE } from './sources/claude-code/source.js';
 import { defaultCodexSource } from './sources/codex/source.js';
+import { combineSources } from './sources/combine.js';
 import type { MainSource } from './sources/source.js';
 import { createControlTmuxRunner } from './sources/tmux/control.js';
+import { createTmuxRunner, listVamSessions } from './sources/tmux/spawn.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
@@ -72,6 +74,9 @@ import { registerUpdateIpc } from './update/ipc.js';
 import { readCodexUsage } from './usage/codex-reader.js';
 import { registerCodexUsageIpc, registerUsageIpc } from './usage/ipc.js';
 import { readUsage } from './usage/reader.js';
+import { runGitViaCli } from './worktrees/git-run.js';
+import { registerWorktreesIpc } from './worktrees/ipc.js';
+import { resolveProjectDirectoryFrom } from './worktrees/resolve-directory.js';
 import { lockZoom } from './zoom.js';
 
 /**
@@ -677,6 +682,25 @@ async function resolveSessionCwd(sessionId: string): Promise<string | null> {
 }
 
 /**
+ * `projectId -> directory`, for the worktrees feature ALONE -- distinct from
+ * `resolveSessionCwd` above, which resolves a SESSION id, because a project
+ * with live sessions but no chosen one yet (the state right after "Start",
+ * `pane-row.ts`) still needs an answer here. The resolution itself is the
+ * SAME two-tier rule `create-session.ts`'s own `createSessionInProject`
+ * applies -- a live agent first, a live pane only when no agent answers --
+ * reimplemented as `resolve-directory.ts`'s pure `resolveProjectDirectoryFrom`
+ * so that module carries no dependency on this file's tmux wiring. Asked
+ * fresh per call, never cached, for `resolveSessionCwd`'s own reason.
+ */
+async function resolveWorktreeProjectDirectory(projectId: string): Promise<string | null> {
+  const agentsResult = await listLiveAgents();
+  const agents = agentsResult.kind === 'ok' ? agentsResult.agents : [];
+  const listed = await listVamSessions(createTmuxRunner());
+  const panes = listed.kind === 'ok' ? listed.sessions : [];
+  return resolveProjectDirectoryFrom(agents, panes, projectId);
+}
+
+/**
  * THE ONE RUNNER FOR THE WHOLE APPLICATION, and that singleness is the
  * guarantee rather than a tidiness.
  *
@@ -882,6 +906,22 @@ void app.whenReady().then(async () => {
   // above, so a `..`, a look-alike sibling directory and a symlink out of the
   // project are all caught against the real disk. See `./files/resolve-ipc.ts`.
   registerFilesResolveIpc(ipcMain, resolveSessionCwd, (path) => realpath(path));
+  // list/create/remove a linked git worktree of a project vam already
+  // knows. `knownProjectIds` re-reads the SAME `source.load()` project set
+  // `remote/server.ts`'s own `confineToProjectSet` confines the
+  // create-session-in ROUTE to -- applied here to the LOCAL bridge instead,
+  // where the caller never hands over a raw path to canonicalise in the
+  // first place, only a project id. `resolveWorktreeProjectDirectory` above
+  // is the only way that id becomes a directory at all: `Project` carries no
+  // `cwd` (`renderer/domain/model.ts`'s own rule). DESKTOP-ONLY, like
+  // `registerFilesIpc` above -- see `CHANNELS.worktreeList`'s own comment
+  // for why a paired phone has no route to any of the three.
+  registerWorktreesIpc(ipcMain, {
+    run: runGitViaCli(),
+    realpathFn: (path) => realpath(path),
+    resolveProjectDirectory: resolveWorktreeProjectDirectory,
+    knownProjectIds: async () => (await combineSources(DESKTOP_SOURCES).load()).map((p) => p.id),
+  });
   // The file-editor tab's LAST channel, and the only one that carries no path
   // at all: how many of its buffers are unsaved, and what they are called.
   // Registered here rather than in `createWindow` because the guard it feeds

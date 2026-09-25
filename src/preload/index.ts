@@ -29,6 +29,7 @@ import {
   createTerminalStreamApi,
   createUpdateApi,
   createUsageApi,
+  createWorktreesApi,
 } from './api.js';
 
 contextBridge.exposeInMainWorld('api', {
@@ -79,4 +80,9 @@ contextBridge.exposeInMainWorld('api', {
   // from, per project. Desktop-only by construction -- it is not a member of
   // the source API a phone implements over HTTP.
   prefs: createPrefsBridge(ipcRenderer),
+  // list/create/remove a linked git worktree of a project vam already
+  // knows. Desktop-only, the same standing as `files` above -- see
+  // `CHANNELS.worktreeList`'s own comment for why a paired phone has no
+  // route to any of the three.
+  worktrees: createWorktreesApi(ipcRenderer),
 });

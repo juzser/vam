@@ -604,6 +604,30 @@ export const CHANNELS = {
   notifyClose: 'vam:notify:close',
   notifyTest: 'vam:notify:test',
   notifyActivated: 'vam:notify:activated',
+  /**
+   * THE WORKTREES FEATURE'S THREE CHANNELS: list the linked worktrees of a
+   * project vam already knows, create one, remove one.
+   *
+   * DESKTOP-ONLY, LIKE `filesRead`/`filesWrite`/`filesList` -- NOT MEMBERS
+   * OF `PreloadSourceApi`, so `remote/server.ts`'s route table carries no
+   * matching path and a paired phone cannot reach any of the three. A
+   * worktree is a checkout on THIS machine's disk, spawning `git` as a
+   * child process of the desktop app; the operator's own decision for this
+   * feature's v1 is that a remote device may see and use the sessions a
+   * worktree already has, exactly as it can for any other project, but may
+   * not create or remove the worktree itself. Exposing that over the
+   * network is named explicitly as a phase 2 question in
+   * `docs/design/worktrees.md`, not decided here by omission.
+   *
+   * Every one of the three answers through the `IpcResult` envelope, like
+   * every other write/read below `describe`/`load` above: `worktrees.ts`'s
+   * own functions already resolve to `SourceError | T`, never throw, so the
+   * handler only has to fold that union into `{ok:false,error}` /
+   * `{ok:true,value}`.
+   */
+  worktreeList: 'vam:worktree:list',
+  worktreeCreate: 'vam:worktree:create',
+  worktreeRemove: 'vam:worktree:remove',
 } as const;
 
 /**

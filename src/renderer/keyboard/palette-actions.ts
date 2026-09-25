@@ -144,6 +144,7 @@ const PALETTE_ACTIONS: readonly PaletteActionSpec[] = [
   { action: { kind: 'search' }, title: 'Search Sessions' },
   { action: { kind: 'filterMenu' }, title: 'Filter Sessions…' },
   { action: { kind: 'revealProject' }, title: 'Reveal Project' },
+  { action: { kind: 'newWorktree' }, title: 'New Worktree…' },
   { action: { kind: 'moveToGroup' }, title: 'Move to Folder…' },
   { action: { kind: 'copy' }, title: 'Copy Commands' },
   { action: { kind: 'toggleFocusView' }, title: 'Toggle Focus View' },
@@ -158,7 +159,8 @@ const PALETTE_ACTIONS: readonly PaletteActionSpec[] = [
  * Which of the candidates need a session focused to do anything, chosen by
  * reading `Canvas.tsx`'s own switch rather than guessed: each of these either
  * opens with `if (focusedEntry === null) { setStatus('pick a session
- * first'); return; }` (`close`, `rename`, `revealProject`, `moveToGroup`), or
+ * first'); return; }` (`close`, `rename`, `revealProject`, `newWorktree`,
+ * `moveToGroup`), or
  * — `splitPane`, through `splitFocused` — the identical guard one call down,
  * or — `pickView` — writes nothing at all when no session is focused, which
  * this module treats as needing one too rather than letting the palette open
@@ -176,6 +178,7 @@ const REQUIRES_FOCUSED_SESSION: ReadonlySet<KeyAction['kind']> = new Set([
   'close',
   'rename',
   'revealProject',
+  'newWorktree',
   'moveToGroup',
   'splitPane',
   'pickView',

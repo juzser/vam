@@ -53,6 +53,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -91,6 +92,8 @@ import { revealScrollTop } from './reveal-row.js';
 import { useSessionListDrafts } from './session-list-drafts.js';
 import { StatusMark } from './status-mark.js';
 import { UsagePopover } from './UsagePopover.js';
+import { useWorktreeParents } from './worktrees/useWorktreeParents.js';
+import { WorktreesSection } from './worktrees/WorktreesSection.js';
 
 /**
  * What `pendingAction` holds while "new project" is running.
@@ -1072,6 +1075,15 @@ export type SessionListProps = {
    * `Canvas.tsx`. See the effect below for what that bought.
    */
   readonly revealRequest?: { readonly projectId: string } | null;
+  /**
+   * `revealRequest`'s own shape, for the `newWorktree` palette action
+   * (`Mod-Shift-w`, or `/New worktree…`): a fresh object each press, read by
+   * the effect below to open that project's "Worktrees" create form even
+   * with zero worktrees yet -- the same route the project menu's own "New
+   * worktree…" item opens locally, so the two never disagree about how a
+   * first worktree gets created.
+   */
+  readonly createWorktreeRequest?: { readonly projectId: string } | null;
   readonly onSettings: () => void;
   /**
    * Opens the same Settings overlay `onSettings` does, focused directly on
@@ -1327,6 +1339,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onPickIcon,
     onRenameProject,
     revealRequest,
+    createWorktreeRequest,
     collapsedProjects,
     onToggleCollapse,
     groups = [],
@@ -1625,8 +1638,32 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   /** Never `entries`. See `allEntries` on the props for what reads this. */
   const allEntries = unfiltered ?? entries;
   const hidden = hiddenProjects;
+  /**
+   * UI1: which project ids are actually a WORKTREE of another visible
+   * project -- `window.api?.worktrees`, read directly here for the same
+   * reason `WorktreesSection.tsx`'s own header already documents (avoiding
+   * a new prop on every call site this file and `Canvas.tsx` already have).
+   * `visibleEntries` below is what actually acts on this map.
+   */
+  const worktreesApiForParents = window.api?.worktrees;
+  const projectIdsForWorktreeParents = useMemo(
+    () => Array.from(new Set(allEntries.map((entry) => entry.project.id))),
+    [allEntries],
+  );
+  const worktreeParents = useWorktreeParents(projectIdsForWorktreeParents, worktreesApiForParents);
   /** The project whose removal is being confirmed, or null. One at a time. */
   const [confirming, setConfirming] = useState<Project | null>(null);
+  /**
+   * The project id whose "Worktrees" sub-list should draw its create form
+   * OPEN even though it has no worktrees yet -- the entry point for the
+   * FIRST worktree of a project, reached from that project's own "New
+   * worktree…" menu item below. `WorktreesSection` itself stays hidden for
+   * a project with none, matching this feature's own operator decision; this
+   * is the one exception, and it is cleared the moment the form closes
+   * (submitted or cancelled) so a later project's menu click cannot reopen a
+   * stale one.
+   */
+  const [creatingWorktreeFor, setCreatingWorktreeFor] = useState<string | null>(null);
   const {
     groupDraft,
     setGroupDraft,
@@ -1737,6 +1774,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     setRevealed(projectId);
     foldRefs.current.get(projectId)?.focus();
   }, [entries, revealRequest]);
+
+  /**
+   * `newWorktree`'s own one-shot request -- `revealRequest`'s effect above,
+   * for a project's "Worktrees" create form instead of its fold. Also
+   * reveals the project's own section first, the same way pressing `p`
+   * would, so the operator can actually see the form `creatingWorktreeFor`
+   * is about to draw rather than it opening off-screen.
+   */
+  useEffect(() => {
+    if (createWorktreeRequest === null || createWorktreeRequest === undefined) {
+      return;
+    }
+    const { projectId } = createWorktreeRequest;
+    if (!entries.some((candidate) => candidate.project.id === projectId)) {
+      return;
+    }
+    setRevealed(projectId);
+    setCreatingWorktreeFor(projectId);
+  }, [entries, createWorktreeRequest]);
 
   /**
    * Bring the focused row into view when it is not.
@@ -1910,7 +1966,28 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * `viewOptions.groupBy` before it ever reaches for `section.project` as a
    * subject rather than a key.
    */
-  const visibleEntries = entries.filter((entry) => !hidden.includes(entry.project.id));
+  /**
+   * UI1's suppression, `Group by: Project` ONLY: a worktree's sessions nest
+   * under its parent's "Worktrees" row instead of also drawing their own
+   * top-level section, but ONLY when that nesting is actually where the
+   * operator can still reach them -- the parent project's OWN section must
+   * still be visible (not itself hidden) for `WorktreesSection` to ever
+   * render at all. Suppressing the child while its parent is hidden would
+   * make its sessions vanish from the sidebar entirely, which is a
+   * regression this filter must never cause. `Status`/`None` grouping has
+   * no "Worktrees" row to nest under in the first place (`WorktreesSection`
+   * only ever renders under `groupBy === 'project'`), so neither mode is
+   * touched here -- PR 486's pane-only fallback and every filter/grouping
+   * mode besides `project` see exactly what they always did.
+   */
+  const isSuppressedWorktreeChild = (projectId: string): boolean => {
+    if (viewOptions.groupBy !== 'project') return false;
+    const parentId = worktreeParents.get(projectId);
+    return parentId !== undefined && !hidden.includes(parentId);
+  };
+  const visibleEntries = entries.filter(
+    (entry) => !hidden.includes(entry.project.id) && !isSuppressedWorktreeChild(entry.project.id),
+  );
   const sections: {
     readonly project: Project;
     readonly items: readonly SessionEntry[];
@@ -2136,6 +2213,685 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
       }
     }
   }
+
+  /**
+   * ONE SESSION ROW, extracted so it is literally the SAME function whether it
+   * draws in its own project's `data-project-rows` or nested under a worktree's
+   * row in `WorktreesSection` (UI1's keyboard-parity fix) -- not a reimplementation
+   * with a matching look, the exact closures this file already had: `rowRefs`,
+   * `jumpLabels`, `pendingAction`, `onPick`, `onRowMenu`, `onClose`, renaming
+   * state, `phone`. A row rendered through this function is reachable by `j`/`k`
+   * (Canvas.tsx's own walk over `entries`, never this file's rendering), wears a
+   * jump label when one is assigned, registers in `rowRefs` for the reveal-scroll
+   * effect, and gets the same context menu and close button -- wherever it is
+   * called from.
+   */
+  const renderSessionRow = (entry: SessionEntry): ReactNode => {
+    const { session } = entry;
+    const isFocused = session.id === focusedSessionId;
+    // The one key that jumps here, or nothing when no jump
+    // is armed -- and nothing, too, for a row past the end
+    // of `JUMP_KEYS`: twenty labels is what the home row and
+    // the top row can spell, and a twenty-first row wearing
+    // a letter that jumped nowhere would be worse than a row
+    // wearing none.
+    const jumpLabel = jumpLabels.get(session.id);
+    const needsYou = session.status === 'waiting';
+    // The newest step's own input: what the session asked,
+    // in the words the session screen's IN region shows.
+    // Newest first, which is the order `decisions` is in.
+    const newestAsk = session.decisions[0]?.input ?? null;
+    // WHAT THE SESSION SAYS IT IS BLOCKED ON, or nothing.
+    // Three states collapse to two here for the same reason
+    // they do in `DetailPanel`: absent ("no surface reports
+    // a wait") and null ("waiting, cause unnamed") differ in
+    // what vam knows and not in anything it could honestly
+    // print, and a word invented for the second would be
+    // indistinguishable from one a session reported.
+    const waitingCause =
+      typeof session.waitingFor === 'string' && session.waitingFor !== ''
+        ? session.waitingFor
+        : null;
+    // The SAME notion the close button already wears, applied
+    // to the whole row: closing can take the full stop timeout,
+    // and for those fifteen seconds the row is not something
+    // the operator can act on. `pendingAction` stays the one
+    // source of truth -- there is no second pending state here.
+    const closing = pendingAction === session.id;
+    const closingLabel = `Stopping “${session.title}”…`;
+    // WHICH SOURCE THIS ROW BELONGS TO, in the same order
+    // the status bar's glyph reads it (`Canvas.tsx`,
+    // `sourceKeyOf`): the session's own stamp first, its
+    // project's second, because the two are written by
+    // different readers and the narrower one is the one
+    // about THIS row. `null` is an entry that names neither
+    // -- a fixture, or a model assembled before sources
+    // existed -- and it draws the lane with nothing in it.
+    // `entry.project`, NOT `section.project`: under
+    // `Status`/`None` one section can hold several
+    // projects, and `section.project` there is only ever
+    // a placeholder key -- this row's OWN project is the
+    // one whose source fallback is actually correct.
+    const rowSource = session.source ?? entry.project.source ?? null;
+
+    return (
+      <div key={session.id}>
+        {renamingId === session.id ? (
+          <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
+            <input
+              ref={renameRef}
+              value={renameDraft}
+              onChange={(event) => onRenameChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onRenameCommit();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onRenameCancel();
+                }
+              }}
+              className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-card px-1 font-mono text-control text-ink outline-none ring-1 ring-waiting"
+              aria-label="rename session"
+            />
+          </div>
+        ) : (
+          <div
+            // A NAMED group. `group-hover:` matches ANY ancestor
+            // carrying `group`, and OverlayScroll wraps this whole
+            // list in one — so an unnamed group here meant hovering
+            // anywhere in the sidebar revealed every row's close
+            // button at once, the exact opposite of what the class
+            // was there to do.
+            // `data-row-pending` carries the dim (styles.css)
+            // rather than an inline colour, so the row keeps
+            // its own tokens and the treatment is one rule.
+            {...(closing ? { 'data-row-pending': session.id, 'aria-busy': true } : {})}
+            className="group/row relative"
+          >
+            <button
+              type="button"
+              // Held by id, like `foldRefs` above: the reveal
+              // effect needs THIS session's row, and a
+              // querySelector on every focus change would go
+              // looking for it in the document instead.
+              ref={(node) => {
+                if (node === null) {
+                  rowRefs.current.delete(session.id);
+                } else {
+                  rowRefs.current.set(session.id, node);
+                }
+              }}
+              data-session-row={session.id}
+              onClick={() => onPick(session.id)}
+              /* ON THE BUTTON, not on the wrapper around it.
+                                   The button IS the row -- `w-full`, the whole
+                                   box -- so the target is the same, and it is
+                                   the element the keyboard focuses, which is
+                                   where the Menu key and Shift+F10 fire their
+                                   `contextmenu`. A handler on the static
+                                   wrapper would have been a pointer-only
+                                   affordance in everything but name.
+                                   `preventDefault` is not optional: without it
+                                   Electron opens the SHELL's menu over the
+                                   app's, offering Reload and Inspect Element
+                                   over a session list. */
+              onContextMenu={onRowMenu(session.id, session.title, session.ended === true)}
+              // Not actionable and not a tab stop -- but still
+              // drawn, and still the row for THIS session: the
+              // operator has to be able to see which one is
+              // closing, which is the whole point of the state.
+              disabled={closing}
+              tabIndex={closing ? -1 : undefined}
+              {...(closing ? { title: closingLabel } : {})}
+              className={[
+                // `vam-tap`: the row is the screen's primary
+                // tap target, and it says so itself rather
+                // than relying on its content to happen to
+                // add up to 44px.
+                'vam-tap relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
+                // Over the 44 floor `vam-tap` sets, and the
+                // extra is what makes a scrolling list
+                // forgiving of a moving thumb.
+                phone ? 'min-h-[56px]' : '',
+                isFocused && !phone
+                  ? 'border border-line-loud bg-raised'
+                  : 'border border-transparent',
+              ].join(' ')}
+            >
+              {/* Not on a phone. `focusedId` does not move
+                                    when the session screen closes, so one
+                                    round trip leaves this bar marking a
+                                    session the operator has already left --
+                                    and the ring around it measures 2.15:1 on
+                                    the light canvas, under even the 3:1
+                                    non-text floor (issue 188). On a desktop it
+                                    says where the next keystroke lands; here
+                                    nothing lands anywhere. */}
+              {isFocused && !phone && (
+                <span
+                  data-row-cursor
+                  className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
+                />
+              )}
+
+              {/* THE JUMP LABEL: the key that brings the
+                                    cursor here, drawn on the row it addresses.
+                                    Vimium's idiom and its reasoning -- the
+                                    label has to be ON the thing it names, or
+                                    the operator is matching a letter against a
+                                    list they have to remember.
+
+                                    ABSOLUTE, so arming the mode moves nothing:
+                                    twenty rows all growing a badge in the flow
+                                    at once would reflow the column under the
+                                    cursor at the exact moment the operator is
+                                    reading it. It overlays the tail of a long
+                                    title, which is the trade the gesture is
+                                    worth: one keystroke later it is gone.
+
+                                    `bg-ink`/`text-ground` rather than a status
+                                    hue. The label is not a fact about the
+                                    session -- it is a transient address for
+                                    one keystroke -- and the two ends of the
+                                    ink ramp are the one pair guaranteed to
+                                    read on every surface in both themes.
+
+                                    The letter is drawn EXACTLY as it must be
+                                    typed, lower case and all: the handler
+                                    matches `event.key`, so a label printed `A`
+                                    over a key that only answers to `a` would
+                                    be an instruction that does not work. The
+                                    `sr-only` word is what stops the badge from
+                                    reading as a bare letter in the row's
+                                    accessible name. */}
+              {jumpLabel !== undefined && (
+                <span
+                  data-jump-label={jumpLabel}
+                  className="pointer-events-none absolute top-1/2 right-2 z-10 flex h-[18px] min-w-[18px] -translate-y-1/2 items-center justify-center rounded-[4px] bg-ink px-1 font-mono font-semibold text-meta text-ground leading-none"
+                >
+                  <span className="sr-only">jump key </span>
+                  {jumpLabel}
+                </span>
+              )}
+
+              <span className="flex items-center gap-2">
+                {/* ONE MARK ON THIS LINE, and it used to be
+                                    two. The status mark and the provider mark
+                                    were paired inside a `gap-1.5` wrapper
+                                    here, so that they read as two marks about
+                                    this row and cost the title one gap rather
+                                    than two. The operator unpaired them: "in
+                                    the sidebar, put the provider glyph before
+                                    the branch name, under the session name."
+                                    The wrapper went with the pairing -- a
+                                    flex box around a single `flex-none` child
+                                    is a box that does nothing, and a comment
+                                    explaining a pair would be describing a
+                                    layout that is no longer here.
+
+                                    WHAT THE SPLIT SAYS. The title line is now
+                                    only about what the session IS: its status
+                                    and its name. Where the work came from --
+                                    the agent that ran it, the branch it ran
+                                    on -- is one sentence, and it is the line
+                                    below. The title also gets back the 18px
+                                    the pair cost it, which at the 200px
+                                    sidebar minimum was about three characters
+                                    of a name that was already truncating. */}
+                {/* A MARK, not a dot. Five statuses drawn as
+                                    five circles differing only in hue is the
+                                    reading the operator called samey -- and
+                                    hue is the one channel that is missing for
+                                    somebody (WCAG 1.4.1). Each status is a
+                                    shape now, in a lane that does not resize
+                                    when one becomes another, and the motion
+                                    each carries is its own: see
+                                    `status-mark.tsx` for which and why. The
+                                    `vam-breathe` that used to pulse the
+                                    running and waiting dots went with them --
+                                    a spinner that also breathes is two
+                                    animations saying one thing.
+                                    SILENT ON A PHONE: `data-row-meta` below
+                                    prints the status as visible text there,
+                                    and a second invisible copy is read
+                                    twice. */}
+                <StatusMark status={session.status} announce={!phone} />
+                <span
+                  data-row-title
+                  className={[
+                    // ONE PIXEL SMALLER AND REGULAR.
+                    // Operator, in one breath with the two
+                    // headings above: "the session name
+                    // regular weight and also 1px smaller."
+                    // `text-control` (12px/16px), not a new
+                    // exception: it is the scale's own next
+                    // step down from `text-body` (13px), so
+                    // the ask lands on a step that already
+                    // exists rather than a fifth one
+                    // (`test/renderer/type-scale.test.ts`).
+                    // `font-normal` makes the 400 explicit
+                    // rather than merely inherited, so the
+                    // "regular" in the ask is a class this
+                    // element carries, not an absence.
+                    'truncate text-control font-normal',
+                    // The dim-unless-focused title is a
+                    // keyboard affordance: it exists so a
+                    // cursor row pops out of a column. With
+                    // no cursor it is only every row but one
+                    // being harder to read than it needs to be.
+                    //
+                    // NO LONGER `font-medium` ON FOCUS. That
+                    // bump predated this ask and was never
+                    // what the affordance above argues for
+                    // -- the argument is about CONTRAST
+                    // (`text-ink` against `text-ink-dim`),
+                    // and the focused row also carries a
+                    // border, a raised surface and a
+                    // status-coloured stripe
+                    // (`data-row-cursor`) that a weight
+                    // change never touched. Keeping the
+                    // extra weight here would leave one row
+                    // in the column not-regular, which is
+                    // the one thing the operator's sentence
+                    // ruled out.
+                    phone || isFocused ? 'text-ink' : 'text-ink-dim',
+                  ].join(' ')}
+                >
+                  {session.title}
+                </span>
+              </span>
+
+              {/* One line of real information where the
+                                    desktop spends one on a placeholder. The
+                                    status WORD is the second channel WCAG
+                                    1.4.1 wants beside the dot; `needs you` is
+                                    the `waiting` token on session state, which
+                                    is what that token means and the only place
+                                    a row borrows one. The branch is appended
+                                    LAST so it is the segment that truncates
+                                    first at 320px -- the age never is. */}
+              {phone && (
+                <span
+                  data-row-meta
+                  className="flex min-w-0 items-center gap-1 truncate font-mono text-meta text-ink-dim"
+                >
+                  {/* THE PROVIDER OPENS THIS LINE TOO, and
+                                        the phone is not an afterthought
+                                        here: it draws its OWN meta line, with
+                                        the status word and the age the
+                                        desktop has no room for, so moving the
+                                        mark on one row and not the other is
+                                        the exact shape of a defect that looks
+                                        right in whichever surface its author
+                                        had open. The branch is last on this
+                                        line rather than next, because at
+                                        390px it is the segment that has to
+                                        truncate first -- so "before the
+                                        branch name" is satisfied by leading
+                                        the line, and the mark keeps the ink
+                                        and the height of the text it leads. */}
+                  <ProviderLane source={rowSource} />
+                  {session.status === 'waiting' ? (
+                    <span data-row-needs-you className="flex-none text-waiting">
+                      needs you
+                    </span>
+                  ) : (
+                    <span className="flex-none">{session.status}</span>
+                  )}
+                  <span className="flex-none">·</span>
+                  <span
+                    data-session-age
+                    // The gap's explanation is `sr-only` rather than a
+                    // `title`, which opens on hover and on nothing else --
+                    // and this span lives inside the row's own <button>, so
+                    // it cannot take a tab stop of its own without nesting an
+                    // interactive control. The row button already has an
+                    // accessible name built from its contents; the sentence
+                    // joins it there, and the em-dash stays as drawn.
+                    title={session.age === null ? undefined : `last activity ${session.age} ago`}
+                    className="flex-none"
+                  >
+                    {session.age ?? 'no age'}
+                    {session.age === null && (
+                      <span className="sr-only">
+                        this source cannot say when the session last did anything
+                      </span>
+                    )}
+                  </span>
+                  {session.branch !== null && (
+                    <>
+                      <span className="flex-none">·</span>
+                      <span data-session-branch className="truncate">
+                        {session.branch}
+                      </span>
+                    </>
+                  )}
+                </span>
+              )}
+              {/* The waiting row's third line: what is being
+                                    asked, rather than only that something is.
+                                    NO LONGER PHONE-ONLY. The gate said the
+                                    desktop sidebar "sits beside a canvas and a
+                                    detail pane that answer it" -- and the
+                                    canvas was deleted in 0.2, so half that
+                                    premise no longer exists and the other half
+                                    answers ONE session at a time. Finding the
+                                    row blocked on a Bash approval across four
+                                    tabs cost four opens, which is the cost this
+                                    line exists to remove.
+                                    THE CAUSE LEADS. `newestAsk` is the
+                                    operator's own newest prompt echoed back: it
+                                    says what the session was set going on,
+                                    never what it is stuck on, so a row blocked
+                                    on a permission prompt read exactly like one
+                                    quietly working. `waitingFor` is the only
+                                    surface that names the cause -- so it is
+                                    drawn first, in the waiting amber, and the
+                                    prompt follows it as context. Either alone
+                                    is a line; neither is no line. */}
+              {needsYou && (waitingCause !== null || newestAsk !== null) && (
+                <span data-row-question className="line-clamp-2 text-control text-ink-dim">
+                  {waitingCause !== null && (
+                    <span data-row-waiting className="text-waiting">
+                      {waitingCause}
+                    </span>
+                  )}
+                  {waitingCause !== null && newestAsk !== null && (
+                    <span aria-hidden="true"> · </span>
+                  )}
+                  {newestAsk}
+                </span>
+              )}
+              {/* Branch on the left, time on the right, and nothing
+                                between them. The step-verb pill and the progress
+                                bar that used to sit here were removed at the
+                                operator's request: both drew a per-status colour
+                                channel over data no source supplies, so a row at
+                                rest read as a dashboard reporting nothing. */}
+              {!phone && (
+                /*
+                 * QUIETER THAN `ink-faint`, AND BY OPACITY RATHER THAN BY A
+                 * DIMMER TOKEN. The operator asked for the age and the branch
+                 * to recede. `--vam-ink-faint` cannot carry that: it is in
+                 * `TEXT_TOKENS` and so owes WCAG 1.4.3's 4.5:1 on every surface
+                 * it is painted on, and its worst pairing
+                 * (`--vam-in-bubble`) is already 4.71:1 -- 0.21 of headroom.
+                 * One step down fails that guard everywhere the token is worn,
+                 * most of it nowhere near this row.
+                 *
+                 * Opacity composites against whatever surface the row is
+                 * actually on, so the pair stays in tone wherever the row is
+                 * drawn. The value is picked from a MEASUREMENT rather than
+                 * from arithmetic over the token a reader would guess at: all
+                 * seven rows composite over `--vam-raised`, not over
+                 * `--vam-sidebar` and not over the selected row's fill. On that
+                 * ground 0.82 lands at 4.74:1. The floor is 0.80
+                 * (4.59:1) and 0.78 fails, so this keeps roughly a fifth of a
+                 * point in hand -- which is the budget a future palette has to
+                 * move `--vam-raised` within before the guard below stops it.
+                 *
+                 * `token-contrast.test.ts` CANNOT SEE THIS. It parses the
+                 * stylesheet and compares two declarations, so an opacity on an
+                 * element is invisible to it and it stays green at any value.
+                 * The real measurement is therefore an e2e guard that reads
+                 * `getComputedStyle` on this span and composites it by hand --
+                 * `sidebar-tree-shots.mjs`. Dimming further without moving that
+                 * guard's number is how this silently becomes unreadable.
+                 */
+                <span
+                  // Its own hook rather than `data-row-meta`, which is the
+                  // PHONE row's and is asserted absent here. The guard needs to
+                  // find the element the opacity sits on, not one of its
+                  // children, because compositing is a property of this node.
+                  data-row-meta-line
+                  className="flex items-center gap-1.5 font-mono text-meta text-ink-faint opacity-[0.82]"
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-1">
+                    {/* WHICH AGENT RAN THIS, before the
+                                          branch it ran on. The operator moved
+                                          it here from the title line: "put the
+                                          provider glyph before the branch
+                                          name, under the session name."
+
+                                          WHY THE TWO BELONG TOGETHER. Nothing
+                                          else on the row answers "which
+                                          provider" -- two checkouts of one
+                                          directory read by two sources are two
+                                          project headings with the same
+                                          basename on them -- and the branch is
+                                          the other half of the same question:
+                                          where this session's work came from.
+                                          The title line above says what the
+                                          session IS; this line says where it
+                                          is from. That is also why the mark
+                                          leads the line rather than joining
+                                          the age on the right: it introduces
+                                          the branch, and a mark after the name
+                                          it belongs to introduces nothing.
+
+                                          UNCONDITIONAL, WHERE THE BRANCH GLYPH
+                                          BELOW IS NOT, and the two rules are
+                                          not in conflict. `GitBranch` is
+                                          suppressed for a null branch because
+                                          it would be a mark spent on an
+                                          absence -- there is no name for it to
+                                          sit beside. The provider lane is
+                                          drawn empty for a sourceless row
+                                          because a lane that collapses to its
+                                          content moves the branch name of
+                                          every row beside it, which is
+                                          `status-mark.tsx`'s rule and the
+                                          reason `ProviderLane` owns the width
+                                          rather than the glyph.
+
+                                          NOT THE SESSION ICON COMING BACK.
+                                          That one (removed from the row, and
+                                          pinned by `SessionList.icon.test.tsx`)
+                                          repeated the project heading's own
+                                          mark down the column and said nothing
+                                          new; this says a thing no other part
+                                          of the row says. Its decorativeness
+                                          and its size are argued at
+                                          `ProviderLane` and `PROVIDER_LANE_PX`. */}
+                    <ProviderLane source={rowSource} />
+                    {/* THE GLYPH GOES WITH THE NAME. A branch
+                                          icon beside an em-dash is a row
+                                          announcing that it has nothing to
+                                          announce -- two marks spent on an
+                                          absence, on every row of every source
+                                          that cannot report a branch, which is
+                                          most of them. Nothing is lost by
+                                          drawing neither: there was no name to
+                                          print either way, and the sentence
+                                          that says WHOSE gap it is stays below
+                                          in the row's accessible name, where
+                                          it was the only copy anyway. */}
+                    {session.branch !== null && (
+                      /* `flex-none` IS A FIX, not tidying.
+                                           An `<svg>` is a flex item with an
+                                           auto basis, so this glyph shrank
+                                           whenever the line was tight --
+                                           MEASURED at the 264px default
+                                           sidebar on the demo fixture: 8x10
+                                           on one row and 9.9x10 on another,
+                                           a branch icon squeezed narrow
+                                           while keeping its height. It was
+                                           already happening before the
+                                           provider lane arrived (8.7x10 with
+                                           the lane hidden), and the lane's
+                                           14px made it worse, which is how
+                                           it was found: the guard's "every
+                                           branch name starts the same
+                                           distance past its lane" came back
+                                           [14, 28, 26].
+                                           The NAME is what gives way on this
+                                           line -- `data-branch-head`
+                                           truncates and `data-branch-tail`
+                                           is `flex-none` for exactly this
+                                           reason -- and a 10px glyph has no
+                                           two pixels to give. */
+                      <GitBranch size={10} strokeWidth={1.6} className="flex-none" />
+                    )}
+                    <span
+                      data-session-branch
+                      // `title` survives ONLY for the non-null case, where it
+                      // reveals text that is already in the DOM and merely
+                      // clipped -- the one legitimate use of the attribute.
+                      // The null case's sentence is information found nowhere
+                      // else, so it becomes `sr-only` text inside the row
+                      // button's own accessible name (see the age cell).
+                      title={session.branch ?? undefined}
+                      // `overflow-hidden` IS the guarantee (see
+                      // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
+                      // already sized correctly by the row's own flex layout
+                      // (`min-w-0`, shrunk to exactly the space
+                      // `data-session-age` -- `flex-none` -- does not need,
+                      // computed by the browser from its REAL rendered width).
+                      // `data-branch-tail` below is `flex-none` and will
+                      // happily paint past this box's edge; clipping here is
+                      // what refuses to let that paint land on the age, at any
+                      // width, any age string, any font.
+                      className="flex min-w-0 items-center overflow-hidden"
+                    >
+                      {session.branch === null ? (
+                        /* The em-dash is gone and the
+                                             sentence is not: a screen reader
+                                             still learns which fact is missing
+                                             and why, from the one place that
+                                             ever carried it. The age cell
+                                             below KEEPS its dash, and the
+                                             difference is deliberate -- it
+                                             holds a column open on the right
+                                             edge that a number will land in,
+                                             where the branch dash held nothing
+                                             open at all. */
+                        <span className="sr-only">
+                          this source cannot say which branch the session is on
+                        </span>
+                      ) : (
+                        <>
+                          <span data-branch-head className="truncate">
+                            {splitBranch(session.branch).head}
+                          </span>
+                          {/* `flex-none` always -- the tail never shares in
+                                                the head's shrink, which is the whole point: the
+                                                distinguishing final segment gives way last. Past
+                                                `BRANCH_TAIL_MAX_CHARS`, `truncate` and an inline
+                                                `maxWidth` turn on TOGETHER as a PREFERRED cut
+                                                point -- an early, readable "…" rather than
+                                                whatever character the parent's `overflow-hidden`
+                                                above happens to land on. `truncate` alone sets no
+                                                ceiling, and Tailwind's static scanner cannot see a
+                                                class built from `BRANCH_TAIL_MAX_CHARS` at build
+                                                time, so the width is inline rather than an
+                                                arbitrary class -- the same reason `popoverWidth`
+                                                above is a `style`, not a class. If this estimate
+                                                is ever a few pixels optimistic, the parent's clip
+                                                is the actual backstop, not this. */}
+                          <span
+                            data-branch-tail
+                            className={
+                              splitBranch(session.branch).tail.length > BRANCH_TAIL_MAX_CHARS
+                                ? 'flex-none truncate'
+                                : 'flex-none'
+                            }
+                            style={
+                              splitBranch(session.branch).tail.length > BRANCH_TAIL_MAX_CHARS
+                                ? { maxWidth: `${BRANCH_TAIL_MAX_CHARS}ch` }
+                                : undefined
+                            }
+                          >
+                            {splitBranch(session.branch).tail}
+                          </span>
+                        </>
+                      )}
+                    </span>
+                  </span>
+                  <span
+                    data-session-age
+                    // The gap's explanation is `sr-only` rather than a
+                    // `title`, which opens on hover and on nothing else --
+                    // and this span lives inside the row's own <button>, so
+                    // it cannot take a tab stop of its own without nesting an
+                    // interactive control. The row button already has an
+                    // accessible name built from its contents; the sentence
+                    // joins it there, and the em-dash stays as drawn.
+                    title={session.age === null ? undefined : `last activity ${session.age} ago`}
+                    className="flex-none"
+                  >
+                    {session.age ?? '—'}
+                    {session.age === null && (
+                      <span className="sr-only">
+                        this source cannot say when the session last did anything
+                      </span>
+                    )}
+                  </span>
+                </span>
+              )}
+            </button>
+
+            {/* Mouse route to the same thing `x` does. Hidden until the
+                            row is hovered, so a list at rest is a list of names
+                            rather than a row of buttons.
+
+                            HIDDEN MEANS UNHITTABLE, AND FOCUS REVEALS. The
+                            phone rule in `styles.css` takes this button away
+                            entirely on a coarse pointer, which was the fix
+                            for "invisible and still tappable"; on a desktop
+                            it stayed `opacity: 0` with its pointer events
+                            and its focus ring intact, so Tab could land on a
+                            control drawn nowhere (WCAG 2.4.7) and a pen or a
+                            touchscreen on a desktop build could hit it
+                            blind. The tab strip's `×` carries the same two
+                            lines for the same reason. */}
+            <ShortcutTip label="Close this session" action={CLOSE_ACTION}>
+              <button
+                type="button"
+                onClick={() => onClose(session.id)}
+                /* The `x` sits OUTSIDE the row button, so a
+                                     right-click on it would otherwise reach
+                                     nothing. Same menu, same session. */
+                onContextMenu={onRowMenu(session.id, session.title, session.ended === true)}
+                aria-label={`close ${session.title}`}
+                {...pending(session.id, `Stopping ${session.title}…`)}
+                className={[
+                  'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-control text-ink-faint',
+                  'opacity-0 hover:bg-card hover:text-failed group-hover/row:opacity-100',
+                  'pointer-events-none group-hover/row:pointer-events-auto',
+                  'focus-visible:pointer-events-auto focus-visible:opacity-100',
+                  'focus-visible:ring-1 focus-visible:ring-cursor-ring',
+                ].join(' ')}
+              >
+                ×
+              </button>
+            </ShortcutTip>
+
+            {/* The indicator, over the row rather than beside
+                                it. Three channels for one fact, because one of
+                                them is always missing for somebody: the turning
+                                mark, the word, and `aria-busy` on the row. With
+                                `prefers-reduced-motion` the mark parks upright
+                                (styles.css) and the word carries it alone --
+                                never "no indicator". `pointer-events-none` so
+                                it cannot become a second thing to click on a
+                                row that refuses clicks. */}
+            {closing && (
+              <span
+                data-row-busy
+                className="pointer-events-none absolute inset-0 flex items-center justify-center"
+              >
+                <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-card px-2 py-1 text-control text-ink-dim">
+                  <LoaderCircle size={11} strokeWidth={1.8} className="vam-spin" />
+                  {closingLabel}
+                </span>
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -3663,6 +4419,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             >
                               Change project icon
                             </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-project-menu-item="new-worktree"
+                              onClick={() => {
+                                setCreatingWorktreeFor(section.project.id);
+                                setOpenMenu(null);
+                              }}
+                              className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            >
+                              New worktree…
+                            </button>
                             {/* Last, and the only red thing in the menu. The icon is
                         LEFT of the label, where the two items above have
                         nothing, because this is the one item you must not
@@ -3773,705 +4541,20 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             </span>
                           </div>
                         )}
-                      {section.items.map((entry) => {
-                        const { session } = entry;
-                        const isFocused = session.id === focusedSessionId;
-                        // The one key that jumps here, or nothing when no jump
-                        // is armed -- and nothing, too, for a row past the end
-                        // of `JUMP_KEYS`: twenty labels is what the home row and
-                        // the top row can spell, and a twenty-first row wearing
-                        // a letter that jumped nowhere would be worse than a row
-                        // wearing none.
-                        const jumpLabel = jumpLabels.get(session.id);
-                        const needsYou = session.status === 'waiting';
-                        // The newest step's own input: what the session asked,
-                        // in the words the session screen's IN region shows.
-                        // Newest first, which is the order `decisions` is in.
-                        const newestAsk = session.decisions[0]?.input ?? null;
-                        // WHAT THE SESSION SAYS IT IS BLOCKED ON, or nothing.
-                        // Three states collapse to two here for the same reason
-                        // they do in `DetailPanel`: absent ("no surface reports
-                        // a wait") and null ("waiting, cause unnamed") differ in
-                        // what vam knows and not in anything it could honestly
-                        // print, and a word invented for the second would be
-                        // indistinguishable from one a session reported.
-                        const waitingCause =
-                          typeof session.waitingFor === 'string' && session.waitingFor !== ''
-                            ? session.waitingFor
-                            : null;
-                        // The SAME notion the close button already wears, applied
-                        // to the whole row: closing can take the full stop timeout,
-                        // and for those fifteen seconds the row is not something
-                        // the operator can act on. `pendingAction` stays the one
-                        // source of truth -- there is no second pending state here.
-                        const closing = pendingAction === session.id;
-                        const closingLabel = `Stopping “${session.title}”…`;
-                        // WHICH SOURCE THIS ROW BELONGS TO, in the same order
-                        // the status bar's glyph reads it (`Canvas.tsx`,
-                        // `sourceKeyOf`): the session's own stamp first, its
-                        // project's second, because the two are written by
-                        // different readers and the narrower one is the one
-                        // about THIS row. `null` is an entry that names neither
-                        // -- a fixture, or a model assembled before sources
-                        // existed -- and it draws the lane with nothing in it.
-                        // `entry.project`, NOT `section.project`: under
-                        // `Status`/`None` one section can hold several
-                        // projects, and `section.project` there is only ever
-                        // a placeholder key -- this row's OWN project is the
-                        // one whose source fallback is actually correct.
-                        const rowSource = session.source ?? entry.project.source ?? null;
-
-                        return (
-                          <div key={session.id}>
-                            {renamingId === session.id ? (
-                              <div className="flex items-center gap-1.5 rounded-[9px] border border-line-loud bg-raised px-2.5 py-2.5">
-                                <input
-                                  ref={renameRef}
-                                  value={renameDraft}
-                                  onChange={(event) => onRenameChange(event.target.value)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                      event.preventDefault();
-                                      onRenameCommit();
-                                    } else if (event.key === 'Escape') {
-                                      event.preventDefault();
-                                      onRenameCancel();
-                                    }
-                                  }}
-                                  className="min-w-0 flex-1 rounded-[var(--radius-sm)] bg-card px-1 font-mono text-control text-ink outline-none ring-1 ring-waiting"
-                                  aria-label="rename session"
-                                />
-                              </div>
-                            ) : (
-                              <div
-                                // A NAMED group. `group-hover:` matches ANY ancestor
-                                // carrying `group`, and OverlayScroll wraps this whole
-                                // list in one — so an unnamed group here meant hovering
-                                // anywhere in the sidebar revealed every row's close
-                                // button at once, the exact opposite of what the class
-                                // was there to do.
-                                // `data-row-pending` carries the dim (styles.css)
-                                // rather than an inline colour, so the row keeps
-                                // its own tokens and the treatment is one rule.
-                                {...(closing
-                                  ? { 'data-row-pending': session.id, 'aria-busy': true }
-                                  : {})}
-                                className="group/row relative"
-                              >
-                                <button
-                                  type="button"
-                                  // Held by id, like `foldRefs` above: the reveal
-                                  // effect needs THIS session's row, and a
-                                  // querySelector on every focus change would go
-                                  // looking for it in the document instead.
-                                  ref={(node) => {
-                                    if (node === null) {
-                                      rowRefs.current.delete(session.id);
-                                    } else {
-                                      rowRefs.current.set(session.id, node);
-                                    }
-                                  }}
-                                  data-session-row={session.id}
-                                  onClick={() => onPick(session.id)}
-                                  /* ON THE BUTTON, not on the wrapper around it.
-                                   The button IS the row -- `w-full`, the whole
-                                   box -- so the target is the same, and it is
-                                   the element the keyboard focuses, which is
-                                   where the Menu key and Shift+F10 fire their
-                                   `contextmenu`. A handler on the static
-                                   wrapper would have been a pointer-only
-                                   affordance in everything but name.
-                                   `preventDefault` is not optional: without it
-                                   Electron opens the SHELL's menu over the
-                                   app's, offering Reload and Inspect Element
-                                   over a session list. */
-                                  onContextMenu={onRowMenu(
-                                    session.id,
-                                    session.title,
-                                    session.ended === true,
-                                  )}
-                                  // Not actionable and not a tab stop -- but still
-                                  // drawn, and still the row for THIS session: the
-                                  // operator has to be able to see which one is
-                                  // closing, which is the whole point of the state.
-                                  disabled={closing}
-                                  tabIndex={closing ? -1 : undefined}
-                                  {...(closing ? { title: closingLabel } : {})}
-                                  className={[
-                                    // `vam-tap`: the row is the screen's primary
-                                    // tap target, and it says so itself rather
-                                    // than relying on its content to happen to
-                                    // add up to 44px.
-                                    'vam-tap relative flex w-full cursor-pointer flex-col gap-[7px] overflow-hidden rounded-[9px] px-2.5 py-2.5 text-left',
-                                    // Over the 44 floor `vam-tap` sets, and the
-                                    // extra is what makes a scrolling list
-                                    // forgiving of a moving thumb.
-                                    phone ? 'min-h-[56px]' : '',
-                                    isFocused && !phone
-                                      ? 'border border-line-loud bg-raised'
-                                      : 'border border-transparent',
-                                  ].join(' ')}
-                                >
-                                  {/* Not on a phone. `focusedId` does not move
-                                    when the session screen closes, so one
-                                    round trip leaves this bar marking a
-                                    session the operator has already left --
-                                    and the ring around it measures 2.15:1 on
-                                    the light canvas, under even the 3:1
-                                    non-text floor (issue 188). On a desktop it
-                                    says where the next keystroke lands; here
-                                    nothing lands anywhere. */}
-                                  {isFocused && !phone && (
-                                    <span
-                                      data-row-cursor
-                                      className={`absolute top-0 bottom-0 left-0 w-0.5 ${STATUS_DOT[session.status]}`}
-                                    />
-                                  )}
-
-                                  {/* THE JUMP LABEL: the key that brings the
-                                    cursor here, drawn on the row it addresses.
-                                    Vimium's idiom and its reasoning -- the
-                                    label has to be ON the thing it names, or
-                                    the operator is matching a letter against a
-                                    list they have to remember.
-
-                                    ABSOLUTE, so arming the mode moves nothing:
-                                    twenty rows all growing a badge in the flow
-                                    at once would reflow the column under the
-                                    cursor at the exact moment the operator is
-                                    reading it. It overlays the tail of a long
-                                    title, which is the trade the gesture is
-                                    worth: one keystroke later it is gone.
-
-                                    `bg-ink`/`text-ground` rather than a status
-                                    hue. The label is not a fact about the
-                                    session -- it is a transient address for
-                                    one keystroke -- and the two ends of the
-                                    ink ramp are the one pair guaranteed to
-                                    read on every surface in both themes.
-
-                                    The letter is drawn EXACTLY as it must be
-                                    typed, lower case and all: the handler
-                                    matches `event.key`, so a label printed `A`
-                                    over a key that only answers to `a` would
-                                    be an instruction that does not work. The
-                                    `sr-only` word is what stops the badge from
-                                    reading as a bare letter in the row's
-                                    accessible name. */}
-                                  {jumpLabel !== undefined && (
-                                    <span
-                                      data-jump-label={jumpLabel}
-                                      className="pointer-events-none absolute top-1/2 right-2 z-10 flex h-[18px] min-w-[18px] -translate-y-1/2 items-center justify-center rounded-[4px] bg-ink px-1 font-mono font-semibold text-meta text-ground leading-none"
-                                    >
-                                      <span className="sr-only">jump key </span>
-                                      {jumpLabel}
-                                    </span>
-                                  )}
-
-                                  <span className="flex items-center gap-2">
-                                    {/* ONE MARK ON THIS LINE, and it used to be
-                                    two. The status mark and the provider mark
-                                    were paired inside a `gap-1.5` wrapper
-                                    here, so that they read as two marks about
-                                    this row and cost the title one gap rather
-                                    than two. The operator unpaired them: "in
-                                    the sidebar, put the provider glyph before
-                                    the branch name, under the session name."
-                                    The wrapper went with the pairing -- a
-                                    flex box around a single `flex-none` child
-                                    is a box that does nothing, and a comment
-                                    explaining a pair would be describing a
-                                    layout that is no longer here.
-
-                                    WHAT THE SPLIT SAYS. The title line is now
-                                    only about what the session IS: its status
-                                    and its name. Where the work came from --
-                                    the agent that ran it, the branch it ran
-                                    on -- is one sentence, and it is the line
-                                    below. The title also gets back the 18px
-                                    the pair cost it, which at the 200px
-                                    sidebar minimum was about three characters
-                                    of a name that was already truncating. */}
-                                    {/* A MARK, not a dot. Five statuses drawn as
-                                    five circles differing only in hue is the
-                                    reading the operator called samey -- and
-                                    hue is the one channel that is missing for
-                                    somebody (WCAG 1.4.1). Each status is a
-                                    shape now, in a lane that does not resize
-                                    when one becomes another, and the motion
-                                    each carries is its own: see
-                                    `status-mark.tsx` for which and why. The
-                                    `vam-breathe` that used to pulse the
-                                    running and waiting dots went with them --
-                                    a spinner that also breathes is two
-                                    animations saying one thing.
-                                    SILENT ON A PHONE: `data-row-meta` below
-                                    prints the status as visible text there,
-                                    and a second invisible copy is read
-                                    twice. */}
-                                    <StatusMark status={session.status} announce={!phone} />
-                                    <span
-                                      data-row-title
-                                      className={[
-                                        // ONE PIXEL SMALLER AND REGULAR.
-                                        // Operator, in one breath with the two
-                                        // headings above: "the session name
-                                        // regular weight and also 1px smaller."
-                                        // `text-control` (12px/16px), not a new
-                                        // exception: it is the scale's own next
-                                        // step down from `text-body` (13px), so
-                                        // the ask lands on a step that already
-                                        // exists rather than a fifth one
-                                        // (`test/renderer/type-scale.test.ts`).
-                                        // `font-normal` makes the 400 explicit
-                                        // rather than merely inherited, so the
-                                        // "regular" in the ask is a class this
-                                        // element carries, not an absence.
-                                        'truncate text-control font-normal',
-                                        // The dim-unless-focused title is a
-                                        // keyboard affordance: it exists so a
-                                        // cursor row pops out of a column. With
-                                        // no cursor it is only every row but one
-                                        // being harder to read than it needs to be.
-                                        //
-                                        // NO LONGER `font-medium` ON FOCUS. That
-                                        // bump predated this ask and was never
-                                        // what the affordance above argues for
-                                        // -- the argument is about CONTRAST
-                                        // (`text-ink` against `text-ink-dim`),
-                                        // and the focused row also carries a
-                                        // border, a raised surface and a
-                                        // status-coloured stripe
-                                        // (`data-row-cursor`) that a weight
-                                        // change never touched. Keeping the
-                                        // extra weight here would leave one row
-                                        // in the column not-regular, which is
-                                        // the one thing the operator's sentence
-                                        // ruled out.
-                                        phone || isFocused ? 'text-ink' : 'text-ink-dim',
-                                      ].join(' ')}
-                                    >
-                                      {session.title}
-                                    </span>
-                                  </span>
-
-                                  {/* One line of real information where the
-                                    desktop spends one on a placeholder. The
-                                    status WORD is the second channel WCAG
-                                    1.4.1 wants beside the dot; `needs you` is
-                                    the `waiting` token on session state, which
-                                    is what that token means and the only place
-                                    a row borrows one. The branch is appended
-                                    LAST so it is the segment that truncates
-                                    first at 320px -- the age never is. */}
-                                  {phone && (
-                                    <span
-                                      data-row-meta
-                                      className="flex min-w-0 items-center gap-1 truncate font-mono text-meta text-ink-dim"
-                                    >
-                                      {/* THE PROVIDER OPENS THIS LINE TOO, and
-                                        the phone is not an afterthought
-                                        here: it draws its OWN meta line, with
-                                        the status word and the age the
-                                        desktop has no room for, so moving the
-                                        mark on one row and not the other is
-                                        the exact shape of a defect that looks
-                                        right in whichever surface its author
-                                        had open. The branch is last on this
-                                        line rather than next, because at
-                                        390px it is the segment that has to
-                                        truncate first -- so "before the
-                                        branch name" is satisfied by leading
-                                        the line, and the mark keeps the ink
-                                        and the height of the text it leads. */}
-                                      <ProviderLane source={rowSource} />
-                                      {session.status === 'waiting' ? (
-                                        <span data-row-needs-you className="flex-none text-waiting">
-                                          needs you
-                                        </span>
-                                      ) : (
-                                        <span className="flex-none">{session.status}</span>
-                                      )}
-                                      <span className="flex-none">·</span>
-                                      <span
-                                        data-session-age
-                                        // The gap's explanation is `sr-only` rather than a
-                                        // `title`, which opens on hover and on nothing else --
-                                        // and this span lives inside the row's own <button>, so
-                                        // it cannot take a tab stop of its own without nesting an
-                                        // interactive control. The row button already has an
-                                        // accessible name built from its contents; the sentence
-                                        // joins it there, and the em-dash stays as drawn.
-                                        title={
-                                          session.age === null
-                                            ? undefined
-                                            : `last activity ${session.age} ago`
-                                        }
-                                        className="flex-none"
-                                      >
-                                        {session.age ?? 'no age'}
-                                        {session.age === null && (
-                                          <span className="sr-only">
-                                            this source cannot say when the session last did
-                                            anything
-                                          </span>
-                                        )}
-                                      </span>
-                                      {session.branch !== null && (
-                                        <>
-                                          <span className="flex-none">·</span>
-                                          <span data-session-branch className="truncate">
-                                            {session.branch}
-                                          </span>
-                                        </>
-                                      )}
-                                    </span>
-                                  )}
-                                  {/* The waiting row's third line: what is being
-                                    asked, rather than only that something is.
-                                    NO LONGER PHONE-ONLY. The gate said the
-                                    desktop sidebar "sits beside a canvas and a
-                                    detail pane that answer it" -- and the
-                                    canvas was deleted in 0.2, so half that
-                                    premise no longer exists and the other half
-                                    answers ONE session at a time. Finding the
-                                    row blocked on a Bash approval across four
-                                    tabs cost four opens, which is the cost this
-                                    line exists to remove.
-                                    THE CAUSE LEADS. `newestAsk` is the
-                                    operator's own newest prompt echoed back: it
-                                    says what the session was set going on,
-                                    never what it is stuck on, so a row blocked
-                                    on a permission prompt read exactly like one
-                                    quietly working. `waitingFor` is the only
-                                    surface that names the cause -- so it is
-                                    drawn first, in the waiting amber, and the
-                                    prompt follows it as context. Either alone
-                                    is a line; neither is no line. */}
-                                  {needsYou && (waitingCause !== null || newestAsk !== null) && (
-                                    <span
-                                      data-row-question
-                                      className="line-clamp-2 text-control text-ink-dim"
-                                    >
-                                      {waitingCause !== null && (
-                                        <span data-row-waiting className="text-waiting">
-                                          {waitingCause}
-                                        </span>
-                                      )}
-                                      {waitingCause !== null && newestAsk !== null && (
-                                        <span aria-hidden="true"> · </span>
-                                      )}
-                                      {newestAsk}
-                                    </span>
-                                  )}
-                                  {/* Branch on the left, time on the right, and nothing
-                                between them. The step-verb pill and the progress
-                                bar that used to sit here were removed at the
-                                operator's request: both drew a per-status colour
-                                channel over data no source supplies, so a row at
-                                rest read as a dashboard reporting nothing. */}
-                                  {!phone && (
-                                    /*
-                                     * QUIETER THAN `ink-faint`, AND BY OPACITY RATHER THAN BY A
-                                     * DIMMER TOKEN. The operator asked for the age and the branch
-                                     * to recede. `--vam-ink-faint` cannot carry that: it is in
-                                     * `TEXT_TOKENS` and so owes WCAG 1.4.3's 4.5:1 on every surface
-                                     * it is painted on, and its worst pairing
-                                     * (`--vam-in-bubble`) is already 4.71:1 -- 0.21 of headroom.
-                                     * One step down fails that guard everywhere the token is worn,
-                                     * most of it nowhere near this row.
-                                     *
-                                     * Opacity composites against whatever surface the row is
-                                     * actually on, so the pair stays in tone wherever the row is
-                                     * drawn. The value is picked from a MEASUREMENT rather than
-                                     * from arithmetic over the token a reader would guess at: all
-                                     * seven rows composite over `--vam-raised`, not over
-                                     * `--vam-sidebar` and not over the selected row's fill. On that
-                                     * ground 0.82 lands at 4.74:1. The floor is 0.80
-                                     * (4.59:1) and 0.78 fails, so this keeps roughly a fifth of a
-                                     * point in hand -- which is the budget a future palette has to
-                                     * move `--vam-raised` within before the guard below stops it.
-                                     *
-                                     * `token-contrast.test.ts` CANNOT SEE THIS. It parses the
-                                     * stylesheet and compares two declarations, so an opacity on an
-                                     * element is invisible to it and it stays green at any value.
-                                     * The real measurement is therefore an e2e guard that reads
-                                     * `getComputedStyle` on this span and composites it by hand --
-                                     * `sidebar-tree-shots.mjs`. Dimming further without moving that
-                                     * guard's number is how this silently becomes unreadable.
-                                     */
-                                    <span
-                                      // Its own hook rather than `data-row-meta`, which is the
-                                      // PHONE row's and is asserted absent here. The guard needs to
-                                      // find the element the opacity sits on, not one of its
-                                      // children, because compositing is a property of this node.
-                                      data-row-meta-line
-                                      className="flex items-center gap-1.5 font-mono text-meta text-ink-faint opacity-[0.82]"
-                                    >
-                                      <span className="flex min-w-0 flex-1 items-center gap-1">
-                                        {/* WHICH AGENT RAN THIS, before the
-                                          branch it ran on. The operator moved
-                                          it here from the title line: "put the
-                                          provider glyph before the branch
-                                          name, under the session name."
-
-                                          WHY THE TWO BELONG TOGETHER. Nothing
-                                          else on the row answers "which
-                                          provider" -- two checkouts of one
-                                          directory read by two sources are two
-                                          project headings with the same
-                                          basename on them -- and the branch is
-                                          the other half of the same question:
-                                          where this session's work came from.
-                                          The title line above says what the
-                                          session IS; this line says where it
-                                          is from. That is also why the mark
-                                          leads the line rather than joining
-                                          the age on the right: it introduces
-                                          the branch, and a mark after the name
-                                          it belongs to introduces nothing.
-
-                                          UNCONDITIONAL, WHERE THE BRANCH GLYPH
-                                          BELOW IS NOT, and the two rules are
-                                          not in conflict. `GitBranch` is
-                                          suppressed for a null branch because
-                                          it would be a mark spent on an
-                                          absence -- there is no name for it to
-                                          sit beside. The provider lane is
-                                          drawn empty for a sourceless row
-                                          because a lane that collapses to its
-                                          content moves the branch name of
-                                          every row beside it, which is
-                                          `status-mark.tsx`'s rule and the
-                                          reason `ProviderLane` owns the width
-                                          rather than the glyph.
-
-                                          NOT THE SESSION ICON COMING BACK.
-                                          That one (removed from the row, and
-                                          pinned by `SessionList.icon.test.tsx`)
-                                          repeated the project heading's own
-                                          mark down the column and said nothing
-                                          new; this says a thing no other part
-                                          of the row says. Its decorativeness
-                                          and its size are argued at
-                                          `ProviderLane` and `PROVIDER_LANE_PX`. */}
-                                        <ProviderLane source={rowSource} />
-                                        {/* THE GLYPH GOES WITH THE NAME. A branch
-                                          icon beside an em-dash is a row
-                                          announcing that it has nothing to
-                                          announce -- two marks spent on an
-                                          absence, on every row of every source
-                                          that cannot report a branch, which is
-                                          most of them. Nothing is lost by
-                                          drawing neither: there was no name to
-                                          print either way, and the sentence
-                                          that says WHOSE gap it is stays below
-                                          in the row's accessible name, where
-                                          it was the only copy anyway. */}
-                                        {session.branch !== null && (
-                                          /* `flex-none` IS A FIX, not tidying.
-                                           An `<svg>` is a flex item with an
-                                           auto basis, so this glyph shrank
-                                           whenever the line was tight --
-                                           MEASURED at the 264px default
-                                           sidebar on the demo fixture: 8x10
-                                           on one row and 9.9x10 on another,
-                                           a branch icon squeezed narrow
-                                           while keeping its height. It was
-                                           already happening before the
-                                           provider lane arrived (8.7x10 with
-                                           the lane hidden), and the lane's
-                                           14px made it worse, which is how
-                                           it was found: the guard's "every
-                                           branch name starts the same
-                                           distance past its lane" came back
-                                           [14, 28, 26].
-                                           The NAME is what gives way on this
-                                           line -- `data-branch-head`
-                                           truncates and `data-branch-tail`
-                                           is `flex-none` for exactly this
-                                           reason -- and a 10px glyph has no
-                                           two pixels to give. */
-                                          <GitBranch
-                                            size={10}
-                                            strokeWidth={1.6}
-                                            className="flex-none"
-                                          />
-                                        )}
-                                        <span
-                                          data-session-branch
-                                          // `title` survives ONLY for the non-null case, where it
-                                          // reveals text that is already in the DOM and merely
-                                          // clipped -- the one legitimate use of the attribute.
-                                          // The null case's sentence is information found nowhere
-                                          // else, so it becomes `sr-only` text inside the row
-                                          // button's own accessible name (see the age cell).
-                                          title={session.branch ?? undefined}
-                                          // `overflow-hidden` IS the guarantee (see
-                                          // `BRANCH_TAIL_MAX_CHARS`'s doc comment): this box is
-                                          // already sized correctly by the row's own flex layout
-                                          // (`min-w-0`, shrunk to exactly the space
-                                          // `data-session-age` -- `flex-none` -- does not need,
-                                          // computed by the browser from its REAL rendered width).
-                                          // `data-branch-tail` below is `flex-none` and will
-                                          // happily paint past this box's edge; clipping here is
-                                          // what refuses to let that paint land on the age, at any
-                                          // width, any age string, any font.
-                                          className="flex min-w-0 items-center overflow-hidden"
-                                        >
-                                          {session.branch === null ? (
-                                            /* The em-dash is gone and the
-                                             sentence is not: a screen reader
-                                             still learns which fact is missing
-                                             and why, from the one place that
-                                             ever carried it. The age cell
-                                             below KEEPS its dash, and the
-                                             difference is deliberate -- it
-                                             holds a column open on the right
-                                             edge that a number will land in,
-                                             where the branch dash held nothing
-                                             open at all. */
-                                            <span className="sr-only">
-                                              this source cannot say which branch the session is on
-                                            </span>
-                                          ) : (
-                                            <>
-                                              <span data-branch-head className="truncate">
-                                                {splitBranch(session.branch).head}
-                                              </span>
-                                              {/* `flex-none` always -- the tail never shares in
-                                                the head's shrink, which is the whole point: the
-                                                distinguishing final segment gives way last. Past
-                                                `BRANCH_TAIL_MAX_CHARS`, `truncate` and an inline
-                                                `maxWidth` turn on TOGETHER as a PREFERRED cut
-                                                point -- an early, readable "…" rather than
-                                                whatever character the parent's `overflow-hidden`
-                                                above happens to land on. `truncate` alone sets no
-                                                ceiling, and Tailwind's static scanner cannot see a
-                                                class built from `BRANCH_TAIL_MAX_CHARS` at build
-                                                time, so the width is inline rather than an
-                                                arbitrary class -- the same reason `popoverWidth`
-                                                above is a `style`, not a class. If this estimate
-                                                is ever a few pixels optimistic, the parent's clip
-                                                is the actual backstop, not this. */}
-                                              <span
-                                                data-branch-tail
-                                                className={
-                                                  splitBranch(session.branch).tail.length >
-                                                  BRANCH_TAIL_MAX_CHARS
-                                                    ? 'flex-none truncate'
-                                                    : 'flex-none'
-                                                }
-                                                style={
-                                                  splitBranch(session.branch).tail.length >
-                                                  BRANCH_TAIL_MAX_CHARS
-                                                    ? { maxWidth: `${BRANCH_TAIL_MAX_CHARS}ch` }
-                                                    : undefined
-                                                }
-                                              >
-                                                {splitBranch(session.branch).tail}
-                                              </span>
-                                            </>
-                                          )}
-                                        </span>
-                                      </span>
-                                      <span
-                                        data-session-age
-                                        // The gap's explanation is `sr-only` rather than a
-                                        // `title`, which opens on hover and on nothing else --
-                                        // and this span lives inside the row's own <button>, so
-                                        // it cannot take a tab stop of its own without nesting an
-                                        // interactive control. The row button already has an
-                                        // accessible name built from its contents; the sentence
-                                        // joins it there, and the em-dash stays as drawn.
-                                        title={
-                                          session.age === null
-                                            ? undefined
-                                            : `last activity ${session.age} ago`
-                                        }
-                                        className="flex-none"
-                                      >
-                                        {session.age ?? '—'}
-                                        {session.age === null && (
-                                          <span className="sr-only">
-                                            this source cannot say when the session last did
-                                            anything
-                                          </span>
-                                        )}
-                                      </span>
-                                    </span>
-                                  )}
-                                </button>
-
-                                {/* Mouse route to the same thing `x` does. Hidden until the
-                            row is hovered, so a list at rest is a list of names
-                            rather than a row of buttons.
-
-                            HIDDEN MEANS UNHITTABLE, AND FOCUS REVEALS. The
-                            phone rule in `styles.css` takes this button away
-                            entirely on a coarse pointer, which was the fix
-                            for "invisible and still tappable"; on a desktop
-                            it stayed `opacity: 0` with its pointer events
-                            and its focus ring intact, so Tab could land on a
-                            control drawn nowhere (WCAG 2.4.7) and a pen or a
-                            touchscreen on a desktop build could hit it
-                            blind. The tab strip's `×` carries the same two
-                            lines for the same reason. */}
-                                <ShortcutTip label="Close this session" action={CLOSE_ACTION}>
-                                  <button
-                                    type="button"
-                                    onClick={() => onClose(session.id)}
-                                    /* The `x` sits OUTSIDE the row button, so a
-                                     right-click on it would otherwise reach
-                                     nothing. Same menu, same session. */
-                                    onContextMenu={onRowMenu(
-                                      session.id,
-                                      session.title,
-                                      session.ended === true,
-                                    )}
-                                    aria-label={`close ${session.title}`}
-                                    {...pending(session.id, `Stopping ${session.title}…`)}
-                                    className={[
-                                      'absolute top-2 right-2 cursor-pointer rounded-[var(--radius-sm)] px-1 text-control text-ink-faint',
-                                      'opacity-0 hover:bg-card hover:text-failed group-hover/row:opacity-100',
-                                      'pointer-events-none group-hover/row:pointer-events-auto',
-                                      'focus-visible:pointer-events-auto focus-visible:opacity-100',
-                                      'focus-visible:ring-1 focus-visible:ring-cursor-ring',
-                                    ].join(' ')}
-                                  >
-                                    ×
-                                  </button>
-                                </ShortcutTip>
-
-                                {/* The indicator, over the row rather than beside
-                                it. Three channels for one fact, because one of
-                                them is always missing for somebody: the turning
-                                mark, the word, and `aria-busy` on the row. With
-                                `prefers-reduced-motion` the mark parks upright
-                                (styles.css) and the word carries it alone --
-                                never "no indicator". `pointer-events-none` so
-                                it cannot become a second thing to click on a
-                                row that refuses clicks. */}
-                                {closing && (
-                                  <span
-                                    data-row-busy
-                                    className="pointer-events-none absolute inset-0 flex items-center justify-center"
-                                  >
-                                    <span className="flex items-center gap-1.5 rounded-[7px] border border-line bg-card px-2 py-1 text-control text-ink-dim">
-                                      <LoaderCircle
-                                        size={11}
-                                        strokeWidth={1.8}
-                                        className="vam-spin"
-                                      />
-                                      {closingLabel}
-                                    </span>
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {viewOptions.groupBy === 'project' && (
+                        <WorktreesSection
+                          project={section.project}
+                          allEntries={allEntries}
+                          forceOpenCreate={creatingWorktreeFor === section.project.id}
+                          onCloseCreate={() =>
+                            setCreatingWorktreeFor((current) =>
+                              current === section.project.id ? null : current,
+                            )
+                          }
+                          renderSessionRow={renderSessionRow}
+                        />
+                      )}
+                      {section.items.map((entry) => renderSessionRow(entry))}
                     </div>
                   )}
                 </li>

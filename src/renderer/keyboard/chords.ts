@@ -668,6 +668,15 @@ export type KeyAction =
   /** `p` — reveal the focused session's project in the sidebar and put the
       keyboard on its fold. */
   | { readonly kind: 'revealProject' }
+  /** Command-palette only (no default chord — see the bindings table below):
+      "New worktree…". Requires a focused session, the same guard
+      `revealProject` applies, because a worktree is created OF a project and
+      there is no sensible directory-picker fallback the way bare `newProject`
+      has for "no session focused". `Canvas.tsx`'s own case sets a
+      `createWorktreeRequest` prop `SessionList.tsx` reads, opening that
+      project's "Worktrees" sub-list create form — the same one-shot,
+      fresh-object-per-press shape `revealRequest` already uses. */
+  | { readonly kind: 'newWorktree' }
   /** `gm` — move the focused session's project into a folder, or out of one.
       Under `g` rather than a single key: the single-key space is thin, and
       this is a project-level act the way `gt`/`gT` already are, not a
@@ -1024,6 +1033,16 @@ const SINGLE: Readonly<Record<string, KeyAction>> = {
   // taken: nothing in any table held `Mod-Shift-p`, and bare `p`
   // (`revealProject`) keeps its own spelling.
   'Mod-Shift-p': { kind: 'newProject' },
+  // THE PALETTE-ONLY ACTION'S OWN CHORD -- `newWorktree`'s doc comment above
+  // says why one is required at all (an unbound action never reaches
+  // `buildPaletteActions`). `Mod-Shift-w` for the same reason `Mod-Shift-p`
+  // reads as "create, of the thing `p`/`w` already names": bare `w` is
+  // `stepSplit` and `Mod-w` is `close`, so the modified-Shift spelling is the
+  // one free member of the family. Free when it was taken: nothing in any
+  // table held `Mod-Shift-w` (`test/keyboard/pick-view-binding.test.ts`
+  // re-derives that no two actions share a chord, over the generated
+  // bindings rather than over this line).
+  'Mod-Shift-w': { kind: 'newWorktree' },
   // HALF A SCREEN OF TRANSCRIPT, vim's own `Ctrl-D` / `Ctrl-U`, which is the
   // gesture the operator asked for by name.
   //

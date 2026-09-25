@@ -267,6 +267,15 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // operator DOES to their work (`gm` files a project into a folder from
   // here), while `view` is surfaces that open over everything.
   newProject: { group: 'session', label: () => 'new project — choose a directory to start it in' },
+  // PALETTE-ONLY IN PRACTICE (`Mod-Shift-w`, unadvertised elsewhere): a new
+  // git worktree of the focused session's project, opening that project's
+  // "Worktrees" create form. `session` for `newProject`'s own reason —
+  // this is something the operator DOES to their work, not a surface that
+  // opens over everything.
+  newWorktree: {
+    group: 'session',
+    label: () => 'new worktree of this session’s project',
+  },
   // ENTER, WHICH OPENS NOTHING IN SELECT — audit F1. It was captioned "open
   // the focused step" in both modes, and there has been no focused step to
   // open since the command strip left the pane: in Select the key answers

@@ -34,6 +34,7 @@ every `Mod-` chord answers it as it always did.
 | `o` / `Mod-n` | Start a new session, in the focused session's project |
 | `Mod-t` | Start a new session as a tab of the FOCUSED PANE — the pane's own `+`, and it names the project on screen when that pane is empty |
 | `Mod-Shift-p` | New project — choose a directory, and start a session in it. There is no stored project in vam: a project is live sessions grouped by their cwd, so this is the only thing creating one can mean. `Cmd+P` is a different gesture and is bound to nothing, so the browser build keeps its print dialog |
+| `Mod-Shift-w` | New worktree of the focused session's project — opens that project's "Worktrees" create form in the sidebar. Palette-only in practice (`/New worktree…`); requires a focused session, the same guard `p` (reveal project) applies, since there is no directory-picker fallback the way `Mod-Shift-p` has for nothing focused |
 | `,` | Open settings |
 | `.` | Open Remote — pair a phone, approve or deny it, unpair one, or revoke every device |
 | `E` | Open the error log — every genuine failure this session hit, never vam's own intended refusals. Each row can Copy the raw event as text, or Report it: vam composes a pre-filled GitHub issue, scrubbed of anything private, and opens the form in your browser for you to read and submit yourself — it is never sent on vam's behalf |
