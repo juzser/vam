@@ -9,7 +9,7 @@
 
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RECONNECT_BACKOFF_MS } from '../../src/main/sources/tmux/control.js';
+import { CONTROL_TIMEOUT_MS, RECONNECT_BACKOFF_MS } from '../../src/main/sources/tmux/control.js';
 import {
   type ControlChildProcess,
   MAX_RECONNECT_ATTEMPTS,
@@ -82,7 +82,24 @@ async function answerListPanes(child: FakeChild, paneId = '%3'): Promise<void> {
   await tick();
 }
 
+/** `#reseed` now chains a cursor query (`argv.ts`'s own `CURSOR_FORMAT`)
+ * before `capture-pane` in ONE control-mode line (`client.ts#sendChain`),
+ * so every reseed this fake child answers needs TWO blocks, not one: the
+ * cursor query's reply first, then `capture-pane`'s. An EMPTY-body ok block
+ * for the cursor query -- the same shape a real tmux answers `display-
+ * message` with against a target it cannot resolve (`spawn.ts`'s own
+ * `readCursorLine` header) -- makes `seedWithCursor` append nothing beyond
+ * its own trailing-newline strip, so every OTHER assertion in this file
+ * about seed TEXT only has to account for that one strip, never a cursor
+ * escape it was never testing for (`stream-client-seed-cursor.test.ts`
+ * owns the cursor-escape behaviour itself). */
+async function answerCursorQuery(child: FakeChild, time: number): Promise<void> {
+  child.data(`%begin ${time} ${time} 1\n%end ${time} ${time} 1\n`);
+  await tick();
+}
+
 async function answerCapturePane(child: FakeChild, seed: string, time = 2): Promise<void> {
+  await answerCursorQuery(child, time);
   child.data(`%begin ${time} ${time} 1\n${seed}\n%end ${time} ${time} 1\n`);
   await tick();
 }
@@ -101,6 +118,7 @@ async function answerCapturePaneWithError(
   errorText: string,
   time = 2,
 ): Promise<void> {
+  await answerCursorQuery(child, time);
   child.data(`%begin ${time} ${time} 1\n${errorText}\n%error ${time} ${time} 1\n`);
   await tick();
 }
@@ -115,7 +133,7 @@ describe('StreamClient', () => {
     const connecting = client.connect();
     const child = at(children, 0);
     await connectWith(child, '%3', 'seed-text');
-    expect(await connecting).toBe('seed-text\n');
+    expect(await connecting).toBe('seed-text');
 
     const received: string[] = [];
     client.onData((chunk) => received.push(chunk));
@@ -138,6 +156,49 @@ describe('StreamClient', () => {
     child.data(full.subarray(0, splitAt));
     child.data(full.subarray(splitAt));
     expect(received).toEqual(['a€b']);
+  });
+
+  // ── Operator report: "the terminal often turns characters into ?." ──────
+  // `#decoder` (`node:string_decoder`, `client.ts#wire`) is persistent
+  // ACROSS raw `child.stdout` chunks for the life of one connection --
+  // Node's own documented contract is that it buffers an incomplete
+  // multi-byte sequence at a chunk boundary rather than emitting U+FFFD for
+  // it early. This is the adversarial version of the single euro-sign test
+  // above: EVERY byte boundary of a realistic line carrying Vietnamese (both
+  // NFC and NFD -- a combining mark is its own multi-byte sequence), CJK, an
+  // emoji (a 4-byte, surrogate-pair-producing codepoint) and box-drawing,
+  // split into two raw `child.stdout` events at that exact point, one whole
+  // fresh connection per split point so no earlier split's decoder state
+  // carries into the next. Zero U+FFFD, zero literal `?` substituted for
+  // real content, at every single split -- not merely the one byte boundary
+  // the euro-sign test above happens to pick.
+  it('decodes multi-byte UTF-8 correctly no matter which byte boundary a %output line is split at', async () => {
+    const text =
+      'Vietnamese NFC: Tiếng Việt | NFD: '.normalize('NFC') +
+      'Tiếng Việt'.normalize('NFD') +
+      ' | box: ╭─╮│╰─╯ | CJK: 你好世界 | emoji: 🎉';
+    const line = `%output %3 ${text}\n`;
+    const full = Buffer.from(line, 'utf8');
+
+    for (let splitAt = 1; splitAt < full.length; splitAt += 1) {
+      const { client: splitClient, children: splitChildren } = harness();
+      const splitConnecting = splitClient.connect();
+      const splitChild = at(splitChildren, 0);
+      await connectWith(splitChild);
+      await splitConnecting;
+
+      const received: string[] = [];
+      splitClient.onData((chunk) => received.push(chunk));
+      splitChild.data(full.subarray(0, splitAt));
+      splitChild.data(full.subarray(splitAt));
+
+      const decoded = received.join('');
+      expect(decoded, `split at byte ${splitAt}/${full.length}`).toBe(text);
+      expect(decoded, `split at byte ${splitAt}/${full.length}`).not.toContain('�');
+      expect(decoded, `split at byte ${splitAt}/${full.length}`).not.toContain('?');
+
+      splitClient.dispose();
+    }
   });
 
   it('drops %output for the resolved pane that arrives before capture-pane replies', async () => {
@@ -170,7 +231,7 @@ describe('StreamClient', () => {
     child.data('%begin 0 1 0\nnoise\n%end 0 1 0\n');
     await tick();
     await connectWith(child, '%7', 'real-seed');
-    expect(await connecting).toBe('real-seed\n');
+    expect(await connecting).toBe('real-seed');
   });
 
   // ── The pause-after fix: tmux only ever sends %pause to a control client
@@ -238,7 +299,7 @@ describe('StreamClient', () => {
       await answerCapturePane(child, 'fresh-seed', 3);
 
       expect(data).toEqual([]);
-      expect(seeds).toEqual(['fresh-seed\n']);
+      expect(seeds).toEqual(['fresh-seed']);
     });
 
     it('does not send a second -A continue if %pause repeats before the first resolves', async () => {
@@ -283,7 +344,7 @@ describe('StreamClient', () => {
     await answerPauseAfter(second);
     await answerCapturePane(second, 'reconnect-seed', 1);
 
-    expect(seeds).toEqual(['reconnect-seed\n']);
+    expect(seeds).toEqual(['reconnect-seed']);
     expect(second.written.some((line) => line.includes('5a'))).toBe(false);
   });
 
@@ -328,7 +389,7 @@ describe('StreamClient', () => {
       const connecting = client.connect();
       const child = at(children, 0);
       await connectWith(child, '%3', 'seed-text');
-      expect(await connecting).toBe('seed-text\n');
+      expect(await connecting).toBe('seed-text');
     });
   });
 
@@ -447,6 +508,131 @@ describe('StreamClient', () => {
       expect(spawnChild).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(1);
       expect(spawnChild).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ── Review finding on #505: a `;`-chained reseed (`#sendChain`) queues
+  // ONE resolver per sub-command BEFORE writing the line, then waits on
+  // ALL of them (`Promise.all`) -- but a real tmux, when the FIRST
+  // sub-command of a `;`-chained line fails to parse (or otherwise errors
+  // at parse time -- an unknown command, an unknown flag), answers with
+  // exactly ONE `%begin`/`%error`/`%end` for the WHOLE line and never
+  // runs -- or answers -- anything chained after it (MEASURED against a
+  // real tmux 3.7b on a private socket: a bogus first command followed by
+  // a `display-message` second command left the second command's own
+  // marker text completely unobserved, while an immediately-following,
+  // SEPARATE command was answered normally -- the connection itself stays
+  // healthy, only the aborted line's own trailing replies never arrive).
+  // Before this fix, the second resolver `#sendChain` queued for that
+  // trailing command was NEVER settled, `Promise.all` never resolved, and
+  // `#reseed` -- and through it `connect()`, `#reconnect()` and
+  // `#finishResume()` -- hung forever. ─────────────────────────────────
+  describe('a `;`-chained reseed that does not get a reply per queued resolver (review finding)', () => {
+    /** The real-tmux shape a `;`-chained line's FIRST sub-command answers
+     * with when it fails to parse: one `%begin`/%error`/`%end`, and NO
+     * second block ever follows it (unlike `answerCapturePaneWithError`,
+     * which answers the cursor query normally and only errors the SECOND
+     * command -- a already-reachable, already-handled shape). */
+    async function answerFirstBlockOnlyWithError(
+      child: FakeChild,
+      errorText: string,
+      time = 2,
+    ): Promise<void> {
+      child.data(`%begin ${time} ${time} 1\n${errorText}\n%error ${time} ${time} 1\n`);
+      await tick();
+    }
+
+    it('settles the WHOLE chain the instant the first block errors -- no second block ever arrives, and no timer is needed', async () => {
+      const { client, children } = harness();
+      let settled = false;
+      const connecting = client.connect();
+      connecting.catch(() => {
+        settled = true;
+      });
+      const child = at(children, 0);
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+
+      await answerFirstBlockOnlyWithError(child, 'parse error: unknown command: bogus-command-xyz');
+
+      // Settled after a plain microtask tick -- no fake timer was ever
+      // advanced -- proving this is the SYNCHRONOUS abort-flush, not the
+      // timeout fallback (the next test) catching it many seconds later.
+      expect(settled).toBe(true);
+      await expect(connecting).rejects.toThrow(/could not capture the initial screen/);
+    });
+
+    it('carries on to answer the NEXT, unrelated command normally -- the connection itself is not presumed dead by an aborted chain', async () => {
+      // Real tmux itself stays healthy after aborting one chained line
+      // (MEASURED, see this block's own header) -- a chain-abort must not
+      // kill the connection or give up reconnecting; only its own missing
+      // replies are synthesised.
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+      await answerFirstBlockOnlyWithError(child, 'parse error: unknown command: bogus');
+      await expect(connecting).rejects.toThrow();
+
+      expect(child.killed).toBe(0);
+    });
+
+    it('times out a chain that gets NO reply at all, kills the connection, and surfaces it through onDown instead of hanging forever', async () => {
+      vi.useFakeTimers();
+      const { client, children } = harness();
+      let settled = false;
+      const connecting = client.connect();
+      connecting.catch(() => {
+        settled = true;
+      });
+      const downEvents: unknown[] = [];
+      client.onDown((event) => downEvents.push(event));
+
+      const child = at(children, 0);
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+      // Neither the cursor query nor capture-pane is ever answered.
+
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      expect(child.killed).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(child.killed).toBe(1);
+      expect(downEvents).toEqual([{ kind: 'reconnecting', attempt: 1 }]);
+
+      await expect(connecting).rejects.toThrow(/could not capture the initial screen/);
+    });
+
+    it('a reseed that fails after %pause/%continue surfaces through onDown immediately -- not silently, waiting on some later drop that may never come', async () => {
+      vi.useFakeTimers();
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await connectWith(child, '%3', 'initial');
+      await connecting;
+
+      const downEvents: unknown[] = [];
+      const seeds: string[] = [];
+      client.onDown((event) => downEvents.push(event));
+      client.onSeed((seed) => seeds.push(seed));
+
+      child.data('%pause %3\n');
+      await tick();
+      // The explicit -A continue itself -- a plain #send, not a chain --
+      // so #finishResume's own reseed, chained, is what is under test.
+      child.data('%begin 2 2 1\n%continue %3\n%end 2 2 1\n');
+      await tick();
+
+      // The reseed's own cursor query -- the FIRST of its two chained
+      // commands -- errors; tmux never answers capture-pane after it.
+      await answerFirstBlockOnlyWithError(child, 'parse error: unknown command: bogus', 3);
+
+      expect(seeds).toEqual([]);
+      expect(downEvents).toEqual([{ kind: 'reconnecting', attempt: 1 }]);
+      expect(child.killed).toBe(1);
     });
   });
 });

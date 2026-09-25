@@ -290,7 +290,17 @@ describe('a refused open', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(lastTerm).toBeUndefined();
+    // ASSERT THE PROPERTY, NOT ITS PROXY. A FRESH connect() now constructs a
+    // Terminal BEFORE `open()` resolves (so it can resize tmux ahead of the
+    // seed capture -- a review finding chasing the cursor-position fix, see
+    // `connect()`'s own header comment), so `lastTerm` being SET is no
+    // longer proof that a blank pane was left drawn: the DOM, and whether
+    // that Terminal was actually disposed rather than leaked detached from
+    // it, are the real facts this test's own title is about.
+    expect(q('[data-terminal-stream-mount]')).toBeNull();
+    expect(q('[data-terminal-stream-refused]')).not.toBeNull();
+    expect(lastTerm).toBeDefined();
+    expect(disposeCalls).toHaveLength(1);
   });
 });
 

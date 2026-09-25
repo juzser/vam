@@ -737,6 +737,22 @@ export type Prefs = {
    * other boolean here.
    */
   readonly streamingTerminalMigrated: boolean;
+  /**
+   * CONSUMED, ONCE, BY `parsePrefs` -- `streamingTerminalMigrated`'s own
+   * ratchet, applied to `viewOptions.sortBy` (`selectors.ts`'s
+   * `DEFAULT_VIEW_OPTIONS` header carries the operator's own argument for
+   * moving the default at all). A payload that never recorded an explicit
+   * sort choice reads back identically to one that baked in the OLD default
+   * (`'needs-you'`) through nothing more than an ordinary settings write, so
+   * the first `parsePrefs` to see a payload without this flag set moves
+   * `sortBy` onto `'created'` -- but ONLY when the stored value actually
+   * IS `'needs-you'`; unlike `streamingTerminal`'s plain boolean, `sortBy`
+   * has a third, unambiguous value (`'name'`) the old default never wrote,
+   * and a payload already carrying that survives untouched even before this
+   * flag is set. Set `true` from then on, so a later, genuine choice of
+   * `'needs-you'` -- including choosing it right back -- sticks.
+   */
+  readonly sortByMigrated: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -776,6 +792,11 @@ export const EMPTY_PREFS: Prefs = {
   // ratchet to do. Marked consumed so a later explicit off is respected the
   // same as any other installation's.
   streamingTerminalMigrated: true,
+  // A truly empty payload has nothing to migrate FROM -- `viewOptions` above
+  // already reads `DEFAULT_VIEW_OPTIONS` (`sortBy: 'created'`), so there is
+  // nothing left for the ratchet to do. Marked consumed on the same rule
+  // `streamingTerminalMigrated` is.
+  sortByMigrated: true,
 };
 
 /**
@@ -858,6 +879,16 @@ function parsePrefs(
   // is for.
   const streamingTerminalMigrated =
     (parsed as { streamingTerminalMigrated?: unknown }).streamingTerminalMigrated === true;
+  // Same rule, for `viewOptions.sortBy` -- see `sortByMigrated`'s own header
+  // on `Prefs` for why this one only forces the AMBIGUOUS stored value
+  // (`'needs-you'`) rather than every stored value the way the ratchet above
+  // does.
+  const sortByMigrated = (parsed as { sortByMigrated?: unknown }).sortByMigrated === true;
+  const storedViewOptions = readViewOptions((parsed as { viewOptions?: unknown }).viewOptions);
+  const viewOptions: ViewOptions =
+    sortByMigrated || storedViewOptions.sortBy !== 'needs-you'
+      ? storedViewOptions
+      : { ...storedViewOptions, sortBy: DEFAULT_VIEW_OPTIONS.sortBy };
   return {
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
@@ -907,8 +938,9 @@ function parsePrefs(
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
     // Same shape as `filters` above, and per field within itself: a garbage
-    // `groupBy` must not cost a good `sortBy` beside it.
-    viewOptions: readViewOptions((parsed as { viewOptions?: unknown }).viewOptions),
+    // `groupBy` must not cost a good `sortBy` beside it. Computed above,
+    // ahead of the migration ratchet that reads it.
+    viewOptions,
     // Not pruned either, and per-source defensive: one garbage bucket cannot
     // unfold the projects another source folded. Old-id migrated like every
     // other source-keyed field: a fold made under the old id is still a fold.
@@ -1070,6 +1102,10 @@ function parsePrefs(
     // `true`, so every FUTURE load takes the branch above rather than this
     // one -- the ratchet only ever fires once.
     streamingTerminalMigrated: true,
+    // Consumed, on the identical rule: every future load of this
+    // installation's payload carries `true` and takes `viewOptions`'s
+    // `sortByMigrated` branch above rather than the forcing one.
+    sortByMigrated: true,
   };
 }
 
@@ -1416,7 +1452,7 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle } = (
+  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle, hideAgentWorktrees } = (
     typeof raw === 'object' && raw !== null ? raw : {}
   ) as {
     hideAgentStarted?: unknown;
@@ -1424,6 +1460,7 @@ function readFilters(raw: unknown): SessionFilters {
     hideEnded?: unknown;
     hideForeign?: unknown;
     hideIdle?: unknown;
+    hideAgentWorktrees?: unknown;
   };
   return {
     hideAgentStarted:
@@ -1445,6 +1482,16 @@ function readFilters(raw: unknown): SessionFilters {
     // such key, and reads back as the shipped default, which is OFF -- so an
     // upgrade never hides a sleeping session nobody asked to hide.
     hideIdle: typeof hideIdle === 'boolean' ? hideIdle : DEFAULT_SESSION_FILTERS.hideIdle,
+    // Same per-field fallback once more: every store predating this toggle
+    // has no such key, and reads back as the shipped default, which is ON --
+    // an upgrade starts hiding agent worktrees exactly as a fresh install
+    // does, on the same "no fresh preference disturbs an existing operator's
+    // screen differently from a new one" rule `hideIdle` states, applied in
+    // the other direction because THIS default is on.
+    hideAgentWorktrees:
+      typeof hideAgentWorktrees === 'boolean'
+        ? hideAgentWorktrees
+        : DEFAULT_SESSION_FILTERS.hideAgentWorktrees,
   };
 }
 
@@ -1454,7 +1501,7 @@ export function setSessionFilters(prefs: Prefs, filters: SessionFilters): Prefs 
 }
 
 const GROUP_BY_VALUES: readonly GroupBy[] = ['project', 'status', 'none'];
-const SORT_BY_VALUES: readonly SortBy[] = ['needs-you', 'name'];
+const SORT_BY_VALUES: readonly SortBy[] = ['needs-you', 'name', 'created'];
 
 /** Per FIELD, like `readFilters`: a garbage `groupBy` must not cost a good
  *  `sortBy` beside it, and vice versa. */

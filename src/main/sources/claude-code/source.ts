@@ -56,6 +56,7 @@ import type { AgentWork } from '../../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
+import { isAgentWorktreeCwd } from '../agent-worktree.js';
 import type { MainSource } from '../source.js';
 import { tagVamSessionArgv } from '../tmux/argv.js';
 import {
@@ -104,7 +105,7 @@ import {
 } from './stop.js';
 import { withLiveAgentTurn } from './subagent.js';
 import { MAX_TAIL_READ_BYTES, readLiveTail, TAIL_WINDOW_BYTES } from './tail.js';
-import { compactAge, EMPTY_FACTS, type TranscriptFacts } from './transcript.js';
+import { compactAge, EMPTY_FACTS, isoOrNull, type TranscriptFacts } from './transcript.js';
 import { defaultTranscriptRoot, indexTranscripts, locateTranscript } from './transcript-index.js';
 import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
@@ -173,6 +174,26 @@ type TranscriptRead = {
   readonly roster: AgentRoster;
   /** Last activity, which `startedAt` is not. `null` when there is no file. */
   readonly mtimeMs: number | null;
+  /**
+   * WHEN THE FILE WAS CREATED -- the same `stat()` this already pays for,
+   * read a second way, WHEN THE FILESYSTEM CAN BE TRUSTED TO REPORT ONE.
+   * `null` when there is no file, or when this filesystem does not track a
+   * birthtime at all (Node reports `0` for that; `readTranscript` below
+   * turns it into `null` rather than the epoch). A NON-null value here is
+   * still not automatically trusted: CI's Linux runners (ext4/overlayfs)
+   * were measured returning a birthtime that does not move with the file's
+   * real creation, so `createdAtMsOf`'s own `isUsableBirthtime` re-checks a
+   * present value against `mtimeMs` before believing it -- this field is the
+   * raw `stat()` answer, not the verdict.
+   */
+  readonly birthtimeMs: number | null;
+  /**
+   * The file's own byte length, from the SAME `stat()` -- kept only so
+   * `createdAtMsOf`'s first-line-timestamp fallback can cache its answer
+   * per `(path, size)` without a second `stat()` call of its own. `null`
+   * when there is no file.
+   */
+  readonly size: number | null;
 };
 
 /**
@@ -193,6 +214,8 @@ const NO_TRANSCRIPT: TranscriptRead = {
   // different thing from a source that cannot answer at all (model.ts).
   roster: { agents: [], running: 0 },
   mtimeMs: null,
+  birthtimeMs: null,
+  size: null,
 };
 
 /**
@@ -248,12 +271,137 @@ export async function readTranscript(
       facts: await withLiveAgentTurn(facts, roster, subagentsDirOf(path), sessionId),
       roster,
       mtimeMs: info.mtimeMs,
+      // `0` is Node's own "this filesystem does not track it" (measured,
+      // `fs.Stats` docs) -- not a claim the file was created at the epoch.
+      birthtimeMs: info.birthtimeMs === 0 ? null : info.birthtimeMs,
+      size: info.size,
     };
   } catch {
     // An unreadable transcript costs its own turns, never the whole load: the
     // session is live and the operator should still see it.
     return NO_TRANSCRIPT;
   }
+}
+
+/**
+ * Is `birthtimeMs` a creation moment this row can actually trust?
+ *
+ * `readTranscript` already turns Node's `0` ("this filesystem does not
+ * track a birthtime") into `null`; this catches the other shapes a
+ * filesystem can hand back that are not a real creation time either --
+ * measured on CI's Linux runners (ext4/overlayfs), which returned `0`
+ * there too but are documented to sometimes answer a small nonzero garbage
+ * value instead, and a birthtime strictly LATER than the file's own last
+ * write is impossible for a real creation time regardless of platform (a
+ * file cannot be modified before it was created). Both get the same
+ * "cannot trust this" verdict as `null`.
+ */
+function isUsableBirthtime(
+  birthtimeMs: number | null,
+  mtimeMs: number | null,
+): birthtimeMs is number {
+  if (birthtimeMs === null || !Number.isFinite(birthtimeMs) || birthtimeMs <= 0) return false;
+  return mtimeMs === null || birthtimeMs <= mtimeMs;
+}
+
+/**
+ * How many leading bytes `firstLineTimestampMs` reads to answer "what does
+ * the transcript's OWN first timestamped line say" -- the fallback of the
+ * fallback, paid only when neither `birthtimeMs` nor `agent.startedAt` can
+ * answer `createdAt`. Bounded so even the operator's largest transcript (157
+ * MB, `transcript.ts`'s own note) costs what a small file costs: this reads
+ * the front of the file once, never the whole thing, for exactly the same
+ * reason `transcript.ts`'s header gives for reading the tail alone.
+ */
+const CREATED_AT_HEAD_READ_BYTES = 8192;
+
+/**
+ * `path` -> the head-read's own answer, valid for as long as `size` has not
+ * changed. Keyed by `(path, size)` rather than by `path` alone: an
+ * append-only transcript's own first line never changes once written, so a
+ * cache entry stays correct for the life of the process UNLESS the file at
+ * that path has grown (or shrunk) since -- which `size` alone already tells
+ * apart from "still the same file, just polled again a moment later", the
+ * common case this cache exists to make free.
+ */
+const FIRST_LINE_TIMESTAMP_CACHE = new Map<
+  string,
+  { readonly size: number; readonly ms: number | null }
+>();
+
+/**
+ * The transcript's own first TIMESTAMPED line, read from at most
+ * `CREATED_AT_HEAD_READ_BYTES` at the front of the file. Most transcripts'
+ * literal first line already carries one (`transcript.ts`'s own corpus
+ * note: 100% of prompt and assistant lines do), but a `last-prompt` marker
+ * never does, so this scans forward through whatever whole lines fit in the
+ * bounded head rather than trusting line zero alone -- still one bounded
+ * read, never a second one.
+ */
+async function firstLineTimestampMs(path: string): Promise<number | null> {
+  let size: number;
+  try {
+    size = (await stat(path)).size;
+  } catch {
+    return null;
+  }
+  const cached = FIRST_LINE_TIMESTAMP_CACHE.get(path);
+  if (cached !== undefined && cached.size === size) return cached.ms;
+  let ms: number | null = null;
+  try {
+    const head = await readTranscriptWindow(path, 0, Math.min(size, CREATED_AT_HEAD_READ_BYTES));
+    for (const line of head.text.split('\n')) {
+      if (line.trim() === '') continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const timestamp =
+        parsed !== null && typeof parsed === 'object'
+          ? (parsed as Record<string, unknown>)['timestamp']
+          : undefined;
+      if (typeof timestamp !== 'string') continue;
+      const parsedMs = Date.parse(timestamp);
+      if (Number.isFinite(parsedMs)) {
+        ms = parsedMs;
+        break;
+      }
+    }
+  } catch {
+    ms = null;
+  }
+  FIRST_LINE_TIMESTAMP_CACHE.set(path, { size, ms });
+  return ms;
+}
+
+/**
+ * CREATED, resolved through the full fallback chain -- `docs/design`'s own
+ * "vam cannot say" convention applies at every rung, never a guess:
+ *
+ *  1. the transcript's own birthtime, when `isUsableBirthtime` can trust it;
+ *  2. this PROCESS's own launch (`agent.startedAt`) -- free, already in
+ *     memory, and unavailable for a terminal-only row with no live process;
+ *  3. the transcript's own first timestamped line -- a bounded read, paid
+ *     only once neither of the above answered;
+ *  4. the transcript's mtime -- last ACTIVITY, not a creation moment, but
+ *     still better than reporting nothing when a file plainly exists.
+ *
+ * `null` only when none of the four can say anything at all.
+ */
+async function createdAtMsOf(
+  read: TranscriptRead,
+  path: string | undefined,
+  agentStartedAt: number | null | undefined,
+): Promise<number | null> {
+  if (isUsableBirthtime(read.birthtimeMs, read.mtimeMs)) return read.birthtimeMs;
+  if (agentStartedAt !== null && agentStartedAt !== undefined) return agentStartedAt;
+  if (path !== undefined) {
+    const fromFirstLine = await firstLineTimestampMs(path);
+    if (fromFirstLine !== null) return fromFirstLine;
+  }
+  return read.mtimeMs;
 }
 
 /**
@@ -280,24 +428,48 @@ async function rowForEmptyPane(
   index: ReadonlyMap<string, string>,
   reads: Map<string, TranscriptRead>,
   nowMs: number,
+  // Same seam and same default as `loadClaudeCodeProjects`'s own parameter
+  // -- this function is its helper, not a second source of truth about how
+  // the check is made.
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<Session> {
   const sessionId = empty.vamSessionId;
   const path = sessionId === undefined || sessionId === '' ? undefined : index.get(sessionId);
-  if (sessionId === undefined || path === undefined) return paneRow(empty);
+  // NO CWD TO CHECK, on this row's own terms: `paneRow` and `terminalRow`
+  // are both keyed by PANE, not by project, and a pane vam only knows by its
+  // `@vam-project` digest (never handed a real cwd this load) is simply not
+  // checkable -- the digest cannot be turned back into a directory, the same
+  // limit `source.ts`'s own project-bucketing comment already states for it.
+  const cwd = empty.cwd;
+  if (sessionId === undefined || path === undefined) {
+    const isAgentWorktree =
+      cwd === undefined || cwd === '' ? false : await isAgentWorktreeOf(cwd, null);
+    return { ...paneRow(empty), ...(isAgentWorktree ? { isAgentWorktree: true } : {}) };
+  }
   const read = reads.get(sessionId) ?? (await readTranscript(path, sessionId, nowMs));
   reads.set(sessionId, read);
   const resumeCommand = claudeResumeCommand(sessionId);
-  return terminalRow(empty, {
-    sessionId,
-    // THE SAME FALLBACK CHAIN A LIVE ROW'S TITLE USES (below): the operator's
-    // own name is never available here (there is no `LiveAgent` for a pane
-    // with no process in it), so this starts one rung down, at the
-    // transcript's own generated title.
-    title: read.facts.aiTitle ?? sessionId,
-    decisions: read.facts.decisions,
-    branch: read.facts.branch,
-    resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
-  });
+  const isAgentWorktree =
+    cwd === undefined || cwd === '' ? false : await isAgentWorktreeOf(cwd, read.facts.branch);
+  return {
+    ...terminalRow(empty, {
+      sessionId,
+      // THE SAME FALLBACK CHAIN A LIVE ROW'S TITLE USES (below): the
+      // operator's own name is never available here (there is no
+      // `LiveAgent` for a pane with no process in it), so this starts one
+      // rung down, at the transcript's own generated title.
+      title: read.facts.aiTitle ?? sessionId,
+      decisions: read.facts.decisions,
+      branch: read.facts.branch,
+      resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
+      // The same `createdAtMsOf` chain a live row's own `createdAt` runs,
+      // minus one rung: no `agent.startedAt` to fall back to, since there is
+      // no process here at all -- a terminal-only row goes straight from an
+      // unusable birthtime to the transcript's own first timestamped line.
+      createdAt: isoOrNull(await createdAtMsOf(read, path, null)),
+    }),
+    ...(isAgentWorktree ? { isAgentWorktree: true } : {}),
+  };
 }
 
 /**
@@ -430,6 +602,10 @@ export async function loadClaudeCodeProjects(
     sessionId: string,
     nowMs: number,
   ) => Promise<TranscriptRead> = readTranscript,
+  // Injectable for the same reason as `branchOf`: a test hands over an
+  // invented answer rather than resolving a real path on the machine
+  // running it. `CLAUDE_CODE_SOURCE` passes the real `isAgentWorktreeCwd`.
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -469,6 +645,11 @@ export async function loadClaudeCodeProjects(
   const claimed = new Set<string>();
   for (const agent of agents) {
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
+    // Re-derived from the same `index` the concurrent read wave above
+    // already built, rather than threaded out of the `reads` map: this loop
+    // has never carried `path` alongside `read`, and `createdAtMsOf`'s
+    // first-line fallback is the first reader in this function to need one.
+    const path = index.get(agent.sessionId);
     const pane = tmuxSessions === null ? null : paneForRow(tmuxSessions, agents, agent, panes);
     if (pane !== null) claimed.add(pane);
     // GUESS ONCE, THEN WRITE IT DOWN -- except this is not a guess.
@@ -506,6 +687,10 @@ export async function loadClaudeCodeProjects(
     // is already read. `.git/HEAD` only stands in when there is no transcript
     // yet, or an older one that never wrote `gitBranch`.
     const branch = read.facts.branch ?? (await branchOf(agent.cwd));
+    // `Session.isAgentWorktree` -- `agent-worktree.ts`'s own two-signal rule,
+    // fed the branch this row already resolved so a worktree whose path was
+    // renamed can still answer from its branch alone.
+    const isAgentWorktree = await isAgentWorktreeOf(agent.cwd, branch);
     /**
      * One question per session, and the directory it is asked in is the
      * session's own UNLESS the operator pointed this project somewhere else.
@@ -558,6 +743,18 @@ export async function loadClaudeCodeProjects(
       // while it is answering right now, so it stands last, because a row
       // with neither a status file nor a transcript has nothing better.
       age: compactAge(nowMs - (statusUpdatedAt ?? read.mtimeMs ?? agent.startedAt ?? nowMs)),
+      // CREATED is a different question from AGE, and reads a different
+      // chain (`createdAtMsOf`): never `statusUpdatedAt` (last activity, not
+      // a start), and the transcript's BIRTHTIME first -- a file's creation
+      // moment, not whatever it last did, when the filesystem can be
+      // trusted to report one. `agent.startedAt` (this PROCESS's own
+      // launch) is the next rung -- the fallback for a session with no
+      // transcript yet (a real gap right after `Start session`, before the
+      // CLI has written its first line) AND for a birthtime CI's own Linux
+      // runners were measured unable to report -- then the transcript's
+      // first timestamped line, then its mtime, and `null` is honest when
+      // none of the four answers.
+      createdAt: isoOrNull(await createdAtMsOf(read, path, agent.startedAt)),
       branch,
       // Absent, not empty, when nobody injected a reader: an empty list is
       // "vam asked GitHub and this branch has none", which a load that never
@@ -630,6 +827,7 @@ export async function loadClaudeCodeProjects(
       ...(pane === null ? {} : { pane }),
       ...(tmuxSessions === null ? {} : { vamControlled: pane !== null }),
       ...(vamListingGap === null ? {} : { vamListingGap }),
+      ...(isAgentWorktree ? { isAgentWorktree: true } : {}),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
@@ -664,7 +862,7 @@ export async function loadClaudeCodeProjects(
         grouped.set(cwd, bucket);
         byProjectId.set(projectId, bucket);
       }
-      bucket.sessions.push(await rowForEmptyPane(empty, index, reads, nowMs));
+      bucket.sessions.push(await rowForEmptyPane(empty, index, reads, nowMs, isAgentWorktreeOf));
     }
   }
 

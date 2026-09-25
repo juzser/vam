@@ -5079,21 +5079,40 @@ function QuestionCard({
           </span>
         </nav>
       )}
+      {/* `break-words` ON BOTH SPANS, NOT ONLY ON THE `min-w-0` WRAPPER --
+          `min-w-0` alone lets a flex/block box SHRINK to fit content that CAN
+          wrap; it does not put a wrap point into a run that has none. A
+          question or a header is the model's own words, unedited (this
+          file's own rule: vam displays what a tool wrote), and the model
+          writes hashes, ids and unbroken paths into both constantly. Without
+          this the run does not stop at the card's edge -- there is no
+          `overflow-x` anywhere between here and `data-detail-column`, the
+          phone's shared transcript scroller, so it keeps going sideways
+          inside THAT box instead: still off screen, only now silently
+          scrollable in a column the operator has no reason to swipe
+          sideways on, `vam-no-scrollbar` hiding the one hint that a scrollbar
+          would have given. Measured before this fix, at 390px, with a
+          question text carrying one 64-character unbroken run: the row's own
+          content reached x=679 against a 362px card. */}
       <div className="flex min-w-0 flex-col gap-0.5">
         {question.header !== null && (
-          <span data-question-header className="text-meta text-ink-faint uppercase tracking-wide">
+          <span
+            data-question-header
+            className="break-words text-meta text-ink-faint uppercase tracking-wide"
+          >
             {question.header}
           </span>
         )}
-        <span data-question-text className="text-body text-ink">
+        <span data-question-text className="break-words text-body text-ink">
           {question.question}
         </span>
       </div>
       {question.answer !== null ? (
         // THIS step is settled while others may not be. It shows what was
         // answered and offers nothing to mark; the set's Submit below is for
-        // whatever is still open.
-        <span data-question-answer className="text-control text-ink-dim">
+        // whatever is still open. `break-words`: the same rule as the
+        // question/header above -- an answer is free text too.
+        <span data-question-answer className="break-words text-control text-ink-dim">
           resolved — {question.answer}
         </span>
       ) : (
@@ -5110,7 +5129,10 @@ function QuestionCard({
               data-question-collapsed
               className={`flex items-baseline gap-2 rounded-[6px] border border-running px-1.5 py-1 ${OPTION_FILL}`}
             >
-              <span data-question-marked className="min-w-0 flex-1 text-control text-ink">
+              <span
+                data-question-marked
+                className="min-w-0 flex-1 break-words text-control text-ink"
+              >
                 {picked.join(', ')}
                 {/* `ink-dim`, not `ink-faint`: this row RESTS on the fill,
                     so there is no hover state to lift its ink and
@@ -5222,7 +5244,7 @@ function QuestionCard({
                             {NUMBERED_OPTIONS[index]}
                           </span>
                         )}
-                        <span data-question-label className="min-w-0">
+                        <span data-question-label className="min-w-0 break-words">
                           {option.label}
                         </span>
                         {(option.preview ?? null) !== null && (
@@ -5275,7 +5297,7 @@ function QuestionCard({
                           )}
                           <span
                             data-question-description
-                            className="min-w-0 text-meta text-ink-dim"
+                            className="min-w-0 break-words text-meta text-ink-dim"
                           >
                             {option.description}
                           </span>
@@ -9683,10 +9705,32 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
               would put the strip there the moment `canSendKeys` held, which
               nothing asked for. */}
           {phone && canSendKeys && (
+            /* THE ROW ITSELF SCROLLS, because seven chips -- two of them
+               "Esc → agent"/"⏎ → agent" pills, not glyphs -- do not fit 361px
+               of clear width and never have: this row shipped with NOWHERE
+               for the overflow to go, `flex-none` on every chip and no wrap,
+               no scroll and no cap. Measured before this fix, at 390px: 408px
+               of chips in a 361px box, `overflow-x: visible` on the nav, the
+               last chip's paint spilling past the screen edge with no way to
+               reach it -- the operator's own report, translated: "the quick
+               buttons row above the prompt input can't be scrolled
+               horizontally". `overflow-x-auto` makes the spill reachable;
+               `overscroll-x-contain` keeps a drag that reaches either end of
+               the row from bouncing the page beneath it instead;
+               `vam-no-scrollbar` hides the bar the same way
+               every other scroller in this app does. The edge fade that says
+               "there is more here" is `[data-key-strip]`'s own rule in
+               `styles.css`, right beside `.vam-no-scrollbar`, because a mask
+               is paint, not layout, and belongs with the rest of this row's
+               paint decisions rather than inline here. A tap still fires and
+               a drag still does not: neither this row nor any button in it
+               calls `preventDefault` on a touch, so the browser's own
+               click-after-significant-move suppression is the only rule in
+               play, and it already does the right thing. */
             <nav
               aria-label="press a key in the session"
               data-key-strip
-              className="flex flex-none items-center gap-1.5"
+              className="vam-no-scrollbar flex flex-none items-center gap-1.5 overflow-x-auto overscroll-x-contain"
             >
               {KEY_STRIP.map((item) => (
                 <button

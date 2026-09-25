@@ -618,6 +618,28 @@ export type Session = {
    * concept of.
    */
   readonly branch: string | null;
+  /**
+   * WHEN THIS SESSION WAS CREATED, ISO-8601 -- the fact `sortBy: 'created'`
+   * (`selectors.ts`) orders on, so a poll that changes `status` or `age`
+   * never moves a row under it.
+   *
+   * OPTIONAL, on the rule every fact-a-source-may-not-have follows here
+   * (`origin`, `pullRequests`): absent is "nobody asked or nobody could
+   * say", not "created at the epoch" -- and dozens of fixtures across this
+   * suite build a `Session` literal with no opinion about it.
+   *
+   * A SOURCE'S BEST EVIDENCE, not a promise of ground truth. `claude-code`
+   * reads it off the transcript file's own birthtime (`source.ts`; a tail
+   * read never opens the file's FIRST line -- `transcript.ts`'s own header
+   * says why -- so birthtime is what the same `stat()` the age already
+   * costs can answer for free) and falls back to the tmux pane's
+   * `session_created` for a row with no transcript yet. `codex` reads the
+   * timestamp Codex itself embeds in the rollout's own file name
+   * (`rollout.ts`), never `recency_at_ms` -- `docs/design/vam-owns-the-
+   * session.md`'s own trap: a recency moves every poll and is not a start
+   * time.
+   */
+  readonly createdAt?: string | null;
   /** Newest first. The canvas shows the first three. */
   readonly decisions: readonly Decision[];
   /**
@@ -695,6 +717,23 @@ export type Session = {
    * `unknown`, which is the visible-by-default case.
    */
   readonly origin?: SessionOrigin;
+  /**
+   * IS THIS SESSION'S WORKING DIRECTORY A CLAUDE CODE AGENT WORKTREE --
+   * `<repo>/.claude/worktrees/agent-<id>`, minted by a subagent run with
+   * `isolation: "worktree"`, never a session the operator opened themselves.
+   * `agent-worktree.ts`'s own header carries the two-signal rule this is
+   * computed by (a realpath'd path segment, or a `worktree-agent-*`
+   * branch) and the reason it cannot be confused with vam's OWN worktree
+   * feature (PR 496), a different directory layout entirely.
+   *
+   * `true` ONLY, on the SAME rule `pane`/`vamControlled` already use for a
+   * fact a source either measured or did not: absent means "not this",
+   * exactly like `false` would, so it is left off rather than spelled out
+   * on the session literals across this whole suite that predate it.
+   *
+   * `session-filter.ts`'s `isHiddenByAgentWorktreeFilter` is the one reader.
+   */
+  readonly isAgentWorktree?: boolean;
   /**
    * Whether vam can ACT on this session directly -- close it, and in time
    * reach it -- because vam started it and can still prove which pane it is.

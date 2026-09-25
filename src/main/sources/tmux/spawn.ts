@@ -295,6 +295,14 @@ export type TmuxSession = {
    * not say", never "the pane has no directory" -- every live pane has one.
    */
   readonly cwd?: string;
+  /**
+   * tmux's own `session_created`, unix seconds as a STRING -- `argv.ts`'s
+   * `#{session_created}`, the seventh and last field, absent for the same
+   * reason `cwd` is: a shorter listing (an older tmux, or a stub that
+   * predates it) simply does not say. `paneRow` (`pane-row.ts`) is the one
+   * reader, for `Session.createdAt` on a pane with no transcript yet.
+   */
+  readonly sessionCreated?: string;
 };
 
 /** Either the thing, or why vam could not get it -- never one standing in for the other. */
@@ -525,7 +533,19 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
             ? line.slice(fourthTab + 1)
             : line.slice(fourthTab + 1, fifthTab)
           ).trim();
-    const cwd = fifthTab === -1 ? '' : line.slice(fifthTab + 1).trim();
+    // THE SIXTH TAB, on the identical rule: only looked for once the fifth
+    // was found, so a line that stops at cwd -- every fixture before this
+    // field existed -- leaves `sessionCreated` off rather than reading a cwd
+    // fragment as a timestamp.
+    const sixthTab = fifthTab === -1 ? -1 : line.indexOf('\t', fifthTab + 1);
+    const cwd = (
+      fifthTab === -1
+        ? ''
+        : sixthTab === -1
+          ? line.slice(fifthTab + 1)
+          : line.slice(fifthTab + 1, sixthTab)
+    ).trim();
+    const sessionCreated = sixthTab === -1 ? '' : line.slice(sixthTab + 1).trim();
     sessions.push({
       project: line.slice(0, firstTab).trim(),
       pid: line.slice(firstTab + 1, secondTab).trim(),
@@ -534,6 +554,7 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
       ...(command === '' ? {} : { command }),
       ...(vamSessionId === '' ? {} : { vamSessionId }),
       ...(cwd === '' ? {} : { cwd }),
+      ...(sessionCreated === '' ? {} : { sessionCreated }),
     });
   }
   return { kind: 'ok', sessions };

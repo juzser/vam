@@ -224,6 +224,28 @@ await page.exposeFunction('__realOpen', async () => {
 await page.exposeFunction('__realWrite', (text) => {
   client?.write(text);
 });
+// A REVIEW FINDING OF THIS FILE'S OWN, found chasing the cursor-offset
+// checks below: `terminalStream.close` used to be a bare `() => {}`, so a
+// `TerminalStreamTab.tsx` RECONNECT (`teardownStream()` before the next
+// `connect()`, exactly what a real tab hide/show or a `visibilitychange`
+// cycle drives) never disposed the OLD `StreamClient` here -- its real
+// `tmux -C` child stayed attached forever, and `tmux list-clients` showed
+// TWO clients on this one session after a single reconnect. Both received
+// the SAME `%output` broadcast for every later keystroke (a real tmux
+// broadcasts to every attached client), and both forwarded it through the
+// identical `__deliverStreamData` global, so the ONE listener the renderer
+// had registered by then was called twice per keystroke -- `hello` arriving
+// as `hheelllloo`, discovered by the check (f)/(g) typed-text assertion
+// below, NOT a product bug: `stream-ipc.ts`'s own real `closeClient(streamId)`
+// already calls `client.dispose()` on an explicit close, this harness's own
+// stub simply never wired the call through. Fixed by actually disposing the
+// CURRENT `client` on close -- this harness only ever has one stream open at
+// a time (`TerminalStreamTab.tsx`'s own invariant), so there is no second
+// stream's client to keep track of instead.
+await page.exposeFunction('__realClose', () => {
+  client?.dispose();
+  client = undefined;
+});
 await page.exposeFunction('__realResize', (cols, rows) => {
   try {
     tmux('resize-window', '-t', `=${TMUX_SESSION}:`, '-x', String(cols), '-y', String(rows));
@@ -329,7 +351,11 @@ await page.addInitScript(
       },
       terminalStream: {
         open: async () => await globalThis.__realOpen(),
-        close: () => {},
+        // Actually disposes the real `StreamClient` now -- see `__realClose`'s
+        // own header for the two-attached-clients bug this used to hide.
+        close: () => {
+          void globalThis.__realClose();
+        },
         write: (_streamId, bytes) => {
           void globalThis.__realWrite(new TextDecoder().decode(bytes));
         },
@@ -605,9 +631,162 @@ check(
   xtermWideMarkColumn !== null && xtermWideMarkColumn === tmuxWideMarkColumn,
   `xterm column ${String(xtermWideMarkColumn)} vs tmux cursor_x ${tmuxWideMarkColumn} (row text ${JSON.stringify(xtermWideMarkMetrics.text)})`,
 );
-// Let the guard sleep finish so the shell is idle again before the OFF
-// screen's own navigation below.
+// Let the guard sleep finish so the shell is idle again before the next
+// section reuses this same live session.
 await new Promise((r) => setTimeout(r, 3000));
+
+/**
+ * (f)/(g) THE OPERATOR'S OWN REPORT, REPRODUCED FROM A SCREENSHOT
+ * (`docs/design/ref/stream-cursor-offset-report.png`): "I type input but it
+ * appears in the wrong position, off from the input box in the terminal" --
+ * typed text landing on the row BELOW a Claude Code-style input box,
+ * overwriting its bottom border ("——hello").
+ *
+ * A SECOND BOX FIXTURE, deliberately NOT the pane's last row -- status text
+ * sits below it, exactly the screenshot's own shape. Drawn in ONE `cat`
+ * (box, border, status lines) that ENDS with an embedded `CSI row;col H`
+ * moving tmux's REAL cursor back up to right after the box's own `❯ ` --
+ * mirroring how a real full-screen TUI redraws its whole frame and then
+ * places the cursor for input -- followed by a blocking `read -r`, which
+ * prints nothing, so the cursor stays exactly there. A real file + `cat`,
+ * never a hand-escaped `send-keys` line (this file's own header note on
+ * why).
+ *
+ * THE STREAM IS FORCED TO RESEED, not merely left to receive this as live
+ * `%output`: a live write was never the bug (xterm has always followed an
+ * explicit CSI in `%output` correctly) -- what this task fixes is the
+ * SEED `StreamClient#connect`/`#reseed` produces when a view opens or
+ * reconnects onto an ALREADY-IDLE pane, which is the operator's own
+ * scenario (opening the Terminal tab onto a Claude Code session already
+ * sitting at its prompt). A `visibilitychange` cycle drives the SAME
+ * teardown-then-`connect()` path `TerminalStreamTab.tsx` wires to a real
+ * tab switch, so this exercises the real seed path, not a shortcut.
+ */
+const BOX2_INTERIOR = 30;
+const BOX2_TOP = `╭${'─'.repeat(BOX2_INTERIOR)}╮`;
+const PROMPT_PREFIX = '│ ❯ ';
+const BOX2_MID = `${PROMPT_PREFIX}${' '.repeat(BOX2_INTERIOR - (PROMPT_PREFIX.length - 1))}│`;
+const BOX2_BOTTOM = `╰${'─'.repeat(BOX2_INTERIOR)}╯`;
+const STATUS2 = '  ▶▶ auto mode on (shift+tab to cycle)';
+// 1-based CSI coordinates: BOX2_TOP is row 1, BOX2_MID is row 2, right after
+// PROMPT_PREFIX's own 4 characters (│, space, ❯, space) is column 5.
+const PROMPT_ROW = 2;
+const PROMPT_COL = PROMPT_PREFIX.length + 1;
+const CURSOR_HOME = `\x1b[${PROMPT_ROW};${PROMPT_COL}H`;
+const box2Path = join(bundleDir, 'box2.txt');
+writeFileSync(
+  box2Path,
+  `${[BOX2_TOP, BOX2_MID, BOX2_BOTTOM, STATUS2].join('\n')}\n${CURSOR_HOME}`,
+  'utf8',
+);
+tmux('send-keys', '-t', `=${TMUX_SESSION}:`, '-l', '--', `clear; cat ${box2Path}; read -r _x`);
+tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
+await new Promise((r) => setTimeout(r, 400));
+
+// Force a fresh RECONNECT (teardown, then `connect()`) -- the same cycle a
+// real tab switch drives -- so the assertions below are against a fresh
+// SEED, not live `%output` riding the already-open connection.
+await page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+await page.waitForTimeout(150);
+await page.evaluate(() => {
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+});
+await page.waitForSelector('[data-terminal-stream]', { timeout: 5_000 });
+await page.waitForTimeout(400);
+
+await page.screenshot({ path: `${outDir}/terminal-streaming-cursor-offset-after.png` });
+console.log(`${outDir}/terminal-streaming-cursor-offset-after.png`);
+
+/* ── (f) after the (re)seed, xterm’s cursor lands on the SAME cell tmux itself reports ── */
+const tmuxPromptCursor = tmux(
+  'display-message',
+  '-p',
+  '-t',
+  `=${TMUX_SESSION}:`,
+  '#{cursor_flag} #{cursor_x} #{cursor_y}',
+).trim();
+const [promptCursorFlag, promptCursorXRaw, promptCursorYRaw] = tmuxPromptCursor.split(' ');
+const tmuxPromptCursorX = Number(promptCursorXRaw);
+const tmuxPromptCursorY = Number(promptCursorYRaw);
+check(
+  'tmux’s own cursor sits on the prompt row (row 1, 0-based), not the pane’s last row -- the fixture’s own precondition',
+  promptCursorFlag === '1' && tmuxPromptCursorY === PROMPT_ROW - 1,
+  tmuxPromptCursor,
+);
+
+const promptSeedCursorMetrics = await page.evaluate(() => {
+  const pane = document.querySelector('[data-terminal-stream]');
+  const paneRows = pane?.querySelectorAll('.xterm-rows > div');
+  const cursorRowIndex = paneRows
+    ? [...paneRows].findIndex((row) => row.querySelector('.xterm-cursor') !== null)
+    : -1;
+  const cursorEl = pane?.querySelector('.xterm-cursor') ?? null;
+  const rowEl = cursorRowIndex >= 0 && paneRows ? paneRows[cursorRowIndex] : null;
+  return {
+    cursorRowIndex,
+    cursorVisible: cursorEl !== null,
+    rowText: rowEl ? (rowEl.textContent ?? '') : null,
+  };
+});
+check(
+  'xterm’s own cursor row (DOM), after the reseed, equals tmux’s cursor_y -- never the end of the seed text',
+  promptSeedCursorMetrics.cursorRowIndex === tmuxPromptCursorY,
+  JSON.stringify({ ...promptSeedCursorMetrics, tmuxPromptCursorY, tmuxPromptCursorX }),
+);
+check(
+  'the cursor’s own row is the PROMPT row (carries the ❯ glyph), not the border row below it',
+  typeof promptSeedCursorMetrics.rowText === 'string' &&
+    promptSeedCursorMetrics.rowText.includes('❯'),
+  JSON.stringify(promptSeedCursorMetrics),
+);
+// `__realClose`'s own header: the RECONNECT above must have disposed the
+// FIRST client, not left it attached alongside the second -- falsified by
+// hand (reverting `close` to `() => {}`) below this file's own header now
+// records it caught `hheelllloo`.
+const attachedClients = tmux('list-clients', '-F', '#{client_name}')
+  .trim()
+  .split('\n')
+  .filter((line) => line.length > 0);
+check(
+  'the reconnect leaves exactly ONE tmux -C client attached, never two',
+  attachedClients.length === 1,
+  `attached: ${JSON.stringify(attachedClients)}`,
+);
+
+/* ── (g) typing lands ON the prompt row, and the border row below is left intact ── */
+await page.locator('[data-terminal-stream]').click();
+await page.waitForTimeout(150);
+await page.keyboard.type('hello', { delay: 30 });
+await page.waitForTimeout(400);
+
+await page.screenshot({ path: `${outDir}/terminal-streaming-cursor-offset-typed.png` });
+console.log(`${outDir}/terminal-streaming-cursor-offset-typed.png`);
+
+const typedMetrics = await page.evaluate(() => {
+  const pane = document.querySelector('[data-terminal-stream]');
+  const rows = pane?.querySelector('.xterm-rows');
+  return rows ? [...rows.children].map((r) => r.textContent ?? '') : [];
+});
+const promptRowAfterTyping = typedMetrics[tmuxPromptCursorY] ?? '';
+const borderRowBelow = typedMetrics[tmuxPromptCursorY + 1] ?? '';
+check(
+  '"hello" landed ON the prompt row, right where ❯ is -- never a row below it',
+  promptRowAfterTyping.includes('❯') && promptRowAfterTyping.includes('hello'),
+  JSON.stringify({ promptRowAfterTyping, allRows: typedMetrics }),
+);
+check(
+  'the border row directly below the prompt is untouched -- no "hello" landed there (the screenshot’s own "——hello")',
+  !borderRowBelow.includes('hello') && /[─╰╯]/.test(borderRowBelow),
+  JSON.stringify({ borderRowBelow }),
+);
+
+// Clear the blocking `read` before this session is reused/torn down below.
+tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
+await new Promise((r) => setTimeout(r, 200));
 
 /* ── the OFF screen, same fixture, for the before/after pair the report asks for ──
  * RE-PRINTED, not merely left over: checks (b) and (e) above both write their

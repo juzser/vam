@@ -2290,6 +2290,40 @@ body {
 }
 
 /*
+ * THE KEY STRIP'S OWN EDGE FADE (`DetailPanel.tsx`'s `[data-key-strip]`,
+ * that row's own comment carries the overflow measurement). `vam-no-
+ * scrollbar` above hides the bar a `scroll-x` row would otherwise paint, and
+ * hiding the ONE affordance that said "this scrolls" is exactly why every
+ * such row in this app needs a second one. A fade is that second one: a
+ * 14px band of the row's own background at each edge, run through the same
+ * gradient in both engines so Safari (still `-webkit-mask-image` only) and
+ * Chromium agree on where the chips start looking whole again.
+ *
+ * ALWAYS ON, NOT TOGGLED BY SCROLL POSITION. The row this ships for has
+ * never yet measured narrower than its own content (its own comment: 408px
+ * of chips in 361px of room), so the near-permanent case is "more to the
+ * right"; a fade needing a scroll listener to appear or disappear is a
+ * second moving part bought for a case this row does not have today, and one
+ * that would draw wrong the one frame before the listener's first read.
+ */
+[data-key-strip] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 14px,
+    black calc(100% - 14px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 14px,
+    black calc(100% - 14px),
+    transparent
+  );
+}
+
+/*
  * THE STREAMING TERMINAL'S OWN SCROLLBAR (`TerminalStreamTab.tsx`), hidden
  * the same way `.vam-no-scrollbar` hides every other native bar in this
  * renderer -- scoped to `.xterm-viewport` rather than applied as a class,

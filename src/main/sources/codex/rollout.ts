@@ -63,6 +63,35 @@ export const MAX_TAIL_READ_BYTES = 4 * 1024 * 1024;
 /** At most this many turns come back from one read. The canvas draws three. */
 export const MAX_TURNS = 8;
 
+/**
+ * `rollout-2026-08-11T18-49-11-<uuid>.jsonl` -- Codex's own file name,
+ * measured against real files under `~/.codex/sessions/YYYY/MM/DD/`. The
+ * colons an ISO instant would carry are dashes here (a colon is not a legal
+ * path character on every filesystem vam runs on), so this reconstructs
+ * them rather than parsing the name as ISO directly.
+ */
+const ROLLOUT_START_PATTERN = /rollout-(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-/;
+
+/**
+ * `Session.createdAt`'s Codex source: THE THREAD'S START, read out of the
+ * rollout's own file name rather than opened -- Codex embeds it there
+ * itself, so there is no file to read and no `recency_at_ms` trap to fall
+ * into (`docs/design/vam-owns-the-session.md`: "a recency moves every poll
+ * and is not a start time").
+ *
+ * TREATED AS UTC. The name carries no timezone offset at all, and a slug
+ * built from `Date#toISOString()` -- the ordinary way a program mints one --
+ * is UTC by construction; nothing here claims better precision than that.
+ * `null` for anything that is not this exact shape, never a guess.
+ */
+export function threadStartOf(rolloutPath: string): string | null {
+  const match = ROLLOUT_START_PATTERN.exec(rolloutPath);
+  if (match === null) return null;
+  const [, date, hh, mm, ss] = match;
+  const iso = `${date}T${hh}:${mm}:${ss}.000Z`;
+  return Number.isFinite(Date.parse(iso)) ? iso : null;
+}
+
 /** The activity line's own limit, matching what the canvas can draw. */
 const MAX_LABEL = 80;
 

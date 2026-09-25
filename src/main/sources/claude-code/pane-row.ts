@@ -50,6 +50,21 @@ import type { TmuxSession } from '../tmux/spawn.js';
 
 const PANE_ROW_PREFIX = 'pane:';
 
+/**
+ * `TmuxSession.sessionCreated` (unix seconds, as a string -- tmux options
+ * and `-F` fields are always strings) into `Session.createdAt`. `null` for
+ * anything not a real listing could have produced: an older tmux (the field
+ * absent), or a rewritten listing (`listVamSessions`'s own LC_CTYPE trap) --
+ * never a thrown exception, on the rule every reader of an optional tmux
+ * field in this source follows.
+ */
+function createdAtOf(session: TmuxSession): string | null {
+  const raw = session.sessionCreated;
+  if (raw === undefined || !/^\d+$/.test(raw)) return null;
+  const ms = Number(raw) * 1000;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 /** The row id a vam tmux session is drawn under while nothing runs in it. */
 export function paneRowId(name: string): string {
   return `${PANE_ROW_PREFIX}${name}`;
@@ -123,6 +138,10 @@ export function paneRow(session: TmuxSession): Session {
     activity: null,
     age: null,
     branch: null,
+    // The one row with no transcript at all, so tmux's own creation time --
+    // never a file's birthtime, which does not exist yet -- is the only
+    // source `Session.createdAt` has (`model.ts`, `createdAtOf` above).
+    createdAt: createdAtOf(session),
     decisions: [],
     source: 'claude-code',
     // A pane vam created, by the only proof there is: it is in vam's own
@@ -174,6 +193,14 @@ export function terminalRow(
     /** `claude --resume <id>`, already joined -- `null` when vam could not
      *  build one, which omits `resumeCommand` rather than inventing it. */
     readonly resumeCommand: string | null;
+    /**
+     * The conversation's OWN creation time, read off its transcript's
+     * birthtime by the caller (`source.ts`) -- this row HAS a transcript
+     * (that is the whole reason it is a `terminalRow` and not a bare
+     * `paneRow`), so it reads the identical source a live row's `createdAt`
+     * does, never tmux's `session_created`.
+     */
+    readonly createdAt: string | null;
   },
 ): Session {
   const runningProvider = identifyRunningProvider(session.command);
@@ -186,6 +213,7 @@ export function terminalRow(
     activity: null,
     age: null,
     branch: conversation.branch,
+    createdAt: conversation.createdAt,
     decisions: conversation.decisions,
     source: 'claude-code',
     origin: { startedBy: 'human', promptCount: null },

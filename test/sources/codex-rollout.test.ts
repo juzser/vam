@@ -15,6 +15,7 @@ import { readWindowOf, type TranscriptSource } from '../../src/main/sources/clau
 import {
   parseRolloutLines,
   readRolloutTail,
+  threadStartOf,
   turnsFromLines,
 } from '../../src/main/sources/codex/rollout.js';
 
@@ -272,5 +273,31 @@ describe('readRolloutTail', () => {
     const read = await readRolloutTail(sourceOf(`${userItem('only a question')}\n`), 'd', 1024);
     expect(read.starved).toBe(false);
     expect(read.decisions[0]?.output).toBeNull();
+  });
+});
+
+/**
+ * `Session.createdAt`'s Codex source: THE THREAD'S START, not
+ * `recency_at_ms` -- `docs/design/vam-owns-the-session.md`'s own trap ("a
+ * recency moves every poll and is not a start time"). Codex embeds the
+ * instant it began right into the rollout's own file name --
+ * `~/.codex/sessions/YYYY/MM/DD/rollout-<iso>-<uuid>.jsonl`, e.g.
+ * `rollout-2026-08-11T18-49-11-019ff0a7-b87e-...jsonl`, measured against
+ * real files on the machine this was written for -- so this never opens the
+ * file at all.
+ */
+describe('threadStartOf', () => {
+  it('reads the instant Codex embedded in the rollout’s own file name', () => {
+    const path =
+      '/home/op/.codex/sessions/2026/08/11/rollout-2026-08-11T18-49-11-019ff0a7-b87e-72e1-a90b-c35b1c66c45d.jsonl';
+    expect(threadStartOf(path)).toBe('2026-08-11T18:49:11.000Z');
+  });
+
+  it('is null for a name Codex never writes, rather than a guess', () => {
+    expect(threadStartOf('/home/op/.codex/sessions/2026/08/11/not-a-rollout.jsonl')).toBeNull();
+  });
+
+  it('is null for an empty string, never throws', () => {
+    expect(threadStartOf('')).toBeNull();
   });
 });
