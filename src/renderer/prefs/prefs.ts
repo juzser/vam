@@ -701,11 +701,13 @@ export type Prefs = {
    */
   readonly filesMarkdownView: FilesMarkdownView;
   /**
-   * WHICH TERMINAL TAB DRAWS: the shipping `capture-pane` poll, or the beta
-   * `TerminalStreamTab.tsx` over a persistent xterm.js connection
-   * (`docs/design/terminal-streaming.md`). `prefs/streaming-terminal.ts`
-   * carries the default and the store `DetailPanel.tsx` reads to choose
-   * between the two, the same `terminalFontSize` reason: `DetailPanel`
+   * WHICH TERMINAL TAB DRAWS: `TerminalStreamTab.tsx` over a persistent
+   * xterm.js connection, the shipping default now, or `TerminalTab.tsx`'s
+   * `capture-pane` poll, kept as the explicit opt-out AND the automatic
+   * fallback for a tmux that cannot stream (`docs/design/terminal-
+   * streaming.md`'s "Flipping the default"). `prefs/streaming-terminal.ts`
+   * carries the default and the store `TerminalAutoTab.tsx` reads to choose
+   * between the two, the same `terminalFontSize` reason: that component
    * carries no `prefs` prop, so the live value has to reach it as module
    * state rather than a prop drilled down from `Canvas.tsx`.
    *
@@ -713,6 +715,28 @@ export type Prefs = {
    * not a fact about the session in it.
    */
   readonly streamingTerminal: boolean;
+  /**
+   * CONSUMED, ONCE, BY `parsePrefs` -- never read anywhere else. `writePrefs`
+   * persists the WHOLE `Prefs` object on every save, so an operator who never
+   * opened Settings at all was still storing `streamingTerminal: false`
+   * (the OLD default) the moment ANY other preference changed -- there is no
+   * way, from the stored payload alone, to tell that apart from an operator
+   * who opened Settings and chose off on purpose. Flipping
+   * `DEFAULT_STREAMING_TERMINAL` cannot reach either of them on its own,
+   * because `readStreamingTerminal` reads the STORED value, not the default,
+   * whenever one is stored at all.
+   *
+   * So the migration is a ratchet, the same shape `migrateSourceKey`'s own
+   * one-time reshuffle already takes for a different field: the first
+   * `parsePrefs` to see a payload WITHOUT this flag set moves
+   * `streamingTerminal` onto the new default regardless of what was stored,
+   * then sets this flag so every later load respects whatever the operator
+   * has actually chosen since -- including turning it back off, which must
+   * stick. A payload that already carries `streamingTerminalMigrated: true`
+   * is read normally, through `readStreamingTerminal`, exactly like every
+   * other boolean here.
+   */
+  readonly streamingTerminalMigrated: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
@@ -747,6 +771,11 @@ export const EMPTY_PREFS: Prefs = {
   notifyWaiting: DEFAULT_NOTIFY_WAITING,
   filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
   streamingTerminal: DEFAULT_STREAMING_TERMINAL,
+  // A truly empty payload has nothing to migrate FROM -- it already reads
+  // `DEFAULT_STREAMING_TERMINAL` above, so there is nothing left for the
+  // ratchet to do. Marked consumed so a later explicit off is respected the
+  // same as any other installation's.
+  streamingTerminalMigrated: true,
 };
 
 /**
@@ -824,6 +853,11 @@ function parsePrefs(
     renames?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  // Read ONCE, ahead of the field below that consults it -- see
+  // `streamingTerminalMigrated`'s own header on `Prefs` for what this ratchet
+  // is for.
+  const streamingTerminalMigrated =
+    (parsed as { streamingTerminalMigrated?: unknown }).streamingTerminalMigrated === true;
   return {
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
@@ -1020,13 +1054,22 @@ function parsePrefs(
     filesMarkdownView: readFilesMarkdownView(
       (parsed as { filesMarkdownView?: unknown }).filesMarkdownView,
     ),
-    // Per field like every line above it, and normalised like `conciseOutput`:
-    // only a literal `true` is on, so a payload this vam cannot read leaves
-    // the shipping Terminal tab in place rather than switching an operator
-    // onto the beta on the strength of a hand-edited value.
-    streamingTerminal: readStreamingTerminal(
-      (parsed as { streamingTerminal?: unknown }).streamingTerminal,
-    ),
+    // The one-time ratchet (`streamingTerminalMigrated`'s own header): a
+    // payload that has not yet been migrated moves onto the NEW default
+    // regardless of what is stored, because the OLD default baked
+    // `streamingTerminal: false` into any such payload just as effectively
+    // as a real explicit choice would have and this vam cannot tell the two
+    // apart. A payload past the migration is read normally, only a literal
+    // `true` on -- the same direction `conciseOutput` reads in, so a
+    // corrupted or hand-edited value never silently switches an operator
+    // to an implementation they never chose.
+    streamingTerminal: streamingTerminalMigrated
+      ? readStreamingTerminal((parsed as { streamingTerminal?: unknown }).streamingTerminal)
+      : true,
+    // Consumed: from here on this installation's payload always carries
+    // `true`, so every FUTURE load takes the branch above rather than this
+    // one -- the ratchet only ever fires once.
+    streamingTerminalMigrated: true,
   };
 }
 
