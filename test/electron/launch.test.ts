@@ -11,7 +11,9 @@
  */
 
 import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -155,7 +157,37 @@ async function startChangeStreamServer(): Promise<{ server: Server; port: number
   return { server, port: address.port };
 }
 
-function launch(port: number, streamPort: number): Promise<Launch> {
+/**
+ * A genuinely free loopback port, allocated the same way `startNoCorsServer`
+ * and `startChangeStreamServer` above do. Handed to the launched process as
+ * `VAM_REMOTE_PORT` so `startRemoteTransport` (`src/main/index.ts`) never
+ * even attempts the operator's own remote-serve port (58217,
+ * `DEFAULT_REMOTE_PORT` in `src/main/remote/launch.ts`) -- a bind against an
+ * already-taken port is caught and non-fatal by that function's own design,
+ * but this harness does not rely on that: it is simply never asked to try.
+ */
+async function allocatePort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const allocated = address !== null && typeof address === 'object' ? address.port : null;
+      server.close((closeError) => {
+        if (closeError) reject(closeError);
+        else if (allocated === null) reject(new Error('no port assigned'));
+        else resolve(allocated);
+      });
+    });
+    server.on('error', reject);
+  });
+}
+
+function launch(
+  port: number,
+  streamPort: number,
+  userDataDir: string,
+  remotePort: number,
+): Promise<Launch> {
   return new Promise((resolve, reject) => {
     const child = spawn(bin('electron'), [path.join('test', 'electron', 'probe.cjs')], {
       cwd: repoRoot,
@@ -169,6 +201,12 @@ function launch(port: number, streamPort: number): Promise<Launch> {
         // to check. This seeds a deterministic one-project fixture instead,
         // per src/main/index.ts's LAUNCH_FIXTURE_SOURCE.
         VAM_FIXTURE_SOURCE: '1',
+        // A throwaway `userData` for this one launch, never the operator's
+        // real profile -- see `src/main/index.ts`'s `VAM_USER_DATA_DIR`
+        // handling and `test/electron/userdata-isolation.test.ts` for the
+        // dedicated proof.
+        VAM_USER_DATA_DIR: userDataDir,
+        VAM_REMOTE_PORT: String(remotePort),
       },
     });
     let stdout = '';
@@ -204,6 +242,7 @@ describe('the Electron shell launches', () => {
   let server: Server;
   let streamServer: Server;
   let launched: Launch;
+  let userDataDir: string;
 
   beforeAll(async () => {
     execFileSync(bin('electron-vite'), ['build'], { cwd: repoRoot, stdio: 'pipe' });
@@ -211,12 +250,17 @@ describe('the Electron shell launches', () => {
     server = started.server;
     const startedStream = await startChangeStreamServer();
     streamServer = startedStream.server;
-    launched = await launch(started.port, startedStream.port);
+    userDataDir = mkdtempSync(path.join(tmpdir(), 'vam-launch-test-userdata-'));
+    const remotePort = await allocatePort();
+    launched = await launch(started.port, startedStream.port, userDataDir, remotePort);
   }, 180_000);
 
   afterAll(() => {
     server?.close();
     streamServer?.close();
+    if (userDataDir !== undefined) {
+      rmSync(userDataDir, { recursive: true, force: true });
+    }
   });
 
   const smoke = (): SmokeResult => {
@@ -578,4 +622,19 @@ describe('the Electron shell launches', () => {
     expect(smoke().zoomLevelAfterReload).toBe(0);
     expect(smoke().zoomFactorAfterReload).toBe(1);
   });
+
+  /**
+   * `TerminalOnlyStart` NO LONGER DRAWS AN `<img>` AT ALL -- "start-polish"
+   * (2026-09-23) moved its mark to the session's own AGENT (`SourceMark`,
+   * an inline SVG through `IconFrame`), which is what the operator asked
+   * for ("change the agent screen's icon to the agent's icon") and it is
+   * also why this file's own `LAUNCH_FIXTURE_PROJECTS` fixture -- which
+   * always owns a session, by design, for the composer/AC-13 assertions
+   * elsewhere in this file -- can no longer reach a screen with an `<img>`
+   * on it: `GettingStarted.tsx`'s own `<img>` (vam's mark, unchanged) shows
+   * ONLY when vam owns no session anywhere, which this fixture can never be.
+   * The `file://`-relative-path regression this test used to guard here now
+   * has its own dedicated, EMPTY-fixture launch:
+   * `test/electron/getting-started-image.test.ts`.
+   */
 });

@@ -44,7 +44,6 @@ function session(id: string, over: Partial<Session> = {}): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -303,6 +302,7 @@ function gatedSource(
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {},
     viewerScope: { kind: 'connection', note: 'one local process' },

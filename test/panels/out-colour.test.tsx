@@ -87,6 +87,27 @@ describe('a code fence gets syntax colour, in the languages agents emit', () => 
     }
   });
 
+  it('marks a fence with NO language for the inline-code ink, not a named language vam cannot colour', () => {
+    // MEASURED on Claude Code 2.1.280: "code blocks that don't name a
+    // language are now coloured like inline code, so commands stand out from
+    // the surrounding text" -- a bare ``` fence, never a ```rust one vam
+    // simply has no grammar for. The two used to be the same case here (both
+    // `resolveLang` to `null`), and both painted `ink-dim` -- body text. Only
+    // the truly language-less one should change.
+    //
+    // The class asserted is the ANCESTOR `pre`'s, not the `<code>`'s own: the
+    // `[&_code]` rule is what wins the cascade in the real page (a tag
+    // selector beats a plain utility class), so a `<code>`-only assertion
+    // would pass even if the override that actually paints the pixel were
+    // wrong -- see `e2e/pane-colour-shots.mjs` for the computed-colour proof.
+    const bare = out(['```', 'echo hi', '```'].join('\n'));
+    const rust = out(['```rust', 'let x = 1;', '```'].join('\n'));
+    expect(bare.querySelector('pre')?.className).toContain('[&_code]:text-chip');
+    expect(bare.querySelector('pre')?.className).not.toContain('[&_code]:text-ink-dim');
+    expect(rust.querySelector('pre')?.className).toContain('[&_code]:text-ink-dim');
+    expect(rust.querySelector('pre')?.className).not.toContain('[&_code]:text-chip');
+  });
+
   it('keeps one fence DOM shape, whichever language the infostring names', () => {
     // The `<pre>`'s own `[&_code]` rules only reach a fence that HAS a
     // `<code>`, so a colouring path that dropped it would style half the

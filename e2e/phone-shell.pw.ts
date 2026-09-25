@@ -139,7 +139,22 @@ async function openFirstSession(page: Page): Promise<void> {
   const row = page.locator('[data-phone-shell] [data-session-row]').first();
   const box = await row.boundingBox();
   if (box === null) throw new Error('no session row');
-  await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+  // `row.tap({ position })` -- not `page.touchscreen.tap(box.x + 60, ...)` on
+  // a `boundingBox()` read a moment earlier. That earlier coordinate can go
+  // stale between the read and the raw touchscreen event: measured on a real
+  // run, deep enough into this file's own long sequential suite, the row had
+  // moved ~11px between the `boundingBox()` call and a `$$eval` a few
+  // milliseconds later -- some still-settling layout above the list, not
+  // this suite's own concern to name -- and the raw coordinate landed on the
+  // sidebar's "new session" footer instead of the row, leaving
+  // `data-phone-shell` on "list" for the rest of the test's timeout.
+  // `Locator.tap`'s own actionability check re-resolves the row's CURRENT
+  // box and waits for it to stop moving before dispatching, which a
+  // fire-and-forget `touchscreen.tap` at a stale coordinate cannot do.
+  // `position` keeps this helper's own promise -- its left side, clear of
+  // any right-hand chrome -- rather than `tap()`'s own default of the
+  // element's centre.
+  await row.tap({ position: { x: 60, y: box.height / 2 } });
   await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
 }
 
@@ -476,9 +491,14 @@ test.describe('the phone shell at 390px', () => {
     ).toBeGreaterThanOrEqual(INSET);
 
     await openFirstSession(page);
+    // `data-question-bar-inline`, not the retired fixed `data-question-bar`
+    // (docs/design/phone-core-loop.md §3.2-3.3): the Response view's
+    // question is inline now, `sticky bottom-0` inside the transcript's own
+    // scroller, and it is STILL the bottom of the screen whenever the
+    // composer stands down.
     expect(
-      await pad('[data-phone-shell] [data-question-bar]'),
-      'with a question open the card is the bottom of the screen, and its last row is an option',
+      await pad('[data-phone-shell] [data-question-bar-inline]'),
+      'with a question open the inline card is the bottom of the screen, and its last row is an option',
     ).toBeGreaterThanOrEqual(INSET);
 
     await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
@@ -486,6 +506,114 @@ test.describe('the phone shell at 390px', () => {
       await pad('[data-phone-shell] [data-composer-bar]'),
       'the composer, whose rule has been here all along and was never measured',
     ).toBeGreaterThanOrEqual(INSET);
+  });
+
+  /**
+   * B13: THE TOP EDGE, review finding closed the same way the bottom one
+   * was -- CDP's real inset, not headless Chromium's own permanent 0.
+   *
+   * THE DOUBLE-PAD CHECK IS THE POINT of asserting an EXACT figure rather
+   * than `toBeGreaterThanOrEqual`: the list screen's own top bar already
+   * carries a flat 12px (`p-3`) before this rule exists at all, so a rule
+   * that ADDED the inset on top of it, rather than growing to `max()` of the
+   * two, would read 12 + 44 = 56 here -- wrong, and a passing
+   * `toBeGreaterThanOrEqual` would never catch it. The session screen's own
+   * app bar had no top padding at all, so its figure is the inset alone.
+   */
+  test('B13: the top bar clears a top safe-area inset, without stacking its own baseline on top of it', async ({
+    page,
+  }) => {
+    const INSET = 44;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: INSET } });
+    await openDemo(page);
+
+    const padTop = async (selector: string) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (el === null) return null;
+        return Math.round(Number.parseFloat(getComputedStyle(el).paddingTop));
+      }, selector);
+
+    expect(
+      await padTop('[data-phone-shell] [data-phone-list-top-bar]'),
+      'max(12px, the inset), never 12px plus the inset',
+    ).toBe(INSET);
+
+    await openFirstSession(page);
+    expect(
+      await padTop('[data-phone-shell] [data-phone-top-bar]'),
+      'the session screen’s own app bar, which carried no top padding before this rule',
+    ).toBe(INSET);
+  });
+
+  /**
+   * B13: THE SIDE GUTTERS, IN LANDSCAPE -- the case a portrait-only suite can
+   * never see for itself: a notch/pill whose long axis is on the LEFT or
+   * RIGHT edge instead of the top. The viewport is swapped to a
+   * landscape-shaped one for this one test; every other test in this file
+   * stays portrait.
+   *
+   * WIDTH 500, NOT A REAL PHONE'S LANDSCAPE WIDTH, and that is a fact about
+   * this app worth stating rather than papering over: `usePhoneViewport`
+   * (`phone/viewport.ts`) gates the phone shell on `max-width: 519px`
+   * (`PHONE_MAX_WIDTH`) alone, no orientation term at all, and every
+   * mainstream phone's landscape width -- 667px and up -- is well past that
+   * gate, so the phone shell as shipped today never mounts in a real phone's
+   * landscape rotation; the desktop columns do. 500x350 is the closest
+   * landscape-SHAPED viewport (wider than tall) that still clears the gate,
+   * so this proves the rule works everywhere the shell itself can currently
+   * appear -- it does not, and cannot, claim to have measured a real
+   * landscape phone, which this codebase has no route to show the shell on
+   * at all yet.
+   *
+   * ONCE, AT THE ROOT, NOT DOUBLED: `[data-phone-shell]`'s own padding is the
+   * ENTIRE gutter -- the composer bar and the app bar inside it carry no
+   * left/right safe-area rule of their own, so their painted position moves
+   * by exactly the inset, not by the inset plus a second helping of it.
+   */
+  test('B13: side gutters clear a landscape left/right inset, applied once at the shell root', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 500, height: 350 });
+    const INSET = 44;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { left: INSET, right: INSET } });
+    await openDemo(page);
+
+    const gutter = await page.evaluate(() => {
+      const el = document.querySelector('[data-phone-shell]');
+      if (el === null) return null;
+      const cs = getComputedStyle(el);
+      return {
+        left: Math.round(Number.parseFloat(cs.paddingLeft)),
+        right: Math.round(Number.parseFloat(cs.paddingRight)),
+      };
+    });
+    expect(gutter, 'the shell root carries both gutters, once').toEqual({
+      left: INSET,
+      right: INSET,
+    });
+
+    await openFirstSession(page);
+    // The fixture's first row opens on an open question, which withdraws the
+    // composer (`composerHidden`) -- `Chat about this` is the same route the
+    // portrait inset test above uses to reach it.
+    await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
+    const shellBox = await page.locator('[data-phone-shell]').boundingBox();
+    const composerBox = await page.locator('[data-phone-shell] [data-composer-bar]').boundingBox();
+    if (shellBox === null || composerBox === null) throw new Error('missing geometry');
+    // `deviceScaleFactor: 3` rounds sub-pixel geometry, so this allows the 1px
+    // either side that comes from that -- not a wider tolerance that could
+    // also pass a doubled gutter (88px) by accident.
+    expect(
+      composerBox.x - shellBox.x,
+      'the composer sits in exactly the shell’s own gutter -- not a second one stacked on it',
+    ).toBeGreaterThanOrEqual(INSET - 1);
+    expect(
+      composerBox.x - shellBox.x,
+      'the composer sits in exactly the shell’s own gutter -- not a second one stacked on it',
+    ).toBeLessThanOrEqual(INSET + 1);
   });
 
   /**
@@ -536,6 +664,66 @@ test.describe('the phone shell at 390px', () => {
       undersized(boxes),
       'measured bounding boxes under 44x44 with focus view on',
     ).toEqual([]);
+  });
+
+  /**
+   * THE COMPOSER PLACEHOLDER FITS ONE LINE, at the merged row's own real
+   * width -- "+", the textarea, mic and Send all present, none of them
+   * hidden to make room. `field-sizing`/`scrollHeight` do not answer this:
+   * neither one grows the box for PLACEHOLDER text (only for a real value),
+   * so a wrapping placeholder does not blow out the 44px box, it just gets
+   * clipped inside it -- invisible to a height assertion, and exactly what
+   * the operator's screenshot caught. The hidden probe measures the STRING
+   * at the textarea's own font/line-height/width, off-screen, which is the
+   * only way to answer "would this wrap" without trusting a box that clips
+   * its own overflow either way.
+   */
+  test('the composer placeholder fits one line at 390px, with attach/mic/Send still in the row', async ({
+    page,
+  }) => {
+    await openDemo(page);
+    await openFirstSession(page);
+    // `crosscheck-2`-shaped state: no question open, so the composer (not a
+    // question card) is what is on screen -- same route `data-question-chat`
+    // reaches from a question-first fixture, taken directly here by opening
+    // whichever session's tab strip currently shows a plain composer.
+    const composer = page.locator('[data-phone-shell] [data-composer-bar]');
+    if ((await composer.count()) === 0) {
+      await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
+    }
+    const probe = await page.evaluate(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        '[data-phone-shell] textarea[aria-label="prompt to session"]',
+      );
+      if (ta === null) return null;
+      const text = ta.placeholder;
+      const cs = getComputedStyle(ta);
+      const div = document.createElement('div');
+      div.style.position = 'absolute';
+      div.style.visibility = 'hidden';
+      div.style.left = '-9999px';
+      div.style.whiteSpace = 'pre-wrap';
+      div.style.width = cs.width;
+      div.style.fontFamily = cs.fontFamily;
+      div.style.fontSize = cs.fontSize;
+      div.style.fontWeight = cs.fontWeight;
+      div.style.letterSpacing = cs.letterSpacing;
+      div.style.lineHeight = cs.lineHeight;
+      div.textContent = text;
+      document.body.append(div);
+      const height = div.getBoundingClientRect().height;
+      const lineHeight = Number.parseFloat(cs.lineHeight);
+      div.remove();
+      return { text, height, lineHeight, boxWidth: cs.width };
+    });
+    if (probe === null) throw new Error('no phone composer textarea to measure');
+    expect(probe.text, 'the phone placeholder, not the desktop sentence').not.toContain(
+      'paste a plan',
+    );
+    expect(
+      probe.height,
+      `"${probe.text}" at ${probe.boxWidth} wide measured ${probe.height}px tall against a ${probe.lineHeight}px line`,
+    ).toBeLessThanOrEqual(probe.lineHeight * 1.15);
   });
 });
 
@@ -992,6 +1180,26 @@ test.describe('the phone search route', () => {
     ).toBeLessThanOrEqual(seen.band);
   });
 
+  /**
+   * TWO PROPERTIES, NOT ONE, since the fix for defect 2 of this task:
+   * the four origin rows (`agent`/`prompted`/`ended`/`foreign`) wear
+   * `vam-tap` again, restored to `py-1.5` -- a previous commit had shrunk
+   * them to `py-1` reasoning "no 44x44 sweep covers this popover, so the
+   * four points saved cost no touch target its floor", which ran backwards:
+   * no sweep covering it means nobody MEASURED it, not that the floor held.
+   * Measured here at 390x844 with 44px rows restored, they do not all fit
+   * above a keyboard band alongside the status pills any more -- so the
+   * popover now REACHES the rest by scrolling, the same "scroller's top
+   * edge above the fold" shape `styles.css`'s icon-picker comment states
+   * generally, rather than by shrinking rows a second time.
+   *
+   * `SessionList.tsx`'s `useFilterPopoverCap` carries the fix:
+   * `PHONE_KEYBOARD_RESERVE_PX` reserves the same 336px this file simulates,
+   * UNCONDITIONALLY on phone -- there is no signal here that tells it a
+   * keyboard is actually up, for the reason its own header gives (iOS never
+   * fires `resize` for one), so the reservation cannot be conditional on
+   * detecting one.
+   */
   test('the filter popover fits above an iOS keyboard at 390x844', async ({ page }) => {
     await openDemo(page);
     await page.locator('[data-phone-shell] [data-filter-toggle]').tap();
@@ -1001,26 +1209,75 @@ test.describe('the phone search route', () => {
     const seen = await menu.evaluate((el, keyboard) => {
       const band = window.innerHeight - (keyboard as number);
       const r = el.getBoundingClientRect();
-      const below = [...el.querySelectorAll('button, input')]
-        .map((c) => ({
-          label: (c.getAttribute('aria-label') ?? c.textContent ?? '').trim().slice(0, 30),
-          bottom: Math.round(c.getBoundingClientRect().bottom),
-        }))
-        .filter((c) => c.bottom > band);
+      const rowsOf = () =>
+        [...el.querySelectorAll('[data-origin-toggle]')].map((c) => {
+          const cr = c.getBoundingClientRect();
+          return {
+            label: c.getAttribute('data-origin-toggle'),
+            bottom: Math.round(cr.bottom),
+            height: Math.round(cr.height),
+          };
+        });
+      const before = rowsOf();
+      // The popover's own scroller, taken all the way down -- the same
+      // "reach" the Android-shrink test below already proves for a REAL
+      // viewport shrink, exercised here for the iOS-covered case instead,
+      // where nothing but this scroll can bring a covered row back.
+      el.scrollTop = el.scrollHeight;
+      const after = rowsOf();
       return {
         band,
         rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
         textInputs: el.querySelectorAll('input[type="text"], input:not([type])').length,
-        below,
+        scrollable: el.scrollHeight > el.clientHeight,
+        before,
+        after,
       };
     }, IOS_KEYBOARD_CSS_PX);
 
     // It carries no text box, so nothing in it raises a keyboard: the band
     // only matters here for a keyboard something else left up.
     expect(seen.textInputs, 'the popover holds no search box of its own').toBe(0);
+
+    // EVERY ORIGIN ROW MEASURES THE PHONE FLOOR, whether or not this
+    // particular scroll offset currently paints it: `min-height` applies to
+    // the box regardless of an ancestor's `overflow`, so a row scrolled out
+    // of view still reports its real height rather than a clipped one.
+    for (const row of seen.before) {
+      expect(row.height, `${row.label} measured ${row.height}px tall`).toBeGreaterThanOrEqual(
+        TOUCH_MIN,
+      );
+    }
+
+    // THE SCROLLER ITSELF fits above the band -- `styles.css`'s icon-picker
+    // comment states the general shape: "a sheet is safe when its
+    // scroller's top edge is above the fold, and unsafe when a nested
+    // scroller pushes it below." This popover IS its own scroller
+    // (`useFilterPopoverCap`), so both of its own edges are checked, not
+    // only its top.
     expect(
-      seen.below.map((c) => `${c.label} @ ${c.bottom}`),
+      seen.rect.bottom,
       `popover ${JSON.stringify(seen.rect)} against a ${seen.band}px band`,
+    ).toBeLessThanOrEqual(seen.band);
+
+    // AND THERE IS SOMETHING TO SCROLL TO. A fit that held by cutting
+    // content rather than by capping and scrolling it would report this
+    // same `rect.bottom` with nothing left beneath the fold -- the
+    // difference between a popover that reaches its own rows and one that
+    // simply never grew tall enough to need to.
+    expect(
+      seen.scrollable,
+      'the popover has content below the fold to scroll to, not merely a box that stops at the band',
+    ).toBe(true);
+
+    // SCROLLED ALL THE WAY, every row -- including the two that sat below
+    // the band before scrolling -- is back inside the popover's own
+    // (already above-band) box: REACHABLE, not merely present in the DOM at
+    // an offset nothing brings back.
+    const stillOut = seen.after.filter((row) => row.bottom > seen.rect.bottom + 1);
+    expect(
+      stillOut,
+      `rows still unreachable after scrolling to the end: ${JSON.stringify(stillOut)}`,
     ).toEqual([]);
   });
 
@@ -1039,10 +1296,11 @@ test.describe('the phone search route', () => {
    * The fix keeps it anchored and caps it from its own measured geometry
    * (`useFilterPopoverCap`), so what this test asserts is REACH, not position:
    * the popover fits the viewport, and every control in it is on screen at
-   * some scroll offset of its own scroller. Both ends are checked, because a
-   * cap without a scroller would clip the same controls the old layout pushed
-   * off the bottom -- silently, and this test would not have seen the
-   * difference if it only looked at the top.
+   * some scroll offset of its own scroller. The whole scroll range is
+   * sampled, not just its two ends, because a cap without a scroller would
+   * clip the same controls the old layout pushed off the bottom -- silently,
+   * and this test would not have seen the difference if it only looked at
+   * the top.
    *
    * THE ANDROID CASE, reproduced exactly: there the layout viewport really
    * does shrink. On iOS the same controls are covered rather than off-screen,
@@ -1094,11 +1352,34 @@ test.describe('the phone search route', () => {
             bottom: Math.round(b.bottom),
           };
         });
-      const atTop = read();
-      el.scrollTop = el.scrollHeight;
-      const atBottom = read();
+      // Sampled across the WHOLE scroll range, not just the two extremes.
+      // Two samples were enough while the popover's content fit within
+      // about two of its own client heights -- a control below the fold at
+      // scrollTop=0 was always still on screen at scrollTop=max. Content
+      // added since (the Group-by/Sort-by rows above the status pills, the
+      // taller two-line filter rows below them) pushed scrollHeight past
+      // 3x clientHeight, and the status pills now sit in a band that is
+      // below the fold at scrollTop=0 AND already scrolled past at
+      // scrollTop=max while still being fully reachable at every offset in
+      // between -- a real position, not a bug, that a 2-point sample
+      // cannot see. The step (16px) is well under any control's own
+      // height, so no reachable window -- at minimum `clientHeight -
+      // controlHeight` wide -- can fall entirely between two samples.
+      const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+      const STEP = 16;
+      const offsets =
+        maxScroll === 0
+          ? [0]
+          : [...Array(Math.floor(maxScroll / STEP) + 1).keys()].map((i) =>
+              Math.min(i * STEP, maxScroll),
+            ).concat(maxScroll);
+      const samples = offsets.map((offset) => {
+        el.scrollTop = offset;
+        return read();
+      });
       el.scrollTop = 0;
       const r = el.getBoundingClientRect();
+      const atTop = samples[0];
       return {
         viewport: window.innerHeight,
         rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
@@ -1106,22 +1387,20 @@ test.describe('the phone search route', () => {
         overflowY: getComputedStyle(el).overflowY,
         scrolls: el.scrollHeight > el.clientHeight + 2,
         controls: atTop.length,
-        // A control is reachable when SOME scroll offset puts it fully on
-        // screen. Only the two extremes are sampled, which is enough: the
-        // popover is one column, so a control the bottom cannot reach is
-        // taller than the scroller or outside it.
+        // A control is reachable when SOME sampled scroll offset puts it
+        // fully on screen. A control that passes at none of them is either
+        // taller than the scroller or outside it -- a real regression, not
+        // a sampling gap.
         unreachable: atTop
-          .map((c, i) => ({ c, end: atBottom[i] }))
-          .filter(
-            ({ c, end }) =>
-              !(c.top >= 0 && c.bottom <= window.innerHeight) &&
-              !(
-                end !== undefined &&
-                end.top >= 0 &&
-                end.bottom <= window.innerHeight
-              ),
+          .map((c, i) =>
+            samples.some((s) => {
+              const at = s[i];
+              return at !== undefined && at.top >= 0 && at.bottom <= window.innerHeight;
+            })
+              ? null
+              : `${c.label} @ ${c.bottom}`,
           )
-          .map(({ c, end }) => `${c.label} @ ${c.bottom} (at full scroll: ${end?.bottom ?? '?'})`),
+          .filter((label): label is string => label !== null),
       };
     });
 
@@ -1178,6 +1457,7 @@ test.describe('the sheets behind a source', () => {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {
       liveUpdates: 'the stub does not stream',
@@ -1380,6 +1660,7 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
       pullRequests: false,
       terminal: true,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {
       liveUpdates: 'the stub does not stream',
@@ -1553,14 +1834,17 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await expect(waitingTab.locator('[data-phone-session-waiting-badge]')).toBeVisible();
   });
 
-  test('the keystroke strip draws five 44px controls that fit inside 390px', async ({ page }) => {
+  test('the keystroke strip draws seven 44px controls that fit inside 390px', async ({ page }) => {
+    // vam/terminal-arrows: Up/Down joined the five (a phone has no arrow
+    // keys, and Claude Code's own option pickers need them) -- see
+    // `KEY_STRIP` in `DetailPanel.tsx`.
     await stubSource(page);
     await openFirstAlphaSession(page);
 
     const strip = page.locator('[data-key-strip]');
     await expect(strip).toBeVisible();
     const keys = strip.locator('[data-key-strip-key]');
-    await expect(keys).toHaveCount(5);
+    await expect(keys).toHaveCount(7);
 
     const geometry = await strip.evaluate((el) => {
       const r = el.getBoundingClientRect();
@@ -1578,6 +1862,13 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
   });
 
   test('the keystroke strip is absent for a session vam did not start', async ({ page }) => {
+    // `beta-one` is `vamControlled: false`, which is also what the new
+    // `hideForeign` default (`session-filter.ts`) hides by default -- this
+    // test is about the keystroke strip, not the sidebar, so it turns the
+    // filter off rather than asserting a row that would otherwise never draw.
+    await page.addInitScript(() => {
+      localStorage.setItem('vam.prefs.v1', JSON.stringify({ filters: { hideForeign: false } }));
+    });
     await stubSource(page);
     // `beta-one` is the second project's only session -- `vamControlled: false`.
     const row = page.locator('[data-phone-shell] [data-session-row]', {
@@ -1612,7 +1903,15 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     page,
   }) => {
     await openDemo(page);
-    await openFirstAlphaSession(page);
+    // Not `openFirstAlphaSession`: the demo fixture's top-ranked session in
+    // this project, `factory-sse-1`, is blocked on a permission prompt --
+    // vam/phone-core-loop now collapses this very strip while a question is
+    // open (in addition to while typing), so asserting the strip from that
+    // session would be asserting the wrong screen. `crosscheck-2` is the
+    // project's other session and carries no open question, so the strip is
+    // the thing on screen to name.
+    await page.locator('[data-phone-shell] [data-session-row="crosscheck-2"]').tap();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
     const strip = page.locator('[data-phone-session-tabs]');
     expect(await strip.getAttribute('aria-label'), 'the region names itself').not.toBeNull();
     const buttons = await strip.evaluate((el) =>
@@ -1633,5 +1932,479 @@ test.describe('the session tab strip and the keystroke strip at 390px', () => {
     await page.locator('[data-phone-back]').tap();
     await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'list');
     await expect(page.locator('[data-project-heading][data-project-id="p1"]')).toBeInViewport();
+  });
+});
+
+/**
+ * The empty-sidebar-with-no-explanation fix: `listVamSessions` answering
+ * `ok, []` (no tmux server yet, the state after every reboot before vam
+ * starts its first session) is not a `vamListingGap` -- ownership is
+ * honestly zero -- so `hideForeign` (on by default) can still take every row
+ * with it. `Canvas.tsx` exempts `?demo=1` from `hideForeign` entirely
+ * (`Canvas.demo-foreign.test.tsx`), so this line never reaches the phone
+ * screen through the demo fixture every other test in this file uses -- it
+ * needs a REAL (non-demo) source, the same route "the sheets behind a
+ * source" above stubs over HTTP rather than through `window.api`, for the
+ * same reason that block's own header gives: `App.tsx` asks its own origin
+ * for `/api/describe` and `/api/load`, and Playwright can answer both
+ * without touching `src/`.
+ *
+ * THE QUIET LINE MOVED. It used to be `SessionList.tsx`'s own standalone
+ * strip (`data-foreign-hidden`) drawn above an otherwise-empty list; it now
+ * reads from the getting-started screen (`GettingStarted.tsx`) that same
+ * emptiness draws instead (`SessionList.tsx`'s own `showGettingStarted`) --
+ * one copy of "N sessions hidden — vam did not start them · Show" on the
+ * 390px screen, not two. The standalone strip still exists and is still
+ * tested (`SessionList.test.tsx`'s own describe block) for the case that
+ * strip is FOR: some rows visible, some hidden alongside them.
+ */
+test.describe('the foreign-hidden quiet line on a phone list screen', () => {
+  const DESCRIPTOR = {
+    id: 'stub',
+    label: 'stub source',
+    capabilities: {
+      liveUpdates: false,
+      recordPrompt: true,
+      deliverPrompt: false,
+      promptAttachments: false,
+      slashCommands: false,
+      renameSession: true,
+      closeSession: true,
+      createSession: true,
+      governance: false,
+      pullRequests: false,
+      terminal: false,
+      agentRoster: false,
+      resumeSession: false,
+    },
+    declines: {
+      liveUpdates: 'the stub does not stream',
+      deliverPrompt: 'the stub delivers nothing',
+      promptAttachments: 'the stub takes no attachments',
+      slashCommands: 'the stub has no slash commands',
+      governance: 'the stub has no governance surface',
+      pullRequests: 'the stub has no pull requests',
+      terminal: 'the stub has no terminal',
+      agentRoster: 'the stub has no agent roster',
+    },
+    viewerScope: { kind: 'connection', note: 'a stubbed transport, not a server' },
+  };
+  /** Two rows, both `vamControlled: false` -- exactly what every Claude Code
+   * row reads when `listVamSessions` answers `ok, []` and the source pairs
+   * each one against an empty tmux listing. */
+  const session = (id: string, title: string) => ({
+    id,
+    title,
+    icon: null,
+    epic: null,
+    status: 'idle',
+    runningAgents: 0,
+    activity: null,
+    age: '4m',
+    branch: null,
+    decisions: [],
+    source: 'stub',
+    vamControlled: false,
+  });
+  const PROJECTS = [
+    {
+      id: 'p1',
+      name: 'alpha',
+      source: 'stub',
+      sessions: [session('s1', 'alpha-1'), session('s2', 'alpha-2')],
+    },
+  ];
+  const envelope = (value: unknown) => ({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: true, value }),
+  });
+
+  test('the Show control meets the phone floor, and brings both rows back', async ({ page }) => {
+    // Same route order note as "the sheets behind a source": the catch-all
+    // goes on first, the two reads over the top of it.
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    await page.goto('/');
+
+    // NO ROW YET -- both are foreign, `hideForeign` is on by default, and
+    // there is no `vamListingGap` (the read succeeded). The quiet line used
+    // to be this list's OWN strip (`data-foreign-hidden`); it now reads from
+    // the getting-started screen (`GettingStarted.tsx`) that replaces the
+    // list body once `entries` is empty -- the SAME rule the screenshot
+    // guard `getting-started-shots.mjs`'s own phone state exercises, and the
+    // reason there is only one copy of this sentence on a 390px screen
+    // rather than two (`SessionList.tsx`'s own `showGettingStarted`).
+    await page.waitForSelector('[data-getting-started-show]', { timeout: 10_000 });
+    expect(await page.locator('[data-session-row]').count()).toBe(0);
+    // WITHDRAWN, NOT DUPLICATED -- see the render site's own comment.
+    expect(await page.locator('[data-foreign-hidden]').count()).toBe(0);
+
+    const noticeText = await page.locator('[data-getting-started-hidden-count]').textContent();
+    expect(noticeText).toContain('2 sessions hidden');
+    expect(noticeText).toContain('vam did not start them');
+
+    const box = await page.locator('[data-getting-started-show]').boundingBox();
+    expect(box, 'the Show control has a box at all').not.toBeNull();
+    expect(box?.width ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+    expect(box?.height ?? 0, `Show measured ${box?.width}x${box?.height}`).toBeGreaterThanOrEqual(
+      TOUCH_MIN,
+    );
+
+    await page.locator('[data-getting-started-show]').tap();
+    await page.waitForFunction(() => document.querySelectorAll('[data-session-row]').length === 2, {
+      timeout: 5_000,
+    });
+    expect(await page.locator('[data-getting-started]').count()).toBe(0);
+  });
+
+  /** Same three routes every test in this file stubs, factored once for the
+   *  four measurements below -- they all want the identical empty-screen
+   *  state and differ only in what they read off it. */
+  async function openGettingStarted(page: Page): Promise<void> {
+    await page.route('**/api/**', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: false,
+          error: { kind: 'unreachable', code: 'stub', message: 'the stub refuses writes' },
+        }),
+      }),
+    );
+    await page.route('**/api/describe', (route) => route.fulfill(envelope(DESCRIPTOR)));
+    await page.route('**/api/load', (route) => route.fulfill(envelope(PROJECTS)));
+    await page.goto('/');
+    await page.waitForSelector('[data-getting-started]', { timeout: 10_000 });
+  }
+
+  /**
+   * THE OPERATOR'S OWN REPORT, MEASURED: "the getting-started screen is
+   * broken -- scrolling exposes a black background underneath, and the text
+   * is not centred... an empty gap and a blue dot" at the very top.
+   * `docs/ui/getting-started-phone.png` is what that read like.
+   *
+   * Ground-truthed against the pre-fix build before these assertions were
+   * written (not merely reasoned about): `html`'s computed background was
+   * `rgba(0, 0, 0, 0)` against `body`'s opaque ground, `overscroll-behavior`
+   * on `html` read `auto`, a `<header>` sat directly under
+   * `[data-phone-shell="list"]` holding nothing but a 7x16 dot at y:0..48,
+   * and the getting-started block's own centre (y=682) sat 150px below the
+   * free area's true centre (y=532) -- exactly the bottom half of a 600px
+   * region, because an EMPTY `OverlayScroll` was a `flex-1` sibling taking
+   * the top half for itself. Each assertion below failed on that build for
+   * the reason its own comment states.
+   *
+   * A SECOND ROUND, from a fresh pair of eyes on the regenerated screenshot:
+   * the fixes above still left a dark band along the very bottom edge,
+   * measured at y:832..844 -- `[data-phone-status-bar]` draws no background
+   * of its own when it has nothing to say (only the safe-area padding that
+   * keeps the last real row clear of the home indicator), so the surface
+   * showing through it was `[data-phone-shell]`'s own `bg-ground`
+   * (`rgb(13, 13, 13)`), a full shade darker than `[data-sidebar-pane]`'s
+   * `bg-sidebar` (`rgb(35, 35, 35)`) filling every row above it. Ground-
+   * truthed the same way: `footerBg` read `rgba(0, 0, 0, 0)` against
+   * `sidebarBg`'s opaque `rgb(35, 35, 35)` on the pre-fix build.
+   */
+  test('the getting-started screen: no colour leak, no empty top strip, and a centred block', async ({
+    page,
+  }) => {
+    await openGettingStarted(page);
+
+    const geometry = await page.evaluate(() => {
+      const r2 = (el: Element | null) => {
+        const b = el?.getBoundingClientRect();
+        return b === undefined || b === null
+          ? null
+          : { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) };
+      };
+      // Walks UP from the topmost element at (x, y) to the first one that
+      // actually paints a background -- the same resolution a compositor
+      // does for a stack of solid colours with no partial transparency or
+      // imagery involved, which is the whole of this screen's own chrome.
+      // `elementFromPoint` alone would report the transparent `<footer>`
+      // itself and miss the surface showing through it.
+      const effectiveBgAt = (x: number, y: number): string | null => {
+        let el = document.elementFromPoint(x, y);
+        while (el !== null) {
+          const bg = getComputedStyle(el).backgroundColor;
+          if (bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
+          el = el.parentElement;
+        }
+        return null;
+      };
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      return {
+        viewportHeight: vh,
+        docScrollHeight: document.documentElement.scrollHeight,
+        htmlBg: getComputedStyle(document.documentElement).backgroundColor,
+        bodyBg: getComputedStyle(document.body).backgroundColor,
+        htmlOverscrollY: getComputedStyle(document.documentElement).overscrollBehaviorY,
+        // The empty strip this screen used to open with: a `<header>` sitting
+        // directly under the phone shell's list root, above `SessionList`'s
+        // own. Gone once the readout folded into that pane's avatar row
+        // instead of keeping a bar of its own.
+        looseHeaderAboveList: document.querySelector('[data-phone-shell="list"] > header') !== null,
+        sourceBox: r2(document.querySelector('[data-source]')),
+        avatarBarBox: r2(document.querySelector('[data-avatar-bar]')),
+        projectsHeaderBox: r2(document.querySelector('[data-projects-header]')),
+        footerBox: r2(document.querySelector('[data-phone-status-bar]')),
+        gettingStartedBox: r2(document.querySelector('[data-getting-started]')),
+        // THE LIST SURFACE'S OWN COLOUR, read once as the ground truth every
+        // other sample below is compared against -- never a literal
+        // `rgb(...)`, which would silently stop meaning anything the moment
+        // the token's value changed.
+        sidebarBg: getComputedStyle(
+          document.querySelector('[data-sidebar-pane]') as Element,
+        ).backgroundColor,
+        footerBg: getComputedStyle(
+          document.querySelector('[data-phone-status-bar]') as Element,
+        ).backgroundColor,
+        // THE BOTTOM 20px ROW, sampled at three x positions, and the point
+        // just above the footer's own top edge (still inside the sidebar
+        // pane proper) as the control every one of the three is compared
+        // against.
+        bottomRowBg: [10, 195, 380].map((x) => effectiveBgAt(x, vh - 1)),
+        underLastElementBg: effectiveBgAt(10, vh - 10),
+        controlBg: effectiveBgAt(10, vh - 30),
+      };
+    });
+
+    // (a) NOTHING SCROLLS PAST THE APP'S OWN SURFACE. A regression guard
+    // rather than a reproduction: a headless engine never diverges `vh` from
+    // `dvh` the way an iOS Safari address bar does (this file's own header,
+    // "WHAT IT CANNOT DO"), so this does not fail on the pre-fix build --
+    // `overscrollBehaviorY` below is what catches THIS engine can catch, and
+    // `height: 100dvh` (styles.css) is what keeps this true on a real phone.
+    expect(
+      geometry.docScrollHeight,
+      JSON.stringify(geometry),
+    ).toBeLessThanOrEqual(geometry.viewportHeight);
+    // `html`'s own background, not only `body`'s -- see `styles.css`'s own
+    // comment on why the gap between the two is where the black came from.
+    expect(geometry.htmlBg, JSON.stringify(geometry)).toBe(geometry.bodyBg);
+    expect(geometry.htmlBg).not.toBe('rgba(0, 0, 0, 0)');
+    expect(geometry.htmlOverscrollY).toBe('none');
+
+    // (b) NO EMPTY GAP AND A LONE DOT ABOVE THE HEADER. The connectivity dot
+    // sits inside the avatar row now, not in a bar of its own above it.
+    expect(geometry.looseHeaderAboveList).toBe(false);
+    const { sourceBox, avatarBarBox } = geometry;
+    if (sourceBox === null || avatarBarBox === null) throw new Error('source or avatar bar missing');
+    expect(sourceBox.y, JSON.stringify(geometry)).toBeGreaterThanOrEqual(avatarBarBox.y);
+    expect(sourceBox.y + sourceBox.h, JSON.stringify(geometry)).toBeLessThanOrEqual(
+      avatarBarBox.y + avatarBarBox.h,
+    );
+
+    // (c) THE BLOCK CENTRES IN THE FREE AREA -- the header above it to the
+    // bottom of the screen (the status bar, when it draws anything; the
+    // viewport's own bottom otherwise).
+    const { projectsHeaderBox, footerBox, gettingStartedBox } = geometry;
+    if (projectsHeaderBox === null || gettingStartedBox === null) {
+      throw new Error('projects header or getting-started block missing');
+    }
+    const freeTop = projectsHeaderBox.y + projectsHeaderBox.h;
+    const freeBottom = footerBox?.y ?? geometry.viewportHeight;
+    const freeCentre = (freeTop + freeBottom) / 2;
+    const blockCentre = gettingStartedBox.y + gettingStartedBox.h / 2;
+    expect(Math.abs(blockCentre - freeCentre), JSON.stringify(geometry)).toBeLessThanOrEqual(4);
+
+    // (d) THE BOTTOM BAND IS THE SAME SURFACE AS THE LIST ABOVE IT -- the
+    // status bar draws no background of its own when it has nothing to say,
+    // so what showed through used to be the SHELL's `bg-ground`, a full
+    // shade darker than the sidebar pane's own `bg-sidebar`. Computed style
+    // on the element itself, not a screenshot pixel: the two describe the
+    // identical fact here (a flat `background-color`, no imagery or partial
+    // transparency anywhere in this stack), and the computed value is exact
+    // where a screenshot would need a tolerance for AA/gamma noise.
+    expect(geometry.footerBg, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+    expect(geometry.footerBg).not.toBe('rgba(0, 0, 0, 0)');
+    // And the EFFECTIVE paint, walked from the real point a finger or an eye
+    // would land on -- the control point confirms the sidebar surface is
+    // what this page actually paints above the footer, so the three bottom-
+    // row samples matching it is the claim "no seam", not "no assertion".
+    expect(geometry.controlBg, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+    for (const sample of geometry.bottomRowBg) {
+      expect(sample, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+    }
+    expect(geometry.underLastElementBg, JSON.stringify(geometry)).toBe(geometry.sidebarBg);
+  });
+});
+
+/**
+ * THE COMPOSER'S OWN POPOVERS AGAINST THE BOX THEY HANG OFF.
+ *
+ * `src/shared/providers.ts`'s own header names the defect and the exact
+ * measurement: with a one-row `PROVIDERS` table the picker was withdrawn
+ * rather than fixed, and the withdrawn comment records what it withdrew --
+ * "the popover also opened INSIDE the prompt box it hangs off, 99x34
+ * overlapping the textarea by 28px". `PROVIDERS` now has two rows
+ * (`codex` joined `claude-code`), so `CAN_CHOOSE_PROVIDER` is `true` and the
+ * control -- and the defect behind it -- is back.
+ *
+ * WHY THE TEXTAREA, SPECIFICALLY. `provider`, `model` and `mode` are three
+ * `data-popover-root`s in the same `data-prompt-tools` row, each still
+ * positioned `absolute bottom-full` against ITS OWN small toggle wrapper
+ * rather than against `data-composer-bar` the way `SUGGEST_LAYER` (the `/`
+ * and `!` typeahead, PR 452) is. The toggle row sits directly under the
+ * textarea with only a `gap-2.5` between them, so a popover of any real
+ * height grows upward into exactly the box it hangs off.
+ */
+test.describe("the composer's popovers at 390px", () => {
+  /**
+   * `notes-1`, not the fixture's first row: the first row the phone list
+   * shows (`factory-sse-1`) is `waiting` on an open tool-approval question,
+   * which withdraws the whole composer block (`data-composer-bar`'s own
+   * comment) — there would be no popover to open at all. `notes-1` is
+   * `idle`, with no question open, which is the ordinary "typing a reply"
+   * shape this bug is about.
+   */
+  async function openComposer(page: Page): Promise<void> {
+    await openDemo(page);
+    // `.tap()`, not `touchscreen.tap()` at a computed offset: `notes-1` sits
+    // below the fold at 390x844 and this locator auto-scrolls it into view
+    // first, the way every other row tap in this file already works.
+    await page
+      .locator('[data-phone-shell] [data-session-row]')
+      .filter({ hasText: 'notes-1' })
+      .tap();
+    await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
+    // vam/phone-core-loop: `provider-picker-toggle` is a resident desktop
+    // control now, hidden on phone (composer diet, step 1) -- reached
+    // through the "+" overflow sheet instead. Same `openPopover` state
+    // underneath, so the popover this file asserts against is unchanged.
+    await expect(page.locator('[data-phone-shell] [data-composer-overflow]')).toBeVisible();
+  }
+
+  /** Opens the "+" sheet and taps its provider row -- the phone route to the
+   *  same `[data-provider-picker]` popover the desktop's resident toggle
+   *  opens directly (`setOpenPopover('provider')` either way). */
+  async function openProviderPicker(page: Page): Promise<void> {
+    await page.locator('[data-phone-shell] [data-composer-overflow]').tap();
+    await page.locator('[data-phone-shell] [data-composer-overflow-provider]').tap();
+  }
+
+  test('the provider picker does not cover the textarea being typed into', async ({ page }) => {
+    await openComposer(page);
+    const textareaBefore = await page
+      .locator('[data-phone-shell] textarea[aria-label="prompt to session"]')
+      .boundingBox();
+    expect(textareaBefore, 'the textarea has a box before the popover opens').not.toBeNull();
+
+    await openProviderPicker(page);
+    const popover = page.locator('[data-phone-shell] [data-provider-picker]');
+    await expect(popover).toBeVisible();
+
+    const popoverBox = await popover.boundingBox();
+    const textareaBox = await page
+      .locator('[data-phone-shell] textarea[aria-label="prompt to session"]')
+      .boundingBox();
+    expect(popoverBox, 'the open popover has a box').not.toBeNull();
+    expect(textareaBox, 'the textarea still has a box with the popover open').not.toBeNull();
+    if (popoverBox === null || textareaBox === null) return;
+
+    // RECTANGLES, NOT A SINGLE EDGE: the popover overlaps the textarea when
+    // it is neither entirely above it nor entirely below it, so both ends
+    // are checked the way `e2e/tooltip-shots.mjs` checks a union rather than
+    // trusting one corner.
+    const intersects =
+      popoverBox.y < textareaBox.y + textareaBox.height &&
+      popoverBox.y + popoverBox.height > textareaBox.y &&
+      popoverBox.x < textareaBox.x + textareaBox.width &&
+      popoverBox.x + popoverBox.width > textareaBox.x;
+    expect(
+      intersects,
+      `popover ${JSON.stringify(popoverBox)} against textarea ${JSON.stringify(textareaBox)}`,
+    ).toBe(false);
+  });
+
+  /**
+   * A REAL SHRINK, the Android case `phone-shell.pw.ts`'s filter-popover
+   * tests already exercise this way (`setViewportSize` after opening): the
+   * layout viewport genuinely shrinks and `resize` fires, so this is the one
+   * keyboard shape `suggestMaxHeight`'s `resize` listener can actually learn
+   * about.
+   *
+   * WHY NOT THE IOS BAND `IOS_KEYBOARD_CSS_PX` SIMULATES FOR THE FILTER
+   * POPOVER. That popover opens near the TOP of the sidebar, well clear of
+   * where a keyboard would sit, so shrinking the band only eats room the
+   * popover was already borrowing. This one opens off a toggle a `gap-2.5`
+   * BELOW the textarea it must not cover -- the whole composer sits in the
+   * band a keyboard would occupy, on a REAL device under `h-[100dvh]`, which
+   * is a fact about the composer's OWN position and not one this popover's
+   * cap can fix. What the cap owns is not growing past the room actually
+   * available above wherever the composer ends up; this test holds it to
+   * that, the same "reach" property the filter popover's band test holds
+   * its own popover to.
+   */
+  test('caps itself to a shrunk viewport and scrolls, never past the top of the screen', async ({
+    page,
+  }) => {
+    await openComposer(page);
+    await openProviderPicker(page);
+    const popover = page.locator('[data-phone-shell] [data-provider-picker]');
+    await expect(popover).toBeVisible();
+
+    await page.setViewportSize({ width: 390, height: 508 });
+    // `suggestMaxHeight` recomputes from a `resize` LISTENER, not
+    // synchronously with `setViewportSize` -- the same asynchrony
+    // `phone-shell.pw.ts`'s own Android-shrink tests already poll for.
+    await expect
+      .poll(async () => (await popover.boundingBox())?.height ?? null)
+      .not.toBeNull();
+
+    const seen = await popover.evaluate((el) => {
+      const options = [...el.querySelectorAll('[data-provider-option]')];
+      const before = options.map((o) => Math.round(o.getBoundingClientRect().bottom));
+      el.scrollTop = el.scrollHeight;
+      const after = options.map((o) => Math.round(o.getBoundingClientRect().bottom));
+      const r = el.getBoundingClientRect();
+      return {
+        rect: { top: Math.round(r.top), bottom: Math.round(r.bottom) },
+        scrollable: el.scrollHeight > el.clientHeight,
+        before,
+        after,
+      };
+    });
+    const textareaBox = await page
+      .locator('[data-phone-shell] textarea[aria-label="prompt to session"]')
+      .boundingBox();
+
+    // NEVER PAST THE TOP OF THE SCREEN: the cap this shares with
+    // `SUGGEST_BOX` is what stops a popover from running off the viewport
+    // it has nowhere else to hang off of.
+    expect(seen.rect.top, `popover top ${JSON.stringify(seen.rect)} in a 508px viewport`).toBeGreaterThanOrEqual(
+      0,
+    );
+    // AND STILL CLEAR OF THE TEXTAREA, the property this whole fix is for --
+    // holds under a real shrink exactly as it does at the full 844px height.
+    if (textareaBox !== null) {
+      expect(
+        seen.rect.bottom,
+        `popover ${JSON.stringify(seen.rect)} against textarea ${JSON.stringify(textareaBox)}`,
+      ).toBeLessThanOrEqual(Math.round(textareaBox.y));
+    }
+    // AND REACHABLE: every option is back inside the popover's own
+    // (already on-screen) box once scrolled, the same difference
+    // `e2e/phone-shell.pw.ts`'s filter-popover cap test holds its rows to.
+    if (seen.scrollable) {
+      const stillOut = seen.after.filter((bottom) => bottom > seen.rect.bottom + 1);
+      expect(stillOut, `options still unreachable after scrolling: ${JSON.stringify(stillOut)}`).toEqual(
+        [],
+      );
+    }
   });
 });

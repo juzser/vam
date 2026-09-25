@@ -220,9 +220,27 @@ jobs:
       # assertion that throws — each script's own message reaches this log
       # unedited. Screenshots go to the runner's temp dir, never docs/ui: CI
       # must not produce a repo diff.
+      # `terminal-echo-scroll-shots.mjs` reads a REAL tmux pane on a private
+      # socket through the app's own read path -- a stub read is what let a
+      # broken scroll fix ship (#439). Without tmux the guard SKIPS, loudly,
+      # and exits 0; this step is what makes it assert here. The same
+      # install is also what turns `terminal-typing-latency-shots.mjs` (the
+      # poll-path keystroke chain) and `terminal-stream-latency-shots.mjs`
+      # (the shipped `StreamClient`, run last in the list on purpose --
+      # see its own entry in `run-web-guards.mjs`) from a loud, exit-0 SKIP
+      # into a real, asserting run: both open their own private tmux socket
+      # the same way.
+      - name: tmux, for the terminal guard
+        run: sudo apt-get install -y tmux
+
+      # VAM_E2E_CHECK_ORPHANS: safe here (and only here) because this step
+      # always runs the full 50-guard list, never a subset — see
+      # run-web-guards.mjs's own header for what the check does and why a
+      # partial run would give it a false positive.
       - name: web guards (real Chromium)
         env:
           VAM_E2E_OUT: ${{ runner.temp }}/web-guard-shots
+          VAM_E2E_CHECK_ORPHANS: '1'
         run: pnpm run test:e2e:web
 
       # A failed assertion is much easier to read next to the frame it failed on.

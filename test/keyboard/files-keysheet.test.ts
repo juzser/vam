@@ -28,7 +28,7 @@ import { buildFilesSheet } from '../../src/renderer/keyboard/keysheet.js';
 import { EDITOR_KEYS, TREE_KEYS } from '../../src/renderer/panels/files-tree.js';
 
 /** Every key the Files tab dispatches on, deduplicated — the same union
- *  `files-tab.readme.test.ts` holds the README against. */
+ *  `files-tab.keyboard-doc.test.ts` holds `docs/keyboard.md` against. */
 const answered = () => [...new Set([...TREE_KEYS, ...EDITOR_KEYS])];
 
 const rows = () => buildFilesSheet().flatMap((group) => group.rows);
@@ -86,7 +86,7 @@ describe('the sheet’s Files section', () => {
       buildFilesSheet(['Tab'], mac)
         .flatMap((group) => group.rows)
         .find((row) => row.keys === 'Tab');
-    expect(tab(true)?.label).toContain('⇧⇥');
+    expect(tab(true)?.label).toContain('⇧ ⇥');
     expect(tab(true)?.label).not.toContain('Shift+Tab');
     expect(tab(false)?.label).toContain('Shift+Tab');
     // And the row's own key is still the token the handlers dispatch on.

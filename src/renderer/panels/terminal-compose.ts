@@ -29,6 +29,22 @@
  * cluster longer than the bound (a ZWJ emoji sequence) goes whole and is
  * refused by main rather than cut in half, because there is no halving of it
  * that means anything.
+ *
+ * NORMALISED TO NFC BEFORE ANY OF THAT IS MEASURED. `TerminalTab.openkey
+ * .test.tsx` carries the report: OpenKey, the Vietnamese input utility behind
+ * it, builds its own replacement string from a hardcoded combining-mark
+ * table rather than calling either of Foundation's canonical-mapping
+ * normalisers, so whether one correction lands on the wire precomposed (`ố`,
+ * one code point) or decomposed (`o` + a combining circumflex + a combining
+ * acute, three) is the SOURCE's habit, not a contract this channel can trust
+ * -- and a real input method's marked-text commit is not guaranteed NFC
+ * either, only USUALLY. tmux and the agents vam starts both draw a decomposed
+ * sequence as a base letter with a mark floating over the NEXT cell rather
+ * than one accented glyph, so a piece handed over exactly as it arrived can
+ * be byte-correct and still look wrong on screen. Normalising FIRST, before
+ * the code points are counted and the bound applied, is what keeps a
+ * three-code-point decomposed input from being chopped into more pieces than
+ * its one-code-point NFC form ever needed.
  */
 
 import { MAX_KEY_TEXT, type PaneKey } from '../../shared/terminal.js';
@@ -42,10 +58,11 @@ import { MAX_KEY_TEXT, type PaneKey } from '../../shared/terminal.js';
 export function composedStrokes(text: string, limit: number = MAX_KEY_TEXT): readonly PaneKey[] {
   const strokes: PaneKey[] = [];
   let piece = '';
+  const normalized = text.normalize('NFC');
   // `for...of` over a string iterates CODE POINTS, so a surrogate pair is one
   // step and can never be divided by the boundary below. `piece.length` is
   // still code UNITS, which is the unit `isPaneKey` bounds.
-  for (const point of text) {
+  for (const point of normalized) {
     if (piece !== '' && piece.length + point.length > limit) {
       strokes.push({ kind: 'text', text: piece });
       piece = '';

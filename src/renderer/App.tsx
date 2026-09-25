@@ -23,10 +23,13 @@ import type {
   IssueApi,
   LinkApi,
   MainErrorsApi,
+  NotifyApi,
   PrsApi,
   TerminalApi,
+  TerminalStreamApi,
   UpdateApi,
   UsageApi,
+  WorktreesApi,
 } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
@@ -89,6 +92,14 @@ declare global {
        */
       readonly prs: PrsApi;
       readonly terminal: TerminalApi;
+      /**
+       * The Terminal tab's STREAMING half, behind the `streamingTerminal`
+       * pref (`src/renderer/prefs/streaming-terminal.ts`) and drawn by
+       * nothing yet. OPTIONAL for the reason `notify`/`prefs` are: a
+       * packaged build whose preload predates this member has the bridge
+       * without it, and the pref must be able to see that rather than throw.
+       */
+      readonly terminalStream?: TerminalStreamApi;
       /** Electron's `showOpenDialog`; the browser build has no picker at all. */
       readonly dialog: DialogApi;
       /**
@@ -99,6 +110,13 @@ declare global {
        * on `remote/server.ts`'s table, ever (`CHANNELS.filesRead`'s header).
        */
       readonly files: FilesApi;
+      /**
+       * list/create/remove a linked git worktree of a project vam already
+       * knows. Desktop-only, the same standing as `files` above -- see
+       * `CHANNELS.worktreeList`'s own header for why a paired phone has no
+       * route to any of the three.
+       */
+      readonly worktrees: WorktreesApi;
       /**
        * The launch check's answer, and the click that opens the release page
        * in the operator's browser. Desktop-only: the browser build has no
@@ -111,6 +129,14 @@ declare global {
        * through `bridgeMainErrors`.
        */
       readonly mainErrors: MainErrorsApi;
+      /**
+       * DESKTOP NOTIFICATIONS, write side: `Canvas` asks main to raise a
+       * banner when a session crosses into `waiting`, and hears which one was
+       * clicked. OPTIONAL in the type for the reason `prefs` is: the hook
+       * that calls it runs in the browser build too, where there is no
+       * bridge, and must be able to see that.
+       */
+      readonly notify?: NotifyApi;
       /**
        * PREFERENCES MAIN NEEDS A COPY OF -- two: where to ask GitHub from, per
        * project, and whether vam asks the agent for a shorter answer before it

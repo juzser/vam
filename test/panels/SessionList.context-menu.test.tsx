@@ -117,12 +117,52 @@ describe('the row menu opens', () => {
 });
 
 describe('what the row menu offers', () => {
-  it('offers the three the chord table already offers for this row', () => {
-    draw({ onRenameSession: vi.fn(), onPickSessionIcon: vi.fn() });
+  it('offers the ones the chord table already offers for this row', () => {
+    draw({ onRenameSession: vi.fn() });
     openOn('a1');
     expect([...document.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent)).toEqual(
-      ['Rename session', 'Change session icon', 'Close session'],
+      [
+        'Rename session',
+        // Drawn and disabled, carrying its reason: this harness wires no
+        // reopen route, which is the phone shell's case too.
+        'Reopen session — not available here',
+        'Close session',
+      ],
     );
+  });
+
+  /**
+   * REOPEN, END TO END THROUGH THE ROW. `SessionList.reopen.test.ts` pins the
+   * item's rules; this pins that a right-click on a row the source has
+   * MEASURED as ended reaches the callback with that row's id -- the wiring
+   * the pure test cannot see.
+   */
+  it('reopens the row that was right-clicked, when its source says it ended', () => {
+    const onReopen = vi.fn();
+    // `twoProjects()` answers ENTRIES, and the row menu reads the session on
+    // the entry it was opened over -- so the mark goes on that session.
+    const entries = twoProjects();
+    const withEnded = entries.map((e, index) =>
+      index === 0 ? { ...e, session: { ...e.session, ended: true } } : e,
+    );
+    const props = { ...baseProps(withEnded), onReopen, canReopen: true };
+    render(<SessionList {...props} />);
+    openOn('a1');
+    const item = entry('reopen') as HTMLButtonElement;
+    expect(item.disabled).toBe(false);
+    fireEvent.click(item);
+    expect(onReopen).toHaveBeenCalledWith('a1');
+  });
+
+  /** And the 409 rule, on the surface the operator actually touches. */
+  it('will not reopen a row that is still running', () => {
+    const onReopen = vi.fn();
+    draw({ onReopen, canReopen: true });
+    openOn('a1');
+    const item = entry('reopen') as HTMLButtonElement;
+    expect(item.disabled).toBe(true);
+    fireEvent.click(item);
+    expect(onReopen).not.toHaveBeenCalled();
   });
 
   it('renames the row that was right-clicked, not the focused one', () => {
@@ -132,14 +172,6 @@ describe('what the row menu offers', () => {
     fireEvent.click(entry('rename') as HTMLElement);
     expect(onRenameSession).toHaveBeenCalledWith('b1');
     expect(menu()).toBeNull();
-  });
-
-  it('picks the icon for the row that was right-clicked', () => {
-    const onPickSessionIcon = vi.fn();
-    draw({ onPickSessionIcon });
-    openOn('a2');
-    fireEvent.click(entry('icon') as HTMLElement);
-    expect(onPickSessionIcon).toHaveBeenCalledWith('a2');
   });
 
   it('closes the row that was right-clicked', () => {
@@ -157,7 +189,7 @@ describe('what the row menu offers', () => {
    * between two surfaces showing the same row.
    */
   it('disables what this caller cannot do, with the reason', () => {
-    draw({ onRenameSession: undefined, onPickSessionIcon: undefined });
+    draw({ onRenameSession: undefined });
     openOn('a1');
     expect(entry('rename')?.disabled).toBe(true);
     expect(entry('rename')?.textContent).toContain('not available here');

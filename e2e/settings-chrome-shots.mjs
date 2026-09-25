@@ -59,6 +59,7 @@ function ratio(a, b) {
 const SECTIONS = [
   ['appearance', 'Appearance'],
   ['behaviour', 'Behaviour'],
+  ['notifications', 'Notifications'],
   ['sessions', 'Sessions'],
   ['remote', 'Remote'],
   ['keyboard', 'Keyboard'],
@@ -177,8 +178,14 @@ for (const width of STRIP_WIDTHS) {
   // section that lands in a gap the previous count already paid for. The
   // budget below is not: it is measured in pixels against the viewport, and it
   // is the assertion that actually protects the operator.
+  //
+  // THE SEVENTH (Notifications) DID REDDEN IT, as the first paragraph
+  // promised: seven over two narrow tracks is four rows where six was three.
+  // Wide, seven over four tracks is still two. The pixel budget below is
+  // what decided the fourth row was acceptable: 121px, 14% of an
+  // 844px viewport at 520px, under the quarter it is held to.
   const rows = new Set(geometry.map((item) => item.top)).size;
-  const expected = width < 640 ? 3 : 2;
+  const expected = width < 640 ? 4 : 2;
   console.log(`${width}px: ${names.join(' ')} rows=${rows} over ${geometry.length} sections`);
   if (rows !== expected) {
     throw new Error(
@@ -461,13 +468,13 @@ for (const width of [1100, NARROWEST_DESKTOP]) {
   //
   // THE PLANT IS A TOKEN AND THE SLOT PAINTS A KEYSTROKE. `Mod-Alt-<key>` is
   // what `normalizeKey` stores and what goes into prefs; what a slot draws is
-  // `chordSymbols` of it — ⌥⌘AudioVolumeDown on a Mac, Ctrl+Alt+AudioVolumeDown
+  // `chordSymbols` of it — ⌥ ⌘ AudioVolumeDown on a Mac, Ctrl+Alt+AudioVolumeDown
   // off one. The symbols shorten the MODIFIERS and not the key name, which is
   // where all of this chord's length lives, so it is still the longest thing
   // this column is ever asked to hold.
   const wanted = await page.evaluate(() =>
     /Mac|iPhone|iPad|iPod/.test(navigator.platform)
-      ? '⌥⌘AudioVolumeDown'
+      ? '⌥ ⌘ AudioVolumeDown'
       : 'Ctrl+Alt+AudioVolumeDown',
   );
   if (planted === null || planted.keys !== wanted) {

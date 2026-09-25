@@ -38,6 +38,23 @@
  *    Delete branch at all.
  *
  *   node e2e/prs-tab-shots.mjs http://localhost:5520 e2e/test-results
+ *
+ * FOUR OF THE FIVE SHOTS ARE COMMITTED, in `docs/ui`, and the default output
+ * directory above is deliberately NOT that: `e2e/test-results` is ignored, so
+ * a guard run during the gate cannot quietly rewrite a picture somebody is
+ * reviewing. To refresh them, build the web bundle, serve it, and pass the
+ * directory:
+ *
+ *   node e2e/prs-tab-shots.mjs http://localhost:5520 docs/ui
+ *
+ * and then keep `prs-tab-desktop.png`, `prs-tab-desktop-light.png`,
+ * `prs-tab-narrow-rows.png` and `prs-tab-phone-withdrawn.png`.
+ * `prs-tab-narrow.png` is the confirm dialog and belongs to that feature's
+ * screenshot budget, not this row's.
+ *
+ * AND RUN IT WEB-ONLY. `test:e2e:phone` clears `e2e/test-results` when it
+ * starts, so a phone run after a guard run leaves the pictures gone rather
+ * than stale -- which is the better failure, but only if you know it.
  */
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -69,9 +86,40 @@ const constant = (name) => {
 };
 const PR_SPLIT_PX = constant('PR_SPLIT_PX');
 const PR_STATUS_PX = constant('PR_STATUS_PX');
+/**
+ * THE RAIL'S FOUR SLOTS AND ITS TWO FLOORS, read the same way.
+ *
+ * `PR_STATUS_PX` is not a free number any more -- it is the sum of either
+ * line, so the arithmetic is checked here rather than believed. A slot widened
+ * without widening the rail would leave the rail's right edge flush and push
+ * the other slot off its column, which every rectangle check below would
+ * happily report as "one value each" for the four rows it still fitted on.
+ */
+const PR_SLOT = {
+  state: constant('PR_SLOT_STATE_PX'),
+  verdict: constant('PR_SLOT_VERDICT_PX'),
+  diff: constant('PR_SLOT_DIFF_PX'),
+  files: constant('PR_SLOT_FILES_PX'),
+};
+const PR_RAIL_MIN_PX = constant('PR_RAIL_MIN_PX');
+const PR_STACKED_MIN_PX = constant('PR_STACKED_MIN_PX');
+const SLOT_GAP_PX = 6;
+for (const [line, a, b] of [
+  ['one', PR_SLOT.state, PR_SLOT.verdict],
+  ['two', PR_SLOT.diff, PR_SLOT.files],
+]) {
+  if (a + SLOT_GAP_PX + b !== PR_STATUS_PX) {
+    throw new Error(
+      `rail line ${line} is ${a} + ${SLOT_GAP_PX} + ${b} = ${a + SLOT_GAP_PX + b}, but PR_STATUS_PX ` +
+        `is ${PR_STATUS_PX} — the rail's width is DERIVED from its slots and the two have drifted.`,
+    );
+  }
+}
 for (const literal of [
   `@min-[${PR_SPLIT_PX}px]:flex-row`,
   `@min-[${PR_SPLIT_PX}px]:w-[${PR_STATUS_PX}px]`,
+  `min-h-[${PR_RAIL_MIN_PX}px]`,
+  `min-h-[${PR_STACKED_MIN_PX}px]`,
 ]) {
   if (!PANEL.includes(literal)) {
     throw new Error(
@@ -134,6 +182,7 @@ const install = () => {
         pullRequests: true,
         terminal: false,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: 'operator',
@@ -165,11 +214,32 @@ const install = () => {
             pullRequests: {
               kind: 'ok',
               prs: [
+                /**
+                 * `checks: 'none'` IS THE CORPUS FOR THE MARK'S CONTRAST, and
+                 * it is on THIS row for a mechanical reason rather than a
+                 * convenient one.
+                 *
+                 * The four checks verdicts all have to appear somewhere in
+                 * five rows, or the contrast assertion further down measures
+                 * three of them and reports a clean sweep over the one that
+                 * was broken -- `none` was the failing case (`bg-line-strong`
+                 * on `bg-card`, 1.71:1 dark and 1.46:1 light) and the fixture
+                 * did not contain it.
+                 *
+                 * #128 is the ONLY row whose pinned verdict does not depend on
+                 * its checks: its `review: 'changes-requested'` outranks every
+                 * checks rung of the ladder, so `data-pr-verdict` reads
+                 * `changes requested` whatever `checks` says. #97, #121 and
+                 * #131 are each pinned to a checks word, and #119 must keep
+                 * `failing` -- it is the row that proves the ladder ORDERS
+                 * rather than concatenates, by drawing `conflicts` while its
+                 * checks are failing.
+                 */
                 pr({
                   number: 128,
                   title: 'Rework the detail pane so a narrow column stays readable end to end',
                   state: 'open',
-                  checks: 'passing',
+                  checks: 'none',
                   additions: 6269,
                   deletions: 317,
                   changedFiles: 76,
@@ -341,6 +411,60 @@ async function installInk(page) {
   });
 }
 
+/**
+ * EVERY ROW'S RAIL, AS RECTANGLES -- the one reading both the 1280 and the
+ * 520 blocks work from, so the two cannot drift into measuring different
+ * things about the same grid.
+ *
+ * `over` is `scrollWidth - clientWidth` on the slot itself: the only question
+ * that distinguishes a word that FITS from one that is being clipped by a box
+ * whose own width is perfectly correct.
+ */
+const readRails = () =>
+  [...document.querySelectorAll('[data-pr-row]')].map((row) => {
+    const box = (el) => {
+      if (el === null) return null;
+      const r = el.getBoundingClientRect();
+      return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height };
+    };
+    const slot = (name, selector) => {
+      const el = row.querySelector(selector);
+      if (el === null) return null;
+      return {
+        name,
+        ...box(el),
+        over: el.scrollWidth - el.clientWidth,
+        title: el.getAttribute('title'),
+        text: el.textContent,
+      };
+    };
+    const cs = getComputedStyle(row);
+    const num = (k) => Number.parseFloat(cs.getPropertyValue(k)) || 0;
+    return {
+      number: row.querySelector('[data-pr-number]')?.textContent ?? '?',
+      checks: row.getAttribute('data-pr-checks'),
+      row: box(row),
+      content:
+        row.getBoundingClientRect().width -
+        num('padding-left') -
+        num('padding-right') -
+        num('border-left-width') -
+        num('border-right-width'),
+      status: box(row.querySelector('[data-pr-status]')),
+      identity: box(row.querySelector('[data-pr-identity]')),
+      actions: box(row.querySelector('[data-pr-actions]')),
+      slots: [
+        slot('state', '[data-pr-state-label]'),
+        slot('verdict', '[data-pr-verdict]'),
+        slot('diff', '[data-pr-diff]'),
+        slot('files', '[data-pr-files]'),
+      ].filter((s) => s !== null),
+      hasAuthor: row.querySelector('[data-pr-author]') !== null,
+      hasLabels: row.querySelector('[data-pr-label]') !== null,
+      verdicts: row.querySelectorAll('[data-pr-verdict]').length,
+    };
+  });
+
 // ---------------------------------------------------------------- desktop
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -362,7 +486,13 @@ async function installInk(page) {
     ['changed files', '[data-pr-files]'],
     ['branches', '[data-pr-branches]'],
     ['author', '[data-pr-author]'],
-    ['review decision', '[data-pr-review]'],
+    // `[data-pr-review]` WAS HERE. The row no longer paints a review word at
+    // all: `review required` is GitHub's default for any open pull request
+    // with a reviewer requested, and `approved` is a second way to say what
+    // `open` + `checks pass` already says. Both are still on the row's
+    // accessible sentence; the slot they cost is now `[data-pr-verdict]`,
+    // which draws exactly one word and is pinned per fixture row below.
+    ['verdict', '[data-pr-verdict]'],
     ['updated at', '[data-pr-updated]'],
   ]) {
     const box = await page.locator(selector).first().boundingBox();
@@ -396,11 +526,15 @@ async function installInk(page) {
           .map((el) => ({ hook: el.getAttributeNames().find((n) => n.startsWith('data-pr-')), ...rect(el) }));
       const identity = row.querySelector('[data-pr-identity]');
       const status = row.querySelector('[data-pr-status]');
-      const IDENTITY = ['[data-pr-title]', '[data-pr-number]', '[data-pr-branches]', '[data-pr-author]', '[data-pr-label]'];
+      // `[data-pr-updated]` IS AN IDENTITY FIELD NOW. The age was the third
+      // quantity on the rail's number line; it is a fact about the row rather
+      // than about the diff, and the house already draws ages on the left meta
+      // line (`SessionList.tsx`). Moving it here is what makes the seam check
+      // below a real claim about where it sits rather than a stale one.
+      const IDENTITY = ['[data-pr-title]', '[data-pr-number]', '[data-pr-branches]', '[data-pr-author]', '[data-pr-label]', '[data-pr-updated]'];
       const STATUS = [
-        '[data-pr-state-label]', '[data-pr-checks-label]', '[data-pr-additions]',
-        '[data-pr-deletions]', '[data-pr-files]', '[data-pr-review]',
-        '[data-pr-mergeable]', '[data-pr-updated]', '[data-pr-merge]', '[data-pr-delete-branch]',
+        '[data-pr-state-label]', '[data-pr-verdict]', '[data-pr-diff]', '[data-pr-additions]',
+        '[data-pr-deletions]', '[data-pr-files]', '[data-pr-merge]', '[data-pr-delete-branch]',
       ];
       const cs = getComputedStyle(row);
       const pad = (k) => Number.parseFloat(cs.getPropertyValue(k)) || 0;
@@ -506,9 +640,9 @@ async function installInk(page) {
     const hidden = [];
     let probes = 0;
     for (const el of document.querySelectorAll(
-      '[data-pr-status] [data-pr-state-label], [data-pr-status] [data-pr-checks-label],' +
-        ' [data-pr-status] [data-pr-additions], [data-pr-status] [data-pr-updated],' +
-        ' [data-pr-status] [data-pr-review], [data-pr-merge], [data-pr-delete-branch]',
+      '[data-pr-status] [data-pr-state-label], [data-pr-status] [data-pr-verdict],' +
+        ' [data-pr-status] [data-pr-diff], [data-pr-status] [data-pr-additions],' +
+        ' [data-pr-status] [data-pr-files], [data-pr-merge], [data-pr-delete-branch]',
     )) {
       const r = el.getBoundingClientRect();
       if (r.width === 0) continue;
@@ -535,37 +669,412 @@ async function installInk(page) {
   );
 
   /**
-   * RIGHT-ALIGNED, NOT MERELY ON THE RIGHT -- and asked PER LINE, which is the
-   * correction that makes this a guard at all.
+   * ================================================== THE RAIL IS A GRID NOW
    *
-   * It was written first as "the widest field in the rail ends where the rail
-   * ends", and a mutation that left-aligned one of the rail's three lines
-   * walked straight through it: the OTHER two lines still reached the edge, so
-   * the maximum did. A claim about a column answered with one number about the
-   * whole column cannot see a line that is wrong.
+   * DELETED HERE, WITH ITS REASON, BECAUSE A CHECK THAT VANISHES FROM A GUARD
+   * IS INDISTINGUISHABLE FROM ONE THAT WAS NEVER WRITTEN:
    *
-   * So the fields are grouped into the bands they actually wrap into -- same
-   * top, within a pixel -- and EVERY band has to end at the rail's right edge.
+   *   "every line of the status rail is right-aligned against it"
+   *
+   * It grouped the rail's fields into the bands they happened to wrap into and
+   * required every band to end at the rail's right edge. That claim is FALSE
+   * of this layout on purpose. Line one holds WORDS, which are read left to
+   * right, and its two slots are left-aligned inside fixed boxes so `open` and
+   * the verdict start at the same x on every row; it is line TWO, the
+   * magnitudes, that is right-aligned. The old check would redden on the
+   * correct paint.
+   *
+   * WHAT REPLACES IT IS STRICTLY STRONGER, which is the only reason deleting
+   * it is allowed: it asked for one edge per band, and the four checks below
+   * ask for BOTH edges of every named slot, its exact width, the exact gap
+   * between the pair, and that nothing inside it overflows -- on every row, at
+   * two widths. A left-aligned line-one is not a thing that can now pass.
    */
-  const ragged = sides.flatMap((s) => {
-    const bands = new Map();
-    for (const f of s.statusFields.filter((f) => f.w > 0)) {
-      const key = Math.round(f.t);
-      bands.set(key, Math.max(bands.get(key) ?? 0, f.r));
-    }
-    return [...bands.entries()]
-      .filter(([, right]) => right < s.status.r - 1.5)
-      .map(([top, right]) => `${s.number} band y=${top} ends at ${right.toFixed(1)}, rail at ${s.status.r.toFixed(1)}`);
-  });
-  const bandCount = sides.reduce(
-    (n, s) => n + new Set(s.statusFields.filter((f) => f.w > 0).map((f) => Math.round(f.t))).size,
-    0,
-  );
-  check('there are wrapped status bands to check the alignment of', bandCount >= 10, String(bandCount));
+  const railGrid = await page.evaluate(readRails);
+  const one = (values) => [...new Set(values.map((v) => Math.round(v)))];
+  const slotBoxes = railGrid.flatMap((r) => r.slots);
+  // A SWEEP MUST PROVE IT FOUND A CORPUS: "every left edge is the same" is
+  // vacuously true of zero rows, which is what a renamed hook produces.
   check(
-    'every line of the status rail is right-aligned against it',
-    ragged.length === 0,
-    ragged.join('; '),
+    'there are slot boxes on every row to measure at all',
+    slotBoxes.length >= 16 &&
+      railGrid.every((r) => r.slots.some((s) => s.name === 'state') && r.slots.some((s) => s.name === 'verdict')),
+    `${slotBoxes.length} boxes over ${railGrid.length} rows`,
+  );
+
+  // 9.1 THE WORDS START AT ONE x. This is the operator's complaint, answered:
+  // across the eleven inked bands of the shot this pass began from, the rail's
+  // left edges fell over a 63px spread.
+  for (const name of ['state', 'verdict']) {
+    const lefts = one(railGrid.flatMap((r) => r.slots.filter((s) => s.name === name)).map((s) => s.l));
+    const found = railGrid.filter((r) => r.slots.some((s) => s.name === name)).length;
+    check(
+      `the ${name} slot starts at the same x on all ${found} rows that draw it`,
+      lefts.length === 1 && found === 5,
+      `${found} rows, x = ${lefts.join(', ')}`,
+    );
+  }
+
+  // 9.2 AND THE NUMBERS END AT ONE x. Right edges, because a magnitude is
+  // compared from its last digit.
+  for (const name of ['diff', 'files']) {
+    const rights = one(railGrid.flatMap((r) => r.slots.filter((s) => s.name === name)).map((s) => s.r));
+    const found = railGrid.filter((r) => r.slots.some((s) => s.name === name)).length;
+    check(
+      `the ${name} slot ends at the same x on all ${found} rows that draw it`,
+      rights.length === 1 && found >= 4,
+      `${found} rows, x = ${rights.join(', ')}`,
+    );
+  }
+
+  // 9.3 THE WIDTHS AND THE GAPS ARE THE SOURCE'S OWN NUMBERS, read out of
+  // `DetailPanel.tsx` at the top of this file rather than retyped here.
+  const wrongWidth = slotBoxes.filter((s) => Math.abs(s.w - PR_SLOT[s.name]) > 0.5);
+  check(
+    `every slot paints the width its constant declares (${Object.entries(PR_SLOT).map(([k, v]) => `${k} ${v}`).join(', ')})`,
+    wrongWidth.length === 0,
+    wrongWidth.map((s) => `${s.name} ${s.w.toFixed(1)}`).join('; '),
+  );
+  const gaps = railGrid.flatMap((r) => {
+    const at = (n) => r.slots.find((s) => s.name === n) ?? null;
+    return [
+      ['line 1', at('state'), at('verdict')],
+      ['line 2', at('diff'), at('files')],
+    ]
+      .filter(([, a, b]) => a !== null && b !== null)
+      .map(([line, a, b]) => ({ line, number: r.number, gap: b.l - a.r }));
+  });
+  check(
+    `both rail lines keep a ${SLOT_GAP_PX}px gap, on every row`,
+    gaps.length >= 9 && gaps.every((g) => Math.abs(g.gap - SLOT_GAP_PX) <= 0.5),
+    gaps.filter((g) => Math.abs(g.gap - SLOT_GAP_PX) > 0.5).map((g) => `${g.number} ${g.line} ${g.gap.toFixed(1)}`).join('; '),
+  );
+
+  /**
+   * 9.4 NOTHING IN THE RAIL CLIPS -- plainly, at both widths, with no
+   * exception carved into it.
+   *
+   * §9.5 IS DELETED, AND THIS IS WHERE IT IS SAID rather than left to be
+   * noticed. It asked that at least one slot DOES clip, so the `title` bargain
+   * was not asserted over boxes that never needed it. It contradicted §9.4
+   * outright -- every slot is `flex-none` at a width that does not change
+   * between 1280 and 520, so the clipping set is identical at both -- and the
+   * only member the spec named for it was `changes requested` at 100.4px in a
+   * 94px verdict slot, "the only intentional truncation in the rail".
+   *
+   * THAT TRUNCATION IS GONE. Line one was rebalanced from 56 + 6 + 94 to
+   * 46 + 6 + 104, paid for out of the state slot's 16px of slack, and the rail
+   * is still 156. It was the ONLY clipped string on the surface and it sat on
+   * the top row, where a deliberate clip that happens exactly once reads as
+   * the layout failing rather than as a rule. So the clip set is now EMPTY BY
+   * CONSTRUCTION: §9.5 has no member left to be satisfied by, and keeping it
+   * alive would have meant finding some other string to sacrifice to it.
+   *
+   * WHAT THE CHECK IS FOR IS UNCHANGED -- a platform whose font metrics are
+   * wider than the ones these widths were measured against, the failure this
+   * repo has already had at 6.0079px/char on macOS against 5.718 on the CI
+   * runner -- and it is STRONGER than §9.4 could be with an exception in it:
+   * the first overflowing pixel anywhere in the rail is now a failure.
+   */
+  const clipping = slotBoxes.filter((s) => s.over > 1);
+  check(
+    'no rail slot overflows its box, at all',
+    clipping.length === 0,
+    clipping.map((s) => `${s.name} "${s.text}" over by ${s.over}`).join('; '),
+  );
+  // THE CORPUS THAT SENTENCE IS ABOUT. "Nothing overflowed" is exactly as
+  // green over four short words as over the two long ones the line is SIZED
+  // for, and a fixture that quietly lost its widest cases is how that happens.
+  const widest = new Set(
+    slotBoxes.filter((s) => s.text === 'merged' || s.text === 'changes requested').map((s) => s.text),
+  );
+  check(
+    'and the two widest words line one is sized against are among the boxes measured',
+    widest.size === 2,
+    [...new Set(slotBoxes.map((s) => s.text))].join(' | '),
+  );
+  /*
+   * The `title` is the FALLBACK for that wider platform, not a bargain being
+   * struck on these metrics -- so it is asserted unconditionally, over every
+   * slot. Filtering by `over > 1` the way §9.5 did would now be a sweep over
+   * the empty set: green, and about nothing.
+   */
+  const noTitle = slotBoxes.filter((s) => s.title !== s.text);
+  check(
+    'every rail slot carries its whole value on `title`',
+    slotBoxes.length >= 16 && noTitle.length === 0,
+    noTitle.map((s) => `${s.name} title=${JSON.stringify(s.title)} text=${JSON.stringify(s.text)}`).join('; '),
+  );
+
+  /**
+   * AND THE TEXT INSIDE THE BOX IS ALIGNED THE WAY THE LINE IS READ, which no
+   * rectangle above can see: all four boxes have the same edges whichever way
+   * their contents are set. Words are read from their starts and magnitudes
+   * are compared from their last digit, so line one is left and line two is
+   * right -- asked as computed style, because `text-right` in a className is a
+   * thing somebody typed.
+   */
+  const alignment = await page.evaluate(() =>
+    Object.fromEntries(
+      [
+        ['state', '[data-pr-state-label]'],
+        ['verdict', '[data-pr-verdict]'],
+        ['diff', '[data-pr-diff]'],
+        ['files', '[data-pr-files]'],
+      ].map(([name, sel]) => {
+        const el = document.querySelector(sel);
+        return [name, el === null ? null : getComputedStyle(el).textAlign];
+      }),
+    ),
+  );
+  check(
+    'the two word slots are set from their starts and the two number slots from their ends',
+    ['start', 'left'].includes(alignment.state) &&
+      ['start', 'left'].includes(alignment.verdict) &&
+      alignment.diff === 'right' &&
+      alignment.files === 'right',
+    JSON.stringify(alignment),
+  );
+
+  /**
+   * 9.6 ROW HEIGHTS ARE UNIFORM, which is the second half of "it all runs
+   * together": the five rows measured 108, 56, 74, 90 and 108 before this --
+   * a 52px spread over 7px gutters.
+   *
+   * NON-VACUITY IS THE WHOLE CHECK. One value out of five rows is exactly as
+   * green over five identical rows as over the two that USED to differ by
+   * 52px, so the two extremes are proved to still be in the fixture: a row
+   * with no action at all, and a row carrying all three identity lines.
+   */
+  const heights = one(railGrid.map((r) => r.row.h));
+  const expectedHeight = PR_RAIL_MIN_PX + 8 + 8 + 2;
+  check('every row is the same height', heights.length === 1, heights.join(', '));
+  check(
+    `and that height is the rail's floor plus its padding and border (${expectedHeight})`,
+    heights[0] === expectedHeight,
+    String(heights[0]),
+  );
+  check(
+    'a row with NO action is still among them, so the reserved slot is what holds the height',
+    railGrid.some((r) => r.actions === null) && railGrid.some((r) => r.actions !== null),
+    railGrid.map((r) => `${r.number}:${r.actions === null ? 'none' : 'action'}`).join(' '),
+  );
+  check(
+    'and so is a row drawing all three identity lines',
+    railGrid.some((r) => r.hasAuthor && r.hasLabels) && railGrid.some((r) => !r.hasAuthor && !r.hasLabels),
+    railGrid.map((r) => `${r.number}:${r.hasAuthor ? 'a' : '-'}${r.hasLabels ? 'l' : '-'}`).join(' '),
+  );
+
+  /**
+   * 9.7 THE ACTION HAS ONE ANCHOR. Its top edge used to fall 63px, 29px, 47px
+   * and 65px below its own card's top -- four rows, four heights, nothing to
+   * aim at. `mt-auto` in a rail with a floor puts its BOTTOM edge at a
+   * constant distance from the row's, which is the edge that is shared with
+   * the row below it in a list.
+   */
+  const anchored = railGrid.filter((r) => r.actions !== null);
+  const ACTION_GAP_PX = 9;
+  check('there are actions on at least three rows to anchor', anchored.length >= 3, String(anchored.length));
+  check(
+    `every action's bottom edge sits ${ACTION_GAP_PX}px above its own row's`,
+    anchored.every((r) => Math.abs(r.row.b - r.actions.b - ACTION_GAP_PX) <= 0.5),
+    anchored.map((r) => `${r.number} ${(r.row.b - r.actions.b).toFixed(1)}`).join('; '),
+  );
+  check(
+    "and its right edge is flush with the rail's",
+    anchored.every((r) => Math.abs(r.actions.r - r.status.r) <= 0.5),
+    anchored.map((r) => `${r.number} ${r.actions.r.toFixed(1)} vs ${r.status.r.toFixed(1)}`).join('; '),
+  );
+
+  /**
+   * 9.10 THE LADDER ORDERS, IT DOES NOT CONCATENATE. Pinned per fixture row,
+   * and #119 is the assertion that matters: it has FAILING checks and a
+   * conflict, and the slot must hold the conflict alone. A verdict that
+   * appended rather than ranked would read `checks fail conflicts` and pass
+   * every "the verdict slot is drawn" check ever written.
+   */
+  const VERDICTS = {
+    '#119': 'conflicts',
+    '#128': 'changes requested',
+    '#121': 'checks running',
+    '#131': 'checks running',
+    '#97': 'checks pass',
+  };
+  const verdictText = Object.fromEntries(
+    railGrid.map((r) => [r.number, r.slots.find((s) => s.name === 'verdict')?.text ?? null]),
+  );
+  check(
+    'each row draws the one verdict its ladder rung says',
+    Object.entries(VERDICTS).every(([number, word]) => verdictText[number] === word),
+    JSON.stringify(verdictText),
+  );
+  check(
+    'and exactly one verdict per row, on all five',
+    railGrid.length === 5 && railGrid.every((r) => r.verdicts === 1),
+    railGrid.map((r) => `${r.number}:${r.verdicts}`).join(' '),
+  );
+
+  /**
+   * 9.11 `review required` IS OFF THE PAINT. It is GitHub's default for any
+   * open pull request with a reviewer requested -- implied by `open`, never a
+   * decision -- and it was what pushed the conflicting row onto a third band.
+   * Asserted over the painted text of the whole list, not over one row.
+   */
+  const painted = await page.locator('[data-prs]').innerText();
+  check('the words `review required` are nowhere in the painted list', !/review required/.test(painted), painted.slice(0, 200));
+  check(
+    'and the list really does have review words in it, so that is not an empty page',
+    /changes requested/.test(painted),
+    painted.slice(0, 200),
+  );
+
+  /**
+   * 9.12 THE MARK IS A SHAPE, NOT A HUE. `status-mark.tsx` exists to forbid a
+   * column of identical discs differing only in colour, and the verdict slot
+   * can now be occupied by `conflicts` or `changes requested` -- rows where
+   * this mark is the ONLY carrier of the checks state.
+   *
+   * THE SIGNATURE IS THE GEOMETRY, and slightly stronger than a set of `d`
+   * attributes: lucide draws `Circle` as a `<circle>` with no `d` at all, so a
+   * `d`-only signature would read as the empty string -- which is also what an
+   * svg with no paths reads as. Tag names are included so those two are not
+   * the same answer. A hue-only regression makes all four signatures identical
+   * and fails here while passing every class-string check in the repo.
+   */
+  const shapes = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pr-checks-mark]')].map((el) => {
+      const svg = el.querySelector('svg');
+      const box = el.getBoundingClientRect();
+      return {
+        checks: el.closest('[data-pr-row]')?.getAttribute('data-pr-checks') ?? '?',
+        svg: svg !== null,
+        signature:
+          svg === null
+            ? ''
+            : [...svg.children].map((c) => `${c.tagName}:${c.getAttribute('d') ?? ''}`).join('|'),
+        w: Math.round(box.width * 10) / 10,
+        h: Math.round(box.height * 10) / 10,
+      };
+    }),
+  );
+  check('every checks mark draws an svg', shapes.length === 5 && shapes.every((s) => s.svg), JSON.stringify(shapes.map((s) => s.svg)));
+  check(
+    'every mark keeps the shared lane, 14x14',
+    shapes.every((s) => Math.abs(s.w - 14) <= 0.5 && Math.abs(s.h - 14) <= 0.5),
+    shapes.map((s) => `${s.w}x${s.h}`).join(', '),
+  );
+  const distinct = new Set(shapes.map((s) => s.signature));
+  check(
+    'and at least three checks verdicts draw a DIFFERENT shape, not the same one recoloured',
+    distinct.size >= 3,
+    `${distinct.size} distinct over ${new Set(shapes.map((s) => s.checks)).size} verdicts`,
+  );
+
+  /**
+   * 9.14 THE TWO CHANNELS OF §2, ASSERTED AS COMPUTED STYLE. A class string
+   * proves somebody typed a rule. `tabular-nums` is what stops right-aligned
+   * digits jittering column to column, and the mono/proportional contrast
+   * between the diff and the file count is what keeps them from reading as one
+   * number -- both are properties of the paint.
+   */
+  const numerics = await page.evaluate(() => {
+    const diff = document.querySelector('[data-pr-diff]');
+    const files = document.querySelector('[data-pr-files]');
+    if (diff === null || files === null) return null;
+    return {
+      variant: getComputedStyle(diff).fontVariantNumeric,
+      diffFamily: getComputedStyle(diff).fontFamily,
+      filesFamily: getComputedStyle(files).fontFamily,
+    };
+  });
+  check(
+    'the diff draws tabular figures',
+    numerics !== null && /tabular-nums/.test(numerics.variant),
+    JSON.stringify(numerics),
+  );
+  check(
+    'and the diff and the file count are in different typefaces',
+    numerics !== null && numerics.diffFamily !== numerics.filesFamily,
+    `${numerics?.diffFamily} vs ${numerics?.filesFamily}`,
+  );
+
+  /**
+   * 9.9 THE AGE LEFT THE RAIL, AND IT NEVER GIVES WAY.
+   *
+   * It was the third quantity on the rail's number line, one size and one 6px
+   * gap away from `+6269 −317` and `76 files` with no separator between any of
+   * them. It is now the last field of the identity's own meta line -- which is
+   * literally where `SessionList.tsx` puts an age -- and it inherits that
+   * row's shrink rule: the BRANCH gives way, the age does not.
+   *
+   * ASSERTED AS BEHAVIOUR, NOT AS A CLASS STRING. `flex-none` in a className
+   * is a thing somebody typed. The container is walked 560 -> 300 by 1px and
+   * the two widths are watched: the age's must not move by a pixel across the
+   * whole walk while the branch's gives up at least 20px over the same range.
+   * That is the only form of this claim a `min-w-0` deleted from the wrong
+   * span cannot pass.
+   */
+  const ages = await page.evaluate(() =>
+    [...document.querySelectorAll('[data-pr-row]')]
+      .map((row) => {
+        const age = row.querySelector('[data-pr-updated]');
+        if (age === null) return null;
+        const branches = row.querySelector('[data-pr-branches]');
+        const identity = row.querySelector('[data-pr-identity]');
+        const box = (el) => (el === null ? null : el.getBoundingClientRect());
+        return {
+          number: row.querySelector('[data-pr-number]')?.textContent ?? '?',
+          age: { l: box(age).left, r: box(age).right },
+          branches: branches === null ? null : { r: box(branches).right },
+          identity: { r: box(identity).right },
+          inIdentity: identity.contains(age),
+        };
+      })
+      .filter((a) => a !== null),
+  );
+  check('there are rows carrying an age to place at all', ages.length >= 2, String(ages.length));
+  check(
+    'every age is inside the identity, left of the rail',
+    ages.every((a) => a.inIdentity && a.age.r <= a.identity.r + 0.5),
+    ages.map((a) => `${a.number} ${a.age.r.toFixed(1)} vs ${a.identity.r.toFixed(1)}`).join('; '),
+  );
+  check(
+    'and it follows the branch pair rather than preceding it',
+    ages.every((a) => a.branches === null || a.age.l >= a.branches.r - 0.5),
+    ages.map((a) => `${a.number} age ${a.age.l.toFixed(1)} vs branch ${a.branches?.r.toFixed(1)}`).join('; '),
+  );
+  const shrink = await page.evaluate(() => {
+    const list = document.querySelector('[data-pr-row]')?.parentElement;
+    if (list === undefined || list === null) return null;
+    const previous = list.style.width;
+    const out = [];
+    for (let w = 560; w >= 300; w -= 1) {
+      list.style.width = `${w}px`;
+      const row = document.querySelector('[data-pr-row]');
+      const age = row.querySelector('[data-pr-updated]');
+      const branches = row.querySelector('[data-pr-branches]');
+      if (age === null || branches === null) continue;
+      out.push({
+        w,
+        age: Math.round(age.getBoundingClientRect().width),
+        branch: Math.round(branches.getBoundingClientRect().width),
+      });
+    }
+    list.style.width = previous;
+    return out;
+  });
+  const ageWidths = [...new Set((shrink ?? []).map((s) => s.age))];
+  const branchWidths = (shrink ?? []).map((s) => s.branch);
+  check('the shrink walk ran over the whole range', shrink !== null && shrink.length >= 260, String(shrink?.length));
+  check(
+    'the age keeps exactly one width from 560px down to 300px',
+    ageWidths.length === 1,
+    ageWidths.join(', '),
+  );
+  check(
+    'while the branch beside it gives up at least 20px over the same walk',
+    branchWidths.length > 0 && Math.max(...branchWidths) - Math.min(...branchWidths) >= 20,
+    `${Math.min(...branchWidths)}..${Math.max(...branchWidths)}`,
   );
 
   /**
@@ -831,6 +1340,87 @@ async function installInk(page) {
       check(`${theme}: ${what} paints at least 28px tall`, box.h >= 28, `${box.h}px`);
       check(`${theme}: ${what}'s own label fits inside it`, box.clipped === false, `${box.w}x${box.h}`);
     }
+
+    /**
+     * ============================================ THE CHECKS MARK'S CONTRAST
+     *
+     * WCAG 1.4.11 asks 3:1 of a non-text mark that carries meaning, and this
+     * one carries the whole checks verdict on the rows where the rail's
+     * verdict slot is occupied by `conflicts` or `changes requested`. So it is
+     * measured AS PAINT, in both themes, over all four verdicts.
+     *
+     * WHAT "AS PAINT" MEANS HERE, and it is the reason this assertion could
+     * fail at all. The mark has been drawn two ways: as a 6px disc, whose ink
+     * is its own `background-color`, and as a glyph, whose ink is the `color`
+     * its `currentColor` strokes resolve to. A check that read only `color`
+     * would have measured the row's INHERITED text ink on the disc -- 11.44:1
+     * dark, 17.72:1 light -- and passed with flying colours while the disc
+     * beside it sat at 1.71:1 and 1.46:1. So the painting element is asked for
+     * an opaque fill of its own FIRST, and only falls back to its ink.
+     *
+     * AND IT WAS SEEN TO GO RED. Run against the build BEFORE the glyph
+     * landed, with `none` already in the fixture, it reported exactly:
+     *
+     *   FAIL  dark: every checks mark clears 3:1 … — none 1.713:1
+     *   FAIL  light: every checks mark clears 3:1 … — none 1.457:1
+     *
+     * A contrast assertion that was green from the moment it was written has
+     * never demonstrated that it can fail.
+     */
+    const marks = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('[data-pr-checks-mark]')) {
+        const painter = el.querySelector('svg') ?? el;
+        const cs = getComputedStyle(painter);
+        const fill = cs.backgroundColor;
+        const ink = window.vamInk.opaque(fill) ? fill : cs.color;
+        const ground = window.vamInk.groundOf(el.parentElement);
+        const box = el.getBoundingClientRect();
+        out.push({
+          checks: el.closest('[data-pr-row]')?.getAttribute('data-pr-checks') ?? '?',
+          ink,
+          ground,
+          opaque: window.vamInk.opaque(ink) && window.vamInk.opaque(ground),
+          ratio: Number(window.vamInk.ratio(ink, ground).toFixed(3)),
+          w: Math.round(box.width * 10) / 10,
+          h: Math.round(box.height * 10) / 10,
+        });
+      }
+      return out;
+    });
+    console.log(`  ${theme} marks: ${marks.map((m) => `${m.checks} ${m.ratio}:1`).join(', ')}`);
+    // A SWEEP MUST PROVE IT FOUND A CORPUS: "every mark clears 3:1" is exactly
+    // as green over four verdicts as over the three the fixture used to carry,
+    // and `none` was the one that was broken.
+    const verdicts = [...new Set(marks.map((m) => m.checks))].sort();
+    check(
+      `${theme}: all four checks verdicts are on screen to be measured`,
+      verdicts.join(',') === 'failing,none,passing,pending',
+      verdicts.join(','),
+    );
+    check(
+      `${theme}: every mark's ink and its ground is opaque, so the ratio means something`,
+      marks.length > 0 && marks.every((m) => m.opaque),
+      JSON.stringify(marks.filter((m) => !m.opaque)),
+    );
+    check(
+      `${theme}: every checks mark clears 3:1 against the card (WCAG 1.4.11)`,
+      marks.every((m) => m.ratio >= 3),
+      marks.filter((m) => m.ratio < 3).map((m) => `${m.checks} ${m.ratio}:1`).join('; '),
+    );
+
+    /* THE LIGHT SHOT, TAKEN WHERE IT IS NEARLY FREE. There was no
+       light-theme picture of this surface at all: every light ratio anyone
+       has quoted about it was computed from token hex in `styles.css`, which
+       is a different claim from "this is what it looks like". The guard
+       already drives both themes for the button paint, so the shot costs one
+       line and closes the gap. Taken HERE rather than at the end of the
+       block, so it is the list at rest -- the dark shot below is taken after
+       a merge has been confirmed and carries the answer note. */
+    if (theme === 'light') {
+      await page.screenshot({ path: `${outDir}/prs-tab-desktop-light.png` });
+      console.log(`${outDir}/prs-tab-desktop-light.png`);
+    }
   }
   await page.evaluate(() => document.documentElement.classList.remove('light'));
   await page.waitForTimeout(150);
@@ -1078,6 +1668,94 @@ async function installInk(page) {
     ),
   );
   check('no row is scrolled sideways inside its own box', clipped === false);
+
+  /**
+   * ============================================ 9.15 THE STACKED RAIL AT 520
+   *
+   * BELOW THE SPLIT THE RAIL IS A DETACHED RIGHT-HAND COLUMN, not a full-width
+   * one. It becomes a block the width of the row's content box -- so its right
+   * edge is the identity's -- and its two lines stay `justify-end` inside it,
+   * so the 156px grid sits at the right of a 265px block rather than stretching
+   * across it. Stretching would give back exactly the alignment the fixed grid
+   * was built for, and it is the obvious thing a `w-full` does by accident.
+   *
+   * ASSERTED AS GEOMETRY. "justify-end" is a class; what is measured is that
+   * line two's right edge lands on the rail's right edge, and that the four
+   * slots still carry the widths their constants declare.
+   */
+  const stacked = await page.evaluate(readRails);
+  check('there are stacked rows to measure', stacked.length === 5, String(stacked.length));
+  check(
+    'every row really is stacked here, so this is the narrow case',
+    stacked.every((r) => r.content < PR_SPLIT_PX && r.identity.b <= r.status.t + 0.5),
+    stacked.map((r) => r.content.toFixed(1)).join(', '),
+  );
+  check(
+    "the rail fills the row's content box",
+    stacked.every((r) => Math.abs(r.status.w - r.content) <= 0.5),
+    stacked.map((r) => `${r.number} ${r.status.w.toFixed(1)} vs ${r.content.toFixed(1)}`).join('; '),
+  );
+  check(
+    "and its right edge is the identity's",
+    stacked.every((r) => Math.abs(r.status.r - r.identity.r) <= 0.5),
+    stacked.map((r) => `${r.number} ${r.status.r.toFixed(1)} vs ${r.identity.r.toFixed(1)}`).join('; '),
+  );
+  const stackedSlots = stacked.flatMap((r) => r.slots);
+  const stackedWrong = stackedSlots.filter((s) => Math.abs(s.w - PR_SLOT[s.name]) > 0.5);
+  check('there are slot boxes at 520 to measure', stackedSlots.length >= 16, String(stackedSlots.length));
+  check(
+    'the four slots keep their fixed widths when the rail detaches',
+    stackedWrong.length === 0,
+    stackedWrong.map((s) => `${s.name} ${s.w.toFixed(1)}`).join('; '),
+  );
+  const pushedRight = stacked.flatMap((r) => {
+    const line2 = r.slots.filter((s) => s.name === 'diff' || s.name === 'files');
+    if (line2.length === 0) return [];
+    const right = Math.max(...line2.map((s) => s.r));
+    return Math.abs(right - r.status.r) <= 0.5 ? [] : [`${r.number} ${right.toFixed(1)} vs ${r.status.r.toFixed(1)}`];
+  });
+  check(
+    "line two is pushed to the rail's right edge rather than stretched across it",
+    pushedRight.length === 0 &&
+      stacked.some((r) => r.slots.some((s) => s.name === 'diff')),
+    pushedRight.join('; '),
+  );
+  const stackedHeights = [...new Set(stacked.map((r) => Math.round(r.row.h)))];
+  const stackedExpected = PR_STACKED_MIN_PX + 8 + 8 + 2;
+  check('every stacked row is the same height too', stackedHeights.length === 1, stackedHeights.join(', '));
+  check(
+    `and that height is PR_STACKED_MIN_PX plus padding and border (${stackedExpected})`,
+    stackedHeights[0] === stackedExpected,
+    String(stackedHeights[0]),
+  );
+  // AND NOTHING CLIPS HERE EITHER, which is the point of the slots keeping
+  // their fixed widths when the rail detaches: the clip set does not depend on
+  // the breakpoint, so this reading and the 1280 one have to agree. See the
+  // 9.4 block up there for why the set is empty and where §9.5 went.
+  const stackedClips = stackedSlots.filter((s) => s.over > 1);
+  check(
+    'no slot overflows at 520 either',
+    stackedClips.length === 0,
+    stackedClips.map((s) => `${s.name} "${s.text}" over by ${s.over}`).join('; '),
+  );
+  const stackedWidest = new Set(
+    stackedSlots.filter((s) => s.text === 'merged' || s.text === 'changes requested').map((s) => s.text),
+  );
+  check(
+    'and the two widest words are on screen at this width too',
+    stackedWidest.size === 2,
+    [...new Set(stackedSlots.map((s) => s.text))].join(' | '),
+  );
+  // The action anchor is scoped to the split layout by §5, and `mt-auto` is a
+  // no-op in a stacked block with no spare height. What must still hold here
+  // is the right edge -- asserted, so the scoping is a decision rather than a
+  // gap nobody noticed.
+  check(
+    "the action stays flush with the rail's right edge when stacked",
+    stacked.filter((r) => r.actions !== null).length >= 3 &&
+      stacked.every((r) => r.actions === null || Math.abs(r.actions.r - r.status.r) <= 0.5),
+    stacked.map((r) => `${r.number} ${r.actions === null ? '-' : r.actions.r.toFixed(1)}`).join(' '),
+  );
 
   // The rows as they sit in the narrowest pane vam will ever give them.
   await page.screenshot({ path: `${outDir}/prs-tab-narrow-rows.png` });

@@ -1,19 +1,24 @@
 // @vitest-environment happy-dom
 
 /**
- * The tab strip's own icon slot, and clicking a tab.
+ * The tab strip's own icon slot — now empty of the session icon — and
+ * clicking a tab.
  *
- * 0.2 migration, step 2: `TabStrip` used to read `entry.session.icon` alone,
- * so a tab never fell back to its project's glyph the way the (now-deleted)
- * canvas root node already did — the two surfaces disagreed the moment one
- * carried a project icon and no session icon of its own. Routing the tab
- * through the shared chain (`resolveSessionGlyph`, pinned in isolation at
- * `test/panels/session-icon.test.ts`) fixes that disagreement; this file pins
- * the chain actually being live at the one surface that draws it now.
+ * 0.2 migration, step 2 routed the tab through a session-else-project chain
+ * so that a tab fell back to its project's glyph the way the (now-deleted)
+ * canvas root node did. The operator then took the slot away: "put the
+ * provider glyph after the indicator, on the tab name. Remove the session
+ * icon from the tab." With the tab gone, the picker wrote where nothing read,
+ * and the operator removed that too — so there is no session icon left to
+ * draw, anywhere, from any source.
  *
- * Deliberately not the module's own `Monitor` placeholder: a tab nobody has
- * picked an icon for draws nothing rather than a mark every unpicked tab
- * would share.
+ * What this half of the file pins therefore NARROWED rather than disappeared.
+ * The case that is still constructible is the loud one: a project WITH an
+ * icon must not put it on its sessions' tabs. (The other two cases it drove
+ * were a session's own glyph and the empty chain; neither can be built now,
+ * because a session has no icon field to set.) The slot is not idle: the
+ * provider glyph has it, as a SIBLING of the select button, which is asserted
+ * here and measured in full in `Canvas.tab-indicators.test.tsx`.
  *
  * The second half relocates `Canvas.keyboard.test.tsx`'s "a canvas card is
  * clickable, and a click focuses that session": every session used to be a
@@ -29,11 +34,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 
-function session(id: string, icon: string | null = null): Session {
+function session(id: string): Session {
   return {
     id,
     title: id,
-    icon,
     epic: null,
     branch: null,
     status: 'done',
@@ -68,8 +72,8 @@ function press(key: string) {
 
 afterEach(cleanup);
 
-describe('the tab strip draws the fallback chain, not the bare session field', () => {
-  it('shows nothing when neither the session nor its project has chosen a glyph', () => {
+describe('the tab strip draws no session icon, not even its project’s', () => {
+  it('shows nothing on a tab whose project has no glyph either', () => {
     const model: CanvasModel = {
       projects: [{ id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')] }],
     };
@@ -77,30 +81,42 @@ describe('the tab strip draws the fallback chain, not the bare session field', (
     expect(tabIcon('a1')).toBeNull();
   });
 
-  it('falls back to the project glyph when the session has none of its own', () => {
+  it('does not fall back to the project glyph — the link that used to be the loud one', () => {
+    // THE CASE THAT IS STILL REAL, and the reason this block survived the
+    // removal. A project icon is a live feature with its own picker, so a tab
+    // CAN be handed a glyph to draw by mistake; a session icon cannot, since
+    // there is no longer a field to put one in. This is the assertion that
+    // would catch the slot coming back by the only door still open to it.
     const model: CanvasModel = {
       projects: [
         { id: 'p1', name: 'alpha', source: 'claude-code', sessions: [session('a1')], icon: '🏭' },
       ],
     };
     render(<Canvas model={model} />);
-    expect(tabIcon('a1')?.textContent).toBe('🏭');
+    expect(tabIcon('a1')).toBeNull();
+    expect(tabSelect('a1')?.textContent).toBe('a1');
   });
 
-  it('prefers the session’s own glyph over its project’s', () => {
+  it('draws the provider glyph in that slot instead, outside the title button', () => {
+    // The slot did not go quiet, it changed hands. Inside the button the
+    // glyph would truncate with a long title; outside it, it cannot.
     const model: CanvasModel = {
       projects: [
         {
           id: 'p1',
           name: 'alpha',
           source: 'claude-code',
-          sessions: [session('a1', '🦊')],
+          sessions: [session('a1')],
           icon: '🏭',
         },
       ],
     };
     render(<Canvas model={model} />);
-    expect(tabIcon('a1')?.textContent).toBe('🦊');
+    const tab = document.querySelector('[data-session-tab]');
+    expect(tab?.querySelector('[data-tab-source]')?.getAttribute('data-tab-source')).toBe(
+      'claude-code',
+    );
+    expect(tab?.querySelector('[data-tab-select] [data-tab-source]')).toBeNull();
   });
 });
 

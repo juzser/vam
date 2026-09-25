@@ -39,6 +39,7 @@ import {
   normalizeKey,
 } from '../keyboard/chords.js';
 import { type BindingRow, buildBindingSheet } from '../keyboard/keysheet.js';
+import { ChordGlyphs } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { EDITOR_INDENT_MAX, EDITOR_INDENT_MIN } from '../prefs/editor.js';
 import {
@@ -63,9 +64,11 @@ import {
   setFocusView,
   setKeyBindings,
   setNarrowViews,
+  setNotifyWaiting,
   setOutFontSize,
   setPaletteColor,
   setPromptSubmitKey,
+  setStreamingTerminal,
   setTerminalFontSize,
   setTheme,
   stylesheetPaletteValue,
@@ -91,6 +94,7 @@ import {
   terminalThemesFor,
 } from '../prefs/terminal-scheme.js';
 import type { SourceDeclines } from '../sources/port.js';
+import { desktopNotifyApi, NotifyTest } from './NotifyTest.js';
 import { RemoteLimits } from './RemoteLimits.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
 import { Switch } from './Switch.js';
@@ -1029,6 +1033,28 @@ export function SettingsOverlay({
                 </p>
               </Block>
 
+              {/* THE STREAMING TERMINAL, BETA. A second Terminal tab
+                  implementation, `TerminalStreamTab.tsx`, driven by xterm.js
+                  over a persistent `tmux -C` connection (`docs/design/
+                  terminal-streaming.md`) instead of `TerminalTab.tsx`'s
+                  `capture-pane` poll. Off by default: it is unreviewed
+                  against a real terminal workload, and the shipping tab
+                  keeps working untouched either way -- `DetailPanel.tsx`
+                  reads this pref to choose which component to mount. */}
+              <Block
+                label={t('settings.behaviour.streamingTerminal.label')}
+                hint={t('settings.behaviour.streamingTerminal.hint')}
+              >
+                <Switch
+                  name="streaming-terminal"
+                  label={t('settings.behaviour.streamingTerminal.label')}
+                  checked={prefs.streamingTerminal}
+                  onChange={(next) => onChange(setStreamingTerminal(prefs, next))}
+                  on={t('settings.behaviour.streamingTerminal.on')}
+                  off={t('settings.behaviour.streamingTerminal.off')}
+                />
+              </Block>
+
               {/* THE INDENT, LAST, and it is the one row here whose subject is
                   a FILE rather than a pane. It reaches two places, which is
                   why it is worth a row at all: it is what `Tab` inserts in the
@@ -1055,6 +1081,65 @@ export function SettingsOverlay({
               </Block>
             </Panel>
 
+            {/* NOTIFICATIONS. Operator: "add a setting for notifications in the
+                desktop app. Include a test-notification button too." The
+                switch shipped as a Behaviour row (PR 440); the button is the
+                reason it is a section now -- a row and a button that exist to
+                be found together. `sections.ts` carries the position and why
+                a phone never sees it; `NotifyTest.tsx` carries the button. */}
+            <Panel
+              id="notifications"
+              active={section === 'notifications'}
+              hint={t('settings.notifications.hint')}
+              phone={phone}
+            >
+              {/* ONE SWITCH, and the list of what it deliberately is not lives
+                  with the default (`prefs/notify.ts`): no per-session mute, no
+                  per-status pick, no sound, no quiet hours -- the OS owns the
+                  last two.
+
+                  THE NOTE CARRIES THREE FACTS the operator cannot guess. That
+                  the switch is per device (prefs are this browser's storage,
+                  so a phone with the page open has its own -- and both notify
+                  if both are on). That it is quiet for the session they are
+                  looking at, which is the difference between a feature and a
+                  nuisance. And WHERE TO READ WHY A BANNER DID NOT COME: main
+                  writes the OS's refusal into the error log verbatim
+                  (`main/notify/notify.ts`), so "nothing happened" is never
+                  the whole story. */}
+              <Block
+                name="notify-waiting"
+                label={t('settings.notifications.waiting.label')}
+                hint={t('settings.notifications.waiting.hint')}
+              >
+                <Switch
+                  name="notify-waiting"
+                  label={t('settings.notifications.waiting.label')}
+                  checked={prefs.notifyWaiting}
+                  onChange={(next) => onChange(setNotifyWaiting(prefs, next))}
+                  on={t('settings.notifications.waiting.on')}
+                  off={t('settings.notifications.waiting.off')}
+                />
+                <p data-notify-waiting-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
+                  {t('settings.notifications.waiting.note')}
+                </p>
+              </Block>
+
+              {/* THE BUTTON, and the outcome beside it. A banner the OS refuses
+                  is a line in the error log for a REAL banner, which is right
+                  for a thing nobody asked for and wrong for a button somebody
+                  just pressed: the answer goes where the finger is. Same main
+                  path as a real banner (`main/notify/notify.ts`, `test()`), so
+                  the log still gets its line as well. */}
+              <Block
+                name="notify-test"
+                label={t('settings.notifications.test.label')}
+                hint={t('settings.notifications.test.hint')}
+              >
+                <NotifyTest api={desktopNotifyApi()} />
+              </Block>
+            </Panel>
+
             <Panel
               id="sessions"
               active={section === 'sessions'}
@@ -1077,7 +1162,17 @@ export function SettingsOverlay({
                             : 'border-line text-ink-dim'
                         }`}
                       >
-                        {provider.label}
+                        {/* A PROPER NAME, printed as its author wrote it --
+                            `data-verbatim`, the same rank the terminal theme
+                            chips hold (`e2e/settings-chrome-shots.mjs`). Not
+                            `capitalize`: "Claude Code" and "Codex" are names,
+                            and the guard holds a name to the opposite rule
+                            from a control named in prose. These buttons were
+                            dormant while the table had one row, which is why
+                            the guard first met them with the `codex` row. */}
+                        <span data-verbatim className="normal-case">
+                          {provider.label}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -1148,10 +1243,12 @@ export function SettingsOverlay({
                       {/* THE SEND KEY IS A CHORD, and the table spells it as
                           one on purpose (`Shift-Enter`, "vam already has one
                           spelling for a modified key and this is it") — so it
-                          reaches the screen through the same renderer as every
-                          other key on this surface: ⇧⏎ on a Mac, Shift+Enter
-                          off one. */}
-                      {chordSymbols(SUBMIT_KEY_LABELS[key])}
+                          reaches the screen through `ChordGlyphs`, the ONE
+                          component every chord in this app now paints
+                          through, THIS BUTTON INCLUDED, so its own look — the
+                          operator's named reference — cannot drift from
+                          itself: ⇧ ⏎ on a Mac, Shift+Enter off one. */}
+                      <ChordGlyphs chord={SUBMIT_KEY_LABELS[key]} />
                     </button>
                   ))}
                 </div>

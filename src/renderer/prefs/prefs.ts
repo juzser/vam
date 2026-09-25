@@ -23,6 +23,12 @@
 
 import { DEFAULT_PROVIDER_ID, type ProviderId, readProviderId } from '../../shared/providers.js';
 import type { CanvasModel, SourceId } from '../domain/model.js';
+import {
+  DEFAULT_VIEW_OPTIONS,
+  type GroupBy,
+  type SortBy,
+  type ViewOptions,
+} from '../domain/selectors.js';
 import { DEFAULT_SESSION_FILTERS, type SessionFilters } from '../domain/session-filter.js';
 import { type KeyBindings, MAX_BINDINGS, setActiveBindings } from '../keyboard/chords.js';
 import { setActiveProvider } from '../sources/provider.js';
@@ -34,15 +40,28 @@ import {
   readEditorHighlight,
   setActiveEditorSettings,
 } from './editor.js';
+import {
+  DEFAULT_FILES_MARKDOWN_VIEW,
+  type FilesMarkdownView,
+  readFilesMarkdownView,
+  setActiveFilesMarkdownView,
+} from './files-markdown-view.js';
 import { clampStoredTreeWidth } from './files-tree-width.js';
+import { DEFAULT_NOTIFY_WAITING, readNotifyWaiting } from './notify.js';
 import { clampPaneWidth, DEFAULT_PANES, type Pane } from './panes.js';
 import { DEFAULT_FOCUS_VIEW, readFocusView, setActiveFocusView } from './progress.js';
+import {
+  DEFAULT_STREAMING_TERMINAL,
+  readStreamingTerminal,
+  setActiveStreamingTerminal,
+} from './streaming-terminal.js';
 import {
   DEFAULT_PROMPT_SUBMIT_KEY,
   type PromptSubmitKey,
   readPromptSubmitKey,
   setActivePromptSubmitKey,
 } from './submit-key.js';
+import {} from './tab-indicators.js';
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   readTerminalFontSize,
@@ -122,6 +141,26 @@ export type IconChoice = { readonly icon: string; readonly at: string };
 export type RenameChoice = { readonly title: string; readonly at: string };
 
 /**
+ * A row Close could not make go away, so the operator asked vam to stop
+ * showing it instead. `docs/design/vam-owns-the-session.md` §5: dismissing
+ * never touches the process -- it is the "safe fallback" for a row vam may
+ * not or cannot close (not its pane, ownership ambiguous, tmux unreachable),
+ * and the one already-open case too (a background job the source itself
+ * reports `done`/`failed`, which `stop.ts`'s `already-finished` refuses
+ * forever with nothing left to stop).
+ *
+ * `activity` IS THE UNDO CLOCK. `Session.activity` is the one line a source
+ * already reports that changes when a session does something, so it is what
+ * this compares against on every later read (`isSessionDismissed`): a row
+ * whose activity has moved on from what vam saw at dismissal time has shown
+ * the operator did not mean "gone for good" -- a resumed session is not the
+ * one that was hidden, and it returns on its own. `null` is recorded
+ * honestly when the source had nothing to say, and a LATER `null` never lifts
+ * a dismissal by itself: silence is not news, only a new line is.
+ */
+export type DismissChoice = { readonly at: string; readonly activity: string | null };
+
+/**
  * Which of the mockup's two artboards you are looking at.
  *
  * Stored, not sniffed. `prefers-color-scheme` answers a question about the
@@ -167,8 +206,8 @@ export function clampOutFontSize(size: number): number {
   return Math.min(OUT_FONT_SIZE_MAX, Math.max(OUT_FONT_SIZE_MIN, size));
 }
 
-/** Session id → the emoji you gave it, for one source. */
-export type IconsBySession = Readonly<Record<string, IconChoice>>;
+/** Project id → the emoji you gave it, for one source. */
+export type IconsById = Readonly<Record<string, IconChoice>>;
 
 /**
  * A session, named the way the store names sessions everywhere else: by source
@@ -196,27 +235,6 @@ export type StoredGroup = {
 };
 
 export type Prefs = {
-  /**
-   * Source id → session id → the emoji you gave it.
-   *
-   * Session ids are unique only within a source (§ epic.md, AC-1): two
-   * sources can both name a session `D-257`, and without this outer key they
-   * would share one glyph. Both levels are built on `Object.create(null)`
-   * objects populated by explicit loops, never a bare `{}` mutated with
-   * `obj[key] = …`, because a plain object's `__proto__` is an inherited
-   * SETTER: assigning through it produces no own property at all, so the entry
-   * misses the store's own-property count and vanishes on the next
-   * `JSON.stringify` round trip (AC-2).
-   *
-   * `__proto__` is the ONLY key that does this, and naming a second one here
-   * would be wrong rather than merely cautious. `constructor`, `prototype` and
-   * `toString` are inherited WRITABLE DATA properties, so assigning through
-   * them shadows the inherited value with a real own property that serialises
-   * like any other — measured, not assumed. The null-prototype accumulator is
-   * still the right shape: it removes the hazard by construction instead of
-   * relying on a list of key names staying complete.
-   */
-  readonly icons: Readonly<Record<string, IconsBySession>>;
   readonly theme: Theme;
   /**
    * The two dragged pane widths, always present — there are exactly two
@@ -229,14 +247,38 @@ export type Prefs = {
   /**
    * Source id → project id → the emoji you gave that project's heading.
    *
-   * Same idiom as `icons`, one level up, for the same reason: a project id is
-   * unique only within a source (`to-canvas.ts` builds it from that source's
-   * own `overview.runningSessions`), so a bare `{ projectId: IconChoice }`
-   * would let two sources' projects collide the way session ids already do.
-   * There is no legacy flat shape to migrate here — this key never shipped
-   * before this field existed.
+   * KEYED BY SOURCE, because a project id is unique only within a source
+   * (`to-canvas.ts` builds it from that source's own
+   * `overview.runningSessions`), so a bare `{ projectId: IconChoice }` would
+   * let two sources' projects collide. There is no legacy flat shape to
+   * migrate here — this key never shipped before this field existed.
+   *
+   * A SESSION-SCOPED TWIN USED TO SIT ABOVE THIS ONE, under `icons`, and its
+   * removal is why the paragraphs below now live here. The tab strip was the
+   * last surface drawing a session's own icon; pull request 433 took it off,
+   * which left a
+   * picker writing where nothing read, and the operator's answer was "remove
+   * the picker". A stored `icons` key from before that day is simply IGNORED:
+   * `parsePrefs` no longer looks for it, and an unknown key in the stored
+   * document has always been dropped. Nothing is migrated, because there is no
+   * surface left for the value to migrate to.
+   *
+   * BOTH LEVELS ARE BUILT ON `Object.create(null)` objects populated by
+   * explicit loops, never a bare `{}` mutated with `obj[key] = …`, because a
+   * plain object's `__proto__` is an inherited SETTER: assigning through it
+   * produces no own property at all, so the entry misses the store's
+   * own-property count and vanishes on the next `JSON.stringify` round trip
+   * (AC-2).
+   *
+   * `__proto__` is the ONLY key that does this, and naming a second one here
+   * would be wrong rather than merely cautious. `constructor`, `prototype` and
+   * `toString` are inherited WRITABLE DATA properties, so assigning through
+   * them shadows the inherited value with a real own property that serialises
+   * like any other — measured, not assumed. The null-prototype accumulator is
+   * still the right shape: it removes the hazard by construction instead of
+   * relying on a list of key names staying complete.
    */
-  readonly projectIcons: Readonly<Record<string, IconsBySession>>;
+  readonly projectIcons: Readonly<Record<string, IconsById>>;
   /**
    * Source id → project id → the name you gave that project's heading, or
    * nothing for "use the source's own name".
@@ -266,9 +308,9 @@ export type Prefs = {
    * the factory's pull requests while the work is in another repository
    * entirely. The operator asked for a way to point it.
    *
-   * PER PROJECT, BECAUSE A PROJECT IS A CWD. The README states it: "there is
-   * no stored project in vam: a project is live sessions grouped by their
-   * cwd." The thing being corrected here IS that cwd, so the correction
+   * PER PROJECT, BECAUSE A PROJECT IS A CWD. `docs/keyboard.md` states it:
+   * "there is no stored project in vam: a project is live sessions grouped by
+   * their cwd." The thing being corrected here IS that cwd, so the correction
    * belongs at the same grain. Per session it would let two sessions with an
    * identical cwd disagree about which repository that cwd is, which is not
    * inconvenient but incoherent.
@@ -291,6 +333,13 @@ export type Prefs = {
    * session that may have stopped existing.
    */
   readonly filters: SessionFilters;
+  /**
+   * The sidebar's Group-by/Sort-by choice -- orca's own two controls, the
+   * cheap half of them (`docs/design/workspace-options.md`). Exempt from the
+   * icon TTL for the same reason `filters` is: it describes how the person
+   * wants the list READ, not a session that may have stopped existing.
+   */
+  readonly viewOptions: ViewOptions;
   /**
    * Source id → the ids of that source's projects you folded shut.
    *
@@ -316,6 +365,26 @@ export type Prefs = {
    * decision the operator made, not a session that has stopped existing.
    */
   readonly hiddenProjects: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Source id → row id → when, and with what last known activity, the
+   * operator dismissed that row from the sidebar -- `DismissChoice`'s own
+   * doc carries the whole rule.
+   *
+   * KEYED BY THE ROW, same two levels as `renames` and for the same reason:
+   * a session id is unique only within its source, AND -- the part this
+   * field cannot skip -- a Claude Code row's own id is already
+   * `<sessionId>#<pid>` (`agents.ts`), never the bare session id, because one
+   * session id can have two live processes. Storing this under anything
+   * coarser would dismiss one process's row and silently take the other's
+   * down with it, which is the exact shape of bug that once made Close kill
+   * the wrong tmux session.
+   *
+   * NOT PRUNED BY THE ICON TTL, for `hiddenProjects`' reason one field above:
+   * this records a decision the operator made about a specific row, not a
+   * position that goes stale on its own. `isSessionDismissed`'s activity
+   * check is what actually retires an entry, on its own schedule.
+   */
+  readonly dismissedSessions: Readonly<Record<string, Readonly<Record<string, DismissChoice>>>>;
   /**
    * Source id → the groups the operator made in that source, in the order
    * they were made. UI "project"; see the vocabulary table in
@@ -604,18 +673,83 @@ export type Prefs = {
    * person, not a session that stopped existing.
    */
   readonly conciseOutput: boolean;
+  /**
+   * Whether THIS DEVICE raises a desktop notification when a session crosses
+   * into `waiting`. `prefs/notify.ts` carries the default and the list of
+   * switches it deliberately is not; `notify/waiting.ts` is its one reader.
+   *
+   * GLOBAL and per device, which is the same fact seen twice: it describes
+   * the machine that is looking, not a session. Exempt from the icon TTL
+   * like `conciseOutput`, for the same reason.
+   */
+  readonly notifyWaiting: boolean;
+  /**
+   * Which face a `.md` file opens wearing in the Files tab: the rendered
+   * document, or the raw text. `prefs/files-markdown-view.ts` carries the
+   * default and the direction it is normalised in; this is the one field
+   * whose default MOVES everyone's file on upgrade, on purpose -- the
+   * operator's whole ask was that the old default (raw) was never found.
+   *
+   * GLOBAL and per device, for the reason `filesTreeWidth` beside it is:
+   * `Canvas.tsx` mounts one `FilesTab` per split leaf and `PhoneShell`
+   * mounts another, so per pane it would be an arrangement to re-make on
+   * every split. Read ONCE, at mount, by `FilesTab.tsx`'s own
+   * `activeFilesMarkdownView()` -- unlike `filesTreeWidth`, it is not
+   * threaded down as a value prop, because nothing outside the tab that
+   * owns it ever needs to react to it changing live; `onFilesMarkdownView`
+   * (`Canvas.tsx`) is the one-way street back out to this field.
+   */
+  readonly filesMarkdownView: FilesMarkdownView;
+  /**
+   * WHICH TERMINAL TAB DRAWS: `TerminalStreamTab.tsx` over a persistent
+   * xterm.js connection, the shipping default now, or `TerminalTab.tsx`'s
+   * `capture-pane` poll, kept as the explicit opt-out AND the automatic
+   * fallback for a tmux that cannot stream (`docs/design/terminal-
+   * streaming.md`'s "Flipping the default"). `prefs/streaming-terminal.ts`
+   * carries the default and the store `TerminalAutoTab.tsx` reads to choose
+   * between the two, the same `terminalFontSize` reason: that component
+   * carries no `prefs` prop, so the live value has to reach it as module
+   * state rather than a prop drilled down from `Canvas.tsx`.
+   *
+   * GLOBAL, like `terminalFontSize`: which implementation draws a pane is
+   * not a fact about the session in it.
+   */
+  readonly streamingTerminal: boolean;
+  /**
+   * CONSUMED, ONCE, BY `parsePrefs` -- never read anywhere else. `writePrefs`
+   * persists the WHOLE `Prefs` object on every save, so an operator who never
+   * opened Settings at all was still storing `streamingTerminal: false`
+   * (the OLD default) the moment ANY other preference changed -- there is no
+   * way, from the stored payload alone, to tell that apart from an operator
+   * who opened Settings and chose off on purpose. Flipping
+   * `DEFAULT_STREAMING_TERMINAL` cannot reach either of them on its own,
+   * because `readStreamingTerminal` reads the STORED value, not the default,
+   * whenever one is stored at all.
+   *
+   * So the migration is a ratchet, the same shape `migrateSourceKey`'s own
+   * one-time reshuffle already takes for a different field: the first
+   * `parsePrefs` to see a payload WITHOUT this flag set moves
+   * `streamingTerminal` onto the new default regardless of what was stored,
+   * then sets this flag so every later load respects whatever the operator
+   * has actually chosen since -- including turning it back off, which must
+   * stick. A payload that already carries `streamingTerminalMigrated: true`
+   * is read normally, through `readStreamingTerminal`, exactly like every
+   * other boolean here.
+   */
+  readonly streamingTerminalMigrated: boolean;
 };
 
 export const EMPTY_PREFS: Prefs = {
-  icons: {},
   theme: DEFAULT_THEME,
   panes: DEFAULT_PANES,
   projectIcons: {},
   projectNames: {},
   prRepos: {},
   filters: DEFAULT_SESSION_FILTERS,
+  viewOptions: DEFAULT_VIEW_OPTIONS,
   collapsedProjects: {},
   hiddenProjects: {},
+  dismissedSessions: {},
   groups: {},
   collapsedGroups: {},
   renames: {},
@@ -634,6 +768,14 @@ export const EMPTY_PREFS: Prefs = {
   terminalScheme: DEFAULT_TERMINAL_SCHEME_PREF,
   narrowViews: DEFAULT_NARROW_VIEWS,
   conciseOutput: DEFAULT_CONCISE_OUTPUT,
+  notifyWaiting: DEFAULT_NOTIFY_WAITING,
+  filesMarkdownView: DEFAULT_FILES_MARKDOWN_VIEW,
+  streamingTerminal: DEFAULT_STREAMING_TERMINAL,
+  // A truly empty payload has nothing to migrate FROM -- it already reads
+  // `DEFAULT_STREAMING_TERMINAL` above, so there is nothing left for the
+  // ratchet to do. Marked consumed so a later explicit off is respected the
+  // same as any other installation's.
+  streamingTerminalMigrated: true,
 };
 
 /**
@@ -698,7 +840,6 @@ function parsePrefs(
     return EMPTY_PREFS;
   }
   const record = parsed as {
-    icons?: unknown;
     panes?: unknown;
     projectIcons?: unknown;
     projectNames?: unknown;
@@ -706,26 +847,18 @@ function parsePrefs(
     filters?: unknown;
     collapsedProjects?: unknown;
     hiddenProjects?: unknown;
+    dismissedSessions?: unknown;
     groups?: unknown;
     collapsedGroups?: unknown;
     renames?: unknown;
   };
   const cutoff = new Date(now.getTime() - TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  // Read ONCE, ahead of the field below that consults it -- see
+  // `streamingTerminalMigrated`'s own header on `Prefs` for what this ratchet
+  // is for.
+  const streamingTerminalMigrated =
+    (parsed as { streamingTerminalMigrated?: unknown }).streamingTerminalMigrated === true;
   return {
-    // `migrateSourceKey` runs BEFORE `pruneBuckets`: it only reshuffles which
-    // source a bucket sits under, and the TTL cutoff is evaluated per entry
-    // regardless, so the order does not change what survives -- but pruning
-    // the merged, current-named picture reads as the one true timeline rather
-    // than two half-histories pruned separately then stitched together.
-    icons: pruneBuckets(
-      migrateSourceKey(
-        readIcons(record.icons, migrateSource),
-        LEGACY_HTTP_SOURCE_ID,
-        migrateSource,
-        mergeTimestamped,
-      ),
-      cutoff,
-    ),
     // Not pruned by the TTL icons get. A theme is about the person, and one
     // who opens vam twice a year still wants the theme they chose.
     theme: readTheme((parsed as { theme?: unknown }).theme),
@@ -733,9 +866,12 @@ function parsePrefs(
     // field (today's shipped payloads have none), a non-object, or garbage
     // numbers left by devtools or an older vam.
     panes: readPanes(record.panes),
-    // Same TTL as session icons, same reasoning: a project's glyph is not
-    // worth remembering forever either. Same old-id migration too -- a
-    // project's glyph is keyed by source exactly like a session's is.
+    // TTL'd: a project's glyph is not worth remembering forever. And
+    // `migrateSourceKey` runs BEFORE `pruneBuckets` -- it only reshuffles
+    // which source a bucket sits under, and the TTL cutoff is evaluated per
+    // entry regardless, so the order does not change what survives, but
+    // pruning the merged, current-named picture reads as one true timeline
+    // rather than two half-histories pruned separately then stitched together.
     projectIcons: pruneBuckets(
       migrateSourceKey(
         readProjectIcons(record.projectIcons),
@@ -749,8 +885,8 @@ function parsePrefs(
     // up -- see the field's own comment. `readBuckets` rather than a
     // dedicated `readProjectNames`: every top-level entry here is already
     // `projectId → RenameChoice`, exactly what `readBuckets` already reads
-    // for `renames`, so there is no flat legacy shape of its own to special-
-    // case the way `readIcons` does for `icons`.
+    // for `renames`, so there is no flat legacy shape of its own to
+    // special-case.
     projectNames: pruneBuckets(
       migrateSourceKey(
         readBuckets(record.projectNames, readRename),
@@ -770,6 +906,9 @@ function parsePrefs(
     // Same argument again: not pruned, and per-field defensive so one garbage
     // toggle cannot drag the other back to its default with it.
     filters: readFilters(record.filters),
+    // Same shape as `filters` above, and per field within itself: a garbage
+    // `groupBy` must not cost a good `sortBy` beside it.
+    viewOptions: readViewOptions((parsed as { viewOptions?: unknown }).viewOptions),
     // Not pruned either, and per-source defensive: one garbage bucket cannot
     // unfold the projects another source folded. Old-id migrated like every
     // other source-keyed field: a fold made under the old id is still a fold.
@@ -786,6 +925,16 @@ function parsePrefs(
       LEGACY_HTTP_SOURCE_ID,
       migrateSource,
       mergeIdLists,
+    ),
+    // Same shape and TTL exemption as `renames` -- see the field's own
+    // comment for why the row key (not the bare session id) is load-bearing
+    // here. `mergeTimestamped` merges an old-id payload the same way renames
+    // does: per row, the newer dismissal wins.
+    dismissedSessions: migrateSourceKey(
+      readBuckets(record.dismissedSessions, readDismissChoice),
+      LEGACY_HTTP_SOURCE_ID,
+      migrateSource,
+      mergeTimestamped,
     ),
     // Per field and per source again, and NOT pruned by the TTL: every store
     // in existence predates the group layer and has neither key, which reads
@@ -894,6 +1043,33 @@ function parsePrefs(
     // this is the one preference whose "on" position TYPES SOMETHING INTO A
     // RUNNING AGENT. A payload vam cannot read must not do that.
     conciseOutput: readConciseOutput((parsed as { conciseOutput?: unknown }).conciseOutput),
+    // Per field like every line above it; a boolean is a choice and anything
+    // else is the default, which is ON (`./notify.ts` says why).
+    notifyWaiting: readNotifyWaiting((parsed as { notifyWaiting?: unknown }).notifyWaiting),
+    // Per field like every line above it, and normalised in the direction
+    // `files-markdown-view.ts` argues at length: unlike every sibling here,
+    // the safe default for an UNREADABLE value is the NEW behaviour
+    // (`'preview'`), because shipping this setting is the fix for an
+    // operator who never found the old one.
+    filesMarkdownView: readFilesMarkdownView(
+      (parsed as { filesMarkdownView?: unknown }).filesMarkdownView,
+    ),
+    // The one-time ratchet (`streamingTerminalMigrated`'s own header): a
+    // payload that has not yet been migrated moves onto the NEW default
+    // regardless of what is stored, because the OLD default baked
+    // `streamingTerminal: false` into any such payload just as effectively
+    // as a real explicit choice would have and this vam cannot tell the two
+    // apart. A payload past the migration is read normally, only a literal
+    // `true` on -- the same direction `conciseOutput` reads in, so a
+    // corrupted or hand-edited value never silently switches an operator
+    // to an implementation they never chose.
+    streamingTerminal: streamingTerminalMigrated
+      ? readStreamingTerminal((parsed as { streamingTerminal?: unknown }).streamingTerminal)
+      : true,
+    // Consumed: from here on this installation's payload always carries
+    // `true`, so every FUTURE load takes the branch above rather than this
+    // one -- the ratchet only ever fires once.
+    streamingTerminalMigrated: true,
   };
 }
 
@@ -983,6 +1159,82 @@ export function setProjectHidden(
     ...prefs,
     hiddenProjects: withIdBySource(prefs.hiddenProjects, source, projectId, hidden),
   };
+}
+
+/**
+ * Is this row hidden from the sidebar because the operator dismissed it, and
+ * has it not shown newer activity since?
+ *
+ * `currentActivity` is `Session.activity` as of THIS read, never a value
+ * cached from the moment of dismissal -- a caller that read it once and kept
+ * reusing it would never see a row lift itself. See `DismissChoice` for the
+ * whole rule this applies: a row with no recorded dismissal is never
+ * dismissed; one with a recorded dismissal stays dismissed while
+ * `currentActivity` is `null` (silence is not news) or unchanged from what
+ * was recorded, and lifts the moment it differs from that and is not `null`.
+ */
+export function isSessionDismissed(
+  prefs: Prefs,
+  source: string,
+  sessionId: string,
+  currentActivity: string | null,
+): boolean {
+  const entry = prefs.dismissedSessions[source]?.[sessionId];
+  if (entry === undefined) return false;
+  if (currentActivity !== null && currentActivity !== entry.activity) return false;
+  return true;
+}
+
+/**
+ * Dismiss a row, or undo that -- `setRename`'s shape, one field over: `on`
+ * chooses which, rather than a boolean tacked onto an otherwise write-only
+ * call, because the undo is exactly as real an act as the dismissal and reads
+ * clearer named at the call site than inferred from an absent argument.
+ *
+ * `activity`/`at` are only consulted when dismissing; undoing simply drops
+ * the entry, so nothing here has to reason about what an undo would even mean
+ * for a clock that no longer applies.
+ */
+export function setSessionDismissed(
+  prefs: Prefs,
+  source: string,
+  sessionId: string,
+  on: boolean,
+  activity: string | null = null,
+  at: Date = new Date(),
+): Prefs {
+  const bucket = prefs.dismissedSessions[source] ?? emptyMap<DismissChoice>();
+  const nextBucket = on
+    ? withEntry(bucket, sessionId, { at: at.toISOString(), activity })
+    : withoutEntry(bucket, sessionId);
+  const dismissedSessions =
+    Object.keys(nextBucket).length > 0
+      ? withEntry(prefs.dismissedSessions, source, nextBucket)
+      : withoutEntry(prefs.dismissedSessions, source);
+  return { ...prefs, dismissedSessions };
+}
+
+/** How many rows are dismissed right now, across every source -- the count
+ *  the status bar shows beside the control that undoes all of them. */
+export function countDismissedSessions(prefs: Prefs): number {
+  let total = 0;
+  for (const bucket of Object.values(prefs.dismissedSessions)) {
+    total += Object.keys(bucket).length;
+  }
+  return total;
+}
+
+/**
+ * Undo every dismissal at once -- the whole of the undo affordance this
+ * feature ships with. Deliberately not "undo the last one": a dismissal
+ * carries no order across sources (two levels of a keyed map, not a list),
+ * and inventing one to support a single-step undo would be a second piece of
+ * state to keep in sync with the first for a control the operator reaches
+ * for rarely enough that "bring everything back" is the whole answer they
+ * need.
+ */
+export function restoreAllDismissedSessions(prefs: Prefs): Prefs {
+  return { ...prefs, dismissedSessions: {} };
 }
 
 /**
@@ -1095,7 +1347,8 @@ export function renameGroup(prefs: Prefs, source: string, groupId: string, name:
   return withGroup(prefs, source, groupId, (group) => ({ ...group, name }));
 }
 
-/** An empty icon clears the choice rather than storing "", as `setIcon` does. */
+/** An empty icon clears the choice rather than storing "", as `setProjectIcon`
+ *  does. */
 export function setGroupIcon(
   prefs: Prefs,
   source: string,
@@ -1163,9 +1416,15 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted } = (
+  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle } = (
     typeof raw === 'object' && raw !== null ? raw : {}
-  ) as { hideAgentStarted?: unknown; onlyPrompted?: unknown };
+  ) as {
+    hideAgentStarted?: unknown;
+    onlyPrompted?: unknown;
+    hideEnded?: unknown;
+    hideForeign?: unknown;
+    hideIdle?: unknown;
+  };
   return {
     hideAgentStarted:
       typeof hideAgentStarted === 'boolean'
@@ -1173,21 +1432,59 @@ function readFilters(raw: unknown): SessionFilters {
         : DEFAULT_SESSION_FILTERS.hideAgentStarted,
     onlyPrompted:
       typeof onlyPrompted === 'boolean' ? onlyPrompted : DEFAULT_SESSION_FILTERS.onlyPrompted,
+    // Every store in existence predates this key and reads back as the
+    // default, which is the state the operator asked for — so a vam that has
+    // never seen the toggle behaves as though it had been left alone.
+    hideEnded: typeof hideEnded === 'boolean' ? hideEnded : DEFAULT_SESSION_FILTERS.hideEnded,
+    // Same per-field fallback, for the same reason: every store predating
+    // Stage 1's toggle has no such key, and reads back as the shipped
+    // default rather than as "off".
+    hideForeign:
+      typeof hideForeign === 'boolean' ? hideForeign : DEFAULT_SESSION_FILTERS.hideForeign,
+    // Same per-field fallback again: every store predating this toggle has no
+    // such key, and reads back as the shipped default, which is OFF -- so an
+    // upgrade never hides a sleeping session nobody asked to hide.
+    hideIdle: typeof hideIdle === 'boolean' ? hideIdle : DEFAULT_SESSION_FILTERS.hideIdle,
   };
 }
 
-/** Written by the filter popover's two toggles. */
+/** Written by the filter popover's toggles. */
 export function setSessionFilters(prefs: Prefs, filters: SessionFilters): Prefs {
   return { ...prefs, filters };
 }
 
-/** No legacy flat shape to migrate — unlike `readIcons`, every top-level
- * entry here is already `projectId → IconChoice`. */
+const GROUP_BY_VALUES: readonly GroupBy[] = ['project', 'status', 'none'];
+const SORT_BY_VALUES: readonly SortBy[] = ['needs-you', 'name'];
+
+/** Per FIELD, like `readFilters`: a garbage `groupBy` must not cost a good
+ *  `sortBy` beside it, and vice versa. */
+function readViewOptions(raw: unknown): ViewOptions {
+  const { groupBy, sortBy } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
+    groupBy?: unknown;
+    sortBy?: unknown;
+  };
+  return {
+    groupBy: GROUP_BY_VALUES.includes(groupBy as GroupBy)
+      ? (groupBy as GroupBy)
+      : DEFAULT_VIEW_OPTIONS.groupBy,
+    sortBy: SORT_BY_VALUES.includes(sortBy as SortBy)
+      ? (sortBy as SortBy)
+      : DEFAULT_VIEW_OPTIONS.sortBy,
+  };
+}
+
+/** Written by the workspace-options popover's Group-by/Sort-by controls. */
+export function setViewOptions(prefs: Prefs, viewOptions: ViewOptions): Prefs {
+  return { ...prefs, viewOptions };
+}
+
+/** No legacy flat shape to migrate: every top-level entry here is already
+ * `projectId → IconChoice`, and this key never shipped in any other shape. */
 function readProjectIcons(raw: unknown): Prefs['projectIcons'] {
   if (typeof raw !== 'object' || raw === null) {
-    return emptyMap<IconsBySession>();
+    return emptyMap<IconsById>();
   }
-  const out = emptyMap<IconsBySession>();
+  const out = emptyMap<IconsById>();
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const nested = readMap(value, readIcon);
     if (Object.keys(nested).length > 0) {
@@ -1351,6 +1648,30 @@ export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, conciseOutput: readConciseOutput(on) };
 }
 
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it: the switch can only send a boolean, but a hand-edited payload
+ *  can send anything, and only a literal `true` may switch the Terminal tab
+ *  onto the unreviewed implementation. */
+export function setStreamingTerminal(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, streamingTerminal: readStreamingTerminal(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it. Read in the renderer alone (`notify/waiting.ts`), so there is no
+ *  crossing into main to make in `activatePrefs` -- the OS call is made per
+ *  banner, and a switch that is off makes no call at all. */
+export function setNotifyWaiting(prefs: Prefs, on: unknown): Prefs {
+  return { ...prefs, notifyWaiting: readNotifyWaiting(on) };
+}
+
+/** Normalised on the way in as well as on the way out, like every setter
+ *  above it. The one caller is `Canvas.tsx`'s `onFilesMarkdownView`, itself
+ *  called from `FilesTab.tsx`'s own toggle -- the only place this preference
+ *  is ever changed. */
+export function setFilesMarkdownView(prefs: Prefs, view: unknown): Prefs {
+  return { ...prefs, filesMarkdownView: readFilesMarkdownView(view) };
+}
+
 /**
  * Put the theme on the document.
  *
@@ -1474,27 +1795,7 @@ function withoutEntry<T>(map: Record<string, T>, key: string): Record<string, T>
   return out;
 }
 
-/** An empty icon clears the choice rather than storing "". */
-export function setIcon(
-  prefs: Prefs,
-  sourceId: SourceId,
-  sessionId: string,
-  icon: string,
-  now: Date,
-): Prefs {
-  const bucket = prefs.icons[sourceId] ?? emptyMap<IconChoice>();
-  const nextBucket =
-    icon === ''
-      ? withoutEntry(bucket, sessionId)
-      : withEntry(bucket, sessionId, { icon, at: now.toISOString() });
-  const icons =
-    Object.keys(nextBucket).length > 0
-      ? withEntry(prefs.icons, sourceId, nextBucket)
-      : withoutEntry(prefs.icons, sourceId);
-  return { ...prefs, icons };
-}
-
-/** An empty icon clears the project's choice, same as `setIcon`. */
+/** An empty icon clears the project's choice rather than storing "". */
 export function setProjectIcon(
   prefs: Prefs,
   sourceId: SourceId,
@@ -1615,14 +1916,13 @@ export function prRepoFor(prefs: Prefs, sourceId: SourceId, projectId: string): 
 
 /**
  * Put the stored names onto the model, once, before anything reads it -- the
- * same trick `applyIcons` plays one field over, and for the same reason: the
- * sidebar and the detail panel both render `session.title`,
- * and neither should have to know that a title can be local.
+ * same trick `applyProjectIcons` plays one field over, and for the same
+ * reason: the sidebar and the detail panel both render `session.title`, and
+ * neither should have to know that a title can be local.
  *
- * `projectNames` defaults to `{}` for the same reason `applyIcons`'
- * `projectIcons` argument does: every existing two-argument call site
- * (session renames only) still compiles. Applied to `project.name` --
- * never `project.id`, which every one of `applyIcons`, `isProjectCollapsed`,
+ * `projectNames` defaults to `{}` so every existing two-argument call site
+ * (session renames only) still compiles. Applied to `project.name` -- never
+ * `project.id`, which every one of `applyProjectIcons`, `isProjectCollapsed`,
  * `isProjectHidden` and the group layer keys off and which a rename must
  * leave alone.
  */
@@ -1661,47 +1961,37 @@ export function applyRenames(
 }
 
 /**
- * Put the stored icons onto the model, once, before anything reads it.
+ * Put the stored project icons onto the model, once, before anything reads it.
  *
- * Only the tab strip renders `session.icon` today, and it should not
- * know that an icon is a local preference rather than something the
- * factory said. Applying it here means one place knows. Looked up per
- * project's `source`, not by session id alone — two sources can name a
- * session the same thing (AC-1). `projectIcons` follows the same rule one
- * level up, and defaults to `{}` so every existing two-argument call site
- * (session icons only) still compiles.
+ * Only the project heading renders `project.icon`, and it should not know that
+ * an icon is a local preference rather than something the source said.
+ * Applying it here means one place knows. Looked up per project's `source`,
+ * not by project id alone — two sources can name a project the same thing.
+ *
+ * IT WAS `applyIcons` AND DID TWO LEVELS. The other level was the session's
+ * own icon, and it went when the feature did ("remove the picker", once pull
+ * request 433 had taken the last surface that drew one). The name says one level now
+ * because that is what is left: a function called `applyIcons` that silently
+ * applies only half of what the word covers is the kind of thing a reader
+ * trusts and should not.
  */
-export function applyIcons(
+export function applyProjectIcons(
   model: CanvasModel,
-  icons: Prefs['icons'],
-  projectIcons: Prefs['projectIcons'] = {},
+  projectIcons: Prefs['projectIcons'],
 ): CanvasModel {
-  if (Object.keys(icons).length === 0 && Object.keys(projectIcons).length === 0) {
+  if (Object.keys(projectIcons).length === 0) {
     return model;
   }
   return {
     ...model,
     projects: model.projects.map((project) => {
       // A project with no source has no bucket to look one up in — the same
-      // "cannot store under an unknown source" call `setIcon`'s caller makes.
+      // "cannot store under an unknown source" call the picker's caller makes.
       if (project.source === undefined) {
         return project;
       }
-      const bucket = icons[project.source];
-      const projectBucket = projectIcons[project.source];
-      const projectChoice = projectBucket?.[project.id];
-      const withIcon =
-        projectChoice === undefined ? project : { ...project, icon: projectChoice.icon };
-      if (bucket === undefined) {
-        return withIcon;
-      }
-      return {
-        ...withIcon,
-        sessions: withIcon.sessions.map((session) => {
-          const choice = bucket[session.id];
-          return choice === undefined ? session : { ...session, icon: choice.icon };
-        }),
-      };
+      const choice = projectIcons[project.source]?.[project.id];
+      return choice === undefined ? project : { ...project, icon: choice.icon };
     }),
   };
 }
@@ -1720,27 +2010,6 @@ function readMap<T>(value: unknown, read: (entry: unknown) => T | null): Record<
   return out;
 }
 
-/**
- * Build the by-source icon map from whatever is under the stored `icons` key,
- * migrating the pre-AC-1 flat shape (`{sessionId: IconChoice}`) as it goes.
- *
- * Handles a payload holding both shapes at once (AC-5) — the case an operator
- * hits mid-upgrade with vam open in two tabs, one writing the old flat shape
- * and one already writing the new nested one to the same key. Each top-level
- * entry is inspected on its own: one that parses as an `IconChoice` is an old
- * flat entry keyed by session id, migrated into `migrateSource`'s bucket;
- * anything else is tried as a new-shape bucket (session id → `IconChoice`)
- * keyed by its own source id. Both merge into the same source's bucket.
- *
- * WHEN THEY CONTEND FOR THE SAME KEY, THE LATER `at` WINS. `migrateSource` is
- * a real source id, so a migrated flat entry and a genuine nested entry can
- * name the same session under the same source -- exactly what the two-tab
- * upgrade produces. An unconditional overwrite would make the survivor depend
- * on `Object.entries` order, which is to say on nothing, and would silently
- * drop an icon that exists nowhere else. An unparseable `at` sorts oldest, so
- * a readable choice always beats an unreadable one; if neither parses the
- * first seen is kept, because there is nothing to prefer it by.
- */
 /** Milliseconds for ordering; an unreadable date sorts oldest and never wins. */
 function ageOf(choice: { readonly at: string }): number {
   const t = Date.parse(choice.at);
@@ -1789,13 +2058,14 @@ const LEGACY_HTTP_SOURCE_ID = 'black-smith';
  * a person with devtools open, and permanently invisible to vam. That is
  * exactly the silent loss a rename must not cause.
  *
- * `merge` resolves the one case that is rare rather than impossible: an
- * install old enough to still carry pre-AC-1 flat data (which `readIcons`
- * folds into `migrateSource`'s bucket on its own) can ALSO already have a
- * genuine nested bucket sitting under the literal old id, in the same
- * payload -- so a bucket can exist under both names in the same read, and
- * dropping either half would be the same silent loss this function exists to
- * prevent.
+ * `merge` resolves the one case that is rare rather than impossible: a bucket
+ * can exist under BOTH the old and the new source name in the same payload --
+ * an install that wrote under the legacy id, then wrote again after the
+ * rename -- and dropping either half would be the same silent loss this
+ * function exists to prevent. (It resolved one more case until recently: the
+ * pre-AC-1 FLAT session-icon shape, which `readIcons` folded into
+ * `migrateSource`'s bucket before this ran. Session icons are gone and so is
+ * that reader; the both-names case below is real on its own.)
  */
 function migrateSourceKey<T>(
   buckets: Readonly<Record<string, T>>,
@@ -1856,31 +2126,6 @@ function migrateLastFocusSource(
   return focus !== null && focus.source === from ? { ...focus, source: to } : focus;
 }
 
-function readIcons(raw: unknown, migrateSource: SourceId): Prefs['icons'] {
-  if (typeof raw !== 'object' || raw === null) {
-    return emptyMap<IconsBySession>();
-  }
-  let outer = emptyMap<IconsBySession>();
-  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-    const flatLeaf = readIcon(value);
-    if (flatLeaf !== null) {
-      const bucket = outer[migrateSource] ?? emptyMap<IconChoice>();
-      outer = withEntry(outer, migrateSource, keepNewer(bucket, key, flatLeaf));
-      continue;
-    }
-    const nested = readMap(value, readIcon);
-    if (Object.keys(nested).length === 0) {
-      continue;
-    }
-    let bucket = outer[key] ?? emptyMap<IconChoice>();
-    for (const [sid, choice] of Object.entries(nested)) {
-      bucket = keepNewer(bucket, sid, choice);
-    }
-    outer = withEntry(outer, key, bucket);
-  }
-  return outer;
-}
-
 /** `fresh` applied per source, dropping a source whose bucket becomes empty. */
 function pruneBuckets<T extends { at: string }>(
   buckets: Readonly<Record<string, Readonly<Record<string, T>>>>,
@@ -1923,6 +2168,23 @@ function readRename(entry: unknown): RenameChoice | null {
     return null;
   }
   return { title, at };
+}
+
+function readDismissChoice(entry: unknown): DismissChoice | null {
+  if (typeof entry !== 'object' || entry === null) {
+    return null;
+  }
+  const { at, activity } = entry as { at?: unknown; activity?: unknown };
+  if (typeof at !== 'string') {
+    return null;
+  }
+  // `null` is a real, storable value here (see `DismissChoice`'s own doc),
+  // so anything that is not a string OR `null` is what gets dropped -- a
+  // hand-edited number, an array, `undefined` read back from JSON as absent.
+  if (activity !== null && typeof activity !== 'string') {
+    return null;
+  }
+  return { at, activity: activity ?? null };
 }
 
 function readIcon(entry: unknown): IconChoice | null {
@@ -2380,6 +2642,8 @@ export function activatePrefs(prefs: Prefs): Prefs {
   // an appearance, and there is no scheme chosen against it.
   setActiveTerminalScheme(prefs.terminalScheme, effectiveTheme(prefs.theme));
   setActiveNarrowViews(prefs.narrowViews);
+  setActiveFilesMarkdownView(prefs.filesMarkdownView);
+  setActiveStreamingTerminal(prefs.streamingTerminal);
   /**
    * AND TWO PREFERENCES CROSS INTO MAIN, because the thing each one changes
    * happens there: `gh` is spawned by `main/sources/claude-code/source.ts`,

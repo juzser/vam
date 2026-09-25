@@ -82,27 +82,49 @@ page.on('console', (msg) => {
   if (msg.type() === 'error') console.error('CONSOLE ERROR:', msg.text());
 });
 
-const TERMINAL = 't.kind===`session`&&t.source.capabilities.terminal';
-const DELIVERS = 't.kind===`session`&&t.source.capabilities.deliverPrompt';
+/**
+ * THE EXPRESSIONS ARE MATCHED AS PATTERNS NOW, NOT AS LITERALS, and the reason
+ * is the second source.
+ *
+ * These used to be the exact minified strings
+ * `t.kind===\`session\`&&t.source.capabilities.terminal` and its
+ * `deliverPrompt` twin. Both stopped existing when the canvas started reading
+ * a capability PER ROW instead of per app: it calls
+ * `capabilitiesFor(source.source, <the row's source id>)`, whose helper name
+ * and argument names are whatever the minifier chose on the day. A literal
+ * could only ever match one build.
+ *
+ * What is stable is the SHAPE -- the `kind===\`session\`` guard, a call, and
+ * the capability being read off it -- so that is what these match. The throw
+ * below is unchanged and is still what keeps this honest: if the pattern ever
+ * stops matching, the script fails rather than quietly photographing a pane
+ * with no control in it.
+ */
+const TERMINAL = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.terminal/g;
+const DELIVERS = /[\w$]+\.kind===`session`&&[\w$]+\([^()]*\)\.capabilities\.deliverPrompt/g;
+const has = (body, pattern) => {
+  pattern.lastIndex = 0;
+  return pattern.test(body);
+};
 let patched = 0;
 await page.route('**/assets/*.js', async (route) => {
   const response = await route.fetch();
   const body = await response.text();
-  if (!body.includes(TERMINAL) && !body.includes(DELIVERS)) {
+  if (!has(body, TERMINAL) && !has(body, DELIVERS)) {
     await route.fulfill({ response, body });
     return;
   }
-  if (!body.includes(TERMINAL) || !body.includes(DELIVERS)) {
+  if (!has(body, TERMINAL) || !has(body, DELIVERS)) {
     throw new Error(
       `the bundle carries only one of the two capability expressions this harness forces ` +
-        `(terminal: ${body.includes(TERMINAL)}, deliverPrompt: ${body.includes(DELIVERS)})`,
+        `(terminal: ${has(body, TERMINAL)}, deliverPrompt: ${has(body, DELIVERS)})`,
     );
   }
   patched += 1;
   console.log('forced terminal and deliverPrompt in', route.request().url());
   await route.fulfill({
     response,
-    body: body.split(TERMINAL).join('!0').split(DELIVERS).join('!0'),
+    body: body.replace(TERMINAL, '!0').replace(DELIVERS, '!0'),
   });
 });
 
@@ -413,7 +435,7 @@ check(
 // ---------------------------------------------------------------------------
 // THE VERSIONS, ON THE RIGHT. Operator: "in the model picker, add the version
 // on the right as well." The values are `MODEL_CHOICES`' own, re-captured from
-// Claude Code 2.1.276 (see `model-command.ts` for the capture and its date);
+// Claude Code 2.1.280 (see `model-command.ts` for the capture and its date);
 // what is measured here is the two things a unit test cannot say -- that they
 // PAINT, and that they paint to the RIGHT of the name rather than merely after
 // it in the markup.
@@ -424,8 +446,8 @@ check(
   JSON.stringify(menu?.columns),
 );
 check(
-  'carrying the CLI’s own numbers — Fable 5.1 and Opus 5, not the other way round',
-  menu !== null && menu.columns.map((c) => c?.text).join(',') === 'Sonnet 5,5,5.1,5,4.5',
+  'carrying the CLI’s own numbers — Fable 5.1 and Opus 5.5, not the other way round',
+  menu !== null && menu.columns.map((c) => c?.text).join(',') === 'Sonnet 5,5,5.1,5.5,4.5',
   JSON.stringify(menu?.columns?.map((c) => `${c?.id}=${c?.text}`)),
 );
 check(
@@ -584,12 +606,12 @@ console.log(`  ${OWNED}: ${JSON.stringify(one)}`);
 console.log(`  ${OWNED} names: ${JSON.stringify(oneNames)}`);
 check(
   'the button wears the model the session is running, not the word "model"',
-  one.label === 'Opus 5',
+  one.label === 'Opus 5.5',
   JSON.stringify(one.label),
 );
 check(
   'and a screen reader is told the same name — the one Chromium computes',
-  oneNames.button.includes('Opus 5'),
+  oneNames.button.includes('Opus 5.5'),
   JSON.stringify(oneNames.button),
 );
 check(
@@ -680,7 +702,7 @@ const labelTip = await tipText();
 console.log(`  hover tip: ${JSON.stringify(labelTip)}`);
 check(
   'hovering the labelled button names the model it is running',
-  (labelTip ?? '').startsWith('running Opus 5 ·'),
+  (labelTip ?? '').startsWith('running Opus 5.5 ·'),
   JSON.stringify(labelTip),
 );
 // WHICH ROUTE COSTS THE OPERATOR THEIR DEFAULT: none of them, now, and the
@@ -952,12 +974,20 @@ check(
   narrow !== null && narrow.phone === false && narrow.rowWidth < 330,
   JSON.stringify({ phone: narrow?.phone, row: narrow?.rowWidth }),
 );
+// MEASURED AFTER CLAUDE CODE 2.1.280: `Opus 5.5` (eight characters) now
+// clips at this row width too, same as `Sonnet 4.5` below -- the two extra
+// characters `.5` added to a name this check used to find drawn whole. The
+// property this row exists to prove was never "short names never clip"; it
+// is "nothing bursts, whatever the name" (the check right after this one
+// says so explicitly), so what moved is which names count as short enough,
+// not the row's own behaviour. Re-asserting an unclipped `Opus 5.5` would be
+// demanding the old id's width out of the new one.
 check(
-  'a short name is drawn whole there, and nothing leaves the row',
-  narrow?.label === 'Opus 5' &&
-    narrow.clipped === false &&
+  'the real label clips safely at this width -- nothing bursts, whatever the name',
+  narrow?.label === 'Opus 5.5' &&
     narrow.outside.length === 0 &&
-    narrow.spill <= 0,
+    narrow.spill <= 0 &&
+    narrow.overflow <= 0,
   JSON.stringify(narrow),
 );
 

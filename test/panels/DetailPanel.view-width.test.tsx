@@ -61,7 +61,6 @@ const QUESTION: AgentQuestion = {
 const SESSION: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',
@@ -155,13 +154,16 @@ void ENTRY;
 void PROJECT;
 
 describe('the views one flag covers', () => {
-  it('is every tab except the Terminal, which caps itself, and Files, which is not in the ask', () => {
+  it('is Response and PRs: the Terminal caps itself, Files is not in the ask, Agents is two panes', () => {
     // The pin, stated once. Everything below derives from the predicate, so a
     // sixth tab cannot join the capped set by accident — and cannot escape it
     // by accident either.
-    expect(TABS.filter(narrowsAsProse)).toEqual(['Response', 'PRs', 'Agents']);
+    expect(TABS.filter(narrowsAsProse)).toEqual(['Response', 'PRs']);
     expect(narrowsAsProse('Terminal')).toBe(false);
     expect(narrowsAsProse('Files')).toBe(false);
+    // Operator, on the screenshot: "the Agents view in narrow mode also needs
+    // full width." It is a roster beside a detail, not a column of prose.
+    expect(narrowsAsProse('Agents')).toBe(false);
   });
 });
 
@@ -300,6 +302,19 @@ describe('with the flag on', () => {
     draw();
     layout(6.0079);
     expect(q<HTMLElement>('[data-composer-bar]')?.style.maxWidth ?? '').toBe('');
+  });
+
+  it('caps nothing while Agents is open — a roster beside a detail is not a column of prose', () => {
+    // The same opt-out the Terminal has, for the operator's stated reason,
+    // and the QUESTION CARD follows the body rather than the flag: a card
+    // still capped under a full-width navigator would be the "column on top
+    // of chrome" mismatch the operator rejected once already, inverted.
+    setActiveNarrowViews(true);
+    draw({}, [QUESTION]);
+    layout(6.0079);
+    open('Agents');
+    expect(body().style.maxWidth).toBe('');
+    expect(q<HTMLElement>('[data-question-bar]')?.style.maxWidth ?? '').toBe('');
   });
 
   it('caps nothing while the Terminal is open — that tab measures in columns, not pixels', () => {

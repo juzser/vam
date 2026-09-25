@@ -43,6 +43,7 @@ const inner = {
     pullRequests: false,
     terminal: false,
     agentRoster: false,
+    resumeSession: false,
   },
   declines: {},
   viewerScope: { kind: 'connection', note: 'one local process' },
@@ -52,6 +53,23 @@ const inner = {
 
 const cell = () => document.querySelector('[data-source]') as HTMLElement;
 const dot = () => cell().firstElementChild as HTMLElement;
+
+/**
+ * What the cell PAINTS, which is no longer the same as what it says.
+ *
+ * `textContent` cannot answer "is the name on the bar" any more: the healthy
+ * arm keeps the source names in `sr-only` text so a screen reader still has
+ * them, and `sr-only` text is in `textContent` like any other. A check written
+ * against `textContent` would have gone on passing while the joined label came
+ * back on screen -- which is exactly the regression the operator asked to be
+ * rid of. So the sr-only nodes are removed from a clone and what is left is
+ * what an eye gets.
+ */
+const painted = () => {
+  const clone = cell().cloneNode(true) as HTMLElement;
+  for (const hidden of clone.querySelectorAll('.sr-only')) hidden.remove();
+  return (clone.textContent ?? '').trim();
+};
 
 beforeAll(() => {
   globalThis.ResizeObserver ??= class {
@@ -71,11 +89,51 @@ afterEach(() => {
 });
 
 describe('the source cell', () => {
-  it('reads green with the source name while the source is answering', () => {
-    const source: CanvasSource = { kind: 'session', source: inner, onWrote: () => {} };
+  /**
+   * THE HEALTHY ARM STOPPED SPENDING THE BAR ON NAMES (operator: "status bar
+   * — show only the provider of the session that is open, not Claude Code +
+   * Codex"). With two desktop sources registered, `combine.ts` joins their
+   * labels with " + " and that string was the whole of this cell's resting
+   * state: it named every source vam is connected to, on every frame, while
+   * the `SourceGlyph` two cells along already says which one the FOCUSED
+   * session came from -- and says it better, because it answers the question
+   * an operator actually has.
+   *
+   * The cell is not deleted and its job is unchanged. What it must still do,
+   * and what these three assertions are, is: report health, keep the names
+   * reachable rather than destroying them, and stay readable without hue.
+   */
+  it('reports health without spending the bar on the joined source names', () => {
+    const joined = { ...inner, label: 'Claude Code + Codex' } as SessionSource;
+    const source: CanvasSource = { kind: 'session', source: joined, onWrote: () => {} };
     render(<Canvas model={MODEL} source={source} />);
-    expect(cell().textContent).toContain('Claude Code');
+    // NOTHING PAINTED BUT THE MARK. `painted()` and not `textContent`, for the
+    // reason written above it.
+    expect(painted()).not.toContain('Claude Code');
+    expect(painted()).not.toContain('+');
+    expect(painted()).toBe('●');
     expect(dot().className).toContain('text-done');
+  });
+
+  it('keeps the names reachable — in the accessible name and in the tooltip', () => {
+    const joined = { ...inner, label: 'Claude Code + Codex' } as SessionSource;
+    render(
+      <Canvas model={MODEL} source={{ kind: 'session', source: joined, onWrote: () => {} }} />,
+    );
+    // The answer to "which sources am I connected to" is still in the DOM for
+    // a screen reader, and on the tooltip `Note` puts on the trigger for a
+    // pointer or a keyboard. Both, because neither alone serves everyone.
+    expect(cell().textContent).toContain('Claude Code + Codex');
+    expect(cell().querySelector('.sr-only')?.textContent).toContain('Claude Code + Codex');
+    expect(dot().getAttribute('data-note')).toContain('Claude Code + Codex');
+  });
+
+  it('says "connected" in words, so the green dot is not the only signal', () => {
+    // WCAG 1.4.1. A bare coloured dot is a claim made in hue alone; the word
+    // is what carries it for a reader who receives no hue. `status-mark.tsx`
+    // is the standing reference for this rule in this codebase.
+    render(<Canvas model={MODEL} source={{ kind: 'session', source: inner, onWrote: () => {} }} />);
+    expect(cell().querySelector('.sr-only')?.textContent).toMatch(/connected/i);
   });
 
   it('does not draw green while the source is in error, and says what failed', () => {

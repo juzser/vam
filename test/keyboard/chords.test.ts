@@ -196,7 +196,9 @@ describe('every old binding still resolves the same way (AC-5b)', () => {
     // further down. The rest of this sweep is unchanged.
     expect(type(['Mod-Shift-h']).actions).toEqual([{ kind: 'focusList' }]);
     expect(type(['r']).actions).toEqual([{ kind: 'rename' }]);
-    expect(type(['s']).actions).toEqual([{ kind: 'icon' }]);
+    // `s` is not here: it held `icon` until session icons were removed, and
+    // the freed key was deliberately left free rather than reassigned. The
+    // case below pins that it stays unbound.
     expect(type(['x']).actions).toEqual([{ kind: 'close' }]);
     expect(type(['o']).actions).toEqual([{ kind: 'newSession' }]);
     expect(type([',']).actions).toEqual([{ kind: 'settings' }]);
@@ -269,10 +271,12 @@ describe('split-pane chords (A15.1) — zs/zv/zc/zw/zW', () => {
   });
 
   it('the bare letters s, v, c, w and W stay unbound at the top level', () => {
-    // Splitting lives entirely under the `z` prefix — a bare `s` must keep
-    // meaning `icon` (SINGLE), and `v`/`c`/`w`/`W` must keep meaning nothing,
-    // exactly as before this change.
-    expect(type(['s']).actions).toEqual([{ kind: 'icon' }]);
+    // Splitting lives entirely under the `z` prefix, so none of these may
+    // acquire a meaning at the top level. `s` is in this list twice over now:
+    // it was the one letter here that DID mean something (`icon`), and when
+    // session icons were removed the key was left free on purpose rather than
+    // handed to the next thing that wanted a letter.
+    expect(type(['s']).actions).toEqual([]);
     expect(type(['v']).actions).toEqual([]);
     expect(type(['c']).actions).toEqual([]);
     expect(type(['w']).actions).toEqual([]);

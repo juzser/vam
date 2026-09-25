@@ -28,7 +28,6 @@ function session(id: string, over: Partial<Session> = {}): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -77,6 +76,7 @@ function sessionSourceWith(closeSession?: (sessionId: string, force?: boolean) =
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: closeSession === undefined ? { closeSession: 'no verb for it' } : {},
     viewerScope: { kind: 'connection', note: 'one local process' },

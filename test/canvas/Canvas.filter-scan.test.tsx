@@ -46,7 +46,6 @@ function session(id: string, title: string): Session {
   return {
     id,
     title,
-    icon: null,
     epic: null,
     branch: 'main',
     status: 'running',

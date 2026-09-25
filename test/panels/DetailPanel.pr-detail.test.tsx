@@ -23,7 +23,7 @@
 
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Decision, Project, Session } from '../../src/renderer/domain/model.js';
+import type { Decision, Project, PullRequest, Session } from '../../src/renderer/domain/model.js';
 import {
   DetailPanel,
   type DetailPanelProps,
@@ -44,7 +44,6 @@ const DECISION: Decision = {
 const BASE: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: 'feature/atlas',
   status: 'waiting',
@@ -173,10 +172,9 @@ describe('the information a row carries', () => {
     expect(branches.indexOf('smith/atlas/tab-shell')).toBeLessThan(branches.indexOf('main'));
   });
 
-  it('shows the author, the review decision, the labels and when it last moved', () => {
+  it('shows the author, the labels and when it last moved', () => {
     draw(list(FULL));
     expect(q('[data-pr-author]')?.textContent).toContain('juzser');
-    expect(q('[data-pr-review]')?.textContent?.toLowerCase()).toContain('approved');
     expect(all('[data-pr-label]').map((el) => el.textContent)).toEqual([
       'enhancement',
       'needs review',
@@ -186,12 +184,91 @@ describe('the information a row carries', () => {
     expect(q('[data-pr-updated]')?.textContent).not.toContain('T');
   });
 
+  /**
+   * THE REVIEW DECISION IS NOT A PAINTED WORD ANY MORE, and this is the test
+   * that says where it went rather than letting it disappear.
+   *
+   * `review required` is GitHub's default for every open pull request with a
+   * reviewer requested: it is implied by `open`, it never changes a decision,
+   * and it was the field doing most of the wrapping in the rail. `approved`
+   * says what `open` + `checks pass` already says. So the rail draws ONE word
+   * -- the most severe live blocker -- and both review words move to the row
+   * control's accessible name, where they cost no pixels and no `innerText`.
+   */
+  it('keeps the review decision in the row’s accessible sentence, not on the rail', () => {
+    draw(list(FULL));
+    expect(q('[data-pr-review]')).toBeNull();
+    expect(q('[data-pr-verdict]')?.textContent).toBe('checks pass');
+    expect(q('[data-pr-open]')?.getAttribute('aria-label')).toContain('approved');
+
+    cleanup();
+    draw(list(makePullRequest({ ...FULL, review: 'review-required' })));
+    expect(q('[data-pr-verdict]')?.textContent).toBe('checks pass');
+    expect(q('[data-pr-open]')?.getAttribute('aria-label')).toContain('review required');
+    expect(q('[data-prs]')?.textContent ?? '').not.toContain('review required');
+  });
+
+  /**
+   * THE LADDER ORDERS, IT DOES NOT CONCATENATE. One slot, one word, and the
+   * word is the blocker that is in the way next -- which is only a testable
+   * claim on a row that has SEVERAL things wrong with it at once.
+   */
+  it('draws the most severe live blocker and only that one', () => {
+    const cases: readonly (readonly [Partial<PullRequest>, string])[] = [
+      // Everything wrong at once: the conflict is the one that stops a merge.
+      [{ mergeable: 'conflicting', review: 'changes-requested', checks: 'failing' }, 'conflicts'],
+      // No conflict, so the review outranks the checks below it.
+      [
+        { mergeable: 'mergeable', review: 'changes-requested', checks: 'failing' },
+        'changes requested',
+      ],
+      [{ review: 'review-required', checks: 'failing' }, 'checks fail'],
+      [{ review: 'approved', checks: 'pending' }, 'checks running'],
+      [{ review: 'approved', checks: 'passing' }, 'checks pass'],
+      [{ checks: 'none' }, 'no checks'],
+    ];
+    for (const [over, word] of cases) {
+      cleanup();
+      draw(list(makePullRequest({ ...FULL, ...over })));
+      expect(all('[data-pr-verdict]'), JSON.stringify(over)).toHaveLength(1);
+      expect(q('[data-pr-verdict]')?.textContent, JSON.stringify(over)).toBe(word);
+    }
+  });
+
   it('keeps the check status exactly as it was', () => {
     draw(list(FULL));
     expect(q('[data-pr-row]')?.getAttribute('data-pr-checks')).toBe('passing');
     expect(q('[data-pr-checks-mark]')).not.toBeNull();
     expect(q('[data-pr-state-label]')?.textContent).toBe('open');
     expect(q('[data-pr-number]')?.textContent).toBe('#411');
+  });
+
+  /**
+   * THE MARK IS A SHAPE, AND `none` IS NO LONGER INVISIBLE.
+   *
+   * It was four 6px discs differing only in hue -- the thing `status-mark.tsx`
+   * exists to forbid -- and one of the four could not be seen at all:
+   * `bg-line-strong` on `bg-card` measures 1.713:1 in dark and 1.457:1 in
+   * light against WCAG 1.4.11's 3:1 for a non-text mark. The CONTRAST is
+   * measured as paint in `e2e/prs-tab-shots.mjs`, which is the only place it
+   * can be; what is answerable here is that the mark is a glyph, that the four
+   * verdicts do not draw the same one, and that no background is carrying the
+   * meaning any more.
+   */
+  it('draws the checks verdict as a glyph rather than a coloured disc', () => {
+    const marks = new Map<string, string>();
+    for (const checks of ['passing', 'failing', 'pending', 'none'] as const) {
+      cleanup();
+      draw(list(makePullRequest({ ...FULL, checks })));
+      const mark = q('[data-pr-checks-mark]');
+      expect(mark, checks).not.toBeNull();
+      expect(mark?.querySelector('svg'), checks).not.toBeNull();
+      // The ink is a `color`, not a fill: a `bg-*` here would be the disc back.
+      expect(mark?.className ?? '', checks).not.toContain('bg-');
+      marks.set(checks, mark?.innerHTML ?? '');
+    }
+    // Four verdicts, four different shapes -- not one shape recoloured.
+    expect(new Set(marks.values()).size).toBe(4);
   });
 
   /**
@@ -206,19 +283,26 @@ describe('the information a row carries', () => {
     for (const selector of [
       '[data-pr-additions]',
       '[data-pr-deletions]',
+      '[data-pr-diff]',
       '[data-pr-files]',
       '[data-pr-branches]',
       '[data-pr-author]',
-      '[data-pr-review]',
       '[data-pr-updated]',
       '[data-pr-label]',
     ]) {
       expect(q(selector), selector).toBeNull();
     }
+    // THE TWO THAT ARE ALWAYS DRAWN, and it is not an exception to the rule
+    // above: neither is a field gh may decline to answer. A state is a state,
+    // and the verdict's own bottom rung is `no checks`, which is the answer
+    // for a repository that runs none.
+    expect(q('[data-pr-state-label]')?.textContent).toBe('open');
+    expect(q('[data-pr-verdict]')?.textContent).toBe('no checks');
     // A zero is NOT an absence: a pull request that only deletes still says so.
     cleanup();
     draw(list(makePullRequest({ number: 8, title: 'deletions only', additions: 0, deletions: 4 })));
     expect(q('[data-pr-additions]')?.textContent).toContain('0');
+    expect(q('[data-pr-diff]')?.textContent).toContain('+0');
   });
 });
 
@@ -486,6 +570,13 @@ describe('the two sides of a row', () => {
       '[data-pr-branches]',
       '[data-pr-author]',
       '[data-pr-label]',
+      // THE AGE CROSSED THE SEAM, and it is on this list rather than the one
+      // below because of what it IS: a fact about the row, not a magnitude of
+      // the diff. It was the third quantity on the rail's number line, sharing
+      // one size and one gap with `+6269 −317` and `76 files`; it now sits
+      // where `SessionList.tsx` already puts an age, at the end of the meta
+      // line, after a `·`.
+      '[data-pr-updated]',
     ]) {
       expect(inSide('identity', selector), selector).toBe(true);
       expect(inSide('status', selector), `${selector} must not be on the right`).toBe(false);
@@ -496,18 +587,22 @@ describe('the two sides of a row', () => {
     draw(list(makePullRequest({ ...FULL, mergeable: 'conflicting' })));
     for (const selector of [
       '[data-pr-state-label]',
-      '[data-pr-checks-label]',
+      // `[data-pr-checks-label]`, `[data-pr-review]` and `[data-pr-mergeable]`
+      // were three of the four words this line used to name. They are one slot
+      // now: `[data-pr-verdict]` draws the most severe live blocker and
+      // nothing else -- `conflicts` on this very row, which is what the
+      // `mergeable: 'conflicting'` override above is here to produce.
+      '[data-pr-verdict]',
+      '[data-pr-diff]',
       '[data-pr-additions]',
       '[data-pr-deletions]',
       '[data-pr-files]',
-      '[data-pr-review]',
-      '[data-pr-mergeable]',
-      '[data-pr-updated]',
       '[data-pr-merge]',
     ]) {
       expect(inSide('status', selector), selector).toBe(true);
       expect(inSide('identity', selector), `${selector} must not be on the left`).toBe(false);
     }
+    expect(q('[data-pr-verdict]')?.textContent).toBe('conflicts');
   });
 
   /**

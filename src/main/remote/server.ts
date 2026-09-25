@@ -38,6 +38,7 @@ import type { SourceDescriptor } from '../../shared/preload-api.js';
 import type { SourceError } from '../ipc/channels.js';
 import { isDirectoryPath, isOptionalText, isPromptText, isText } from '../ipc/validators.js';
 import { projectIdOf } from '../sources/claude-code/project-id.js';
+import { combineSources } from '../sources/combine.js';
 import type { MainSource } from '../sources/source.js';
 import { serveAsset } from './assets.js';
 import {
@@ -88,7 +89,14 @@ export type RemoteServerOptions = {
    */
   readonly pairedDevices?: () => readonly PairedDevice[];
   readonly allowWrites: boolean;
-  readonly source: MainSource;
+  /**
+   * THE SOURCES THIS SERVER SERVES, as a list -- one of the three places main
+   * held exactly one before `docs/design/a-second-source.md` Stage 0. Folded
+   * into the single object every route below reads by `combineSources`, which
+   * returns a list of one BY REFERENCE, so a single-source server is
+   * unchanged.
+   */
+  readonly sources: readonly MainSource[];
   readonly subscribe: (onChange: () => void) => () => void;
   /** One line per write that reached a source. Defaults to the process log. */
   readonly audit?: (line: string) => void;
@@ -200,7 +208,8 @@ function isProjectMatch(
 
 /**
  * `/api/create-session-in`'s guard: confines the route to a `cwd` that
- * canonicalises to a project id `options.source.load()` already lists, and
+ * canonicalises to a project id the combined source's own `load()` already
+ * lists, and
  * hands back that id rather than the caller's path -- see the `write()`
  * `guard` parameter this feeds.
  *
@@ -337,6 +346,7 @@ function readBody(request: IncomingMessage): Promise<Record<string, unknown> | n
  */
 function write(
   options: RemoteServerOptions,
+  source: MainSource,
   name: string,
   valid: (body: Record<string, unknown>) => boolean,
   call: (
@@ -360,7 +370,7 @@ function write(
     }
     let projectId: string | undefined;
     if (guard !== undefined) {
-      const outcome = await guard(options.source, body);
+      const outcome = await guard(source, body);
       if (!isProjectMatch(outcome)) {
         audit(`remote write ${name} refused for ${identity.name} (${identity.deviceId})`);
         send(response, 403, { ok: false, error: outcome });
@@ -368,7 +378,7 @@ function write(
       }
       projectId = outcome.projectId;
     }
-    const performed = call(options.source, body, projectId);
+    const performed = call(source, body, projectId);
     if (performed === null) {
       send(response, 200, {
         ok: false,
@@ -439,6 +449,7 @@ const WRITE_CAPABILITIES = [
   'deliverPrompt',
   'closeSession',
   'createSession',
+  'resumeSession',
 ] as const;
 
 /**
@@ -494,6 +505,18 @@ export function servedDescriptor(
  * extension -- the "looks static" rule this shape exists to avoid. The cost is
  * a missing tab icon before pairing.
  *
+ * `/icon.svg` IS named, individually, the same way `/index.html` is -- not by
+ * extension, which is the exact widening the paragraph above refuses. The
+ * favicon's cost is bearable because the browser fetches it itself, before any
+ * script of vam's has run, so no token could ever reach it either way.
+ * `icon.svg` is different: it is read by `GettingStarted.tsx`'s own `<img>`,
+ * INSIDE the authenticated app, on the screen a freshly-paired phone is most
+ * likely to be looking at, and an `<img src>` carries no bearer header this
+ * server could check even after pairing. Left off the shape it is not
+ * "missing before pairing" the way the favicon is, it is broken every time,
+ * on every browser -- see `the served root` in `phone-shell.test.ts` for the
+ * fixture that holds this the same way it holds `favicon.png`'s exclusion.
+ *
  * The first character must be alphanumeric, so `/assets/..` and `/assets/.env`
  * cannot match, and there is no second slash, so nothing nests. `serveAsset`
  * refuses to leave the root independently of this: two guards, neither relying
@@ -502,7 +525,9 @@ export function servedDescriptor(
 const APP_SHELL_ASSET = /^\/assets\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function isAppShellPath(path: string): boolean {
-  return path === '/' || path === '/index.html' || APP_SHELL_ASSET.test(path);
+  return (
+    path === '/' || path === '/index.html' || path === '/icon.svg' || APP_SHELL_ASSET.test(path)
+  );
 }
 
 /**
@@ -515,6 +540,12 @@ export function registeredRoutePaths(options: RemoteServerOptions): readonly str
 }
 
 function routesFor(options: RemoteServerOptions): Map<string, { method: string; route: Route }> {
+  // ONE COMBINATION FOR THE LIFE OF THIS ROUTE TABLE, never one per request:
+  // `combineSources` learns which source owns which session from `load()`, and
+  // a fresh combination per call would have forgotten that by the time a write
+  // arrived. A list of one is its member by reference, so a single-source
+  // server holds exactly the object it held before.
+  const source = combineSources(options.sources);
   const table = new Map<string, { method: string; route: Route }>();
   const read = (path: string, produce: () => Promise<unknown>): void => {
     table.set(path, {
@@ -525,10 +556,8 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     });
   };
 
-  read('/api/describe', async () =>
-    servedDescriptor(options.source.descriptor, options.allowWrites),
-  );
-  read('/api/load', async () => await options.source.load());
+  read('/api/describe', async () => servedDescriptor(source.descriptor, options.allowWrites));
+  read('/api/load', async () => await source.load());
 
   /**
    * THE PAIRED DEVICES, FOR A PHONE THAT HAS NO BRIDGE TO ASK.
@@ -591,7 +620,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
         });
         return;
       }
-      const read = options.source.readHistory;
+      const read = source.readHistory;
       if (read === undefined) {
         send(response, 200, {
           ok: true,
@@ -636,7 +665,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
         });
         return;
       }
-      const read = options.source.readAgentWork;
+      const read = source.readAgentWork;
       if (read === undefined) {
         send(response, 200, {
           ok: true,
@@ -690,6 +719,17 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
       undefined,
     ],
     [
+      // The phone gets this for the same reason it gets `close-session`: a
+      // session that ended while the operator was away from the desk is
+      // exactly the one they want back, and the refusals that matter are
+      // enforced in the source rather than by which caller asked.
+      '/api/resume-session',
+      'resumeSession',
+      (b) => isText(b.sessionId),
+      (s, b) => s.resumeSession?.(b.sessionId as string) ?? null,
+      undefined,
+    ],
+    [
       '/api/close-session',
       'closeSession',
       (b) => isText(b.sessionId) && (b.force === undefined || typeof b.force === 'boolean'),
@@ -725,7 +765,7 @@ function routesFor(options: RemoteServerOptions): Map<string, { method: string; 
     ],
   ];
   for (const [path, name, valid, call, guard] of writes) {
-    table.set(path, { method: 'POST', route: write(options, name, valid, call, guard) });
+    table.set(path, { method: 'POST', route: write(options, source, name, valid, call, guard) });
   }
   return table;
 }

@@ -261,6 +261,7 @@ describe('the close-session channel, once the source can actually stop one', () 
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {},
     viewerScope: { kind: 'connection' as const, note: 'test' },
@@ -268,7 +269,7 @@ describe('the close-session channel, once the source can actually stop one', () 
 
   const wire = (source: MainSource) => {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
-    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, source);
+    registerSourceIpc({ handle: (c, l) => void handlers.set(c, l) }, [source]);
     return (...args: unknown[]) => handlers.get(CHANNELS.closeSession)?.({}, ...args);
   };
 
@@ -400,6 +401,26 @@ describe('closing a session vam itself started', () => {
     const { calls, run } = runner();
     const error = await stopSession(
       [owned, twin],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(error?.code).toBe('pane-unresolved');
+    expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+  });
+
+  it('D1: refuses the iTerm+Codex scenario -- Close does not kill a pane proven to run Codex', async () => {
+    // `owned` is alone in its project (`here.length === 1`), and the one vam
+    // pane tagged for that project is running Codex, tagged with the
+    // thread's own uuid -- `paneForRow`'s fallback must refuse it, and Close
+    // must never reach `kill-session` for a program it never proved was this
+    // row's own.
+    const { calls, run } = runner(
+      ok,
+      listing(`${projectIdOf('/w/alpha')}\t\t${OWNED}\tcodex\tcodex-thread-11111111`),
+    );
+    const error = await stopSession(
+      [owned],
       'sess-9#12',
       vi.fn(async () => null),
       run,

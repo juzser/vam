@@ -97,7 +97,7 @@ async function start(over: Partial<RemoteServerOptions> = {}): Promise<string> {
     port: 0,
     devices: directory(),
     allowWrites: true,
-    source,
+    sources: [source],
     subscribe: () => () => {},
     audit: () => {},
     ...over,
@@ -265,7 +265,7 @@ describe('the server, end to end', () => {
       port: 0,
       devices: directory(),
       allowWrites: true,
-      source,
+      sources: [source],
       subscribe: () => () => {},
     });
     expect(paths).toContain('/api/stream');

@@ -9,6 +9,7 @@
  * is `reader.ts`'s `readUsage`, which never returns or throws a token.
  */
 
+import type { CodexUsageSnapshot } from '../../shared/codex-usage.js';
 import type { UsageSnapshot } from '../../shared/usage.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
@@ -30,15 +31,26 @@ import type { IpcMainLike } from '../ipc/handlers.js';
  */
 export const MIN_READ_INTERVAL_MS = 30_000;
 
-export function registerUsageIpc(
+/**
+ * The cache-and-throttle machinery both channels below share: at most one
+ * real read per `MIN_READ_INTERVAL_MS`, concurrent callers during a read
+ * joining the one already in flight rather than starting their own, and a
+ * `getSnapshot` that throws answering `unavailable` rather than rejecting the
+ * channel. Generic over the snapshot type so Claude's and Codex's caches are
+ * two independent instances -- one channel's floor never consumes the
+ * other's -- with the throttling logic itself written once.
+ */
+function registerCachedRead<T>(
   ipcMain: IpcMainLike,
-  getSnapshot: () => Promise<UsageSnapshot>,
-  now: () => number = Date.now,
+  channel: string,
+  getSnapshot: () => Promise<T>,
+  unavailable: T,
+  now: () => number,
 ): void {
-  let last: { at: number; snapshot: UsageSnapshot } | null = null;
-  let inFlight: Promise<UsageSnapshot> | null = null;
+  let last: { at: number; snapshot: T } | null = null;
+  let inFlight: Promise<T> | null = null;
 
-  ipcMain.handle(CHANNELS.usageGet, async (): Promise<UsageSnapshot> => {
+  ipcMain.handle(channel, async (): Promise<T> => {
     if (last !== null && now() - last.at < MIN_READ_INTERVAL_MS) {
       return last.snapshot;
     }
@@ -48,23 +60,58 @@ export function registerUsageIpc(
       return inFlight;
     }
     inFlight = (async () => {
-      let snapshot: UsageSnapshot;
+      let snapshot: T;
       try {
         snapshot = await getSnapshot();
       } catch {
-        // `readUsage` already turns every ordinary failure into a value; a
+        // The reader already turns every ordinary failure into a value; a
         // throw here would be the one case neither it nor this handler
         // anticipated, and 'unavailable' is the honest reason for that.
-        snapshot = { kind: 'unknown', reason: 'unavailable' };
+        snapshot = unavailable;
       }
       // Recorded whatever the outcome. A FAILING read must be throttled too:
-      // caching only successes would leave a permanently broken Keychain
-      // spawning a subprocess per call, which is the hole this closes rather
-      // than a smaller version of it.
+      // caching only successes would leave a permanently broken reader
+      // spawning a subprocess (or a filesystem scan) per call, which is the
+      // hole this closes rather than a smaller version of it.
       last = { at: now(), snapshot };
       inFlight = null;
       return snapshot;
     })();
     return inFlight;
   });
+}
+
+export function registerUsageIpc(
+  ipcMain: IpcMainLike,
+  getSnapshot: () => Promise<UsageSnapshot>,
+  now: () => number = Date.now,
+): void {
+  registerCachedRead(
+    ipcMain,
+    CHANNELS.usageGet,
+    getSnapshot,
+    { kind: 'unknown', reason: 'unavailable' },
+    now,
+  );
+}
+
+/**
+ * Codex's twin of `registerUsageIpc`, on its own channel and its own cache --
+ * see that function's doc for the shared reasoning. `getSnapshot` here is
+ * `readCodexUsage` (`usage/codex-reader.ts`), a filesystem scan rather than a
+ * network call, but the same floor applies for the same reason: the renderer
+ * must not be the thing that decides how often `~/.codex` is walked.
+ */
+export function registerCodexUsageIpc(
+  ipcMain: IpcMainLike,
+  getSnapshot: () => Promise<CodexUsageSnapshot>,
+  now: () => number = Date.now,
+): void {
+  registerCachedRead(
+    ipcMain,
+    CHANNELS.usageCodexGet,
+    getSnapshot,
+    { kind: 'unknown', reason: 'unavailable' },
+    now,
+  );
 }

@@ -375,6 +375,40 @@ await page.waitForTimeout(200);
 await typeInto(composer, '/');
 await page.waitForSelector('[data-slash-suggest]');
 await checkPlacement('[data-slash-suggest]', '/ in a short window', { composerMustFit: false });
+
+/**
+ * PINNED: THE SAME LIST, BESIDE A TALL PREVIEW PANEL, STILL AT 480px.
+ *
+ * `vam-preview-1` (`notes` project) is the session `QuestionCard`'s preview
+ * panel is measured against (`e2e/key-truth-shots.mjs`); its `Long poll`
+ * option carries a real multi-line diagram. A card showing that panel is
+ * taller than one that is not, which moves `data-composer-bar` -- and
+ * therefore this layer's `bottom-full` anchor -- further down the window
+ * than the plain `vam-build-1` case above ever did. This is the regression
+ * `e2e/prompt-suggest-shots.mjs` first caught (`popoverTop: -18` at this same
+ * 480px before `SUGGEST_BOX` learned to clamp and scroll itself -- see that
+ * constant's own comment) reproduced on purpose, so it cannot come back
+ * silently: still at 480px, the CARD stays exactly as tall as it can be
+ * (the diagram focused, not the fallback's one-line default) and the
+ * popover's own rect is checked the identical way.
+ */
+const preview = await openComposer('vam-preview-1');
+await page.locator('[data-question-option]').nth(1).focus();
+await page.waitForFunction(
+  () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+);
+await typeInto(preview, '/');
+await page.waitForSelector('[data-slash-suggest]');
+await checkPlacement('[data-slash-suggest]', '/ beside a tall preview panel, in a short window', {
+  composerMustFit: false,
+});
+await page.screenshot({ path: `${outDir}/slash-typeahead-beside-preview-panel.png` });
+console.log(`${outDir}/slash-typeahead-beside-preview-panel.png`);
+
+// BACK TO `vam-build-1`, whose own `composer` (captured above, a Locator --
+// re-queried fresh, not a snapshot) is what every check below this line
+// still names.
+await openComposer('vam-build-1');
 await page.setViewportSize({ width: 1280, height: 800 });
 await page.waitForTimeout(200);
 await typeInto(composer, '/');

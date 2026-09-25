@@ -15,7 +15,6 @@ function session(origin?: SessionOrigin): Session {
   return {
     id: 's',
     title: 's',
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',

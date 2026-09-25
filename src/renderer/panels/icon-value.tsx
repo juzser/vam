@@ -40,11 +40,10 @@
  *
  * ## Why the tone lives INSIDE the value instead of beside it
  *
- * A colour resolves down the same chain as the glyph (`session-icon.tsx`): the
- * session's own, else the project's, else a default. The cheap way to build
- * that is a second field with a second chain — and a second chain is how a
- * session showing its PROJECT's emoji ends up wearing its own stored tone,
- * which is a combination nobody ever chose and which cannot even be drawn.
+ * A colour would resolve wherever a glyph resolves, and the cheap way to build
+ * that is a second field with a second chain — which is how a surface showing
+ * one source's emoji ends up wearing another's stored tone, a combination
+ * nobody ever chose and which cannot even be drawn (an emoji ignores `color`).
  * Carrying the tone inside the value makes the two questions one question:
  * whatever link of the chain answers, answers with both halves at once.
  *
@@ -279,11 +278,11 @@ export function describeIcon(stored: string): string {
 /**
  * An icon, drawn — and the one place either kind turns into pixels.
  *
- * `fallback` is the CALLER'S placeholder rather than one chosen here, for the
- * reason `SessionIcon`'s `size` is a parameter: the three call sites end the
- * chain differently on purpose (a project draws `Monitor`, a group draws
- * `Folder`, a tab draws nothing at all), and that is a fact about each surface,
- * not about what an icon is.
+ * `fallback` is the CALLER'S placeholder rather than one chosen here, and
+ * `size` is a parameter for the same reason: the call sites end differently on
+ * purpose (a project draws `Monitor`, a group draws `Folder`), and how a
+ * surface says "nobody picked one" is a fact about that surface, not about
+ * what an icon is.
  *
  * AN EMOJI IS RETURNED AS BARE TEXT, with no element around it. Every existing
  * caller puts it inside its own span and lays that span out; wrapping it here

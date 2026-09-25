@@ -202,6 +202,90 @@ describe('replyToSession', () => {
     expect(calls.filter((argv) => argv[0] === 'send-keys')).toHaveLength(2);
   });
 
+  it('presses Enter again when Claude Code 2.1.280 opens an invisible-character review gate', async () => {
+    // MEASURED on a real `claude` 2.1.280 over a private tmux socket: typing a
+    // prompt carrying a zero-width space and pressing Enter once does NOT
+    // submit it. The pane repaints with the cleaned text still sitting in the
+    // input box and a footer hint reading "Removed 1 invisible character ·
+    // review and press Enter to send" -- a second Enter is what actually
+    // sends it. A reply carrying such a character must press twice, or the
+    // words sit unsent while vam reports success.
+    const project = projectIdOf(CWD);
+    let captures = 0;
+    const calls: string[][] = [];
+    const run: TmuxRun = async (argv) => {
+      calls.push([...argv]);
+      if (argv[0] === 'list-sessions') return ok(`${project}\t\t${PANE}\n`);
+      if (argv[0] === 'display-message') {
+        captures += 1;
+        return ok('❯ probecheck\nRemoved 1 invisible character · review and press Enter to send\n');
+      }
+      return ok();
+    };
+    const error = await replyToSession({
+      agents,
+      rowId: `${SESSION}#7`,
+      prompt: 'probe​check',
+      run,
+    });
+
+    expect(error).toBeNull();
+    expect(calls.filter((argv) => argv[0] === 'send-keys')).toEqual([
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'probe​check'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+    ]);
+    // The gate is read once, not polled: the CLI's own screen says whether a
+    // second Enter is needed, so nothing here guesses from the prompt text.
+    expect(captures).toBe(1);
+  });
+
+  it('does not press a second Enter when the pane shows no review gate', async () => {
+    // The common case, pinned so the check above cannot regress into pressing
+    // Enter twice on every ordinary reply.
+    const tmux = fakeTmux(`${projectIdOf(CWD)}\t\t${PANE}\n`);
+    const error = await replyToSession({
+      agents,
+      rowId: `${SESSION}#7`,
+      prompt: 'ship it',
+      run: tmux.run,
+    });
+
+    expect(error).toBeNull();
+    expect(tmux.sent()).toEqual([
+      ['send-keys', '-t', `=${PANE}:`, '-l', '--', 'ship it'],
+      ['send-keys', '-t', `=${PANE}:`, 'Enter'],
+    ]);
+  });
+
+  it('reports a tmux that could not press the second Enter to clear the review gate', async () => {
+    const project = projectIdOf(CWD);
+    let entersSent = 0;
+    const run: TmuxRun = async (argv) => {
+      if (argv[0] === 'list-sessions') return ok(`${project}\t\t${PANE}\n`);
+      if (argv[0] === 'display-message') {
+        return ok('review and press Enter to send\n');
+      }
+      if (isBareEnter([...argv])) {
+        entersSent += 1;
+        if (entersSent === 2) {
+          return { failure: { message: 'exit 1', code: 1 }, stdout: '', stderr: 'boom' };
+        }
+      }
+      return ok();
+    };
+    const error = await replyToSession({
+      agents,
+      rowId: `${SESSION}#7`,
+      prompt: 'probe​check',
+      run,
+    });
+
+    expect(error).not.toBeNull();
+    expect(error?.message).toMatch(/review/i);
+    expect(entersSent).toBe(2);
+  });
+
   it('refuses when tmux cannot be asked at all, without claiming a delivery', async () => {
     const tmux = fakeTmux('', {
       'list-sessions': {
@@ -246,6 +330,24 @@ describe('replyToSession with published panes', () => {
       ['send-keys', '-t', '=vam-atlas-cc22dd:', '-l', '--', 'ship it'],
       ['send-keys', '-t', '=vam-atlas-cc22dd:', 'Enter'],
     ]);
+  });
+
+  it('D1: refuses the iTerm+Codex scenario end-to-end -- Claude row, project pane already running Codex', async () => {
+    // The operator's own `claude`, running in iTerm and not under tmux at
+    // all (no published `tmux` field), shares a cwd with the one vam pane
+    // this project has -- and that pane is running Codex, tagged with the
+    // thread's own uuid. `replyToSession` must type nothing anywhere.
+    const project = projectIdOf(CWD);
+    const tmux = fakeTmux(`${project}\t\tvam-atlas-aa11bb\tcodex\tcodex-thread-11111111\n`);
+    const error = await replyToSession({
+      agents,
+      rowId: `${SESSION}#7`,
+      prompt: 'ship it',
+      run: tmux.run,
+    });
+
+    expect(tmux.sent()).toEqual([]);
+    expect(error?.code).toBe('no-terminal');
   });
 
   it('refuses the project-tag fallback when the only tagged pane was published by another row', async () => {

@@ -1,12 +1,18 @@
 /**
- * A SECOND, discriminating test for the argv the session-start path
- * builds (issue 166). `tmux-create-session.test.ts` covers the same code
- * (`create-session.ts`'s `spawnSessionIn`) honestly, but with `PROVIDERS`
- * (`src/shared/providers.ts`) at one row, "runs the chosen provider's
- * command" (an explicit `provider: 'claude-code'`) and "runs claude" (the
- * plain no-provider path elsewhere in that file) build the identical argv
- * either way -- neither can fail if `resolveProvider` were replaced with a
- * function that ignored its argument and always returned the default.
+ * A SECOND, discriminating test for the argv `create-session.ts` builds
+ * (issue 166) -- REPURPOSED for the fix that removed `createSessionInDirectory`'s
+ * own dispatch on `input.provider` entirely (the operator's second report:
+ * a start-session flow racing the getting-started screen, `create-session.ts`'s
+ * own header carries the full account). Before that fix this file proved
+ * `spawnSessionIn`'s caller actually read `input.provider` through
+ * `resolveProvider` rather than silently always running the default; there
+ * is no such read left in `create-session.ts` to prove ANYTHING about now --
+ * `createSessionInDirectory` types nothing, for any provider, exactly like
+ * `createSessionInProject` beside it always has. What this file still earns
+ * its keep proving: that remains true with a SECOND provider in the table
+ * too, so a regression that special-cased the two-row case (typing the
+ * NON-default entry while still leaving the one-row case alone) cannot pass
+ * `tmux-create-session.test.ts` alone, which only ever sees one row.
  *
  * A SEPARATE FILE, RATHER THAN EDITING THE ORIGINAL, for the reason
  * `prefs.provider-double.test.ts` gives: `vi.mock` here replaces the whole
@@ -14,14 +20,20 @@
  * one-entry table and its fallback are themselves correct -- the original
  * file keeps doing that. This file trades it away on purpose for a
  * two-entry table with a second, obviously fictitious provider
- * (`vam-test-second-provider`) whose command differs from the default's, so
- * a call that dispatches on `input.provider` and a call that ignores it stop
- * agreeing on what tmux runs.
+ * (`vam-test-second-provider`) whose command differs from the default's.
  *
- * DO NOT DELETE THIS ONCE A REAL SECOND PROVIDER SHIPS -- it tests that
- * `spawnSessionIn` actually reads `input.provider` through `resolveProvider`,
- * which does not become redundant just because the shipped table grows a
- * row.
+ * WHERE THE REAL DISPATCH LIVES NOW: the renderer's `startSessionIn`
+ * (`Canvas.tsx`) resolves the chosen id through this same table and sends
+ * the command as `recordPrompt`'s text -- main types verbatim what it is
+ * handed (`start-in-pane.ts`'s `typeIntoOwnPane`), with no id-to-command
+ * resolution of its own left to get wrong. `DetailPanel.provider-double.test.tsx`
+ * is the double for the PICKER that produces the id; nothing between the
+ * picker and `recordPrompt` resolves anything a discriminating double could
+ * catch failing.
+ *
+ * DO NOT DELETE THIS ONCE A REAL SECOND PROVIDER SHIPS, on the same rule the
+ * header above always gave: a real table makes it strictly better evidence,
+ * not redundant evidence.
  */
 
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -58,10 +70,12 @@ import {
   createSessionInProject,
 } from '../../src/main/sources/claude-code/create-session.js';
 import { projectIdOf } from '../../src/main/sources/claude-code/project-id.js';
+import { loginShellCommand } from '../../src/main/sources/tmux/shell.js';
 import type { TmuxRun } from '../../src/main/sources/tmux/spawn.js';
 import { DEFAULT_PROVIDER_ID, resolveProvider } from '../../src/shared/providers.js';
 
 const SECOND_PROVIDER_ID = 'vam-test-second-provider';
+const SECOND_PROVIDER_COMMAND = 'vam-test-second-provider-cmd';
 
 function recordingTmux(): TmuxRun & { calls: (readonly string[])[] } {
   const calls: (readonly string[])[] = [];
@@ -98,8 +112,8 @@ const agent = (cwd: string) => ({
   startedAt: null,
 });
 
-describe('the requested provider is what runs, not merely what the default already runs (issue 166)', () => {
-  it('runs the SECOND provider’s command when asked for it', async () => {
+describe('neither creation path runs the requested provider any more, even with a real choice to dispatch on', () => {
+  it('the chosen-directory path types NOTHING for the second provider -- a shell, exactly as for the default', async () => {
     const run = recordingTmux();
     const orchard = tempRepo();
     const failure = await createSessionInDirectory({
@@ -111,49 +125,62 @@ describe('the requested provider is what runs, not merely what the default alrea
     });
 
     expect(failure).toBeNull();
-    expect(run.calls[0]).toEqual([
-      'new-session',
-      '-d',
-      '-P',
-      '-F',
-      '#{pane_pid}',
-      '-s',
-      'vam-orchard-a1b2c3',
-      '-c',
-      orchard,
-      ...resolveProvider(SECOND_PROVIDER_ID).command,
+    // The spawn is a shell, and NOTHING follows it -- pinned by value so a
+    // regression that typed the second provider (while still leaving the
+    // default case alone) reddens here even though it would pass a
+    // one-row table.
+    expect(run.calls).toEqual([
+      [
+        'new-session',
+        '-d',
+        '-P',
+        '-F',
+        '#{pane_pid}',
+        '-s',
+        'vam-orchard-a1b2c3',
+        '-c',
+        orchard,
+        ...loginShellCommand(),
+      ],
+      ['set-option', '-t', 'vam-orchard-a1b2c3', '@vam-project', projectIdOf(orchard)],
     ]);
-    // The discriminator itself: the second provider's command is not the
-    // default's, so this assertion cannot be satisfied by a bug that always
-    // runs the default regardless of `input.provider`.
+    expect(run.calls.flat()).not.toContain(SECOND_PROVIDER_COMMAND);
+    // The discriminator itself, kept: the second provider's command really
+    // differs from the default's, so "nothing was typed" is not vacuously
+    // true because the two providers happen to agree.
     expect(resolveProvider(SECOND_PROVIDER_ID).command).not.toEqual(
       resolveProvider(DEFAULT_PROVIDER_ID).command,
     );
   });
 
-  it('still falls back to the default for an id nothing answers to', async () => {
+  it('still types nothing for an id nothing answers to', async () => {
     const run = recordingTmux();
-    const failure = await createSessionInProject({
+    const orchard = tempRepo();
+    const failure = await createSessionInDirectory({
+      cwd: orchard,
+      title: 'orchard',
+      run,
+      name: 'vam-orchard-a1b2c3',
+      provider: 'nonesuch',
+    });
+
+    expect(failure).toBeNull();
+    expect(run.calls).toHaveLength(2); // spawn + @vam-project, never a type
+    expect(run.calls.flat()).not.toContain(SECOND_PROVIDER_COMMAND);
+  });
+
+  it('is NOT what the project path runs either: a shell there, whichever provider is named', async () => {
+    const run = recordingTmux();
+    await createSessionInProject({
       agents: [agent('/w/demo')],
       projectId: projectIdOf('/w/demo'),
       title: 'new work',
       run,
       name: 'vam-new-work-a1b2c3',
-      provider: 'nonesuch',
+      provider: SECOND_PROVIDER_ID,
+      shell: ['/bin/zsh', '-l'],
     });
-
-    expect(failure).toBeNull();
-    expect(run.calls[0]).toEqual([
-      'new-session',
-      '-d',
-      '-P',
-      '-F',
-      '#{pane_pid}',
-      '-s',
-      'vam-new-work-a1b2c3',
-      '-c',
-      '/w/demo',
-      ...resolveProvider(DEFAULT_PROVIDER_ID).command,
-    ]);
+    expect(run.calls[0]?.slice(-2)).toEqual(['/bin/zsh', '-l']);
+    expect(run.calls.flat()).not.toContain(SECOND_PROVIDER_COMMAND);
   });
 });

@@ -3,16 +3,21 @@
  * which file is open per session, what each open file's in-memory text is,
  * and the load/open/edit/save/reload cycle that keeps it in step with disk.
  *
- * This is a MOVE, not a rewrite: every rule below -- the save/dirty logic,
- * the `changed-on-disk` conflict handling, the `not-found` "start a new
- * file" path -- reads exactly as it did inside `FilesTab`. See that file's
- * own header for the reasoning; this module only relocates the scope.
+ * This started as a MOVE, not a rewrite: the save/dirty logic, the
+ * `changed-on-disk` conflict handling, the `not-found` "start a new file"
+ * path all read exactly as they did inside `FilesTab`. See that file's own
+ * header for the reasoning; this module only relocated the scope. Save-time
+ * normalisation (`files-save-normalize.ts`) landed on `FilesTab` after this
+ * split and is folded in here rather than left behind in the component --
+ * see `saveFile`'s own comment for what it does and why `FilesTab.tsx`'s
+ * `onNormalizedBeforeSave` exists.
  */
 
 import { useCallback, useMemo, useState } from 'react';
 import type { FileReadResult, FileSignature, FileWriteResult } from '../../main/files/types.js';
 import type { SourceError } from '../sources/port.js';
 import { relativeLabel } from './files-editor-text.js';
+import { normalizeForSave } from './files-save-normalize.js';
 import { encodeUnsaved } from './unsaved-files.js';
 
 export type SaveState =
@@ -51,6 +56,14 @@ export interface UseFileBuffersParams {
         baseSignature: FileSignature | null,
       ) => Promise<FileWriteResult>)
     | undefined;
+  /**
+   * Fired only when saving trims/newlines the buffer's text out from under
+   * the caret (`files-save-normalize.ts`) -- never on a save that changes
+   * nothing. The caret itself is a DOM concern this hook does not own
+   * (`FilesTab.tsx`'s `textareaRef`/`pendingSelection`), so it is reported
+   * here rather than clamped inside the hook.
+   */
+  readonly onNormalizedBeforeSave?: (path: string, normalizedContent: string) => void;
 }
 
 export interface UseFileBuffersResult {
@@ -72,6 +85,7 @@ export function useFileBuffers({
   root,
   read,
   write,
+  onNormalizedBeforeSave,
 }: UseFileBuffersParams): UseFileBuffersResult {
   const [buffers, setBuffers] = useState<Record<string, Buffer>>({});
   const [activeBySession, setActiveBySession] = useState<Record<string, string | null>>({});
@@ -179,13 +193,26 @@ export function useFileBuffers({
    * typing while a save is in flight, and crediting whatever is live in
    * state at resolve time as "saved" would silently mark text nobody ever
    * asked vam to write as clean.
+   *
+   * TRIM TRAILING WHITESPACE, ONE FINAL NEWLINE — the operator's save-time
+   * ask (`files-save-normalize.ts`'s own header carries the behaviour table
+   * and why it does not carve out `.env`/`.ini` the way Format does).
+   * Computed from the buffer captured above, never re-read from `buffers`
+   * after this point, for the same reason `sentContent`/`baseSignature`
+   * already are. ONLY WHEN NORMALISING ACTUALLY CHANGED SOMETHING does the
+   * buffer's own content move and `onNormalizedBeforeSave` fire — an already
+   * -clean buffer gets no caret reset and no extra render.
    */
   const saveFile = useCallback(
     async (path: string) => {
       const buffer = buffers[path];
       if (buffer?.kind !== 'editable' || write === undefined) return;
-      const sentContent = buffer.content;
+      const sentContent = normalizeForSave(buffer.content);
       const baseSignature = buffer.baseSignature;
+      if (sentContent !== buffer.content) {
+        onNormalizedBeforeSave?.(path, sentContent);
+        setContent(path, sentContent);
+      }
       setBuffers((prev) => {
         const b = prev[path];
         return b?.kind === 'editable'
@@ -224,7 +251,7 @@ export function useFileBuffers({
         });
       }
     },
-    [buffers, write],
+    [buffers, write, setContent, onNormalizedBeforeSave],
   );
 
   /**

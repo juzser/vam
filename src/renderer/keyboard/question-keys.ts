@@ -69,8 +69,11 @@ export function questionKeys(overrides: KeyBindings = activeBindings()): Questio
  *
  * `walkOption` steps the options of the step on screen; `walkStep` steps
  * through the STEPS of a multi-question call; `mark` is a digit naming an
- * option by position; `toggle` is the pick under the cursor; `chat` leaves the
- * picker for prose.
+ * option by position; `toggle` is Space's bare pick, never a send; `confirm`
+ * is Enter's own — mark the option under the cursor if it is not marked
+ * already, then advance the call (the next unmarked step, or a send once
+ * nothing is left to mark); `submit` is `Mod-Enter`, send from wherever the
+ * cursor is; `chat` leaves the picker for prose.
  */
 type QuestionAction =
   | { readonly kind: 'walkOption'; readonly delta: 1 | -1 }
@@ -80,6 +83,8 @@ type QuestionAction =
    *  here is what stops two call sites doing the same arithmetic. */
   | { readonly kind: 'mark'; readonly at: number }
   | { readonly kind: 'toggle' }
+  | { readonly kind: 'confirm' }
+  | { readonly kind: 'submit' }
   | { readonly kind: 'chat' };
 
 /**
@@ -108,8 +113,9 @@ type QuestionAction =
  * then the card's built-ins. `chat` already worked this way — it hands `c`
  * over the moment a motion moves onto it, on the reasoning that two meanings
  * on one keystroke is an ambiguity the card cannot resolve, and walking the
- * list is what was just asked for. The digits and Enter/Space follow the same
- * rule now, because the rule was never about `c` in particular.
+ * list is what was just asked for. The digits, Space, Enter and `Mod-Enter`
+ * follow the same rule now, because the rule was never about `c` in
+ * particular — a motion rebound onto `Enter` still walks, not confirms.
  *
  * The cost is stated rather than hidden: an operator who binds a motion to `1`
  * cannot mark option one by number any more. One digit, spent by them, in
@@ -136,6 +142,13 @@ export function resolveQuestionKey(
   if (keys.prev.includes(key)) return { kind: 'walkStep', delta: -1 };
   if (keys.chat.includes(key)) return { kind: 'chat' };
   if (/^[1-9]$/.test(key)) return { kind: 'mark', at: Number(key) - 1 };
-  if (key === 'Enter' || key === ' ') return { kind: 'toggle' };
+  if (key === ' ') return { kind: 'toggle' };
+  // A CLI PICKER'S ENTER, NOT A FORM'S. Operator: pressing Submit for every
+  // option is what this replaces — Enter marks the option under the cursor
+  // and moves the call on in the same keystroke, so one pick is one Enter.
+  // `Mod-Enter` is the other half: send from wherever the cursor is, without
+  // first walking back to a focused option at all.
+  if (key === 'Enter') return { kind: 'confirm' };
+  if (key === 'Mod-Enter') return { kind: 'submit' };
   return null;
 }

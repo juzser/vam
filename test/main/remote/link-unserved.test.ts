@@ -42,7 +42,7 @@ const baseOptions = (allowWrites: boolean): RemoteServerOptions => ({
   port: 0,
   devices,
   allowWrites,
-  source,
+  sources: [source],
   subscribe: () => () => {},
 });
 

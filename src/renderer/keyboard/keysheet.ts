@@ -252,7 +252,6 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // side.
   prompt: { group: 'session', label: () => 'type into this pane — its box, or its screen' },
   rename: { group: 'session', label: () => 'rename this session' },
-  icon: { group: 'session', label: () => 'pick this session’s icon' },
   close: { group: 'session', label: () => 'close this session' },
   newSession: { group: 'session', label: () => 'start a new session' },
   // Named for the pane, because that is the whole difference from
@@ -268,6 +267,15 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // operator DOES to their work (`gm` files a project into a folder from
   // here), while `view` is surfaces that open over everything.
   newProject: { group: 'session', label: () => 'new project — choose a directory to start it in' },
+  // PALETTE-ONLY IN PRACTICE (`Mod-Shift-w`, unadvertised elsewhere): a new
+  // git worktree of the focused session's project, opening that project's
+  // "Worktrees" create form. `session` for `newProject`'s own reason —
+  // this is something the operator DOES to their work, not a surface that
+  // opens over everything.
+  newWorktree: {
+    group: 'session',
+    label: () => 'new worktree of this session’s project',
+  },
   // ENTER, WHICH OPENS NOTHING IN SELECT — audit F1. It was captioned "open
   // the focused step" in both modes, and there has been no focused step to
   // open since the command strip left the pane: in Select the key answers
@@ -280,12 +288,23 @@ export const ACTION_LABELS: { readonly [K in KeyAction['kind']]: Meta<K> } = {
   // mode to split by. "open the focused step" there would tell an operator
   // whose key collided with `Enter` that Select opens something, which it
   // never has since the strip left. The base has to be true standing alone.
+  //
+  // THE INSERT HALF GREW A THIRD CLAUSE — operator: "Enter to submit... a
+  // keyboard shortcut for submitting" against having to reach for Submit with
+  // every option. `question-keys.ts`'s `resolveQuestionKey` still claims this
+  // key first over the card, so what changed is what it does with it: mark
+  // then advance rather than mark alone. `Space` and `Mod-Enter` are not
+  // `chords.ts` bindings — they are local to the card, so they have no row of
+  // their own here and are named in this caption instead, the same way `c`
+  // (chat) is never a row either.
   open: {
     group: 'session',
-    label: () => 'nothing to open in Select; marks the option or opens the prompt in Insert',
+    label: () =>
+      'nothing to open in Select; marks the option and advances the call in Insert, or opens the prompt',
     byMode: () => ({
       select: 'nothing to open — the whole detail is already in the right pane',
-      insert: 'mark the option under the cursor, or open the prompt box',
+      insert:
+        'mark the option under the cursor and, once nothing is left unmarked, send the call — Space marks without sending, Mod-Enter sends from anywhere on the card. With no question on screen, opens the prompt box instead',
     }),
   },
   // NAMES WHAT IS THERE, NOT A CHOICE THAT DOES NOT EXIST. The pane holds one
@@ -764,7 +783,7 @@ export function buildFilesSheet(
  *   ITS CAPTION, for "how do I get back up the transcript".
  *   ITS CHORD AS PAINTED, for the operator who can see ⌘P on this screen and
  *     wants the row it belongs to — the operator's own example.
- *   ITS TOKEN, because `Mod-p` is what the README prints, what
+ *   ITS TOKEN, because `Mod-p` is what `docs/keyboard.md` prints, what
  *     `files-tree.ts` lists and what every commit message in this repo calls
  *     it. An operator who arrives from the docs types what the docs said.
  *

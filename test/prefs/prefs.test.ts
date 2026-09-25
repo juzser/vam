@@ -12,11 +12,10 @@ import type { CanvasModel } from '../../src/renderer/domain/model.js';
 import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
 import { DEFAULT_PANES, DETAIL_MAX, renderedWidth } from '../../src/renderer/prefs/panes.js';
 import {
-  applyIcons,
+  applyProjectIcons,
   EMPTY_PREFS,
   readPrefs,
   type StorageLike,
-  setIcon,
   setPaneWidth,
   setProjectIcon,
   setTheme,
@@ -40,11 +39,10 @@ function fake(initial: string | null = null): StorageLike & { value: string | nu
   };
 }
 
-function session(id: string, icon: string | null = null) {
+function session(id: string) {
   return {
     id,
     title: id,
-    icon,
     epic: null,
     branch: null,
     status: 'done' as const,
@@ -55,9 +53,9 @@ function session(id: string, icon: string | null = null) {
   };
 }
 
-function model(icon: string | null = null): CanvasModel {
+function model(): CanvasModel {
   return {
-    projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1', icon)] }],
+    projects: [{ id: 'p1', name: 'alpha', source: 'factory', sessions: [session('a1')] }],
   };
 }
 
@@ -68,66 +66,18 @@ describe('remembering what you arranged', () => {
     writePrefs(store, saved);
     expect(readPrefs(store, NOW).theme).toBe('light');
   });
-
-  it('round-trips an icon', () => {
-    const store = fake();
-    const saved = setIcon(EMPTY_PREFS, 'factory', 'a1', '🛠', NOW);
-    writePrefs(store, saved);
-    expect(readPrefs(store, NOW)).toEqual(saved);
-  });
-
-  it('clearing an icon removes it rather than storing an empty one', () => {
-    // An entry holding "" would render as an icon-shaped nothing and, worse,
-    // would keep the session out of whatever the absent case does.
-    const set = setIcon(EMPTY_PREFS, 'factory', 'a1', '🛠', NOW);
-    expect(setIcon(set, 'factory', 'a1', '', NOW).icons).toEqual({});
-  });
 });
 
-describe('AC-1: two sources sharing a session id do not share an icon', () => {
-  it('setting the icon on one source leaves the other source untouched', () => {
-    const twoSources: CanvasModel = {
-      projects: [
-        { id: 'p1', name: 'alpha', source: 'factory', sessions: [session('D-257')] },
-        { id: 'p2', name: 'beta', source: 'orca', sessions: [session('D-257')] },
-      ],
-    };
-    let prefs = setIcon(EMPTY_PREFS, 'factory', 'D-257', '🔥', NOW);
-    prefs = setIcon(prefs, 'orca', 'D-257', '🌊', NOW);
-    const out = applyIcons(twoSources, prefs.icons);
-    const factory = out.projects.find((p) => p.source === 'factory');
-    const orca = out.projects.find((p) => p.source === 'orca');
-    // Assert both independently: a shared-key store would make orca read
-    // 'factory's last write and pass one of these while failing the other.
-    expect(factory?.sessions[0]?.icon).toBe('🔥');
-    expect(orca?.sessions[0]?.icon).toBe('🌊');
-  });
-});
-
-describe('putting icons on the model', () => {
-  it('replaces the factory’s null with your choice', () => {
-    const out = applyIcons(model(), {
-      factory: { a1: { icon: '🛠', at: NOW.toISOString() } },
-    });
-    expect(out.projects[0]?.sessions[0]?.icon).toBe('🛠');
-  });
-
-  it('leaves a session you never chose for alone', () => {
-    const out = applyIcons(model(), {
-      factory: { other: { icon: '🛠', at: NOW.toISOString() } },
-    });
-    expect(out.projects[0]?.sessions[0]?.icon).toBeNull();
-  });
-
-  it('returns the same object when there is nothing to apply', () => {
-    // Identity matters here: this feeds a useMemo whose result lays out the
-    // whole canvas, and a new object every render would relayout every render.
-    const before = model();
-    expect(applyIcons(before, {})).toBe(before);
-  });
-});
-
-describe('project icons: keyed (sourceId, projectId), the same idiom as session icons', () => {
+/**
+ * ONE ICON MAP, NOT TWO. A session-scoped twin of every case below used to sit
+ * above it, under a `Prefs.icons` key. The operator removed session icons
+ * outright once #433 left the picker writing where no surface read, so the
+ * project bucket is the only one left -- and every property the pair shared
+ * (two sources cannot collide, an empty pick clears, a hostile key survives a
+ * round trip, the TTL prunes per source) is asserted here rather than lost
+ * with the half that went.
+ */
+describe('project icons: keyed (sourceId, projectId)', () => {
   it('round-trips a project icon', () => {
     const saved = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
     expect(saved.projectIcons).toEqual({
@@ -147,28 +97,39 @@ describe('project icons: keyed (sourceId, projectId), the same idiom as session 
     expect(prefs.projectIcons.orca?.p1?.icon).toBe('🐋');
   });
 
-  it('applyIcons puts the stored project icon onto the model', () => {
+  it('applyProjectIcons puts the stored project icon onto the model', () => {
     const prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
-    const out = applyIcons(model(), {}, prefs.projectIcons);
+    const out = applyProjectIcons(model(), prefs.projectIcons);
     expect(out.projects[0]?.icon).toBe('📦');
+  });
+
+  it('leaves a project you never chose for alone', () => {
+    // Moved off the session map when that went: the "a stored entry for
+    // something else must not land here" property is the same one, and it is
+    // still worth an assertion of its own.
+    const out = applyProjectIcons(model(), {
+      factory: { other: { icon: '📦', at: NOW.toISOString() } },
+    });
+    expect(out.projects[0]?.icon).toBeUndefined();
   });
 
   it('leaves a project with no source alone — never guesses which bucket to read', () => {
     const sourceless: CanvasModel = { projects: [{ id: 'p1', name: 'alpha', sessions: [] }] };
     const prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
-    const out = applyIcons(sourceless, {}, prefs.projectIcons);
+    const out = applyProjectIcons(sourceless, prefs.projectIcons);
     expect(out.projects[0]?.icon).toBeUndefined();
   });
 
-  it('returns the same object when there is no icon and no project icon to apply', () => {
+  it('returns the same object when there is no project icon to apply', () => {
+    // Identity matters here: this feeds a useMemo whose result lays out the
+    // whole canvas, and a new object every render would relayout every render.
     const before = model();
-    expect(applyIcons(before, {}, {})).toBe(before);
+    expect(applyProjectIcons(before, {})).toBe(before);
   });
 
-  it('round-trips through storage alongside session icons and theme', () => {
+  it('round-trips through storage alongside theme', () => {
     const store = fake();
-    let prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW);
-    prefs = setIcon(prefs, 'factory', 'a1', '🛠', NOW);
+    const prefs = setTheme(setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '📦', NOW), 'light');
     writePrefs(store, prefs);
     expect(readPrefs(store, NOW)).toEqual(prefs);
   });
@@ -204,7 +165,9 @@ describe('when localStorage misbehaves', () => {
         throw new Error('QuotaExceededError');
       },
     };
-    expect(() => writePrefs(full, setIcon(EMPTY_PREFS, 'factory', 'a1', '🛠', NOW))).not.toThrow();
+    expect(() =>
+      writePrefs(full, setProjectIcon(EMPTY_PREFS, 'factory', 'p1', '🛠', NOW)),
+    ).not.toThrow();
   });
 
   it('starts over on junk rather than guessing', () => {
@@ -216,34 +179,40 @@ describe('when localStorage misbehaves', () => {
   it('drops the entries that are malformed and keeps the ones that are not', () => {
     const store = fake(
       JSON.stringify({
-        icons: {
-          good: { icon: '🛠', at: NOW.toISOString() },
-          empty: { icon: '', at: '…' },
+        projectIcons: {
+          factory: {
+            good: { icon: '🛠', at: NOW.toISOString() },
+            empty: { icon: '', at: '…' },
+          },
         },
       }),
     );
     const out = readPrefs(store, NOW);
-    expect(Object.keys(out.icons['factory'] ?? {})).toEqual(['good']);
+    expect(Object.keys(out.projectIcons['factory'] ?? {})).toEqual(['good']);
   });
 
   it('forgets what has gone stale, and keeps what has not', () => {
     const store = fake(
       JSON.stringify({
-        icons: {
-          old: { icon: '🛠', at: '2026-01-01T00:00:00.000Z' },
-          recent: { icon: '🛠', at: '2026-08-20T00:00:00.000Z' },
+        projectIcons: {
+          factory: {
+            old: { icon: '🛠', at: '2026-01-01T00:00:00.000Z' },
+            recent: { icon: '🛠', at: '2026-08-20T00:00:00.000Z' },
+          },
         },
       }),
     );
-    expect(Object.keys(readPrefs(store, NOW).icons['factory'] ?? {})).toEqual(['recent']);
+    expect(Object.keys(readPrefs(store, NOW).projectIcons['factory'] ?? {})).toEqual(['recent']);
   });
 
   it('keeps an entry whose date it cannot read', () => {
     // "I cannot tell how old this is" is not a reason to throw away something
     // somebody arranged on purpose. Decision kept as-is from before AC-1: an
     // unparseable `at` never expires.
-    const store = fake(JSON.stringify({ icons: { a1: { icon: '🛠', at: 'yesterday' } } }));
-    expect(Object.keys(readPrefs(store, NOW).icons['factory'] ?? {})).toEqual(['a1']);
+    const store = fake(
+      JSON.stringify({ projectIcons: { factory: { p1: { icon: '🛠', at: 'yesterday' } } } }),
+    );
+    expect(Object.keys(readPrefs(store, NOW).projectIcons['factory'] ?? {})).toEqual(['p1']);
   });
 });
 
@@ -251,11 +220,11 @@ describe('AC-1: a payload written by the currently shipped version still loads',
   // Exactly the shape today's shipped `writePrefs` emits: no `panes` key at
   // all. Real user data, sitting under the real key, on a real machine.
   const SHIPPED_PAYLOAD =
-    '{"icons":{"s-1":{"icon":"🔥","at":"2026-08-20T00:00:00.000Z"}},"theme":"light"}';
+    '{"projectIcons":{"factory":{"p-1":{"icon":"🔥","at":"2026-08-20T00:00:00.000Z"}}},"theme":"light"}';
 
-  it('non-vacuity: the fixture has no panes key and a non-empty icons map', () => {
+  it('non-vacuity: the fixture has no panes key and a non-empty icon map', () => {
     expect(SHIPPED_PAYLOAD).not.toContain('panes');
-    expect(Object.keys(JSON.parse(SHIPPED_PAYLOAD).icons).length).toBeGreaterThan(0);
+    expect(Object.keys(JSON.parse(SHIPPED_PAYLOAD).projectIcons).length).toBeGreaterThan(0);
   });
 
   it('loads theme, icons and a defaulted panes from the literal key vam.prefs.v1', () => {
@@ -263,7 +232,7 @@ describe('AC-1: a payload written by the currently shipped version still loads',
     store.setItem('vam.prefs.v1', SHIPPED_PAYLOAD);
     const out = readPrefs(store, NOW);
     expect(out.theme).toBe('light');
-    expect(out.icons['factory']?.['s-1']?.icon).toBe('🔥');
+    expect(out.projectIcons['factory']?.['p-1']?.icon).toBe('🔥');
     expect(out.panes).toEqual(DEFAULT_PANES);
   });
 
@@ -277,7 +246,7 @@ describe('AC-1: a payload written by the currently shipped version still loads',
     writePrefs(store, saved);
     const out = readPrefs(store, NOW);
     expect(out.theme).toBe('light');
-    expect(out.icons).toEqual({});
+    expect(out.projectIcons).toEqual({});
     expect(out.panes).toEqual({ sidebar: 300, detail: DEFAULT_PANES.detail });
   });
 });
@@ -310,21 +279,22 @@ describe('readPanes is defensive on every field', () => {
     const store = fake(
       JSON.stringify({
         panes: { sidebar: 300, detail: 500 },
-        icons: { a1: { icon: '🛠', at: '2020-01-01T00:00:00.000Z' } },
+        projectIcons: { factory: { p1: { icon: '🛠', at: '2020-01-01T00:00:00.000Z' } } },
       }),
     );
     const out = readPrefs(store, NOW);
     expect(out.panes).toEqual({ sidebar: 300, detail: 500 });
-    expect(out.icons).toEqual({}); // the stale icon is pruned away entirely, panes is not.
+    // The stale icon is pruned away entirely, panes is not.
+    expect(out.projectIcons).toEqual({});
   });
 });
 
-describe('AC-1(b): a `/`-containing session id cannot reach another source', () => {
-  it('a slash in the session id does not cross the source boundary', () => {
-    let prefs = setIcon(EMPTY_PREFS, 'factory', 'vam-electron-shell/task-4', '🔧', NOW);
-    prefs = setIcon(prefs, 'orca', 'vam-electron-shell/task-4', '🐙', NOW);
-    expect(prefs.icons['factory']?.['vam-electron-shell/task-4']?.icon).toBe('🔧');
-    expect(prefs.icons.orca?.['vam-electron-shell/task-4']?.icon).toBe('🐙');
+describe('AC-1(b): a `/`-containing id cannot reach another source', () => {
+  it('a slash in the id does not cross the source boundary', () => {
+    let prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'vam-electron-shell/task-4', '🔧', NOW);
+    prefs = setProjectIcon(prefs, 'orca', 'vam-electron-shell/task-4', '🐙', NOW);
+    expect(prefs.projectIcons['factory']?.['vam-electron-shell/task-4']?.icon).toBe('🔧');
+    expect(prefs.projectIcons.orca?.['vam-electron-shell/task-4']?.icon).toBe('🐙');
   });
 });
 
@@ -338,9 +308,9 @@ describe('AC-2: a hostile key cannot forge, corrupt or vanish an entry', () => {
     expect(JSON.stringify(bare)).toBe('{}'); // gone on serialization
   });
 
-  it('an icon set on a session literally named __proto__ survives a JSON round trip', () => {
-    const prefs = setIcon(EMPTY_PREFS, 'factory', '__proto__', '🔥', NOW);
-    const roundTripped = JSON.parse(JSON.stringify(prefs.icons));
+  it('an icon set on a project literally named __proto__ survives a JSON round trip', () => {
+    const prefs = setProjectIcon(EMPTY_PREFS, 'factory', '__proto__', '🔥', NOW);
+    const roundTripped = JSON.parse(JSON.stringify(prefs.projectIcons));
     expect(Object.hasOwn(roundTripped['factory'] ?? {}, '__proto__')).toBe(true);
     expect(roundTripped['factory']['__proto__'].icon).toBe('🔥');
   });
@@ -359,53 +329,24 @@ describe('AC-2: a hostile key cannot forge, corrupt or vanish an entry', () => {
   // a future edit could break — a store that sanitised keys by name, or
   // switched to a `Map` keyed by something clever, would fail it — and because
   // deleting it would invite someone to re-add it as the guard it is not.
-  it('a session literally named constructor round-trips (documentation, not a guard)', () => {
-    const prefs = setIcon(EMPTY_PREFS, 'factory', 'constructor', '🐛', NOW);
-    const roundTripped = JSON.parse(JSON.stringify(prefs.icons));
+  it('a project literally named constructor round-trips (documentation, not a guard)', () => {
+    const prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'constructor', '🐛', NOW);
+    const roundTripped = JSON.parse(JSON.stringify(prefs.projectIcons));
     expect(roundTripped['factory'].constructor.icon).toBe('🐛');
   });
 
   it('a source id literally named __proto__ survives the same round trip', () => {
-    const prefs = setIcon(EMPTY_PREFS, '__proto__' as never, 'a1', '🔥', NOW);
-    const roundTripped = JSON.parse(JSON.stringify(prefs.icons));
-    expect(roundTripped['__proto__'].a1.icon).toBe('🔥');
+    const prefs = setProjectIcon(EMPTY_PREFS, '__proto__' as never, 'p1', '🔥', NOW);
+    const roundTripped = JSON.parse(JSON.stringify(prefs.projectIcons));
+    expect(roundTripped['__proto__'].p1.icon).toBe('🔥');
   });
 
-  it('the full store round trip (writePrefs then readPrefs) keeps a __proto__-named session', () => {
+  it('the full store round trip (writePrefs then readPrefs) keeps a __proto__-named project', () => {
     const store = fake();
-    const saved = setIcon(EMPTY_PREFS, 'factory', '__proto__', '🔥', NOW);
+    const saved = setProjectIcon(EMPTY_PREFS, 'factory', '__proto__', '🔥', NOW);
     writePrefs(store, saved);
     const out = readPrefs(store, NOW);
-    expect(out.icons['factory']?.['__proto__']?.icon).toBe('🔥');
-  });
-});
-
-describe('AC-3 & AC-4: migrating the pre-AC-1 flat shape', () => {
-  it('AC-3: every glyph in a realistic multi-entry flat payload survives, on the same session', () => {
-    const store = fake(
-      JSON.stringify({
-        icons: {
-          'D-257': { icon: '🔥', at: NOW.toISOString() },
-          'vam-electron-shell/task-4': { icon: '🔧', at: NOW.toISOString() },
-          's-9': { icon: '📐', at: NOW.toISOString() },
-        },
-        theme: 'light',
-      }),
-    );
-    const out = readPrefs(store, NOW);
-    const bucket = out.icons['factory'] ?? {};
-    expect(bucket['D-257']?.icon).toBe('🔥');
-    expect(bucket['vam-electron-shell/task-4']?.icon).toBe('🔧');
-    expect(bucket['s-9']?.icon).toBe('📐');
-  });
-
-  it('AC-4: migrated entries follow the resolved source, not a hardcoded literal', () => {
-    const store = fake(
-      JSON.stringify({ icons: { 'D-257': { icon: '🔥', at: NOW.toISOString() } } }),
-    );
-    const out = readPrefs(store, NOW, 'orca');
-    expect(out.icons.orca?.['D-257']?.icon).toBe('🔥');
-    expect(out.icons['factory']).toBeUndefined();
+    expect(out.projectIcons['factory']?.['__proto__']?.icon).toBe('🔥');
   });
 });
 
@@ -415,35 +356,28 @@ describe('the source id rename (black-smith -> factory) carries existing prefs f
   // exists for. A rename in code changes nothing already on disk, so without
   // an explicit migration this bucket would sit under a key nothing looks up
   // anymore: readable, present in `localStorage`, and permanently invisible.
-  it('reads a session icon stored under the old id back under the new one', () => {
-    const store = fake(
-      JSON.stringify({
-        icons: { 'black-smith': { 's-1': { icon: '🔥', at: NOW.toISOString() } } },
-      }),
-    );
-    const out = readPrefs(store, NOW);
-    expect(out.icons.factory?.['s-1']?.icon).toBe('🔥');
-    expect(out.icons['black-smith']).toBeUndefined();
-  });
-
   it('merges an old-id bucket with one already under the new id, newest write winning', () => {
+    // Moved off the session bucket when that went. `migrateSourceKey` is
+    // shared by every source-keyed field, so the newest-wins merge is still
+    // load-bearing -- and it is the one rule here that a careless rewrite
+    // would turn into "whichever `Object.entries` reached last".
     const store = fake(
       JSON.stringify({
-        icons: {
+        projectIcons: {
           'black-smith': {
-            's-1': { icon: '🔥', at: '2026-08-01T00:00:00.000Z' },
-            's-2': { icon: '📦', at: NOW.toISOString() },
+            'p-1': { icon: '🔥', at: '2026-08-01T00:00:00.000Z' },
+            'p-2': { icon: '📦', at: NOW.toISOString() },
           },
-          factory: { 's-1': { icon: '🛠', at: NOW.toISOString() } },
+          factory: { 'p-1': { icon: '🛠', at: NOW.toISOString() } },
         },
       }),
     );
     const out = readPrefs(store, NOW);
-    // s-1 exists under both; the newer write (factory's) wins.
-    expect(out.icons.factory?.['s-1']?.icon).toBe('🛠');
-    // s-2 only exists under the old id; it survives the merge.
-    expect(out.icons.factory?.['s-2']?.icon).toBe('📦');
-    expect(out.icons['black-smith']).toBeUndefined();
+    // p-1 exists under both; the newer write (factory's) wins.
+    expect(out.projectIcons.factory?.['p-1']?.icon).toBe('🛠');
+    // p-2 only exists under the old id; it survives the merge.
+    expect(out.projectIcons.factory?.['p-2']?.icon).toBe('📦');
+    expect(out.projectIcons['black-smith']).toBeUndefined();
   });
 
   it('carries a project icon, a rename, a fold, a hide, a group and the last-focus pointer', () => {
@@ -477,121 +411,53 @@ describe('the source id rename (black-smith -> factory) carries existing prefs f
 
 describe('AC-5: the reader stays total', () => {
   it('never throws on garbage icons, and yields usable Prefs', () => {
-    const store = fake(JSON.stringify({ icons: 'not an object' }));
+    const store = fake(JSON.stringify({ projectIcons: 'not an object' }));
     expect(() => readPrefs(store, NOW)).not.toThrow();
-    expect(readPrefs(store, NOW).icons).toEqual({});
+    expect(readPrefs(store, NOW).projectIcons).toEqual({});
   });
 
   it('never throws on a half-written entry (only one of icon/at present)', () => {
-    const store = fake(JSON.stringify({ icons: { a1: { icon: '🔥' } } }));
+    const store = fake(JSON.stringify({ projectIcons: { factory: { p1: { icon: '🔥' } } } }));
     expect(() => readPrefs(store, NOW)).not.toThrow();
-    expect(readPrefs(store, NOW).icons).toEqual({});
+    expect(readPrefs(store, NOW).projectIcons).toEqual({});
   });
 
-  it('an unknown source id in the new nested shape still loads without throwing', () => {
+  it('an unknown source id still loads without throwing', () => {
     const store = fake(
       JSON.stringify({
-        icons: { 'a-future-source': { a1: { icon: '🔥', at: NOW.toISOString() } } },
+        projectIcons: { 'a-future-source': { p1: { icon: '🔥', at: NOW.toISOString() } } },
       }),
     );
     expect(() => readPrefs(store, NOW)).not.toThrow();
-    expect(readPrefs(store, NOW).icons['a-future-source']?.a1?.icon).toBe('🔥');
-  });
-
-  it('a payload holding both the old flat shape and the new nested shape at once merges cleanly', () => {
-    // The operator-mid-upgrade case: one tab wrote the flat shape, another
-    // already wrote the nested shape, to the same localStorage key.
-    const store = fake(
-      JSON.stringify({
-        icons: {
-          'D-257': { icon: '🔥', at: NOW.toISOString() }, // old flat entry
-          orca: { 's-9': { icon: '🌊', at: NOW.toISOString() } }, // new nested bucket
-        },
-      }),
-    );
-    const out = readPrefs(store, NOW);
-    expect(out.icons['factory']?.['D-257']?.icon).toBe('🔥');
-    expect(out.icons.orca?.['s-9']?.icon).toBe('🌊');
-  });
-});
-
-/**
- * The both-shapes case where the two shapes CONTEND for one key.
- *
- * The AC-5 test above uses distinct session ids, so the flat and nested
- * entries never touch each other -- it looks like it covers the merge and
- * does not. `migrateSource` is a real source id, so the migrated flat entry
- * and a genuine nested entry can name the SAME session under the SAME source.
- * That is what two tabs mid-upgrade produce, and an unconditional overwrite
- * loses one of the operator's choices to `Object.entries` order.
- */
-describe('AC-5(b): both shapes contending for the same session id', () => {
-  const iso = (ms: number) => new Date(ms).toISOString();
-
-  it('keeps the later choice when the nested entry is newer', () => {
-    const now = new Date(3_000_000);
-    const raw = JSON.stringify({
-      icons: {
-        'D-257': { icon: 'older', at: iso(1_000_000) },
-        factory: { 'D-257': { icon: 'newer', at: iso(2_000_000) } },
-      },
-    });
-    const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
-    expect(got.icons['factory']?.['D-257']?.icon).toBe('newer');
-  });
-
-  it('keeps the later choice when the MIGRATED flat entry is newer', () => {
-    const now = new Date(3_000_000);
-    const raw = JSON.stringify({
-      icons: {
-        'D-257': { icon: 'newer', at: iso(2_000_000) },
-        factory: { 'D-257': { icon: 'older', at: iso(1_000_000) } },
-      },
-    });
-    const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
-    // Order-independent: the flat entry is read FIRST here and must still win.
-    expect(got.icons['factory']?.['D-257']?.icon).toBe('newer');
-  });
-
-  it('prefers a readable date over an unreadable one', () => {
-    const now = new Date(3_000_000);
-    const raw = JSON.stringify({
-      icons: {
-        'D-257': { icon: 'unreadable', at: 'not-a-date' },
-        factory: { 'D-257': { icon: 'readable', at: iso(1_000_000) } },
-      },
-    });
-    const got = readPrefs({ getItem: () => raw, setItem: () => {} }, now);
-    expect(got.icons['factory']?.['D-257']?.icon).toBe('readable');
+    expect(readPrefs(store, NOW).projectIcons['a-future-source']?.p1?.icon).toBe('🔥');
   });
 });
 
 describe('AC-6: TTL prunes per source', () => {
-  it('falsifier: a stale entry under one source drops without touching a fresh one under another, same session id', () => {
+  it('falsifier: a stale entry under one source drops without touching a fresh one under another, same id', () => {
     const store = fake(
       JSON.stringify({
-        icons: {
-          factory: { 'D-257': { icon: '🔥', at: '2026-01-01T00:00:00.000Z' } }, // stale
-          orca: { 'D-257': { icon: '🌊', at: '2026-08-20T00:00:00.000Z' } }, // fresh
+        projectIcons: {
+          factory: { 'p-1': { icon: '🔥', at: '2026-01-01T00:00:00.000Z' } }, // stale
+          orca: { 'p-1': { icon: '🌊', at: '2026-08-20T00:00:00.000Z' } }, // fresh
         },
       }),
     );
     const out = readPrefs(store, NOW);
     // A single shared cutoff pass over one merged map would drop both or
     // neither; this asserts exactly one drops.
-    expect(out.icons['factory']).toBeUndefined();
-    expect(out.icons.orca?.['D-257']?.icon).toBe('🌊');
+    expect(out.projectIcons['factory']).toBeUndefined();
+    expect(out.projectIcons.orca?.['p-1']?.icon).toBe('🌊');
   });
 });
 
 describe('AC-7: theme and panes are not id-keyed maps', () => {
   // Checked by: `grep -n "Record<string" src/renderer/prefs/prefs.ts` — the
-  // matches are `IconsBySession` (session or project id → IconChoice),
-  // `Prefs['icons']` (source id → IconsBySession) and `Prefs['projectIcons']`
-  // (source id → IconsBySession, the same idiom one level up, added by the
-  // sidebar-flat project icon). `theme` is `Theme`, a string union; `panes`
-  // is `{ sidebar: number; detail: number }`, a fixed two-field object.
-  // Neither is keyed by anything id-shaped.
+  // matches are `IconsById` (project id → IconChoice) and
+  // `Prefs['projectIcons']` (source id → IconsById, the same idiom one level
+  // up). `theme` is `Theme`, a string union; `panes` is
+  // `{ sidebar: number; detail: number }`, a fixed two-field object. Neither
+  // is keyed by anything id-shaped.
   it('theme is a plain scalar union, not a keyed map', () => {
     const saved = setTheme(EMPTY_PREFS, 'light');
     expect(typeof saved.theme).toBe('string');
@@ -604,26 +470,24 @@ describe('AC-7: theme and panes are not id-keyed maps', () => {
 });
 
 describe('AC-9: the demo path', () => {
-  it('an icon set on a demo session lands on that session and not the other demo source', () => {
-    const prefs = setIcon(EMPTY_PREFS, 'factory', 'factory-sse-1', '🎯', NOW);
-    const out = applyIcons(DEMO_MODEL, prefs.icons);
-    const bs = out.projects.find((p) => p.id === 'factory');
-    const vamProject = out.projects.find((p) => p.id === 'vam');
-    expect(bs?.sessions.find((s) => s.id === 'factory-sse-1')?.icon).toBe('🎯');
-    // vam's project is tagged 'orca' — an icon meant for the factory
-    // bucket must not leak onto it even though DEMO_MODEL renders both at
-    // once (AC-9's "must not move or vanish").
-    expect(vamProject?.sessions[0]?.icon).not.toBe('🎯');
+  it('an icon set on a demo project lands on it and not the other demo source', () => {
+    const prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'factory', '🎯', NOW);
+    const out = applyProjectIcons(DEMO_MODEL, prefs.projectIcons);
+    // vam's project is tagged 'orca' — an icon meant for the factory bucket
+    // must not leak onto it even though DEMO_MODEL renders both at once
+    // (AC-9's "must not move or vanish").
+    expect(out.projects.find((p) => p.id === 'factory')?.icon).toBe('🎯');
+    expect(out.projects.find((p) => p.id === 'vam')?.icon).not.toBe('🎯');
   });
 
   it('a demo-shaped read (both sources present) keeps each source’s icon independent', () => {
-    let prefs = setIcon(EMPTY_PREFS, 'factory', 'factory-sse-1', '🎯', NOW);
-    prefs = setIcon(prefs, 'orca', 'vam-build-1', '📌', NOW);
+    let prefs = setProjectIcon(EMPTY_PREFS, 'factory', 'factory', '🎯', NOW);
+    prefs = setProjectIcon(prefs, 'orca', 'vam', '📌', NOW);
     const store = fake();
     writePrefs(store, prefs);
-    const out = applyIcons(DEMO_MODEL, readPrefs(store, NOW).icons);
-    expect(out.projects.find((p) => p.id === 'factory')?.sessions[0]?.icon).toBe('🎯');
-    expect(out.projects.find((p) => p.id === 'vam')?.sessions[0]?.icon).toBe('📌');
+    const out = applyProjectIcons(DEMO_MODEL, readPrefs(store, NOW).projectIcons);
+    expect(out.projects.find((p) => p.id === 'factory')?.icon).toBe('🎯');
+    expect(out.projects.find((p) => p.id === 'vam')?.icon).toBe('📌');
   });
 });
 

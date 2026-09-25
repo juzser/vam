@@ -3,10 +3,10 @@
  *
  * Audit finding F3, reproduced first and then held. The sequence is entirely
  * through the normal editor, with no hand-edited payload: move `rename` off
- * `r` onto a free key, bind `icon` to the freed `r`, then RESET `rename`.
+ * `r` onto a free key, bind `close` to the freed `r`, then RESET `rename`.
  * The capture box judged the one key it was handed; reset judged nothing, so
- * the third step put `rename` back on a key `icon` now owned. `buildTables`
- * gives the override precedence, so `r` fired `icon` while both the sheet and
+ * the third step put `rename` back on a key `close` now owned. `buildTables`
+ * gives the override precedence, so `r` fired `close` while both the sheet and
  * the editor went on advertising `r` for `rename`.
  *
  * Everything here is asserted through `resolveChord` — what the keystroke
@@ -32,8 +32,8 @@ import { buildBindingSheet, buildKeySheet } from '../../src/renderer/keyboard/ke
 
 /** The three steps of F3, as the editor performs them. */
 const RENAME_MOVED = bindKey(NO_BINDINGS, 'rename', 0, 'b');
-const ICON_ON_R = bindKey(RENAME_MOVED, 'icon', 0, 'r');
-const RENAME_RESET = clearBindings(ICON_ON_R, 'rename');
+const CLOSE_ON_R = bindKey(RENAME_MOVED, 'close', 0, 'r');
+const RENAME_RESET = clearBindings(CLOSE_ON_R, 'rename');
 
 /** What a chord really invokes, chord or top-level key alike. */
 function fires(bindings: KeyBindings, text: string) {
@@ -59,7 +59,7 @@ describe('F3 — the state the editor could reach', () => {
     const clashes = bindingClashes(RENAME_RESET);
     expect(clashes.length).toBe(1);
     expect(clashes[0]?.chord).toBe('r');
-    expect(clashes[0]?.winner).toBe('icon');
+    expect(clashes[0]?.winner).toBe('close');
     expect(clashes[0]?.shadowed).toEqual(['rename']);
   });
 
@@ -94,27 +94,27 @@ describe('F3 — the state the editor could reach', () => {
 
 describe('which write minted it', () => {
   it('reports the clash a reset would create, before it is written', () => {
-    const created = newClashes(ICON_ON_R, RENAME_RESET);
+    const created = newClashes(CLOSE_ON_R, RENAME_RESET);
     expect(created.length).toBe(1);
     expect(created[0]?.chord).toBe('r');
-    expect(created[0]?.winner).toBe('icon');
+    expect(created[0]?.winner).toBe('close');
   });
 
   it('reports the clash a capture would create', () => {
-    const taken = bindKey(NO_BINDINGS, 'icon', 0, 'r');
+    const taken = bindKey(NO_BINDINGS, 'close', 0, 'r');
     expect(newClashes(NO_BINDINGS, taken).map((clash) => clash.chord)).toEqual(['r']);
   });
 
   it('is silent about the two steps that were always legal', () => {
     expect(newClashes(NO_BINDINGS, RENAME_MOVED)).toEqual([]);
-    expect(newClashes(RENAME_MOVED, ICON_ON_R)).toEqual([]);
+    expect(newClashes(RENAME_MOVED, CLOSE_ON_R)).toEqual([]);
   });
 
   it('lets an operator out of a contested map instead of freezing them in it', () => {
     // A map that arrived contested — hand-edited, or an override colliding
     // with a shipped key a later vam moved — must not refuse every write on
     // its own key. Only a NEW claim is refused.
-    const wayOut = bindKey(RENAME_RESET, 'icon', 0, 'q');
+    const wayOut = bindKey(RENAME_RESET, 'close', 0, 'q');
     expect(newClashes(RENAME_RESET, wayOut)).toEqual([]);
     expect(fires(wayOut, 'r')).toEqual({ kind: 'rename' });
     expect(newClashes(RENAME_RESET, NO_BINDINGS)).toEqual([]);
@@ -131,12 +131,12 @@ describe('the sheet shows the winner and marks what is dead', () => {
   it('marks the shadowed row and leaves the winner’s row alone', () => {
     const rows = buildBindingSheet(RENAME_RESET).flatMap((group) => group.rows);
     const rename = rows.find((row) => row.id === 'rename');
-    const icon = rows.find((row) => row.id === 'icon');
+    const close = rows.find((row) => row.id === 'close');
     expect(rename?.keys).toEqual(['r']);
     // Named by what took it, not merely flagged: "dead" without a culprit
     // leaves the operator hunting.
-    expect(rename?.dead['r']).toBe(icon?.label);
-    expect(icon?.dead).toEqual({});
+    expect(rename?.dead['r']).toBe(close?.label);
+    expect(close?.dead).toEqual({});
   });
 
   it('carries the same fact into the reference sheet, per row', () => {
@@ -146,7 +146,7 @@ describe('the sheet shows the winner and marks what is dead', () => {
     const dead = onR.filter((row) => row.dead !== null);
     expect(dead.length).toBe(1);
     expect(dead[0]?.label).toContain('rename');
-    expect(dead[0]?.dead).toContain('icon');
+    expect(dead[0]?.dead).toContain('close');
   });
 
   it('marks a row dead EXACTLY when its key reaches something else', () => {

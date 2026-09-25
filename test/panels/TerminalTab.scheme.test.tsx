@@ -11,8 +11,13 @@
  *      utilities already read, and the seven `--vam-term-*` names. Never
  *      `:root`: the sixteen are global tokens, and a scheme put on the root
  *      would recolour every surface that reads them. The scan at the bottom
- *      holds the other half of that promise -- nothing outside the terminal
- *      reads the seven new names at all.
+ *      holds the other half of that promise -- nothing outside the TWO
+ *      terminal tabs reads the seven new names at all. `TerminalStreamTab.
+ *      tsx` joined the allowlist for the operator's own frame-parity ask
+ *      (`docs/design/terminal-streaming.md`): its pane frame now carries the
+ *      SAME `terminalSchemeStyle(scheme)` call this file's own subject does,
+ *      so the setting ON and OFF read the same background at the same
+ *      opacity -- a second intentional reader, not a leak.
  *   2. THE BOLD RULE IS iTERM2'S. A bold run with no colour of its own takes
  *      `bold`; a bold run the agent coloured keeps the agent's colour. The
  *      run's classes say which, and `terminal-ansi.test.ts` holds the
@@ -232,11 +237,17 @@ describe('the screen follows the store without a remount', () => {
  * inside the Tailwind theme block -- as `--color-term-*: var(--vam-term-*)`
  * pairs -- and never as values on `:root` or `html.light`.
  */
-describe('the seven term tokens are the terminal’s alone', () => {
+describe('the seven term tokens are the two terminal tabs’ alone', () => {
   const SRC = resolve(process.cwd(), 'src');
   const ALLOWED = new Set([
     'renderer/panels/TerminalTab.tsx',
     'renderer/panels/terminal-ansi.ts',
+    // `TerminalStreamTab.tsx`'s own pane frame reads the scheme the
+    // identical way (`terminalSchemeStyle(scheme)`) so the streaming
+    // setting's frame background matches `TerminalTab.tsx`'s at the shipped
+    // `backgroundOpacity` default -- see this file's own header and
+    // `docs/design/terminal-streaming.md`'s frame-parity section.
+    'renderer/panels/terminal-stream/TerminalStreamTab.tsx',
     'renderer/prefs/terminal-scheme.ts',
     'renderer/prefs/prefs.ts',
     'renderer/styles.css',
@@ -262,10 +273,11 @@ describe('the seven term tokens are the terminal’s alone', () => {
       expect(corpus.has(name), name).toBe(true);
     }
     expect(corpus.get('renderer/panels/TerminalTab.tsx')).toMatch(TERM);
+    expect(corpus.get('renderer/panels/terminal-stream/TerminalStreamTab.tsx')).toMatch(TERM);
     expect(corpus.get('renderer/styles.css')).toMatch(TERM);
   });
 
-  it('finds them in no file outside the terminal and the stylesheet', () => {
+  it('finds them in no file outside the two terminal tabs and the stylesheet', () => {
     const readers = [...corpus.entries()]
       .filter(([name, text]) => !ALLOWED.has(name) && TERM.test(text))
       .map(([name]) => name);

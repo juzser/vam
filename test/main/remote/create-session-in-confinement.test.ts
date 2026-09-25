@@ -5,7 +5,7 @@
  * implement it at all. That must refuse -- byte-identically with every other
  * refusal this guard produces -- and it must refuse WITHOUT reading the
  * operator's project list, because the capability check is the FIRST thing
- * the guard does, before `options.source.load()` is even awaited.
+ * the guard does, before the combined source's own `load()` is even awaited.
  *
  * This lives in its own file, apart from `server.test.ts`, because AC7 names
  * it as a dedicated case and because the `load` spy's zero-calls assertion is
@@ -66,7 +66,7 @@ async function start(source: MainSource, over: Partial<RemoteServerOptions> = {}
     port: 0,
     devices,
     allowWrites: true,
-    source,
+    sources: [source],
     subscribe: () => () => {},
     streams: createStreamRegistry(),
     audit: () => {},
@@ -370,5 +370,67 @@ describe('create-session-in: the same count of awaited work on every cause (task
     expect(load).not.toHaveBeenCalled();
     expect(realpathSpy).not.toHaveBeenCalled();
     expect(createSessionInDirectory).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * #486 added a PANE-ONLY fallback to `createSessionInProject` -- a project
+ * right after Start is all pane rows and no live agent yet, so
+ * `loadClaudeCodeProjects` lists it from `tmuxSessions` alone
+ * (`docs/design/vam-owns-the-session.md` Stage 1). `confineToProjectSet`
+ * reads only the id out of whatever `load()` returns; it has no notion of
+ * "live" vs "pane-only" at all. These two cases prove that is true in both
+ * directions: a real, readable repository that `load()` simply does not name
+ * is refused exactly like a non-repository, and a project that exists ONLY
+ * as a tagged pane -- zero sessions -- is admitted exactly like one with a
+ * live agent, because membership is checked by id, never by how the project
+ * came to be listed.
+ */
+describe('create-session-in: membership is by id, live agent or pane-only alike', () => {
+  beforeEach(() => {
+    realpathSpy.mockClear();
+  });
+
+  it('refuses a real, readable repository that exists but names no project vam lists', async () => {
+    const strangerRepo = await mkdtemp(join(tmpdir(), 'vam-outside-set-'));
+    await mkdir(join(strangerRepo, '.git'), { recursive: true });
+    const createSession = vi.fn(async () => null);
+    const base = await start({ descriptor, load: vi.fn(async () => []), createSession });
+
+    const response = await post(base, '/api/create-session-in', {
+      cwd: strangerRepo,
+      title: 'a run',
+    });
+
+    expect(response.status).toBe(403);
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it('admits a pane-only project -- one load() lists with no live agent behind it', async () => {
+    const paneOnlyRepo = await mkdtemp(join(tmpdir(), 'vam-pane-only-'));
+    await mkdir(join(paneOnlyRepo, '.git'), { recursive: true });
+    // Shaped exactly like `loadClaudeCodeProjects`'s entry for a tmux pane
+    // that has never had a live agent: the id vam's own digest derives from
+    // the pane's cwd, and `sessions: []` -- there is no conversation yet, only
+    // the pane.
+    const paneOnlyProject = {
+      id: projectIdOf(await realpath(paneOnlyRepo)),
+      name: 'pane-only',
+      sessions: [],
+    } as unknown as Project;
+    const createSession = vi.fn(async () => null);
+    const base = await start({
+      descriptor,
+      load: vi.fn(async () => [paneOnlyProject]),
+      createSession,
+    });
+
+    const response = await post(base, '/api/create-session-in', {
+      cwd: paneOnlyRepo,
+      title: 'a run',
+    });
+
+    expect(response.status).toBe(200);
+    expect(createSession).toHaveBeenCalledWith(paneOnlyProject.id, 'a run', undefined);
   });
 });

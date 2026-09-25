@@ -53,12 +53,52 @@ export type SourceId = string;
  * Its colour is a neutral, deliberately: `idle` is the absence of news, and
  * the four hues stay spent on states that are news.
  *
+ * `unstarted` IS THE SIXTH, and it is not a synonym for any of the five: a
+ * pane is open and NOTHING has been started in it. `docs/design/vam-owns-the-
+ * session.md` §3 -- a new session is a shell in a tmux pane vam owns, real
+ * from the first frame, and the provider is chosen afterwards. Such a row has
+ * no transcript, no turn and no agent; it has a Terminal view that works and a
+ * Response view whose whole content is the provider picker and Start. The
+ * row is the tmux session's (`main/sources/claude-code/pane-row.ts`) and it
+ * lives exactly as long as that does -- it is never a paint on a timer. It
+ * is never `idle` (which is an AGENT between turns), never `done` (nothing
+ * ended), and never `waiting` (nothing asked). Its colour is the neutral
+ * `idle` shares, because it too is the absence of news.
+ *
+ * `terminal` IS THE SEVENTH: the operator's own words, "a session should have
+ * a 'terminal only' state" -- a pane vam started, whose agent has exited (by
+ * `/exit`, Ctrl+C, or on its own), leaving the shell in the pane's foreground
+ * again, WHILE the conversation it hosted is still known -- vam has a native
+ * session id for it (`docs/design/vam-terminal-only.md`; the pane's own
+ * `@vam-session` tmux option, or the published pane a live row proved this
+ * poll — `main/sources/claude-code/pane-row.ts`). It differs from `unstarted`
+ * in exactly that one fact: `unstarted` is a pane that has NEVER hosted a
+ * conversation, so its `title` is the tmux session's own name and it carries
+ * no transcript; `terminal` is a pane that HAS, so its `title`, `branch` and
+ * `decisions` are the conversation's own, read off the transcript exactly as
+ * a live row's are — identity survives the exit. Never `idle` (which is an
+ * AGENT between turns — this row has no agent at all), never `done` (Claude
+ * Code's own word for a conversation that ended, which this one has not:
+ * typing the provider's command, by hand or through Resume, continues it),
+ * and never `waiting` (nothing asked, and MUST NOT queue the "waiting" OS
+ * notification — `notify/waiting.ts`'s rule is `!== 'waiting' -> 'waiting'`,
+ * so a status this union never assigns can never cross it). Its colour is the
+ * same neutral `idle` and `unstarted` share: the pane is alive and typeable,
+ * asking for nothing.
+ *
  * Every surface that paints a status keys a `Record<SessionStatus, …>` off
  * this union — the tab ink and dot, the sidebar dot, the phone dot, the rank
  * order, the filter tally. That is the guard against this list growing again
- * behind someone's back: add a member and the four maps stop compiling.
+ * behind someone's back: add a member and the maps stop compiling.
  */
-export type SessionStatus = 'running' | 'waiting' | 'idle' | 'done' | 'failed';
+export type SessionStatus =
+  | 'running'
+  | 'waiting'
+  | 'idle'
+  | 'done'
+  | 'failed'
+  | 'unstarted'
+  | 'terminal';
 
 /**
  * One round trip between you and a session: your words in, its answer out.
@@ -508,19 +548,38 @@ export type Session = {
   readonly id: string;
   /** Short name shown on the tab and the sidebar row — an epic id, a task id, a run name. */
   readonly title: string;
-  /**
-   * A single glyph the operator picked, or `null` for none.
-   *
-   * Borrowed from orca, where a workspace carries one. It earns its place for
-   * the same reason there: a list of a dozen sessions named `D-2xx` is a list
-   * you read character by character, and a glyph is the thing the eye finds
-   * before it starts reading. It is chosen by a person and means whatever they
-   * decided — nothing derives it, and nothing should.
-   */
-  readonly icon: string | null;
   /** Optional second label beside the title, e.g. which epic a task belongs to. */
   readonly epic: string | null;
   readonly status: SessionStatus;
+  /**
+   * HAS THIS CONVERSATION FINISHED — as something the source MEASURED?
+   *
+   * Absent means no source said so, which is not the same as `false`, and is
+   * why it is optional: a source that has never looked leaves it off, and
+   * nothing downstream may read the absence as "still going".
+   *
+   * ── WHY THIS IS NOT SIMPLY `status === 'done'` ────────────────────────────
+   *
+   * Because `done` is already spoken for, by a different thing wearing the
+   * same word. Claude Code reports `done` for a BACKGROUND AGENT that has
+   * finished inside a session the operator is still working in
+   * (`sources/claude-code/agents.ts`) — a row that belongs on the canvas,
+   * beside the work it came out of. Hiding those was tried here and measured:
+   * it broke 461 assertions across 62 files, which is this repo's own corpus
+   * saying that a `done` row is ordinary furniture.
+   *
+   * What the operator asked to stop seeing is the other thing — a finished
+   * CONVERSATION a source went and dug out of an archive: "Don't show recent
+   * threads, it makes managing active sessions harder." The Codex source sets
+   * this from a writer-lock probe (`main/sources/codex/liveness.ts`), and only
+   * where that probe actually answered; where it could not look the field
+   * stays off rather than claiming an ending nobody observed.
+   *
+   * `status` still answers the other question — what colour the row is — and
+   * such a session is `done` there too. One fact seen from two sides, not one
+   * boolean doing two jobs.
+   */
+  readonly ended?: boolean;
   /**
    * How many agents this session is running right now — the `●N` on the header.
    * This is the ONLY place a subagent appears: it is work happening under
@@ -656,6 +715,101 @@ export type Session = {
    */
   readonly vamControlled?: boolean;
   /**
+   * WHY THIS SOURCE COULD NOT CONFIRM ITS OWN OWNERSHIP THIS LOAD -- absent on
+   * every ordinary poll, present only while vam's tmux spine itself could not
+   * be read (`docs/design/vam-owns-the-session.md`'s own trap: "an unreadable
+   * tmux listing must not empty the sidebar").
+   *
+   * THE SAME SHAPE `slashCommandGap` USES, for the same reason: `code` is for
+   * a reader that wants to branch, `message` is the sentence a person reads,
+   * and a code alone cannot be shown while a message alone cannot be matched
+   * on.
+   *
+   * WHY IT RIDES ON THE SESSION AND NOT ON THE SOURCE. A descriptor is
+   * computed once, at construction, and cannot change per poll
+   * (`combine.ts`'s own header); this is a fact about THIS load, so it has to
+   * travel with what this load produced. Stamped identically on every session
+   * a source returns while its own tmux read failed -- the same "one per-load
+   * fact, many rows" shape `slashCommandGap`'s `builtinCommands` arm already
+   * uses -- so the filter layer only has to find ONE occurrence to know the
+   * whole load is degraded, and the popover has the actual words to show for
+   * it.
+   *
+   * `vamControlled` ITSELF ALREADY SAYS "ABSENT WHEN VAM COULD NOT ASK" --
+   * this is not a second copy of that fact, it is the REASON, which absence
+   * alone cannot carry. A filter that hides a row on `vamControlled === false`
+   * needs this to know THAT false is trustworthy right now, and a filter that
+   * would otherwise hide an ended session needs it to know the same tmux
+   * failure is why it cannot trust ITS OWN default either -- see
+   * `isHiddenByForeignFilter` and the orchestration in `Canvas.tsx`.
+   */
+  readonly vamListingGap?: { readonly code: string; readonly message: string };
+  /**
+   * WHICH vam tmux session this row is proven to be in -- the pane's name --
+   * when `vamControlled` is `true`; absent otherwise.
+   *
+   * THE ONE THING A PANE'S TWO ROWS SHARE. A pane starts life as an
+   * `unstarted` row keyed by its own name (`pane-row.ts`), and the moment an
+   * agent registers in it the source reports a session row keyed by the
+   * agent's identity instead. The two ids have nothing in common, and a tab
+   * holding the first would be pruned as closed at exactly the moment the
+   * operator is watching it. This field is how the canvas follows the pane
+   * across that moment (`renameTab` in `canvas/split.ts`): same pane, new
+   * row, same tab.
+   *
+   * A pairing HINT for the renderer's own bookkeeping, never a row key and
+   * never an address anything writes to -- every write still resolves its
+   * pane in main, by the rule `reply.ts` documents.
+   */
+  readonly pane?: string;
+  /**
+   * FOR A `terminal` ROW: the exact text that resumes the conversation this
+   * pane last hosted -- `claude --resume <id>`, already joined the way
+   * `recordPrompt` types a command (`startSessionIn` in `Canvas.tsx` does the
+   * identical join for `provider.command`; a Codex resume would be `codex
+   * resume <id>` were a Codex pane possible, which today it is not --
+   * `main/sources/codex/source.ts` declines `terminal` outright).
+   *
+   * PROVIDER-SPECIFIC KNOWLEDGE STAYS IN MAIN, which is why this is a finished
+   * string rather than a provider id plus a session id for the renderer to
+   * assemble: `claudeResumeCommand`/`codexResumeCommand` are main-only
+   * modules (they validate the id's shape and read the provider table), and a
+   * renderer that re-derived the verb would be a second copy of a rule that
+   * already differs by provider.
+   *
+   * Absent whenever the status is not `terminal`, and absent even on a
+   * `terminal` row when vam could not build one (an id that fails the uuid
+   * shape `resume.ts` requires) -- the row still carries its identity and its
+   * transcript either way; only the secondary "Resume" action goes unoffered.
+   */
+  readonly resumeCommand?: string;
+  /**
+   * THE MODEL THIS SESSION IS ON, when its SOURCE holds that fact -- never
+   * read off a screen, and never what vam last asked for.
+   *
+   * WHY A FIELD RATHER THAN THE BRIDGE THAT ALREADY ANSWERS THIS. vam has one
+   * way to learn a model today: `main/terminal/model.ts` reads the CLI's own
+   * status line out of a pane vam started, with the session's transcript as
+   * the fallback. Both of those exist because Claude Code keeps the fact
+   * nowhere a program can ask for it. Codex keeps it in `threads.model`, so
+   * the source simply knows -- there is no pane to read, and there does not
+   * need to be one.
+   *
+   * THREE STATES, the shape `agents` and `vamControlled` established. ABSENT
+   * is a source with no such fact, which is every Claude Code row and every
+   * fixture: those rows still get their name from the pane read, and a field
+   * that defaulted to `null` would have claimed the source had looked. NULL is
+   * a source that holds the field and found it empty -- one of the 789 threads
+   * measured here has no model recorded. A STRING is the model as the source
+   * spells it, verbatim, because it is the provider's own identifier and not
+   * something vam may normalise.
+   *
+   * IT IS NOT A CONTROL. A source that can say which model a session is on
+   * cannot necessarily CHANGE it, and this one cannot: see the Codex source's
+   * `terminal` decline.
+   */
+  readonly model?: string | null;
+  /**
    * The `AskUserQuestion` questions this session asked, oldest first, or
    * absent when the source has no such surface.
    *
@@ -665,11 +819,16 @@ export type Session = {
    * sessions never ask through the tool. Neither is a reason to draw an empty
    * box where a question would go.
    *
-   * A question older than the transcript tail vam reads (`TAIL_BYTES` in
-   * `sources/claude-code/source.ts`) has scrolled out of the window and is
-   * absent here -- which is why a pane may show none while a session is in
-   * fact blocked on one, and why nothing in this app treats an empty list as
-   * "this session is not waiting on you".
+   * A STILL-OPEN question survives past the transcript tail vam reads
+   * (`TAIL_WINDOW_BYTES` in `sources/claude-code/tail.ts`): a burst of
+   * ordinary output after the question used to push it out of the window and
+   * silently close the card in the Response view while the session was still
+   * waiting, and `sources/claude-code/question-index.ts` now keeps the newest
+   * OPEN one in view independently of where the tail window stopped. That
+   * memory is itself bounded (`QUESTION_SCAN_CAP_BYTES`), so a question older
+   * than even that -- already answered, or asked further back than the cold-
+   * start scan reaches -- can still be absent here. Nothing in this app may
+   * treat an empty list as "this session is not waiting on you".
    */
   readonly questions?: readonly AgentQuestion[];
   /**

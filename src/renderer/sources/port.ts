@@ -30,6 +30,20 @@ export type SourceCapabilities = {
   readonly pullRequests: boolean;
   readonly terminal: boolean;
   readonly agentRoster: boolean;
+  /**
+   * THE THIRTEENTH, and the first affordance added to this list rather than
+   * gated out of it. The header above says "gate every affordance the canvas
+   * already draws, never a new one" — reopening is a new one, and it needs a
+   * boolean for the same reason the other twelve do: whether it can act is
+   * known before the control would be drawn, so a source that cannot resume
+   * must be able to withdraw it with a sentence rather than fail when pressed.
+   *
+   * It is NOT folded into `createSession`. Codex separates them by example:
+   * vam cannot start a Codex thread (that is Stage 2 of
+   * `docs/design/a-second-source.md`) and CAN resume one, because
+   * `codex resume <uuid>` exists and was measured.
+   */
+  readonly resumeSession: boolean;
 };
 
 /**
@@ -108,6 +122,17 @@ export type SourceWrites = {
    */
   createSessionIn?(cwd: string, title: string): Promise<void>;
   /**
+   * Continue a conversation that has ended, addressed by the row id the
+   * canvas holds. Gated by `resumeSession`, which is its OWN capability and
+   * not `createSession`'s -- Codex is the case that separates them: vam
+   * cannot start a Codex thread and can return to one.
+   *
+   * No cwd and no provider: both are facts the source holds about that
+   * conversation, and a caller supplying either would be deciding where
+   * somebody else's session resumes.
+   */
+  resumeSession?(sessionId: string): Promise<void>;
+  /**
    * Opens a picker for one image, scoped to and validated against the
    * session's own working directory, and answers the resolved path -- or
    * `null` on cancel. Gated by `promptAttachments`, not by `recordPrompt`
@@ -131,12 +156,41 @@ export type SourceGovernance = {
  * Use `canSubscribeTo`, `canWriteTo` and `canGovernWith` to reach them; a
  * direct ungated call does not typecheck.
  */
+/**
+ * ONE CONSTITUENT of a source that is really several, for the questions that
+ * are about a ROW rather than about the app.
+ *
+ * `SessionSource.capabilities` is the OR over everything main serves, which is
+ * the right answer to "can this app do X" -- whether a control exists at all.
+ * It is the wrong answer to "can THIS ROW do X", and the two only started
+ * differing when a second source arrived: Claude Code types into a pane it
+ * started, Codex queues into a session vam never saw, and a canvas reading the
+ * OR would draw a Terminal tab over a row that has no terminal.
+ *
+ * Narrower than the descriptor it comes from on purpose: a member is consulted
+ * for a capability and for the words behind a withdrawal, never for a
+ * `viewerScope`, which is a claim about the whole connection.
+ */
+export type SourceMember = {
+  readonly id: SourceId;
+  readonly label: string;
+  readonly capabilities: SourceCapabilities;
+  readonly declines: SourceDeclines;
+};
+
 export type SessionSource = {
   readonly id: SourceId;
   readonly label: string;
   readonly capabilities: SourceCapabilities;
   readonly declines: SourceDeclines;
   readonly viewerScope: ViewerScope;
+  /**
+   * The constituents, when main is serving more than one source. ABSENT when
+   * it is serving one, and then this source IS that one -- so a reader must
+   * fall back to the top level rather than treat absence as "no capabilities".
+   * `capabilitiesFor` in `./members.ts` is the one place that rule lives.
+   */
+  readonly members?: readonly SourceMember[];
   load(): Promise<readonly Project[]>;
   /**
    * The turns BEFORE a point in one session -- scrolling back, which `load()`

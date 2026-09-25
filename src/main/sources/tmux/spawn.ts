@@ -46,6 +46,7 @@ import {
   resizeWindowArgv,
   tagPidArgv,
   tagSessionArgv,
+  tagVamSessionArgv,
   VAM_CURSOR_MARK,
 } from './argv.js';
 
@@ -57,8 +58,14 @@ const TMUX_TIMEOUT_MS = 10_000;
  * `killSignal`, and it is what tells a timeout apart from a kill vam did not
  * ask for -- so `createTmuxRunner` passes it explicitly rather than leaving the
  * classifier's reasoning resting on a default that could change.
+ *
+ * EXPORTED for `control.ts`'s own synthetic timeout failure (A2): a control-
+ * mode command this file refuses to re-run after losing its reply reads
+ * exactly like this module's own timeout to `classifyTmuxFailure` below,
+ * which is the honest description -- tmux did not answer in time -- and
+ * reusing the same constant keeps the two timeouts from drifting apart.
  */
-const TIMEOUT_SIGNAL = 'SIGTERM';
+export const TIMEOUT_SIGNAL = 'SIGTERM';
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
@@ -132,9 +139,16 @@ const clip = (text: string): string =>
  * tmux's own words, matched loosely enough to survive a rewording. NO_SERVER
  * is the one that must not be mistaken for a failure by a caller listing
  * sessions -- see `listVamSessions`.
+ *
+ * `NO_SESSION` is exported so `terminal/stream/client.ts` can recognise the
+ * SAME shape of tmux error text on a control-mode `%error` block's own body
+ * (a `capture-pane`/`list-panes` reply during a reconnect attempt) -- the
+ * session it was streaming is gone, not merely the connection, and that is a
+ * reason to give up permanently rather than keep backing off and retrying
+ * against a session that will never answer.
  */
 const NO_SERVER = /no server running|error connecting to .*\(no such file/i;
-const NO_SESSION = /can't find (?:session|pane|window)|session not found/i;
+export const NO_SESSION = /can't find (?:session|pane|window)|session not found/i;
 const DUPLICATE = /duplicate session/i;
 
 /**
@@ -256,6 +270,31 @@ export type TmuxSession = {
    */
   readonly pid?: string;
   readonly name: string;
+  /**
+   * What is in the FOREGROUND of the pane, as tmux names the process
+   * (`pane_current_command` -- `zsh`, `claude`, `codex`, `sleep`). OPTIONAL
+   * for the reason `pid` is: the fixtures that predate it answer three
+   * fields, and absence means "the listing did not say", never "a shell".
+   * `tmux/shell.ts`'s `isShellCommand` is the one reader that interprets it.
+   */
+  readonly command?: string;
+  /**
+   * The native id vam wrote for whatever it started in this pane -- a Claude
+   * Code session id or a Codex thread uuid -- or absent when the listing did
+   * not carry it. Same optionality as `command` and `pid`, and the same rule:
+   * `''` and absent mean the identical thing to every reader, because an
+   * unset tmux option reads back as the empty string and a reader that
+   * matched on it would pair every session vam never wrote this for.
+   */
+  readonly vamSessionId?: string;
+  /**
+   * The pane's REAL working directory, as tmux itself reports it -- never
+   * vam's own `@vam-project` digest, which cannot be turned back into a
+   * directory. Absent for the same reason `command` is: the fixtures that
+   * predate this field answer without it, and absence means "the listing did
+   * not say", never "the pane has no directory" -- every live pane has one.
+   */
+  readonly cwd?: string;
 };
 
 /** Either the thing, or why vam could not get it -- never one standing in for the other. */
@@ -264,7 +303,13 @@ export type TmuxSessions =
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 export type TmuxText =
-  | { readonly kind: 'ok'; readonly text: string; readonly cursor: PaneCursor }
+  | {
+      readonly kind: 'ok';
+      readonly text: string;
+      readonly cursor: PaneCursor;
+      /** Whether the pane's program asked for the mouse; absent when tmux did not say. */
+      readonly mouse?: boolean;
+    }
   | { readonly kind: 'unavailable'; readonly error: SourceError };
 
 /**
@@ -285,7 +330,12 @@ const MAX_CURSOR_CELL = 99_999;
  * forget where the cursor is; it is a reason not to be able to PLACE it, and
  * only when history was asked for (`readPane`).
  */
-type PaneMark = { readonly cursor: PaneCursor; readonly depth: number | null };
+type PaneMark = {
+  readonly cursor: PaneCursor;
+  readonly depth: number | null;
+  /** `#{mouse_any_flag}`, or `null` for a line that did not carry it. */
+  readonly mouse: boolean | null;
+};
 
 /**
  * tmux's one-line answer about the cursor, or the honest absence of one.
@@ -302,36 +352,41 @@ type PaneMark = { readonly cursor: PaneCursor; readonly depth: number | null };
  * false and would slip through a `>=` guard the wrong way round. The shape is
  * matched whole, by pattern, and anything else is `unreadable`.
  *
- * THREE FIELDS OR FOUR. The format asks for four (`argv.ts`, `CURSOR_FORMAT`),
- * and the fourth is the history depth. Three is still read as a cursor rather
+ * THREE FIELDS, FOUR OR FIVE. The format asks for five (`argv.ts`,
+ * `CURSOR_FORMAT`): the fourth is the history depth, the fifth whether the
+ * pane's program asked for the mouse. Three is still read as a cursor rather
  * than refused, because the many stubbed runners in this repo's own suite --
  * and any tmux old enough to have dropped the key entirely -- answer with
  * three, and every one of them is a screen-only read where the depth is not
- * needed.
+ * needed; four is every stub written before the mouse was asked about. A
+ * field that is not there is `null`, never `false`: "tmux did not say" and
+ * "the program declined the mouse" send a wheel to different places.
  */
 export function readCursorLine(line: string): PaneMark {
-  const nothing: PaneMark = { cursor: { kind: 'unreadable' }, depth: null };
+  const nothing: PaneMark = { cursor: { kind: 'unreadable' }, depth: null, mouse: null };
   const marked = `${VAM_CURSOR_MARK} `;
   if (!line.startsWith(marked)) return nothing;
   const fields = line.slice(marked.length).split(' ');
-  const [flag, x, y, history] = fields;
-  if (fields.length !== 3 && fields.length !== 4) return nothing;
+  const [flag, x, y, history, mouseFlag] = fields;
+  if (fields.length < 3 || fields.length > 5) return nothing;
   // `#{history_size}` is a count and never negative, so anything that is not
   // a run of digits is tmux having said nothing vam can use.
   const depth = history !== undefined && /^\d+$/.test(history) ? Number(history) : null;
+  // Only its two values are believed, for the reason `cursor_flag` gives.
+  const mouse = mouseFlag === '1' ? true : mouseFlag === '0' ? false : null;
   // The flag can VETO, so it is read before the coordinates and only two
   // values mean anything: a `cursor_flag` that is neither 0 nor 1 is a tmux
   // this parse does not understand, not a cursor to guess about.
-  if (flag === '0') return { cursor: { kind: 'hidden' }, depth };
-  if (flag !== '1') return { ...nothing, depth };
+  if (flag === '0') return { cursor: { kind: 'hidden' }, depth, mouse };
+  if (flag !== '1') return { ...nothing, depth, mouse };
   if (x === undefined || y === undefined || !/^\d+$/.test(x) || !/^\d+$/.test(y)) {
-    return { ...nothing, depth };
+    return { ...nothing, depth, mouse };
   }
   const column = Number(x);
   const row = Number(y);
   return column > MAX_CURSOR_CELL || row > MAX_CURSOR_CELL
-    ? { ...nothing, depth }
-    : { cursor: { kind: 'at', column, row }, depth };
+    ? { ...nothing, depth, mouse }
+    : { cursor: { kind: 'at', column, row }, depth, mouse };
 }
 
 /**
@@ -361,7 +416,10 @@ export function readCursorLine(line: string): PaneMark {
  * a position -- and it costs nothing on the screen-only path, where no offset
  * is needed and none is looked for.
  */
-function splitCursor(stdout: string, history: number): { text: string; cursor: PaneCursor } {
+function splitCursor(
+  stdout: string,
+  history: number,
+): { text: string; cursor: PaneCursor; mouse?: boolean } {
   const end = stdout.indexOf('\n');
   const marked = stdout.startsWith(`${VAM_CURSOR_MARK} `);
   const line = end === -1 ? stdout : stdout.slice(0, end);
@@ -371,11 +429,14 @@ function splitCursor(stdout: string, history: number): { text: string; cursor: P
     const above = mark.depth === null ? null : Math.min(mark.depth, Math.floor(history));
     return above === null ? { kind: 'unreadable' } : { ...cursor, row: above + cursor.row };
   };
-  if (end === -1) return { text: stdout, cursor: place(mark.cursor) };
+  // The flag is only SAID when tmux said it: an absent field stays absent,
+  // so a consumer reading `mouse === false` is reading a program's answer.
+  const said = mark.mouse === null ? {} : { mouse: mark.mouse };
+  if (end === -1) return { text: stdout, cursor: place(mark.cursor), ...said };
   return mark.cursor.kind === 'unreadable' && !marked
     ? // No cursor line at all: every byte is screen.
       { text: stdout, cursor: mark.cursor }
-    : { text: stdout.slice(end + 1), cursor: place(mark.cursor) };
+    : { text: stdout.slice(end + 1), cursor: place(mark.cursor), ...said };
 }
 
 /**
@@ -432,12 +493,47 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
         },
       };
     }
-    const name = line.slice(secondTab + 1).trim();
+    // The THIRD tab is optional -- what follows it is the foreground command
+    // (`listSessionsArgv`), and a line without it is the older three-field
+    // shape every stubbed runner in this suite still answers with. The name
+    // is what sits between the second tab and the third, or to the end.
+    const thirdTab = line.indexOf('\t', secondTab + 1);
+    const name = (
+      thirdTab === -1 ? line.slice(secondTab + 1) : line.slice(secondTab + 1, thirdTab)
+    ).trim();
     if (!isVamSession(name)) continue;
+    // THE FOURTH AND FIFTH TABS ARE BOTH OPTIONAL TOO, and for the same
+    // reason the third is: an older tmux, or any stub in this suite that
+    // predates `@vam-session` and the real cwd, still parses. Each is only
+    // looked for once the one before it was found, so a line that stops
+    // after the command -- the shape every existing fixture uses -- leaves
+    // both trailing fields off rather than reading a foreign-directory
+    // digest as if it were one of them.
+    const fourthTab = thirdTab === -1 ? -1 : line.indexOf('\t', thirdTab + 1);
+    const fifthTab = fourthTab === -1 ? -1 : line.indexOf('\t', fourthTab + 1);
+    const command =
+      thirdTab === -1
+        ? ''
+        : (fourthTab === -1
+            ? line.slice(thirdTab + 1)
+            : line.slice(thirdTab + 1, fourthTab)
+          ).trim();
+    const vamSessionId =
+      fourthTab === -1
+        ? ''
+        : (fifthTab === -1
+            ? line.slice(fourthTab + 1)
+            : line.slice(fourthTab + 1, fifthTab)
+          ).trim();
+    const cwd = fifthTab === -1 ? '' : line.slice(fifthTab + 1).trim();
     sessions.push({
       project: line.slice(0, firstTab).trim(),
       pid: line.slice(firstTab + 1, secondTab).trim(),
       name,
+      // Absent, not `''`, when the listing did not carry it -- see the field.
+      ...(command === '' ? {} : { command }),
+      ...(vamSessionId === '' ? {} : { vamSessionId }),
+      ...(cwd === '' ? {} : { cwd }),
     });
   }
   return { kind: 'ok', sessions };
@@ -462,7 +558,22 @@ function readPanePid(stdout: string): string | null {
  */
 export async function createVamSession(
   run: TmuxRun,
-  input: { name: string; cwd: string; command: readonly string[]; projectId: string },
+  input: {
+    name: string;
+    cwd: string;
+    command: readonly string[];
+    projectId: string;
+    /**
+     * The native id a RESUME already holds -- `docs/design/vam-owns-the-
+     * session.md` §2, step 1. Absent for a fresh start, which has no id to
+     * give yet (§2 step 2 is Stage 2's problem). An empty string is refused
+     * exactly like an absent one, never written: the same rule every other
+     * option here follows, because an unset option reads back as `''` and a
+     * reader that matched on it would pair every session this was never
+     * written for.
+     */
+    sessionId?: string;
+  },
 ): Promise<SourceError | null> {
   const { failure, stdout, stderr } = await run(newSessionArgv(input));
   if (failure !== null) {
@@ -499,6 +610,15 @@ export async function createVamSession(
   const pid = readPanePid(stdout);
   if (pid !== null) {
     await run(tagPidArgv(input.name, pid));
+  }
+  // THE VAM-SESSION TAG, LAST AND AT THE SAME SEVERITY AS THE PID TAG. Only
+  // written when the caller actually has an id -- a resume -- and never for
+  // an empty one, which would be indistinguishable from a session nobody
+  // wrote this for. A failure here degrades silently for the pid tag's own
+  // reason: the project tag already recorded is what actually gates the
+  // Terminal tab, and this is a bonus pairing on top of it.
+  if (input.sessionId !== undefined && input.sessionId !== '') {
+    await run(tagVamSessionArgv(input.name, input.sessionId));
   }
   return null;
 }

@@ -105,6 +105,19 @@ const EXCEPTIONS: ReadonlyArray<{
       'one thing in vam that is deliberately set at display size.',
   },
   {
+    file: 'panels/PairingScreen.tsx',
+    size: '16',
+    count: 1,
+    why:
+      'The device-name field, and not a reading size at all: iOS Safari zooms ' +
+      'the page on focus for any control under 16px and does not undo it ' +
+      'cleanly, which `styles.css`’s own `[data-phone-shell] input` rule ' +
+      'already holds the floor for everywhere a shell exists. This screen ' +
+      'mounts BEFORE any shell does -- there is nothing paired yet to host one ' +
+      '-- so that selector cannot reach it, and a desktop browser can land ' +
+      'here too, so the floor is unconditional rather than a phone-only class.',
+  },
+  {
     file: 'phone/PhoneShell.tsx',
     size: '18',
     count: 1,
@@ -123,6 +136,42 @@ const EXCEPTIONS: ReadonlyArray<{
       'smaller than the chevron for the same optical reason in the other ' +
       'direction: a multiplication sign fills its em box where a chevron does ' +
       'not.',
+  },
+  {
+    file: 'panels/SessionList.tsx',
+    size: '13',
+    count: 6,
+    why:
+      'The sidebar\u2019s project and group titles, TWICE MOVED. Operator, in ' +
+      'one breath the first time: "make the project and group titles bold and ' +
+      '1px smaller; the session name regular weight and also 1px smaller" -- ' +
+      'landing at 14, one pixel below `heading` (15). Then, in the workspace-' +
+      'options pass: "make the project and group title font size in the ' +
+      'sidebar 1px smaller" again, landing at 13 -- which happens to be ' +
+      '`text-body`\u2019s own number, and is a coincidence rather than a merge: ' +
+      'the row title stays `text-control` (12, one pixel below body) exactly ' +
+      'as before, so a heading at 13 still outranks every row beneath it, and ' +
+      'the weight (`font-semibold`) is what keeps the two levels apart at a ' +
+      'shared size. Still a named exception rather than the fifth step: 13 is ' +
+      '`text-body`\u2019s number but not `text-body`\u2019s ROLE (a section ' +
+      'heading, not read prose), and reusing the role would be the false ' +
+      'economy `docs/design/workspace-options.md` argues against. Six call ' +
+      'sites, not one: the group heading name, the project heading name, the ' +
+      'provisional project heading a session-in-flight draws before it has a ' +
+      'real section to join (which has to match the real heading\u2019s size ' +
+      'and weight exactly, or the row would visibly change size the moment ' +
+      'the session arrives and the two swap), the two heading ICON slots -- ' +
+      'an emoji is text and takes its size from the slot it sits in, and ' +
+      '`HEADING_GLYPH_PX`\u2019s own history is what a heading whose picture ' +
+      'and word disagree on size looks like, so the icon moved with the ' +
+      'caption both times rather than being left at `text-heading` -- and, ' +
+      'new with the same pass, `Group by: Status`\u2019s own section heading ' +
+      '(the bucket name -- "Needs you", "Running", "Sleeping", "Done"), which ' +
+      'sits at the SAME level the project/group heading does when THEY are ' +
+      'showing, and reads at their exact size and weight for the same reason ' +
+      'the provisional heading above does: an operator flipping `Group by` ' +
+      'must not see the level above the rows change size depending on which ' +
+      'grouping is chosen.',
   },
 ];
 

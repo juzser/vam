@@ -29,7 +29,6 @@ function session(id: string): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -68,6 +67,7 @@ function sourceWith(createSession?: (projectId: string, title: string) => Promis
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines:
       createSession === undefined ? { createSession: 'this source has no way to start one' } : {},
@@ -327,12 +327,22 @@ describe('Cmd+T starts a session in the focused pane', () => {
 
   /**
    * WHY IT IS NOT `Mod-n` UNDER A SECOND NAME. `Mod-n`/`o` start a session in
-   * the FOCUSED SESSION's project and refuse when nothing is focused; `Mod-t`
-   * is the per-pane `+`, which resolves a project from the pane and falls back
-   * to the project on screen. A pane a split emptied is exactly where the two
-   * diverge, and it is a state the operator reaches with one keystroke.
+   * the FOCUSED SESSION's project, and fall back to `newProject` (choose a
+   * directory) when nothing is focused rather than starting one by guessing;
+   * `Mod-t` is the per-pane `+`, which resolves a project from the pane and
+   * falls back to the project on screen. A pane a split emptied is exactly
+   * where the two diverge, and it is a state the operator reaches with one
+   * keystroke.
+   *
+   * `created` (`write.createSession`) stays empty on `Mod-n` here for a
+   * DIFFERENT reason than it used to: not a dead end any more (see
+   * `Canvas.getting-started.test.tsx`, which drives the fallback all the way
+   * through a real picker) but the browser build's own missing bridge --
+   * this fixture never installs `window.api.dialog.chooseDirectory`, so
+   * `newProject` declines exactly as it does for the Projects header's own
+   * `+` in that state.
    */
-  it('still creates in a pane a split emptied, where `Mod-n` refuses', async () => {
+  it('still creates in a pane a split emptied, where `Mod-n` falls back to New project instead', async () => {
     const { source, created } = sourceWith(async () => {});
     render(<Canvas model={modelWith('a1')} source={source} />);
     press('z');
@@ -343,7 +353,7 @@ describe('Cmd+T starts a session in the focused pane', () => {
 
     await pressAsync('n', { metaKey: true });
     expect(created).toEqual([]);
-    expect(statusBar()).toContain('pick a session first');
+    expect(statusBar()).toMatch(/desktop app|browser/i);
 
     await pressAsync('t', { metaKey: true });
     expect(created).toEqual([['p1', 'alpha']]);

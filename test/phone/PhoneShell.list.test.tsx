@@ -39,6 +39,11 @@ describe('the phone list screen', () => {
   it('says where the rows came from — a dropped tunnel must not look idle', () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
     const readout = document.querySelector('[data-source]');
+    // The name is `sr-only` now that the healthy arm has stopped painting the
+    // joined source labels (`Canvas.source-cell.test.tsx` holds that decision
+    // and the operator's reason for it). It is still IN the cell, which is
+    // what this test is about: the phone must not look idle when the tunnel
+    // drops, and it still names the source to anything that reads the DOM.
     expect(readout?.textContent).toContain('Claude Code');
     // In the app bar, not in a canvas top bar that is not drawn.
     expect(readout?.closest('header')).not.toBeNull();
@@ -50,6 +55,17 @@ describe('the phone list screen', () => {
     expect(document.querySelector('[data-usage]')).toBeNull();
     expect(document.querySelector('[data-status-bar]')).toBeNull();
     expect(document.querySelector('[data-phone-status-bar]')).not.toBeNull();
+  });
+
+  // B13: the top bar's own safe-area hook. jsdom lays nothing out, so the
+  // actual padding this rule closes is only provable in a browser
+  // (`e2e/phone-shell.pw.ts`); what a unit test can pin is that the hook the
+  // CSS rule keys off is actually on the element, on a phone.
+  it('marks its own top bar for the B13 safe-area rule (styles.css)', () => {
+    render(<Canvas model={MODEL} source={phoneSource()} />);
+    const bar = document.querySelector('[data-phone-list-top-bar]');
+    expect(bar).not.toBeNull();
+    expect(bar?.tagName).toBe('HEADER');
   });
 
   it('pushes the session screen on a tap and pops it on the chevron', () => {

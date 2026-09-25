@@ -31,7 +31,6 @@ function session(id: string): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -64,6 +63,7 @@ function cannotCreate(): CanvasSource {
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: { createSession: 'the CLI on this machine has no session command' },
     viewerScope: { kind: 'connection', note: 'one local process' },

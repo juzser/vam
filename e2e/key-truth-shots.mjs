@@ -20,6 +20,19 @@
  *    storage, reads what the sheet PAINTS for the dead half, and then presses
  *    the key to see which action it really reaches.
  *
+ *  - THE PREVIEW PANEL. Operator, translated: "when Claude offers options
+ *    described with a diagram, the options go on one side and the diagram on
+ *    the other — today, when the diagram goes with the option, the display
+ *    breaks." `options[].preview` used to be drawn `truncate`d to one line
+ *    INSIDE the option row; a multi-line ASCII diagram collapsed to that is
+ *    the break. happy-dom lays nothing out, so "beside" and "below" are both
+ *    RECTANGLES no unit test can compare — measured here at 1100px (a card
+ *    comfortably past the panel's own 720px container-query threshold) and at
+ *    390px (the phone shell, well under it), against `vam-preview-1`'s own
+ *    `Transport` question in the demo fixture: a real multi-line preview, a
+ *    one-line one and an option with none, on a session of its own rather
+ *    than `vam-build-1` (see `PREVIEW_SESSION`'s own comment for why).
+ *
  * WHY A REAL BROWSER, for the second one especially. The quiet case and the
  * loud one are told apart by `event.defaultPrevented`: the options list of an
  * open question answers `j` itself and calls `preventDefault`, and the window
@@ -47,6 +60,16 @@ const outDir = process.argv[3] ?? 'docs/ui';
 const ASKING_SESSION = 'vam-build-1';
 /** A session with none, where Insert's own cursor has one stop: the prompt. */
 const QUIET_SESSION = 'notes-1';
+/**
+ * THE PREVIEW PANEL'S OWN SESSION — not `ASKING_SESSION`. `vam-build-1`'s
+ * card shares its pane with `e2e/prompt-suggest-shots.mjs`'s composer
+ * typeahead checks at a window as short as 480px, and a panel drawn by
+ * default (`QuestionCard`'s `activeOption` fallback) costs the card real
+ * height even at its shortest — measured, enough to leave that guard's `/`
+ * popover a few pixels short of the floor. See `vam-preview-1`'s own
+ * comment in `fixtures/demo.ts`.
+ */
+const PREVIEW_SESSION = 'vam-preview-1';
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1200, height: 760 } });
@@ -785,7 +808,7 @@ const sheetHasIt = await settle(
 // runs against a SERVED bundle and shares no module with it, which is what
 // makes it an independent reading.
 const newProjectChord = await page.evaluate(() =>
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⇧⌘P' : 'Ctrl+Shift+P',
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? '⇧ ⌘ P' : 'Ctrl+Shift+P',
 );
 console.log(`this browser spells newProject "${newProjectChord}"`);
 
@@ -848,7 +871,10 @@ await settle(
 // keydown delivered to whatever holds focus.
 
 await page.addInitScript(() => {
-  window.localStorage.setItem('vam.prefs.v1', JSON.stringify({ keyBindings: { icon: ['r'] } }));
+  window.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ keyBindings: { filterMenu: ['r'] } }),
+  );
 });
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-session-row]');
@@ -898,7 +924,7 @@ if (sheetOpen) {
   check('exactly one of them is marked dead', dead.length === 1, `${dead.length} marked`);
   check(
     'the dead one is the row whose key was taken, and it names the taker',
-    dead[0]?.label.includes('rename') === true && dead[0]?.dead?.includes('icon') === true,
+    dead[0]?.label.includes('rename') === true && dead[0]?.dead?.includes('filter') === true,
     `label "${dead[0]?.label}", mark "${dead[0]?.dead}"`,
   );
   check(
@@ -923,12 +949,13 @@ await settle(
   'the sheet closes before the key is pressed',
 );
 
-// AND THE KEYSTROKE ITSELF. The sheet says `icon` has `r`; if `r` opened a
-// rename field instead, the sheet would be wrong in the new direction rather
-// than the old one — which is why this is measured and not reasoned about.
+// AND THE KEYSTROKE ITSELF. The sheet says `filterMenu` has `r`; if `r`
+// opened a rename field instead, the sheet would be wrong in the new
+// direction rather than the old one — which is why this is measured and not
+// reasoned about.
 await page.keyboard.press('r');
 const reached = await settle(
-  () => document.querySelector('[data-icon-picker]') !== null,
+  () => document.querySelector('[data-filter-menu]') !== null,
   undefined,
   '`r` invokes the action the sheet names as the winner',
 );
@@ -939,7 +966,7 @@ if (reached) {
   check(
     'and the shadowed action did not also run',
     renaming === false,
-    'a rename field opened as well as the icon panel',
+    'a rename field opened as well as the filter popover',
   );
 }
 
@@ -983,13 +1010,15 @@ if (settingsOpen) {
   console.log('settings over a contested map:', JSON.stringify(editor));
   check(
     'the notice names the key, the winner and the loser',
-    editor.text.includes('"r"') && editor.text.includes('icon') && editor.text.includes('rename'),
+    editor.text.includes('"r"') &&
+      editor.text.includes('filter') &&
+      editor.text.includes('rename'),
     editor.text,
   );
   check('and it is painted', editor.painted && editor.inView, 'the notice has no visible box');
   check(
     'the dead slot says so in its accessible name, not only in ink',
-    editor.slotLabel.includes('dead') && editor.slotLabel.includes('icon'),
+    editor.slotLabel.includes('dead') && editor.slotLabel.includes('filter'),
     editor.slotLabel,
   );
   check(
@@ -1011,14 +1040,14 @@ if (settingsOpen) {
 
 // AND THE REFUSAL ITSELF, driven the way an operator drives it. The map is
 // the one F3's first two steps leave behind — `rename` moved to a free key,
-// `icon` on the freed `r` — and the third step is the click that used to hand
+// `filterMenu` on the freed `r` — and the third step is the click that used to hand
 // `r` to two actions in silence. A unit test can prove the write did not
 // happen; only this can prove the control is reachable, the message lands on
 // screen, and the row still shows the binding it refused to change.
 await page.addInitScript(() => {
   window.localStorage.setItem(
     'vam.prefs.v1',
-    JSON.stringify({ keyBindings: { rename: ['b'], icon: ['r'] } }),
+    JSON.stringify({ keyBindings: { rename: ['b'], filterMenu: ['r'] } }),
   );
 });
 await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
@@ -1070,7 +1099,7 @@ if (editorOpen) {
     console.log('refused reset:', JSON.stringify(said));
     check(
       'the refusal names the key and the action that owns it',
-      said.text.includes('"r"') && said.text.includes('icon'),
+      said.text.includes('"r"') && said.text.includes('filter'),
       said.text,
     );
     check('and a way out of it', said.text.includes('reset shortcuts'), said.text);
@@ -1314,6 +1343,541 @@ if (inBox) {
     landed.tag !== 'TEXTAREA' && landed.mode === 'Select',
     JSON.stringify(landed),
   );
+}
+
+// ---------------------------------------------------------------------------
+// OPERATOR REQUEST: "Enter to submit, Space to select" — measured against a
+// REAL Submit, which `?demo=1` cannot draw at all. `DetailPanel.submit.js`
+// only offers the button where `window.api.terminal.answer` exists, and the
+// browser build has none — every guard above this line that opens a question
+// (`ASKING_SESSION`, `vam-build-1`) is deliberately `vamControlled: false`
+// and gets none either (its own comment in `fixtures/demo.ts` says so). So
+// this section stubs `window.api` itself, the way `terminal-ime-shots.mjs`
+// and `start-screen-shots.mjs` already do for the same reason, and drives a
+// session that CAN answer.
+//
+// WHAT ONLY THIS CAN PROVE, that `DetailPanel.question-enter.test.tsx`
+// cannot: that a REAL Enter keydown, cancelable and dispatched by Chromium
+// rather than assembled by `fireEvent`, reaches `onKeys` before the button's
+// own native activation and before the canvas grammar's `open` binding —
+// exactly the `defaultPrevented`-on-a-real-event class this whole file exists
+// for (see the header). The mark, the walk-or-send decision and the recorded
+// call are read off the SHIPPED BUNDLE, not off a component rendered in
+// isolation.
+console.log('\n=== Enter marks and submits, against a real Submit');
+
+/** Every call the stub's own `answer` received, so "the submit happened" is
+ *  read off a recording rather than inferred from the DOM alone. */
+const answered = [];
+
+await page.addInitScript(() => {
+  globalThis.window.__answered = [];
+  globalThis.window.api = {
+    describe: async () => ({
+      id: 'stub',
+      label: 'Stub',
+      capabilities: {
+        liveUpdates: false,
+        recordPrompt: false,
+        // THE ONE FLAG THIS SECTION IS ABOUT: without it `delivers` is false
+        // and Submit is withheld exactly as it is for every demo session.
+        deliverPrompt: true,
+        promptAttachments: false,
+        slashCommands: false,
+        renameSession: false,
+        closeSession: false,
+        createSession: false,
+        governance: false,
+        pullRequests: false,
+        terminal: true,
+        agentRoster: false,
+        resumeSession: false,
+      },
+      declines: {},
+      viewerScope: 'operator',
+    }),
+    load: async () => [
+      {
+        id: 'p1',
+        name: 'stub project',
+        sessions: [
+          {
+            // vam started this one — the one fact `vam-build-1` deliberately
+            // does not carry, and the reason Submit never draws there.
+            vamControlled: true,
+            id: 'asking-1',
+            title: 'asking-1',
+            epic: null,
+            branch: null,
+            status: 'waiting',
+            runningAgents: 0,
+            activity: null,
+            age: '1m',
+            questions: [
+              {
+                id: 'toolu_e2e:0',
+                header: 'Colours',
+                question: 'Which colour do you prefer?',
+                multiSelect: false,
+                options: [
+                  { label: 'Crimson', description: null },
+                  { label: 'Cobalt', description: null },
+                ],
+                answer: null,
+              },
+            ],
+            decisions: [
+              { id: 'd1', label: 'plan', input: 'ask me', output: 'asked', commands: [] },
+            ],
+          },
+        ],
+      },
+    ],
+    subscribe: () => () => {},
+    recordPrompt: async () => {},
+    renameSession: async () => {},
+    closeSession: async () => {},
+    createSession: async () => {},
+    createSessionIn: async () => {},
+    pickImageAttachment: async () => null,
+    history: async () => ({ kind: 'unavailable' }),
+    agentWork: async () => ({ kind: 'unavailable' }),
+    applyWaivers: async () => {},
+    transitionLesson: async () => {},
+    usage: { get: async () => ({ kind: 'unavailable' }) },
+    terminal: {
+      read: async () => ({ kind: 'unavailable' }),
+      resize: async () => true,
+      send: async () => 'sent',
+      // RECORDED, and answered as a real picker read-back would be: the
+      // outcome names the labels the card sent, so a wrong or missing mark
+      // shows up in the sentence on screen rather than only in this array.
+      answer: async (projectId, request, rowId) => {
+        globalThis.window.__answered.push({ projectId, request, rowId });
+        return { kind: 'sent', answer: request.steps.map((s) => s.labels.join(', ')).join('; ') };
+      },
+      prompt: async () => ({ kind: 'unavailable' }),
+    },
+  };
+});
+
+await page.goto(origin, { waitUntil: 'networkidle' });
+await page.waitForSelector('[data-session-row]');
+await page.locator('[data-session-row="asking-1"]').click();
+await page.waitForSelector('[data-question-option]', { timeout: 4000 });
+
+const submitBefore = await page.evaluate(
+  () => document.querySelector('[data-question-submit]') !== null,
+);
+check('a real answer bridge really draws Submit', submitBefore);
+
+// Cobalt — the SECOND option, so a defect that always reads "the first
+// option" cannot pass this by accident.
+await page.locator('[data-question-option]').nth(1).focus();
+await page.keyboard.press('Enter');
+await page.waitForFunction(
+  () => document.querySelectorAll('[data-question-option]')[1]?.getAttribute('data-picked') === 'true',
+  undefined,
+  { timeout: 4000 },
+);
+const marked = await page.evaluate(
+  () => document.querySelectorAll('[data-question-option]')[1]?.getAttribute('data-picked'),
+);
+check('Enter marked the option under the cursor', marked === 'true', `data-picked="${marked}"`);
+
+await page.waitForFunction(() => globalThis.window.__answered.length === 1, undefined, {
+  timeout: 4000,
+});
+answered.push(...(await page.evaluate(() => globalThis.window.__answered)));
+console.log('recorded answer call:', JSON.stringify(answered[0]));
+check(
+  'the SAME Enter sent the call — one keystroke, not a second Submit press',
+  answered.length === 1,
+  `${answered.length} calls`,
+);
+check(
+  'carrying the marked label and no other',
+  JSON.stringify(answered[0]?.request?.steps?.[0]?.labels) === JSON.stringify(['Cobalt']),
+  JSON.stringify(answered[0]?.request),
+);
+check('and the session row this pane is actually on', answered[0]?.rowId === 'asking-1');
+
+const outcome = await page.evaluate(
+  () => document.querySelector('[data-question-outcome]')?.textContent ?? '',
+);
+console.log('outcome drawn on screen:', JSON.stringify(outcome));
+check(
+  'the outcome on screen reads back what the stub confirmed',
+  outcome.includes('the picker now reads Cobalt'),
+  outcome,
+);
+await page.screenshot({ path: `${outDir}/key-truth-question-enter-submits.png` });
+console.log(`${outDir}/key-truth-question-enter-submits.png`);
+
+// ---------------------------------------------------------------------------
+// THE CARD'S OWN UI PASS: a picked option's Check and tint, a subtler
+// focus-visible ring that never wears the picked accent, Submit's own chord
+// chip, and the two sentences withdrawn along with them ("Enter submits", "a
+// pick is only a mark until you press Submit…"). Same stubbed `window.api`
+// as the section above (the ONE real Submit this file can draw), re-navigated
+// so `asking-1`'s question comes back unanswered -- the previous section just
+// spent it.
+//
+// PAINT, NOT CLASS NAMES: `data-picked`/`data-question-picked-mark` are read
+// in `DetailPanel.question-picked-ui.test.tsx` already; what only a real
+// browser can add is the COMPUTED style two states resolve to (a colour is
+// not visible to a class-name assertion) and a REAL, cancelable Enter
+// keydown Chromium dispatches rather than one `fireEvent` assembles.
+console.log('\n=== the picked option, the focus ring and Submit, as paint');
+
+for (const theme of ['dark', 'light']) {
+  await page.goto(origin, { waitUntil: 'networkidle' });
+  if (theme === 'light') {
+    await page.evaluate(() => document.documentElement.classList.add('light'));
+  }
+  await page.locator('[data-session-row="asking-1"]').click();
+  await page.waitForSelector('[data-question-option]');
+  // A REAL Tab, once, so Chromium's own focus-visible MODALITY -- a
+  // document-wide flag, not a per-element one -- reads "keyboard" for every
+  // `.focus()` call below. The click just above set it to "mouse", and a
+  // script-invoked `.focus()` alone does not move it back: measured, the
+  // first cut of this loop called `.focus()` straight after that click and
+  // every ring below painted `outlineStyle: none`. Where it actually lands
+  // does not matter -- every state after this explicitly focuses or blurs
+  // its own target.
+  await page.keyboard.press('Tab');
+  await page.evaluate(() => document.activeElement?.blur());
+
+  const cardText = () => page.locator('[data-question]').innerText();
+  const paintOf = (selector) =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (el === null) return null;
+      const cs = getComputedStyle(el);
+      return {
+        background: cs.backgroundColor,
+        borderColor: cs.borderColor,
+        outlineStyle: cs.outlineStyle,
+        outlineColor: cs.outlineColor,
+      };
+    }, selector);
+
+  // -------------------------------------------------------------- IDLE
+  const idleNote = await page.evaluate(
+    () => document.querySelector('[data-question] [data-question-note]') !== null,
+  );
+  check(
+    `${theme}/idle: the withdrawn hint never draws where Submit is real`,
+    !idleNote,
+  );
+  const idleText = await cardText();
+  check(
+    `${theme}/idle: neither retired sentence is anywhere on the card`,
+    !idleText.includes('Enter submits') &&
+      !idleText.includes('a pick is only a mark until you press Submit'),
+    idleText,
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-idle-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-idle-${theme}.png`);
+
+  // ----------------------------------------------------------- FOCUSED
+  await page.locator('[data-question-option]').first().focus();
+  const focusedOnly = await paintOf('[data-question-option]');
+  check(
+    `${theme}/focused: a merely-focused option draws no picked fill`,
+    focusedOnly !== null && !/^rgb\(\s*\d/.test(focusedOnly.background),
+    JSON.stringify(focusedOnly),
+  );
+  check(
+    `${theme}/focused: the ring itself paints (focus-visible, not the browser default)`,
+    focusedOnly !== null && focusedOnly.outlineStyle !== 'none',
+    JSON.stringify(focusedOnly),
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-focused-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-focused-${theme}.png`);
+
+  // ------------------------------------------------------------ PICKED
+  // The digit key MARKS (`onKeys`' `mark` branch) without folding the list
+  // (folding is pointer-only) and without submitting (only Enter/Space
+  // "confirm" a step) -- so the row stays on screen, picked, to photograph.
+  await page.keyboard.press('1');
+  await page.waitForSelector('[data-question-option][data-picked="true"]');
+  await page.evaluate(() => document.activeElement?.blur());
+  const picked = await paintOf('[data-question-option][data-picked="true"]');
+  const pickedMark = await page.evaluate(
+    () =>
+      document.querySelector('[data-question-option][data-picked="true"] [data-question-picked-mark]') !==
+      null,
+  );
+  check(`${theme}/picked: the row carries a Check mark`, pickedMark);
+  check(
+    `${theme}/picked: a DIFFERENT background from the merely-focused row above`,
+    picked !== null &&
+      /^rgb\(\s*\d/.test(picked.background) &&
+      picked.background !== focusedOnly?.background,
+    `picked ${JSON.stringify(picked)} vs focused-only ${JSON.stringify(focusedOnly)}`,
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-picked-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-picked-${theme}.png`);
+
+  // ------------------------------------------------------ PICKED + FOCUSED
+  await page.locator('[data-question-option][data-picked="true"]').focus();
+  const pickedFocused = await paintOf('[data-question-option][data-picked="true"]');
+  check(
+    `${theme}/picked+focused: both signals hold at once -- the fill/border AND the ring`,
+    pickedFocused !== null &&
+      /^rgb\(\s*\d/.test(pickedFocused.background) &&
+      pickedFocused.outlineStyle !== 'none',
+    JSON.stringify(pickedFocused),
+  );
+  check(
+    `${theme}/picked+focused: the focus colour is not the picked accent`,
+    pickedFocused !== null && pickedFocused.outlineColor !== pickedFocused.borderColor,
+    JSON.stringify(pickedFocused),
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-picked-focused-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-picked-focused-${theme}.png`);
+
+  // ----------------------------------------------------------- SUBMIT
+  await page.locator('[data-question-submit]').focus();
+  const chip = await page.evaluate(
+    () => document.querySelector('[data-question-submit] [data-question-submit-key]')?.textContent ?? null,
+  );
+  check(
+    `${theme}/submit: Submit carries its own chord chip, not the retired caption`,
+    chip !== null && chip.length > 0,
+    String(chip),
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-submit-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-submit-${theme}.png`);
+
+  // Enter, on Submit itself, TWICE -- the second must do nothing further. The
+  // first press answers the call (`asking-1` is fresh again this pass) and
+  // removes Submit from the DOM entirely (`open` goes false the instant the
+  // question is answered), which is what makes a second Enter here a real
+  // test of the `sending` gate rather than a press with nothing left to hit.
+  await page.evaluate(() => {
+    globalThis.window.__answered = [];
+  });
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-question-outcome]');
+  const fired = await page.evaluate(() => globalThis.window.__answered.length);
+  check(`${theme}: Enter-Enter on Submit fires the call exactly once`, fired === 1, `${fired} call(s)`);
+}
+
+/**
+ * THE PREVIEW PANEL — see the header. Its own pages, not the shared `page`
+ * above: the wide case needs a card past the panel's 720px container-query
+ * threshold (1100px of window comfortably clears it, measured — the sidebar
+ * and the pane's own padding eat the rest) and the narrow case needs the
+ * phone shell's own 390px, neither of which the rest of this file's 1200x760
+ * checks should be resized around.
+ */
+{
+  const wide = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+  await wide.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await wide.waitForSelector('[data-session-row]');
+  await wide.locator(`[data-session-row="${PREVIEW_SESSION}"]`).click();
+  await wide.waitForSelector('[data-question-preview-panel]', { timeout: 4000 });
+
+  const rects = await wide.evaluate(() => {
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+    };
+    return {
+      list: rect(document.querySelector('[role="listbox"]')),
+      panel: rect(document.querySelector('[data-question-preview-panel]')),
+    };
+  });
+  check(
+    'at 1100px the panel sits BESIDE the list, never under it',
+    rects.panel.left >= rects.list.right,
+    `list.right=${rects.list.right} panel.left=${rects.panel.left}`,
+  );
+
+  // ROW HEIGHT PARITY, within the SAME step: `Transport`'s own third option
+  // carries no preview at all, so comparing it against the first two (which
+  // do) needs no second question and no different content to confound it —
+  // a taller or shorter LABEL would move this number for a reason that has
+  // nothing to do with the marker.
+  const rowHeights = await wide.$$eval('[data-question-option]', (els) =>
+    els.map((el) => Math.round(el.getBoundingClientRect().height)),
+  );
+  check(
+    'an option row is the same height with a preview marker as without one',
+    rowHeights.length === 3 && rowHeights.every((h) => h === rowHeights[0]),
+    JSON.stringify(rowHeights),
+  );
+
+  // WALKING (`j`, the #449 key work) MOVES THE PANEL. Real DOM focus, not a
+  // click — the panel follows `document.activeElement`, the same cursor the
+  // listbox has always had.
+  await wide.locator('[data-question-option]').first().focus();
+  await wide.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '0',
+  );
+  await wide.keyboard.press('j');
+  await wide.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+  );
+  await wide.keyboard.press('j');
+  const walked = await wide.evaluate(() =>
+    document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for'),
+  );
+  check('walking with j moved the panel a second time, to the third option', walked === '2', walked);
+
+  const allRowsText = (
+    await Promise.all(
+      (await wide.locator('[data-question-option]').all()).map((row) => row.innerText()),
+    )
+  ).join('\n---\n');
+  check(
+    'no option row ever prints the multi-line preview text itself, only the quiet marker',
+    !allRowsText.includes('fetch() awaits it') && !allRowsText.includes('held up to 30s'),
+    allRowsText,
+  );
+
+  // Land the screenshot on the multi-line diagram (`Long poll`, option 1) --
+  // the walk above ended on option 2, which has no preview and would
+  // screenshot the empty-panel state instead of the feature this file is for.
+  await wide.locator('[data-question-option]').nth(1).focus();
+  await wide.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+  );
+  await wide.screenshot({ path: `${outDir}/question-preview-wide.png` });
+  console.log(`${outDir}/question-preview-wide.png`);
+  await wide.close();
+}
+
+{
+  const narrow = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await narrow.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await narrow.waitForSelector('[data-phone-shell] [data-session-row]');
+  await narrow.locator(`[data-phone-shell] [data-session-row="${PREVIEW_SESSION}"]`).click();
+  await narrow.waitForSelector('[data-question-preview-panel]', { timeout: 4000 });
+
+  // Focus alone moves the panel, same as the wide page above -- landed on
+  // `Long poll` (option 1), the multi-line one, so the two checks below are
+  // against a preview that actually HAS a long line to scroll, not the
+  // default one-liner (`Server-sent events`, kept short precisely so the
+  // card does not crowd the composer -- see its own comment in the fixture).
+  await narrow.locator('[data-question-option]').nth(1).focus();
+  await narrow.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '1',
+  );
+
+  const narrowRects = await narrow.evaluate(() => {
+    const rect = (el) => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+    };
+    const card = document.querySelector('[data-question]');
+    return {
+      list: rect(document.querySelector('[role="listbox"]')),
+      panel: rect(document.querySelector('[data-question-preview-panel]')),
+      cardScrollWidth: card.scrollWidth,
+      cardClientWidth: card.clientWidth,
+    };
+  });
+  check(
+    'at 390px the panel sits BELOW the list, never beside it',
+    narrowRects.panel.top >= narrowRects.list.bottom,
+    `list.bottom=${narrowRects.list.bottom} panel.top=${narrowRects.panel.top}`,
+  );
+  check(
+    // `vam-no-scrollbar` hides the panel's OWN horizontal scrollbar (a long
+    // diagram line is allowed to scroll inside it), so this measures the
+    // CARD, not the panel — the rectangle the phone screen actually has.
+    'the card itself never scrolls sideways, whatever a long preview line does inside its own panel',
+    narrowRects.cardScrollWidth <= narrowRects.cardClientWidth,
+    `scrollWidth=${narrowRects.cardScrollWidth} clientWidth=${narrowRects.cardClientWidth}`,
+  );
+
+  await narrow.screenshot({ path: `${outDir}/question-preview-narrow.png` });
+  console.log(`${outDir}/question-preview-narrow.png`);
+
+  // `Web socket` (option 2) is the option the fixture deliberately left
+  // without a preview -- checked last, after the screenshot, so the
+  // committed picture shows the feature (a real diagram) rather than its
+  // empty state.
+  await narrow.locator('[data-question-option]').nth(2).focus();
+  await narrow.waitForFunction(
+    () => document.querySelector('[data-question-preview-panel]')?.getAttribute('data-for') === '2',
+  );
+  const empty = await narrow.locator('[data-question-preview-panel]').innerText();
+  check(
+    'an option with no preview shows the quiet fallback line, not a blank panel',
+    empty.includes('no preview for this option'),
+    empty,
+  );
+
+  await narrow.close();
+}
+
+// ---------------------------------------------------------------------------
+// A MULTI-SELECT DESCRIPTION, UNDER THE LABEL -- not under the option number.
+//
+// Claude Code 2.1.280: "fixed multi-select option descriptions being indented
+// under the option number instead of under the label". happy-dom lays nothing
+// out, so this is a rectangle no unit test can compare -- `vam-build-1`'s
+// second question ("Retries") is `multiSelect: true` with a description on
+// every option, reached through the step strip rather than a second session,
+// so nothing here needs the answer bridge the marking tests above stub.
+{
+  const page2 = await browser.newPage({ viewport: { width: 1200, height: 760 } });
+  await page2.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
+  await page2.waitForSelector('[data-session-row]');
+  await page2.locator(`[data-session-row="${ASKING_SESSION}"]`).click();
+  await page2.waitForSelector('[data-question-option]', { timeout: 4000 });
+  // Two questions on this one call ("Transport", then "Retries") -- the step
+  // strip only draws once there is a second, and clicking its second tab
+  // switches which one is showing without answering or submitting either.
+  await page2.locator('[data-question-step]').nth(1).click();
+  await page2.waitForFunction(
+    () => document.querySelector('[data-question-step][data-current]')?.textContent?.includes('Retries') ?? false,
+  );
+
+  const aligned = await page2.evaluate(() => {
+    const left = (el) => (el === null ? null : el.getBoundingClientRect().left);
+    return [...document.querySelectorAll('[data-question-option]')].map((option) => ({
+      label: option.querySelector('[data-question-label]')?.textContent ?? null,
+      labelLeft: left(option.querySelector('[data-question-label]')),
+      descriptionLeft: left(option.querySelector('[data-question-description]')),
+    }));
+  });
+  console.log(`  Retries option alignment: ${JSON.stringify(aligned)}`);
+  check(
+    'every option has a description on this question, so the sweep actually measured something',
+    aligned.length === 3 && aligned.every((row) => row.descriptionLeft !== null),
+    JSON.stringify(aligned),
+  );
+  check(
+    // WITHIN A TENTH OF A PIXEL, NOT EXACT -- measured at 310 vs 309.921875:
+    // a real layout engine distributes a flex `gap` and a `1ch` spacer against
+    // a real font's own metrics, and the two are not bit-identical the way two
+    // reads of the same rectangle would be. The option NUMBER a broken build
+    // would align under instead sits many pixels to the left, so a bound this
+    // tight still catches that regression and only that one.
+    'the description lines up under the LABEL, not under the option number',
+    aligned.every(
+      (row) => row.labelLeft !== null && Math.abs(row.descriptionLeft - row.labelLeft) < 0.5,
+    ),
+    JSON.stringify(aligned),
+  );
+
+  await page2.close();
 }
 
 await browser.close();

@@ -10,7 +10,7 @@
  * clicks the choice, and reads the column.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Decision, Session } from '../../src/renderer/domain/model.js';
@@ -33,7 +33,6 @@ function session(id: string, decisions: readonly Decision[]): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -195,7 +194,7 @@ describe('the appearance section offers focus view', () => {
 });
 
 describe('throwing the switch changes the screen, not only the store', () => {
-  it('takes the quiet turns’ lines off the column, and puts them back', () => {
+  it('takes the quiet turns’ lines off the column, and puts them back', async () => {
     // END TO END through the seam the mode really travels: overlay → prefs →
     // `writePrefs` → `activatePrefs` → the module store → the column's
     // subscription. Every one of those is a place the choice can be dropped
@@ -204,11 +203,21 @@ describe('throwing the switch changes the screen, not only the store', () => {
     render(<Canvas model={MODEL} />);
     expect(lines().length, 'the column starts with a line per turn').toBe(3);
 
-    const settings = () =>
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`), so `toggle()` is not there the instant the
+    // keystroke lands the first time -- `waitFor` (real timers, its
+    // default) rather than a fixed `Promise.resolve()` count. The chunk is
+    // cached after the first open, so the second `settings()` below
+    // resolves this wait immediately.
+    const settings = async () => {
       act(() => {
         window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
       });
-    settings();
+      await waitFor(() => {
+        if (!toggle()) throw new Error('still pending');
+      });
+    };
+    await settings();
     fireEvent.click(toggle() as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
     expect(lines().length, 'every turn here is quiet and finished').toBe(0);
@@ -217,14 +226,14 @@ describe('throwing the switch changes the screen, not only the store', () => {
     // setting produced, and it is indistinguishable from a deletion.
     expect(unfolds().length, 'folded, not deleted').toBe(3);
 
-    settings();
+    await settings();
     fireEvent.click(toggle() as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));
     expect(lines().length, 'and the choice is reversible').toBe(3);
     expect(unfolds().length, 'with nothing folded, nothing offers to unfold').toBe(0);
   });
 
-  it('does not fold away the turn that failed', () => {
+  it('does not fold away the turn that failed', async () => {
     // The same drive, over a session with a failing turn: the whole point of
     // the setting is that this line survives it.
     const model: CanvasModel = {
@@ -240,6 +249,10 @@ describe('throwing the switch changes the screen, not only the store', () => {
     render(<Canvas model={model} />);
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: ',', bubbles: true }));
+    });
+    // See the sibling test above: `SettingsOverlay`'s own lazy chunk.
+    await waitFor(() => {
+      if (!toggle()) throw new Error('still pending');
     });
     fireEvent.click(toggle() as HTMLElement);
     fireEvent.click(screen.getByRole('button', { name: 'close settings' }));

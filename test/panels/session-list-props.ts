@@ -8,7 +8,7 @@
  */
 
 import type { Decision, Project, Session, SourceId } from '../../src/renderer/domain/model.js';
-import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { DEFAULT_VIEW_OPTIONS, type SessionEntry } from '../../src/renderer/domain/selectors.js';
 import type { SessionListProps } from '../../src/renderer/panels/SessionList.js';
 
 export function decision(id: string, output: string | null): Decision {
@@ -19,7 +19,6 @@ export function makeSession(over: Partial<Session> = {}): Session {
   return {
     id: 's1',
     title: 'alpha-refactor',
-    icon: null,
     epic: null,
     branch: 'work',
     status: 'running',
@@ -86,12 +85,30 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     // went red while `typecheck:test` in CI did.
     statusFilter: 'all',
     onStatusFilter: noop,
-    statusTally: { all: entries.length, running: 0, waiting: 0, idle: 0, done: 0, failed: 0 },
+    statusTally: {
+      all: entries.length,
+      running: 0,
+      waiting: 0,
+      idle: 0,
+      unstarted: 0,
+      terminal: 0,
+      done: 0,
+      failed: 0,
+    },
     filterMenuOpen: false,
     onFilterMenuToggle: noop,
-    originFilters: { hideAgentStarted: false, onlyPrompted: false },
+    originFilters: {
+      hideAgentStarted: false,
+      onlyPrompted: false,
+      hideEnded: false,
+      hideForeign: false,
+      hideIdle: false,
+    },
     onOriginFilters: noop,
-    hiddenCounts: { agent: 0, unprompted: 0 },
+    viewOptions: DEFAULT_VIEW_OPTIONS,
+    onViewOptions: noop,
+    hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
+    foreignHiddenCount: 0,
     filter: '',
     filtering: false,
     onFilterChange: noop,
@@ -106,9 +123,14 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     onPick: noop,
     onClose: noop,
     onAdd: noop,
+    // The ordinary fixture: something IS focused, so the footer button adds
+    // a session rather than falling back to New project. A test exercising
+    // the fallback overrides this alongside `focusedSessionId: null`.
+    addWillCreateProject: false,
     onAddInProject: noop,
     onNewProject: noop,
     newSessionDecline: null,
+    hasDirectoryPicker: true,
     onPickIcon: noop,
     // Required, not optional -- see the props. A test that wants to observe a
     // removal overrides these; a test that does not still has to pass them,

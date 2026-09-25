@@ -8,9 +8,13 @@
  * below the fold was reachable by any key. Keys are consumed now, and these
  * tests pin the three things that makes true and dangerous.
  *
- * WHAT MUST STILL WORK: the arrows and the Page keys still scroll, because
- * that is what the focus stop was for and losing it silently would be the
- * regression nobody notices.
+ * WHAT MUST STILL WORK, AND IT CHANGED SHAPE (vam/terminal-arrows): the
+ * arrows, Home, End, PageUp and PageDown now reach the PANE -- the operator's
+ * report was that they could not be used to select an option in a Claude Code
+ * picker, because this tab was reading them as its own scroll keys first.
+ * `TerminalTab.nav-keys.test.tsx` carries that in full; vam's OWN scrollback
+ * moved to Shift+PageUp/PageDown/Home/End, terminal convention, and that is
+ * what this file still pins as the focus stop's own job.
  *
  * WHO OWNS A KEY: an unmodified key belongs to the pane and stops there, so
  * `j` does not also move vam's cursor. A CMD chord belongs to vam and is never
@@ -166,7 +170,19 @@ describe('a keystroke in the pane reaches tmux, exactly once', () => {
     const send = await open();
     fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' });
     await settle();
-    expect(keys(send)).toEqual([{ kind: 'enter' }]);
+    expect(keys(send)).toEqual([{ kind: 'enter', shift: false }]);
+  });
+
+  it('sends Shift+Enter as a literal newline, so it inserts a line instead of submitting', async () => {
+    // The operator's report: Shift+Enter submits in the Terminal tab instead
+    // of inserting a line the way it does in a real terminal. `shift` rides
+    // on the SAME `enter` kind (`shared/terminal.ts`) rather than a kind of
+    // its own -- main is what turns it into a different tmux command
+    // (`sendNewlineArgv`, measured against Claude Code and Codex both).
+    const send = await open();
+    fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter', shiftKey: true });
+    await settle();
+    expect(keys(send)).toEqual([{ kind: 'enter', shift: true }]);
   });
 
   it('sends Backspace as a key, because a terminal you cannot correct is not usable', async () => {
@@ -337,28 +353,78 @@ describe('the pane declines the keys that are not its own', () => {
   });
 
   /**
-   * THE SCROLLING KEYS STILL SCROLL, AND THE PANE IS NOW WHAT DOES IT.
+   * THE ARROWS AND THE PAGE KEYS NOW REACH THE PANE, TERMINAL CONVENTION
+   * (vam/terminal-arrows). This test used to assert the OPPOSITE -- that
+   * these six scrolled vam's own view and were never sent -- on the reasoning
+   * that a focused text control eats them for its own caret before a scroll
+   * container ever sees them. That reasoning is what made the operator's
+   * report true: Claude Code's own pickers (`AskUserQuestion`, a permission
+   * prompt, `/model`, `/config`, plan approval) are walked with exactly these
+   * keys, and a tab that swallowed them into its own scrollbar left every one
+   * of those pickers unreachable from inside the pane.
    *
-   * This test used to assert that these six were NOT cancelled, on the
-   * reasoning that the browser's scrolling of a focused overflow element is
-   * the default and vam must not take it. That reasoning died with the hidden
-   * box: the keyboard is on a text control now, and a text control takes these
-   * keys for its own caret before any scroll container sees them. Measured in
-   * Chromium with an empty one-by-one `<textarea>` focused inside a scrolling
-   * `<section>`: `PageDown`, `PageUp`, `Home` and `End` moved the pane not at
-   * all, and the arrows only sometimes.
-   *
-   * So the assertion moved from the MECHANISM to the OUTCOME, which is the
-   * stronger of the two and the one the operator has: the pane moves. A test
-   * that only checked `defaultPrevented` would have gone green through exactly
-   * the regression that made this rewrite necessary.
+   * `TerminalTab.nav-keys.test.tsx` carries the full shape (all eight keys,
+   * `heard`, `notPrevented`, the pairing guard); this is the one test kept
+   * here, beside its own sibling below, so the regression this docstring
+   * describes stays visible in the file the operator's original report lives
+   * in.
    */
-  it('scrolls the pane itself, because a focused text control eats those keys', async () => {
+  it('sends the arrows and the Page/Home/End keys to the pane, not to vam’s own scroll', async () => {
     const send = await open();
     const box = pane() as HTMLElement;
-    // happy-dom lays nothing out, so the geometry the scroll is computed from
-    // is written here: a screenful of 200px over 1000px of content, and a
-    // 16px row measured off the ruler.
+    // happy-dom lays nothing out, so the geometry the live-end snap reads is
+    // written here: a screenful of 200px over 1000px of content.
+    Object.defineProperty(box, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(box, 'scrollHeight', { value: 1_000, configurable: true });
+    box.scrollTop = 300;
+
+    for (const [key, nav] of [
+      ['ArrowUp', 'up'],
+      ['ArrowDown', 'down'],
+      ['ArrowLeft', 'left'],
+      ['ArrowRight', 'right'],
+      ['Home', 'home'],
+      ['End', 'end'],
+      ['PageUp', 'page-up'],
+      ['PageDown', 'page-down'],
+    ] as const) {
+      // CANCELLED: the operator's keystroke goes to the program, not to the
+      // browser's own scrolling of a focused element.
+      expect(fireEvent.keyDown(box, { key })).toBe(false);
+      await settle();
+      expect(send).toHaveBeenLastCalledWith(expect.anything(), { kind: 'nav', nav }, ATLAS);
+    }
+    expect(send).toHaveBeenCalledTimes(8);
+  });
+
+  /**
+   * TERMINAL CONVENTION: a key delivered to the program returns the view to
+   * the live end, so the operator can see what they just navigated to --
+   * `scrollPane(pane, 'bottom', row)`, the same call the sticky-follow effect
+   * makes, run once per delivered nav key regardless of where the operator
+   * had scrolled.
+   */
+  it('snaps the view back to the live end when a navigation key reaches the pane', async () => {
+    const send = await open();
+    const box = pane() as HTMLElement;
+    Object.defineProperty(box, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(box, 'scrollHeight', { value: 1_000, configurable: true });
+    box.scrollTop = 40;
+    expect(fireEvent.keyDown(box, { key: 'ArrowDown' })).toBe(false);
+    await settle();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(box.scrollTop).toBe(1_000);
+  });
+
+  /**
+   * VAM'S OWN SCROLLBACK, MOVED TO Shift+ -- terminal convention
+   * (xterm/GNOME Terminal both bind Shift+PageUp/PageDown to their own
+   * scrollback, never to the program), and the same four keys this tab used
+   * to bind bare.
+   */
+  it('scrolls the pane itself on Shift+PageUp/PageDown/Home/End, and sends nothing', async () => {
+    const send = await open();
+    const box = pane() as HTMLElement;
     Object.defineProperty(box, 'clientHeight', { value: 200, configurable: true });
     Object.defineProperty(box, 'scrollHeight', { value: 1_000, configurable: true });
     const ruler = q<HTMLElement>('[data-terminal-ruler]');
@@ -368,13 +434,9 @@ describe('the pane declines the keys that are not its own', () => {
 
     const moved = (key: string, from: number): number => {
       box.scrollTop = from;
-      // CANCELLED, and that is now the correct answer: the pane performed the
-      // scroll, so leaving the default on would be a second one.
-      expect(fireEvent.keyDown(box, { key })).toBe(false);
+      expect(fireEvent.keyDown(box, { key, shiftKey: true })).toBe(false);
       return box.scrollTop;
     };
-    expect(moved('ArrowDown', 0)).toBe(16);
-    expect(moved('ArrowUp', 100)).toBe(84);
     // A page overlaps by one row, the way every pager does: the line at the
     // fold is the line the next screen starts on.
     expect(moved('PageDown', 0)).toBe(184);
@@ -382,12 +444,11 @@ describe('the pane declines the keys that are not its own', () => {
     expect(moved('Home', 500)).toBe(0);
     expect(moved('End', 0)).toBe(1_000);
     // Never below the top: a negative scroll offset is not a position.
-    expect(moved('ArrowUp', 0)).toBe(0);
     expect(moved('PageUp', 10)).toBe(0);
 
     await settle();
-    // And none of them is typed into the agent, which was always the other
-    // half: scrolling the transcript is scrolling, not a keypress in the shell.
+    // None of them is typed into the agent: scrolling the transcript is
+    // scrolling, not a keypress in the shell.
     expect(send).not.toHaveBeenCalled();
   });
 
@@ -467,7 +528,7 @@ describe('keys reach the pane in the order they were typed', () => {
     expect(pending.map((call) => call.key)).toEqual([
       { kind: 'text', text: 'n' },
       { kind: 'text', text: 'o' },
-      { kind: 'enter' },
+      { kind: 'enter', shift: false },
     ]);
   });
 
@@ -811,6 +872,11 @@ describe('the pane says whether what is typed is going anywhere', () => {
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'h' })).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Enter' })).toBe(true);
     expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'Backspace' })).toBe(true);
+    // THE SAME GUARD COVERS THE NAVIGATION KEYS (vam/terminal-arrows): a build
+    // that cannot deliver a keystroke must not consume an arrow key either,
+    // or a browser build would silently kill the browser's own scrolling of
+    // whatever ends up focused here with nothing to replace it.
+    expect(fireEvent.keyDown(pane() as HTMLElement, { key: 'ArrowUp' })).toBe(true);
     await settle();
     // No caption says so any more -- the honesty is in the behaviour above:
     // nothing was consumed, so every one of those keys is still vam's.

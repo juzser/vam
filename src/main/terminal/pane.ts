@@ -27,6 +27,7 @@
  */
 
 import type { PaneKey, PaneSendResult, PaneSize, PaneView } from '../../shared/terminal.js';
+import { paneNameOf } from '../sources/claude-code/pane-row.js';
 import { claimedPanes } from '../sources/claude-code/session-pane.js';
 import {
   PANE_HISTORY_LINES,
@@ -35,7 +36,11 @@ import {
   sendControlArgv,
   sendEnterArgv,
   sendEscapeArgv,
+  sendNavArgv,
+  sendNewlineArgv,
+  sendPasteArgv,
   sendTextArgv,
+  sendWheelArgv,
 } from '../sources/tmux/argv.js';
 import {
   listVamSessions,
@@ -128,6 +133,21 @@ export function targetSession(
   rowId: string | undefined,
   panes: ReadonlyMap<string, string> | undefined,
 ): SessionMatch {
+  // A PANE ROW IS ITS OWN PROOF. A vam pane with nothing in it is a row keyed
+  // by its tmux name (`claude-code/pane-row.ts`), and the Terminal view is
+  // what such a row is FOR -- the operator types `claude` into it. Its
+  // project very often holds a second vam pane, the one with an agent in it,
+  // so the tag count below would answer `ambiguous` for exactly the row that
+  // most needs a screen. The name is checked against the listing and the
+  // project the way a published pane is: `none` when the pane has ended, and
+  // never a fall-through to a guess at some other pane.
+  const own = rowId === undefined ? null : paneNameOf(rowId);
+  if (own !== null) {
+    return projectId !== '' &&
+      sessions.some((session) => session.name === own && session.project === projectId)
+      ? { kind: 'one', name: own }
+      : { kind: 'none' };
+  }
   // `rowId` IS ALREADY the row key (`<sessionId>#<pid>`, `deliver.ts`), and
   // `panes` is keyed the same way (`session-pane.ts`) precisely so two
   // processes resuming one session -- each with its own pid and its own
@@ -188,6 +208,13 @@ export async function readSessionPane(
   // answer this module gave before, `ambiguous` and all.
   rowId?: string,
   panes?: ReadonlyMap<string, string>,
+  /**
+   * How many lines ABOVE the screen to ask for. The default is the tab's whole
+   * window, because that is what every caller of this function wanted before
+   * there was an argument; `0` is the echo read at the live end, and
+   * `shared/terminal.ts`'s `PaneReadMode` holds the whole of why.
+   */
+  history: number = PANE_HISTORY_LINES,
 ): Promise<PaneView> {
   const listed = await listVamSessions(run);
   if (listed.kind === 'unavailable') {
@@ -205,13 +232,44 @@ export async function readSessionPane(
   if (match.kind === 'mispaired') {
     return { kind: 'mispaired', published: match.published };
   }
-  const pane = await readPane(run, match.name, PANE_HISTORY_LINES);
+  return readAimedPane(run, match.name, history);
+}
+
+/**
+ * The screen of a session that has ALREADY been paired to the row asking --
+ * the read with no proof in front of it.
+ *
+ * SPLIT OUT OF THE FUNCTION ABOVE rather than duplicated, so there is exactly
+ * one place that turns a `TmuxText` into a `PaneView` and exactly one rule
+ * about which failure is `gone`. The proving caller above is the normal one;
+ * the other is the echo read, which rides an aim proven less than
+ * `AIM_TTL_MS` ago (`terminal/ipc.ts`, where that trade is argued and where
+ * the aim is dropped when this answers anything but `ok`).
+ *
+ * IT PROVES NOTHING, and the name is meant to say so. Every safety argument
+ * for the session it is handed was made by whoever aimed it.
+ */
+export async function readAimedPane(
+  run: TmuxRun,
+  name: string,
+  history: number = PANE_HISTORY_LINES,
+): Promise<PaneView> {
+  const pane = await readPane(run, name, history);
   if (pane.kind === 'ok') {
     // The cursor travels WITH the screen it belongs to and is never
     // reconstructed downstream: it is a position in THIS capture, at this
     // moment, and a value kept across two reads would be one screen's caret
     // drawn on another's (`shared/terminal.ts`, `PaneCursor`).
-    return { kind: 'ok', name: match.name, text: pane.text, cursor: pane.cursor };
+    return {
+      kind: 'ok',
+      name,
+      text: pane.text,
+      cursor: pane.cursor,
+      // Whether the program asked for the mouse travels with the screen for
+      // the same reason the cursor does: it is a fact about THIS capture, and
+      // it is what decides where the next wheel goes (`shared/terminal.ts`).
+      ...(pane.mouse === undefined ? {} : { mouse: pane.mouse }),
+    };
   }
   return pane.error.code === 'no-such-session'
     ? { kind: 'gone' }
@@ -286,11 +344,14 @@ export async function resizeSessionPane(
  * AND IT IS WIDER THAN IT LOOKS SINCE THE LATENCY FIX. A typing run proves
  * its pairing once and reuses it (`terminal/ipc.ts`, `AIM_TTL_MS`), so the
  * gap between the proof and a given keystroke is no longer the milliseconds
- * between two spawns; it is up to a second in practice and two at the
- * backstop. That trade was made deliberately and the reasoning is written
- * where the constant is, including the two things that keep it bounded: tmux
- * failing loudly for a name that no longer exists, and the tab's once-a-second
- * read re-proving the same pairing for free.
+ * between two spawns; it is up to a quarter of a second in practice and two
+ * whole ones at the backstop. That trade was made deliberately and the
+ * reasoning is written where the constant is, including the two things that
+ * keep it bounded: tmux failing loudly for a name that no longer exists, and
+ * the tab's INTERVAL read re-proving the same pairing for free, four times a
+ * second. The echo read in between proves nothing and is not allowed to
+ * extend the aim either; `terminal/ipc.ts` holds that rule and its worst
+ * case.
  *
  * WHY THAT IS IMPROBABLE AND NOT IMPOSSIBLE. A vam session name carries six
  * base-36 characters of randomness (`vamSessionName`), about 2.2e9 values, so
@@ -353,17 +414,43 @@ export async function sendToPane(
   name: string,
   key: PaneKey,
 ): Promise<PaneSendResult> {
+  // A PASTE IS SEVERAL TMUX COMMANDS, NOT ONE -- `sendPasteArgv`'s own
+  // `set-buffer`/`-a` chain plus a final `paste-buffer`, run IN ORDER on the
+  // SAME run this switch uses for everything else. Handled here, ahead of
+  // the single-argv switch below, because that switch assumes one `run` call
+  // answers the whole key; a paste answers `refused` the moment any step of
+  // it fails, exactly as a single failed `send-keys` would, and never runs
+  // the remaining steps into a pane that may already be gone.
+  if (key.kind === 'paste') {
+    for (const step of sendPasteArgv(name, key.text)) {
+      if ((await run(step)).failure !== null) return 'refused';
+    }
+    return 'sent';
+  }
   const match = { name } as const;
   // The builders are kept apart in `tmux/argv.ts` for the one reason that
-  // matters here: `-l` types, and Return, Backspace, Shift-Tab, Escape and a
-  // Ctrl chord have to be PRESSED. There is deliberately no builder that takes
-  // a key name, so nothing here can turn the operator's text into a keypress
-  // by accident -- and this switch is where that holds: a `kind` off the bridge
-  // selects one of five fixed argvs, or one of twenty-six constants in a table
-  // it can only INDEX, and only `text` carries anything the operator wrote.
+  // matters here: `-l` types, and Return, Backspace, Shift-Tab, Escape, a
+  // Ctrl chord and a navigation key all have to be PRESSED. There is
+  // deliberately no builder that takes a key name, so nothing here can turn
+  // the operator's text into a keypress by accident -- and this switch is
+  // where that holds: a `kind` off the bridge selects one of five fixed
+  // argvs, or one of twenty-six or eight constants in a table it can only
+  // INDEX, and only `text` carries anything the operator wrote. `enter`
+  // alone answers TWO of the five, by `shift` -- the one field this
+  // switch reads off a kind rather than dispatching on, because Shift+Return
+  // is typed (`-l`, a literal LF) rather than pressed and still is not text
+  // the operator wrote: it is vam's own answer to a modifier, exactly as
+  // `sendEscapeArgv` is vam's own answer to `escape` carrying nothing to read.
   const argv =
     key.kind === 'enter'
-      ? sendEnterArgv(match.name)
+      ? // Plain Return is PRESSED, interpreted; Shift+Return is a literal LF
+        // TYPED, so the program in the pane reads it as an inserted line
+        // rather than a submit -- see `sendNewlineArgv` for the measurement
+        // this rests on. `shift` is required on the bridge (`isPaneKey`), so
+        // there is no third answer to fall through to.
+        key.shift
+        ? sendNewlineArgv(match.name)
+        : sendEnterArgv(match.name)
       : key.kind === 'backspace'
         ? sendBackspaceArgv(match.name)
         : key.kind === 'back-tab'
@@ -382,6 +469,19 @@ export async function sendToPane(
                 // the wrong pane is a bigger mistake than a letter in it and
                 // never a smaller one.
                 sendControlArgv(match.name, key.letter)
-              : sendTextArgv(match.name, key.text);
+              : key.kind === 'nav'
+                ? // An arrow, Home, End, PageUp or PageDown -- the operator's
+                  // own navigation keys, pressed in the pane exactly as a
+                  // control chord is (`sendNavArgv`'s own note has the
+                  // measurement).
+                  sendNavArgv(match.name, key.nav)
+                : key.kind === 'wheel'
+                  ? // The one key that is neither pressed nor typed by the
+                    // operator: a mouse report the program in the pane asked
+                    // for, and aimed by the same guard as everything else --
+                    // a wheel that scrolls somebody else's pager is a smaller
+                    // mistake than a chord, and still one.
+                    sendWheelArgv(match.name, key)
+                  : sendTextArgv(match.name, key.text);
   return (await run(argv)).failure === null ? 'sent' : 'refused';
 }

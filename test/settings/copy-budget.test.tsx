@@ -91,7 +91,17 @@ const words = (text: string) => text.split(/\s+/).filter((word) => word.length >
 /** id, the fewest paragraphs it may draw, the most words they may add up to. */
 const BUDGET: readonly (readonly [string, number, number])[] = [
   ['appearance', 10, 180],
-  ['behaviour', 6, 210],
+  // 210 is the seven-row panel with a quarter cut off. The desktop
+  // notifications row lived here for one release (#440 raised this to 8/255
+  // for it, 244 measured) and then moved to a section of its own; the
+  // numbers go back to what they were before it.
+  ['behaviour', 7, 210],
+  // Its own hint, the switch's hint and three-fact note, the test button's
+  // hint, and -- in this harness, which has no bridge -- the one line saying
+  // only the desktop app can send one. Measured at 79 words over 5
+  // paragraphs; the ceiling leaves a short sentence of slack and refuses a
+  // second note. (Behaviour re-measured at 202 over 7 without the row.)
+  ['notifications', 5, 90],
 ];
 
 describe('a settings panel says what a row does without arguing for it', () => {

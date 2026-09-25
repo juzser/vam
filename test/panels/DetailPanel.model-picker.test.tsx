@@ -62,7 +62,6 @@ const DECISION: Decision = {
 const SESSION: Session = {
   id: 's1',
   title: 'Sprint board reorder',
-  icon: null,
   epic: 'board',
   branch: null,
   status: 'idle',
@@ -262,7 +261,7 @@ describe('a session vam can type into gets a real picker', () => {
       all('[data-model-option]').map((el) =>
         el.querySelector('[data-model-version]')?.textContent?.trim(),
       ),
-    ).toEqual(['Sonnet 5', '5', '5.1', '5', '4.5']);
+    ).toEqual(['Sonnet 5', '5', '5.1', '5.5', '4.5']);
     for (const option of all('[data-model-option]')) {
       const kids = [...option.children];
       expect(kids[0]?.getAttribute('data-model-name')).not.toBeNull();
@@ -654,10 +653,10 @@ describe('the button names the model the session is running', () => {
     // (`main/sources/claude-code/transcript-model.ts`), already in the shape
     // the footer would have printed -- so the label and the tick are the same
     // machinery, fed from the other source.
-    const { model } = reader({ kind: 'last-turn', name: 'Opus 5' });
+    const { model } = reader({ kind: 'last-turn', name: 'Opus 5.5' });
     draw({ delivers: true, terminal: true, model });
     await settle();
-    expect(label()).toBe('Opus 5');
+    expect(label()).toBe('Opus 5.5');
     act(() => picker()?.click());
     expect(ticked()).toEqual(['opus']);
   });
@@ -683,7 +682,7 @@ describe('the button names the model the session is running', () => {
   });
 
   it('ticks the row whose model that is, and no other', async () => {
-    const { model } = reader({ kind: 'model', name: 'Opus 5' });
+    const { model } = reader({ kind: 'model', name: 'Opus 5.5' });
     draw({ delivers: true, terminal: true, model });
     await settle();
     act(() => picker()?.click());

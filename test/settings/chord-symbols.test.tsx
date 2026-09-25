@@ -41,7 +41,7 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
     onBothPlatforms((mac) => {
       open();
       expect(slot('palette')?.querySelector('[data-settings-keys]')?.textContent).toBe(
-        mac ? '⌘K' : 'Ctrl+K',
+        mac ? '⌘ K' : 'Ctrl+K',
       );
       cleanup();
     });
@@ -73,7 +73,7 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
       open();
       const row = ROWS.find((each) => each.id === 'palette');
       expect(slot('palette')?.getAttribute('aria-label')).toBe(
-        `${mac ? '⌘K' : 'Ctrl+K'}, ${row?.label}`,
+        `${mac ? '⌘ K' : 'Ctrl+K'}, ${row?.label}`,
       );
       cleanup();
     });
@@ -91,9 +91,9 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
       const dead = [...document.querySelectorAll<HTMLElement>('[data-binding-dead]')];
       expect(dead.length, 'no shadowed slot — the fixture stopped clashing').toBeGreaterThan(0);
       for (const cell of dead) {
-        expect(cell.getAttribute('title') ?? '').toContain(mac ? '⌘K' : 'Ctrl+K');
+        expect(cell.getAttribute('title') ?? '').toContain(mac ? '⌘ K' : 'Ctrl+K');
         expect(cell.getAttribute('title') ?? '').not.toContain('Mod-k');
-        expect(cell.getAttribute('aria-label') ?? '').toContain(mac ? '⌘K' : 'Ctrl+K');
+        expect(cell.getAttribute('aria-label') ?? '').toContain(mac ? '⌘ K' : 'Ctrl+K');
       }
       cleanup();
     });
@@ -115,7 +115,7 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
         fireEvent.keyDown(box as HTMLElement, { key: '[', code: 'BracketLeft', metaKey: true });
       });
       const said = document.body.textContent ?? '';
-      expect(said).toContain(`"${mac ? '⌘[' : 'Ctrl+['}" is reserved`);
+      expect(said).toContain(`"${mac ? '⌘ [' : 'Ctrl+['}" is reserved`);
       expect(said).not.toContain('Mod-[');
       cleanup();
     });
@@ -133,7 +133,7 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
       const option = (key: string) =>
         document.querySelector<HTMLElement>(`[data-submit-key-option="${key}"]`)?.textContent;
       expect(option('enter')).toBe(mac ? '⏎' : 'Enter');
-      expect(option('shift-enter')).toBe(mac ? '⇧⏎' : 'Shift+Enter');
+      expect(option('shift-enter')).toBe(mac ? '⇧ ⏎' : 'Shift+Enter');
       cleanup();
     });
   });
@@ -179,7 +179,7 @@ describe('the reference list in the other sections', () => {
     onBothPlatforms((mac) => {
       open({ ...EMPTY_PREFS, keyBindings: { [row?.id ?? '']: ['Ctrl-k'] } });
       const printed = slot(row?.id ?? '')?.querySelector('[data-settings-keys]')?.textContent;
-      expect(printed).toBe(mac ? '⌃K' : 'Ctrl+K');
+      expect(printed).toBe(mac ? '⌃ K' : 'Ctrl+K');
       cleanup();
     });
   });

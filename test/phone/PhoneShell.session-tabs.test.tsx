@@ -12,8 +12,20 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
-import type { CanvasModel } from '../../src/renderer/domain/model.js';
+import type { AgentQuestion, CanvasModel } from '../../src/renderer/domain/model.js';
 import { installPhoneGlobals, MODEL, phoneSource, rows, session } from './harness.js';
+
+const OPEN_QUESTION: AgentQuestion = {
+  id: 'q1',
+  header: null,
+  question: 'run the migration?',
+  multiSelect: false,
+  options: [
+    { label: 'Yes', description: null },
+    { label: 'No', description: null },
+  ],
+  answer: null,
+};
 
 beforeAll(installPhoneGlobals);
 beforeEach(() => localStorage.clear());
@@ -146,5 +158,80 @@ describe('the session tab strip', () => {
       expect(skin).not.toBeNull();
       expect(skin?.className).toContain('h-[30px]');
     }
+  });
+});
+
+/**
+ * Spec step 2 (docs/design/phone-core-loop.md §3.2): the strip collapses
+ * "whenever a question is open", extending the `!typing` guard it already
+ * has to `!typing && !openQuestion`. `openQuestion` is `DetailPanel`'s own
+ * derived fact, reported up through `onQuestionOpenChange` -- see that
+ * prop's doc in `DetailPanel.tsx` for why a re-hosting shell cannot derive
+ * it on its own.
+ */
+describe('the session tab strip collapses while a question is open', () => {
+  const WITH_OPEN_QUESTION: CanvasModel = {
+    projects: [
+      {
+        id: 'p1',
+        name: 'alpha',
+        source: 'claude-code',
+        sessions: [
+          session('a1', {
+            title: 'nightly sweep',
+            status: 'waiting',
+            questions: [OPEN_QUESTION],
+          }),
+          session('a2', { title: 'second thing' }),
+        ],
+      },
+    ],
+  };
+
+  const WITH_ANSWERED_QUESTION: CanvasModel = {
+    projects: [
+      {
+        id: 'p1',
+        name: 'alpha',
+        source: 'claude-code',
+        sessions: [
+          session('a1', {
+            title: 'nightly sweep',
+            status: 'waiting',
+            questions: [{ ...OPEN_QUESTION, answer: 'Yes' }],
+          }),
+          session('a2', { title: 'second thing' }),
+        ],
+      },
+    ],
+  };
+
+  it('is absent from the DOM (not merely hidden) while the focused session has an open question', () => {
+    openSession(WITH_OPEN_QUESTION);
+    // The question itself really is drawn -- otherwise this would be a test
+    // that collapsed nothing.
+    expect(document.querySelector('[data-question-open]')).not.toBeNull();
+    expect(document.querySelector('[data-phone-session-tabs]')).toBeNull();
+  });
+
+  it('is drawn as usual once that question is answered', () => {
+    openSession(WITH_ANSWERED_QUESTION);
+    expect(document.querySelector('[data-question-open]')).toBeNull();
+    expect(document.querySelector('[data-phone-session-tabs]')).not.toBeNull();
+    expect(tabs()).toHaveLength(2);
+  });
+
+  it('stays collapsed on a project with only one session, same as the 0px case', () => {
+    openSession({
+      projects: [
+        {
+          id: 'p1',
+          name: 'alpha',
+          source: 'claude-code',
+          sessions: [session('a1', { title: 'solo', questions: [OPEN_QUESTION] })],
+        },
+      ],
+    });
+    expect(document.querySelector('[data-phone-session-tabs]')).toBeNull();
   });
 });

@@ -141,6 +141,7 @@ await page.addInitScript(
           pullRequests: false,
           terminal: true,
           agentRoster: false,
+          resumeSession: false,
         },
         declines: {},
         viewerScope: 'operator',
@@ -204,6 +205,22 @@ await page.addInitScript(
   },
   { session: SESSION, branch: BRANCH, history: HISTORY },
 );
+// STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this file is
+// about the CLASSIC `[data-terminal-pane]` renderer's `OverlayScroll`
+// scrollback specifically (the streaming renderer has xterm's own NATIVE
+// scrollback instead, a different mechanism entirely -- see `docs/design/
+// terminal-streaming.md`), and the stub `window.api` above carries no
+// `terminalStream` member at all, so the explicit opt-out is what keeps this
+// testing the renderer it names. `streamingTerminalMigrated: true` too --
+// omitting it hits `prefs.ts`'s own one-time migration ratchet, which
+// treats an UN-migrated payload's `streamingTerminal` as unwritten and
+// forces it back to the new default regardless of what this sets.
+await page.addInitScript(() => {
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+  );
+});
 
 await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-tab-strip]');
@@ -340,14 +357,18 @@ check(
 
 /* ── 4: GOING BACK TO THE BOTTOM RE-PINS IT ──────────────────────────────── */
 
-// `End` is one of the six scroll keys the pane binds (`SCROLL_KEYS`), and the
-// pane has to hold the keyboard for it — a click is how an operator gives it.
+// `Shift+End` is vam's OWN scrollback control now (vam/terminal-arrows): a
+// bare `End` reaches the program in the pane instead (`NAV_KEYS`), because
+// the operator's report was that the arrows and Home/End/PageUp/PageDown
+// could not be used to walk a Claude Code picker from inside this tab — see
+// `TerminalTab.nav-keys.test.tsx` for the fix in full. The pane has to hold
+// the keyboard for either spelling — a click is how an operator gives it.
 await page.locator('[data-terminal-pane]').click();
-await page.keyboard.press('End');
+await page.keyboard.press('Shift+End');
 await page.waitForTimeout(150);
 const returned = await readPane();
 check(
-  'End takes the operator back to the live end',
+  'Shift+End takes the operator back to the live end',
   atBottom(returned),
   `scrollTop ${returned.scrollTop} of ${returned.scrollHeight - returned.clientHeight}`,
 );

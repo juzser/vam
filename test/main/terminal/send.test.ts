@@ -62,9 +62,19 @@ describe('typing into the session vam started for a project', () => {
 
   it('sends the interpreted Return for Enter, and nothing literal', async () => {
     const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
-    expect(await sendSessionKey(run, ATLAS, { kind: 'enter' })).toBe('sent');
+    expect(await sendSessionKey(run, ATLAS, { kind: 'enter', shift: false })).toBe('sent');
     expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', 'Enter']);
     expect(argvs[1]).not.toContain('-l');
+  });
+
+  it('sends Shift+Enter as a literal newline, so it inserts a line instead of submitting', async () => {
+    // MEASURED (`tmux/argv.ts`'s `sendNewlineArgv`): a bare `\n` is what both
+    // Claude Code and Codex read as an inserted line rather than a submit, on
+    // a private socket. `-l` is the whole of why: without it tmux would look
+    // the argument up as a key name instead of typing the byte.
+    const { run, argvs } = runner(listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'enter', shift: true })).toBe('sent');
+    expect(argvs[1]).toEqual(['send-keys', '-t', '=vam-atlas-a1b2c3:', '-l', '--', '\n']);
   });
 
   it('sends Backspace as the interpreted key, so a typo can be corrected', async () => {
@@ -270,6 +280,51 @@ describe('typing into the session vam started for a project', () => {
   });
 });
 
+/**
+ * A REAL PASTE -- one `PaneKey`, several tmux commands (`sendPasteArgv`'s own
+ * `set-buffer`/`paste-buffer` chain), aimed by the SAME pairing guard as
+ * every other key.
+ */
+describe('typing a real paste into the session vam started for a project', () => {
+  const pasteAnswers = (rows: string) => ({
+    ...listing(rows),
+    'set-buffer': ok(''),
+    'paste-buffer': ok(''),
+  });
+
+  it('sends the whole paste as one PaneKey and reports it sent', async () => {
+    const { run, verbs } = runner(pasteAnswers(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello\rworld' })).toBe('sent');
+    // A listing, then every step `sendPasteArgv` built for this text -- one
+    // `set-buffer` (short text, one chunk) and the final `paste-buffer`.
+    expect(verbs()).toEqual(['list-sessions', 'set-buffer', 'paste-buffer']);
+  });
+
+  it('refuses a paste it cannot aim, exactly like every other key -- and touches no buffer', async () => {
+    const { run, verbs } = runner(pasteAnswers(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello' })).toBe('unaimed');
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('reports refused, not sent, when tmux declines the paste-buffer delivery', async () => {
+    const { run } = runner({
+      ...listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
+      'set-buffer': ok(''),
+      'paste-buffer': failed('no such buffer'),
+    });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello' })).toBe('refused');
+  });
+
+  it('reports refused when even setting the buffer fails, and never calls paste-buffer', async () => {
+    const { run, verbs } = runner({
+      ...listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
+      'set-buffer': failed('tmux: server exited'),
+    });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello' })).toBe('refused');
+    expect(verbs()).toEqual(['list-sessions', 'set-buffer']);
+  });
+});
+
 describe('the send channel refuses what the renderer may not ask', () => {
   function handler() {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();
@@ -321,8 +376,16 @@ describe('the send channel refuses what the renderer may not ask', () => {
     ['text that is not a string', [ATLAS, { kind: 'text', text: 7 }]],
     ['a paste wearing a keystroke’s clothes', [ATLAS, { kind: 'text', text: 'x'.repeat(64) }]],
     ['an empty keystroke', [ATLAS, { kind: 'text', text: '' }]],
-    ['a row id that is not a string', [ATLAS, { kind: 'enter' }, 42]],
-    ['one argument too many', [ATLAS, { kind: 'enter' }, ATLAS, 'extra']],
+    // A missing `shift` is refused rather than read as `false`: the renderer
+    // is the least trusted process in the app, and `isPaneKey` checks the
+    // field rather than defaulting it (`shared/terminal.ts`).
+    ['an Enter with no shift field', [ATLAS, { kind: 'enter' }]],
+    // `send-nav-keys.test.ts` carries the full table of malformed `nav`
+    // shapes; this is the one representative case that belongs beside the
+    // rest of the general refusal table.
+    ['a nav key that is not one of the eight', [ATLAS, { kind: 'nav', nav: 'diagonal' }]],
+    ['a row id that is not a string', [ATLAS, { kind: 'enter', shift: false }, 42]],
+    ['one argument too many', [ATLAS, { kind: 'enter', shift: false }, ATLAS, 'extra']],
   ])('refuses %s without running tmux', async (_why, args) => {
     const { send, argvs } = handler();
     expect(await send({}, ...args)).toBe('unaimed');

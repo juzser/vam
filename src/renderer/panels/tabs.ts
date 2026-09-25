@@ -48,8 +48,8 @@ export type Tab = (typeof TABS)[number];
  * to `TABS` has to be classified once, here, instead of silently inheriting
  * whichever answer the `!==` chain at the call site happened to give it.
  *
- * TWO NAMES SAY NO, FOR TWO DIFFERENT REASONS, and neither of them is "it is
- * not prose":
+ * THREE NAMES SAY NO, FOR THREE DIFFERENT REASONS, and none of them is "it
+ * is not prose":
  *
  *  - `Terminal` IS covered by the same setting -- one flag, one promise of
  *    eighty characters a line (`prefs/view-width.ts`) -- but it caps ITSELF,
@@ -61,9 +61,21 @@ export type Tab = (typeof TABS)[number];
  *    share of the pane and its editor's column is the operator's own drag.
  *    It also shares the capped element (always mounted, merely `hidden`), so
  *    a cap left on for it would narrow a tree nobody asked to narrow.
+ *  - `Agents` was in the capped set, and the operator reversed it on a
+ *    screenshot: "the Agents view in narrow mode also needs full width." It
+ *    is a two-pane navigator -- the roster on the left, the picked agent's
+ *    In/Out on the right (`AGENT_SPLIT_PX`) -- and a cap meant to shorten a
+ *    line of prose was confining both panes to a 890px column in a 1336px
+ *    pane, with a dead gutter either side. The cap answers "how long should
+ *    a line be"; this view's question is "how much room do two panes get",
+ *    which is the Terminal's question, and it gets the Terminal's answer:
+ *    the whole pane. The question card follows the body here
+ *    (`DetailPanel`'s `bodyMaxWidth`), so a card still capped under a
+ *    full-width navigator cannot recreate the mismatch the operator
+ *    rejected on the first cut.
  */
 export function narrowsAsProse(tab: Tab): boolean {
-  return tab !== 'Terminal' && tab !== 'Files';
+  return tab !== 'Terminal' && tab !== 'Files' && tab !== 'Agents';
 }
 
 /**
@@ -77,7 +89,7 @@ export function narrowsAsProse(tab: Tab): boolean {
  * answered for.
  *
  * THE QUESTION IS "IS THIS VIEW A CONVERSATION WITH THE AGENT", and only
- * that. Three names say no, for three different reasons, and none of them is
+ * that. FOUR names say no, for four different reasons, and none of them is
  * "it is a list":
  *
  *  - `Terminal` has its OWN keyboard. A second insert scope underneath it
@@ -93,13 +105,27 @@ export function narrowsAsProse(tab: Tab): boolean {
  *    that was breaking it. The actions the operator DOES want here (merge,
  *    delete the branch) are buttons on the row they act on, where the number
  *    and the title they name are already on screen.
+ *  - `Agents` is the SAME report, one view later and in the same words: "the
+ *    agents view doesn't need the prompt input either." The paragraph that
+ *    stood at the bottom of this comment named it a conversation; it is not
+ *    one, and the reason is the PRs argument exactly. This view is a ROSTER --
+ *    which agents are running, on what, and what each last did. A sentence
+ *    typed under it is addressed to the SESSION, not to any agent on the list,
+ *    and the ANSWER to it is drawn on Response, so the box stood over a list
+ *    it could neither act on nor report back into. The view pill is one
+ *    keystroke wide (`Ctrl-Alt-<digit>`, or `Mod-Shift-[`/`]`), which is what
+ *    makes the withdrawal cheap rather than a loss: prompting is a view away,
+ *    where what comes back is already on screen.
  *
- * It is NOT "does this view have a keyboard of its own": `Response` and
- * `Agents` both draw one, and both are places where a typed sentence reaches
- * the agent.
+ * IT IS NOT "DOES THIS VIEW HAVE A KEYBOARD OF ITS OWN", which is what the
+ * closing line here used to say while `Agents` was in the set. Three of the
+ * four refusals above have nothing to do with a keyboard at all: the box
+ * belongs where a typed sentence has something ON SCREEN to be about, and the
+ * one view that draws the answer to a prompt is the one that draws the
+ * transcript.
  */
 export function drawsComposer(tab: Tab): boolean {
-  return tab === 'Response' || tab === 'Agents';
+  return tab === 'Response';
 }
 
 /**

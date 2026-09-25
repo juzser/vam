@@ -26,7 +26,6 @@ import type { CanvasSource } from '../../src/renderer/sources/source.js';
 const session = (id: string, title: string): Session => ({
   id,
   title,
-  icon: null,
   epic: null,
   branch: null,
   status: 'done',
@@ -77,6 +76,7 @@ function sourceWith(answer: () => Promise<void>): { source: CanvasSource; calls:
       pullRequests: false,
       terminal: false,
       agentRoster: false,
+      resumeSession: false,
     },
     declines: {},
     viewerScope: { kind: 'connection', note: 'one local process' },
@@ -262,10 +262,19 @@ describe('closing a session', () => {
     });
   });
 
+  /**
+   * `docs/design/vam-owns-the-session.md` §5, "Dismiss is the safe fallback":
+   * a refusal this row cannot retry its way out of now DISMISSES it rather
+   * than leaving its control sitting there pending forever -- see
+   * `Canvas.dismiss-session.test.tsx` for the feature itself. That subsumes
+   * the ORIGINAL point of this case (a spinner that outlives its refusal):
+   * there is no control left to be stuck at all, and restoring the row is
+   * what proves it was never left mid-spin.
+   */
   it.each([
     ['interactive-session', 'close that terminal yourself'],
     ['no-such-session', 'that tmux session no longer exists'],
-  ])('clears the pending state on %s and says why', async (code, message) => {
+  ])('dismisses the row on %s, with no pending state left behind', async (code, message) => {
     const gate = deferred<void>();
     const { source } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
@@ -274,8 +283,15 @@ describe('closing a session', () => {
       gate.fail({ kind: 'refused', code, message });
       await Promise.resolve();
     });
-    expect(control('close nightly sweep').getAttribute('data-pending')).toBeNull();
+    expect(screen.queryByLabelText('close nightly sweep')).toBeNull();
     expect(statusFull()).toContain(message);
+
+    // Restoring the row proves the spinner really cleared rather than being
+    // carried off-screen along with it.
+    await act(async () => {
+      (document.querySelector('[data-restore-dismissed]') as HTMLElement).click();
+    });
+    expect(control('close nightly sweep').getAttribute('data-pending')).toBeNull();
   });
 });
 

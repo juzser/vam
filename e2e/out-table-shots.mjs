@@ -179,6 +179,7 @@ async function open(viewport, isMobile) {
           pullRequests: false,
           terminal: false,
           agentRoster: false,
+          resumeSession: false,
         },
         declines: {},
         viewerScope: 'operator',

@@ -16,8 +16,10 @@ import { type AnswerResult, isAnswerRequest, type PromptView } from '../../share
 import {
   isModelChoice,
   isPaneKey,
+  isPaneReadMode,
   isPaneSize,
   type ModelSwitchResult,
+  type PaneReadMode,
   type PaneSendResult,
   type PaneView,
   type SessionModel,
@@ -28,12 +30,19 @@ import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
 import { defaultSessionsRoot } from '../sources/claude-code/session-status.js';
 import { defaultTranscriptRoot } from '../sources/claude-code/transcript-index.js';
 import { readSessionModelFromTranscript } from '../sources/claude-code/transcript-model.js';
+import { PANE_HISTORY_LINES } from '../sources/tmux/argv.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import { answerQuestion, readSessionPrompt } from './answer.js';
 import { setConciseOutput } from './concise.js';
 import { readSessionModel } from './model.js';
 import { switchSessionModel } from './model-switch.js';
-import { readSessionPane, resizeSessionPane, sendToPane, targetSession } from './pane.js';
+import {
+  readAimedPane,
+  readSessionPane,
+  resizeSessionPane,
+  sendToPane,
+  targetSession,
+} from './pane.js';
 
 /**
  * A project id is a digest (`sources/claude-code/project-id.ts`), and it
@@ -73,13 +82,21 @@ export const MAX_PROJECT_ID_LENGTH = 500;
  * the exact name is dangerous, and a vam session name carries six base-36
  * characters of randomness -- another process would have to create a session
  * with that precise name inside the window. Second, the window is bounded in
- * practice by something much shorter than this: the tab re-reads the pane
- * every second and that read RE-PROVES the pairing (see below), so a live tab
- * refreshes or clears this before the constant is ever reached. Third,
+ * practice by something much shorter than this: the tab re-reads the pane four
+ * times a second and that read RE-PROVES the pairing (see below), so a live
+ * tab refreshes or clears this before the constant is ever reached. Third,
  * typing only happens while that tab is open and its window visible, which is
- * exactly when that one-second revalidation is running.
+ * exactly when that quarter-second revalidation is running.
  *
  * It is a backstop, in other words, not the mechanism.
+ *
+ * AND IT IS NOW A BACKSTOP FOR A SECOND CALLER, which is the one change worth
+ * re-reading the three parts above for. The echo READ rides this aim too
+ * (`terminalRead`, `PaneReadMode`), so a proven pairing is what aims a capture
+ * as well as a keystroke. The three arguments hold for it unchanged, and it is
+ * held to the same rule that keeps them true: only a read that PROVED a
+ * pairing may write `at`. An echo read never does, so no amount of typing can
+ * carry an unproven aim past this constant.
  */
 export const AIM_TTL_MS = 2_000;
 
@@ -140,16 +157,21 @@ export function registerTerminalIpc(
   });
 
   ipcMain.handle(CHANNELS.terminalRead, async (_event, ...args: unknown[]): Promise<PaneView> => {
-    const [projectId, rowId] = args;
+    const [projectId, rowId, asked] = args;
     // The row is OPTIONAL: a caller that names only a project still gets the
     // project-wide answer. Both ids are bounded for the same reason -- they
-    // arrive from the least trusted process in the app.
+    // arrive from the least trusted process in the app. So is the MODE, and
+    // it is checked against its closed list rather than defaulted from: it
+    // decides how much this re-proves before aiming a read at a tmux session,
+    // and an unrecognised word is a malformed ask, not a reason to guess.
     if (
       args.length < 1 ||
-      args.length > 2 ||
+      args.length > 3 ||
       typeof projectId !== 'string' ||
       projectId.length > MAX_PROJECT_ID_LENGTH ||
-      (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      (rowId !== undefined &&
+        (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH)) ||
+      (asked !== undefined && !isPaneReadMode(asked))
     ) {
       // A refusal is data here like everywhere else on this bridge, and it is
       // deliberately NOT an empty pane: vam did not look, so it may not say
@@ -159,27 +181,82 @@ export function registerTerminalIpc(
         error: {
           kind: 'refused',
           code: 'bad-request',
-          message: 'vam asked for a terminal pane without a usable project id',
+          message: 'vam asked for a terminal pane in a way it could not use',
         },
       };
+    }
+    const mode: PaneReadMode = asked ?? 'poll';
+    const key = aimKey(projectId, rowId);
+    /**
+     * HOW MUCH SCROLLBACK, and it is the renderer's situation that decides.
+     * `echo` and `poll-live` are both a read for a view stuck to the live
+     * end, where the 500 lines above the screen are not on anybody's screen:
+     * measured on tmux 3.7b, asking for them costs 78KB and ~4.8ms more per
+     * read even through the control-mode runner's own cheaper connection
+     * (`shared/terminal.ts`, `PaneReadMode`, which carries both the original
+     * and the re-measured numbers). Every other situation -- `poll` (an
+     * operator scrolled away, or nothing drawn yet) and `echo-scrollback` --
+     * gets the whole window, because the scrollback has to be in the DOM for
+     * there to be anything to scroll.
+     */
+    const history = mode === 'echo' || mode === 'poll-live' ? 0 : PANE_HISTORY_LINES;
+    /**
+     * WHICH READ PROVES WHAT, written out because this is the one place in vam
+     * where a read is allowed to aim at a tmux session without proving it may.
+     *
+     * `poll` AND `poll-live` BOTH PROVE: same tick, same `list-sessions`, same
+     * match against the recorded `@vam-project` and the row's published pane
+     * by `targetSession` -- `poll-live` only ever changes how much of the
+     * SCREEN is asked for (`history` above), never whether the pairing is
+     * re-checked. The pairing either establishes is what refreshes the aim
+     * below. Every refusal vam has -- `not-vam`, `gone`, `ambiguous`,
+     * `mispaired` -- is minted there and nowhere else.
+     *
+     * An `echo`/`echo-scrollback` RIDES that proof: one `capture-pane` spawn
+     * aimed at the name the aim holds, with no `list-sessions` (~5ms) and no
+     * `readdir` of the published panes (~0.4ms) in front of it. It is the hot
+     * path of somebody typing, which asks about 30 times a second.
+     *
+     * THE WORST CASE, stated rather than implied: if the row is re-paired to a
+     * different pane between two proofs -- a session ends and the row
+     * republishes itself, say -- an echo read draws the OLD pane's screen
+     * until the next `poll`/`poll-live`. That is a stale SCREEN, never a
+     * keystroke in the wrong place: this channel only reads, and
+     * `terminalSend` does its own aiming. The window is bounded three ways.
+     * The tab polls four times a second while it is visible (`REFRESH_MS`),
+     * and stops polling AND echoing together when it is not, so an echo read
+     * cannot outlive the poll that backs it. `AIM_TTL_MS` is the backstop
+     * when the polls themselves are slow. And an echo read may not EXTEND
+     * either bound: it deliberately does not refresh `at`, so a typing run
+     * cannot keep an unproven pairing alive by typing. If tmux cannot find the
+     * pane the aim names, the aim is dropped here exactly as a failed send
+     * drops it.
+     */
+    const aimed = mode === 'poll' || mode === 'poll-live' ? undefined : aims.get(key);
+    if (aimed !== undefined && now() - aimed.at < AIM_TTL_MS) {
+      const echoed = await readAimedPane(run, aimed.name, history);
+      // Not `aims.set`: see above. Only a proof may set the timestamp, and
+      // this read made none.
+      if (echoed.kind !== 'ok') aims.delete(key);
+      return echoed;
     }
     const view = await readSessionPane(
       run,
       projectId,
       rowId,
       rowId === undefined ? undefined : await readPanes(),
+      history,
     );
     /**
      * THE READ IS THE REVALIDATION, and this is the line that makes reusing a
-     * pairing defensible. This handler runs once a second for as long as the
-     * tab is open, and it has just resolved the pane by the same
-     * `targetSession` rule the send uses. So an `ok` refreshes the aim, and
-     * every other answer -- gone, ambiguous, mispaired, unreachable --
-     * destroys it. A pairing that stops being true is therefore dropped
-     * within about a second, by work that was happening anyway, instead of
-     * being ridden to the end of `AIM_TTL_MS`.
+     * pairing defensible. This handler runs four times a second for as long as
+     * the tab is open and visible, and it has just resolved the pane by the
+     * same `targetSession` rule the send uses. So an `ok` refreshes the aim,
+     * and every other answer -- gone, ambiguous, mispaired, unreachable --
+     * destroys it. A pairing that stops being true is therefore dropped within
+     * about a quarter of a second, by work that was happening anyway, instead
+     * of being ridden to the end of `AIM_TTL_MS`.
      */
-    const key = aimKey(projectId, rowId);
     if (view.kind === 'ok') aims.set(key, { name: view.name, at: now() });
     else aims.delete(key);
     return view;

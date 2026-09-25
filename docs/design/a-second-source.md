@@ -76,6 +76,10 @@ parse rather than failing the read.
   column. `~/.codex/thread-writer-locks/<uuid>.lock` files exist but were
   stale for threads long finished. Whether an `flock` probe answers "a Codex is
   writing this thread right now" is **unmeasured**, and §Experiments says so.
+
+  **Answered 2026-09-21: yes.** See §Stage 3 below. The lock files being
+  stale was the right observation and the wrong conclusion — the *file* is
+  not the signal, the *held* lock is.
 - **`codex agents` is useless to a program.** It is an alt-screen TUI with no
   `--json`.
 - **`codex mcp-server` points the wrong way.** It makes Codex an MCP *server*
@@ -170,9 +174,58 @@ TUI, so `tmux … codex` works exactly as `tmux … claude` does, and such a
 session gets `terminal: true` and `vamControlled: true` back. This is the stage
 that makes the two sources look alike again.
 
-### Stage 3 — liveness
+### Stage 3 — liveness — **built, 2026-09-21**
 
-Only after the experiment in §Experiments says what liveness can be read from.
+The experiment ran. codex-cli 0.153.2, macOS 25.6.0, Node 22.23.1, driving one
+throwaway thread on a private `-L` tmux socket in a scratch directory:
+
+- a live Codex holds an **exclusive `flock`** on
+  `~/.codex/thread-writer-locks/<uuid>.lock`. A non-blocking open that asks for
+  a lock fails with errno 35, `EWOULDBLOCK`.
+- measured for **both** holders: the ChatGPT desktop app's `codex app-server`,
+  and a `codex` **CLI** TUI started by hand. They lock identically, so one
+  probe answers for both.
+- the lock is taken **before** the thread has a row in `threads`. A just
+  started session is live and invisible to the store.
+- a clean `/quit` **deletes** the lock file. `kill -9` **leaves it behind**,
+  and it then probes free. So the presence of a lock file is not the signal;
+  the held lock is — which is exactly what made the earlier sighting of stale
+  files look like a dead end.
+- `codex resume <uuid>` replayed the thread's turns and took the **same**
+  uuid's lock, so a reopened thread is the same thread.
+
+Thread count before the probe: 789. After `codex delete --force`: 789.
+
+**Two traps, both of which produce a confident wrong answer**, recorded in
+`src/main/sources/codex/liveness.ts`:
+
+1. `fs.constants.O_SHLOCK` and `O_EXLOCK` are **`undefined`** on Node 22 /
+   darwin, so `O_RDONLY | O_NONBLOCK | constants.O_SHLOCK` is `4` — an
+   ordinary read that always succeeds. A probe built that way reports "nothing
+   is live" on a machine with a live Codex on it. It was written that way here
+   first and only a controlled `flock` holder falsified it.
+2. macOS `lsof` shows the lock file as merely **open** (`22u`), with no lock
+   character, for a held lock and an unheld one alike. It cannot tell them
+   apart and is not an alternative.
+
+**What Stage 3 changed.** The seven-day recency window is gone: it was never a
+window, it was a stand-in for liveness. Measured against the operator's own
+store it drew 12 rows of which **1** was live, under **8** project headings,
+with the live row sorted **third** (`recency_at_ms DESC` is the only order the
+store offers), **6 of 12** sharing a title and **3 of 12** naming a directory
+that no longer exists. A row is drawn now because a Codex holds its lock; the
+ended ones are kept behind the sidebar's own filter toggle, off by default.
+
+**Status.** `idle` for a live thread is now `SessionStatus`'s own definition
+("alive, ... simply between turns") rather than Stage 1's least-wrong neutral,
+and `done` for a thread with no writer is that union's "a job that ENDED".
+What the lock does **not** say is whether a live thread is mid-turn or waiting
+on the operator, so `running` and `waiting` are still not guessed.
+
+**Where the probe cannot run** — CI is `ubuntu-latest`, and Linux has no
+`O_SHLOCK` — every row is `unknown`, which is a first-class answer and never
+`ended`. There the source draws the list it drew before Stage 3 and says so in
+its label.
 
 ### Stage 4 — `app-server --listen`, when it stops being experimental.
 
@@ -186,10 +239,10 @@ Only after the experiment in §Experiments says what liveness can be read from.
    what vam wants to promise? A prompt that is silently delivered to nobody is
    the one failure this source must not have, because `deliverPrompt: true` is
    a claim the composer makes to the operator.
-2. **Can liveness be read at all?** Probe `thread-writer-locks/<uuid>.lock` with
-   a non-blocking `flock` against a Codex that is running and one that is not.
-   If it cannot be read, Stage 1 draws every Codex row without a live mark and
-   says so, rather than guessing.
+2. **Can liveness be read at all?** ~~Probe `thread-writer-locks/<uuid>.lock`
+   with a non-blocking `flock` against a Codex that is running and one that is
+   not.~~ **Run, 2026-09-21. Yes** — see §Stage 3 for what it measured, and
+   for the two traps that make a probe answer confidently and wrongly.
 
 ## What this costs
 

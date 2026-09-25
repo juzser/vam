@@ -45,13 +45,22 @@ module.exports = {
       { target: 'zip', arch: ['arm64', 'x64'] },
     ],
     category: 'public.app-category.developer-tools',
-    // Explicitly unsigned. Left unset, electron-builder signs with whatever
+    // No certificate. Left unset, electron-builder signs with whatever
     // identity happens to be in the building machine's keychain, so the same
     // commit produces a different artifact on a different machine. There is
     // no project certificate; saying so here is honest and reproducible.
     // Gatekeeper consequences are documented in the release notes.
+    //
+    // NOT "unsigned", though: `afterPack` below gives the bundle a real
+    // AD-HOC signature under its own identifier, which is what lets macOS
+    // tell it apart from every other Electron app (notifications need that).
+    // Still not notarised, so the first launch is still interrupted.
     identity: null,
   },
+  // Ad-hoc signs the macOS bundle; a no-op on every other platform. HERE and
+  // not `afterSign`: this runs BEFORE electron-builder's own signing pass, so
+  // a real identity configured later still lands on top of it. See the script.
+  afterPack: require('./scripts/adhoc-sign-mac.cjs').afterPack,
   win: {
     target: ['nsis', 'zip'],
   },

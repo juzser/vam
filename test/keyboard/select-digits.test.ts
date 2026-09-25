@@ -232,22 +232,26 @@ describe('the tooltip splits the two spellings rather than joining them', () => 
    */
   it('prints the chord plainly and the bare digit as Select’s', () => {
     for (const [mac, chord] of [
-      [true, '⌃⌥1'],
+      [true, '⌃ ⌥ 1'],
       [false, 'Ctrl+Alt+1'],
     ] as const) {
       expect(shortcutLines(RESPONSE, undefined, NO_BINDINGS, mac)).toEqual([
-        { caption: null, keys: chord },
-        { caption: 'Select · the Response view, in the focused pane', keys: '1' },
+        { caption: null, keys: chord, chords: ['Ctrl-Alt-1'] },
+        {
+          caption: 'Select · the Response view, in the focused pane',
+          keys: '1',
+          chords: ['1'],
+        },
       ]);
     }
   });
 
   it('drops the bare digit entirely for a caller that knows it is in Insert', () => {
     expect(shortcutLines(RESPONSE, 'insert', NO_BINDINGS, true)).toEqual([
-      { caption: null, keys: '⌃⌥1' },
+      { caption: null, keys: '⌃ ⌥ 1', chords: ['Ctrl-Alt-1'] },
     ]);
     expect(shortcutLines(RESPONSE, 'insert', NO_BINDINGS, false)).toEqual([
-      { caption: null, keys: 'Ctrl+Alt+1' },
+      { caption: null, keys: 'Ctrl+Alt+1', chords: ['Ctrl-Alt-1'] },
     ]);
   });
 
@@ -255,10 +259,10 @@ describe('the tooltip splits the two spellings rather than joining them', () => 
     // `close` holds two chords and neither is Select-only, so it must still be
     // one joined line — the shape this change must not spread to.
     expect(shortcutLines({ kind: 'close' }, undefined, NO_BINDINGS, true)).toEqual([
-      { caption: null, keys: 'x or ⌘W' },
+      { caption: null, keys: 'x or ⌘ W', chords: ['x', 'Mod-w'] },
     ]);
     expect(shortcutLines({ kind: 'close' }, undefined, NO_BINDINGS, false)).toEqual([
-      { caption: null, keys: 'x or Ctrl+W' },
+      { caption: null, keys: 'x or Ctrl+W', chords: ['x', 'Mod-w'] },
     ]);
   });
 });

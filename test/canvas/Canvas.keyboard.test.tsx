@@ -15,7 +15,7 @@
  * sidebar, tab strip and detail panel all follow the same single focus.
  */
 
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SmithApiError, type SmithClient } from '../../src/renderer/adapter/client.js';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
@@ -33,7 +33,6 @@ function session(id: string, over: Partial<Session> = {}): Session {
   return {
     id,
     title: id,
-    icon: null,
     epic: null,
     branch: null,
     status: 'done',
@@ -142,9 +141,13 @@ const headings = () =>
   [...document.querySelectorAll('[data-project-heading]')].map((el) => el.textContent ?? '');
 const rowText = (id: string) =>
   document.querySelector(`[data-session-row="${id}"]`)?.textContent ?? '';
-/** What the session row draws for its icon -- the one icon display left. */
-const nodeIcon = (id: string) =>
-  document.querySelector(`[data-session-icon="${id}"]`)?.textContent ?? null;
+// `nodeIcon` used to live here: `[data-session-icon="<id>"]`, the tab's own
+// slot and the last surface that drew a session's icon. That went off the tab
+// ("remove the session icon from the tab"), which left a picker writing where
+// nothing read, and the operator removed the picker too. So there is no
+// selector to keep and no store round-trip left to pin: the cases that used
+// this helper are gone with the feature, except the one whose real subject was
+// never the icon at all (the captured target, below, now pinned on rename).
 // A <textarea>, not an <input>: the composer is multiline, so a prompt is
 // prose rather than the tail of one line.
 const promptInput = () =>
@@ -154,7 +157,6 @@ const filterInput = () =>
 const renameInput = () =>
   document.querySelector<HTMLInputElement>('input[aria-label="rename session"]');
 /** Whether `I` has handed the keyboard to the right pane. */
-const iconPicker = () => document.querySelector('[data-icon-picker]');
 /** The status bar's own text. The header badge carries the same words in demo
  *  mode, so a bare text query cannot tell "it refused" from "it is a demo". */
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
@@ -937,18 +939,23 @@ describe('the sidebar', () => {
     expect(screen.getByText(/factory has no new-session command/)).toBeTruthy();
   });
 
-  it('pins settings at the bottom, and it opens the overlay', () => {
+  it('pins settings at the bottom, and it opens the overlay', async () => {
     // It used to answer "settings not built yet". The refusal is gone from the
     // tree; the gear and `,` reach one overlay (test/canvas/Canvas.settings).
     render(<Canvas model={MODEL} />);
     act(() => {
       screen.getByLabelText('settings').click();
     });
-    expect(document.querySelector('[data-settings-overlay]')).toBeTruthy();
+    // `SettingsOverlay` is its own lazy chunk now (`Canvas.tsx`'s own
+    // `React.lazy` + `Suspense`), so its DOM resolves a render tick or two
+    // after the click, not on it.
+    await waitFor(() => {
+      expect(document.querySelector('[data-settings-overlay]')).toBeTruthy();
+    });
   });
 });
 
-describe('renaming, icons and closing', () => {
+describe('renaming and closing', () => {
   it('r opens rename on the focused row, seeded with its current name', () => {
     render(<Canvas model={MODEL} />);
     press('j'); // a2, the next row in the sidebar
@@ -978,137 +985,15 @@ describe('renaming, icons and closing', () => {
     expect(rowText('a1')).toContain('a1');
   });
 
-  it('s opens the icon picker on the focused row, and s again closes it', () => {
+  it('s does nothing at all — the freed key was left free', () => {
+    // It opened the session-icon picker until that feature was removed.
+    // Asserted as a whole-screen absence rather than on the picker's own
+    // marker, because the point is that `s` acquired no REPLACEMENT: an
+    // overlay of any kind here would mean the key had been quietly reused.
     render(<Canvas model={MODEL} />);
+    const before = document.body.innerHTML;
     press('s');
-    // Asserted on our own shell, not on the third-party grid inside it: the
-    // picker's own buttons are labelled in English by the library, and a test
-    // that queried them would be testing emoji-picker-react.
-    expect(iconPicker()).toBeTruthy();
-    press('s');
-    expect(iconPicker()).toBeNull();
-  });
-
-  it('names the session it is picking for', () => {
-    render(<Canvas model={MODEL} />);
-    press('j'); // a2, the next row in the sidebar
-    press('s');
-    expect(iconPicker()?.textContent).toContain('a2');
-  });
-
-  it('shows an icon you chose on a previous visit', () => {
-    // The read half of the store, end to end: what localStorage holds reaches
-    // the icon slot without the canvas knowing an icon is a local
-    // preference. This used to read the SIDEBAR row (`rowText('a1')` contains
-    // the glyph, `rowText('a2')` does not); the sidebar no longer draws a
-    // session icon, so the same end-to-end path is asserted on the surface
-    // that still displays it -- the assertion moved, it was not dropped.
-    localStorage.setItem(
-      'vam.prefs.v1',
-      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
-    );
-    render(<Canvas model={MODEL} />);
-    expect(nodeIcon('a1')).toBe('🛠');
-    expect(rowText('a1')).not.toContain('🛠');
-  });
-
-  it('clearing the icon says where it was kept, and forgets it', () => {
-    // The write half. Picking an emoji goes through the third-party grid, which
-    // loads in its own lazy chunk and is not this test's to drive; "clear icon" is
-    // our own button and exercises the same path out.
-    localStorage.setItem(
-      'vam.prefs.v1',
-      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
-    );
-    render(<Canvas model={MODEL} />);
-    press('s');
-    act(() => {
-      screen.getByText('clear icon').click();
-    });
-    // It says "on this machine", not "not saved": factory having no icon route
-    // was never the point — this is per-user state that must NOT reach
-    // the event log.
-    expect(screen.getByText(/on this machine/)).toBeTruthy();
-    expect(iconPicker()).toBeNull();
-    // Also moved off the sidebar row: it asserted `rowText('a1')` no longer
-    // contained the cleared glyph, and now asserts the icon slot does not.
-    expect(nodeIcon('a1')).not.toBe('🛠');
-    expect(JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}').icons).toEqual({});
-  });
-
-  /**
-   * The picker aims at a session in a SOURCE, and it must still know which one
-   * after the model underneath it has moved on.
-   *
-   * A model refresh between opening the picker and picking is the one input
-   * that separates carrying the target from re-deriving it. Re-deriving meant
-   * `allEntries.find(e => e.session.id === id)?.project.source ?? 'factory'`
-   * — and once the entry is gone that `??` fires, so a pick aimed at an ORCA
-   * session silently rewrote the factory bucket instead. `b1` exists under
-   * both sources here, so the wrong bucket is a real entry rather than a
-   * harmless no-op, which is what makes the two directions distinguishable at
-   * all.
-   *
-   * This is deliberately NOT written as "two sources share a session id, focus
-   * the second one". That test cannot be written today: `focusedEntry` is
-   * `entries.find((e) => e.session.id === focusedSessionId)`, so of two
-   * sessions sharing an id the second is never the entry `.find` returns —
-   * it cannot be focused, so it cannot be picked for. That collision is one
-   * layer above the storage keys AC-1 re-keyed, and it is filed rather than
-   * quietly fixed here.
-   */
-  const BOTH_SOURCES_HOLD_B1 = () =>
-    localStorage.setItem(
-      'vam.prefs.v1',
-      JSON.stringify({
-        icons: {
-          factory: { b1: { icon: '🛠', at: new Date().toISOString() } },
-          orca: { b1: { icon: '🐋', at: new Date().toISOString() } },
-        },
-      }),
-    );
-
-  /** MODEL with beta emptied — b1 gone, everything else identical. */
-  const WITHOUT_B1: CanvasModel = {
-    ...MODEL,
-    projects: MODEL.projects.map((p) => (p.source === 'orca' ? { ...p, sessions: [] } : p)),
-  };
-
-  it("keeps aiming at orca's b1 after the model drops it mid-pick", () => {
-    BOTH_SOURCES_HOLD_B1();
-    const { rerender } = render(<Canvas model={MODEL} />);
-    press('j');
-    press('j'); // beta/b1 — the orca one, two rows down the sidebar
-    expect(focused()).toBe('beta/b1');
-    press('s');
-    // The refresh that used to lose the source.
-    act(() => rerender(<Canvas model={WITHOUT_B1} />));
-    expect(iconPicker()).toBeTruthy();
-    act(() => {
-      screen.getByText('clear icon').click();
-    });
-    const stored = JSON.parse(localStorage.getItem('vam.prefs.v1') ?? '{}');
-    expect(stored.icons).toEqual({
-      factory: { b1: { icon: '🛠', at: expect.any(String) } },
-    });
-  });
-
-  it('names the session it is picking for even after the entry is gone', () => {
-    // The title came from the same lookup and fell back to the raw session id.
-    const titled: CanvasModel = {
-      ...MODEL,
-      projects: MODEL.projects.map((p) =>
-        p.source === 'orca'
-          ? { ...p, sessions: p.sessions.map((x) => ({ ...x, title: 'beta work' })) }
-          : p,
-      ),
-    };
-    const { rerender } = render(<Canvas model={titled} />);
-    press('j');
-    press('j'); // beta/b1
-    press('s');
-    act(() => rerender(<Canvas model={WITHOUT_B1} />));
-    expect(iconPicker()?.textContent).toContain('beta work');
+    expect(document.body.innerHTML).toBe(before);
   });
 
   it('gr does not rename — the chord grammar drops an unrecognised second key', () => {
@@ -1119,16 +1004,16 @@ describe('renaming, icons and closing', () => {
     // it is asserted below over the whole store rather than over the bar.
     localStorage.setItem(
       'vam.prefs.v1',
-      JSON.stringify({ icons: { a1: { icon: '🛠', at: new Date().toISOString() } } }),
+      JSON.stringify({
+        renames: { factory: { a1: { title: 'seeded', at: new Date().toISOString() } } },
+      }),
     );
     render(<Canvas model={MODEL} />);
     const before = statusBar();
     // Both samples taken AFTER mounting, not against the seed. Landing focus on
     // something real now records where it landed, so a launch writes once on
-    // its own -- and against a legacy flat `icons` payload like the one seeded
-    // above, that write is also what migrates it to the per-source shape.
-    // Neither is this chord's doing. What the test is about is that `g`
-    // followed by an unbound key changes NOTHING, so it brackets the two
+    // its own; that is not this chord's doing. What the test is about is that
+    // `g` followed by an unbound key changes NOTHING, so it brackets the two
     // presses and compares the whole store: stricter than the seed comparison
     // it replaces, which only ever looked at one key.
     const storedBefore = localStorage.getItem('vam.prefs.v1');
@@ -1408,7 +1293,7 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
    * suite by accident.
    */
   function fakeSessionSource(
-    over: { deliverPrompt?: boolean; recordPrompt?: boolean } = {},
+    over: { deliverPrompt?: boolean; recordPrompt?: boolean; terminal?: boolean } = {},
     recordPrompt: (sessionId: string, prompt: string) => Promise<void> = async () => {},
   ): { source: CanvasSource; wrote: { count: number } } {
     const recordPromptFlag = over.recordPrompt ?? true;
@@ -1427,8 +1312,13 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
         createSession: false,
         governance: false,
         pullRequests: false,
-        terminal: false,
+        // WHETHER THE DELIVERY HAS A PANE BEHIND IT, which is what decides
+        // the word the status bar uses: a source that types into a terminal
+        // can say so, and one that queues for a session it does not own
+        // cannot. Both deliver.
+        terminal: over.terminal ?? false,
         agentRoster: false,
+        resumeSession: false,
       },
       declines: {},
       viewerScope: { kind: 'connection', note: 'one local process' },
@@ -1493,11 +1383,14 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(control()?.getAttribute('aria-busy')).toBe('false');
   });
 
-  it('says the prompt was TYPED INTO THE TERMINAL when the source delivers, not that it was answered', async () => {
+  it('says the prompt was TYPED INTO THE TERMINAL when the source delivers through a pane', async () => {
     const calls: { sessionId: string; prompt: string }[] = [];
-    const { source } = fakeSessionSource({ deliverPrompt: true }, async (sessionId, prompt) => {
-      calls.push({ sessionId, prompt });
-    });
+    const { source } = fakeSessionSource(
+      { deliverPrompt: true, terminal: true },
+      async (sessionId, prompt) => {
+        calls.push({ sessionId, prompt });
+      },
+    );
     await submit(source, 'run task-4 again');
     expect(calls).toEqual([{ sessionId: 'a1', prompt: 'run task-4 again' }]);
     // After a keystroke-into-the-pane there is no echo that the turn landed, so
@@ -1507,6 +1400,20 @@ describe('writing a prompt to a "session" source (the desktop shell)', () => {
     expect(statusBar()).not.toContain('recorded');
     // It must not claim a delivery that was confirmed, nor that an answer is
     // already coming -- the words the retired `--resume` echo used to earn.
+    expect(statusBar()).not.toMatch(/delivered|it will answer there/i);
+  });
+
+  it('says QUEUED when the source delivers WITHOUT a pane, which typing is not', async () => {
+    // The Codex case, and the first source vam has that is in it: the message
+    // goes into a queue the session polls, and `codex queue` answers when it
+    // is IN the queue -- not when a session has read it. A thread whose Codex
+    // has exited has nobody polling, so "typed" would be a claim about a
+    // keyboard that does not exist and "delivered" a claim vam never observed.
+    const { source } = fakeSessionSource({ deliverPrompt: true, terminal: false }, async () => {});
+    await submit(source, 'run task-4 again');
+    expect(statusBar()).toContain('queued for');
+    expect(statusBar()).not.toContain('typed into the terminal');
+    expect(statusBar()).not.toContain('recorded');
     expect(statusBar()).not.toMatch(/delivered|it will answer there/i);
   });
 

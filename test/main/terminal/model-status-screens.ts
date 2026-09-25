@@ -92,6 +92,46 @@ export const OPUS_FRESH = [
   '  \u001b[93m⏵⏵ auto mode on\u001b[37m (shift+tab to cycle) · ← for agents\u001b[39m',
 ].join('\n');
 
+/**
+ * OPUS 5.5, THE NEW DEFAULT -- Claude Code 2.1.280, re-captured 2026-09-23 the
+ * same way `OPUS_FRESH` was: a throwaway session, private `-L` socket, killed
+ * after. Added because `claude-opus-5-5` is a REAL id now, not a guess about
+ * what the next Opus might be named -- the changelog's own "Added Claude Opus
+ * 5.5 ... now the default Opus model", and this account's own fresh session
+ * already opened on it with no `/model` typed.
+ *
+ * WHAT IT PROVES THAT `OPUS_FRESH` COULD NOT. The footer's version field is
+ * `5.5`, not `5` -- a dot where the shorter capture had none -- and
+ * `readModelLine` was written against `VERSION = /^\d+(?:\.\d+)*$/`, a shape
+ * that already admits it. This is that shape's first REAL instance, not a
+ * synthetic one.
+ */
+export const OPUS_5_5_FRESH = [
+  '',
+  '\u001b[91m ▐\u001b[40m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[37mv2.1.280\u001b[39m',
+  '\u001b[91m▝▜\u001b[40m█████\u001b[49m█▀\u001b[39m  \u001b[37mOpus 5.5 · Claude API\u001b[39m',
+  '\u001b[91m  ▝▝ ▝▝  \u001b[39m  \u001b[37m/…/scratch/wd5',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '\u001b[37m────────────────────────────────────────',
+  '\u001b[39m❯ ',
+  '\u001b[37m────────────────────────────────────────',
+  '\u001b[39m  \u001b[36mwd5\u001b[37m \u001b[2mOpus 5.5\u001b[0m\u001b[37m \u001b[2min:0 out:0\u001b[0m',
+  '  \u001b[93m⏵⏵ auto mode on\u001b[37m (shift+tab to cycle) · ← 1 agent\u001b[39m',
+].join('\n');
+
 export const NARROW_TRUNCATED = [
   '     \u001b[2m\u001b[37m 1 h\u001b[0m',
   '     \u001b[2m\u001b[37m   i\u001b[0m',

@@ -149,9 +149,9 @@ describe('key bindings in storage', () => {
   });
 
   it('drops a garbage entry without dropping a good one', () => {
-    const prefs = readPrefs(storage({ keyBindings: { rename: ['p'], icon: 'nope' } }));
+    const prefs = readPrefs(storage({ keyBindings: { rename: ['p'], close: 'nope' } }));
     expect(prefs.keyBindings['rename']).toEqual(['p']);
-    expect(prefs.keyBindings['icon']).toBeUndefined();
+    expect(prefs.keyBindings['close']).toBeUndefined();
   });
 
   /**
@@ -166,11 +166,11 @@ describe('key bindings in storage', () => {
    * editor and the `?` sheet mark the dead key.
    */
   it('keeps a payload that contests a key, and hands it on reported', () => {
-    const prefs = readPrefs(storage({ keyBindings: { icon: ['r'] } }));
-    expect(prefs.keyBindings['icon']).toEqual(['r']);
+    const prefs = readPrefs(storage({ keyBindings: { close: ['r'] } }));
+    expect(prefs.keyBindings['close']).toEqual(['r']);
     const clashes = bindingClashes(prefs.keyBindings);
     expect(clashes.map((clash) => clash.chord)).toEqual(['r']);
-    expect(clashes[0]?.winner).toBe('icon');
+    expect(clashes[0]?.winner).toBe('close');
     expect(clashes[0]?.shadowed).toEqual(['rename']);
   });
 });

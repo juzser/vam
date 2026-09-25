@@ -336,11 +336,6 @@ describe('toCanvasModel', () => {
     );
     expect(model.projects[0]?.sessions[0]?.decisions[0]?.input).toBe('hi');
   });
-
-  it('gives a session no icon, because nothing in the factory stores one', () => {
-    const model = toCanvasModel(overview([apiSession('a')]), new Map(), 'factory');
-    expect(model.projects[0]?.sessions[0]?.icon).toBeNull();
-  });
 });
 
 /**

@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 
 /**
- * The phone keystroke strip -- vam's real five `PaneKey` shapes (Escape,
- * Enter, Backspace, Shift-Tab, Space), reachable by tap.
+ * The phone keystroke strip -- vam's real seven `PaneKey` shapes (Escape,
+ * Enter, Backspace, Shift-Tab, Space, and now Up/Down -- vam/terminal-arrows,
+ * a phone has no arrow keys and Claude Code's own pickers need them),
+ * reachable by tap.
  *
  * Gated on the SAME predicate as the mode row's `canCycleMode`
  * (`vamControlled === true && terminal !== false`), and placed first inside
@@ -14,13 +16,14 @@ import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
+import { chordSymbols } from '../../src/renderer/keyboard/chords.js';
 import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
 import type { PaneSendResult } from '../../src/shared/terminal.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 const SESSION: Session = {
   id: 's1',
   title: 'Provider survey',
-  icon: null,
   epic: null,
   branch: null,
   status: 'running',
@@ -106,7 +109,7 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
   it('is drawn for a session vam started, on a source with a terminal, on phone', () => {
     draw({}, { terminal: true });
     expect(strip()).not.toBeNull();
-    expect(keys()).toHaveLength(5);
+    expect(keys()).toHaveLength(7);
   });
 
   it('never draws a plain Tab key: there is no PaneKey behind it', () => {
@@ -116,7 +119,33 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
       keys()
         .map((k) => k.getAttribute('data-key-strip-key'))
         .sort(),
-    ).toEqual(['back-tab', 'backspace', 'enter', 'escape', 'space'].sort());
+    ).toEqual(['back-tab', 'backspace', 'enter', 'escape', 'space', 'up', 'down'].sort());
+  });
+
+  it('sends Up/Down as real navigation keys, so a phone can walk a picker too', async () => {
+    // vam/terminal-arrows. A phone has no arrow keys at all, and Claude
+    // Code's own option pickers are walked with them -- the same report the
+    // Terminal tab's own keyboard fix answers, from the surface that never
+    // had a keyboard to begin with.
+    const send = vi.fn(async (): Promise<PaneSendResult> => 'sent');
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { terminal: { send } },
+    });
+    draw({}, { terminal: true });
+    const upKey = document.querySelector('[data-key-strip-key="up"]') as HTMLElement;
+    const downKey = document.querySelector('[data-key-strip-key="down"]') as HTMLElement;
+    await act(async () => {
+      fireEvent.click(upKey);
+      await Promise.resolve();
+    });
+    expect(send).toHaveBeenLastCalledWith('p1', { kind: 'nav', nav: 'up' }, 's1');
+    await act(async () => {
+      fireEvent.click(downKey);
+      await Promise.resolve();
+    });
+    expect(send).toHaveBeenLastCalledWith('p1', { kind: 'nav', nav: 'down' }, 's1');
+    Reflect.deleteProperty(window, 'api');
   });
 
   it('labels Escape and Enter distinctly from their textarea siblings', () => {
@@ -135,6 +164,36 @@ describe('the keystroke strip is drawn only where a key can actually be sent', (
     // rather than a matter of which caption won.
     expect(document.querySelector('[data-prompt-keys]')).toBeNull();
     expect(document.querySelector('[data-prompt-escape]')).toBeNull();
+  });
+
+  /**
+   * THE STRIP PAINTS chords.ts's OWN TABLE, NOT A SECOND ONE HAND-TYPED
+   * BESIDE IT. It shipped with `⏎`, `⌫`, `⇧⇥` and `␣` written straight into
+   * `KEY_STRIP`'s captions — Apple's own glyphs, painted on every platform
+   * unconditionally, including the Android phone this same bundle is served
+   * to over Tailscale (`test/support/platform.ts`'s whole reason for
+   * existing). `chordSymbols` was already the one function this app trusts
+   * to answer that question; the strip now asks it, per key, like every
+   * other chord in the app.
+   */
+  it('paints the platform’s own glyphs for every key, off chords.ts’s table', () => {
+    const EXPECT: Readonly<Record<string, { chord: string; suffix: string }>> = {
+      escape: { chord: 'Escape', suffix: ' → agent' },
+      enter: { chord: 'Enter', suffix: ' → agent' },
+      backspace: { chord: 'Backspace', suffix: '' },
+      'back-tab': { chord: 'Shift-Tab', suffix: '' },
+      space: { chord: ' ', suffix: '' },
+      up: { chord: 'ArrowUp', suffix: '' },
+      down: { chord: 'ArrowDown', suffix: '' },
+    };
+    onBothPlatforms((mac) => {
+      draw({}, { terminal: true });
+      for (const [id, { chord, suffix }] of Object.entries(EXPECT)) {
+        const el = document.querySelector(`[data-key-strip-key="${id}"]`);
+        expect(el?.textContent, id).toBe(`${chordSymbols(chord, mac)}${suffix}`);
+      }
+      cleanup();
+    });
   });
 
   it('disappears with the composer while a QuestionCard is open', () => {

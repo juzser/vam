@@ -11,8 +11,8 @@
  * `DetailPanel.test.tsx`'s own `mode control` tests.
  */
 
-import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   FileListResult,
   FileReadResult,
@@ -30,7 +30,30 @@ import {
   DEFAULT_EDITOR_INDENT,
   setActiveEditorSettings,
 } from '../../src/renderer/prefs/editor.js';
+import {
+  DEFAULT_FILES_MARKDOWN_VIEW,
+  setActiveFilesMarkdownView,
+} from '../../src/renderer/prefs/files-markdown-view.js';
 import { onBothPlatformsAsync } from '../support/platform.js';
+
+/**
+ * THE AMBIENT DEFAULT, PINNED TO RAW FOR EVERY TEST IN THIS FILE THAT DOES
+ * NOT SAY OTHERWISE.
+ *
+ * `activeFilesMarkdownView()` is module-wide state (`files-markdown-view.ts`
+ * carries why it has no per-test lifecycle of its own), and this whole file
+ * predates the device default changing to `'preview'`. Every test below that
+ * opens a `.md` file and asserts on the RAW editor — the gutter, the
+ * formatter, the keyboard model, `Mod-Shift-m` FROM the editor INTO the
+ * preview — was written against the OLD default and is about something
+ * other than what that default is. Pinning it here, once, keeps every one
+ * of those bodies unchanged; the one `describe` that is actually ABOUT the
+ * new default (`the default view for a freshly opened .md file`) restores
+ * the real default explicitly before it draws anything.
+ */
+beforeEach(() => {
+  setActiveFilesMarkdownView('raw');
+});
 
 const DECISION: Decision = {
   id: 'd1',
@@ -43,7 +66,6 @@ const DECISION: Decision = {
 const SESSION: Session = {
   id: 's1',
   title: 'atlas work',
-  icon: null,
   epic: null,
   branch: null,
   status: 'waiting',
@@ -118,7 +140,7 @@ afterEach(() => {
   resetUnsavedRegistry();
 });
 
-function draw(over: Partial<DetailPanelProps> = {}) {
+async function draw(over: Partial<DetailPanelProps> = {}) {
   const props: DetailPanelProps = {
     entry: ENTRY,
     decision: DECISION,
@@ -136,6 +158,21 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     ...over,
   };
   render(<DetailPanel {...props} />);
+  // `FilesTab` mounts behind a `React.lazy` + `Suspense` boundary now
+  // (`DetailPanel.tsx`'s own `LazyFilesTab` -- see its declaration's header
+  // for the measured cost), so its DOM is not there the instant `render`
+  // returns. `[data-files]` is FilesTab's own root marker in every one of
+  // its three return branches (`data-files-empty`/`data-files-unavailable`/
+  // `data-files-view`), so its arrival is exactly the signal "the lazy chunk
+  // resolved and rendered" -- `DetailPanel.file-ref.test.tsx`'s own
+  // `LazyMarkdown` wait is the precedent for this shape. Skipped when
+  // `files` does not resolve `true`: FilesTab never mounts at all then, and
+  // this would wait forever.
+  if (props.files === true) {
+    await waitFor(() => {
+      if (!document.querySelector('[data-files]')) throw new Error('still pending');
+    });
+  }
 }
 
 const openFiles = async () => {
@@ -145,20 +182,34 @@ const openFiles = async () => {
   });
 };
 
+/**
+ * PRESSES THE SAVE CHORD, on whichever element actually holds `onKeyDown` —
+ * the editor while raw, `[data-files-preview-view]` while previewing. There
+ * is no Save button any more (`FilesTab.tsx`'s own dirty-indicator comment):
+ * the operator asked for an indicator instead, so every test that used to
+ * click one now presses `Mod-s` exactly as the operator's fingers would.
+ */
+const saveViaChord = async (target: Element) => {
+  await act(async () => {
+    fireEvent.keyDown(target, { key: 's', metaKey: true });
+    await Promise.resolve();
+  });
+};
+
 describe('the Files tab is withdrawn until a caller confirms the desktop bridge', () => {
-  it('draws no Files icon when the files prop is absent', () => {
-    draw({ files: undefined });
+  it('draws no Files icon when the files prop is absent', async () => {
+    await draw({ files: undefined });
     expect(q('[data-view="files"]')).toBeNull();
   });
 
-  it('draws no Files icon when files is explicitly false', () => {
-    draw({ files: false });
+  it('draws no Files icon when files is explicitly false', async () => {
+    await draw({ files: false });
     expect(q('[data-view="files"]')).toBeNull();
   });
 
-  it('draws the Files icon once a caller has confirmed the bridge', () => {
+  it('draws the Files icon once a caller has confirmed the bridge', async () => {
     withBridge({});
-    draw({ files: true });
+    await draw({ files: true });
     expect(q('[data-view="files"]')).not.toBeNull();
   });
 });
@@ -166,7 +217,7 @@ describe('the Files tab is withdrawn until a caller confirms the desktop bridge'
 describe('no session focused', () => {
   it('says so, plainly, rather than showing an empty list', async () => {
     withBridge({});
-    draw({ entry: null, files: true });
+    await draw({ entry: null, files: true });
     await openFiles();
     expect(q('[data-files-empty]')?.textContent).toContain('No session selected');
   });
@@ -183,7 +234,7 @@ describe('the file tree', () => {
       };
     });
     withBridge({ list });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     // Two rows, not two files: `src` is one collapsed directory, and `.env`
@@ -206,7 +257,7 @@ describe('the file tree', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(q('[data-files-tree]')).not.toBeNull();
     await act(async () => {
@@ -230,7 +281,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(rowPaths()).toEqual(['/work/atlas/src']);
     expect(row('/work/atlas/src')?.getAttribute('data-files-row-open')).toBe('false');
@@ -272,7 +323,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const icon = (path: string) =>
@@ -302,7 +353,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const ink = (path: string) =>
@@ -321,7 +372,7 @@ describe('the file tree', () => {
         truncated: false,
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       fireEvent.change(q<HTMLInputElement>('[data-files-filter]') as HTMLInputElement, {
@@ -352,7 +403,7 @@ describe('the file tree', () => {
     withBridge({
       list: async () => Promise.reject(refusal('unknown-session', 'vam has no live session s1')),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     const note = q('[data-files-refusal="unknown-session"]');
     expect(note?.textContent).toContain('vam has no live session s1');
@@ -369,7 +420,7 @@ describe('opening a file — the read side of all seven refusals', () => {
       }),
       read: async () => ({ content: '', isBinary: true, signature: SIGNATURE({ size: 48_231 }) }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -393,7 +444,7 @@ describe('opening a file — the read side of all seven refusals', () => {
           refusal('too-large', '/work/atlas/huge.log is 78643200 bytes, over the ceiling'),
         ),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -415,7 +466,7 @@ describe('opening a file — the read side of all seven refusals', () => {
           ),
         ),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -433,7 +484,7 @@ describe('opening a file — the read side of all seven refusals', () => {
       list: async () => ({ root: '/work/atlas', files: [], truncated: false }),
       read: async () => Promise.reject(refusal('not-found', '/work/atlas/.env does not exist')),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       fireEvent.change(
@@ -466,7 +517,7 @@ describe('changed-on-disk — the refusal that must not look like a failure', ()
       read,
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -477,16 +528,16 @@ describe('changed-on-disk — the refusal that must not look like a failure', ()
     await act(async () => {
       fireEvent.change(editor, { target: { value: 'A=2 — my own edit' } });
     });
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
 
     expect(q('[data-files-conflict]')?.textContent).toContain('changed on disk');
     // THE OPERATOR'S TEXT IS STILL THERE. This is the assertion that matters
     // most in the whole feature: a conflict must never look like the edit
-    // vanished.
-    expect(editor.value).toBe('A=2 — my own edit');
+    // vanished. The trailing `\n` is the save-time normaliser
+    // (`files-save-normalize.ts`) adding the one final newline every save
+    // attempt gets, whether or not the write itself lands — nothing else
+    // about the operator's own text moved.
+    expect(editor.value).toBe('A=2 — my own edit\n');
 
     // Reload discards it, but only because the operator explicitly asked.
     read.mockResolvedValueOnce({
@@ -516,7 +567,7 @@ describe('dirty state', () => {
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -529,12 +580,14 @@ describe('dirty state', () => {
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     expect(q('[data-files-dirty]')).not.toBeNull();
+    // A NAME A SCREEN READER CAN SAY, not just a hue: the dot replaced a
+    // labelled Save button, so it owes the operator its own accessible name.
+    expect(q('[data-files-dirty]')?.getAttribute('aria-label')).toBe('unsaved changes');
 
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
-    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2', SIGNATURE());
+    await saveViaChord(editor);
+    // The save-time normaliser adds the one final newline every save gets
+    // (`files-save-normalize.ts`) — `A=2` had none.
+    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2\n', SIGNATURE());
     expect(q('[data-files-dirty]')).toBeNull();
   });
 
@@ -556,7 +609,7 @@ describe('dirty state', () => {
         signature: SIGNATURE(),
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const openRow = async (path: string) => {
@@ -583,13 +636,86 @@ describe('dirty state', () => {
   });
 });
 
+/**
+ * THE OPERATOR'S SAVE-TIME ASK: "trim spaces and create an empty line at the
+ * bottom." `saveFile` (`FilesTab.tsx`) runs `normalizeForSave`
+ * (`files-save-normalize.ts`, its own unit tests hold the behaviour table) on
+ * `content` before it reaches `write` — this is the integration half: proof
+ * that what actually goes out over the bridge, and what the editor shows
+ * afterwards, is the normalised text, not the operator's raw keystrokes.
+ */
+describe('save-time normalisation', () => {
+  it('trims trailing whitespace and collapses blank lines before writing, and updates the buffer to match', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'kept', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'a  \nb\t\n\n\n' } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith('/work/atlas/notes.txt', 'a\nb\n', SIGNATURE());
+    // The buffer shows the NORMALISED text, not the operator's raw
+    // keystrokes — the dirty dot has to clear against something, and it must
+    // be what actually reached disk, or a reopened file would look dirty
+    // against its own just-saved content.
+    expect(editor.value).toBe('a\nb\n');
+    expect(q('[data-files-dirty]')).toBeNull();
+  });
+
+  it('leaves an already-normalised file’s save untouched — no needless rewrite of a clean buffer', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'a\nb\n', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'a\nb\nc\n' } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith('/work/atlas/notes.txt', 'a\nb\nc\n', SIGNATURE());
+    expect(editor.value).toBe('a\nb\nc\n');
+  });
+});
+
 describe('the line-number gutter', () => {
   const openWith = async (content: string) => {
     withBridge({
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await act(async () => {
       q<HTMLButtonElement>('[data-view="files"]')?.click();
       await Promise.resolve();
@@ -672,7 +798,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -686,7 +812,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -708,7 +834,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -726,7 +852,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -749,7 +875,7 @@ describe('the keyboard model', () => {
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -769,7 +895,9 @@ describe('the keyboard model', () => {
       editor.dispatchEvent(event);
       await Promise.resolve();
     });
-    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2', SIGNATURE());
+    // The save-time normaliser adds the one final newline every save gets
+    // (`files-save-normalize.ts`) — `A=2` had none.
+    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=2\n', SIGNATURE());
   });
 
   /**
@@ -790,7 +918,7 @@ describe('the keyboard model', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -817,17 +945,23 @@ describe('the keyboard model', () => {
     // check used to read `firstStop.hasAttribute('data-files-editor')`, which
     // answered the question only for the ONE element that carried a mark at
     // the time. The tree added a filter box and a "new file" box to this
-    // hidden subtree; marking either of them — conditionally or not — would
-    // put a `display: none` stop first in document order and make `I` fail
-    // silently on every other tab, and the old assertion would have passed,
-    // because the first stop still would not have been the editor.
+    // hidden subtree; marking either of them AS A STOP — conditionally or not
+    // — would put a `display: none` stop first in document order and make `I`
+    // fail silently on every other tab, and the old assertion would have
+    // passed, because the first stop still would not have been the editor.
     const firstStop = q('[data-question-option], [data-insert-stop]');
     expect(firstStop).not.toBeNull();
     expect(firstStop?.closest('[data-files]')).toBeNull();
-    // The two boxes in the tree are not insert surfaces at all, showing or
-    // hidden: a native `input` is already exempt from the chord grammar by
-    // tag name, and the marks are for what the STATUS BAR must call Insert.
-    for (const box of qa('[data-files] input')) {
+    // The two boxes in the tree ARE insert scopes now — that is how `Mod-0`
+    // gets the keyboard back out of them (`FilesTab.tsx`'s header carries the
+    // argument and the measurement) — but they are scopes ONLY, and the scope
+    // comes off with `hidden` exactly as the editor's does. So on a tab that
+    // is not showing, this subtree carries no insert mark of any kind: no
+    // `display: none` region can claim a mode, and no `display: none` stop can
+    // swallow `I`.
+    const boxes = qa('[data-files] input');
+    expect(boxes).toHaveLength(2);
+    for (const box of boxes) {
       expect(box.hasAttribute('data-insert-scope')).toBe(false);
       expect(box.hasAttribute('data-insert-stop')).toBe(false);
     }
@@ -860,7 +994,7 @@ describe('walking the tree from the keyboard', () => {
 
   const openTree = async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
   };
 
@@ -1129,7 +1263,7 @@ describe('walking the tree from the keyboard', () => {
       }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/src')?.click(); // open it
@@ -1155,11 +1289,28 @@ describe('walking the tree from the keyboard', () => {
     expect(row('/work/atlas/src')?.getAttribute('aria-selected')).toBe('false');
   });
 
-  it('the tree is not an insert scope — bare j and k could not mean "walk" if it were', async () => {
+  /**
+   * THE ROWS ARE NOT AN INSERT SCOPE — narrowed from "nothing in this column
+   * is", which stopped being the claim when the two text boxes in the tree's
+   * HEADER became scopes so `Mod-0` could get out of them (`FilesTab.tsx`'s
+   * header). The boxes never had a bearing on this property: what makes bare
+   * `j`/`k` free to mean "walk" is that the thing being walked is a list of
+   * `<button>`s, and the assertion has to be about those.
+   */
+  it('the tree rows are not an insert scope — bare j and k could not mean "walk" if they were', async () => {
     await openTree();
-    expect(q('[data-files-tree] [data-insert-scope]')).toBeNull();
-    expect(q('[data-files-row][data-insert-scope]')).toBeNull();
-    expect(q('[data-files-row][data-insert-stop]')).toBeNull();
+    const rows = qa('[data-files-row]');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const el of rows) {
+      expect(el.hasAttribute('data-insert-scope')).toBe(false);
+      expect(el.hasAttribute('data-insert-stop')).toBe(false);
+      // Nor inside one: a row that merely SAT in a scope would report Insert
+      // just the same, because the mode is `closest`, not `matches`.
+      expect(el.closest('[data-insert-scope]')).toBeNull();
+    }
+    // The scroller and the `role="tree"` wrapper are not scopes either — a
+    // mark on either would cover every row at once.
+    expect(q('[role="tree"]')?.hasAttribute('data-insert-scope')).toBe(false);
   });
 });
 
@@ -1217,7 +1368,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
   /** MUTATION TARGET: drop the tab's own window listener and this reddens. */
   it('reaches the filter box, and claims the key', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(q('[data-files-filter]')).not.toBe(document.activeElement);
 
@@ -1236,7 +1387,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('does nothing at all once another tab is showing', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLButtonElement>('[data-view="response"]')?.click();
@@ -1257,7 +1408,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('does nothing in a pane that does not hold the keyboard', async () => {
     withBridge(TREE);
-    draw({ files: true, paneFocused: false, tabRequest: { tab: 'Files' } });
+    await draw({ files: true, paneFocused: false, tabRequest: { tab: 'Files' } });
     await act(async () => {
       await Promise.resolve();
     });
@@ -1278,7 +1429,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('stands down while a caret outside this tab is answering the keys', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     const elsewhere = document.createElement('input');
@@ -1310,7 +1461,7 @@ describe('Mod-p in select mode — with the keyboard on none of this tab’s own
    */
   it('claims Mod-p and nothing else', async () => {
     withBridge(TREE);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
 
     // NOT `Control+p`: its SPELLING is platform-dependent (`CTRL_GESTURES`),
@@ -1349,7 +1500,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -1371,7 +1522,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
         signature: SIGNATURE(),
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1400,7 +1551,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       q<HTMLElement>('[data-files-row]')?.click();
@@ -1411,10 +1562,7 @@ describe('closing warns — the one exit dirty text cannot survive', () => {
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     expect(dispatchBeforeUnload()).toBe(true);
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
     expect(dispatchBeforeUnload()).toBe(false);
   });
 });
@@ -1455,14 +1603,14 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('says "nothing" on mount — which is what corrects main after a reload', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
   });
 
   it('NAMES the file, and counts it, the moment the buffer is dirty', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1479,7 +1627,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('counts TWO as two and names both — a count fixed at one would be a lie in a modal', async () => {
     const reportUnsaved = withReporter(['/work/atlas/.env', '/work/atlas/README.md']);
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     for (const path of ['/work/atlas/.env', '/work/atlas/README.md']) {
       await act(async () => {
@@ -1496,7 +1644,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('says "nothing" again once the buffer is saved', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1507,10 +1655,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
       fireEvent.change(editor, { target: { value: 'A=2' } });
     });
     expect(lastReport(reportUnsaved)).toEqual({ count: 1, names: ['.env'] });
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    await saveViaChord(editor);
     expect(lastReport(reportUnsaved)).toEqual({ count: 0, names: [] });
   });
 
@@ -1519,7 +1664,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
     // every key typed into the editor. The set is what main needs, so the set
     // is what the effect watches.
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1541,7 +1686,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
 
   it('stops speaking for a tab that has been unmounted', async () => {
     const reportUnsaved = withReporter();
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1564,7 +1709,7 @@ describe('quitting asks — what the Files tab tells main it is holding', () => 
       list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
       read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/.env')?.click();
@@ -1597,7 +1742,7 @@ async function openFile(path: string, content: string): Promise<HTMLTextAreaElem
     list: async () => ({ root: '/work/atlas', files: [path], truncated: false }),
     read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
   });
-  draw({ files: true });
+  await draw({ files: true });
   await openFiles();
   await act(async () => {
     row(path)?.click();
@@ -1848,26 +1993,39 @@ describe('the highlight overlay', () => {
  * THE TOOLBAR'S OWN WORDS.
  *
  * The operator asked for "a tooltip for the Save button and the formatter
- * button". Save had none at all; Format had a `title`, which is the shape
- * `panels/Note.tsx` was written to replace and says why in its own header: a
- * `title` opens on HOVER and on nothing else, so on a keyboard-first tool the
- * explanation was unreadable to the operator it was written for.
+ * button" first, and later for the Save button itself to go, replaced by an
+ * indicator: "no Save button is needed there, just an indicator showing the
+ * file is unsaved". Format had a `title`, which is the shape `panels/Note.tsx`
+ * was written to replace and says why in its own header: a `title` opens on
+ * HOVER and on nothing else, so on a keyboard-first tool the explanation was
+ * unreadable to the operator it was written for. The dirty dot inherits that
+ * same obligation now that it is what a hand reaching for Save's old tooltip
+ * finds instead.
  *
- * So both are `Note`s now, and these hold four things a later edit could
- * quietly undo: that the note exists, that it names the chord (neither key is
- * in the rebindable table -- they are `EDITOR_KEYS`, hardcoded, which is what
- * makes writing them out honest here rather than a lie waiting to happen),
- * that no `title` came back, and that wrapping added no element to a flex row.
+ * So both are `Note`s, and these hold the things a later edit could quietly
+ * undo: that no Save button is drawn at all, that each note exists and names
+ * its chord (neither key is in the rebindable table -- `Mod-s` is `EDITOR_
+ * KEYS`, hardcoded, and `Mod-Shift-f`/`Mod-z` the same, which is what makes
+ * writing them out honest here rather than a lie waiting to happen), that no
+ * `title` came back, and that wrapping added no element to a flex row.
  * ====================================================================== */
 
-describe('the tooltips on the two buttons the operator named', () => {
+describe('the toolbar — no Save button, and the tooltips on what remains', () => {
   const noteOn = (selector: string): string | null =>
     q(selector)?.getAttribute('data-note') ?? null;
 
-  it('gives Save a note a keyboard can read, naming the chord that does the same thing', async () => {
+  it('draws no Save button — saving is Mod-s (or Mod-s from the preview) and the dot alone', async () => {
+    await openFile('/work/atlas/.env', 'A=1\n');
+    expect(q('[data-files-save]')).toBeNull();
+  });
+
+  it('gives the dirty indicator a note a keyboard can read, naming the chord that saves', async () => {
     await onBothPlatformsAsync(async (mac) => {
-      await openFile('/work/atlas/.env', 'A=1\n');
-      const text = noteOn('[data-files-save]');
+      const editor = await openFile('/work/atlas/.env', 'A=1\n');
+      await act(async () => {
+        fireEvent.change(editor, { target: { value: 'A=2' } });
+      });
+      const text = noteOn('[data-files-dirty]');
       expect(text).not.toBeNull();
       expect(text).toContain(chordSymbols('Mod-s', mac));
       expect(text).not.toContain('Mod-s');
@@ -1912,22 +2070,28 @@ describe('the tooltips on the two buttons the operator named', () => {
    * snapshot -- it works perfectly with a mouse -- so the only thing keeping
    * it from coming back is a check that looks for it.
    */
-  it('uses no bare title on either — the shape that was unreadable from the keyboard', async () => {
-    await openFile('/work/atlas/.env', 'A=1\n');
-    expect(q('[data-files-save]')?.getAttribute('title')).toBeNull();
+  it('uses no bare title on Format or the dirty indicator — the shape that was unreadable from the keyboard', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\n');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=2' } });
+    });
+    expect(q('[data-files-dirty]')?.getAttribute('title')).toBeNull();
     expect(q('[data-files-format]')?.getAttribute('title')).toBeNull();
   });
 
   /**
    * `Tooltip.Trigger asChild` ADDS NO ELEMENT -- `ShortcutTip`'s own header
    * states that as an invariant it depends on and does not enforce, and the
-   * header row these buttons sit in is a flex row whose spacing a wrapper
+   * header row these controls sit in is a flex row whose spacing a wrapper
    * would change. So each must still be a DIRECT child of that row.
    */
-  it('wraps neither button in an extra element — the header row is a flex row', async () => {
-    await openFile('/work/atlas/.env', 'A=1\n');
+  it('wraps neither Format nor the dirty indicator in an extra element — the header row is a flex row', async () => {
+    const editor = await openFile('/work/atlas/.env', 'A=1\n');
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=2' } });
+    });
     const children = [...(q('[data-files-header]')?.children ?? [])];
-    expect(children.some((el) => el.hasAttribute('data-files-save'))).toBe(true);
+    expect(children.some((el) => el.hasAttribute('data-files-dirty'))).toBe(true);
     expect(children.some((el) => el.hasAttribute('data-files-format'))).toBe(true);
   });
 });
@@ -1951,11 +2115,24 @@ describe('the tooltips on the two buttons the operator named', () => {
  * leaves for another file and comes back.
  * ====================================================================== */
 
-const pressPreview = async () => {
+/**
+ * TOGGLES THE SEGMENTED CONTROL — presses whichever of the two buttons is
+ * NOT currently selected, which is what every existing caller below means by
+ * "press preview": the single-button toggle this replaced had only one
+ * thing to click. `pressPreviewOption` presses a named side directly, for a
+ * test that wants to press the button already showing (a no-op) or state
+ * which side it means regardless of where the control started.
+ */
+const pressPreviewOption = async (option: 'preview' | 'raw') => {
   await act(async () => {
-    q<HTMLButtonElement>('[data-files-preview]')?.click();
+    q<HTMLButtonElement>(`[data-files-preview-option="${option}"]`)?.click();
     await Promise.resolve();
   });
+};
+
+const pressPreview = async () => {
+  const state = q('[data-files-preview]')?.getAttribute('data-files-preview-state');
+  await pressPreviewOption(state === 'preview' ? 'raw' : 'preview');
 };
 
 const MD = ['# Title', '', 'Some **bold** prose.', '', '- one', '- two', ''].join('\n');
@@ -2123,7 +2300,7 @@ describe('the markdown preview', () => {
     expect(q<HTMLTextAreaElement>('[data-files-editor]')?.value).toBe('# edited, never saved\n');
   });
 
-  it('keeps Save reachable from the preview, and a save from there really lands', async () => {
+  it('keeps Save (Mod-s) reachable from the preview, and a save from there really lands', async () => {
     const write = vi.fn(async () => ({ signature: SIGNATURE({ sha256: 'next' }) }));
     withBridge({
       list: async () => ({
@@ -2134,7 +2311,7 @@ describe('the markdown preview', () => {
       read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
       write,
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2146,11 +2323,14 @@ describe('the markdown preview', () => {
       await Promise.resolve();
     });
     await pressPreview();
-    expect(q('[data-files-save]')).not.toBeNull();
-    await act(async () => {
-      q<HTMLButtonElement>('[data-files-save]')?.click();
-      await Promise.resolve();
-    });
+    // No button to reach for any more — the textarea `Mod-s` used to answer
+    // is genuinely unmounted here (`onPreviewKeyDown`'s own comment on why
+    // that made a button the ONLY way to save from this view before it
+    // answered the chord itself). `[data-files-preview-view]` is the element
+    // that now carries it.
+    const previewView = q<HTMLElement>('[data-files-preview-view]');
+    expect(previewView).not.toBeNull();
+    await saveViaChord(previewView as HTMLElement);
     expect(write).toHaveBeenCalledWith('/work/atlas/README.md', '# b\n', SIGNATURE());
     expect(q('[data-files-dirty]')).toBeNull();
   });
@@ -2168,7 +2348,7 @@ describe('the markdown preview', () => {
         signature: SIGNATURE(),
       }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();
@@ -2201,12 +2381,204 @@ describe('the markdown preview', () => {
       cleanup();
     });
     await openFile('/work/atlas/README.md', MD);
-    const toggle = () => q('[data-files-preview]');
-    expect(toggle()?.getAttribute('data-files-preview-state')).toBe('raw');
-    expect(toggle()?.getAttribute('aria-pressed')).toBe('false');
+    const group = () => q('[data-files-preview]');
+    const previewButton = () => q('[data-files-preview-option="preview"]');
+    const rawButton = () => q('[data-files-preview-option="raw"]');
+    expect(group()?.getAttribute('data-files-preview-state')).toBe('raw');
+    expect(previewButton()?.getAttribute('aria-pressed')).toBe('false');
+    expect(rawButton()?.getAttribute('aria-pressed')).toBe('true');
     await pressPreview();
-    expect(toggle()?.getAttribute('data-files-preview-state')).toBe('preview');
-    expect(toggle()?.getAttribute('aria-pressed')).toBe('true');
+    expect(group()?.getAttribute('data-files-preview-state')).toBe('preview');
+    expect(previewButton()?.getAttribute('aria-pressed')).toBe('true');
+    expect(rawButton()?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('shows both labels of the segmented control, in words, not only as icons', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    expect(q('[data-files-preview-option="preview"]')?.textContent).toContain('Preview');
+    expect(q('[data-files-preview-option="raw"]')?.textContent).toContain('Raw');
+  });
+});
+
+/* =========================================================================
+ * THE DEFAULT — the operator's actual complaint. Translated: ".md files
+ * need to be previewed GitHub-style, and there must be a button to switch
+ * between preview mode and raw mode." The button already existed; nobody
+ * found it, because it opened onto raw text every time. This is the one
+ * behaviour that changed, and it is pinned here rather than left to the
+ * `beforeEach` above, which exists PRECISELY so every other test in this
+ * file can stay ignorant of it.
+ * ====================================================================== */
+describe('the default view for a freshly opened .md file', () => {
+  /** `openFile`'s own body, minus the assertion that an editor exists — the
+   *  one thing that assertion cannot survive when preview really is the
+   *  default. Returns nothing; every test below reads the DOM itself. */
+  async function openReadme(content: string) {
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content, isBinary: false, signature: SIGNATURE() }),
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+  }
+
+  it('is preview, with the device default left untouched', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    await openReadme(MD);
+    expect(q('[data-files-preview-view]')).not.toBeNull();
+    expect(q('[data-files-editor]')).toBeNull();
+    expect(q('[data-files-preview]')?.getAttribute('data-files-preview-state')).toBe('preview');
+    expect(q('[data-files-preview-option="preview"]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('is raw when the operator’s own last choice on this device was raw', async () => {
+    setActiveFilesMarkdownView('raw');
+    await openReadme(MD);
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+    expect(q('[data-files-preview]')?.getAttribute('data-files-preview-state')).toBe('raw');
+  });
+
+  it('is one click away either way — raw remains reachable from the new default', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    await openReadme(MD);
+    await pressPreviewOption('raw');
+    expect(q('[data-files-editor]')).not.toBeNull();
+    expect(q('[data-files-preview-view]')).toBeNull();
+  });
+});
+
+/* =========================================================================
+ * PERSISTENCE — the operator's last choice, per device, survives past this
+ * one mount. `FilesTab` itself never touches `localStorage`; it calls
+ * `onFilesMarkdownView`, the same way `onFilesTreeWidth` already does for
+ * the tree's width, and `Canvas.tsx` is the one place that ever writes it
+ * for real (`prefs.ts`'s `setFilesMarkdownView`, covered on its own in
+ * `test/prefs/prefs.files-markdown-view.test.ts`). What belongs here is only
+ * the CALLBACK CONTRACT: which value it is handed, and when.
+ * ====================================================================== */
+describe('persisting the choice — the callback out to `Canvas.tsx`', () => {
+  it('calls back with the mode just entered, on the button and on the chord alike', async () => {
+    const onFilesMarkdownView = vi.fn();
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    await draw({ files: true, onFilesMarkdownView });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    // The ambient default in this file is raw (this file's own `beforeEach`),
+    // so the mode actually CHANGES on the way to preview, and changes back on
+    // the way to raw — each press below is a real flip, not the side already
+    // selected.
+    onFilesMarkdownView.mockClear();
+    await pressPreviewOption('preview');
+    expect(onFilesMarkdownView).toHaveBeenCalledWith('preview');
+    await pressPreviewOption('raw');
+    expect(onFilesMarkdownView).toHaveBeenCalledWith('raw');
+  });
+
+  it('is never called by pressing the side already selected', async () => {
+    const onFilesMarkdownView = vi.fn();
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    await draw({ files: true, onFilesMarkdownView });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    // The default is raw in this file (the module-wide `beforeEach` above);
+    // pressing "raw" again presses the side already showing.
+    onFilesMarkdownView.mockClear();
+    await pressPreviewOption('raw');
+    expect(onFilesMarkdownView).not.toHaveBeenCalled();
+  });
+
+  it('withdraws quietly with no callback wired — the tab still toggles on its own state', async () => {
+    await openFile('/work/atlas/README.md', MD);
+    await expect(pressPreview()).resolves.toBeUndefined();
+    expect(q('[data-files-preview-view]')).not.toBeNull();
+  });
+});
+
+/* =========================================================================
+ * THE GITHUB SCOPE — one marker, on the Files preview's own wrapper, that
+ * `OUT_MARKDOWN`'s tree never carries. `test/panels/files-markdown.test.tsx`
+ * holds the component map itself; this is the one integration point that
+ * proves `FilesTab.tsx` really reaches for `FILES_MARKDOWN` rather than
+ * `OUT_MARKDOWN` at the one call site that matters.
+ * ====================================================================== */
+describe('the Files preview carries its own GitHub-scoped wrapper', () => {
+  it('marks the rendered document, and nothing about the raw editor', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    const view = q('[data-files-preview-view]');
+    expect(view?.querySelector('[data-files-markdown-github]')).not.toBeNull();
+    await pressPreviewOption('raw');
+    expect(q('[data-files-markdown-github]')).toBeNull();
+  });
+
+  /**
+   * Operator report, translated: "the font size in preview mode is small —
+   * use the same font size as the Response view." The wrapper is the ROOT
+   * every size in `files-markdown.tsx`'s ladder is `em`-relative to (see
+   * that file's own `HEADING_SIZE` comment), and it has to be the SAME
+   * property the transcript's own `[data-detail-scroll="out"]` sets
+   * (`--vam-out-font-size`) rather than a second, unrelated number, or the
+   * two surfaces would only agree by coincidence at one setting.
+   */
+  it('pins its root to the same font-size property the transcript’s own out pane sets', async () => {
+    setActiveFilesMarkdownView(DEFAULT_FILES_MARKDOWN_VIEW);
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/README.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: MD, isBinary: false, signature: SIGNATURE() }),
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      row('/work/atlas/README.md')?.click();
+      await Promise.resolve();
+    });
+    expect(q('[data-files-markdown-github]')?.className).toContain('--vam-out-font-size');
   });
 });
 
@@ -2308,7 +2680,7 @@ describe('the preview’s keyboard — a control reachable only by mouse is not 
       }),
       read: async () => ({ content: '# a\n', isBinary: false, signature: SIGNATURE() }),
     });
-    draw({ files: true });
+    await draw({ files: true });
     await openFiles();
     await act(async () => {
       row('/work/atlas/README.md')?.click();

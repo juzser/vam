@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applePlatform,
   bindingChords,
+  chordSegments,
   chordSymbols,
   effectiveBindings,
   NO_BINDINGS,
@@ -33,15 +34,15 @@ import { MAC_PLATFORM as MAC, PC_PLATFORM as PC, withPlatform } from '../support
 
 describe('the modifiers become the platform’s own symbols', () => {
   it('spells `Mod` ⌘ on a Mac and Ctrl everywhere else — the whole ask, in one case', () => {
-    expect(chordSymbols('Mod-p', true)).toBe('⌘P');
+    expect(chordSymbols('Mod-p', true)).toBe('⌘ P');
     expect(chordSymbols('Mod-p', false)).toBe('Ctrl+P');
   });
 
   it('gives every modifier a glyph on a Mac and a word off it', () => {
-    expect(chordSymbols('Mod-k', true)).toBe('⌘K');
-    expect(chordSymbols('Shift-1', true)).toBe('⇧1');
-    expect(chordSymbols('Alt-1', true)).toBe('⌥1');
-    expect(chordSymbols('Ctrl-1', true)).toBe('⌃1');
+    expect(chordSymbols('Mod-k', true)).toBe('⌘ K');
+    expect(chordSymbols('Shift-1', true)).toBe('⇧ 1');
+    expect(chordSymbols('Alt-1', true)).toBe('⌥ 1');
+    expect(chordSymbols('Ctrl-1', true)).toBe('⌃ 1');
     expect(chordSymbols('Mod-k', false)).toBe('Ctrl+K');
     expect(chordSymbols('Shift-1', false)).toBe('Shift+1');
     expect(chordSymbols('Alt-1', false)).toBe('Alt+1');
@@ -49,7 +50,7 @@ describe('the modifiers become the platform’s own symbols', () => {
   });
 
   it('joins Apple’s way with nothing and everyone else’s with `+`', () => {
-    expect(chordSymbols('Mod-Shift-e', true)).toBe('⇧⌘E');
+    expect(chordSymbols('Mod-Shift-e', true)).toBe('⇧ ⌘ E');
     expect(chordSymbols('Mod-Shift-e', false)).toBe('Ctrl+Shift+E');
   });
 
@@ -60,11 +61,11 @@ describe('the modifiers become the platform’s own symbols', () => {
    * `Mod-Ctrl-Alt-Shift-` because that is the order `normalizeKey` builds it
    * in, and the two have no reason to agree.
    */
-  it('prints a Mac’s modifiers in ⌃⌥⇧⌘ order, whatever order the token holds', () => {
-    expect(chordSymbols('Mod-Ctrl-Alt-Shift-k', true)).toBe('⌃⌥⇧⌘K');
-    expect(chordSymbols('Ctrl-Alt-1', true)).toBe('⌃⌥1');
-    expect(chordSymbols('Mod-Alt-[', true)).toBe('⌥⌘[');
-    expect(chordSymbols('Mod-Shift-[', true)).toBe('⇧⌘[');
+  it('prints a Mac’s modifiers in ⌃ ⌥ ⇧ ⌘ order, whatever order the token holds', () => {
+    expect(chordSymbols('Mod-Ctrl-Alt-Shift-k', true)).toBe('⌃ ⌥ ⇧ ⌘ K');
+    expect(chordSymbols('Ctrl-Alt-1', true)).toBe('⌃ ⌥ 1');
+    expect(chordSymbols('Mod-Alt-[', true)).toBe('⌥ ⌘ [');
+    expect(chordSymbols('Mod-Shift-[', true)).toBe('⇧ ⌘ [');
   });
 
   it('keeps Ctrl first off a Mac, the way that platform writes it', () => {
@@ -81,7 +82,7 @@ describe('the modifiers become the platform’s own symbols', () => {
    */
   it('says Ctrl once off a Mac when the token names both command and control', () => {
     expect(chordSymbols('Mod-Ctrl-k', false)).toBe('Ctrl+K');
-    expect(chordSymbols('Mod-Ctrl-k', true)).toBe('⌃⌘K');
+    expect(chordSymbols('Mod-Ctrl-k', true)).toBe('⌃ ⌘ K');
   });
 });
 
@@ -93,14 +94,14 @@ describe('the modifiers become the platform’s own symbols', () => {
  */
 describe('Ctrl is not Mod, and a Mac must never be told it is', () => {
   it('renders a Control chord with ⌃ on a Mac, never ⌘', () => {
-    expect(chordSymbols('Ctrl-d', true)).toBe('⌃D');
-    expect(chordSymbols('Ctrl-u', true)).toBe('⌃U');
+    expect(chordSymbols('Ctrl-d', true)).toBe('⌃ D');
+    expect(chordSymbols('Ctrl-u', true)).toBe('⌃ U');
     expect(chordSymbols('Ctrl-d', true)).not.toContain('⌘');
   });
 
   it('keeps the two apart on a Mac, chord for chord', () => {
-    expect(chordSymbols('Mod-d', true)).toBe('⌘D');
-    expect(chordSymbols('Ctrl-d', true)).toBe('⌃D');
+    expect(chordSymbols('Mod-d', true)).toBe('⌘ D');
+    expect(chordSymbols('Ctrl-d', true)).toBe('⌃ D');
     expect(chordSymbols('Mod-d', true)).not.toBe(chordSymbols('Ctrl-d', true));
   });
 });
@@ -118,8 +119,8 @@ describe('the key itself', () => {
     expect(chordSymbols('ArrowRight', true)).toBe('→');
     expect(chordSymbols('PageUp', true)).toBe('⇞');
     expect(chordSymbols('PageDown', true)).toBe('⇟');
-    expect(chordSymbols('Shift-Tab', true)).toBe('⇧⇥');
-    expect(chordSymbols('Shift-Enter', true)).toBe('⇧⏎');
+    expect(chordSymbols('Shift-Tab', true)).toBe('⇧ ⇥');
+    expect(chordSymbols('Shift-Enter', true)).toBe('⇧ ⏎');
   });
 
   it('spells them in words off a Mac', () => {
@@ -131,7 +132,7 @@ describe('the key itself', () => {
     expect(chordSymbols('PageDown', false)).toBe('PgDn');
     expect(chordSymbols('Shift-Tab', false)).toBe('Shift+Tab');
     expect(chordSymbols('Mod-Alt-ArrowRight', false)).toBe('Ctrl+Alt+Right');
-    expect(chordSymbols('Mod-Alt-ArrowRight', true)).toBe('⌥⌘→');
+    expect(chordSymbols('Mod-Alt-ArrowRight', true)).toBe('⌥ ⌘ →');
   });
 
   /**
@@ -157,18 +158,18 @@ describe('the key itself', () => {
   });
 
   it('upper cases a letter only once a modifier is holding it', () => {
-    expect(chordSymbols('Mod-w', true)).toBe('⌘W');
+    expect(chordSymbols('Mod-w', true)).toBe('⌘ W');
     expect(chordSymbols('Mod-w', false)).toBe('Ctrl+W');
-    expect(chordSymbols('Mod-Shift-h', true)).toBe('⇧⌘H');
+    expect(chordSymbols('Mod-Shift-h', true)).toBe('⇧ ⌘ H');
   });
 
   it('survives the shapes a capture can produce', () => {
     // A hyphen is a key. Stripping tokens by splitting on `-` would leave
     // nothing at all here.
-    expect(chordSymbols('Mod--', true)).toBe('⌘-');
+    expect(chordSymbols('Mod--', true)).toBe('⌘ -');
     expect(chordSymbols('-', true)).toBe('-');
     expect(chordSymbols('', true)).toBe('');
-    expect(chordSymbols('Mod- ', true)).toBe('⌘␣');
+    expect(chordSymbols('Mod- ', true)).toBe('⌘ ␣');
     expect(chordSymbols('Mod- ', false)).toBe('Ctrl+Space');
     // A modifier token with no key behind it is not a chord; it is left alone
     // rather than rendered as a naked glyph.
@@ -208,8 +209,76 @@ describe('every chord the shipped tables hold, rendered', () => {
   });
 
   it('never leaves a ⌘ on a chord that is not the command modifier', () => {
-    expect(chordSymbols('Ctrl-Alt-3', true)).toBe('⌃⌥3');
+    expect(chordSymbols('Ctrl-Alt-3', true)).toBe('⌃ ⌥ 3');
     expect(chordSymbols('Ctrl-Alt-3', true)).not.toContain('⌘');
+  });
+});
+
+/**
+ * `chordSegments` IS `chordSymbols`' OWN COMPUTATION, one step short of the
+ * join -- the shape a caller that draws modifiers larger than the key needs
+ * (`ShortcutTip.tsx`'s `InlineChord`/`Chip`, `KeySheet.tsx`, the status
+ * bar's own hint). Falsified by mutating `chordSymbols` back to computing its
+ * own modifier set independently: this suite would still pass while the two
+ * silently disagreed about which segment is which.
+ */
+describe('chordSegments: the same computation, tagged, before the join', () => {
+  it('tags every held modifier and only the trailing key', () => {
+    expect(chordSegments('Mod-Shift-e', true)).toEqual([
+      { text: '⇧', modifier: true, glyph: true },
+      { text: '⌘', modifier: true, glyph: true },
+      { text: 'E', modifier: false, glyph: false },
+    ]);
+    expect(chordSegments('Mod-p', false)).toEqual([
+      { text: 'Ctrl', modifier: true, glyph: false },
+      { text: 'P', modifier: false, glyph: false },
+    ]);
+  });
+
+  /**
+   * `glyph` IS THE SEND KEY OPTION'S OWN DISTINCTION, MADE READABLE: a
+   * modifier on a Mac is always a symbol (⇧⌘⌥⌃), and so is a named key this
+   * table draws as one (⏎ ⎋ ⇥ ⌫ an arrow, …) — `ChordGlyphs` reaches for the
+   * body sans stack on exactly those, the same face the Send key option has
+   * always painted its own ⇧/⏎ in. A bare letter or digit is not a symbol —
+   * `G` is a letter a vim user reads as a letter — and neither is a modifier
+   * off a Mac, which is already a word (`Ctrl`, `Shift`). Both keep the
+   * chip's own font, untouched.
+   */
+  it('tags a named Mac glyph — not only a modifier — and no plain letter or digit', () => {
+    expect(chordSegments('Enter', true)).toEqual([{ text: '⏎', modifier: false, glyph: true }]);
+    expect(chordSegments('Escape', true)).toEqual([{ text: '⎋', modifier: false, glyph: true }]);
+    expect(chordSegments('ArrowUp', true)).toEqual([{ text: '↑', modifier: false, glyph: true }]);
+    expect(chordSegments('Mod-1', true)).toEqual([
+      { text: '⌘', modifier: true, glyph: true },
+      { text: '1', modifier: false, glyph: false },
+    ]);
+    // Off a Mac the same named keys fall back to WORDS, which is the family
+    // the operator's ask never touched — untouched here too.
+    expect(chordSegments('Enter', false)).toEqual([
+      { text: 'Enter', modifier: false, glyph: false },
+    ]);
+    expect(chordSegments('Escape', false)).toEqual([
+      { text: 'Esc', modifier: false, glyph: false },
+    ]);
+  });
+
+  it('is exactly what chordSymbols joins — the two can never drift apart', () => {
+    for (const [chord, mac] of [
+      ['Mod-Ctrl-Alt-Shift-k', true],
+      ['Ctrl-Alt-1', false],
+      ['j', true],
+      ['Mod-', true],
+    ] as const) {
+      const joined = chordSegments(chord, mac)
+        .map((segment) => segment.text)
+        .join(mac ? ' ' : '+');
+      expect(joined).toBe(chordSymbols(chord, mac));
+    }
+  });
+
+  it('holds a bare key with no modifier at all', () => {
+    expect(chordSegments('G', true)).toEqual([{ text: 'G', modifier: false, glyph: false }]);
   });
 });
 
@@ -220,12 +289,12 @@ describe('applePlatform: the runtime answer, asked of the real navigator', () =>
   });
 
   it('is what a chord defaults to, so a surface needs no platform of its own', () => {
-    expect(withPlatform(MAC, () => chordSymbols('Mod-p'))).toBe('⌘P');
+    expect(withPlatform(MAC, () => chordSymbols('Mod-p'))).toBe('⌘ P');
     expect(withPlatform(PC, () => chordSymbols('Mod-p'))).toBe('Ctrl+P');
   });
 
   it('answers for an iPhone too — the web build is served to one', () => {
-    expect(withPlatform('iPhone', () => chordSymbols('Mod-p'))).toBe('⌘P');
+    expect(withPlatform('iPhone', () => chordSymbols('Mod-p'))).toBe('⌘ P');
     expect(withPlatform('Linux x86_64', () => chordSymbols('Mod-p'))).toBe('Ctrl+P');
   });
 });
@@ -243,6 +312,6 @@ describe('the grammar is untouched', () => {
 
   it('still stores and looks bindings up by their token spelling', () => {
     expect(bindingChords(NO_BINDINGS, 'palette')).toContain('Mod-k');
-    expect(bindingChords(NO_BINDINGS, 'palette')).not.toContain('⌘K');
+    expect(bindingChords(NO_BINDINGS, 'palette')).not.toContain('⌘ K');
   });
 });

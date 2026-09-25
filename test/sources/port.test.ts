@@ -21,6 +21,7 @@ const NO_CAPABILITIES: SourceCapabilities = {
   pullRequests: false,
   terminal: false,
   agentRoster: false,
+  resumeSession: false,
 };
 
 const ALL_CAPABILITIES: SourceCapabilities = {
@@ -36,6 +37,7 @@ const ALL_CAPABILITIES: SourceCapabilities = {
   pullRequests: true,
   terminal: true,
   agentRoster: true,
+  resumeSession: true,
 };
 
 function makeSource(
@@ -56,11 +58,42 @@ function makeSource(
 }
 
 describe('SourceCapabilities', () => {
-  it('carries exactly twelve boolean members', () => {
-    expect(Object.keys(NO_CAPABILITIES)).toHaveLength(12);
+  /**
+   * THIRTEEN NOW, AND THE THIRTEENTH IS THE FIRST ONE ADDED.
+   *
+   * The count is here so the list cannot grow behind somebody's back, and it
+   * did its job: adding `resumeSession` reddened this line and 44 fixture
+   * tables besides. That is the cost being paid deliberately rather than
+   * skipped, so the number is updated with the reason attached.
+   *
+   * WHY IT EARNED ONE. `port.ts`'s rule is "gate every affordance the canvas
+   * already draws, never a new one", and reopening is a new one — so the
+   * default answer would be an `unavailable` arm in a return type, the way
+   * `readHistory` and `readAgentWork` carry theirs. That works for a READ,
+   * whose answer arrives in the same breath as the question. A write has to
+   * be gated BEFORE the control is drawn: a Reopen item that looked pressable
+   * and failed when pressed is the dead button this app keeps apologising for.
+   *
+   * AND WHY NOT FOLDED INTO `createSession`. Codex is the case that separates
+   * them, and it separates them in the surprising direction: it CANNOT start
+   * a thread and CAN return to one. One boolean for both would have withdrawn
+   * reopening from the source that prompted the feature.
+   */
+  it('carries exactly thirteen boolean members', () => {
+    expect(Object.keys(NO_CAPABILITIES)).toHaveLength(13);
     for (const value of Object.values(NO_CAPABILITIES)) {
       expect(typeof value).toBe('boolean');
     }
+  });
+
+  /**
+   * The two that a reader will assume are one. Asserted because the assumption
+   * is reasonable and wrong, and because the day somebody folds them the
+   * Codex source silently loses its only lifecycle action.
+   */
+  it('keeps starting a session and returning to one apart', () => {
+    expect(Object.keys(NO_CAPABILITIES)).toContain('createSession');
+    expect(Object.keys(NO_CAPABILITIES)).toContain('resumeSession');
   });
 });
 

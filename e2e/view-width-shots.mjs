@@ -52,9 +52,15 @@
  *      full-pane and narrowed at 1600px; the body must land on two thirds of
  *      the pane, and the characters on a line — measured off the prose the
  *      page really drew — must fall by the same two thirds.
- *   2. ONE COLUMN. PRs and Agents, the composer and the question card must all
- *      land on the identical rectangle, on the operator's own instruction after
- *      the first screenshots. Compared to each other rather than to a number.
+ *   2. ONE COLUMN. PRs, the composer and the question card must all land on
+ *      the identical rectangle, on the operator's own instruction after the
+ *      first screenshots. Compared to each other rather than to a number.
+ *      AGENTS IS THE EXCEPTION, on a later instruction from a later
+ *      screenshot: "the Agents view in narrow mode also needs full width." It
+ *      is a two-pane navigator, and it gets the Terminal's answer: with the
+ *      flag on, its content box spans the pane less the pane's own padding,
+ *      the question card under it spans the same, and the Response view in
+ *      the same page state still gets the column.
  *   3. THE STEP, AND WHAT IT FOLLOWS. The window is bisected to the narrowest
  *      pane at which the narrowed body is not the whole pane: one pixel of
  *      window below it the body must BE the whole pane, at it the body must be
@@ -141,7 +147,10 @@
  *     instead of trusting one.
  *   - take the cap off the composer -> `narrowed, the composer bar is the same
  *     column the transcript is` reddens.
- *   - drop `Agents` from `narrowsAsProse` -> the agents rectangle check reddens.
+ *   - put `Agents` back into `narrowsAsProse` -> `narrowed, the agents
+ *     navigator spans the pane less the pane's own padding` reddens
+ *     (861.98px against a 1335px pane less 28px of padding) and `and the
+ *     question card under it spans it too` (889.98px under a 1335px pane).
  *   - delete the `[data-reading-pane]` block, drop `--text-control` from it,
  *     or take the attribute off the pane -> `at out 15 the option label is
  *     scaled by its own share` reddens.
@@ -426,7 +435,7 @@ await narrowPage.screenshot({ path: `${outDir}/view-width-narrow.png` });
 console.log(`${outDir}/view-width-narrow.png`);
 
 const perView = { Response: narrow.boxWidth };
-for (const view of ['prs', 'agents']) {
+for (const view of ['prs']) {
   await openView(narrowPage, view);
   const seen = await narrowPage.evaluate(
     () => document.querySelector('[data-detail-body]').getBoundingClientRect().width,
@@ -438,6 +447,56 @@ for (const view of ['prs', 'agents']) {
     `${seen}px against the response view's ${narrow.boxWidth}px`,
   );
 }
+// AGENTS, THE EXCEPTION. Measured before the fix, in this very page state:
+// `[data-agents]` at x 502..1363 (862px) in a pane at 264..1600, the roster
+// and the picked agent's In/Out confined to the prose column with a dead
+// gutter either side. The claim is about the NAVIGATOR's content box, not the
+// body's `max-width`: the body could be uncapped and the navigator still
+// narrowed by a cap of its own, and a class-name reading would not know.
+await openView(narrowPage, 'agents');
+const agents = await narrowPage.evaluate(() => {
+  const body = document.querySelector('[data-detail-body]');
+  const pane = body.parentElement;
+  const px = (value) => Number.parseFloat(value) || 0;
+  const style = getComputedStyle(body);
+  const nav = document.querySelector('[data-agents]');
+  const box = (el) => (el === null ? null : el.getBoundingClientRect());
+  return {
+    paneWidth: pane.clientWidth,
+    paneLeft: pane.getBoundingClientRect().left,
+    paneRight: pane.getBoundingClientRect().right,
+    padding: px(style.paddingLeft) + px(style.paddingRight),
+    nav: nav === null ? null : { left: box(nav).left, right: box(nav).right, width: box(nav).width },
+    question: box(document.querySelector('[data-question-bar]'))?.width ?? null,
+  };
+});
+perView.agents = agents.nav?.width ?? null;
+console.log('agents narrowed:', JSON.stringify(agents));
+check('the agents view drew its navigator at all, so the next check is not vacuous', agents.nav !== null);
+check(
+  'narrowed, the agents navigator spans the pane less the pane’s own padding',
+  agents.nav !== null && near(agents.nav.width, agents.paneWidth - agents.padding, 1),
+  `${agents.nav?.width}px against a ${agents.paneWidth}px pane less ${agents.padding}px of padding`,
+);
+check(
+  'and the question card under it spans it too — one rectangle, not a column on a full pane',
+  agents.question !== null && near(agents.question, agents.paneWidth, 1),
+  `${agents.question}px under a ${agents.paneWidth}px pane`,
+);
+// AND THE RESPONSE VIEW, IN THE SAME PAGE STATE, STILL GETS THE COLUMN — the
+// opt-out is one name's, not the flag's. Measured back, not remembered from
+// above: a regression that uncapped everything would leave `narrow.boxWidth`
+// as it was and only this re-reading would notice.
+await openView(narrowPage, 'response');
+const responseAgain = await narrowPage.evaluate(
+  () => document.querySelector('[data-detail-body]').getBoundingClientRect().width,
+);
+check(
+  'while the response view, in the same state, is still the column',
+  near(responseAgain, narrow.paneWidth * FRACTION, 1) && responseAgain < agents.paneWidth - 100,
+  `${responseAgain}px in a ${agents.paneWidth}px pane`,
+);
+await openView(narrowPage, 'agents');
 console.log('narrowed body width per view:', JSON.stringify(perView));
 await narrowPage.screenshot({ path: `${outDir}/view-width-narrow-agents.png` });
 console.log(`${outDir}/view-width-narrow-agents.png`);
@@ -740,6 +799,7 @@ await term.addInitScript(
           pullRequests: false,
           terminal: true,
           agentRoster: false,
+          resumeSession: false,
         },
         declines: {},
         viewerScope: 'operator',
@@ -799,11 +859,26 @@ await term.addInitScript(
 );
 
 async function openTerminal(size, narrowed) {
+  // `streamingTerminal: false` -- STREAMING DEFAULTS ON NOW
+  // (`prefs/streaming-terminal.ts`), and this measures the CLASSIC
+  // `[data-terminal-pane]` renderer's own width/column arithmetic
+  // specifically ("the operator's width choice does not land here" is about
+  // THIS renderer, per `TerminalTab.tsx`'s own header -- the streaming
+  // renderer's sizing is `FitAddon`'s, a different mechanism).
+  // `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+  // own one-time migration ratchet, which treats an UN-migrated payload's
+  // `streamingTerminal` as unwritten and forces it back to the new default
+  // regardless of what this sets.
   await term.addInitScript(
     ([px, value]) => {
       globalThis.localStorage.setItem(
         'vam.prefs.v1',
-        JSON.stringify({ terminalFontSize: px, narrowViews: value }),
+        JSON.stringify({
+          terminalFontSize: px,
+          narrowViews: value,
+          streamingTerminal: false,
+          streamingTerminalMigrated: true,
+        }),
       );
     },
     [size, narrowed],
@@ -982,11 +1057,15 @@ const readType = (target) =>
       // the loop below reads it off a second session, and the first read
       // carries `null` here on purpose.
       composer: size('[data-composer-bar] textarea'),
-      // Outside the pane: the sidebar's session title is `text-body` too
-      // (`data-row-title` in `SessionList.tsx`), and it must NOT follow a
-      // setting that is about the pane. Read off the title itself -- the row
-      // around it inherits a size no scale step sets, and read there this
-      // check stayed green with the scope keyed to `body`.
+      // Outside the pane: the sidebar's session title (`data-row-title` in
+      // `SessionList.tsx`) is `text-control` -- one step below `text-body`,
+      // since the operator asked for the session name a pixel smaller and
+      // regular ("make the project and group titles bold and 1px smaller;
+      // the session name regular weight and also 1px smaller") -- and it
+      // must NOT follow a setting that is about the pane either way. Read
+      // off the title itself -- the row around it inherits a size no scale
+      // step sets, and read there this check stayed green with the scope
+      // keyed to `control`.
       sidebar: size('[data-session-row] [data-row-title]'),
     };
   });
@@ -1047,8 +1126,8 @@ for (const size of [15, 20]) {
   );
   check(
     `and the sidebar outside the pane does not move at out ${size}`,
-    near(t.sidebar, SCALE.body, 0.05),
-    `sidebar title ${t.sidebar}px against the shipped ${SCALE.body}px`,
+    near(t.sidebar, SCALE.control, 0.05),
+    `sidebar title ${t.sidebar}px against the shipped ${SCALE.control}px`,
   );
 }
 check(
@@ -1245,6 +1324,7 @@ await termSplit.addInitScript(
           pullRequests: false,
           terminal: true,
           agentRoster: false,
+          resumeSession: false,
         },
         declines: {},
         viewerScope: 'operator',
@@ -1300,8 +1380,23 @@ await termSplit.addInitScript(
   },
   { session: STUB_SESSION, branch: STUB_BRANCH },
 );
+// `streamingTerminal: false` -- STREAMING DEFAULTS ON NOW
+// (`prefs/streaming-terminal.ts`), and this measures the CLASSIC
+// `[data-terminal-pane]` renderer specifically; the stub `window.api` above
+// carries no `terminalStream` member at all. `streamingTerminalMigrated:
+// true` too -- omitting it hits `prefs.ts`'s own one-time migration
+// ratchet, which forces `streamingTerminal` back to the new default
+// regardless of what this sets.
 await termSplit.addInitScript(() => {
-  globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ terminalFontSize: 12.5, narrowViews: true }));
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({
+      terminalFontSize: 12.5,
+      narrowViews: true,
+      streamingTerminal: false,
+      streamingTerminalMigrated: true,
+    }),
+  );
 });
 await termSplit.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
 await termSplit.waitForSelector('[data-tab-strip]');
