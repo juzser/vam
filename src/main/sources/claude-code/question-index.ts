@@ -74,7 +74,7 @@
  */
 
 import type { AgentQuestion } from '../../../renderer/domain/model.js';
-import { contentParts, questionsFromToolUse } from './questions.js';
+import { contentParts, nextEffectiveId, questionsFromToolUse } from './questions.js';
 import { parseTranscriptLines } from './transcript.js';
 import type { TranscriptSource, TranscriptWindow } from './window.js';
 
@@ -89,7 +89,16 @@ export const QUESTION_SCAN_CAP_BYTES = 4 * 1024 * 1024;
 
 /** The newest `AskUserQuestion` a transcript's tail has not answered yet. */
 export type OpenQuestion = {
+  /** The call's own raw id, as the transcript wrote it -- what a `tool_result` names. */
   readonly toolUseId: string;
+  /**
+   * `toolUseId` run through `nextEffectiveId` -- identical to it unless
+   * `toolUseId` is this transcript's 2nd or later occurrence of a repeated
+   * id. `mergeOpenQuestion` keys its dedup check off THIS, never off
+   * `toolUseId` raw, so a reused id's still-open occurrence is never mistaken
+   * for one the tail window already covered under the same raw prefix.
+   */
+  readonly effectiveId: string;
   /** The absolute byte offset of the `tool_use` line that asked it. */
   readonly offset: number;
   /** Every question of that one call, oldest first, each still unanswered. */
@@ -101,6 +110,14 @@ type IndexState = {
   readonly consumedThrough: number;
   readonly mtimeMs: number;
   readonly open: OpenQuestion | null;
+  /**
+   * How many times each raw `tool_use` id has been seen so far, so a repeat
+   * arriving in a LATER poll's delta is still told apart from its earlier
+   * occurrence -- see `nextEffectiveId` (`questions.ts`). Absent for a normal
+   * transcript's ids, which never repeat, so this stays empty in the
+   * overwhelmingly common case.
+   */
+  readonly occurrences: ReadonlyMap<string, number>;
 };
 
 /**
@@ -134,17 +151,25 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
  */
 function foldQuestionWindow(
   initialOpen: OpenQuestion | null,
+  initialOccurrences: ReadonlyMap<string, number>,
   window: TranscriptWindow,
-): { open: OpenQuestion | null; consumedThrough: number } {
-  if (window.text === '') return { open: initialOpen, consumedThrough: window.start };
+): {
+  open: OpenQuestion | null;
+  occurrences: ReadonlyMap<string, number>;
+  consumedThrough: number;
+} {
+  if (window.text === '')
+    return { open: initialOpen, occurrences: initialOccurrences, consumedThrough: window.start };
 
   const lastNewline = window.text.lastIndexOf('\n');
-  if (lastNewline === -1) return { open: initialOpen, consumedThrough: window.start };
+  if (lastNewline === -1)
+    return { open: initialOpen, occurrences: initialOccurrences, consumedThrough: window.start };
 
   const complete = window.text.slice(0, lastNewline + 1);
   const consumedThrough = window.start + Buffer.byteLength(complete, 'utf8');
 
   let open = initialOpen;
+  const occurrences = new Map(initialOccurrences);
   for (const { line, start } of parseTranscriptLines(complete, window.start)) {
     for (const part of contentParts(line)) {
       if (part['type'] === 'tool_result') {
@@ -153,17 +178,20 @@ function foldQuestionWindow(
       } else if (part['type'] === 'tool_use' && part['name'] === 'AskUserQuestion') {
         const id = str(part['id']);
         if (id === null) continue;
-        const questions = questionsFromToolUse(part, id);
+        const occurrence = (occurrences.get(id) ?? 0) + 1;
+        occurrences.set(id, occurrence);
+        const effectiveId = nextEffectiveId(id, occurrence);
+        const questions = questionsFromToolUse(part, effectiveId);
         // A tool_use with nothing readable in it is the same as one vam never
         // saw -- readQuestion already drops what it cannot vouch for
         // (questions.ts), and an entry with zero questions would open a
         // record `mergeOpenQuestion` could not draw anything from.
         if (questions.length > 0)
-          open = { toolUseId: id, offset: start ?? window.start, questions };
+          open = { toolUseId: id, effectiveId, offset: start ?? window.start, questions };
       }
     }
   }
-  return { open, consumedThrough };
+  return { open, occurrences, consumedThrough };
 }
 
 /**
@@ -204,8 +232,12 @@ export async function readOpenQuestion(
 
   const from = cached === undefined ? Math.max(0, size - scanCapBytes) : cached.consumedThrough;
   const window = await source.read(from, size);
-  const { open, consumedThrough } = foldQuestionWindow(cached?.open ?? null, window);
-  index.set(path, { consumedThrough, mtimeMs, open });
+  const { open, occurrences, consumedThrough } = foldQuestionWindow(
+    cached?.open ?? null,
+    cached?.occurrences ?? new Map(),
+    window,
+  );
+  index.set(path, { consumedThrough, mtimeMs, open, occurrences });
   return open;
 }
 
@@ -221,7 +253,10 @@ export function mergeOpenQuestion(
   open: OpenQuestion | null,
 ): readonly AgentQuestion[] {
   if (open === null) return windowQuestions;
-  const prefix = `${open.toolUseId}:`;
+  // `effectiveId`, never `toolUseId` raw: a reused id's already-answered
+  // first occurrence and still-open second occurrence share the raw prefix
+  // but must not share this check -- see `OpenQuestion`'s own doc.
+  const prefix = `${open.effectiveId}:`;
   if (windowQuestions.some((q) => q.id.startsWith(prefix))) return windowQuestions;
   return [...windowQuestions, ...open.questions];
 }
