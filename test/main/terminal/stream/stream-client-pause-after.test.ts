@@ -32,7 +32,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { spawnRealControlChild } from '../../../../src/main/sources/tmux/control.js';
+import {
+  type SpawnControlChild,
+  spawnRealControlChild,
+} from '../../../../src/main/sources/tmux/control.js';
 import { StreamClient } from '../../../../src/main/terminal/stream/client.js';
 
 const tmuxWorks = (): boolean => {
@@ -105,17 +108,68 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
     tmux('send-keys', '-t', `=${SESSION}:`, 'clear', 'Enter');
   }, 15_000);
 
-  it('%pause arrives on a real StreamClient (sends pause-after), and the pane recovers correctly', async () => {
-    const client = new StreamClient({ prefix: ['-L', SOCKET], target: SESSION });
+  // RETRY ONCE, matching #493's own convention for exactly this class of
+  // real-timing guard: a real tmux, a real socket and a real flood still
+  // leave SOME residual timing this test cannot fully pin down (how long
+  // tmux itself takes to notice and report %pause once genuinely behind).
+  // One retry covers that without widening every ordinary run's budget to
+  // cover a rare miss.
+  it('%pause arrives on a real StreamClient (sends pause-after), and the pane recovers correctly', {
+    retry: 1,
+    timeout: 30_000,
+  }, async () => {
+    // TEES the real child's raw stdout (via `StreamClient`'s own public
+    // `spawnChild` injection seam -- a SECOND listener on the SAME
+    // `child.stdout`, never interfering with `StreamClient`'s own
+    // internal parsing) so this test can assert the WIRE PROTOCOL
+    // directly -- tmux actually sent `%pause`, and this client actually
+    // sent the `-A "<pane>:continue"` resume tmux requires -- rather than
+    // only inferring both from a reseed firing. Also the STALL LEVER: a
+    // Node `Readable` genuinely pauses ALL its listeners (not just this
+    // one) while `.pause()`d, until `.resume()`.
+    const rawChunks: string[] = [];
+    // `ControlChildProcess['stdout']` (`control.ts`) is deliberately typed
+    // minimally (`{ on(event: 'data', ...) }`) -- every other caller only
+    // ever needs that. `spawnRealControlChild` is a real `child_process.
+    // spawn()` underneath, whose `.stdout` really is a full `Readable`
+    // with `.pause()`/`.resume()`; this test's own local, wider type
+    // names exactly the extra surface it needs rather than casting to
+    // `any`.
+    let realStdout: { pause(): void; resume(): void } | undefined;
+    const observingSpawn: SpawnControlChild = (binary, argv) => {
+      const child = spawnRealControlChild(binary, argv);
+      realStdout = child.stdout as unknown as { pause(): void; resume(): void };
+      child.stdout.on('data', (chunk) => rawChunks.push(String(chunk)));
+      return child;
+    };
+
+    const client = new StreamClient({
+      prefix: ['-L', SOCKET],
+      target: SESSION,
+      spawnChild: observingSpawn,
+    });
     try {
       await client.connect();
 
-      const seeds: string[] = [];
-      client.onSeed((seed) => seeds.push(seed));
-      // The same slow-consumer shape as the falsification above --
-      // reproduced through StreamClient's own onData, exactly how a
-      // stalled renderer would actually stall THIS process's drain.
-      client.onData(() => slowSpin(20));
+      // THE CLIENT'S OWN VIEW, not tmux's independent `capture-pane` --
+      // `capture-pane` reads the pane's CURRENT buffer regardless of
+      // whether any control client is stuck paused (a pause only stops
+      // tmux SENDING to that one client; it never stops the pane's own
+      // process or tmux's own buffer of it), so polling `capture-pane`
+      // alone cannot tell "the flood finished" apart from "this CLIENT is
+      // still stuck and will never say so". `liveText` is rebuilt from
+      // exactly what this client itself received: replaced whole on every
+      // seed (a fresh `capture-pane` snapshot, `StreamClient`'s own
+      // contract), appended on every live `%output` chunk in between --
+      // the direct answer to "did the pane recover, from THIS client's
+      // own point of view, or does it stay paused".
+      let liveText = '';
+      client.onSeed((seed) => {
+        liveText = seed;
+      });
+      client.onData((chunk) => {
+        liveText += chunk;
+      });
 
       tmux(
         'send-keys',
@@ -125,30 +179,71 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
         'Enter',
       );
 
-      // A reseed (onSeed) only ever fires after the INITIAL connect() here
-      // in response to a %pause -> -A continue -> reseed round trip --
-      // never on its own. Seeing one is direct proof the whole cycle ran
-      // against a real tmux, not a fake one.
-      const deadline = Date.now() + 15_000;
-      while (seeds.length === 0 && Date.now() < deadline) {
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      expect(seeds.length).toBeGreaterThan(0);
-      expect(seeds[0]?.length).toBeGreaterThan(0);
+      // A REAL STALLED READER, not a per-chunk timing guess. MEASURED,
+      // the hard way, across several iterations of this file: a
+      // 20ms-per-chunk busy-wait's actual effect depends entirely on how
+      // many bytes tmux happens to batch into each chunk -- when tmux (or
+      // the OS scheduler) batches LARGE chunks (thousands of lines at
+      // once, observed directly), the SAME 20ms/chunk delay throttles
+      // total throughput far less than when chunks arrive small and
+      // frequent, so whether the client ever falls a full pause-after
+      // SECOND behind became a coin flip that depended on unrelated
+      // system conditions -- 3 separate local test sessions each saw both
+      // outcomes. Genuinely pausing the underlying stream is
+      // deterministic regardless: `.pause()` stops Node reading from the
+      // OS pipe AT ALL (for every listener on it, including `StreamClient`'s
+      // own), so the pipe's kernel buffer fills and tmux's own write
+      // blocks -- exactly the real condition `pause-after` exists to
+      // detect -- for as long as this test decides, independent of chunk
+      // size. 1.5s comfortably clears the 1s `PAUSE_AFTER_SECONDS`
+      // threshold (`client.ts`) without depending on exactly how long
+      // tmux takes to notice.
+      realStdout?.pause();
+      await new Promise((r) => setTimeout(r, 1_500));
+      realStdout?.resume();
 
-      // The flood must actually finish and the pane must actually show
-      // it -- correctness, not just "something reseeded". Polled: the
-      // flood plus an `echo` after it can outlast the first reseed.
-      const doneDeadline = Date.now() + 10_000;
-      let real = '';
-      while (Date.now() < doneDeadline) {
-        real = tmux('capture-pane', '-p', '-t', `=${SESSION}:`);
-        if (/VAM-FLOOD-DONE/.test(real)) break;
+      // GENEROUS AND CONDITION-BASED, not a fixed sleep: CI found the
+      // ORIGINAL version of this test failing at 11.9s on a slower Linux
+      // runner because a fixed 10s poll for `capture-pane`'s own text was
+      // simply too short there -- a wall-clock race in the TEST, not
+      // proof of a bug. Polled every 200ms, on the CLIENT'S OWN
+      // accumulated view. Once resumed, everything buffered during the
+      // stall arrives in one burst and the remainder of the flood drains
+      // unthrottled (~2.5s wall for a full 5MB flood with no slow
+      // consumer at all, this repo's own `terminal-stream-resource-
+      // shots.mjs` measurement) -- 15s is generous against that, not
+      // against a chunk-size-dependent guess.
+      const liveDeadline = Date.now() + 15_000;
+      while (!/VAM-FLOOD-DONE/.test(liveText) && Date.now() < liveDeadline) {
         await new Promise((r) => setTimeout(r, 200));
       }
-      expect(real).toMatch(/VAM-FLOOD-DONE/);
+
+      const raw = rawChunks.join('');
+      // THE PROPERTY ITSELF, asserted directly rather than merely
+      // inferred from a reseed happening to fire: tmux actually sent
+      // %pause for this client's own pane, and this client actually sent
+      // the explicit resume tmux requires (MEASURED: tmux never resumes a
+      // paused pane on its own -- see client.ts's own `#continueAfterPause`
+      // header). `%continue` appears here whether it arrived as a bare
+      // notification line or nested inside the `-A` command's own reply
+      // block (measured to be the real shape) -- a plain substring search
+      // catches either.
+      expect(raw).toMatch(/%pause /);
+      expect(raw).toMatch(/%continue/);
+
+      // NEVER STAYS PAUSED: the client's own view must show the flood's
+      // trailing marker -- proof the pane recovered from THIS client's
+      // point of view, not merely that tmux's own independent buffer
+      // moved on without it.
+      expect(liveText).toMatch(/VAM-FLOOD-DONE/);
+
+      // CORRECTNESS cross-check against ground truth: what this client
+      // ended up seeing agrees with tmux's own `capture-pane` for the
+      // same pane at the same point.
+      const groundTruth = tmux('capture-pane', '-p', '-t', `=${SESSION}:`);
+      expect(groundTruth).toMatch(/VAM-FLOOD-DONE/);
     } finally {
       client.dispose();
     }
-  }, 30_000);
+  });
 });
