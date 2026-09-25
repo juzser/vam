@@ -2199,7 +2199,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           "the app bar" `PhoneShell.list.test.tsx` already asserts the
           readout sits inside -- true before by accident of a bar that held
           nothing else, true now on purpose. */}
-      <header className="flex flex-col gap-2.5 border-line border-b p-3">
+      <header
+        // B13, phone only: `styles.css`'s `[data-phone-list-top-bar]` rule
+        // grows this bar's existing 12px top padding under a real inset
+        // rather than replacing it -- see that rule's own comment for why it
+        // is not the SAME hook `PhoneShell.tsx`'s session header wears. Not
+        // set on desktop: this header is the sidebar's own everywhere else,
+        // and a desktop window has no safe area to grow into.
+        {...(phone ? { 'data-phone-list-top-bar': '' } : {})}
+        className="flex flex-col gap-2.5 border-line border-b p-3"
+      >
         {/* The avatar bar, which used to be the sidebar's footer.
             It took the place of the workspace line -- avatar, name and the
             word "workspace" -- which is gone at the operator's request. vam
