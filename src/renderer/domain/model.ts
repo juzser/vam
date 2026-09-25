@@ -716,6 +716,23 @@ export type Session = {
    */
   readonly origin?: SessionOrigin;
   /**
+   * IS THIS SESSION'S WORKING DIRECTORY A CLAUDE CODE AGENT WORKTREE --
+   * `<repo>/.claude/worktrees/agent-<id>`, minted by a subagent run with
+   * `isolation: "worktree"`, never a session the operator opened themselves.
+   * `agent-worktree.ts`'s own header carries the two-signal rule this is
+   * computed by (a realpath'd path segment, or a `worktree-agent-*`
+   * branch) and the reason it cannot be confused with vam's OWN worktree
+   * feature (#496), a different directory layout entirely.
+   *
+   * `true` ONLY, on the SAME rule `pane`/`vamControlled` already use for a
+   * fact a source either measured or did not: absent means "not this",
+   * exactly like `false` would, so it is left off rather than spelled out
+   * on the session literals across this whole suite that predate it.
+   *
+   * `session-filter.ts`'s `isHiddenByAgentWorktreeFilter` is the one reader.
+   */
+  readonly isAgentWorktree?: boolean;
+  /**
    * Whether vam can ACT on this session directly -- close it, and in time
    * reach it -- because vam started it and can still prove which pane it is.
    *
