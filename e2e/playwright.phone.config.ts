@@ -28,6 +28,11 @@
  * used from is the web build over Tailscale Serve, where the remote server
  * turns four capabilities off for every client. Both fixtures serve from the
  * same build on the same port; what differs is only who answers `/api/*`.
+ *
+ * `phone-overflow.pw.ts` runs here too, on its own third stub -- see that
+ * file's own header for why (it needs `terminal: true`, several sessions in
+ * one project, and an open question with long unbroken text all at once,
+ * which neither `?demo=1` nor `phone-core-loop.pw.ts`'s `STUB` states).
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +43,7 @@ const repoRoot = path.resolve(here, '..');
 
 export default defineConfig({
   testDir: '.',
-  testMatch: ['phone-shell.pw.ts', 'phone-core-loop.pw.ts'],
+  testMatch: ['phone-shell.pw.ts', 'phone-core-loop.pw.ts', 'phone-overflow.pw.ts'],
   outputDir: path.join(here, 'test-results'),
   workers: 1,
   retries: 0,

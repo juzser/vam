@@ -2290,6 +2290,40 @@ body {
 }
 
 /*
+ * THE KEY STRIP'S OWN EDGE FADE (`DetailPanel.tsx`'s `[data-key-strip]`,
+ * that row's own comment carries the overflow measurement). `vam-no-
+ * scrollbar` above hides the bar a `scroll-x` row would otherwise paint, and
+ * hiding the ONE affordance that said "this scrolls" is exactly why every
+ * such row in this app needs a second one. A fade is that second one: a
+ * 14px band of the row's own background at each edge, run through the same
+ * gradient in both engines so Safari (still `-webkit-mask-image` only) and
+ * Chromium agree on where the chips start looking whole again.
+ *
+ * ALWAYS ON, NOT TOGGLED BY SCROLL POSITION. The row this ships for has
+ * never yet measured narrower than its own content (its own comment: 408px
+ * of chips in 361px of room), so the near-permanent case is "more to the
+ * right"; a fade needing a scroll listener to appear or disappear is a
+ * second moving part bought for a case this row does not have today, and one
+ * that would draw wrong the one frame before the listener's first read.
+ */
+[data-key-strip] {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 14px,
+    black calc(100% - 14px),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 14px,
+    black calc(100% - 14px),
+    transparent
+  );
+}
+
+/*
  * THE STREAMING TERMINAL'S OWN SCROLLBAR (`TerminalStreamTab.tsx`), hidden
  * the same way `.vam-no-scrollbar` hides every other native bar in this
  * renderer -- scoped to `.xterm-viewport` rather than applied as a class,
@@ -2311,6 +2345,52 @@ body {
   scrollbar-width: none;
 }
 [data-terminal-stream] .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * XTERM 6's OWN SCROLLBAR, hidden for the identical reason the rule above
+ * hides `.xterm-viewport`'s native one -- xterm 6 (#496's dependency bump)
+ * replaced the scroll model behind that same viewport with a VS Code-style
+ * `DomScrollableElement` (`.xterm-scrollable-element`, wrapping
+ * `.xterm-viewport` rather than replacing it), which paints its OWN overlay
+ * thumb (`.xterm-scrollable-element > .scrollbar`) independently of the
+ * native bar the rule above already hides -- unaffected by
+ * `scrollbar-width`/`::-webkit-scrollbar`, which only ever reach a REAL
+ * browser scrollbar, not a `<div>` xterm draws itself. MEASURED (a real
+ * `Terminal`, real DOM, a seeded pane taller than the viewport): this thumb
+ * reveals at `opacity: 1` on `term.open()` AND on every later `term.write()`
+ * -- mount, each streamed chunk alike -- fading back to `opacity: 0` only
+ * after roughly 1.2s of no new output (xterm's own `visible`/`invisible.fade`
+ * classes, `@xterm/xterm/css/xterm.css`). For an ACTIVELY STREAMING pane --
+ * this tab's whole reason to exist, and the operator's own report, "always
+ * shows a scrollbar right from the start" -- a live program rarely goes
+ * 1.2s without printing anything, so the bar is functionally always
+ * mid-fade. This is NOT a height/overflow bug: every ancestor from the pane
+ * down to the mount already has `scrollHeight === clientHeight` without this
+ * rule (`FitAddon.fit()`'s own `Math.floor` division guarantees it) --
+ * `terminal-stream-frame-shots.mjs`'s own overflow checks hold that
+ * measurement, not a recalculated height.
+ *
+ * `display: none`, not merely `opacity: 0` (which xterm's own `.invisible`
+ * class already sets on this same element once its fade completes, and
+ * which a second rule here would just be repeating for nothing): the thumb
+ * is positioned via an inline style (VS Code's own scrollbar component,
+ * not a rule in `xterm.css` -- that stylesheet gives `.scrollbar` a cursor
+ * and nothing else, so it reserves no layout space FitAddon's own box-model
+ * math needs to know about either way), so removing it from paint costs
+ * nothing `opacity: 0` did not already cost, and it removes the one thing
+ * `opacity` alone could not: the `visible`/`opacity: 1` frame itself, painted
+ * before the `invisible` class and its own transition ever apply.
+ *
+ * WHEEL SCROLLBACK IS UNTOUCHED: xterm's `mouseWheelSmoothScroll` listener
+ * lives on the viewport itself, not on this thumb, so a wheel over the pane
+ * still moves the buffer -- only the click-and-drag-the-thumb gesture is
+ * lost, which this pane never offered a stable, visible thumb to grab in the
+ * first place (the fade already hid it again within ~1.2s before this rule
+ * existed).
+ */
+[data-terminal-stream] .xterm-scrollable-element > .scrollbar {
   display: none;
 }
 
