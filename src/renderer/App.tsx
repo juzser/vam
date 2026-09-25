@@ -29,6 +29,7 @@ import type {
   TerminalStreamApi,
   UpdateApi,
   UsageApi,
+  WorktreesApi,
 } from '../preload/api.js';
 import type { PreloadSourceApi } from '../shared/preload-api.js';
 import { SmithClient } from './adapter/client.js';
@@ -109,6 +110,13 @@ declare global {
        * on `remote/server.ts`'s table, ever (`CHANNELS.filesRead`'s header).
        */
       readonly files: FilesApi;
+      /**
+       * list/create/remove a linked git worktree of a project vam already
+       * knows. Desktop-only, the same standing as `files` above -- see
+       * `CHANNELS.worktreeList`'s own header for why a paired phone has no
+       * route to any of the three.
+       */
+      readonly worktrees: WorktreesApi;
       /**
        * The launch check's answer, and the click that opens the release page
        * in the operator's browser. Desktop-only: the browser build has no
