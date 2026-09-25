@@ -222,10 +222,13 @@ const EN = {
     'ask the agent for shorter, clearer answers — vam types the request into the session, it never rewrites what it draws',
   'settings.behaviour.conciseOutput.on': 'on',
   'settings.behaviour.conciseOutput.off': 'off',
-  // THE STREAMING TERMINAL, BETA: a second Terminal tab, driven by xterm.js
-  // over a persistent connection instead of the shipping poll. Off by
-  // default until it has seen real use.
-  'settings.behaviour.streamingTerminal.label': 'streaming terminal (beta)',
+  // THE STREAMING TERMINAL: the shipping Terminal tab now
+  // (`docs/design/terminal-streaming.md`'s "Flipping the default"), driven
+  // by xterm.js over a persistent connection instead of periodic
+  // `capture-pane`. On by default; an older tmux -- or a connection that
+  // cannot be re-established -- falls back to the classic renderer
+  // automatically.
+  'settings.behaviour.streamingTerminal.label': 'streaming terminal',
   'settings.behaviour.streamingTerminal.hint': 'a live xterm.js pane instead of periodic capture',
   'settings.behaviour.streamingTerminal.on': 'on',
   'settings.behaviour.streamingTerminal.off': 'off',
