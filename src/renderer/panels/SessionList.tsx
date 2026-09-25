@@ -53,6 +53,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -91,6 +92,7 @@ import { revealScrollTop } from './reveal-row.js';
 import { useSessionListDrafts } from './session-list-drafts.js';
 import { StatusMark } from './status-mark.js';
 import { UsagePopover } from './UsagePopover.js';
+import { useWorktreeParents } from './worktrees/useWorktreeParents.js';
 import { WorktreesSection } from './worktrees/WorktreesSection.js';
 
 /**
@@ -1636,6 +1638,19 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   /** Never `entries`. See `allEntries` on the props for what reads this. */
   const allEntries = unfiltered ?? entries;
   const hidden = hiddenProjects;
+  /**
+   * UI1: which project ids are actually a WORKTREE of another visible
+   * project -- `window.api?.worktrees`, read directly here for the same
+   * reason `WorktreesSection.tsx`'s own header already documents (avoiding
+   * a new prop on every call site this file and `Canvas.tsx` already have).
+   * `visibleEntries` below is what actually acts on this map.
+   */
+  const worktreesApiForParents = window.api?.worktrees;
+  const projectIdsForWorktreeParents = useMemo(
+    () => Array.from(new Set(allEntries.map((entry) => entry.project.id))),
+    [allEntries],
+  );
+  const worktreeParents = useWorktreeParents(projectIdsForWorktreeParents, worktreesApiForParents);
   /** The project whose removal is being confirmed, or null. One at a time. */
   const [confirming, setConfirming] = useState<Project | null>(null);
   /**
@@ -1951,7 +1966,28 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * `viewOptions.groupBy` before it ever reaches for `section.project` as a
    * subject rather than a key.
    */
-  const visibleEntries = entries.filter((entry) => !hidden.includes(entry.project.id));
+  /**
+   * UI1's suppression, `Group by: Project` ONLY: a worktree's sessions nest
+   * under its parent's "Worktrees" row instead of also drawing their own
+   * top-level section, but ONLY when that nesting is actually where the
+   * operator can still reach them -- the parent project's OWN section must
+   * still be visible (not itself hidden) for `WorktreesSection` to ever
+   * render at all. Suppressing the child while its parent is hidden would
+   * make its sessions vanish from the sidebar entirely, which is a
+   * regression this filter must never cause. `Status`/`None` grouping has
+   * no "Worktrees" row to nest under in the first place (`WorktreesSection`
+   * only ever renders under `groupBy === 'project'`), so neither mode is
+   * touched here -- #486's pane-only fallback and every filter/grouping
+   * mode besides `project` see exactly what they always did.
+   */
+  const isSuppressedWorktreeChild = (projectId: string): boolean => {
+    if (viewOptions.groupBy !== 'project') return false;
+    const parentId = worktreeParents.get(projectId);
+    return parentId !== undefined && !hidden.includes(parentId);
+  };
+  const visibleEntries = entries.filter(
+    (entry) => !hidden.includes(entry.project.id) && !isSuppressedWorktreeChild(entry.project.id),
+  );
   const sections: {
     readonly project: Project;
     readonly items: readonly SessionEntry[];
@@ -3836,6 +3872,8 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                               current === section.project.id ? null : current,
                             )
                           }
+                          onPickSession={onPick}
+                          focusedSessionId={focusedSessionId}
                         />
                       )}
                       {section.items.map((entry) => {

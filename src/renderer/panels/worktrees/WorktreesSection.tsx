@@ -28,17 +28,23 @@
  * `allEntries` is already the flat list every other selector in this file
  * reads from.
  *
- * KNOWN v1 GAP, DISCLOSED RATHER THAN HIDDEN: a worktree that already has a
- * live session also still gets its OWN top-level project section elsewhere
- * in the sidebar (nothing here suppresses that) -- see
- * `docs/design/worktrees.md`'s identity decision for why, and the operator
- * report this shipped against for the plan to close it.
+ * A WORKTREE'S SESSIONS NO LONGER ALSO DRAW THEIR OWN TOP-LEVEL PROJECT
+ * SECTION (UI1, closed after the v1 report disclosed it): `SessionList.tsx`'s
+ * `useWorktreeParents` hook now suppresses that duplicate whenever this
+ * section's own parent project is visible, so the rows this section draws
+ * below (via `onPickSession`) are the ONLY way to reach a worktree's session
+ * from the sidebar in `Group by: Project` mode -- see
+ * `docs/design/worktrees.md`'s identity decision for the full rationale on
+ * why a worktree's session keeps its own, different `Project.id` regardless.
  */
 
+import { Play } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { WorktreeInfo } from '../../../shared/worktree.js';
 import type { Project } from '../../domain/model.js';
 import type { SessionEntry } from '../../domain/selectors.js';
+import { ShortcutTip } from '../../keyboard/ShortcutTip.js';
+import { StatusMark } from '../status-mark.js';
 import { ConfirmDeleteWorktree } from './ConfirmDeleteWorktree.js';
 import { useWorktrees } from './useWorktrees.js';
 
@@ -78,6 +84,16 @@ export type WorktreesSectionProps = {
   readonly allEntries: readonly SessionEntry[];
   readonly forceOpenCreate: boolean;
   readonly onCloseCreate: () => void;
+  /**
+   * `SessionList.tsx`'s own `onPick` prop, unchanged -- the SAME handler a
+   * top-level `data-session-row` click already calls. UI1: since
+   * `SessionList.tsx` now suppresses a worktree's own top-level project
+   * section (`useWorktreeParents.ts`), this is the nested row's only route
+   * back to "select this session" -- reusing the real handler rather than
+   * re-deriving what "pick a session" means a second time.
+   */
+  readonly onPickSession: (sessionId: string) => void;
+  readonly focusedSessionId: string | null;
 };
 
 export function WorktreesSection({
@@ -85,6 +101,8 @@ export function WorktreesSection({
   allEntries,
   forceOpenCreate,
   onCloseCreate,
+  onPickSession,
+  focusedSessionId,
 }: WorktreesSectionProps) {
   const api = window.api?.worktrees;
   const { state, reload } = useWorktrees({ projectId: project.id, api });
@@ -142,6 +160,7 @@ export function WorktreesSection({
     setDeleteError(null);
     try {
       await api.remove({
+        projectId: project.id,
         worktreeId: pendingDelete.worktreeId,
         force: confirmName !== undefined,
         confirmName,
@@ -270,9 +289,9 @@ export function WorktreesSection({
 
       <div className="flex flex-col gap-1">
         {worktrees.map((worktree) => {
-          const sessionCount = allEntries.filter(
+          const worktreeSessions = allEntries.filter(
             (entry) => entry.project.id === worktree.projectId,
-          ).length;
+          );
           return (
             <div
               key={worktree.worktreeId}
@@ -304,42 +323,75 @@ export function WorktreesSection({
                   ×
                 </button>
               </div>
-              {/* Line 2: branch + lock tag, own full-width line to truncate
-                  against; the start-here/session-count control sits at the
-                  far end, same right-alignment as a session row's age. */}
+              {/* Line 2: branch is the FLEXIBLE one here, `flex-1`, and
+                  truncates LAST -- a real screenshot (`docs/ui/worktrees-
+                  sidebar-dark.png`) caught it losing that fight to "Start a
+                  session here"'s own fixed-width text and truncating to
+                  "fix-t…" first. `locked` stays `flex-none`, and the
+                  start-here control is now a compact icon (below) rather
+                  than a text label competing for the same line's width. */}
               <div className="flex items-center gap-[7px]">
-                {worktree.branch !== null && (
+                {worktree.branch !== null ? (
                   <span
                     data-worktree-branch
-                    className="min-w-0 truncate font-mono text-ink-faint text-meta"
+                    className="min-w-0 flex-1 truncate font-mono text-ink-faint text-meta"
                   >
                     {worktree.branch}
                   </span>
+                ) : (
+                  <span className="flex-1" />
                 )}
                 {worktree.locked && (
                   <span data-worktree-locked className="flex-none text-ink-faint text-meta">
                     locked
                   </span>
                 )}
-                <span className="flex-1" />
-                {sessionCount > 0 ? (
-                  <span
-                    data-worktree-session-count
-                    className="flex-none font-mono text-ink-faint text-meta"
-                  >
-                    {sessionCount}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    data-worktree-start-here={worktree.worktreeId}
-                    onClick={() => void startHere(worktree)}
-                    className="flex-none cursor-pointer whitespace-nowrap rounded-[5px] px-1 font-mono text-control text-ink-faint hover:text-ink"
-                  >
-                    Start a session here
-                  </button>
+                {worktreeSessions.length === 0 && (
+                  <ShortcutTip label={`Start a session in ${displayName(worktree.path)}`}>
+                    <button
+                      type="button"
+                      data-worktree-start-here={worktree.worktreeId}
+                      aria-label={`start a session in ${displayName(worktree.path)}`}
+                      onClick={() => void startHere(worktree)}
+                      className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
+                    >
+                      <Play size={11} strokeWidth={1.8} />
+                    </button>
+                  </ShortcutTip>
                 )}
               </div>
+              {/* UI1: the nested rows a worktree's sessions used to only get
+                  a COUNT for -- `SessionList.tsx` now suppresses this
+                  worktree's own top-level project section whenever it is
+                  visible here, so this is the only route left to reach one
+                  of its sessions in `Group by: Project` mode. `onPickSession`
+                  is `SessionList.tsx`'s own `onPick`, the exact handler a
+                  top-level row's click already calls -- reused, not
+                  re-derived. */}
+              {worktreeSessions.length > 0 && (
+                <div
+                  data-worktree-sessions={worktree.worktreeId}
+                  className="flex flex-col gap-0.5 pt-0.5"
+                >
+                  {worktreeSessions.map((entry) => (
+                    <button
+                      key={entry.session.id}
+                      type="button"
+                      data-worktree-session-row={entry.session.id}
+                      onClick={() => onPickSession(entry.session.id)}
+                      className={[
+                        'vam-tap flex w-full items-center gap-1.5 rounded-[5px] px-1.5 py-1 text-left text-control',
+                        entry.session.id === focusedSessionId
+                          ? 'bg-raised text-ink'
+                          : 'text-ink-dim hover:bg-line hover:text-ink',
+                      ].join(' ')}
+                    >
+                      <StatusMark status={entry.session.status} lane={11} glyph={9} />
+                      <span className="min-w-0 flex-1 truncate">{entry.session.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
