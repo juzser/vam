@@ -78,85 +78,77 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
     }
   });
 
-  it(
-    'FALSIFICATION: never arrives on a raw connection that never sets pause-after',
-    async () => {
-      const child = spawnRealControlChild('tmux', [
-        '-L',
-        SOCKET,
-        '-C',
-        'attach-session',
+  it('FALSIFICATION: never arrives on a raw connection that never sets pause-after', async () => {
+    const child = spawnRealControlChild('tmux', [
+      '-L',
+      SOCKET,
+      '-C',
+      'attach-session',
+      '-t',
+      `=${SESSION}:`,
+    ]);
+    let sawPause = false;
+    child.stdout.on('data', (chunk) => {
+      if (/%pause/.test(String(chunk))) sawPause = true;
+      slowSpin(20);
+    });
+
+    await new Promise((r) => setTimeout(r, 300));
+    tmux('send-keys', '-t', `=${SESSION}:`, 'yes | head -c 5000000', 'Enter');
+    await new Promise((r) => setTimeout(r, 4_000));
+
+    child.kill();
+    expect(sawPause).toBe(false);
+
+    // Clean the pane for the next test.
+    tmux('send-keys', '-t', `=${SESSION}:`, 'C-c');
+    tmux('send-keys', '-t', `=${SESSION}:`, 'clear', 'Enter');
+  }, 15_000);
+
+  it('%pause arrives on a real StreamClient (sends pause-after), and the pane recovers correctly', async () => {
+    const client = new StreamClient({ prefix: ['-L', SOCKET], target: SESSION });
+    try {
+      await client.connect();
+
+      const seeds: string[] = [];
+      client.onSeed((seed) => seeds.push(seed));
+      // The same slow-consumer shape as the falsification above --
+      // reproduced through StreamClient's own onData, exactly how a
+      // stalled renderer would actually stall THIS process's drain.
+      client.onData(() => slowSpin(20));
+
+      tmux(
+        'send-keys',
         '-t',
         `=${SESSION}:`,
-      ]);
-      let sawPause = false;
-      child.stdout.on('data', (chunk) => {
-        if (/%pause/.test(String(chunk))) sawPause = true;
-        slowSpin(20);
-      });
+        'yes | head -c 5000000; echo VAM-FLOOD-DONE',
+        'Enter',
+      );
 
-      await new Promise((r) => setTimeout(r, 300));
-      tmux('send-keys', '-t', `=${SESSION}:`, 'yes | head -c 5000000', 'Enter');
-      await new Promise((r) => setTimeout(r, 4_000));
-
-      child.kill();
-      expect(sawPause).toBe(false);
-
-      // Clean the pane for the next test.
-      tmux('send-keys', '-t', `=${SESSION}:`, 'C-c');
-      tmux('send-keys', '-t', `=${SESSION}:`, 'clear', 'Enter');
-    },
-    15_000,
-  );
-
-  it(
-    '%pause arrives on a real StreamClient (sends pause-after), and the pane recovers correctly',
-    async () => {
-      const client = new StreamClient({ prefix: ['-L', SOCKET], target: SESSION });
-      try {
-        await client.connect();
-
-        const seeds: string[] = [];
-        client.onSeed((seed) => seeds.push(seed));
-        // The same slow-consumer shape as the falsification above --
-        // reproduced through StreamClient's own onData, exactly how a
-        // stalled renderer would actually stall THIS process's drain.
-        client.onData(() => slowSpin(20));
-
-        tmux(
-          'send-keys',
-          '-t',
-          `=${SESSION}:`,
-          'yes | head -c 5000000; echo VAM-FLOOD-DONE',
-          'Enter',
-        );
-
-        // A reseed (onSeed) only ever fires after the INITIAL connect() here
-        // in response to a %pause -> -A continue -> reseed round trip --
-        // never on its own. Seeing one is direct proof the whole cycle ran
-        // against a real tmux, not a fake one.
-        const deadline = Date.now() + 15_000;
-        while (seeds.length === 0 && Date.now() < deadline) {
-          await new Promise((r) => setTimeout(r, 200));
-        }
-        expect(seeds.length).toBeGreaterThan(0);
-        expect(seeds[0]?.length).toBeGreaterThan(0);
-
-        // The flood must actually finish and the pane must actually show
-        // it -- correctness, not just "something reseeded". Polled: the
-        // flood plus an `echo` after it can outlast the first reseed.
-        const doneDeadline = Date.now() + 10_000;
-        let real = '';
-        while (Date.now() < doneDeadline) {
-          real = tmux('capture-pane', '-p', '-t', `=${SESSION}:`);
-          if (/VAM-FLOOD-DONE/.test(real)) break;
-          await new Promise((r) => setTimeout(r, 200));
-        }
-        expect(real).toMatch(/VAM-FLOOD-DONE/);
-      } finally {
-        client.dispose();
+      // A reseed (onSeed) only ever fires after the INITIAL connect() here
+      // in response to a %pause -> -A continue -> reseed round trip --
+      // never on its own. Seeing one is direct proof the whole cycle ran
+      // against a real tmux, not a fake one.
+      const deadline = Date.now() + 15_000;
+      while (seeds.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 200));
       }
-    },
-    30_000,
-  );
+      expect(seeds.length).toBeGreaterThan(0);
+      expect(seeds[0]?.length).toBeGreaterThan(0);
+
+      // The flood must actually finish and the pane must actually show
+      // it -- correctness, not just "something reseeded". Polled: the
+      // flood plus an `echo` after it can outlast the first reseed.
+      const doneDeadline = Date.now() + 10_000;
+      let real = '';
+      while (Date.now() < doneDeadline) {
+        real = tmux('capture-pane', '-p', '-t', `=${SESSION}:`);
+        if (/VAM-FLOOD-DONE/.test(real)) break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      expect(real).toMatch(/VAM-FLOOD-DONE/);
+    } finally {
+      client.dispose();
+    }
+  }, 30_000);
 });

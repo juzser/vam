@@ -87,6 +87,48 @@ const NOT_AVAILABLE_TEXT = 'the terminal is only available in the vam desktop ap
  *  scroll. */
 const SCROLL_CHORD_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End']);
 
+/**
+ * RENDERER-SIDE BACKPRESSURE (the coordinator's own follow-up to the
+ * pause-after fix in `main/terminal/stream/client.ts`). This pane used to
+ * hand every `onData` chunk straight to `term.write()` with nothing ever
+ * tracking how much of it xterm had actually finished PARSING -- `write()`
+ * queues internally and returns immediately, so a long flood (a verbose
+ * build log, `cat` of a large file) could grow that internal queue
+ * unboundedly with nothing here ever noticing, REGARDLESS of whether
+ * `pause-after` also bounds what MAIN's own drain of tmux falls behind by
+ * -- that fix is one layer up and does not know or care how fast xterm
+ * itself can keep up.
+ *
+ * `term.write(data, callback)`'s callback fires once xterm has actually
+ * PARSED that call's data (xterm's own documented contract) -- `pendingBytes`
+ * below tracks exactly that: bytes handed to `term.write` but not yet
+ * parsed, never merely "received over IPC".
+ *
+ * `HIGH_WATER_MARK` -- the low end of the operator's own suggested 1-2MB
+ * range. `LOW_WATER_MARK` -- a quarter of it, a wide hysteresis gap so
+ * draining right at the edge does not flap between dropping and forwarding
+ * on every single chunk.
+ *
+ * DROP AND RESEED, not "ask main to pause the stream" (the coordinator's own
+ * other option): once dropping starts, no new chunk is EVER handed to
+ * `term.write()`, so `pendingBytes` can only fall from there -- renderer
+ * memory is bounded with no new main<->renderer pause/resume IPC round trip
+ * at all. Once it drains back under the low mark the screen is PROVABLY
+ * stale (real data was silently dropped in between), so "resume" means
+ * reconnecting -- the exact `teardownStream()`-then-`connect()` pair this
+ * file already runs for a hidden pane becoming visible again, reused rather
+ * than inventing a second, narrower resync primitive.
+ *
+ * `chunk.length` (UTF-16 code units), NOT a real UTF-8 byte count, is what
+ * this file adds to `pendingBytes` -- measuring the exact byte length would
+ * cost a `TextEncoder().encode()` pass over every chunk, real CPU work
+ * paid on exactly the hot path this exists to protect, for a threshold
+ * whose whole point is an order-of-magnitude guard rail, not an exact
+ * count.
+ */
+export const TERMINAL_STREAM_HIGH_WATER_MARK = 2 * 1024 * 1024;
+export const TERMINAL_STREAM_LOW_WATER_MARK = TERMINAL_STREAM_HIGH_WATER_MARK / 4;
+
 /** The four ways `terminalStreamOpen` refuses (`main/terminal/stream-ipc.ts`'s
  *  own `StreamOpenRefusal`), named here rather than imported: that module
  *  reaches `node:crypto`, and this file is typechecked under
@@ -503,7 +545,28 @@ export function TerminalStreamTab(props: {
       window.api?.terminal?.resize(openProjectId, term.cols, term.rows, rowId);
       term.write(asXtermSeed(result.seed));
 
-      unsubscribeData = openBridge.onData(streamId, (chunk) => term?.write(chunk));
+      // See `TERMINAL_STREAM_HIGH_WATER_MARK`'s own header for the full
+      // reasoning. `pendingBytes`/`dropping` are fresh for every `connect()`
+      // call, deliberately: a backpressure-triggered reconnect (below) calls
+      // `connect()` again, which re-declares both here, in the SAME motion
+      // that already resets everything else this function sets up.
+      let pendingBytes = 0;
+      let dropping = false;
+      unsubscribeData = openBridge.onData(streamId, (chunk) => {
+        if (dropping) return;
+        pendingBytes += chunk.length;
+        term?.write(chunk, () => {
+          pendingBytes -= chunk.length;
+          if (!dropping || pendingBytes > TERMINAL_STREAM_LOW_WATER_MARK) return;
+          dropping = false;
+          pendingBytes = 0;
+          teardownStream();
+          void connect().catch((error: unknown) => {
+            console.error('vam: terminal stream backpressure reconnect failed:', error);
+          });
+        });
+        if (pendingBytes > TERMINAL_STREAM_HIGH_WATER_MARK) dropping = true;
+      });
       unsubscribeSeed = openBridge.onSeed(streamId, (seed) => {
         // A FRESH SEED IS THE ALL-CLEAR (review finding, paired with
         // `onDown` below): `StreamClient` only ever pushes one after a
