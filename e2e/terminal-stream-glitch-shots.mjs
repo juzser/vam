@@ -173,7 +173,17 @@ tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', Strin
 
 /* ── the fixture: a real UTF-8 file, `cat`, never a hand-escaped send-keys line ── */
 const BOX_TOP = `╭${'─'.repeat(98)}╮`;
-const BOX_MID = `│ ❯ Try "how do I..."${' '.repeat(74)}│`;
+// MEASURED, this task's own second defect: this row's own printf count
+// used to disagree with BOX_TOP/BOX_BOTTOM's -- ` ❯ Try "how do I..."` is 20
+// codepoints (space, ❯, space, then the 17-character quoted prompt text),
+// so the padding needed to reach the SAME 98-column interior BOX_TOP/
+// BOX_BOTTOM already have is 98 - 20 = 78 spaces, not 74. A real tmux (-L
+// socket, `#{cursor_x}`) confirms BOTH sides render exactly as measured:
+// `❯`/box-drawing characters are width 1 in tmux and xterm alike (no width-
+// table disagreement here at all) -- this was the FIXTURE's own arithmetic
+// bug, not a renderer defect, four columns short of the border it was
+// supposed to align with.
+const BOX_MID = `│ ❯ Try "how do I..."${' '.repeat(78)}│`;
 const BOX_BOTTOM = `╰${'─'.repeat(98)}╯`;
 const STATUS = '  ⏵⏵ accept edits on (shift+tab to cycle)   ✻ Ready';
 const CJK = 'CJK: 你好世界 🎉 emoji';
@@ -496,7 +506,117 @@ check(
   `xterm ${wideLineMetrics.colsFromWideRow}x${wideLineMetrics.rowsCount} vs tmux ${tmuxWindowSize}`,
 );
 
-/* ── the OFF screen, same fixture, for the before/after pair the report asks for ── */
+/**
+ * (e) A WIDE GLYPH FOLLOWED BY `|` LANDS AT THE SAME COLUMN IN XTERM'S
+ * BUFFER AS TMUX REPORTS -- the task brief's own falsifiable guard for the
+ * xterm-vs-tmux Unicode WIDTH disagreement (distinct from check (b)'s
+ * padding-on-mount bug and check (d)'s resize bug above): MEASURED against
+ * this real tmux (`#{cursor_x}`, a private `-L` socket) and a real
+ * `@xterm/xterm` Terminal headless, U+1F389 (🎉) reports width 2 in tmux
+ * and width 1 under xterm's OWN DEFAULT (Unicode 6) table -- every cell
+ * after it draws one column off from where tmux put it, this task's own
+ * "the emoji overlaps the next character". `Unicode11Addon` (loaded by
+ * `TerminalStreamTab.tsx`, `term.unicode.activeVersion = '11'`) is the fix;
+ * `@xterm/addon-unicode-graphemes` was measured too (a real Terminal,
+ * `activeVersion = '15-graphemes'`) and does NOT agree with tmux for this
+ * same glyph -- grapheme clustering answers "how many codepoints form one
+ * glyph", not "how many columns wide", a different question.
+ *
+ * tmux's own column is read via `#{cursor_x}` immediately after printing
+ * (a trailing `sleep 3`, no `echo`, keeps the shell from drawing its next
+ * prompt over this same row before the read -- `echo`'s own newline, used
+ * by check (b)'s WWWW line above, would already have moved off this row by
+ * the time `cursor_x` is queried, which is exactly why THIS check cannot
+ * reuse that trick: it needs the cursor still ON the printed row). xterm's
+ * own column is read from the RENDERED row's pixel width divided by the
+ * cell width check (b) already measured off the WWWW row (same font, same
+ * zoom, both real) -- not `.textContent.indexOf('|')`, which would count
+ * CODEPOINTS (tmux's `capture-pane` text dump carries no width information
+ * of its own) rather than the COLUMNS a disagreement actually shifts.
+ *
+ * FALSIFIED by hand against a real build: commenting out
+ * `term.loadAddon(new Unicode11Addon())`/`term.unicode.activeVersion = '11'`
+ * in `TerminalStreamTab.tsx` reddens this check (xterm column 11 vs tmux's
+ * 12); restoring the two lines greens it again.
+ *
+ * WRITTEN TO A REAL FILE AND `cat`, not typed through `send-keys` as one
+ * escaped line carrying raw UTF-8 -- this file's own header names that
+ * exact trap (a hand-escaped fixture corrupting itself before tmux ever
+ * saw a bug). Only the ASCII path itself crosses `send-keys`.
+ */
+const WIDE_MARK = 'wide 你好🎉|';
+const wideMarkPath = join(bundleDir, 'wide-mark.txt');
+writeFileSync(wideMarkPath, WIDE_MARK, 'utf8'); // no trailing newline: cat leaves the cursor right after `|`
+tmux(
+  'send-keys',
+  '-t',
+  `=${TMUX_SESSION}:`,
+  '-l',
+  '--',
+  `clear; cat ${wideMarkPath}; sleep 3`,
+);
+tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
+await new Promise((r) => setTimeout(r, 500));
+await page.waitForTimeout(500);
+
+const tmuxWideMarkColumn = Number(
+  tmux('display-message', '-p', '-t', `=${TMUX_SESSION}:`, '#{cursor_x}').trim(),
+);
+/**
+ * XTERM'S OWN CURSOR ELEMENT, not the row `<div>`'s outer box: that box is
+ * ALWAYS rendered at the terminal's full row width (760px, MEASURED,
+ * regardless of how much of the row has real content) -- reading its
+ * `getBoundingClientRect()` for "where did the content end" was this
+ * check's own first bug, caught by its own row text coming back correct
+ * while the computed column read 101 (essentially the row's full width in
+ * cells). `.xterm-cursor`'s rendered LEFT edge, by contrast, is exactly
+ * where xterm placed `buffer.active.cursorX` -- the same fact the DOM
+ * renderer used to decide every span's own letter-spacing hack, read back
+ * directly instead of re-derived from them.
+ */
+const xtermWideMarkMetrics = await page.evaluate(() => {
+  const pane = document.querySelector('[data-terminal-stream]');
+  const paneRect = pane?.getBoundingClientRect();
+  const rows = pane?.querySelector('.xterm-rows');
+  const markRow = rows
+    ? [...rows.children].find((r) => (r.textContent ?? '').includes('wide') && (r.textContent ?? '').includes('|'))
+    : null;
+  const cursor = markRow?.querySelector('.xterm-cursor') ?? null;
+  const cursorRect = cursor ? cursor.getBoundingClientRect() : null;
+  return {
+    text: markRow ? markRow.textContent : null,
+    cursorLeftFromPane: cursorRect && paneRect ? cursorRect.left - paneRect.left : null,
+  };
+});
+const xtermWideMarkColumn =
+  xtermWideMarkMetrics.cursorLeftFromPane !== null && wideLineMetrics.cellWidth !== null
+    ? Math.round(
+        (xtermWideMarkMetrics.cursorLeftFromPane - wideLineMetrics.leftClearance) /
+          wideLineMetrics.cellWidth,
+      )
+    : null;
+check(
+  'a line of wide glyphs (CJK + 🎉) followed by "|" places "|" at the same column in xterm’s buffer as tmux reports',
+  xtermWideMarkColumn !== null && xtermWideMarkColumn === tmuxWideMarkColumn,
+  `xterm column ${String(xtermWideMarkColumn)} vs tmux cursor_x ${tmuxWideMarkColumn} (row text ${JSON.stringify(xtermWideMarkMetrics.text)})`,
+);
+// Let the guard sleep finish so the shell is idle again before the OFF
+// screen's own navigation below.
+await new Promise((r) => setTimeout(r, 3000));
+
+/* ── the OFF screen, same fixture, for the before/after pair the report asks for ──
+ * RE-PRINTED, not merely left over: checks (b) and (e) above both write their
+ * OWN content into this same live session (the WWWW line, then WIDE_MARK),
+ * so by this point the pane no longer shows the original box/CJK/VN fixture
+ * this comment's own first line promises -- a pre-existing gap (check (b)'s
+ * WWWW line already overwrote it before this section ran, even before this
+ * task's own check (e) was added) that would otherwise hand the "before"
+ * screenshot an empty prompt instead of the fixture the "after" screenshot
+ * shows. `cat`, the same real file already on disk, never a second
+ * hand-typed line. */
+tmux('send-keys', '-t', `=${TMUX_SESSION}:`, '-l', '--', `clear; cat ${fixturePath}`);
+tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
+await new Promise((r) => setTimeout(r, 300));
 await page.addInitScript(({ on }) => {
   globalThis.localStorage.setItem(
     'vam.prefs.v1',

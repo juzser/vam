@@ -20,6 +20,7 @@ import {
 
 const writeCalls: string[] = [];
 const disposeCalls: number[] = [];
+const loadedAddons: unknown[] = [];
 let lastTerm: FakeTerminal | undefined;
 let onDataHandler: ((text: string) => void) | undefined;
 
@@ -41,11 +42,17 @@ class FakeTerminal {
   // computed one. Defaults to `false`: most panes are not running a program
   // that asked for bracketed paste.
   modes: { bracketedPasteMode: boolean } = { bracketedPasteMode: false };
+  // The real `Terminal.unicode` API surface this component touches:
+  // `activeVersion` starts at xterm's own built-in default ('6') until a
+  // provider addon (`Unicode11Addon`) is loaded and this is reassigned.
+  unicode: { activeVersion: string } = { activeVersion: '6' };
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
     lastTerm = this;
   }
-  loadAddon() {}
+  loadAddon(addon: unknown) {
+    loadedAddons.push(addon);
+  }
   open(container: HTMLElement) {
     container.appendChild(this.textarea);
   }
@@ -71,8 +78,15 @@ class FakeFitAddon {
   }
 }
 
+// A stand-in for the real addon this component loads to correct xterm's
+// default (Unicode 6) width table against tmux's own -- `instanceof` in the
+// wiring test below is what proves THIS addon, not merely *an* addon, was
+// loaded.
+class FakeUnicode11Addon {}
+
 vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: FakeFitAddon }));
+vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: FakeUnicode11Addon }));
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 
 // Imported AFTER the mocks above are registered (vitest hoists `vi.mock`
@@ -163,6 +177,7 @@ function withDownCapture() {
 beforeEach(() => {
   writeCalls.length = 0;
   disposeCalls.length = 0;
+  loadedAddons.length = 0;
   lastTerm = undefined;
   onDataHandler = undefined;
   FakeResizeObserver.instances = [];
@@ -266,6 +281,17 @@ describe('mounted with a bridge', () => {
       await Promise.resolve();
     });
     expect(writeCalls).toContain('row one\r\nrow two\r\nrow three');
+  });
+
+  it('loads Unicode11Addon and switches to the "11" width table -- xterm’s default (Unicode 6) disagrees with tmux on wide emoji (measured: real tmux reports width 2 for U+1F389, xterm’s default table reports 1)', async () => {
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(loadedAddons.some((addon) => addon instanceof FakeUnicode11Addon)).toBe(true);
+    expect(lastTerm?.unicode.activeVersion).toBe('11');
   });
 
   it('a data push for this stream reaches term.write; a push for another stream never does', async () => {

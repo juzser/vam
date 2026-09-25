@@ -20,6 +20,7 @@
  */
 
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
@@ -254,9 +255,36 @@ export function TerminalStreamTab(props: {
           // cursor can carry.
           cursorBlink: false,
           convertEol: false,
+          // REQUIRED for `term.unicode` (read AND written, just below) --
+          // xterm.js gates that whole getter behind this flag and throws
+          // `You must set the allowProposedApi option to true` otherwise
+          // (MEASURED: `Unicode11Addon.activate()` reads `term.unicode` to
+          // register its width provider, so this option has to be set
+          // before that addon is loaded, not merely before `activeVersion`
+          // is assigned).
+          allowProposedApi: true,
         });
         const fit = new FitAddon();
         term.loadAddon(fit);
+        // xterm's OWN default width table (Unicode 6, `term.unicode.
+        // activeVersion === '6'`) disagrees with tmux's about which
+        // codepoints are double-width -- MEASURED against a real tmux 3.7b
+        // on a private `-L` socket: `#{cursor_x}` after printing 🎉 (U+1F389)
+        // reports 2, xterm's default table reports 1. `capture-pane`'s text
+        // dump carries no width information of its own (only the codepoints
+        // tmux already rendered at ITS width), so every cell after a
+        // disagreement draws one column off from where tmux put it -- this
+        // task's own "the emoji overlaps the next character". `Unicode11Addon`
+        // (Unicode 11's East Asian Width data, MEASURED to agree with this
+        // tmux exactly: `#{cursor_x}` 22 vs xterm's `cursorX` 22 for this
+        // file's own CJK/emoji fixture line, both real) fixes it;
+        // `@xterm/addon-unicode-graphemes` was measured too and does NOT
+        // agree (its `cursorX` for the same emoji, activeVersion
+        // '15-graphemes', still reads 1 -- grapheme clustering answers a
+        // different question, "how many codepoints form one glyph", not
+        // "how many columns wide").
+        term.loadAddon(new Unicode11Addon());
+        term.unicode.activeVersion = '11';
         term.open(container);
         // WHERE `I`/A CLICK LANDS. `focus-scope.ts`'s `focusInsertStop` finds
         // the first `data-insert-stop` inside the nearest `data-insert-scope`
