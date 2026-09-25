@@ -149,10 +149,6 @@ import {
   drawsUnfoldControl,
   subscribeFocusView,
 } from '../prefs/progress.js';
-import {
-  activeStreamingTerminal,
-  subscribeStreamingTerminal,
-} from '../prefs/streaming-terminal.js';
 // `SUBMIT_KEY_LABELS` and `DEFAULT_PROMPT_SUBMIT_KEY` are no longer imported
 // here: this file's only reader of either was the send-key caption under the
 // prompt input, which is gone with the row it sat on (see the comment at the
@@ -205,8 +201,8 @@ import { OUT_MARKDOWN, OUT_URL_TRANSFORM } from './out-markdown.js';
 import { newestSet, toolUseOf } from './question-set.js';
 import { GLYPH_PX, MARK_LANE_PX } from './status-mark.js';
 import { hasContentAbove, hasContentBelow, isAtBottom, shouldStick } from './stick-to-bottom.js';
-import { TerminalTab } from './TerminalTab.js';
 import { drawsComposer, narrowsAsProse, TABS, type Tab, visibleTabs } from './tabs.js';
+import { TerminalAutoTab } from './terminal-stream/TerminalAutoTab.js';
 import {
   appendOlder,
   applyWalk,
@@ -232,15 +228,12 @@ const LazyMarkdown = lazy(() => import('./LazyMarkdown.js'));
 // above -- only the component VALUE needs to move behind `lazy()`.
 const LazyFilesTab = lazy(() => import('./FilesTab.js').then((m) => ({ default: m.FilesTab })));
 
-// `TerminalStreamTab`, in its own lazy chunk -- the same split as
-// `LazyFilesTab` above, at the same bundle-budget boundary: it carries
-// xterm.js, which is not small, and most sessions never turn the
-// `streamingTerminal` beta on (see `prefs/streaming-terminal.ts`).
-const LazyTerminalStreamTab = lazy(() =>
-  import('./terminal-stream/TerminalStreamTab.js').then((m) => ({
-    default: m.TerminalStreamTab,
-  })),
-);
+// `TerminalAutoTab` picks between the streaming and classic Terminal tabs
+// live (`streamingTerminal`, default on) AND owns the runtime fallback for a
+// tmux that cannot stream (`docs/design/terminal-streaming.md`'s "Flipping
+// the default") -- it does its OWN lazy split for the streaming half
+// (xterm.js is not small), so nothing here needs `React.lazy` any more than
+// `LazyFilesTab` above already does for `FilesTab`.
 
 /**
  * How often the pane is re-read while a row says it is waiting.
@@ -7852,18 +7845,6 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     activeNarrowViews,
   );
   /**
-   * WHETHER THE TERMINAL TAB STREAMS, or still polls -- `prefs/streaming-
-   * terminal.ts`'s own store, read the same way `narrowViews` above is: this
-   * component mounts once per split leaf with no prefs object drilled down
-   * to it, and a beta flag opened by a keystroke has no dialogue to be
-   * passed through.
-   */
-  const streamingTerminal = useSyncExternalStore(
-    subscribeStreamingTerminal,
-    activeStreamingTerminal,
-    activeStreamingTerminal,
-  );
-  /**
    * HOW WIDE ONE CHARACTER OF THIS PANE'S PROSE REALLY IS, in pixels — or
    * `null` until something has been laid out.
    *
@@ -8467,51 +8448,42 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         {current === 'Terminal' ? (
           /* Mounted by this branch and by nothing else, which is the whole of
              the tab's laziness: while another tab is showing, the component
-             does not exist, so no timer runs and no `capture-pane` is spawned.
-             `window.api` exists only in the Electron shell (App.tsx); in the
-             browser build the tab says so instead of asking.
+             does not exist, so no timer runs and no `capture-pane` is spawned
+             and no `tmux -C` connects. `window.api` exists only in the
+             Electron shell (App.tsx); in the browser build the tab says so
+             instead of asking.
 
-             `streamingTerminal` PICKS BETWEEN TWO TABS, not a mode inside one:
-             the beta is xterm.js over a persistent `tmux -C` connection
-             (`docs/design/terminal-streaming.md`), and `TerminalTab`'s props
-             below must stay byte-for-byte what they were -- this flag is an
-             opt-in a later operator can turn off without touching the tab it
-             was reading before. */
-          streamingTerminal ? (
-            <Suspense fallback={null}>
-              <LazyTerminalStreamTab
-                projectId={entry?.project.id ?? null}
-                rowId={entry?.session.id}
-                branch={entry?.session.branch ?? null}
-              />
-            </Suspense>
-          ) : (
-            <TerminalTab
-              projectId={entry?.project.id ?? null}
-              rowId={entry?.session.id}
-              read={globalThis.window?.api?.terminal?.read}
-              /* The pane fits because tmux is TOLD the size: `capture-pane`
-                 returns a screen tmux already composed at the session's own
-                 size, which no style on this side can re-wrap. */
-              resize={globalThis.window?.api?.terminal?.resize}
-              /* Typing. Passed here beside the other two rather than reached
-                 for inside the tab, so all three halves of the bridge this
-                 tab uses are visible at the one call site: a member wired
-                 invisibly is one refactor away from being dropped with
-                 nothing to notice. `undefined` in the browser build, where
-                 the tab says so instead of taking keys it cannot deliver. */
-              send={globalThis.window?.api?.terminal?.send}
-              /* THE BRANCH, for the rule under the screen. Passed from here
-                 rather than read inside the tab for the reason the three
-                 members above are: this panel is where the session is in
-                 scope, and a fact reached for invisibly is a fact a later
-                 edit drops with nothing to notice. `null` when there is no
-                 session and when the source cannot say -- `TerminalTab`
-                 draws nothing for either, and its `branch` prop says why
-                 that is not a dash. */
-              branch={entry?.session.branch ?? null}
-            />
-          )
+             `TerminalAutoTab` PICKS BETWEEN THE TWO RENDERERS -- and falls
+             back live if streaming's tmux turns out not to support it
+             (`docs/design/terminal-streaming.md`'s "Flipping the default")
+             -- so every prop below is the union of what EITHER renderer
+             needs; `TerminalAutoTab.tsx` is where that decision actually
+             lives now. */
+          <TerminalAutoTab
+            projectId={entry?.project.id ?? null}
+            rowId={entry?.session.id}
+            read={globalThis.window?.api?.terminal?.read}
+            /* The pane fits because tmux is TOLD the size: `capture-pane`
+               returns a screen tmux already composed at the session's own
+               size, which no style on this side can re-wrap. */
+            resize={globalThis.window?.api?.terminal?.resize}
+            /* Typing. Passed here beside the other two rather than reached
+               for inside the tab, so all three halves of the bridge this
+               tab uses are visible at the one call site: a member wired
+               invisibly is one refactor away from being dropped with
+               nothing to notice. `undefined` in the browser build, where
+               the tab says so instead of taking keys it cannot deliver. */
+            send={globalThis.window?.api?.terminal?.send}
+            /* THE BRANCH, for the rule under the screen. Passed from here
+               rather than read inside the tab for the reason the three
+               members above are: this panel is where the session is in
+               scope, and a fact reached for invisibly is a fact a later
+               edit drops with nothing to notice. `null` when there is no
+               session and when the source cannot say -- neither renderer
+               draws anything for either, and their `branch` prop says why
+               that is not a dash. */
+            branch={entry?.session.branch ?? null}
+          />
         ) : current === 'Agents' ? (
           <AgentsTab agents={entry?.session.agents} sessionId={entry?.session.id ?? ''} />
         ) : current === 'PRs' ? (

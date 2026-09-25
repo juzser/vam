@@ -121,6 +121,27 @@ type StreamDownEvent =
   | { readonly kind: 'reconnecting'; readonly attempt: number }
   | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
 
+/**
+ * WHY THIS PANE ASKS TO BE REPLACED, rather than falling back itself
+ * (`docs/design/terminal-streaming.md`'s "Flipping the default" section,
+ * task 3). Two of the four ways `terminalStreamOpen` can refuse, and one of
+ * the two ways `StreamClient` can give up, are not about THIS request --
+ * they are about THIS operator's tmux, which the polling `TerminalTab.tsx`
+ * does not need control-mode's `%output`/`%pause` notifications to run at
+ * all. `unsupported-tmux` names the version gate directly; `'max-attempts'`
+ * is what `StreamClient` reports after its own bounded reconnect retries are
+ * exhausted (`StreamDownEvent`, `main/terminal/stream/client.ts`); `'session-
+ * gone'` is included too, deliberately, even though a vanished session will
+ * not read any differently under the fallback -- the fallback renderer says
+ * so in its OWN honest words rather than this one staying frozen on whatever
+ * it last painted forever. This component decides NONE of this on its own:
+ * it has no way to know whether it is the setting's default choice or an
+ * operator's own opt-in, and does not carry `TerminalTab.tsx`'s own props
+ * (`read`/`resize`/`send`) to render the fallback itself even if it wanted
+ * to. `TerminalAutoTab.tsx` is the one place both facts are in scope.
+ */
+export type StreamFallbackReason = 'unsupported-tmux' | 'max-attempts' | 'session-gone';
+
 /** One honest sentence for the banner drawn over the pane while `down` is
  *  set -- `reconnecting…` for a retry still in flight, `disconnected —
  *  <reason>` once `StreamClient` has given up for good (matched to this
@@ -165,8 +186,15 @@ export function TerminalStreamTab(props: {
   readonly projectId: string | null;
   readonly rowId?: string | undefined;
   readonly branch: string | null;
+  /** Fired at most once per mount, the moment this pane learns its tmux
+   *  cannot stream at all or has given up reconnecting -- see the type's own
+   *  header. This pane keeps drawing its OWN refusal/down text regardless
+   *  (unchanged, so it is never blank even for the one render before a
+   *  caller acts on this), rather than going silent and trusting a caller
+   *  to replace it in time. */
+  readonly onFallback?: (reason: StreamFallbackReason) => void;
 }) {
-  const { projectId, rowId, branch } = props;
+  const { projectId, rowId, branch, onFallback } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -243,6 +271,10 @@ export function TerminalStreamTab(props: {
       if (cancelled) return;
       if (!result.ok) {
         setRefusal(result.reason);
+        // Only THIS refusal is about the operator's tmux rather than this
+        // request (see `StreamFallbackReason`'s own header) -- the other
+        // three stay a refused pane, not a silent swap to the poller.
+        if (result.reason === 'unsupported-tmux') onFallback?.('unsupported-tmux');
         return;
       }
       const { streamId } = result;
@@ -505,6 +537,11 @@ export function TerminalStreamTab(props: {
       });
       unsubscribeDown = openBridge.onDown(streamId, (event) => {
         setDown(event);
+        // `StreamClient` only ever reaches `gave-up` after its OWN bounded
+        // reconnect retries are exhausted (`RECONNECT_BACKOFF_MS` growing to
+        // `MAX_RECONNECT_ATTEMPTS`, `main/terminal/stream/client.ts`) -- a
+        // still-in-flight `reconnecting` event is not this.
+        if (event.kind === 'gave-up') onFallback?.(event.reason);
       });
     }
 
@@ -535,7 +572,7 @@ export function TerminalStreamTab(props: {
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [bridge, projectId, rowId]);
+  }, [bridge, projectId, rowId, onFallback]);
 
   // The font size, pushed live -- cell metrics change with it, so the fit
   // addon has to re-measure and tell the running program the new size.
