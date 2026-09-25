@@ -14,6 +14,7 @@ import {
   type ControlChildProcess,
   MAX_RECONNECT_ATTEMPTS,
   MAX_RECONNECT_BACKOFF_MS,
+  PAUSE_AFTER_SECONDS,
   StreamClient,
 } from '../../src/main/terminal/stream/client.js';
 
@@ -67,6 +68,15 @@ function harness(target = 'vam-atlas-a1b2c3') {
  * the two so the client's own continuation (which only issues the SECOND
  * command after the first one's reply resolves) has a chance to run before
  * the second reply arrives. */
+/** Replies to the `refresh-client -f pause-after=…` this file now sends
+ * FIRST on every `connect()`/reconnect, before `list-panes`/`capture-pane`
+ * -- an empty-body ok block, exactly what a real tmux answers a `-f` flag
+ * set with (no output). */
+async function answerPauseAfter(child: FakeChild, time = 0): Promise<void> {
+  child.data(`%begin ${time} ${time} 1\n%end ${time} ${time} 1\n`);
+  await tick();
+}
+
 async function answerListPanes(child: FakeChild, paneId = '%3'): Promise<void> {
   child.data(`%begin 1 1 1\n${paneId}\n%end 1 1 1\n`);
   await tick();
@@ -78,6 +88,7 @@ async function answerCapturePane(child: FakeChild, seed: string, time = 2): Prom
 }
 
 async function connectWith(child: FakeChild, paneId = '%3', seed = 'seed'): Promise<void> {
+  await answerPauseAfter(child);
   await answerListPanes(child, paneId);
   await answerCapturePane(child, seed);
 }
@@ -136,7 +147,8 @@ describe('StreamClient', () => {
     const received: string[] = [];
     client.onData((chunk) => received.push(chunk));
 
-    // list-panes reply lands, capture-pane not yet answered.
+    // pause-after, then list-panes reply lands, capture-pane not yet answered.
+    await answerPauseAfter(child);
     await answerListPanes(child, '%3');
     // %output for the now-resolved pane arrives before the seed's own reply.
     child.data('%output %3 too-early\n');
@@ -161,28 +173,89 @@ describe('StreamClient', () => {
     expect(await connecting).toBe('real-seed\n');
   });
 
-  it('reseeds via onSeed, not onData, on %pause then %continue', async () => {
-    const { client, children } = harness();
-    const connecting = client.connect();
-    const child = at(children, 0);
-    await connectWith(child, '%3', 'initial');
-    await connecting;
+  // ── The pause-after fix: tmux only ever sends %pause to a control client
+  // that asked for it (`refresh-client -f pause-after=<N>`, sent on every
+  // connect and reconnect below), and MEASURED against a real tmux 3.7b on a
+  // private socket it never resumes on its own -- the explicit
+  // `refresh-client -A "<pane>:continue"` this class now sends is required,
+  // its pane:state argument must be quoted (unquoted is a parse error in
+  // tmux's own command grammar, measured), and the `%continue` it produces
+  // arrives INSIDE that command's own %begin/%end reply block rather than as
+  // a bare notification line (also measured) -- so the reseed is driven off
+  // that reply landing, not off spotting a bare `%continue` line. ─────────
+  describe('pause-after (real-tmux measured fix)', () => {
+    it('sends refresh-client -f pause-after=<N> first, before list-panes, on connect()', async () => {
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      expect(child.written[0]).toBe(`refresh-client -f pause-after=${PAUSE_AFTER_SECONDS}\n`);
+      await connectWith(child, '%3', 'seed');
+      await connecting;
+    });
 
-    const data: string[] = [];
-    const seeds: string[] = [];
-    client.onData((chunk) => data.push(chunk));
-    client.onSeed((seed) => seeds.push(seed));
+    it('sends refresh-client -f pause-after=<N> again on reconnect, before capture-pane', async () => {
+      vi.useFakeTimers();
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const first = at(children, 0);
+      await connectWith(first, '%3', 'seed');
+      await connecting;
 
-    child.data('%pause %3\n');
-    // %output while paused is not trusted -- dropped, not forwarded.
-    child.data('%output %3 unreliable\n');
-    child.data('%continue %3\n');
-    await tick();
-    // The reseed's own capture-pane reply.
-    await answerCapturePane(child, 'fresh-seed', 3);
+      first.emit('exit');
+      await tick();
+      await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
+      const second = at(children, 1);
+      expect(second.written[0]).toBe(`refresh-client -f pause-after=${PAUSE_AFTER_SECONDS}\n`);
+      await answerPauseAfter(second);
+      await answerCapturePane(second, 'reconnect-seed', 1);
+    });
 
-    expect(data).toEqual([]);
-    expect(seeds).toEqual(['fresh-seed\n']);
+    it('answers %pause with a quoted -A continue, then reseeds once that reply lands', async () => {
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await connectWith(child, '%3', 'initial');
+      await connecting;
+
+      const data: string[] = [];
+      const seeds: string[] = [];
+      client.onData((chunk) => data.push(chunk));
+      client.onSeed((seed) => seeds.push(seed));
+
+      child.data('%pause %3\n');
+      await tick();
+      expect(child.written.at(-1)).toBe('refresh-client -A "%3:continue"\n');
+
+      // %output while paused is not trusted -- dropped, not forwarded.
+      child.data('%output %3 unreliable\n');
+
+      // The %continue this produces is nested inside the -A command's own
+      // reply block (measured) -- answer it exactly that way, not as a bare
+      // notification line.
+      child.data('%begin 2 2 1\n%continue %3\n%end 2 2 1\n');
+      await tick();
+      // The reseed's own capture-pane reply.
+      await answerCapturePane(child, 'fresh-seed', 3);
+
+      expect(data).toEqual([]);
+      expect(seeds).toEqual(['fresh-seed\n']);
+    });
+
+    it('does not send a second -A continue if %pause repeats before the first resolves', async () => {
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await connectWith(child, '%3', 'initial');
+      await connecting;
+
+      child.data('%pause %3\n');
+      await tick();
+      child.data('%pause %3\n');
+      await tick();
+
+      const continueLines = child.written.filter((line) => line.includes('refresh-client -A'));
+      expect(continueLines).toHaveLength(1);
+    });
   });
 
   it('reconnects after a drop: backoff, fresh child, fresh seed, no resent write', async () => {
@@ -207,6 +280,7 @@ describe('StreamClient', () => {
     expect(spawnChild).toHaveBeenCalledTimes(2);
     const second = at(children, 1);
     // Only the reconnect's own capture-pane is sent -- never the earlier `Z`.
+    await answerPauseAfter(second);
     await answerCapturePane(second, 'reconnect-seed', 1);
 
     expect(seeds).toEqual(['reconnect-seed\n']);
@@ -335,6 +409,7 @@ describe('StreamClient', () => {
       await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
       expect(spawnChild).toHaveBeenCalledTimes(2);
       const second = at(children, 1);
+      await answerPauseAfter(second);
       await answerCapturePaneWithError(second, "can't find session: vam-atlas-a1b2c3");
 
       // No reseed -- the reconnect never got a real screen.
@@ -360,6 +435,7 @@ describe('StreamClient', () => {
       await tick();
       await vi.advanceTimersByTimeAsync(RECONNECT_BACKOFF_MS);
       const second = at(children, 1);
+      await answerPauseAfter(second);
       await answerCapturePane(second, 'reconnect-seed', 5);
 
       // A SECOND drop, now: if the attempt counter had not reset, this
