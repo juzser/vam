@@ -1222,6 +1222,343 @@ describe('loadClaudeCodeProjects', () => {
     expect(without?.sessions[0]?.age).toBe('3d');
   });
 
+  describe('createdAt', () => {
+    /**
+     * A `TranscriptRead`-shaped stub, handed to `loadClaudeCodeProjects`
+     * through its `readTranscriptOf` seam -- the SAME injection point
+     * `describe('concurrent transcript reads', ...)` above already uses,
+     * chosen over `writeTranscript`'s real-filesystem `utimesSync` (which
+     * moves mtime, never birthtime) so these tests assert against a KNOWN
+     * value instead of the host filesystem's own, unspecified birthtime
+     * behaviour. CI's Linux runners (ext4/overlayfs) were measured
+     * reporting `birthtimeMs` as `0` regardless of what `utimesSync` set --
+     * the whole reason the two tests this replaces broke there and nowhere
+     * else.
+     */
+    const stubbedRead = (over: {
+      birthtimeMs?: number | null;
+      mtimeMs?: number | null;
+      branch?: string | null;
+    }) => ({
+      facts: {
+        aiTitle: null,
+        branch: over.branch ?? null,
+        activity: null,
+        decisions: [],
+        questions: [],
+      },
+      roster: { agents: [], running: 0 },
+      mtimeMs: over.mtimeMs ?? null,
+      birthtimeMs: over.birthtimeMs ?? null,
+      size: null,
+    });
+
+    it('reads the transcript file’s own birthtime, not its last-activity mtime', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      const createdAgo = 3 * 3_600_000;
+      const readTranscriptOf = async () =>
+        stubbedRead({ birthtimeMs: NOW - createdAgo, mtimeMs: NOW - 60_000 });
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+      expect(project?.sessions[0]?.createdAt).toBe(new Date(NOW - createdAgo).toISOString());
+    });
+
+    it('falls back to the process start time when there is no transcript at all', async () => {
+      const startedAt = NOW - 3 * 86_400_000;
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ sessionId: 'absent', startedAt })],
+        NOW,
+      );
+      expect(project?.sessions[0]?.createdAt).toBe(new Date(startedAt).toISOString());
+    });
+
+    it('is null, never the epoch, when neither a transcript nor a start time exists', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ sessionId: 'absent', startedAt: null })],
+        NOW,
+      );
+      expect(project?.sessions[0]?.createdAt).toBeNull();
+    });
+
+    it('never reads statusUpdatedAt -- that is last activity, not a creation time', async () => {
+      // A session resumed long after it was created: `statusUpdatedAt` (5m
+      // ago) would make a terrible `createdAt` if the chain ever picked it
+      // up by mistake -- the transcript's own, much older birthtime must win.
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      writeStatusFile(4242, NOW - 5 * 60_000);
+      const createdAgo = 20 * 3_600_000;
+      const readTranscriptOf = async () =>
+        stubbedRead({ birthtimeMs: NOW - createdAgo, mtimeMs: NOW - 60_000 });
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ key: 'sess-1#4242', pid: 4242 })],
+        NOW,
+        async () => null,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+      expect(project?.sessions[0]?.createdAt).toBe(new Date(NOW - createdAgo).toISOString());
+    });
+
+    /**
+     * WHAT CI's OWN RUNNERS ACTUALLY DO: `birthtimeMs` measured as `0`
+     * there regardless of `utimesSync`. `readTranscript` already turns a
+     * real `0` into `null` before it reaches this fallback chain, so `null`
+     * (rather than re-deriving Node's own zero-means-untracked rule) is
+     * this suite's own stand-in for "the filesystem could not say".
+     */
+    describe('when the transcript exists but its birthtime cannot be trusted', () => {
+      it('falls back to the process start time', async () => {
+        writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+        const startedAt = NOW - 3 * 86_400_000;
+        const readTranscriptOf = async () =>
+          stubbedRead({ birthtimeMs: null, mtimeMs: NOW - 60_000 });
+        const [project] = await loadClaudeCodeProjects(
+          root,
+          [agent({ startedAt })],
+          NOW,
+          undefined,
+          sessionsRoot,
+          null,
+          null,
+          [],
+          undefined,
+          null,
+          null,
+          null,
+          readTranscriptOf,
+        );
+        expect(project?.sessions[0]?.createdAt).toBe(new Date(startedAt).toISOString());
+      });
+
+      it('treats a birthtime later than the file’s own last write as untrustworthy too', async () => {
+        // Impossible for a real creation time on any platform -- a file
+        // cannot be modified before it was created -- so this must be
+        // rejected exactly like `null`, not read as a very recent start.
+        writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+        const startedAt = NOW - 3 * 86_400_000;
+        const readTranscriptOf = async () =>
+          stubbedRead({ birthtimeMs: NOW, mtimeMs: NOW - 60_000 });
+        const [project] = await loadClaudeCodeProjects(
+          root,
+          [agent({ startedAt })],
+          NOW,
+          undefined,
+          sessionsRoot,
+          null,
+          null,
+          [],
+          undefined,
+          null,
+          null,
+          null,
+          readTranscriptOf,
+        );
+        expect(project?.sessions[0]?.createdAt).toBe(new Date(startedAt).toISOString());
+      });
+
+      it('falls back to the transcript’s own first timestamped line when there is no process to ask either', async () => {
+        // No `agent.startedAt` reaches this chain for a terminal-only row
+        // (no live process at all) -- `startedAt: null` on a live fixture
+        // stands in for that here, exercising the SAME rung `rowForEmptyPane`
+        // reaches without needing a full tmux fixture.
+        const firstLineAt = NOW - 9 * 3_600_000;
+        writeTranscript(
+          'slug-a',
+          'sess-1',
+          jsonl(
+            {
+              type: 'user',
+              timestamp: new Date(firstLineAt).toISOString(),
+              message: { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+            },
+            reply('x'),
+          ),
+        );
+        const readTranscriptOf = async () =>
+          stubbedRead({ birthtimeMs: null, mtimeMs: NOW - 60_000 });
+        const [project] = await loadClaudeCodeProjects(
+          root,
+          [agent({ startedAt: null })],
+          NOW,
+          undefined,
+          sessionsRoot,
+          null,
+          null,
+          [],
+          undefined,
+          null,
+          null,
+          null,
+          readTranscriptOf,
+        );
+        expect(project?.sessions[0]?.createdAt).toBe(new Date(firstLineAt).toISOString());
+      });
+
+      it('falls back to mtime as the last resort, when no line in the head carries a timestamp', async () => {
+        // `reply('x')` (used throughout this file) carries no `timestamp`
+        // field -- the same shape `transcript.ts`'s own corpus note says a
+        // marker line never has one.
+        writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+        const mtimeMs = NOW - 5 * 3_600_000;
+        const readTranscriptOf = async () => stubbedRead({ birthtimeMs: null, mtimeMs });
+        const [project] = await loadClaudeCodeProjects(
+          root,
+          [agent({ startedAt: null })],
+          NOW,
+          undefined,
+          sessionsRoot,
+          null,
+          null,
+          [],
+          undefined,
+          null,
+          null,
+          null,
+          readTranscriptOf,
+        );
+        expect(project?.sessions[0]?.createdAt).toBe(new Date(mtimeMs).toISOString());
+      });
+
+      it('caches the first-line read per (path, size) rather than re-reading it every poll', async () => {
+        const firstAt = NOW - 9 * 3_600_000;
+        const timedLine = (at: number) => ({
+          type: 'user',
+          timestamp: new Date(at).toISOString(),
+          message: { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        });
+        const file = writeTranscript('slug-a', 'sess-1', jsonl(timedLine(firstAt), reply('x')));
+        const readTranscriptOf = async () =>
+          stubbedRead({ birthtimeMs: null, mtimeMs: NOW - 60_000 });
+        const load = () =>
+          loadClaudeCodeProjects(
+            root,
+            [agent({ startedAt: null })],
+            NOW,
+            undefined,
+            sessionsRoot,
+            null,
+            null,
+            [],
+            undefined,
+            null,
+            null,
+            null,
+            readTranscriptOf,
+          );
+
+        const [first] = await load();
+        expect(first?.sessions[0]?.createdAt).toBe(new Date(firstAt).toISOString());
+
+        // Rewritten with a DIFFERENT first timestamp but the identical byte
+        // length (both ISO strings are the same fixed width) -- same
+        // `(path, size)`, so a working cache must still answer the
+        // ORIGINAL value instead of this one.
+        const laterAt = NOW - 1 * 3_600_000;
+        const rewritten = jsonl(timedLine(laterAt), reply('x'));
+        expect(rewritten.length).toBe(jsonl(timedLine(firstAt), reply('x')).length);
+        writeFileSync(file, rewritten);
+
+        const [second] = await load();
+        expect(second?.sessions[0]?.createdAt).toBe(new Date(firstAt).toISOString());
+      });
+    });
+  });
+
+  describe('isAgentWorktree', () => {
+    it('marks a row true when the injected check says so', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        async () => true,
+      );
+      expect(project?.sessions[0]?.isAgentWorktree).toBe(true);
+    });
+
+    it('is absent, not false, for an ordinary project', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        async () => false,
+      );
+      expect(project?.sessions[0]).not.toHaveProperty('isAgentWorktree');
+    });
+
+    it('feeds the check the row’s own resolved branch, not a raw undefined', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      let seenBranch: string | null | undefined;
+      await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        async (_cwd, branch) => {
+          seenBranch = branch;
+          return false;
+        },
+      );
+      // `reply('x')` stamps `gitBranch: '/w/alpha'.includes ? ...` -- whatever
+      // the fixture's own branch is, the point is that it is not undefined:
+      // the transcript's own branch reached the check.
+      expect(seenBranch).not.toBeUndefined();
+    });
+  });
+
   it('ages two processes that resumed one session apart, from their own status files', async () => {
     // The regression. Both rows share ONE transcript, so an age taken from
     // the transcript's mtime is identical for both -- measured on a real
@@ -1559,6 +1896,8 @@ describe('loadClaudeCodeProjects', () => {
       facts: { aiTitle: null, branch, activity: null, decisions: [], questions: [] },
       roster: { agents: [], running: 0 },
       mtimeMs: null,
+      birthtimeMs: null,
+      size: null,
     });
 
     const boundedWait = (promise: Promise<unknown>, ms: number, message: string) =>

@@ -1102,12 +1102,19 @@ export function sendNavArgv(name: string, nav: NavKey): readonly string[] {
  * `listVamSessions` treats a missing trailing field as "the listing did not
  * say", never as a session with an empty foreground command or an empty
  * cwd.
+ *
+ * THE SEVENTH FIELD, `session_created` -- tmux's own creation timestamp,
+ * unix seconds. What `Session.createdAt` (`model.ts`) reads for a pane
+ * `pane-row.ts`'s `paneRow` draws: a fresh shell with no transcript at all,
+ * so there is no file whose birthtime could answer the same question
+ * (`source.ts` reads that, for every row that HAS one). Last of all seven,
+ * for the identical shorter-listing reason the sixth is.
  */
 export function listSessionsArgv(): readonly string[] {
   return [
     'list-sessions',
     '-F',
-    `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`,
+    `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}\t#{session_created}`,
   ];
 }
 

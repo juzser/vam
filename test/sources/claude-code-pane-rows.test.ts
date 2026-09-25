@@ -234,6 +234,27 @@ describe('a vam pane no source row is paired to', () => {
     expect(alpha?.sessions.map((s) => s.id)).toEqual(['sess-1#100']);
   });
 
+  it('marks an unstarted pane row an agent worktree when its own cwd checks true', async () => {
+    const projects = await loadClaudeCodeProjects(
+      root,
+      [],
+      NOW,
+      undefined,
+      sessionsRoot,
+      null,
+      [{ project: '', pid: '', name: 'vam-x-000002', cwd: '/w/gamma' }],
+      [],
+      undefined,
+      null,
+      null,
+      null,
+      undefined,
+      async (cwd) => cwd === '/w/gamma',
+    );
+    const gamma = projects.find((p) => p.id === projectIdOf('/w/gamma'));
+    expect(gamma?.sessions[0]?.isAgentWorktree).toBe(true);
+  });
+
   it('reuses the same brand-new project for two untagged panes in the one directory', async () => {
     const BETA = '/w/beta';
     const projects = await load(

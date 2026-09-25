@@ -78,8 +78,10 @@ import type { SessionFilters, StatusFilter } from '../domain/session-filter.js';
 import {
   countHiddenByForeignFilter,
   isAgentStarted,
+  isAgentWorktreeSession,
   isEnded,
   isForeign,
+  isHiddenByAgentWorktreeFilter,
   isHiddenByEndedFilter,
   isHiddenByForeignFilter,
   isHiddenByIdleFilter,
@@ -3115,6 +3117,7 @@ function CanvasInner({
         (e) =>
           !isHiddenByEndedFilter(e.session, prefs.filters, statusFilter) &&
           !isHiddenByIdleFilter(e.session, prefs.filters, statusFilter) &&
+          !isHiddenByAgentWorktreeFilter(e.session, prefs.filters) &&
           (!foreignFilterApplies || !isHiddenByForeignFilter(e.session, prefs.filters)),
       );
     })();
@@ -3189,6 +3192,14 @@ function CanvasInner({
       ended: allEntries.filter((e) => isEnded(e.session)).length,
       foreign: allEntries.filter((e) => isForeign(e.session)).length,
       idle: allEntries.filter((e) => isIdle(e.session)).length,
+      // A waiting one is never actually hidden (`isHiddenByAgentWorktreeFilter`'s
+      // own header), so this counts only what the toggle in force right now
+      // could really take away -- the same "would take away" reading
+      // `hiddenCounts.foreign` already gives the popover pill, computed the
+      // identical way: every OTHER rule here counts unconditionally too.
+      agentWorktree: allEntries.filter(
+        (e) => isAgentWorktreeSession(e.session) && e.session.status !== 'waiting',
+      ).length,
     }),
     [allEntries],
   );

@@ -1123,6 +1123,23 @@ describe('handing the keyboard to the right pane', () => {
 });
 
 describe('waiting on you', () => {
+  // This whole block is about `needs-you` ranking specifically, not about
+  // whatever `sortBy` the app currently ships by default -- pinned
+  // explicitly so the sort-default feature (`created`, now the shipped
+  // default) cannot silently make this block stop testing what its name
+  // says. `sortByMigrated: true` keeps the seed's explicit choice from being
+  // read as the OLD default baked in and moved onto the new one
+  // (`prefs.ts`'s own ratchet).
+  beforeEach(() => {
+    localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({
+        viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+        sortByMigrated: true,
+      }),
+    );
+  });
+
   const WAITING: CanvasModel = {
     projects: [
       {
