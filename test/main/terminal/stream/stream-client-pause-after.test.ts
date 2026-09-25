@@ -22,6 +22,75 @@
  * test below only passes if that round trip, and the reseed after it,
  * actually works end to end against a real tmux -- not a fake child.
  *
+ * ── WHY THE SECOND TEST WAS FLAKY ON CI (RCA, D-<pending>) ────────────────
+ * PR #498's CI (run 36125880008, job 108041761291) failed on this file
+ * without having touched it -- purely load-dependent. TWO DISTINCT bugs in
+ * THIS TEST, both reproduced locally (macOS, 10 cores) by running the OLD
+ * version of this file repeatedly under 20 competing `yes > /dev/null`
+ * processes (heavier oversubscription than a shared CI runner, but the
+ * SAME shape of CPU starvation):
+ *
+ * (1) THE FIXED 1.5s PAUSE WINDOW RACED THE FLOOD'S OWN PRODUCTION RATE.
+ *     tmux's `pause-after` fires once ITS OWN write to a client's socket
+ *     has been blocked for longer than the threshold -- which requires the
+ *     `yes | head -c 5000000` pipeline to actually have been SCHEDULED and
+ *     to have produced enough bytes to fill the kernel pipe/socket buffers
+ *     in the first place. On a CPU-starved runner, process scheduling for
+ *     that pipeline (and tmux's own server) can be delayed well past the
+ *     fixed 1.5s the OLD test paused its reader for, so `.resume()` fires
+ *     before any real backlog -- let alone backlog older than
+ *     `PAUSE_AFTER_SECONDS` -- ever built up. MEASURED locally: the FIRST
+ *     attempt failed with `raw` containing nothing but the initial
+ *     `capture-pane` reply -- zero `%pause`, zero `%output` at all -- an
+ *     exact match for the CI failure's first assertion.
+ *
+ * (2) THE RETRY REUSED THE SAME, UNCLEANED PANE -- A CROSS-ATTEMPT RACE
+ *     ON `groundTruth`. `beforeAll` creates ONE session for the whole
+ *     file; nothing reset the pane between the first attempt and vitest's
+ *     own `retry: 1`. When attempt 1 failed (as in (1)), it had ALREADY
+ *     sent `yes | head -c 5000000; echo VAM-FLOOD-DONE` to the pane before
+ *     throwing, and that pipeline kept running, unobserved, in the
+ *     background. The retry then: seeded itself from -- and had its
+ *     `%output` listener fed by -- attempt 1's STILL-RUNNING flood, so its
+ *     OWN `liveText` could show `VAM-FLOOD-DONE` from attempt 1's leftover
+ *     run while the retry's OWN freshly-queued flood command was still
+ *     sitting unread in the pty's input queue (the shell was still busy
+ *     with attempt 1's pipeline, which does not read stdin). By the time
+ *     the retry's OWN flood finally started and this file asked for a
+ *     FRESH, independent `capture-pane` (`groundTruth`), that told the
+ *     truth: the pane was still mid-flood, no marker yet. MEASURED
+ *     locally, byte-for-byte the same failure as CI's own log: `raw`
+ *     carries `%pause `/`%continue`, `liveText` matches
+ *     `/VAM-FLOOD-DONE/`, and `groundTruth` -- checked at
+ *     `stream-client-pause-after.test.ts:244` in both the CI log and this
+ *     file's own local repro -- is still bare `y` lines.
+ *
+ * THE FIX, both load-independent:
+ *   - A DUTY-CYCLE pause instead of one fixed window: pause the raw reader,
+ *     briefly resume it to let `%pause`/`%continue` latch if they arrived
+ *     (see `sawPause`/`sawContinue` below), and repeat -- up to a GENEROUS
+ *     deadline -- rather than gambling that 1.5s of pausing lines up with
+ *     however fast this runner happens to produce bytes today.
+ *   - A CONTINUOUS `yes` (no `head -c`, killed with `C-c` only once this
+ *     file has ITSELF observed the causal chain -- `%pause` then
+ *     `%continue` -- on the wire) instead of a fixed-size flood racing a
+ *     fixed wait, so there is always more output on the way regardless of
+ *     how slowly this runner produces it.
+ *   - AN EXPLICIT PANE RESET, with a per-attempt sentinel polled back
+ *     before anything else runs, at the TOP of the flaky test -- so
+ *     vitest's own retry (or a second local run) never inherits a previous
+ *     attempt's still-running flood. A per-attempt DONE marker
+ *     (`VAM-FLOOD-DONE-<timestamp>`) closes the loophole for good: even if
+ *     the reset somehow failed to fully settle, a stale marker from a
+ *     different attempt could never match this attempt's own regex.
+ *   - Every wait below is a POLL against a generous deadline, never a bare
+ *     `setTimeout`, so this file's own timing choices are never again the
+ *     thing a loaded CI runner falsifies. `%pause`/`%continue` are LATCHED
+ *     synchronously as their chunk arrives (see the `observingSpawn` note
+ *     below) rather than re-scanned from an accumulated buffer -- a second,
+ *     independently MEASURED bug this file's own first draft introduced
+ *     and fixed before it ever reached review (see that note).
+ *
  * SAFETY: a private `-L` socket named for this process and this file, a
  * session name carrying the mandatory `vam-` prefix `StreamClient` itself
  * requires (`SAFE_TARGET_RE`), `kill-server` in `afterAll` -- the same
@@ -64,6 +133,43 @@ const slowSpin = (ms: number): void => {
   while (Date.now() < until) {
     /* deliberately blocking */
   }
+};
+
+/** The one shape every generous, condition-based wait in this file uses --
+ * `stream-client-count.test.ts`'s own `while (... && Date.now() < until)`
+ * poll, named and reused rather than copied five times over. Returns
+ * whether `check()` was ever true, so a caller can assert on the SAME
+ * condition it polled for and get a message that names what never
+ * happened, rather than a generic timeout. */
+const pollUntil = async (
+  check: () => boolean,
+  deadlineMs: number,
+  intervalMs = 200,
+): Promise<boolean> => {
+  const deadline = Date.now() + deadlineMs;
+  while (!check() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return check();
+};
+
+/** Appends `chunk`, keeping only the last `MAX_TRACKED_CHARS` -- MEASURED
+ * the hard way, running the falsification drill below (production's own
+ * `#requestPauseAfter` commented out) against a CONTINUOUS `yes`: with
+ * pause-after genuinely broken, `%pause` never arrives, so the duty-cycle
+ * stall below runs its full generous deadline with an entirely unthrottled
+ * flood behind it the whole time. An unbounded accumulator re-scanned on
+ * every poll (this file's own first draft: an array of chunks, re-joined
+ * from scratch on every check) grew fast enough to crash the Vitest worker
+ * outright -- a V8 OOM inside `RegExpReplace`, not a clean assertion
+ * failure. Every marker this file ever looks for is short and always
+ * arrives at (or near) the CURRENT tail of the stream, so trimming old
+ * history changes nothing this file asserts on, in either the fast-path or
+ * the broken-production path. */
+const MAX_TRACKED_CHARS = 200_000;
+const appendBounded = (acc: string, chunk: string): string => {
+  const next = acc + chunk;
+  return next.length > MAX_TRACKED_CHARS ? next.slice(-MAX_TRACKED_CHARS) : next;
 };
 
 const live = tmuxWorks();
@@ -109,15 +215,32 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
   }, 15_000);
 
   // RETRY ONCE, matching #493's own convention for exactly this class of
-  // real-timing guard: a real tmux, a real socket and a real flood still
-  // leave SOME residual timing this test cannot fully pin down (how long
-  // tmux itself takes to notice and report %pause once genuinely behind).
-  // One retry covers that without widening every ordinary run's budget to
-  // cover a rare miss.
+  // real-timing guard. Safe to keep now that `#resetPane` runs at the top
+  // of the test body on EVERY invocation (the initial attempt and any
+  // retry alike): a retry can no longer inherit a previous attempt's
+  // still-running flood (the module header's own RCA), so this is purely
+  // a safety net for a genuinely rare real-tmux hiccup, never a way to
+  // paper over this file's own timing.
   it('%pause arrives on a real StreamClient (sends pause-after), and the pane recovers correctly', {
     retry: 1,
-    timeout: 30_000,
+    timeout: 120_000,
   }, async () => {
+    // THE RESET (module header, bug (2)): send an interrupt in case a
+    // PREVIOUS attempt left a flood running, then confirm the shell is
+    // actually back at a prompt and has executed a fresh, per-attempt
+    // sentinel before this attempt touches the pane at all. Without this,
+    // vitest's own retry can start while the FIRST attempt's own
+    // `yes`/`head` pipeline is still mid-flight in the pane, feeding this
+    // attempt's seed and `%output` with the wrong run's text.
+    const ready = `VAM-READY-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    tmux('send-keys', '-t', `=${SESSION}:`, 'C-c');
+    tmux('send-keys', '-t', `=${SESSION}:`, `clear; echo ${ready}`, 'Enter');
+    const settled = await pollUntil(
+      () => tmux('capture-pane', '-p', '-t', `=${SESSION}:`).includes(ready),
+      10_000,
+    );
+    expect(settled).toBe(true);
+
     // TEES the real child's raw stdout (via `StreamClient`'s own public
     // `spawnChild` injection seam -- a SECOND listener on the SAME
     // `child.stdout`, never interfering with `StreamClient`'s own
@@ -127,7 +250,24 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
     // only inferring both from a reseed firing. Also the STALL LEVER: a
     // Node `Readable` genuinely pauses ALL its listeners (not just this
     // one) while `.pause()`d, until `.resume()`.
-    const rawChunks: string[] = [];
+    // LATCHED, not re-scanned from an accumulated buffer: MEASURED, the
+    // hard way, running this exact drill -- a resume after the duty-cycle
+    // stall below can flush a burst large enough that, by the time a
+    // DEFERRED poll gets around to checking a bounded tail buffer, that
+    // burst has ALREADY pushed `%pause` itself out of the tracked window
+    // (this file's own first draft: `appendBounded`'s trimming, working
+    // exactly as designed, but against the wrong target -- it should bound
+    // MEMORY, not decide what this file gets to notice). Checking
+    // synchronously, INSIDE the same `'data'` handler invocation that
+    // delivers the matching text, catches it regardless of how much MORE
+    // data floods in immediately after -- Node runs one listener call to
+    // completion before the next `'data'` event is even dispatched.
+    // `pauseTail` is a SEPARATE, small rolling window used only to catch a
+    // marker split across a chunk boundary; once `sawPause`/`sawContinue`
+    // latch true they never go false again.
+    let sawPause = false;
+    let sawContinue = false;
+    let pauseTail = '';
     // `ControlChildProcess['stdout']` (`control.ts`) is deliberately typed
     // minimally (`{ on(event: 'data', ...) }`) -- every other caller only
     // ever needs that. `spawnRealControlChild` is a real `child_process.
@@ -139,7 +279,15 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
     const observingSpawn: SpawnControlChild = (binary, argv) => {
       const child = spawnRealControlChild(binary, argv);
       realStdout = child.stdout as unknown as { pause(): void; resume(): void };
-      child.stdout.on('data', (chunk) => rawChunks.push(String(chunk)));
+      child.stdout.on('data', (chunk) => {
+        const text = String(chunk);
+        const window = pauseTail + text;
+        if (!sawPause && /%pause /.test(window)) sawPause = true;
+        if (!sawContinue && /%continue/.test(window)) sawContinue = true;
+        // Comfortably wider than either marker, just enough to survive a
+        // chunk boundary landing mid-marker.
+        pauseTail = window.slice(-256);
+      });
       return child;
     };
 
@@ -168,80 +316,96 @@ describe.skipIf(!live)('pause-after: %pause only arrives with the flag set (real
         liveText = seed;
       });
       client.onData((chunk) => {
-        liveText += chunk;
+        liveText = appendBounded(liveText, chunk);
       });
 
-      tmux(
-        'send-keys',
-        '-t',
-        `=${SESSION}:`,
-        'yes | head -c 5000000; echo VAM-FLOOD-DONE',
-        'Enter',
-      );
+      // CONTINUOUS, not a fixed 5MB `head -c` (module header, bug (1)): a
+      // slow runner needs MORE wall-clock time to produce the same
+      // backlog, not less, so a size-capped flood can finish (or simply
+      // not yet have produced enough to overflow a kernel buffer) before
+      // this file ever gets a chance to observe backpressure. `yes` alone
+      // never stops on its own; this file explicitly interrupts it below,
+      // only once the causal chain has actually been observed.
+      tmux('send-keys', '-t', `=${SESSION}:`, 'yes', 'Enter');
 
-      // A REAL STALLED READER, not a per-chunk timing guess. MEASURED,
-      // the hard way, across several iterations of this file: a
-      // 20ms-per-chunk busy-wait's actual effect depends entirely on how
-      // many bytes tmux happens to batch into each chunk -- when tmux (or
-      // the OS scheduler) batches LARGE chunks (thousands of lines at
-      // once, observed directly), the SAME 20ms/chunk delay throttles
-      // total throughput far less than when chunks arrive small and
-      // frequent, so whether the client ever falls a full pause-after
-      // SECOND behind became a coin flip that depended on unrelated
-      // system conditions -- 3 separate local test sessions each saw both
-      // outcomes. Genuinely pausing the underlying stream is
-      // deterministic regardless: `.pause()` stops Node reading from the
-      // OS pipe AT ALL (for every listener on it, including `StreamClient`'s
-      // own), so the pipe's kernel buffer fills and tmux's own write
-      // blocks -- exactly the real condition `pause-after` exists to
-      // detect -- for as long as this test decides, independent of chunk
-      // size. 1.5s comfortably clears the 1s `PAUSE_AFTER_SECONDS`
-      // threshold (`client.ts`) without depending on exactly how long
-      // tmux takes to notice.
-      realStdout?.pause();
-      await new Promise((r) => setTimeout(r, 1_500));
-      realStdout?.resume();
-
-      // GENEROUS AND CONDITION-BASED, not a fixed sleep: CI found the
-      // ORIGINAL version of this test failing at 11.9s on a slower Linux
-      // runner because a fixed 10s poll for `capture-pane`'s own text was
-      // simply too short there -- a wall-clock race in the TEST, not
-      // proof of a bug. Polled every 200ms, on the CLIENT'S OWN
-      // accumulated view. Once resumed, everything buffered during the
-      // stall arrives in one burst and the remainder of the flood drains
-      // unthrottled (~2.5s wall for a full 5MB flood with no slow
-      // consumer at all, this repo's own `terminal-stream-resource-
-      // shots.mjs` measurement) -- 15s is generous against that, not
-      // against a chunk-size-dependent guess.
-      const liveDeadline = Date.now() + 15_000;
-      while (!/VAM-FLOOD-DONE/.test(liveText) && Date.now() < liveDeadline) {
-        await new Promise((r) => setTimeout(r, 200));
+      // A DUTY-CYCLE STALL, not one fixed window (module header, bug (1)).
+      // MEASURED, the hard way, across several iterations of this file: a
+      // single fixed pause gambles that tmux crosses its own
+      // `PAUSE_AFTER_SECONDS` age threshold DURING that exact window,
+      // which depends entirely on how fast THIS runner happens to be able
+      // to schedule the flood today. Pausing the raw reader for 1s, then
+      // resuming it just long enough to drain and inspect what arrived,
+      // then pausing again -- repeated up to a generous 25s deadline --
+      // keeps this client NET SLOW for as long as it takes, on a fast
+      // machine or a starved one alike, rather than betting on a single
+      // window. `.pause()` stops Node reading from the OS pipe AT ALL
+      // (for every listener on it, including `StreamClient`'s own), so the
+      // pipe's kernel buffer fills and tmux's own write blocks -- exactly
+      // the real condition `pause-after` exists to detect.
+      const pauseDeadline = Date.now() + 25_000;
+      while (!sawPause && Date.now() < pauseDeadline) {
+        realStdout?.pause();
+        await new Promise((r) => setTimeout(r, 1_000));
+        realStdout?.resume();
+        await new Promise((r) => setTimeout(r, 300));
       }
 
-      const raw = rawChunks.join('');
       // THE PROPERTY ITSELF, asserted directly rather than merely
       // inferred from a reseed happening to fire: tmux actually sent
-      // %pause for this client's own pane, and this client actually sent
+      // %pause for this client's own pane. Checked BEFORE the flood is
+      // ever interrupted below, so a genuine regression here (pause-after
+      // silently dropped) fails on THIS assertion rather than stalling
+      // out waiting for a DONE marker that can never arrive while the
+      // pane stays paused.
+      expect(sawPause, 'tmux never sent %pause for this pane').toBe(true);
+
+      // GENEROUS AND CONDITION-BASED: wait for this client to have sent
       // the explicit resume tmux requires (MEASURED: tmux never resumes a
       // paused pane on its own -- see client.ts's own `#continueAfterPause`
-      // header). `%continue` appears here whether it arrived as a bare
-      // notification line or nested inside the `-A` command's own reply
-      // block (measured to be the real shape) -- a plain substring search
-      // catches either.
-      expect(raw).toMatch(/%pause /);
-      expect(raw).toMatch(/%continue/);
+      // header) and gotten its reply. `%continue` appears here whether it
+      // arrived as a bare notification line or nested inside the `-A`
+      // command's own reply block (measured to be the real shape) -- a
+      // plain substring search catches either.
+      await pollUntil(() => sawContinue, 15_000);
+      expect(sawContinue, 'this client never sent -A "<pane>:continue" back').toBe(true);
+
+      // THE CAUSAL CHAIN'S NEXT LINK: only NOW, with pause and continue
+      // both independently confirmed on the wire, interrupt the flood and
+      // print a marker unique to THIS attempt (module header, bug (2)) --
+      // so even if some future change reintroduces a reset gap, a stale
+      // marker from a different attempt can never match this regex.
+      const done = `VAM-FLOOD-DONE-${Date.now()}`;
+      tmux('send-keys', '-t', `=${SESSION}:`, 'C-c');
+      tmux('send-keys', '-t', `=${SESSION}:`, `echo ${done}`, 'Enter');
+      const doneMarker = new RegExp(done);
 
       // NEVER STAYS PAUSED: the client's own view must show the flood's
       // trailing marker -- proof the pane recovered from THIS client's
       // point of view, not merely that tmux's own independent buffer
-      // moved on without it.
-      expect(liveText).toMatch(/VAM-FLOOD-DONE/);
+      // moved on without it. GENEROUS AND CONDITION-BASED, not a fixed
+      // sleep: CI found the ORIGINAL version of this test failing at
+      // 11.9s on a slower Linux runner because a fixed 10s poll was
+      // simply too short there -- a wall-clock race in the TEST, not
+      // proof of a bug.
+      const sawLive = await pollUntil(() => doneMarker.test(liveText), 30_000);
+      expect(sawLive).toBe(true);
+      expect(liveText).toMatch(doneMarker);
 
       // CORRECTNESS cross-check against ground truth: what this client
       // ended up seeing agrees with tmux's own `capture-pane` for the
-      // same pane at the same point.
-      const groundTruth = tmux('capture-pane', '-p', '-t', `=${SESSION}:`);
-      expect(groundTruth).toMatch(/VAM-FLOOD-DONE/);
+      // same pane. Polled too, not a single post-hoc snapshot: spawning a
+      // brand new `tmux` CLI process (`execFileSync`) to ask is itself
+      // slower under the exact CPU contention this file exists to survive
+      // -- CI's own log showed this specific assertion racing a
+      // still-in-flight flood (module header, bug (2)); polling here
+      // removes that race regardless of which cause produced it.
+      let groundTruth = '';
+      const sawGroundTruth = await pollUntil(() => {
+        groundTruth = tmux('capture-pane', '-p', '-t', `=${SESSION}:`);
+        return doneMarker.test(groundTruth);
+      }, 10_000);
+      expect(sawGroundTruth).toBe(true);
+      expect(groundTruth).toMatch(doneMarker);
     } finally {
       client.dispose();
     }
