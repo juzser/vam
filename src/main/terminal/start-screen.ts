@@ -7,43 +7,27 @@
  * a screen vam read in the wrong pane would be answered in the wrong pane.
  */
 
-import { PROVIDERS, type ProviderId } from '../../shared/providers.js';
 import type { AnswerTrustResult, StartScreenView } from '../../shared/start-screen.js';
 import { answerTrustDialog, detectStartScreen } from '../sources/claude-code/start-screen.js';
+import { identifyRunningProvider } from '../sources/tmux/shell.js';
 import { listVamSessions, readPane, type TmuxRun } from '../sources/tmux/spawn.js';
 import { targetSession } from './pane.js';
 
 export type { AnswerTrustResult };
-
-/**
- * WHICH PROVIDER IS ACTUALLY RUNNING IN THIS PANE, from its foreground
- * command (`pane_current_command`) -- a SEPARATE question from `screen`
- * above, and answered from a different signal: `start-screen.ts`'s own
- * classifier reads the pane's TEXT and is deliberately blind to the command
- * (its own header explains why); this is the command, and nothing else.
- *
- * A DIRECT MATCH for a provider whose own quirk-free command is running
- * (`codex`), and the ONE MEASURED EXCEPTION for `claude`: its ready screen
- * and its blocking dialogs alike report the bare version string
- * (`2.1.282`) as the foreground command, never the word `claude`
- * (`sources/claude-code/start-screen.ts`'s own header, measured against the
- * real CLI). `null` for a shell, an unrecognised command, or no command at
- * all -- never a guess at which provider that might be.
- */
-const CLAUDE_VERSION_COMMAND = /^\d+\.\d+\.\d+$/;
-
-export function identifyRunningProvider(command: string | undefined): ProviderId | null {
-  if (command === undefined || command === '') return null;
-  const bare = command.startsWith('-') ? command.slice(1) : command;
-  const direct = PROVIDERS.find((provider) => provider.command[0] === bare);
-  if (direct !== undefined) return direct.id;
-  return CLAUDE_VERSION_COMMAND.test(bare) ? 'claude-code' : null;
-}
+export { identifyRunningProvider };
 
 /**
  * The screen the pane behind `rowId` is showing right now, AND which
  * provider its foreground command names -- a READ, safe to poll, nothing
  * here presses a key.
+ *
+ * `identifyRunningProvider` CAN ANSWER `undefined` (`sources/tmux/shell.ts`'s
+ * own three-state header) FOR A PANE THIS FUNCTION HAS ALREADY PROVEN IS NOT
+ * A SHELL -- a race between the two reads this call makes (`listVamSessions`
+ * for the command, `readPane` for the text) that only ever narrows, never
+ * widens, what `screen` already found; `?? null` folds it into
+ * `StartScreenView`'s own "confirmed, unidentified" arm rather than growing
+ * a fourth state this type was never meant to carry.
  */
 export async function readStartScreen(
   run: TmuxRun,
@@ -62,7 +46,7 @@ export async function readStartScreen(
   return {
     kind: 'ok',
     screen: detectStartScreen(pane.text),
-    provider: identifyRunningProvider(session?.command),
+    provider: identifyRunningProvider(session?.command) ?? null,
   };
 }
 

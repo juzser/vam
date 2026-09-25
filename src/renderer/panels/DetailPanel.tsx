@@ -1070,14 +1070,19 @@ export type DetailPanelProps = {
   readonly startingPane?: StartingPaneWait | null;
   /**
    * CONFIRMED RUNNING, even while `entry.session.status` still reads
-   * `unstarted`/`terminal` -- `Canvas.tsx`'s `providerRunningByKey`, read off
-   * the pane's own foreground command (`readStartScreen`'s `provider`,
-   * `identifyRunningProvider` in main) once `detectStartScreen` reports
-   * `ready`. `undefined` (absent) is the ordinary case and draws the start
-   * screen exactly as before this existed; PRESENT -- even `null`, for a
-   * confirmed pane whose command named neither provider -- draws the ready
-   * state instead (`PaneReady`) and withdraws the Start/Resume controls, so
-   * a pane already running an agent is never offered a second one.
+   * `unstarted`/`terminal` -- `Canvas.tsx`'s own merge of TWO sources, both
+   * reading the pane's foreground command through the SAME classifier
+   * (`identifyRunningProvider`, `sources/tmux/shell.ts`): the fast, bounded
+   * `providerRunningByKey` map while an ACTIVE Start/Resume wait is up
+   * (`readStartScreen`'s `provider`, once `detectStartScreen` reports
+   * `ready`), and `entry.session.runningProvider` (`model.ts`) for the
+   * ordinary idle case -- read straight off the SAME tmux listing the
+   * source's own poll already fetches, no per-row IPC of its own. `undefined`
+   * (absent) is the ordinary case and draws the start screen exactly as
+   * before this existed; PRESENT -- even `null`, for a confirmed pane whose
+   * command named neither provider -- draws the ready state instead
+   * (`PaneReady`) and withdraws the Start/Resume controls, so a pane already
+   * running an agent is never offered a second one.
    *
    * THE BLOCKER THIS CLOSES: the first cut of the start-screen work cleared
    * `startingPane` outright on `ready`, which dropped straight back to the

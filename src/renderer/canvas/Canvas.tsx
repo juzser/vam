@@ -316,16 +316,6 @@ export const START_SCREEN_POLL_MS = 1_500;
 export const START_SCREEN_UNKNOWN_STALL_MS = 9_000;
 
 /**
- * HOW OFTEN A VISIBLE `unstarted`/`terminal` ROW WITH NO ACTIVE WAIT IS
- * CHECKED FOR A PROVIDER ALREADY RUNNING IN IT -- the reload case
- * (`providerRunningByKey`'s own header). Slower than `START_SCREEN_POLL_MS`
- * on purpose: that cadence is for a pane the operator is actively watching a
- * spinner on; this is a quiet background check across however many idle rows
- * are on screen, and nothing here draws anything until it finds a `ready`.
- */
-export const PROVIDER_WATCH_POLL_MS = 3_000;
-
-/**
  * A status message shortened for the bar, never for the log.
  *
  * `describeFailure` renders failures as `code: message` and the codes are
@@ -2624,23 +2614,35 @@ function CanvasInner({
     Readonly<Record<string, StartingPaneWait>>
   >({});
   /**
-   * CONFIRMED RUNNING, KEYED THE SAME WAY `startingPaneByKey` IS -- the
-   * coordinator's own blocker on the first cut of this feature: `ready`
-   * used to CLEAR the wait outright, which dropped the Response view back
-   * to the ordinary "Nothing is running in this pane yet" screen with an
-   * idle Start button, while `allEntries` still had not caught up -- still
-   * the operator's second report ("even when the terminal has finished
-   * starting the session, the Response view is still stuck") in a new
-   * shape, and worse: a second press there types the provider's command
-   * into a pane that already has it running.
+   * CONFIRMED RUNNING BY THE FAST POLL, KEYED THE SAME WAY `startingPaneByKey`
+   * IS -- and ONLY EVER POPULATED FOR A KEY THAT POLL IS ALREADY WATCHING,
+   * i.e. an ACTIVE Start/Resume wait. A first cut of this feature also ran a
+   * SECOND, background poll across every idle `unstarted`/`terminal` row so
+   * a reload or a by-hand `claude` would resolve without a Start press --
+   * caught in review as a performance concern (an unbounded, per-row,
+   * forever-repeating `capture-pane`-equivalent IPC). That idle case is now
+   * answered from the MODEL instead: `Session.runningProvider` (`model.ts`),
+   * read straight off the SAME tmux listing `source.ts`'s own poll already
+   * fetches `pane_current_command` from, at that poll's own cadence -- no
+   * second read, no interval of its own. `runningProvider` below merges the
+   * two: this map first (the fast, bounded case), the model's own field
+   * otherwise.
+   *
+   * `ready` used to CLEAR the wait outright, which dropped the Response view
+   * back to the ordinary "Nothing is running in this pane yet" screen with
+   * an idle Start button while `allEntries` still had not caught up -- the
+   * operator's second report ("even when the terminal has finished starting
+   * the session, the Response view is still stuck") in a new shape, and
+   * worse: a second press there types the provider's command into a pane
+   * that already has it running. This map is what `ready` sets instead.
    *
    * A KEY'S PRESENCE IS THE FACT, never its value alone -- the map's value
    * is the provider `readStartScreen` identified from the pane's own
-   * foreground command (`identifyRunningProvider`, main), or `null` when
-   * something is confirmed running but the command named neither provider.
-   * `null` here is not "not confirmed" (`in` is what answers that); folding
-   * the two into one falsy check would un-confirm a pane vam has already
-   * proven is not a shell.
+   * foreground command (`identifyRunningProvider`, `sources/tmux/shell.ts`),
+   * or `null` when something is confirmed running but the command named
+   * neither provider. `null` here is not "not confirmed" (`in` is what
+   * answers that); folding the two into one falsy check would un-confirm a
+   * pane vam has already proven is not a shell.
    *
    * SURVIVES UNTIL THE ROW ITSELF SAYS SO, the same rule `startingPaneByKey`
    * follows a few lines down: nothing here clears a key on a timer or on a
@@ -2865,59 +2867,6 @@ function CanvasInner({
       window.clearInterval(id);
     };
   }, [startingPaneByKey, providerRunningFor, armUnknownStall]);
-  /**
-   * D-RELOAD: THE SAME "SOMETHING IS ALREADY RUNNING" FACT, FOR A PANE THE
-   * OPERATOR NEVER PRESSED START ON THIS SESSION.
-   *
-   * `startingPaneByKey` above only ever holds a wait for a press this
-   * renderer itself made (`beginStartingPane`, `startSessionIn`/
-   * `resumeInPane`) -- so it starts EMPTY on every fresh mount, a reload
-   * included, no matter what the pane already has running: the operator may
-   * have typed `claude` by hand in the Terminal view (`start-in-pane.ts`'s
-   * own header says this is an ordinary thing to happen), or simply reloaded
-   * the window while a session they started minutes ago was already up. The
-   * coordinator's own words: "The start screen must not reappear for a pane
-   * whose program is a provider, even after a reload." So this polls every
-   * VISIBLE row still reading `unstarted`/`terminal` that neither state above
-   * already accounts for, and asks the identical question `readStartScreen`
-   * answers for an active wait -- the only difference is there is no spinner
-   * to freeze and no blocking-screen card to draw while it waits: a pane
-   * this renderer never pressed Start on stays silent until it is either
-   * confirmed running or the operator acts on it themselves.
-   */
-  useEffect(() => {
-    const getStartScreen = window.api?.terminal?.startScreen;
-    if (getStartScreen === undefined) return;
-    const candidates = allEntries.filter((entry) => {
-      const key = entry.session.pane ?? entry.session.id;
-      return (
-        (entry.session.status === 'unstarted' || entry.session.status === 'terminal') &&
-        startingPaneByKey[key] === undefined &&
-        providerRunningFor(key) === undefined
-      );
-    });
-    if (candidates.length === 0) return;
-    let cancelled = false;
-    const poll = () => {
-      for (const entry of candidates) {
-        const key = entry.session.pane ?? entry.session.id;
-        getStartScreen(entry.project.id, entry.session.id)
-          .then((view) => {
-            if (cancelled || view.kind !== 'ok' || view.screen !== 'ready') return;
-            setProviderRunningByKey((current) =>
-              key in current ? current : { ...current, [key]: view.provider },
-            );
-          })
-          .catch(() => {});
-      }
-    };
-    poll();
-    const id = window.setInterval(poll, PROVIDER_WATCH_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [allEntries, startingPaneByKey, providerRunningFor]);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -7257,6 +7206,13 @@ function CanvasInner({
                 savePrefs(setProjectPrRepo(prefs, projectSource, projectId, ''));
               },
             };
+      // CONFIRMED RUNNING, from whichever of the two sources has an answer --
+      // `runningProvider`'s own comment at its call site below.
+      let runningProvider: ProviderId | null | undefined;
+      if (entry !== null) {
+        const fromWait = providerRunningFor(entry.session.pane ?? entry.session.id);
+        runningProvider = fromWait !== undefined ? fromWait : entry.session.runningProvider;
+      }
       return {
         entry,
         prRepo,
@@ -7342,9 +7298,14 @@ function CanvasInner({
         // `terminal` -- `providerRunningByKey`'s own header. `undefined`
         // (the ordinary case) draws the start screen exactly as before;
         // present (even `null`) is what tells `DetailPanel` to draw the
-        // ready state instead and to stop offering Start.
-        runningProvider:
-          entry === null ? undefined : providerRunningFor(entry.session.pane ?? entry.session.id),
+        // ready state instead and to stop offering Start. THE FAST POLL'S
+        // MAP TAKES PRIORITY, the model's own field otherwise (computed just
+        // above): an ACTIVE wait's `providerRunningByKey` entry is never
+        // stale by more than `START_SCREEN_POLL_MS`, while `entry.session.
+        // runningProvider` trails the source's own ~10s cadence -- exactly
+        // right for the idle case that field exists for, too slow for one
+        // this renderer is actively watching a spinner on.
+        runningProvider,
         // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
         // when THIS pane holds nothing, vam has no session to show ANYWHERE
         // (`entries`, the same filtered set the sidebar and the tab strip

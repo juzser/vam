@@ -352,37 +352,52 @@ describe('Start session — the wait for the agent to register', () => {
     });
 
     /**
-     * D-RELOAD: NO WAIT EVER BEGAN -- a fresh mount, exactly what a page
-     * reload gives Canvas, with the pane already running a provider from
-     * before the reload (or typed by hand). `startingPaneByKey` starts empty
-     * on every mount, so this is the OTHER poll (`PROVIDER_WATCH_POLL_MS`'s
-     * own effect) proving the ready state does not depend on ever having
-     * pressed Start in this render tree at all.
+     * D-RELOAD, PERFORMANCE-FIXED VERSION: NO WAIT EVER BEGAN, AND NO POLL OF
+     * ANY KIND -- a fresh mount, exactly what a page reload gives Canvas,
+     * with the pane already running a provider from before the reload (or
+     * typed by hand). A first cut of this feature answered this with a
+     * SECOND background poll across every idle row, caught in review as an
+     * unbounded per-row IPC that never stops. The reload case is now
+     * answered from the MODEL alone -- `Session.runningProvider`, arriving
+     * with the row exactly as `source.ts`'s own poll cadence delivers it
+     * (`pane-row.ts`'s own header) -- so this mounts with NO `window.api` at
+     * all and still shows the ready state.
      */
-    it('shows the ready state on a fresh mount with no Start ever pressed — the reload case', async () => {
-      const startScreen = vi.fn(async () => ({
-        kind: 'ok' as const,
-        screen: 'ready' as const,
-        provider: 'codex' as const,
-      }));
-      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+    it('shows the ready state on a fresh mount with no Start ever pressed, from the model alone — the reload case', async () => {
       const { source } = gatedSource();
-      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      render(
+        <Canvas model={modelWith({ ...UNSTARTED, runningProvider: 'codex' })} source={source} />,
+      );
       await act(async () => {});
-      expect(startScreen).toHaveBeenCalledWith('p1', UNSTARTED.id);
       expect(document.querySelector('[data-pane-ready]')?.textContent).toContain('Codex is ready');
       expect(startButton()).toBeNull();
+      expect(providerPicker()).toBeNull();
     });
 
-    it('sends a first message from the ready state through the normal composer path', async () => {
-      const startScreen = vi.fn(async () => ({
-        kind: 'ok' as const,
-        screen: 'ready' as const,
-        provider: 'claude-code' as const,
-      }));
-      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+    it('draws the ready state for a `terminal` row too, from the model alone', async () => {
+      const { source } = gatedSource();
+      render(
+        <Canvas
+          model={modelWith({ ...TERMINAL, runningProvider: 'claude-code' })}
+          source={source}
+        />,
+      );
+      await act(async () => {});
+      expect(document.querySelector('[data-pane-ready]')?.textContent).toContain(
+        'Claude Code is ready',
+      );
+      expect(document.querySelector('[data-terminal-only-start]')).toBeNull();
+      expect(resumeButton()).toBeNull();
+    });
+
+    it('sends a first message from the ready state through the normal composer path, with no window.api at all', async () => {
       const { source, recorded } = sourceWith(async () => {});
-      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      render(
+        <Canvas
+          model={modelWith({ ...UNSTARTED, runningProvider: 'claude-code' })}
+          source={source}
+        />,
+      );
       await act(async () => {});
       expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
       const box = document.querySelector<HTMLTextAreaElement>(
@@ -402,6 +417,38 @@ describe('Start session — the wait for the agent to register', () => {
         box?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
       });
       expect(recorded).toEqual([[UNSTARTED.id, 'hello there']]);
+    });
+
+    /**
+     * THE COORDINATOR'S OWN PERFORMANCE FIX, FALSIFIED. A first cut of this
+     * feature ran `window.api.terminal.startScreen` on an interval for
+     * EVERY idle `unstarted`/`terminal` row, forever -- N tmux calls every
+     * few seconds, whether or not the operator was even looking. This
+     * mounts several such rows with NO Start/Resume wait active on any of
+     * them and asserts the IPC is never called at all, then advances the
+     * fake clock well past both the fast poll's cadence
+     * (`START_SCREEN_POLL_MS`) and the retired background poll's own
+     * (3s) to prove it stays that way -- not merely absent on the first
+     * tick. FALSIFIED by hand against the pre-fix code (the `D-RELOAD`
+     * effect this repo's history shows): that version fails this test
+     * outright, the whole point of writing it.
+     */
+    it('never calls terminal.startScreen for an idle row with no active wait — the coordinator’s own perf fix', async () => {
+      vi.useFakeTimers();
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'claude-code' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED, otherSession('s2'))} source={source} />);
+      await act(async () => {});
+      expect(startScreen).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(startScreen).not.toHaveBeenCalled();
     });
 
     it('shows the trust card once the pane reports trust, and does not clear the wait', async () => {

@@ -60,7 +60,15 @@ function check(label, ok, detail) {
  * promise that never resolves is "the agent registers a moment later" held
  * open for exactly as long as the screenshot below needs it.
  */
-function stubApiScript({ row, pane, hangRecordPrompt, startScreen, startScreenProvider, answerTrustSpy }) {
+function stubApiScript({
+  row,
+  pane,
+  hangRecordPrompt,
+  startScreen,
+  startScreenProvider,
+  answerTrustSpy,
+  runningProvider,
+}) {
   const SCREEN = ['Last login: Mon Sep 21 10:12:03 on ttys006', `~/w/notes $ `].join('\n');
   const unavailable = () =>
     Promise.resolve({
@@ -123,6 +131,12 @@ function stubApiScript({ row, pane, hangRecordPrompt, startScreen, startScreenPr
             decisions: [],
             source: 'claude-code',
             vamControlled: true,
+            // THE COORDINATOR'S OWN PERFORMANCE FIX: the idle-row ready state
+            // now comes from the MODEL (`Session.runningProvider`,
+            // `pane-row.ts`), not a poll -- `undefined` here (the ordinary
+            // case) omits the key entirely, matching the shape `Object.
+            // hasOwn` -based unit tests pin at the source.
+            ...(runningProvider === undefined ? {} : { runningProvider }),
           },
         ],
       },
@@ -153,16 +167,17 @@ function stubApiScript({ row, pane, hangRecordPrompt, startScreen, startScreenPr
       send: async () => 'sent',
       answer: async () => ({ kind: 'unavailable' }),
       prompt: async () => ({ kind: 'unavailable' }),
-      // WHAT `Canvas.tsx`'s OWN POLL READS while a Start-session wait is up,
-      // and what its `providerRunningByKey` poll reads for a row with none
-      // (`start-screen.ts`) -- `startScreen` is `undefined` in most blocks
-      // below, which answers `unavailable` and leaves the wait to the
-      // ordinary spinner, exactly as it always has. The blocks that DO pass
-      // it are what draw the trust card and the ready state.
-      // `startScreenProvider` defaults to `null` (confirmed running,
-      // unidentified) rather than to `undefined` (not confirmed at all) --
-      // `StartScreenView`'s own shape requires the field whenever `screen`
-      // is reported at all.
+      // WHAT `Canvas.tsx`'s OWN FAST POLL READS while an ACTIVE Start-session
+      // wait is up (`main/terminal/start-screen.ts`) -- `startScreen` is
+      // `undefined` in most blocks below, which answers `unavailable` and
+      // leaves the wait to the ordinary spinner, exactly as it always has.
+      // The trust-card block is the one that passes it; the READY case is
+      // `runningProvider` on the fixture row above instead (the coordinator's
+      // own performance fix: an idle row's readiness comes from the model,
+      // never from this poll). `startScreenProvider` defaults to `null`
+      // (confirmed running, unidentified) rather than to `undefined` (not
+      // confirmed at all) -- `StartScreenView`'s own shape requires the
+      // field whenever `screen` is reported at all.
       startScreen: async () =>
         startScreen === undefined
           ? { kind: 'unavailable' }
@@ -498,20 +513,24 @@ async function trustCardShot({ theme }) {
 }
 
 /**
- * THE OPERATOR'S SECOND REPORT, SEEN, AND THE COORDINATOR'S OWN BLOCKER ON
- * THE FIRST CUT OF THIS FIX: "even when the terminal has finished starting
- * the session, the Response view is still stuck loading." `startScreen:
- * 'ready'` is the pane itself proving the CLI is up, from the moment the
- * page loads -- the RELOAD case (`Canvas.tsx`'s own D-RELOAD poll,
- * `providerRunningByKey`'s header): no Start press happens in this shot at
- * all, which is the point. The first cut of this guard pressed Start and
+ * THE OPERATOR'S SECOND REPORT, SEEN, AND TWO ROUNDS OF REVIEW ON THE FIRST
+ * CUT OF THIS FIX: "even when the terminal has finished starting the
+ * session, the Response view is still stuck loading." `runningProvider:
+ * 'claude-code'` on the fixture ROW is the pane's own tmux listing proving
+ * the CLI is up, from the moment the page loads -- the RELOAD case
+ * (`Session.runningProvider`, `pane-row.ts`'s header): no Start press
+ * happens in this shot at all, which is the point.
+ *
+ * TWO BLOCKERS, IN ORDER. The first cut of this guard pressed Start and
  * screenshotted the wait clearing back to the ORDINARY, idle Start button --
- * which the coordinator caught as the exact bug being fixed wearing a
- * different shape: a pane vam has already proven is running an agent must
- * never fall back to offering Start, on a reload or otherwise. This now
- * asserts the corrected shape -- `PaneReady` (`DetailPanel.tsx`) drawn
- * straight off the row's `unstarted` status with no click at all, no Start
- * button anywhere, and the composer already enabled.
+ * caught as the exact bug being fixed wearing a different shape: a pane vam
+ * has already proven is running an agent must never fall back to offering
+ * Start. The second cut answered the reload case with a SECOND background
+ * poll (`window.api.terminal.startScreen` on an interval, across every idle
+ * row) -- caught as an unbounded per-row IPC that never stops. This shot now
+ * proves the CURRENT shape: `PaneReady` (`DetailPanel.tsx`) drawn straight
+ * off the row's OWN `runningProvider` field, no poll of any kind, no click
+ * at all, no Start button anywhere, and the composer already enabled.
  */
 async function readyStateShot({ theme }) {
   const outName = `start-screen-ready-${theme}`;
@@ -521,8 +540,7 @@ async function readyStateShot({ theme }) {
     row: ROW,
     pane: PANE,
     hangRecordPrompt: false,
-    startScreen: 'ready',
-    startScreenProvider: 'claude-code',
+    runningProvider: 'claude-code',
   });
   await page.addInitScript(
     (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),
