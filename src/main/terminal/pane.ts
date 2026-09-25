@@ -38,6 +38,7 @@ import {
   sendEscapeArgv,
   sendNavArgv,
   sendNewlineArgv,
+  sendPasteArgv,
   sendTextArgv,
   sendWheelArgv,
 } from '../sources/tmux/argv.js';
@@ -413,6 +414,19 @@ export async function sendToPane(
   name: string,
   key: PaneKey,
 ): Promise<PaneSendResult> {
+  // A PASTE IS SEVERAL TMUX COMMANDS, NOT ONE -- `sendPasteArgv`'s own
+  // `set-buffer`/`-a` chain plus a final `paste-buffer`, run IN ORDER on the
+  // SAME run this switch uses for everything else. Handled here, ahead of
+  // the single-argv switch below, because that switch assumes one `run` call
+  // answers the whole key; a paste answers `refused` the moment any step of
+  // it fails, exactly as a single failed `send-keys` would, and never runs
+  // the remaining steps into a pane that may already be gone.
+  if (key.kind === 'paste') {
+    for (const step of sendPasteArgv(name, key.text)) {
+      if ((await run(step)).failure !== null) return 'refused';
+    }
+    return 'sent';
+  }
   const match = { name } as const;
   // The builders are kept apart in `tmux/argv.ts` for the one reason that
   // matters here: `-l` types, and Return, Backspace, Shift-Tab, Escape, a

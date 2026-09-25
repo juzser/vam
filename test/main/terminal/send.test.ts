@@ -280,6 +280,51 @@ describe('typing into the session vam started for a project', () => {
   });
 });
 
+/**
+ * A REAL PASTE -- one `PaneKey`, several tmux commands (`sendPasteArgv`'s own
+ * `set-buffer`/`paste-buffer` chain), aimed by the SAME pairing guard as
+ * every other key.
+ */
+describe('typing a real paste into the session vam started for a project', () => {
+  const pasteAnswers = (rows: string) => ({
+    ...listing(rows),
+    'set-buffer': ok(''),
+    'paste-buffer': ok(''),
+  });
+
+  it('sends the whole paste as one PaneKey and reports it sent', async () => {
+    const { run, verbs } = runner(pasteAnswers(`${ATLAS}\t\tvam-atlas-a1b2c3\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello\rworld' })).toBe('sent');
+    // A listing, then every step `sendPasteArgv` built for this text -- one
+    // `set-buffer` (short text, one chunk) and the final `paste-buffer`.
+    expect(verbs()).toEqual(['list-sessions', 'set-buffer', 'paste-buffer']);
+  });
+
+  it('refuses a paste it cannot aim, exactly like every other key -- and touches no buffer', async () => {
+    const { run, verbs } = runner(pasteAnswers(`${BEACON}\t\tvam-beacon-d4e5f6\n`));
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello' })).toBe('unaimed');
+    expect(verbs()).toEqual(['list-sessions']);
+  });
+
+  it('reports refused, not sent, when tmux declines the paste-buffer delivery', async () => {
+    const { run } = runner({
+      ...listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
+      'set-buffer': ok(''),
+      'paste-buffer': failed('no such buffer'),
+    });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello' })).toBe('refused');
+  });
+
+  it('reports refused when even setting the buffer fails, and never calls paste-buffer', async () => {
+    const { run, verbs } = runner({
+      ...listing(`${ATLAS}\t\tvam-atlas-a1b2c3\n`),
+      'set-buffer': failed('tmux: server exited'),
+    });
+    expect(await sendSessionKey(run, ATLAS, { kind: 'paste', text: 'hello' })).toBe('refused');
+    expect(verbs()).toEqual(['list-sessions', 'set-buffer']);
+  });
+});
+
 describe('the send channel refuses what the renderer may not ask', () => {
   function handler() {
     const handlers = new Map<string, (event: unknown, ...args: unknown[]) => unknown>();

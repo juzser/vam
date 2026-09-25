@@ -13,7 +13,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { CHANNELS } from '../../../src/main/ipc/channels.js';
 import type { TmuxRun, TmuxRunResult } from '../../../src/main/sources/tmux/spawn.js';
 import type { StreamClient } from '../../../src/main/terminal/stream/client.js';
-import { registerTerminalStreamIpc } from '../../../src/main/terminal/stream-ipc.js';
+import {
+  MAX_STREAM_WRITE_BYTES,
+  registerTerminalStreamIpc,
+} from '../../../src/main/terminal/stream-ipc.js';
 
 const ok = (stdout: string): TmuxRunResult => ({ failure: null, stdout, stderr: '' });
 const failed = (stderr: string): TmuxRunResult => ({
@@ -174,6 +177,45 @@ describe('registerTerminalStreamIpc', () => {
     await call(CHANNELS.terminalStreamWrite, opened.streamId, bytes);
 
     expect(fake.written).toEqual(['héllo']);
+  });
+
+  it('ignores a write over MAX_STREAM_WRITE_BYTES rather than forwarding it', async () => {
+    // A paste is the one caller that could ever hand this channel more than a
+    // few bytes at once (`TerminalStreamTab.tsx`'s paste listener); the
+    // renderer already truncates at `MAX_PASTE_TEXT` before it ever gets this
+    // far, but the renderer is the least trusted process in the app, so the
+    // bound is checked here too rather than only there.
+    const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    const tooBig = new Uint8Array(MAX_STREAM_WRITE_BYTES + 1);
+    await call(CHANNELS.terminalStreamWrite, opened.streamId, tooBig);
+
+    expect(fake.written).toEqual([]);
+  });
+
+  it('still forwards a write right at the bound', async () => {
+    const { run } = runner({ '-V': TMUX_VERSION_OK, 'list-sessions': LIST_ONE });
+    const { ipcMain, call } = fakeIpcMain();
+    const { webContents } = fakeWebContents();
+    const fake = fakeClient();
+    registerTerminalStreamIpc(ipcMain, webContents, run, { createClient: () => fake.client });
+
+    const opened = (await call(CHANNELS.terminalStreamOpen, ATLAS)) as {
+      ok: true;
+      streamId: string;
+    };
+    const atBound = new TextEncoder().encode('a'.repeat(MAX_STREAM_WRITE_BYTES));
+    await call(CHANNELS.terminalStreamWrite, opened.streamId, atBound);
+
+    expect(fake.written).toEqual(['a'.repeat(MAX_STREAM_WRITE_BYTES)]);
   });
 
   it('close disposes the client and is idempotent for an unknown id', async () => {

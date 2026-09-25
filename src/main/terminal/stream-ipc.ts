@@ -20,6 +20,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { MAX_PASTE_TEXT } from '../../shared/terminal.js';
 import { CHANNELS } from '../ipc/channels.js';
 import type { IpcMainLike } from '../ipc/handlers.js';
 import { readPublishedPanes } from '../sources/claude-code/session-pane.js';
@@ -29,6 +30,22 @@ import type { WebContentsLike } from '../stream/register.js';
 import { MAX_PROJECT_ID_LENGTH } from './ipc.js';
 import { targetSession } from './pane.js';
 import { type SpawnControlChild, StreamClient, type StreamClientOptions } from './stream/client.js';
+
+/**
+ * The most bytes one `terminalStream.write` may carry.
+ *
+ * EVERY OTHER CALLER OF THIS CHANNEL IS xterm's OWN `onData`, one keystroke
+ * at a time -- a handful of bytes. A paste is the one caller that can hand it
+ * a whole clipboard (`TerminalStreamTab.tsx`'s paste listener); the renderer
+ * already truncates to `MAX_PASTE_TEXT` code points before it ever builds
+ * that write (`terminal-paste.ts`), but the renderer is the least trusted
+ * process in the app, so the bound is enforced here too rather than only
+ * there. FOUR TIMES `MAX_PASTE_TEXT` because the text crosses the bridge
+ * UTF-8-encoded and a code point can be up to four bytes -- this is a ceiling
+ * on the WIRE size of a legitimate paste, not a second, independent guess at
+ * one.
+ */
+export const MAX_STREAM_WRITE_BYTES = MAX_PASTE_TEXT * 4;
 
 /** The version floor named in the module header. */
 const MIN_TMUX_MAJOR = 3;
@@ -167,7 +184,13 @@ export function registerTerminalStreamIpc(
     CHANNELS.terminalStreamWrite,
     async (_event, ...args: unknown[]): Promise<void> => {
       const [streamId, bytes] = args;
-      if (typeof streamId !== 'string' || !(bytes instanceof Uint8Array)) return;
+      if (
+        typeof streamId !== 'string' ||
+        !(bytes instanceof Uint8Array) ||
+        bytes.length > MAX_STREAM_WRITE_BYTES
+      ) {
+        return;
+      }
       const client = clients.get(streamId);
       if (client === undefined) return;
       // Decoded back to the exact string xterm's own `onData` produced --

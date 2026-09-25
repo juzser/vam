@@ -321,6 +321,27 @@ etc. can tell the difference) or suppress it deliberately in the new path
 too, matching today's posture. This doc takes no position; it is listed here
 so the decision is made rather than defaulted into.
 
+**REVERSED.** The operator asked, in as many words, for paste in Insert mode
+back: "paste in the terminal's Insert mode is currently refused -- fix it:
+allow it." Both renderers now deliver it. `renderer/panels/terminal-paste.ts`'s
+`preparePastedText` is the one sanitiser both share -- CRLF/LF collapsed to a
+single CR, NUL stripped, an embedded bracketed-paste marker's ESC byte
+dropped so pasted content cannot forge the END sentinel and have whatever
+follows read as if typed (xterm.js's own default paste handling does not
+guard against that, which is why this component owns the wrap rather than
+letting xterm's default paste run: measured against the shipped `@xterm/xterm`
+6.0.0 bundle, its `prepareTextForTerminal`/paste helper normalises newlines
+and wraps in bracket codes but performs no such escaping of its own). This
+streaming renderer decides whether to wrap in bracket codes itself, from
+xterm's own `modes.bracketedPasteMode` -- the SAME fact tmux tracks per pane,
+consulted here instead of there because there is no tmux verb on this write
+path at all, only a raw write to the control-mode connection. The
+capture-pane renderer (`TerminalTab.tsx`) instead hands the sanitised text to
+`sendPasteArgv`, which delivers it through tmux's OWN paste buffer
+(`set-buffer`/`paste-buffer -p -r -S -d`) so tmux itself -- not this bridge --
+decides whether the pane's program gets bracket codes, exactly as it would
+for any other paste into that pane.
+
 **Phone / the remote server.** Checked directly (`remote/server.ts`'s own
 `UNSERVED` map): the remote endpoint does not expose the Terminal surface AT
 ALL today -- "read, send, answer and resize type into a running agent and
@@ -471,12 +492,11 @@ what actually landed on `vam/terminal-stream`.
    CDP-level technique `TerminalTab.openkey.test.tsx` uses for the polling
    path's own IME coverage is the same shape this file's test uses, which is
    the strongest evidence available short of a real OS-level IME session.
-8. **Paste: a deliberate decision.** DONE, decided as "suppress" --
-   `7db34eab feat(terminal): refuse paste silently, matching
-   TerminalTab.tsx's own posture` -- so the streaming pane keeps today's
-   safety boundary (no large, unreviewed block of text delivered into a
-   running agent via paste) rather than adopting xterm's native paste
-   support.
+8. **Paste: a deliberate decision.** Decided as "suppress" in `7db34eab
+   feat(terminal): refuse paste silently, matching TerminalTab.tsx's own
+   posture` -- REVERSED since: the operator asked for paste in Insert mode
+   back, in both renderers. See "REVERSED" above and `terminal-paste.ts`,
+   `sendPasteArgv` (`sources/tmux/argv.ts`).
 9. **`%pause`/`%extended-output` handling** with reseed-on-resume. DONE --
    `StreamClient`'s `#handlePauseOrContinue` sets `#paused` on `%pause` (drops
    `%output` while paused rather than trusting it is complete) and reseeds
@@ -556,19 +576,30 @@ parity for the beta, not the flip itself, which the operator will test first.
 | cursor | steady block, never blinks (this file's own design: a poll cannot honestly animate liveness) | steady block, `cursorBlink: false` set to MATCH -- this pane really is live, but the operator's ask is that the two screens look the same |
 | Insert/Select marks | `insertScopeMark`+`insertStopMark` on the pane, the hidden `<textarea>` forwarded to | `insertScopeMark` on the pane, `INSERT_STOP` on xterm's own `term.textarea` directly (already shipped, task-breakdown item 4) |
 
-**The one real gap, named rather than hidden: `backgroundOpacity` under 1.**
-`terminalSchemeStyle()` composites the scheme's background with the
-operator's opacity slider (`prefs/terminal-scheme.ts`) as a translucent
-`rgba()`, painted on `TerminalTab.tsx`'s pane directly. `TerminalStreamTab.tsx`
-now paints its OWN frame (`[data-terminal-stream]`'s `style`) with that exact
-same composite -- but xterm.js's `ITheme.background` is passed the OPAQUE hex
-(`mapScheme` still drops `backgroundOpacity`), because xterm's DOM/canvas
-renderer painting a truly translucent cell background was not attempted or
-verified for this task. At the shipped default (`backgroundOpacity: 1`,
-opaque) the two are pixel-identical, which is the row the comparison table
-above measures and the case the operator will actually see; an operator who
-has moved the slider off 1 would see the padding ring go translucent while
-the text area under it stays opaque -- a real, narrow, follow-up gap.
+**`backgroundOpacity` under 1 -- CLOSED, a follow-up to the gap this section
+used to name.** `terminalSchemeStyle()` composites the scheme's background
+with the operator's opacity slider (`prefs/terminal-scheme.ts`) as a
+translucent `rgba()`, painted on `TerminalTab.tsx`'s pane directly.
+`TerminalStreamTab.tsx` paints its OWN frame (`[data-terminal-stream]`'s
+`style`) with that exact same composite, AND `mapScheme` now passes xterm's
+`ITheme.background` the SAME `withAlpha(...)` composite (exported from
+`terminal-scheme.ts`) rather than the opaque hex it used to drop
+`backgroundOpacity` from -- xterm's DOM renderer (no `@xterm/addon-canvas`/
+`@xterm/addon-webgl` installed here) honours the alpha channel in an ordinary
+CSS `background-color`, so passing the composited value is the whole fix.
+`allowTransparency: true` is set per xterm's own documented prerequisite for
+a non-opaque background, though FALSIFIED against this actual build to be a
+no-op for the DOM renderer specifically (grepping the compiled
+`@xterm/xterm/lib/xterm.js` finds exactly one occurrence of the option, the
+default-options declaration, never read elsewhere) -- kept anyway as the
+documented contract, at zero measured cost. `terminal-stream-frame-shots.mjs`
+now measures the PAINTED pixel (a real screenshot, decoded back through the
+page's own compositor, never `getComputedStyle`) at opacity 1 and 0.6, in
+both themes, against `TerminalTab.tsx`'s own; both match within a small
+(≤5-per-channel) tolerance measured against a genuine, reproducible
+Chromium compositing-layer rounding in light theme's near-white ground
+(absent in dark), not against a logic defect -- see that guard's own header
+for the falsification and the measurement.
 
 **Why the row height needed a SEPARATE constant
 (`TERMINAL_STREAM_LINE_HEIGHT`, not `TERMINAL_LINE_HEIGHT` again).** The two

@@ -5,10 +5,13 @@
  * PARITY PASS (`docs/design/terminal-streaming.md`, task-breakdown items
  * 4-6): open, seed, live data, typed input, resize-driven refit, a
  * theme/font that tracks the shared prefs stores, insert/select-mode marks,
- * scrollback chords and visibility-driven connect/disconnect. Paste refusal
- * and IME composition are covered separately (see this file's own commits).
- * The `Terminal` instance's lifecycle is React's mount/unmount; the STREAM's
- * lifecycle is additionally gated on `document.visibilityState`, below.
+ * scrollback chords and visibility-driven connect/disconnect. Paste WAS
+ * refused outright; the operator asked for it back, and it now goes through
+ * `terminal-paste.ts`'s shared sanitiser and xterm's own bracketed-paste mode
+ * (see the paste listener below). IME composition is covered separately (see
+ * this file's own commits). The `Terminal` instance's lifecycle is React's
+ * mount/unmount; the STREAM's lifecycle is additionally gated on
+ * `document.visibilityState`, below.
  *
  * RESIZE IS NOT PART OF THE STREAM PROTOCOL. The EXISTING
  * `window.api.terminal.resize` channel (the one `TerminalTab.tsx` already
@@ -17,6 +20,7 @@
  */
 
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
 import type { ITheme } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
@@ -35,18 +39,40 @@ import {
   type ResolvedTerminalScheme,
   subscribeTerminalScheme,
   terminalSchemeStyle,
+  withAlpha,
 } from '../../prefs/terminal-scheme.js';
+import { preparePastedText } from '../terminal-paste.js';
 
 /**
  * The scheme's twenty-three colours plus `backgroundOpacity`, reduced to what
  * xterm.js's own `ITheme` accepts. `bold` is dropped -- `ITheme` has no such
- * field (`TerminalTab.tsx`'s own `spanClasses` is the only reader of it) --
- * and `backgroundOpacity` is a vam-only composite this tab does not paint
- * (the pane is opaque; there is no wrapper behind it to show through).
+ * field (`TerminalTab.tsx`'s own `spanClasses` is the only reader of it).
+ *
+ * `background` IS COMPOSITED WITH THE OPACITY, unlike every other colour
+ * here -- `withAlpha`, the SAME arithmetic `terminalSchemeStyle` already
+ * applies to the frame div below, rather than a second independent rounding
+ * of the same channel. This used to be dropped outright (a plain opaque
+ * hex), on the claim that "the pane is opaque; there is no wrapper behind
+ * it to show through" -- MEASURED wrong: the frame div's own `background-
+ * color` (via `terminalSchemeStyle`) IS already translucent at
+ * `backgroundOpacity < 1`, and xterm's own DOM renderer painted an OPAQUE
+ * `background-color` of its own on the row elements it draws (this
+ * `theme.background` value), directly on top of nearly all of it (the mount
+ * div fills the frame's whole content box) -- hiding the frame's
+ * translucency everywhere the terminal itself draws. Passing an `rgba(...)`
+ * here is what fixes it (`terminal-stream-frame-shots.mjs`'s own
+ * opacity-pixel checks hold the measurement); `allowTransparency: true`
+ * (the Terminal constructor option below) is xterm's own DOCUMENTED
+ * prerequisite for that, though FALSIFIED against this actual build to be a
+ * no-op for the DOM renderer specifically -- see that option's own comment.
+ *
+ * EVERY OTHER COLOUR STAYS FULLY OPAQUE, deliberately: the cursor and the
+ * selection pair are markers, not ground, and a translucent one would read
+ * as broken rather than as the parity this fix is for.
  */
 function mapScheme(scheme: ResolvedTerminalScheme): ITheme {
-  const { bold: _bold, backgroundOpacity: _backgroundOpacity, ...theme } = scheme;
-  return theme;
+  const { bold: _bold, backgroundOpacity, ...theme } = scheme;
+  return { ...theme, background: withAlpha(theme.background, backgroundOpacity) };
 }
 
 /** What is shown when there is no bridge, or nothing focused to stream --
@@ -105,6 +131,34 @@ function downText(event: StreamDownEvent): string {
   return event.reason === 'session-gone'
     ? 'disconnected — the session ended'
     : 'disconnected — vam could not reconnect';
+}
+
+/**
+ * A "seed" (`StreamClient#connect`'s return value and every later
+ * `onSeed` push) is `tmux capture-pane -p -e -J`'s own TEXT DUMP of the
+ * pane -- one already-composed row per line, joined with a bare `\n`
+ * exactly as any other line-oriented CLI output is (tmux's own documented
+ * behaviour, unrelated to how a running program's PTY writes a real
+ * newline). The live half of this stream (`onData`, fed by `%output`) is
+ * the OPPOSITE: raw bytes the pane's own process actually wrote to its
+ * pty, decoded verbatim (`decodeOutputPayload`) -- a real terminal program
+ * pairs a line break with an explicit `\r` there, which is why
+ * `convertEol` is `false` on this `Terminal` (converting a bare `\n` to
+ * `\r\n` on the LIVE path would be redundant at best).
+ *
+ * A SEED IS NOT THAT: xterm.js only moves the cursor to column 0 on a
+ * `\r`, never merely on a `\n` (`convertEol: false`'s whole point), so
+ * writing a bare-`\n`-joined seed drew every row indented by wherever the
+ * PREVIOUS row's text happened to end -- a staircase that grew by one
+ * row's width each line and was this task's own reproduction of "ALL the
+ * output is misaligned" (an operator's box-drawn Claude Code prompt, once
+ * so indented, reads as noise). MEASURED: `e2e/terminal-stream-glitch-shots.mjs`'s
+ * own real-tmux fixture (a Claude Code-style box, CJK, an emoji, Vietnamese
+ * combining marks) rendered seven garbled, staircased rows without this
+ * and all seven byte-for-byte correct with it.
+ */
+function asXtermSeed(seed: string): string {
+  return seed.replace(/\r?\n/g, '\r\n');
 }
 
 export function TerminalStreamTab(props: {
@@ -222,9 +276,73 @@ export function TerminalStreamTab(props: {
           // cursor can carry.
           cursorBlink: false,
           convertEol: false,
+          // REQUIRED for `term.unicode` (read AND written, just below) --
+          // xterm.js gates that whole getter behind this flag and throws
+          // `You must set the allowProposedApi option to true` otherwise
+          // (MEASURED: `Unicode11Addon.activate()` reads `term.unicode` to
+          // register its width provider, so this option has to be set
+          // before that addon is loaded, not merely before `activeVersion`
+          // is assigned).
+          allowProposedApi: true,
+          // REQUIRED for `mapScheme`'s own composited `background` (above)
+          // to actually PAINT translucent -- xterm's own doc: "Whether
+          // background should support non-opaque color… can't be changed
+          // later without [re-running `open()`]", which is why this is set
+          // here, at construction, rather than on the live scheme-update
+          // effect further down (that effect only ever reassigns
+          // `term.options.theme`, never reopens the terminal). MEASURED
+          // rendering cost: negligible for THIS renderer -- xterm 6's
+          // built-in default is the DOM renderer (one `<span>` per styled
+          // run, no `WebglAddon`/`CanvasAddon` installed here), which was
+          // already compositing through ordinary CSS `background-color`;
+          // `allowTransparency` only changes WHICH colour string reaches
+          // that same CSS property, not how it is painted. xterm's own
+          // "can negatively impact performance" warning is about the
+          // CANVAS renderer's clear-then-redraw cost, which this stack does
+          // not use.
+          // xterm's own public docs name this "required" for a non-opaque
+          // `theme.background` to paint at all. FALSIFIED against this
+          // actual build, though: removing it changes NOTHING measurable --
+          // `terminal-stream-frame-shots.mjs`'s own opacity-pixel checks
+          // stay green either way, and grepping the compiled
+          // `@xterm/xterm/lib/xterm.js` for `allowTransparency` finds
+          // exactly one occurrence (the default-options declaration; the
+          // value is never READ anywhere else in the bundle). The DOM
+          // renderer this build actually uses (no `@xterm/addon-canvas`/
+          // `@xterm/addon-webgl` installed) paints `theme.background` as an
+          // ordinary CSS `background-color`, which honours an alpha channel
+          // unconditionally -- this flag is understood to gate the CANVAS
+          // renderer's clear-then-redraw path instead (xterm's own
+          // "can negatively impact performance" warning is about that path).
+          // Kept anyway, at zero measured cost (400 writes to a 100x30
+          // terminal: ~1873ms without vs ~1880ms with, a ~0.4% difference
+          // inside this measurement's own run-to-run noise) and zero
+          // runtime effect today, as the documented contract for the option
+          // this file's `background` value actually needs -- correctness
+          // against a future renderer swap, not present-tense behaviour.
+          allowTransparency: true,
         });
         const fit = new FitAddon();
         term.loadAddon(fit);
+        // xterm's OWN default width table (Unicode 6, `term.unicode.
+        // activeVersion === '6'`) disagrees with tmux's about which
+        // codepoints are double-width -- MEASURED against a real tmux 3.7b
+        // on a private `-L` socket: `#{cursor_x}` after printing 🎉 (U+1F389)
+        // reports 2, xterm's default table reports 1. `capture-pane`'s text
+        // dump carries no width information of its own (only the codepoints
+        // tmux already rendered at ITS width), so every cell after a
+        // disagreement draws one column off from where tmux put it -- this
+        // task's own "the emoji overlaps the next character". `Unicode11Addon`
+        // (Unicode 11's East Asian Width data, MEASURED to agree with this
+        // tmux exactly: `#{cursor_x}` 22 vs xterm's `cursorX` 22 for this
+        // file's own CJK/emoji fixture line, both real) fixes it;
+        // `@xterm/addon-unicode-graphemes` was measured too and does NOT
+        // agree (its `cursorX` for the same emoji, activeVersion
+        // '15-graphemes', still reads 1 -- grapheme clustering answers a
+        // different question, "how many codepoints form one glyph", not
+        // "how many columns wide").
+        term.loadAddon(new Unicode11Addon());
+        term.unicode.activeVersion = '11';
         term.open(container);
         // WHERE `I`/A CLICK LANDS. `focus-scope.ts`'s `focusInsertStop` finds
         // the first `data-insert-stop` inside the nearest `data-insert-scope`
@@ -234,17 +352,52 @@ export function TerminalStreamTab(props: {
         // the mark has to be set imperatively on the element it actually
         // gives back rather than rendered.
         term.textarea?.setAttribute(INSERT_STOP, '');
-        // SILENT, MATCHING `TerminalTab.tsx` EXACTLY -- its own `onInput`
-        // drops `insertFromPaste`/`insertFromDrop` with no visible message,
-        // "this channel is bounded precisely so that it cannot become one".
-        // xterm.js listens for `paste` on this same textarea and, by
-        // default, sends the clipboard text through as input; the CAPTURE
-        // phase is what lets this handler run and refuse BEFORE that.
-        term.textarea?.addEventListener(
+        // `liveTerm`, NOT `term`, IS WHAT THE CLOSURES BELOW CAPTURE --
+        // `attachCustomKeyEventHandler`'s callback, `onData`'s callback and
+        // this paste listener are all invoked LATER, after this whole `if`
+        // block has finished running, and TypeScript does not narrow a `let`
+        // captured by a function defined here across that gap. Declared once
+        // and reused by every one of them, rather than each closing over
+        // `term` and fighting the same narrowing individually.
+        const liveTerm = term;
+        // A REAL PASTE, HANDLED HERE RATHER THAN LEFT TO XTERM'S OWN DEFAULT.
+        // xterm.js listens for `paste` on this same textarea and, left alone,
+        // sends the clipboard text through as `onData` itself -- wrapped in
+        // bracketed-paste codes if the pane asked for them, but with NO
+        // escaping of an embedded END marker inside the clipboard text
+        // (`terminal-paste.ts`'s own header explains why that matters). The
+        // CAPTURE phase is what lets this handler run and cancel xterm's own
+        // BEFORE it acts; `stopImmediatePropagation` on top of
+        // `preventDefault` is belt and braces against xterm's own listener
+        // (added earlier, inside `open()`) ever running for the same event.
+        //
+        // NO PERMISSION IS NEEDED TO READ `event.clipboardData` -- it is
+        // handed over because the operator pressed the keys (or used the
+        // Edit menu's Paste), not read via `navigator.clipboard`, whose
+        // permission this app's policy denies (`composer-paste.ts` carries
+        // the same argument for the prompt box's own image paste).
+        //
+        // BRACKETING IS THIS COMPONENT'S OWN DECISION, unlike the
+        // capture-pane renderer's `sendPasteArgv`, which leaves it to tmux's
+        // `paste-buffer -p`: there is no tmux verb on this path at all, only
+        // a write of raw bytes to the control-mode connection, so xterm's own
+        // `modes.bracketedPasteMode` -- the SAME fact tmux tracks per pane,
+        // read here instead of there -- is what this component consults
+        // before deciding whether to wrap.
+        liveTerm.textarea?.addEventListener(
           'paste',
           (event) => {
             event.preventDefault();
             event.stopImmediatePropagation();
+            const raw = event.clipboardData?.getData('text/plain') ?? '';
+            if (raw === '') return;
+            const text = preparePastedText(raw);
+            if (text === '') return;
+            const payload = liveTerm.modes.bracketedPasteMode ? `\x1b[200~${text}\x1b[201~` : text;
+            const currentStreamId = streamIdRef.current;
+            if (currentStreamId !== null) {
+              openBridge.write(currentStreamId, new TextEncoder().encode(payload));
+            }
           },
           { capture: true },
         );
@@ -253,7 +406,6 @@ export function TerminalStreamTab(props: {
         // `TerminalTab.tsx`'s own `onKeyDown` checks `SCROLL_CHORDS`. `true`
         // for everything else, including keyup, so ordinary typing is
         // unaffected.
-        const liveTerm = term;
         liveTerm.attachCustomKeyEventHandler((event) => {
           if (event.type !== 'keydown' || !event.shiftKey || !SCROLL_CHORD_KEYS.has(event.key)) {
             return true;
@@ -294,9 +446,30 @@ export function TerminalStreamTab(props: {
         // `StreamClient`'s own reconnect.
         term.reset();
       }
-      term.write(result.seed);
+      // FIT/RESIZE BEFORE THE SEED IS WRITTEN, not after: this terminal's
+      // `cols`/`rows` start at xterm's own default (80x24) until the first
+      // `fit()` runs, and a seed containing a box-drawn Claude Code prompt
+      // (98 columns wide) written at 80 columns would soft-wrap once here
+      // and never straighten back out (`asXtermSeed`'s own header covers the
+      // OTHER half of this same symptom).
+      //
+      // NO `document.fonts.ready` AWAIT HERE, deliberately, despite this
+      // task's own brief asking to check for one: `fontFamily`
+      // (`TERMINAL_FONT_FAMILY`, copied from `styles.css`'s `--font-mono`)
+      // NAMES `Geist Mono` but this renderer bundles no such font -- no
+      // `@font-face`, no package (`SessionList.tsx`'s own header, the same
+      // gap `terminal-size.ts` already lives with for `TerminalTab.tsx`'s own
+      // measurement). `document.fonts.ready` resolves once every
+      // ALREADY-REGISTERED `@font-face` has loaded; with none registered for
+      // this stack, Chromium resolves straight to a system fallback (`ui-
+      // monospace`/`SF Mono`/Menlo/Consolas) SYNCHRONOUSLY, before this line
+      // ever runs -- there is no later font swap for a deferred `fit()` to
+      // correct. Awaiting it here would cost a microtask for a race that
+      // cannot occur today; add it back the day this stack ships a real
+      // `@font-face` (searching for that comment is the reminder).
       fitRef.current?.fit();
       window.api?.terminal?.resize(openProjectId, term.cols, term.rows, rowId);
+      term.write(asXtermSeed(result.seed));
 
       unsubscribeData = openBridge.onData(streamId, (chunk) => term?.write(chunk));
       unsubscribeSeed = openBridge.onSeed(streamId, (seed) => {
@@ -306,7 +479,29 @@ export function TerminalStreamTab(props: {
         // banner `onDown` raised is stale the moment this arrives.
         setDown(null);
         term?.reset();
-        term?.write(seed);
+        // REFIT AND RE-ASSERT THE SIZE HERE TOO, not only on the initial
+        // `connect()` above: this branch is `StreamClient`'s OWN reconnect
+        // (`main/terminal/stream/client.ts#reconnect`) and its `%pause`/
+        // `%continue` catch-up, neither of which re-opens the stream from
+        // this side -- they push straight through this same subscription.
+        // tmux has nothing holding the window at the size this pane last
+        // fit it to while THIS client was down (a control-mode client with
+        // no real tty reports no size of its own to keep it there), so the
+        // guard this task asks for -- cols×rows still equal to tmux's own
+        // window size AFTER a reconnect -- has to be re-asserted on every
+        // seed, exactly like the first one, rather than assumed to still
+        // hold from before the drop.
+        fitRef.current?.fit();
+        // READ BACK THROUGH `termRef`, not the `term` this closure captured:
+        // the same reason the `ResizeObserver` callback above does (a `let`
+        // closed over by an async callback keeps its DECLARED, nullable type
+        // under TypeScript's control-flow analysis, not the narrowing this
+        // function body earned above this closure).
+        const current = termRef.current;
+        if (current !== null) {
+          window.api?.terminal?.resize(openProjectId, current.cols, current.rows, rowId);
+        }
+        term?.write(asXtermSeed(seed));
       });
       unsubscribeDown = openBridge.onDown(streamId, (event) => {
         setDown(event);
@@ -403,15 +598,30 @@ export function TerminalStreamTab(props: {
          `TerminalTab.tsx` never has this problem because its screen is a
          `<pre>` inside the SAME rounded/padded box, never a layer under it.
 
-         THE PADDING LIVES HERE, ON THE ELEMENT `term.open()` MOUNTS INTO
-         DIRECTLY, and that placement is load-bearing rather than cosmetic:
-         `FitAddon.proposeDimensions()` reads `getComputedStyle` on THIS
-         element to size the terminal, and a resolved `width`/`height` is
-         always the CONTENT box (padding already excluded) whatever
-         `box-sizing` is in force -- so putting the padding anywhere else
-         (an extra wrapper) would make xterm measure the padding as
-         terminal space and draw text into the rounded corner instead of
-         away from it.
+         THE PADDING LIVES HERE, ON THE FRAME -- DELIBERATELY NOT ON THE
+         ELEMENT `term.open()` MOUNTS INTO (a review finding, reversing this
+         file's own earlier claim). `FitAddon.proposeDimensions()` reads
+         `getComputedStyle` on `term.element.parentElement` for its WIDTH/
+         HEIGHT and, separately, on `term.element` ITSELF for the padding to
+         subtract -- two DIFFERENT elements. Putting the padding on the
+         element `term.open()` mounts into makes it `term.element`'s own
+         PARENT, so its width is read (807px, MEASURED, this task's own
+         report) but its padding never is (`term.element`'s -- the `.xterm`
+         div's own -- padding is zero): every column this frame's `px-3
+         py-2` was supposed to reserve was instead handed to xterm as
+         drawable columns, and Chromium's `getComputedStyle().width` on a
+         `box-sizing: border-box` element (this renderer's own Tailwind
+         preflight) returns the BORDER-BOX size, padding and border
+         included -- NOT the content box this file used to claim it always
+         is. MEASURED consequence: `.xterm-screen` rendered 790px wide
+         inside a 781px viewport, the missing 9px landing exactly in this
+         padding's own space, which is why a full-width line's closing `│`
+         crowded the right edge with none of the left edge's clearance.
+         The fix is the INNER, UNPADDED `[data-terminal-stream-mount]` div
+         below: `term.open()` mounts into THAT, so `term.element.parentElement`
+         is an element with no padding of its own, sized (`h-full w-full`)
+         to exactly this frame's content box -- the number FitAddon needs,
+         with nothing left for it to fail to subtract.
 
          THE SCHEME'S OWN COLOURS, the same `terminalSchemeStyle` call
          `TerminalTab.tsx` makes -- the composited background and the
@@ -425,11 +635,15 @@ export function TerminalStreamTab(props: {
          the default the operator will actually see. */}
       <div
         data-terminal-stream
-        ref={containerRef}
         {...insertScopeMark}
         className="relative min-h-0 flex-1 overflow-hidden rounded-[9px] border border-line px-3 py-2 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-line-strong"
         style={terminalSchemeStyle(scheme) as CSSProperties}
       >
+        {/* THE UNPADDED MOUNT, per the comment above: `term.open()` mounts
+           HERE, not into the padded frame, so `term.element.parentElement`
+           (this div) reports the frame's own content box with nothing left
+           for `FitAddon` to fail to subtract. */}
+        <div data-terminal-stream-mount ref={containerRef} className="h-full w-full" />
         {down !== null && (
           // A review finding: this pane never subscribed to onDown at all, so
           // a dropped connection sat frozen -- the last screen drawn, no sign

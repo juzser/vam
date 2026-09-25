@@ -30,6 +30,7 @@ import {
   sendEscapeArgv,
   sendNavArgv,
   sendNewlineArgv,
+  sendPasteArgv,
   sendTextArgv,
   tagPidArgv,
   tagSessionArgv,
@@ -616,5 +617,112 @@ describe('promptKeystrokes', () => {
     for (const step of promptKeystrokes('vam-a1b2c3', 'a\nb')) {
       expect(step).toContain(PANE);
     }
+  });
+});
+
+/**
+ * A REAL PASTE, delivered through tmux's OWN paste buffer rather than
+ * `send-keys -l` -- unlike `promptKeystrokes`, which types a reply itself and
+ * so must escape its own newlines by hand, a paste is handed to `paste-buffer
+ * -p` so TMUX decides whether the pane's own program asked for bracketed
+ * paste, exactly as it would for any other paste into that pane.
+ */
+describe('sendPasteArgv', () => {
+  const setBufferSteps = (steps: readonly (readonly string[])[]) =>
+    steps.filter((step) => step[0] === 'set-buffer');
+  const pasteBufferStep = (steps: readonly (readonly string[])[]) =>
+    steps.find((step) => step[0] === 'paste-buffer');
+  const bufferNameOf = (step: readonly string[]): string | undefined => {
+    const at = step.indexOf('-b');
+    return at === -1 ? undefined : step[at + 1];
+  };
+
+  it('sets one buffer and pastes it into the pane, deleting it after', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hello');
+    const sets = setBufferSteps(steps);
+    expect(sets).toHaveLength(1);
+    const buffer = bufferNameOf(sets[0] ?? []);
+    expect(buffer).toBeDefined();
+    expect(sets[0]).toEqual(['set-buffer', '-b', buffer, '--', 'hello']);
+
+    const paste = pasteBufferStep(steps);
+    expect(paste).toBeDefined();
+    // `-p`: tmux itself decides whether to wrap in bracketed-paste codes,
+    // based on whether the PANE's own program asked for them -- this bridge
+    // never guesses. `-r`: no substitution of tmux's own, since the text
+    // handed in has already had its own newlines normalised
+    // (`terminal-paste.ts`). `-S`: raw bytes, not `vis(3)`-escaped -- a real
+    // terminal paste delivers control characters, it does not print their
+    // escaped spelling. `-d`: the private buffer is deleted once used, so it
+    // never lingers as something the operator could paste again by hand.
+    expect(paste).toEqual(['paste-buffer', '-d', '-p', '-r', '-S', '-b', buffer, '-t', PANE]);
+  });
+
+  it('names a buffer under vam’s own prefix, never the operator’s default buffer', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hello');
+    const buffer = bufferNameOf(setBufferSteps(steps)[0] ?? []);
+    // Random-suffixed like `vamSessionName`: two pastes issued around the
+    // same moment -- two open Terminal tabs, say -- must never write into the
+    // SAME buffer, which `set-buffer -a` would otherwise concatenate.
+    expect(buffer).toMatch(/^vam-paste-[a-z0-9]+$/);
+  });
+
+  it('every set-buffer chunk carries -- before the payload, so a chunk starting with "-" is data', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', '-rf everything');
+    for (const step of setBufferSteps(steps)) {
+      const dashDash = step.indexOf('--');
+      expect(dashDash).toBeGreaterThan(-1);
+      expect(step[step.length - 1]).toBe('-rf everything');
+    }
+  });
+
+  it('chunks a paste too large for one set-buffer call, appending every piece after the first', () => {
+    const text = 'abcdefghij'; // 10 bytes
+    const steps = sendPasteArgv('vam-a1b2c3', text, 4);
+    const sets = setBufferSteps(steps);
+    expect(sets.length).toBeGreaterThan(1);
+    sets.forEach((step, index) => {
+      if (index === 0) {
+        expect(step).not.toContain('-a');
+      } else {
+        expect(step).toContain('-a');
+      }
+    });
+    // Every chunk names the SAME buffer, and the pieces reassemble the whole
+    // paste in order.
+    const buffers = new Set(sets.map((step) => bufferNameOf(step)));
+    expect(buffers.size).toBe(1);
+    expect(sets.map((step) => step[step.length - 1]).join('')).toBe(text);
+  });
+
+  it('chunks by UTF-8 byte length, not by JS string length', () => {
+    // Three-byte-each characters: a chunk bound of 4 bytes must hold at most
+    // one per piece, or an execFile argv element could carry more raw bytes
+    // than the bound promises.
+    const text = '零一二三';
+    const steps = sendPasteArgv('vam-a1b2c3', text, 4);
+    const sets = setBufferSteps(steps);
+    expect(sets).toHaveLength(4);
+    for (const step of sets) {
+      const chunk = step[step.length - 1] ?? '';
+      expect(Buffer.byteLength(chunk, 'utf8')).toBeLessThanOrEqual(4);
+    }
+    expect(sets.map((step) => step[step.length - 1]).join('')).toBe(text);
+  });
+
+  it('never splits a surrogate pair across two chunks', () => {
+    const emoji = '🙂🙂🙂'; // 4 bytes each in UTF-8
+    const steps = sendPasteArgv('vam-a1b2c3', emoji, 4);
+    const sets = setBufferSteps(steps);
+    for (const step of sets) {
+      const chunk = step[step.length - 1] ?? '';
+      expect([...chunk].join('')).toBe(chunk);
+    }
+    expect(sets.map((step) => step[step.length - 1]).join('')).toBe(emoji);
+  });
+
+  it('addresses the pane exactly, with the `=`…`:` target every send-keys/paste-buffer uses', () => {
+    const steps = sendPasteArgv('vam-a1b2c3', 'hi');
+    expect(pasteBufferStep(steps)).toContain(PANE);
   });
 });

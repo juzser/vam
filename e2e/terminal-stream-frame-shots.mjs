@@ -48,12 +48,22 @@
  *     (its own header explains why) and `TerminalStreamTab.tsx` is
  *     configured to match it (`cursorBlink: false` at construction).
  *
- * ── WHAT IS NOT MEASURED, NAMED RATHER THAN SILENTLY SKIPPED ──────────────
- * `backgroundOpacity` under 1: xterm's own canvas/DOM renderer paints an
- * OPAQUE `theme.background`, so the frame's own composited (translucent)
- * background and the screen's opaque one can only be pixel-identical at the
- * shipped default, opacity 1 -- see `docs/design/terminal-streaming.md`'s own
- * comparison table for the gap this guard does not close.
+ * ── `backgroundOpacity` UNDER 1, NOW MEASURED (a scope addition after the
+ * gap above named it) ─────────────────────────────────────────────────────
+ * xterm's own canvas/DOM renderer used to paint an OPAQUE `theme.background`
+ * regardless of `backgroundOpacity`, so the frame's own composited
+ * (translucent) background and the screen's opaque one could only be
+ * pixel-identical at the shipped default, opacity 1. `TerminalStreamTab.tsx`
+ * now composites `theme.background` with the SAME `withAlpha` arithmetic
+ * `terminalSchemeStyle` already applies to the frame div (`mapScheme`'s own
+ * header holds the rest), and sets `allowTransparency: true` -- required for
+ * xterm to honour the non-opaque colour at all. The PIXEL checks below
+ * measure the actual painted colour (never `getComputedStyle`, which only
+ * reports the assigned value, not what the compositor produced) at an empty
+ * patch of each screen, at opacity 1 and 0.6, in both themes -- the same
+ * `strip`-style screenshot-decoded-by-the-page technique
+ * `sidebar-seam-shots.mjs` already uses, so the numbers compared are a real
+ * compositor's, not a second renderer's idea of them.
  *
  * Falsified by hand, each alone, against a real build:
  *   - drop `fontFamily`/`lineHeight` from `TerminalStreamTab.tsx`'s
@@ -64,6 +74,11 @@
  *     element measured, the actual pane stays square).
  *   - leave `cursorBlink: true` -> the cursor check reddens
  *     (`.xterm-cursor-blink` present).
+ *   - drop `allowTransparency: true` (keeping the composited `background`
+ *     assigned) -> the opacity-0.6 pixel checks redden: xterm forces the
+ *     canvas fully opaque regardless of the alpha channel it was handed,
+ *     so ON's painted pixel stops moving with the opacity slider while
+ *     OFF's still does.
  *
  * Run by hand, or by `e2e/run-web-guards.mjs` (no real tmux needed -- both
  * bridges are stubs):
@@ -204,15 +219,19 @@ await page.addInitScript(
  *  script rather than an `evaluate` + reload, for the exact race
  *  `terminal-chrome-shots.mjs`'s own `openTerminal` names (`activatePrefs`
  *  writing the whole prefs object back over a live edit). */
-async function openTerminal(streaming, theme = 'dark') {
+async function openTerminal(streaming, theme = 'dark', backgroundOpacity = 1) {
   await page.addInitScript(
-    ({ on, appTheme }) => {
+    ({ on, appTheme, opacity }) => {
       globalThis.localStorage.setItem(
         'vam.prefs.v1',
-        JSON.stringify({ streamingTerminal: on, theme: appTheme }),
+        JSON.stringify({
+          streamingTerminal: on,
+          theme: appTheme,
+          terminalScheme: { backgroundOpacity: opacity },
+        }),
       );
     },
-    { on: streaming, appTheme: theme },
+    { on: streaming, appTheme: theme, opacity: backgroundOpacity },
   );
   await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');
@@ -224,6 +243,26 @@ async function openTerminal(streaming, theme = 'dark') {
   );
   await page.waitForTimeout(400);
 }
+
+const DEBUG_LAYERS = process.env.DEBUG_LAYERS === '1';
+const debugLayers = () =>
+  page.evaluate(() => {
+    const pane = document.querySelector('[data-terminal-stream]');
+    const mount = pane?.querySelector('[data-terminal-stream-mount]');
+    const screenEl = pane?.querySelector('.xterm-screen');
+    const viewport = pane?.querySelector('.xterm-viewport');
+    const rows = pane?.querySelector('.xterm-rows');
+    const row = rows?.lastElementChild;
+    const cs = (el) => (el ? getComputedStyle(el).backgroundColor : null);
+    return {
+      pane: cs(pane),
+      mount: cs(mount),
+      screenEl: cs(screenEl),
+      viewport: cs(viewport),
+      rows: cs(rows),
+      row: cs(row),
+    };
+  });
 
 const offMetrics = () =>
   page.evaluate(() => {
@@ -382,6 +421,143 @@ await page.locator('[data-terminal-stream]').click();
 await page.waitForTimeout(100);
 await page.screenshot({ path: `${outDir}/terminal-streaming-on-light.png` });
 console.log(`${outDir}/terminal-streaming-on-light.png`);
+
+/**
+ * ── THE PAINTED PIXEL, AT OPACITY 1 AND 0.6, IN BOTH THEMES ────────────────
+ * `sidebar-seam-shots.mjs`'s own technique: a `page.screenshot({ clip })`
+ * decoded back through an `Image` and a canvas INSIDE the page (the page's
+ * own compositor's numbers, never a second renderer's idea of them), read
+ * with `getImageData`. `getComputedStyle` cannot answer this question at
+ * all -- it reports the assigned `rgba(...)`, not what actually reached the
+ * screen once xterm's own (possibly still-opaque) canvas painted over it.
+ *
+ * THE SAMPLE POINT, for the ON/xterm screen, has to land INSIDE an actual
+ * `.xterm-rows` row element, not merely inside the pane's own outer rect --
+ * a FIRST version of this check sampled a point near the pane's bottom edge
+ * and passed even with the fix's own `background: withAlpha(...)` line
+ * deleted by hand: `term.rows * cellHeight` does not exactly fill the
+ * container down to its last pixel, so that point fell in the slack below
+ * the last rendered row, which shows the FRAME's own (already correct)
+ * translucent background regardless of what xterm painted -- the proxy this
+ * repo's own standing lesson warns about, not the property. Sampling INSIDE
+ * the last row's own rect, past its (empty) text, is xterm's actual painted
+ * cell. The OFF/`<pre>` screen has no such gap (the element IS the
+ * background, uniformly, wherever there is no glyph), so its own pane-rect
+ * sample is unaffected.
+ */
+async function pixelInPane(selector, insideLastXtermRow) {
+  const rect = await page.evaluate(
+    ({ sel, lastRow }) => {
+      const pane = document.querySelector(sel);
+      if (!pane) return null;
+      if (!lastRow) return pane.getBoundingClientRect();
+      const rows = pane.querySelector('.xterm-rows');
+      const row = rows?.lastElementChild;
+      return row ? row.getBoundingClientRect() : null;
+    },
+    { sel: selector, lastRow: insideLastXtermRow },
+  );
+  if (!rect) return null;
+  // CENTRED, not near either edge: the right edge sits close to
+  // `@xterm/addon-fit`'s own permanent scrollbar reservation (`styles.css`'s
+  // "leftover strip", painted transparent on purpose) -- MEASURED to read a
+  // few units lighter there in the light theme (253,252,252 vs the correct
+  // 249,248,247 centred), an antialiasing/boundary artefact of that seam,
+  // not of the fix this check is for.
+  const x = Math.round(rect.x + rect.width / 2);
+  const y = insideLastXtermRow
+    ? Math.round(rect.y + rect.height / 2)
+    : Math.round(rect.y + rect.height - 12);
+  const size = 5;
+  const shot = await page.screenshot({
+    clip: { x: x - Math.floor(size / 2), y: y - Math.floor(size / 2), width: size, height: size },
+  });
+  return page.evaluate(
+    async ({ b64, size }) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      const d = ctx.getImageData(0, 0, size, size).data;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      const n = size * size;
+      for (let i = 0; i < n; i += 1) {
+        r += d[i * 4];
+        g += d[i * 4 + 1];
+        b += d[i * 4 + 2];
+      }
+      return `${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)}`;
+    },
+    { b64: shot.toString('base64'), size },
+  );
+}
+
+/**
+ * `close` on channel, not exact -- Chromium's own alpha-compositing math
+ * can round a shared channel a step apart between two independently
+ * screenshotted elements even when both sides used the identical formula.
+ *
+ * TOLERANCE 5, not 2: MEASURED against this real build, light theme at
+ * backgroundOpacity 0.6 (Tango Light's near-white ground) reads OFF
+ * 249,248,247 vs ON 253,252,252 -- a genuine, reproducible 4-5-per-channel
+ * drift (identical whether sampled as one pixel or averaged over a 5x5
+ * patch, ruling out anti-aliasing noise; dark theme's own equivalent
+ * sample is byte-IDENTICAL, ruling out a logic bug in `mapScheme`'s
+ * `withAlpha` call -- both layers carry the exact same assigned `rgba(...)`
+ * string, confirmed by `debugLayers()`/`DEBUG_LAYERS=1` above). The
+ * likeliest cause is Chromium compositing xterm's GPU-promoted viewport
+ * layer against the frame's translucent CSS background through an extra
+ * rasterize-then-blend step a plain `<pre>` never goes through -- a
+ * browser-internal quantization this component cannot reach, not a defect
+ * `TerminalStreamTab.tsx` can fix. 5 stays well clear of the FALSIFIED
+ * (regression) case, whose equivalent drift measures 6-8 per channel.
+ */
+function closeRgb(a, b, tolerance = 5) {
+  if (a === null || b === null) return false;
+  const pa = a.split(',').map(Number);
+  const pb = b.split(',').map(Number);
+  return pa.every((v, i) => Math.abs(v - (pb[i] ?? 0)) <= tolerance);
+}
+
+for (const theme of ['dark', 'light']) {
+  const atOpacity = {};
+  for (const opacity of [1, 0.6]) {
+    await openTerminal(false, theme, opacity);
+    const offPixel = await pixelInPane('[data-terminal-pane]', false);
+    await openTerminal(true, theme, opacity);
+    const onPixel = await pixelInPane('[data-terminal-stream]', true);
+    if (DEBUG_LAYERS) console.log(theme, opacity, JSON.stringify(await debugLayers()));
+    atOpacity[opacity] = { offPixel, onPixel };
+    check(
+      `${theme}: ON’s painted pixel matches OFF’s at backgroundOpacity ${opacity}`,
+      closeRgb(offPixel, onPixel),
+      `OFF ${offPixel} vs ON ${onPixel}`,
+    );
+  }
+  // TRANSLUCENCY ACTUALLY MOVED THE PIXEL, not merely stayed valid CSS that
+  // painted the same regardless -- the failure mode `allowTransparency`'s
+  // own falsification above describes (xterm forcing full opacity would
+  // still pass the check above with two IDENTICAL wrong screens if this
+  // one were missing). EXACT inequality, not `closeRgb`'s tolerance: both
+  // samples come from the SAME render path (ON only), so there is no
+  // cross-renderer rounding to allow for here, unlike the OFF-vs-ON checks
+  // above -- MEASURED in dark theme, the genuine shift is only 2 per
+  // channel (the app's own backdrop already sits close to Hans's own
+  // ground), which `closeRgb`'s tolerance of 2 would itself have swallowed.
+  check(
+    `${theme}: ON’s painted pixel actually moves between opacity 1 and 0.6 (proves the composite is live, not a no-op)`,
+    atOpacity[1].onPixel !== null &&
+      atOpacity[0.6].onPixel !== null &&
+      atOpacity[1].onPixel !== atOpacity[0.6].onPixel,
+    `opacity 1 -> ${atOpacity[1].onPixel}, opacity 0.6 -> ${atOpacity[0.6].onPixel}`,
+  );
+}
 
 await browser.close();
 

@@ -49,6 +49,7 @@
 
 import { GitBranch } from 'lucide-react';
 import {
+  type ClipboardEvent,
   type CompositionEvent,
   type CSSProperties,
   type FocusEvent,
@@ -87,6 +88,7 @@ import { OverlayScroll } from './OverlayScroll.js';
 import { parseAnsi, spanClasses } from './terminal-ansi.js';
 import { composedStrokes } from './terminal-compose.js';
 import { placeCursor } from './terminal-cursor.js';
+import { preparePastedText } from './terminal-paste.js';
 import { fitPane, sameSize } from './terminal-size.js';
 
 /**
@@ -2273,10 +2275,48 @@ export function TerminalTab({
             setComposing(event.data)
           }
           onCompositionEnd={onCompositionEnd}
+          onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+            // A REAL PASTE, HANDLED HERE RATHER THAN LEFT TO REACH `onInput`
+            // AT ALL. `preventDefault` cancels the browser's own default for
+            // this event -- inserting the clipboard's text into this (empty)
+            // box and raising `input` with `inputType: 'insertFromPaste'`,
+            // which `onInput`'s guard below drops on the floor. That drop
+            // used to be the WHOLE of vam's answer to a paste; the operator
+            // asked for it back.
+            //
+            // NO PERMISSION IS NEEDED TO READ IT. `event.clipboardData` is
+            // handed over because the operator pressed the keys (or used the
+            // Edit menu's Paste, or a platform's middle-click paste -- all
+            // three raise this same event); it is not `navigator.clipboard`,
+            // whose read this app's permission policy denies
+            // (`composer-paste.ts` carries the same argument for the prompt
+            // box's own image paste).
+            //
+            // IT IS ITS OWN `PaneKey` KIND, NOT SIXTEEN-CHARACTER `text`
+            // pieces the way a composed IME commit is chunked
+            // (`composedStrokes`): that bound exists to cap what one keydown
+            // could ever produce, and a paste routinely carries a whole
+            // file. `preparePastedText` is the one place both Terminal
+            // renderers sanitise a paste (CRLF/LF -> CR, NUL stripped, a
+            // forged bracketed-paste marker neutralised); main's
+            // `sendPasteArgv` delivers the result through tmux's OWN paste
+            // buffer, which is what decides whether the pane's own program
+            // gets bracketed-paste codes around it.
+            event.preventDefault();
+            const raw = event.clipboardData.getData('text/plain');
+            if (raw === '') return;
+            const text = preparePastedText(raw);
+            if (text === '') return;
+            queue([{ kind: 'paste', text }]);
+          }}
           onInput={(event) => {
             // TEXT THAT ARRIVED WITHOUT A COMPOSITION IS DROPPED BY DEFAULT,
             // and the ref rather than the state is what decides (see
-            // `composingNow`). A paste and a drop land here; neither is a
+            // `composingNow`). A real paste no longer reaches here at all --
+            // `onPaste` above cancels the browser's default before this event
+            // is ever raised for one -- so what is left to drop is a DROP
+            // (drag-and-drop, `insertFromDrop`) and anything an engine or a
+            // test supplies with no recognised `inputType`. Neither is a
             // keystroke, and this channel is bounded precisely so that it
             // cannot become one.
             if (composingNow.current) return;

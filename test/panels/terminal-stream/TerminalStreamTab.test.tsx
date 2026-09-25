@@ -17,9 +17,15 @@ import {
   TERMINAL_FONT_FAMILY,
   TERMINAL_STREAM_LINE_HEIGHT,
 } from '../../../src/renderer/prefs/terminal-font.js';
+import {
+  DEFAULT_TERMINAL_SCHEME_PREF,
+  readTerminalSchemePref,
+  setActiveTerminalScheme,
+} from '../../../src/renderer/prefs/terminal-scheme.js';
 
 const writeCalls: string[] = [];
 const disposeCalls: number[] = [];
+const loadedAddons: unknown[] = [];
 let lastTerm: FakeTerminal | undefined;
 let onDataHandler: ((text: string) => void) | undefined;
 
@@ -36,11 +42,22 @@ class FakeTerminal {
   scrollToTop = vi.fn();
   scrollToBottom = vi.fn();
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
+  // The one field of the real `Terminal.modes` getter the paste handler
+  // reads -- a plain, test-settable property standing in for xterm's own
+  // computed one. Defaults to `false`: most panes are not running a program
+  // that asked for bracketed paste.
+  modes: { bracketedPasteMode: boolean } = { bracketedPasteMode: false };
+  // The real `Terminal.unicode` API surface this component touches:
+  // `activeVersion` starts at xterm's own built-in default ('6') until a
+  // provider addon (`Unicode11Addon`) is loaded and this is reassigned.
+  unicode: { activeVersion: string } = { activeVersion: '6' };
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
     lastTerm = this;
   }
-  loadAddon() {}
+  loadAddon(addon: unknown) {
+    loadedAddons.push(addon);
+  }
   open(container: HTMLElement) {
     container.appendChild(this.textarea);
   }
@@ -66,8 +83,15 @@ class FakeFitAddon {
   }
 }
 
+// A stand-in for the real addon this component loads to correct xterm's
+// default (Unicode 6) width table against tmux's own -- `instanceof` in the
+// wiring test below is what proves THIS addon, not merely *an* addon, was
+// loaded.
+class FakeUnicode11Addon {}
+
 vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: FakeFitAddon }));
+vi.mock('@xterm/addon-unicode11', () => ({ Unicode11Addon: FakeUnicode11Addon }));
 vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 
 // Imported AFTER the mocks above are registered (vitest hoists `vi.mock`
@@ -158,10 +182,12 @@ function withDownCapture() {
 beforeEach(() => {
   writeCalls.length = 0;
   disposeCalls.length = 0;
+  loadedAddons.length = 0;
   lastTerm = undefined;
   onDataHandler = undefined;
   FakeResizeObserver.instances = [];
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  setActiveTerminalScheme(DEFAULT_TERMINAL_SCHEME_PREF, 'dark');
 });
 
 afterEach(() => {
@@ -237,6 +263,68 @@ describe('mounted with a bridge', () => {
     // real seed string must be the one that reached the mock terminal.
     expect(writeCalls).toContain('the actual seed text');
     expect(q('[data-terminal-stream]')).not.toBeNull();
+  });
+
+  it("normalizes a bare-\\n seed to \\r\\n before writing it (capture-pane's own line separator, against convertEol: false)", async () => {
+    // REPRODUCED against a real tmux + a real Terminal
+    // (`e2e/terminal-stream-glitch-shots.mjs`): `tmux capture-pane -p` joins
+    // its own rows with a bare `\n`, and `convertEol: false` (this
+    // component's own option, matching a real pty's `\r\n`) means xterm.js
+    // never returns the cursor to column 0 on a bare `\n` -- every row after
+    // the first landed further right than the last, a staircase that read
+    // as "ALL the output is misaligned" for a box-drawn Claude Code prompt.
+    withBridge({
+      open: async () => ({
+        ok: true,
+        streamId: 'stream-1',
+        seed: 'row one\nrow two\r\nrow three',
+        name: 'vam-stub-a1b2c3',
+      }),
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writeCalls).toContain('row one\r\nrow two\r\nrow three');
+  });
+
+  it('loads Unicode11Addon and switches to the "11" width table -- xterm’s default (Unicode 6) disagrees with tmux on wide emoji (measured: real tmux reports width 2 for U+1F389, xterm’s default table reports 1)', async () => {
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(loadedAddons.some((addon) => addon instanceof FakeUnicode11Addon)).toBe(true);
+    expect(lastTerm?.unicode.activeVersion).toBe('11');
+  });
+
+  it('gives xterm a transparent ground at the composited opacity, matching the frame’s own translucent background -- xterm’s canvas used to paint an opaque one over it regardless of the pref', async () => {
+    setActiveTerminalScheme(readTerminalSchemePref({ backgroundOpacity: 0.6 }), 'dark');
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // `allowTransparency` is required for xterm to honour a non-opaque
+    // `theme.background` at all -- without it, xterm forces the background
+    // fully opaque regardless of the alpha channel it was handed.
+    expect(lastTerm?.options.allowTransparency).toBe(true);
+    // Hans's own #1e1f29 (the default dark scheme), composited at 0.6 --
+    // the SAME `withAlpha` arithmetic `terminalSchemeStyle` already applies
+    // to the frame div, so both layers land on identical pixels rather than
+    // two independent roundings of the same colour.
+    const theme = lastTerm?.options.theme as
+      | { background?: string; cursor?: string; selectionBackground?: string }
+      | undefined;
+    expect(theme?.background).toBe('rgba(30, 31, 41, 0.6)');
+    // The cursor and selection colours stay the scheme's own OPAQUE hex --
+    // only the GROUND is meant to let the frame show through; a translucent
+    // cursor/selection would read as broken, not as parity.
+    expect(theme?.cursor).toBe('#ae7af7');
+    expect(theme?.selectionBackground).toBe('#0f0e19');
   });
 
   it('a data push for this stream reaches term.write; a push for another stream never does', async () => {
@@ -342,38 +430,130 @@ describe('mounted with a bridge', () => {
     });
   });
 
-  it('refuses a paste silently, matching TerminalTab.tsx: no message, nothing written', async () => {
-    const write = vi.fn();
-    withBridge({ write });
-    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    const textarea = lastTerm?.textarea;
-    if (textarea === undefined) throw new Error('no textarea');
+  describe('a real paste', () => {
     // A minimal fake `clipboardData` -- a real `ClipboardEvent`/`DataTransfer`
     // is awkward to instantiate in happy-dom (no precedent for it in this
     // file's own paste-adjacent tests, which drive the hidden-input path via
     // a plain `input` event with `inputType` instead).
-    const event = new Event('paste', { bubbles: true, cancelable: true });
-    Object.defineProperty(event, 'clipboardData', {
-      value: { getData: () => 'a whole pasted paragraph' },
+    function pasteEvent(text: string): Event {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { getData: () => text } });
+      return event;
+    }
+
+    it('cancels the browser default and xterm’s own paste handling', async () => {
+      withBridge({});
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined) throw new Error('no textarea');
+      const event = pasteEvent('a whole pasted paragraph');
+      const preventDefault = vi.spyOn(event, 'preventDefault');
+      const stopImmediatePropagation = vi.spyOn(event, 'stopImmediatePropagation');
+      act(() => {
+        textarea.dispatchEvent(event);
+      });
+      expect(preventDefault).toHaveBeenCalled();
+      expect(stopImmediatePropagation).toHaveBeenCalled();
     });
-    const preventDefault = vi.spyOn(event, 'preventDefault');
-    const stopImmediatePropagation = vi.spyOn(event, 'stopImmediatePropagation');
-    act(() => {
-      textarea.dispatchEvent(event);
+
+    it('writes the sanitised clipboard text, unwrapped, when the pane has not asked for bracketed paste', async () => {
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined || lastTerm === undefined) throw new Error('no textarea');
+      lastTerm.modes.bracketedPasteMode = false;
+      act(() => {
+        textarea.dispatchEvent(pasteEvent('line one\r\nline two'));
+      });
+      // CRLF -> one CR, exactly `terminal-paste.ts`'s own `preparePastedText`.
+      expect(write).toHaveBeenCalledWith(
+        'stream-1',
+        new TextEncoder().encode('line one\rline two'),
+      );
     });
-    expect(preventDefault).toHaveBeenCalled();
-    expect(stopImmediatePropagation).toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalledWith(
-      'stream-1',
-      new TextEncoder().encode('a whole pasted paragraph'),
-    );
-    // No visible refusal text either -- TerminalTab.tsx's own posture, a
-    // silent drop.
-    expect(q('[data-terminal-stream-refused]')).toBeNull();
+
+    it('wraps the write in bracketed-paste codes when the pane HAS asked for it', async () => {
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined || lastTerm === undefined) throw new Error('no textarea');
+      lastTerm.modes.bracketedPasteMode = true;
+      act(() => {
+        textarea.dispatchEvent(pasteEvent('hello'));
+      });
+      expect(write).toHaveBeenCalledWith(
+        'stream-1',
+        new TextEncoder().encode('\x1b[200~hello\x1b[201~'),
+      );
+    });
+
+    it('does nothing for an empty clipboard', async () => {
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined) throw new Error('no textarea');
+      act(() => {
+        textarea.dispatchEvent(pasteEvent(''));
+      });
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it('draws no refusal text -- a real paste is not a refusal', async () => {
+      withBridge({});
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const textarea = lastTerm?.textarea;
+      if (textarea === undefined) throw new Error('no textarea');
+      act(() => {
+        textarea.dispatchEvent(pasteEvent('hello'));
+      });
+      expect(q('[data-terminal-stream-refused]')).toBeNull();
+    });
+
+    it('does nothing for a paste outside Select mode -- the listener lives only on term.textarea', async () => {
+      // The operator's ask was Insert mode only; Select mode's own posture
+      // (no focus on `term.textarea`, `focusInsertStop`'s own note) is
+      // unchanged. The paste listener is wired to `liveTerm.textarea`
+      // exclusively (see the connect effect above), so a paste dispatched on
+      // the CONTAINER -- what a real paste would target while the textarea
+      // does not hold DOM focus -- never reaches it: a `paste` event does not
+      // propagate to a descendant, only to ancestors.
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const container = q('[data-terminal-stream]');
+      if (container === null) throw new Error('no container');
+      act(() => {
+        container.dispatchEvent(pasteEvent('nope'));
+      });
+      expect(write).not.toHaveBeenCalled();
+    });
   });
 
   it('types into the stream via write()', async () => {
@@ -648,6 +828,29 @@ describe('the onDown banner (review finding)', () => {
     expect(q('[data-terminal-stream-down]')).toBeNull();
   });
 
+  it('normalizes a bare-\\n RECONNECT seed the same way the initial one is (onSeed, not just connect())', async () => {
+    let seedListener: ((seed: string) => void) | undefined;
+    withBridge({
+      onSeed: (_streamId, listener) => {
+        seedListener = listener;
+        return () => {
+          seedListener = undefined;
+        };
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    writeCalls.length = 0;
+
+    act(() => {
+      seedListener?.('reseeded row one\nreseeded row two');
+    });
+    expect(writeCalls).toContain('reseeded row one\r\nreseeded row two');
+  });
+
   it('clears a stale banner on a fresh connect() (visibility reconnect)', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
     const down = withDownCapture();
@@ -679,5 +882,42 @@ describe('the onDown banner (review finding)', () => {
     } finally {
       visibility.mockRestore();
     }
+  });
+});
+
+describe('tmux stays sized to xterm across a reconnect (task brief: cols×rows must equal tmux’s window size after a reconnect, not only after the first connect)', () => {
+  it('refits and re-sends resize-window when a RECONNECT pushes a fresh seed through onSeed, not only on the initial connect()', async () => {
+    let seedListener: ((seed: string) => void) | undefined;
+    const { resize } = withBridge({
+      onSeed: (_streamId, listener) => {
+        seedListener = listener;
+        return () => {
+          seedListener = undefined;
+        };
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // THE INITIAL connect() already asserted the size once -- cleared so this
+    // test only speaks to what the RECONNECT path does on its own.
+    resize.mockClear();
+
+    // `StreamClient`'s own `#reconnect()` (main/terminal/stream/client.ts)
+    // never re-opens the stream from the renderer's side -- it pushes a
+    // fresh seed through the SAME `onSeed` subscription a `%pause`/
+    // `%continue` reseed also uses. Between the drop and this reseed, tmux's
+    // window may have drifted from whatever `fit()` last told it (a `-C`
+    // client with no real tty reports no size of its own, and a window this
+    // pane is not currently drawing to has nothing forcing it to stay put)
+    // -- so this is the one seam that MUST re-assert cols×rows, not merely
+    // rewrite the screen.
+    act(() => {
+      seedListener?.('reseeded row one');
+    });
+
+    expect(resize).toHaveBeenCalledWith('p1', lastTerm?.cols, lastTerm?.rows, 's1');
   });
 });

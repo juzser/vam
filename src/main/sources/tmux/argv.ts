@@ -623,6 +623,122 @@ export function sendNewlineArgv(name: string): readonly string[] {
  * the whole prompt has landed, so that a keystroke that fails midway leaves the
  * text sitting in the pane UNSENT rather than half-submitted (`reply.ts`).
  */
+/**
+ * The buffer name every paste writes into, random-suffixed exactly the way
+ * `vamSessionName` is. TWO PASTES ISSUED AROUND THE SAME MOMENT -- two open
+ * Terminal tabs, say -- must never write into the SAME buffer: `set-buffer
+ * -a` appends, so a shared name would interleave one paste's chunks with the
+ * other's. It is never the operator's own default buffer (the one `]` pastes
+ * from, or the one an unnamed `copy-mode` yank fills) for the reason the
+ * operator's ask names directly: this bridge must never clobber it.
+ */
+const PASTE_BUFFER_PREFIX = 'vam-paste-';
+
+/**
+ * How many UTF-8 BYTES may sit in one `set-buffer` argv element.
+ *
+ * BYTES, NOT JS STRING LENGTH, because a run of CJK or emoji text can be two
+ * to four bytes per UTF-16 code unit, and counting code units would let a
+ * chunk carry several times more raw bytes than the number promises.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket, because the real ceiling
+ * here is NOT `execve`'s own ARG_MAX -- it is tmux's OWN command-line parser.
+ * A single `set-buffer -b <name> -- <data>` answered `command too long` and
+ * exited 1 (not a spawn failure; `execFile` ran tmux, and tmux itself
+ * refused) starting at 16,350 bytes of `data` and succeeded at every size
+ * tried below 16,300 -- a real, tmux-side limit around 16 KiB for the WHOLE
+ * command line, reached long before `execve`'s own argv/environ ceiling
+ * (which only failed, with a genuine `spawn E2BIG`, at 1 MiB). 8 KiB is
+ * chosen to sit at roughly half that measured ceiling, leaving headroom for
+ * the buffer name and flags that share the same command line and for
+ * whatever a different tmux build's own limit turns out to be.
+ */
+export const PASTE_CHUNK_BYTES = 8192;
+
+/**
+ * Split `text` into pieces of at most `maxBytes` UTF-8 bytes each, never
+ * inside a surrogate pair -- the same guard `terminal-compose.ts`'s
+ * `composedStrokes` carries, for the same reason: half a pair has no UTF-8
+ * encoding at all, and a chunk boundary that landed inside one would corrupt
+ * exactly the one character it split.
+ */
+function chunkPasteBytes(text: string, maxBytes: number): readonly string[] {
+  if (text === '') return [];
+  const chunks: string[] = [];
+  let piece = '';
+  let bytes = 0;
+  for (const point of text) {
+    const pointBytes = Buffer.byteLength(point, 'utf8');
+    if (piece !== '' && bytes + pointBytes > maxBytes) {
+      chunks.push(piece);
+      piece = '';
+      bytes = 0;
+    }
+    piece += point;
+    bytes += pointBytes;
+  }
+  if (piece !== '') chunks.push(piece);
+  return chunks;
+}
+
+/**
+ * A REAL PASTE, delivered through tmux's OWN paste buffer rather than one
+ * `send-keys -l` per chunk -- and that choice, not merely the chunking, is
+ * the whole of what this function is for.
+ *
+ * WHY A BUFFER AND NOT MORE `sendTextArgv` CALLS. `send-keys -l` types
+ * literally with no notion of a paste at all, so a pane running a program
+ * that asked for bracketed paste (a shell's own readline, `vim`, Claude
+ * Code's composer) would see a burst of ordinary keystrokes -- exactly the
+ * shape the receiving program cannot tell from someone typing very fast, and
+ * exactly what bracketed paste exists to let it tell apart. `paste-buffer -p`
+ * asks tmux to wrap the buffer in the bracket codes IF AND ONLY IF the pane's
+ * own program requested them (`man tmux`: "paste bracket control codes are
+ * inserted around the buffer if the application has requested bracketed
+ * paste mode") -- the SAME fact tmux itself already tracks per pane, so this
+ * bridge never has to guess it and can never guess it wrong.
+ *
+ * `-r`: NO SUBSTITUTION OF TMUX'S OWN. Without it, `paste-buffer` replaces
+ * every linefeed in the buffer with a carriage return -- which is nearly
+ * what `terminal-paste.ts`'s `preparePastedText` already did, except that a
+ * CRLF pair arriving un-normalised would become TWO carriage returns (the
+ * original CR, plus tmux's own replacement for the LF) instead of one. The
+ * text hitting this function has already been normalised the correct way;
+ * `-r` is what stops tmux normalising it a second time, differently.
+ *
+ * `-S`: RAW BYTES, NOT `vis(3)`-ESCAPED. `paste-buffer`'s default sanitizes
+ * control characters into their printable spelling (`man tmux`: "By default,
+ * control characters are sanitized with vis(3)") -- which would turn a
+ * pasted Tab or Escape into the LITERAL TEXT of its escape, never reaching
+ * the pane as the byte it is. A real terminal paste delivers control
+ * characters raw; `-S` is what keeps this one honest to that.
+ *
+ * `-d`: THE BUFFER IS DELETED ONCE PASTED. It is scratch space for exactly
+ * one paste, not a new entry in the operator's own buffer stack.
+ *
+ * THE BUFFER IS BUILT IN CHUNKS (`chunkPasteBytes`) because `execFile` on
+ * vam's side, not tmux, is what bounds one argv element -- `set-buffer`
+ * itself has no length limit of its own to speak of. The FIRST chunk
+ * creates the buffer; `-a` on every chunk after it appends, so the pane
+ * receives the whole paste as tmux assembled it, never as this bridge's own
+ * concatenation.
+ */
+export function sendPasteArgv(
+  name: string,
+  text: string,
+  chunkBytes: number = PASTE_CHUNK_BYTES,
+): readonly (readonly string[])[] {
+  const bufferName = `${PASTE_BUFFER_PREFIX}${randomSuffix()}`;
+  const chunks = chunkPasteBytes(text, chunkBytes);
+  const steps: string[][] = (chunks.length === 0 ? [''] : chunks).map((chunk, index) =>
+    index === 0
+      ? ['set-buffer', '-b', bufferName, '--', chunk]
+      : ['set-buffer', '-a', '-b', bufferName, '--', chunk],
+  );
+  steps.push(['paste-buffer', '-d', '-p', '-r', '-S', '-b', bufferName, '-t', paneTarget(name)]);
+  return steps;
+}
+
 export function promptKeystrokes(name: string, prompt: string): readonly (readonly string[])[] {
   const lines = prompt.split('\n');
   const steps: (readonly string[])[] = [];
