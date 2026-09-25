@@ -244,6 +244,30 @@ describe('mounted with a bridge', () => {
     expect(q('[data-terminal-stream]')).not.toBeNull();
   });
 
+  it('normalizes a bare-\\n seed to \\r\\n before writing it (capture-pane\'s own line separator, against convertEol: false)', async () => {
+    // REPRODUCED against a real tmux + a real Terminal
+    // (`e2e/terminal-stream-glitch-shots.mjs`): `tmux capture-pane -p` joins
+    // its own rows with a bare `\n`, and `convertEol: false` (this
+    // component's own option, matching a real pty's `\r\n`) means xterm.js
+    // never returns the cursor to column 0 on a bare `\n` -- every row after
+    // the first landed further right than the last, a staircase that read
+    // as "ALL the output is misaligned" for a box-drawn Claude Code prompt.
+    withBridge({
+      open: async () => ({
+        ok: true,
+        streamId: 'stream-1',
+        seed: 'row one\nrow two\r\nrow three',
+        name: 'vam-stub-a1b2c3',
+      }),
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(writeCalls).toContain('row one\r\nrow two\r\nrow three');
+  });
+
   it('a data push for this stream reaches term.write; a push for another stream never does', async () => {
     let capturedListener: ((chunk: string) => void) | undefined;
     withBridge({
@@ -745,6 +769,29 @@ describe('the onDown banner (review finding)', () => {
     expect(q('[data-terminal-stream-down]')).toBeNull();
   });
 
+  it('normalizes a bare-\\n RECONNECT seed the same way the initial one is (onSeed, not just connect())', async () => {
+    let seedListener: ((seed: string) => void) | undefined;
+    withBridge({
+      onSeed: (_streamId, listener) => {
+        seedListener = listener;
+        return () => {
+          seedListener = undefined;
+        };
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    writeCalls.length = 0;
+
+    act(() => {
+      seedListener?.('reseeded row one\nreseeded row two');
+    });
+    expect(writeCalls).toContain('reseeded row one\r\nreseeded row two');
+  });
+
   it('clears a stale banner on a fresh connect() (visibility reconnect)', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
     const down = withDownCapture();
@@ -776,5 +823,42 @@ describe('the onDown banner (review finding)', () => {
     } finally {
       visibility.mockRestore();
     }
+  });
+});
+
+describe('tmux stays sized to xterm across a reconnect (task brief: cols×rows must equal tmux’s window size after a reconnect, not only after the first connect)', () => {
+  it('refits and re-sends resize-window when a RECONNECT pushes a fresh seed through onSeed, not only on the initial connect()', async () => {
+    let seedListener: ((seed: string) => void) | undefined;
+    const { resize } = withBridge({
+      onSeed: (_streamId, listener) => {
+        seedListener = listener;
+        return () => {
+          seedListener = undefined;
+        };
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // THE INITIAL connect() already asserted the size once -- cleared so this
+    // test only speaks to what the RECONNECT path does on its own.
+    resize.mockClear();
+
+    // `StreamClient`'s own `#reconnect()` (main/terminal/stream/client.ts)
+    // never re-opens the stream from the renderer's side -- it pushes a
+    // fresh seed through the SAME `onSeed` subscription a `%pause`/
+    // `%continue` reseed also uses. Between the drop and this reseed, tmux's
+    // window may have drifted from whatever `fit()` last told it (a `-C`
+    // client with no real tty reports no size of its own, and a window this
+    // pane is not currently drawing to has nothing forcing it to stay put)
+    // -- so this is the one seam that MUST re-assert cols×rows, not merely
+    // rewrite the screen.
+    act(() => {
+      seedListener?.('reseeded row one');
+    });
+
+    expect(resize).toHaveBeenCalledWith('p1', lastTerm?.cols, lastTerm?.rows, 's1');
   });
 });

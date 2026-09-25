@@ -2315,6 +2315,33 @@ body {
 }
 
 /*
+ * NO HARDCODED BLACK BEHIND THE GRID, EITHER -- the other half of the same
+ * "grey bar" report. `@xterm/xterm/css/xterm.css`'s own `.xterm-viewport`
+ * rule paints `background-color: #000` ("required... for the scroll bar to
+ * appear fully opaque" on its own comment, a bar the rule above already
+ * removes). `@xterm/addon-fit` also always reserves
+ * `options.overviewRuler?.width || 14` real px on the right for a bar this
+ * pane never draws -- a reservation this file cannot zero without also
+ * instantiating xterm's OWN overview-ruler canvas (`Terminal`'s own
+ * constructor: `options.overviewRuler.width && new OverviewRulerRenderer(...)`,
+ * a decorations feature this pane does not use and does not want a second
+ * canvas layer for). Between that permanent sliver and ordinary column
+ * rounding (`Math.floor` in `proposeDimensions()`), SOME blank strip past
+ * the last drawn column is unavoidable -- so it is repainted transparent
+ * here instead, letting `[data-terminal-stream]`'s own themed background
+ * (`terminalSchemeStyle`, on the frame this selects inside) show through
+ * rather than xterm's hardcoded black seam against a lighter theme.
+ *
+ * `!important`: `@xterm/xterm/css/xterm.css` is imported by
+ * `TerminalStreamTab.tsx` itself, into its own lazy-loaded chunk -- MEASURED
+ * to land in the DOM after this renderer's own stylesheet, so an equal-
+ * specificity override here would lose the cascade tie purely on load
+ * order, silently, depending on which chunk finished fetching last. */
+[data-terminal-stream] .xterm-viewport {
+  background-color: transparent !important;
+}
+
+/*
  * THE FILE EDITOR'S OVERLAY, IN FORCED COLOURS.
  *
  * `FilesTab.tsx` draws its syntax colours on a `<pre>` behind the textarea and
