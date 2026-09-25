@@ -101,8 +101,8 @@ describe('parseWorktreeListPorcelain — `-z` (NUL-separated)', () => {
       'a-future-git-added-this locked-in-some-new-way',
     ]);
     const [entry] = parseWorktreeListPorcelain(output, '\0');
-    expect(entry.path).toBe('/repo-worktrees/future');
-    expect(entry.branchRef).toBe('refs/heads/future');
+    expect(entry?.path).toBe('/repo-worktrees/future');
+    expect(entry?.branchRef).toBe('refs/heads/future');
   });
 });
 
