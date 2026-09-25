@@ -139,7 +139,22 @@ async function openFirstSession(page: Page): Promise<void> {
   const row = page.locator('[data-phone-shell] [data-session-row]').first();
   const box = await row.boundingBox();
   if (box === null) throw new Error('no session row');
-  await page.touchscreen.tap(box.x + 60, box.y + box.height / 2);
+  // `row.tap({ position })` -- not `page.touchscreen.tap(box.x + 60, ...)` on
+  // a `boundingBox()` read a moment earlier. That earlier coordinate can go
+  // stale between the read and the raw touchscreen event: measured on a real
+  // run, deep enough into this file's own long sequential suite, the row had
+  // moved ~11px between the `boundingBox()` call and a `$$eval` a few
+  // milliseconds later -- some still-settling layout above the list, not
+  // this suite's own concern to name -- and the raw coordinate landed on the
+  // sidebar's "new session" footer instead of the row, leaving
+  // `data-phone-shell` on "list" for the rest of the test's timeout.
+  // `Locator.tap`'s own actionability check re-resolves the row's CURRENT
+  // box and waits for it to stop moving before dispatching, which a
+  // fire-and-forget `touchscreen.tap` at a stale coordinate cannot do.
+  // `position` keeps this helper's own promise -- its left side, clear of
+  // any right-hand chrome -- rather than `tap()`'s own default of the
+  // element's centre.
+  await row.tap({ position: { x: 60, y: box.height / 2 } });
   await expect(page.locator('[data-phone-shell]')).toHaveAttribute('data-phone-shell', 'session');
 }
 

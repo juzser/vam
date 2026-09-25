@@ -50,12 +50,20 @@ export type HiddenBehavior = 'pause' | { readonly slowBy: number };
  *   codebase already is (`TerminalTab`, `useSourceModel`, `useAgentWork`):
  *   this hook never awaits it and never delays the next tick for it. A
  *   caller that must not overlap two loads keeps its own in-flight guard.
+ *   Called with `resumedFromHidden: true` ONLY for the hidden -> visible
+ *   transition's own immediate call -- `false` for the initial mount call
+ *   and every ordinary interval tick. `useSourceModel.ts` (S2, a review
+ *   finding on C10) is why this argument exists at all: it used to treat
+ *   EVERY call through this hook as "the operator just returned", which
+ *   made a routine periodic tick already in flight capable of swallowing a
+ *   genuine focus/visibilitychange pair landing a moment later, instead of
+ *   queuing behind it like the unrelated poll it actually was.
  */
 export function useVisibilityInterval(
   enabled: boolean,
   intervalMs: number,
   hidden: HiddenBehavior,
-  callback: () => void,
+  callback: (resumedFromHidden: boolean) => void,
 ): void {
   // Read through refs, updated every render with no dependency array of
   // their own -- `TerminalTab`'s own `readNow` ref makes the same argument:
@@ -98,7 +106,8 @@ export function useVisibilityInterval(
       // Hidden AND paused is the one state with no timer at all -- every
       // other combination (visible, or hidden-and-slowed) gets one.
       if (document.visibilityState === 'hidden' && hiddenRef.current === 'pause') return;
-      timer = window.setInterval(() => callbackRef.current(), periodNow());
+      // An ordinary tick, never a return -- see this hook's own header (S2).
+      timer = window.setInterval(() => callbackRef.current(false), periodNow());
     };
     controllerRef.current = { stop, restart };
   }
@@ -126,11 +135,13 @@ export function useVisibilityInterval(
       }
       // BECOMING VISIBLE: one immediate call, matching every poller's own
       // "call once on mount, then poll" shape -- coming back to a hidden
-      // window is exactly when its numbers are stalest.
-      callbackRef.current();
+      // window is exactly when its numbers are stalest. The one call marked
+      // `resumedFromHidden: true` -- see this hook's own header (S2).
+      callbackRef.current(true);
       restart();
     };
-    if (document.visibilityState !== 'hidden') callbackRef.current();
+    // The mount call is not a "return" -- there was nothing to return FROM.
+    if (document.visibilityState !== 'hidden') callbackRef.current(false);
     restart();
     document.addEventListener('visibilitychange', onVisibility);
     return () => {

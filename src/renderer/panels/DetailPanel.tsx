@@ -181,6 +181,8 @@ import { ConfirmPrAction } from './ConfirmPrAction.js';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu.js';
 import { copyText } from './clipboard.js';
 import { type ComposerImage, readPastedImages, spliceDraft } from './composer-paste.js';
+import { useDetailPanelModelRun } from './detail-panel-model-run.js';
+import { useDetailPanelTab } from './detail-panel-tab.js';
 import { type DictationHandle, dictationAvailable, startDictation } from './dictation.js';
 import type { FileOpenRequest } from './FilesTab.js';
 import {
@@ -196,8 +198,6 @@ import {
   modelButtonName,
   modelControlState,
   modelRunningClause,
-  type RunningModel,
-  runningModelRows,
 } from './model-command.js';
 import { Note } from './Note.js';
 import { type OutActionResult, OutActionsProvider } from './out-actions.js';
@@ -253,28 +253,6 @@ const LazyTerminalStreamTab = lazy(() =>
  * that vam started.
  */
 const PROMPT_POLL_MS = 2_000;
-
-/**
- * How often the pane is re-read for the model the session is running.
- *
- * SLOWER THAN THE PROMPT ABOVE IT, because it is a slower fact: a model
- * changes when somebody types `/model`, where a prompt appears and vanishes on
- * its own. What it buys at all is that vam is not the only one who can type
- * that line -- the operator can switch the model in their own terminal, and
- * the status line is HIDDEN behind any open question, so a read that never
- * repeated would leave the button unlabelled until the row changed.
- *
- * IT IS ALSO THE BOUND ON HOW STALE THE LABEL CAN BE, which is why it is not
- * slower still: four seconds is the longest the button can name a model the
- * session has stopped running. A pick vam makes itself does not wait for it
- * (`sendModel` looks again at once).
- *
- * WHAT IT COSTS: two tmux invocations per tick per pane showing a composer for
- * a session vam started -- the listing that proves the pairing and the capture
- * -- measured at 5.7ms and 5.4ms on a private socket. It runs nowhere else:
- * the recording source and every session vam did not start ask for nothing.
- */
-const MODEL_POLL_MS = 4_000;
 
 /**
  * One empty turn list, shared. A frozen constant rather than a fresh `[]` at
@@ -5995,7 +5973,14 @@ const TurnBlock = memo(function TurnBlock({
   );
 });
 
-export function DetailPanel(props: DetailPanelProps) {
+/**
+ * `React.memo`: same reason `SessionList.tsx:734` already carries it --
+ * `draft` and its siblings live one level up in `Canvas`, so a keystroke in
+ * ANOTHER pane must not re-render this one. `Canvas.tsx` carries the
+ * matching half: every prop this panel receives is a stable
+ * `useCallback`/`useMemo`, including the per-pane props object itself.
+ */
+export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
   const {
     entry,
     decision: canvasDecision,
@@ -6159,7 +6144,12 @@ export function DetailPanel(props: DetailPanelProps) {
   if (sessionChanged && pager !== RESTING_PAGER) setPager(RESTING_PAGER);
   const olderNow = sessionChanged ? NO_TURNS : older;
   const pagerNow = sessionChanged ? RESTING_PAGER : pager;
-  const mergedColumn = columnOf(entry?.session.decisions ?? NO_TURNS, olderNow);
+  const liveDecisions = entry?.session.decisions ?? NO_TURNS;
+  // Memoized on the two inputs `columnOf` actually reads: an unrelated
+  // re-render (a sibling pane's keystroke, a focus flip) must reuse the
+  // previous array rather than rebuilding a Set, a filter and a spread over
+  // up to MAX_DECISIONS turns.
+  const mergedColumn = useMemo(() => columnOf(liveDecisions, olderNow), [liveDecisions, olderNow]);
   /**
    * A PICK THE COLUMN NO LONGER CARRIES AT ALL -- not merely off the newest
    * slice, but genuinely absent, the same gap `source.ts` already documents for
@@ -6425,56 +6415,7 @@ export function DetailPanel(props: DetailPanelProps) {
   };
   /** The first option of the open question, when one is being asked. */
   const firstOptionRef = useRef<HTMLButtonElement>(null);
-  /**
-   * Which view the pane is showing -- the caller's fact when it has one, this
-   * component's own when it does not.
-   *
-   * IT USED TO BE LOCAL STATE THAT DELIBERATELY SURVIVED A SESSION SWITCH, on
-   * the reasoning that "an operator who opened Agents is looking at agents,
-   * not at whichever tab the last session left behind". The operator has
-   * overruled it: a view is a per-session choice, and switching session 1 to
-   * PRs must leave every other session where it was. The sentence above was
-   * true of ONE session in ONE pane and became false the moment a pane could
-   * show several -- `Canvas.tsx` claimed the isolation in a comment on
-   * `renderLeaf` while `key={leaf.id}` remounted nothing.
-   *
-   * The validating stays HERE, for both routes, because this is where the bar
-   * is: a name that is not on it (an older vam's tab, a hand-edited store) is
-   * simply not a view, so it costs the default and nothing else.
-   */
-  const [ownTab, setOwnTab] = useState<Tab>(() => {
-    const remembered = props.initialTab;
-    return TABS.find((name) => name === remembered) ?? 'Response';
-  });
-  const named = props.tab;
-  const controlled = named !== undefined;
-  const tab = controlled ? (TABS.find((name) => name === named) ?? 'Response') : ownTab;
-  const onTabChange = props.onTabChange;
-  /**
-   * Report the operator's CHOICE, never `current`. `current` falls back to
-   * Response while a source withdraws the Terminal tab, and reporting that
-   * would let walking past a session without a terminal erase a choice the
-   * operator never changed.
-   *
-   * FROM THE ACT, NOT FROM AN EFFECT, and that is what closes a loop rather
-   * than opening one. This used to be `useEffect(() => onTabChange?.(tab))`
-   * gated on `paneFocused`: `onTabChange` is a fresh closure every render, so
-   * it fired on every render, and with two panes showing two different tabs
-   * each write re-rendered the other pane, which wrote back, forever --
-   * measured, a synchronous `savePrefs` loop that hung the shell. Calling it
-   * only when a view is actually PICKED means there is no render-driven write
-   * left to loop, so the `paneFocused` gate that was holding the loop shut is
-   * no longer load-bearing and is gone with it. A background pane can now
-   * report its own session's view, which is correct: it is still an act the
-   * operator performed, in the pane they performed it in.
-   */
-  const pickTab = useCallback(
-    (next: Tab) => {
-      if (!controlled) setOwnTab(next);
-      onTabChange?.(next);
-    },
-    [controlled, onTabChange],
-  );
+  const { tab, pickTab, pickTabRef } = useDetailPanelTab(props);
   const tabRequest = props.tabRequest ?? null;
   const viewNote = props.viewNote ?? null;
   /**
@@ -6492,8 +6433,7 @@ export function DetailPanel(props: DetailPanelProps) {
    * request object is the only thing that should re-run this, so it is the
    * only dependency.
    */
-  const pickTabRef = useRef(pickTab);
-  pickTabRef.current = pickTab;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `pickTabRef` is the stable ref returned by `useDetailPanelTab`, not a reactive value -- listing it (or `onTabChange`) here is exactly the re-run-on-every-render bug the comment above describes.
   useEffect(() => {
     if (tabRequest !== null) {
       pickTabRef.current(tabRequest.tab);
@@ -6511,6 +6451,7 @@ export function DetailPanel(props: DetailPanelProps) {
    */
   const [fileOpenRequest, setFileOpenRequest] = useState<FileOpenRequest | null>(null);
   const refSessionId = entry?.session.id ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `pickTabRef.current` is called inside `openFileRef` below; the ref itself (from `useDetailPanelTab`) is stable and not a reactive dependency of this memo.
   const outActions = useMemo(
     () => ({
       /**
@@ -7575,112 +7516,12 @@ export function DetailPanel(props: DetailPanelProps) {
     'pause',
     () => void lookPrompt(),
   );
-  /**
-   * WHICH MODEL THIS SESSION IS RUNNING -- the name the CLI paints on its own
-   * status line, read back out of the pane, or `null` for "vam cannot tell".
-   *
-   * THE FACT IS READ, NEVER REMEMBERED, and that is the whole design. vam
-   * drives the CLI's own `/model` menu and reads no answer line afterwards:
-   * the operator can type their own `/model` there, a resumed session was set
-   * by somebody else, and the CLI can refuse. So the button below shows what
-   * the pane SAYS, and the two things it must never show are a name from a
-   * switch vam asked for and a name read from another row.
-   *
-   * ASKED ONLY WHERE THE PICKER IS DRAWN, which is `delivers` and a pane vam
-   * owns (`modelControlState`). On every other row vam does not look into a
-   * pane it may not act in -- the same rule the prompt read above keeps -- and
-   * the disabled button keeps its old word.
-   *
-   * READ ON THE ROW, ON AN INTERVAL, AND ON DEMAND. The row because a new
-   * session is a new pane; the interval because the operator can switch the
-   * model in their own terminal and because the status line is hidden behind
-   * every open question, so a single read would leave the button unlabelled
-   * until the row changed; on demand because a `/model` line vam has just
-   * typed is the one moment the answer is known to be about to change.
-   *
-   * THE ON-DEMAND ROUTE IS A REF AND NOT A DEPENDENCY, which is `TerminalTab`'s
-   * own arrangement (`readNow`): the poll publishes its reader while it is
-   * running and takes it back when it stops, so nothing outside can ask a read
-   * of a row that is no longer being polled -- and the effect keeps the
-   * dependencies it actually reads.
-   */
-  const [running, setRunning] = useState<RunningModel | null>(null);
-  /** Published only while the poll below is live; see `sendModel`. */
-  const lookForModel = useRef<(() => void) | null>(null);
-  const modelReadable = modelControl === 'picker' && model !== undefined;
-  /** True while THIS effect's own previous run was already polling -- see
-   *  its use below for why an "already polling, just a different row"
-   *  transition needs its own immediate ask instead of
-   *  `useVisibilityInterval`'s (which only fires on OFF -> ON). */
-  const wasModelReadable = useRef(false);
-  /**
-   * WHICH READ'S ANSWER IS STILL WANTED. Bumped on every call, so two reads
-   * in flight at once -- a hidden window's throttled interval releases a
-   * burst when it comes back -- can never have an older one answering last
-   * paint a model the session had seconds ago. `TerminalTab`'s own poll
-   * makes exactly this argument; only the most recently ISSUED read may
-   * write. Also bumped by the reset effect's own cleanup below, so a read
-   * left over from the PREVIOUS row cannot land under this one's title
-   * either -- the `live` closure this replaces covered both cases at once;
-   * a hook-managed poll can no longer hold one open across ticks.
-   */
-  const modelGeneration = useRef(0);
-  const lookModel = useCallback(async () => {
-    if (!modelReadable || model === undefined) return;
-    modelGeneration.current += 1;
-    const mine = modelGeneration.current;
-    const view = await model(projectId, rowId);
-    if (mine !== modelGeneration.current) return;
-    // `unknown` IS THE FALLBACK AND NOT A HOLD. Every reason vam could not
-    // tell -- a question over the status line, a cut pane, a pairing it
-    // refused, AND a transcript with no answered turn in it -- lands on the
-    // word the button wore before, because the one thing worse than an
-    // unlabelled button is a label that has quietly stopped being true.
-    //
-    // AND THE ARM IS KEPT, not flattened to the name. `model` came off the
-    // CLI's painted footer and `last-turn` out of the session's transcript;
-    // both put the same word on the button, and only one of them can be
-    // called "running" in the words around it (`modelRunningClause`).
-    setRunning(view.kind === 'unknown' ? null : view);
-  }, [modelReadable, model, projectId, rowId]);
-  useEffect(() => {
-    if (!modelReadable || model === undefined) {
-      // A row change lands here first, and this line is what stops the last
-      // session's model being drawn under this one's title for one frame.
-      setRunning(null);
-      lookForModel.current = null;
-      wasModelReadable.current = false;
-      return;
-    }
-    lookForModel.current = () => void lookModel();
-    // SKIPPED on the very first tick this becomes readable at all --
-    // `useVisibilityInterval`'s own OFF -> ON immediate call already covers
-    // that edge; asking twice would be a second, needless tmux read.
-    if (wasModelReadable.current) void lookModel();
-    wasModelReadable.current = true;
-    return () => {
-      lookForModel.current = null;
-      modelGeneration.current += 1;
-    };
-    // `projectId`/`rowId` are not read directly here -- `lookModel` already
-    // carries them, and its own identity is what re-runs this effect.
-  }, [modelReadable, model, lookModel]);
-  // READ ON THE ROW, ON THE INTERVAL, AND ON DEMAND -- see this control's own
-  // header above. Paused outright while the window is hidden (`hidden:
-  // 'pause'`): nothing downstream of this button depends on it the way
-  // `notify/waiting.ts` depends on `useSourceModel`, and it resumes with one
-  // immediate tick the moment the window is visible again.
-  useVisibilityInterval(modelReadable, MODEL_POLL_MS, 'pause', () => void lookModel());
-  /**
-   * The rows the answer marks; two when the name cannot separate them.
-   *
-   * BY NAME, AND THEREFORE THE SAME FOR BOTH SOURCES. A transcript-sourced
-   * name arrives already in the footer's own shape (`displayModelName`), so
-   * the tick is the same machinery on either -- and a tick that disagreed with
-   * the label beside it would be worse than a tick that lags with it. What the
-   * lag means is carried in the words, where it can be said.
-   */
-  const runningRows = runningModelRows(running?.name ?? null);
+  const { running, lookForModel, runningRows } = useDetailPanelModelRun({
+    modelControl,
+    model,
+    projectId,
+    rowId,
+  });
   /**
    * THE RECORD WINS. A transcript question carries the tool's own
    * `multiSelect`, its descriptions and its previews; a screen carries none of
@@ -8161,7 +8002,10 @@ export function DetailPanel(props: DetailPanelProps) {
   // Oldest first: the column is newest first. That
   // ordering is what makes "the last line" and "the newest turn" the same
   // line, so the ones kept are taken off the end.
-  const orderedTurns = [...mergedColumn].reverse();
+  // `mergedColumn` is itself memoized on `liveDecisions`/`olderNow`, so
+  // keying on it here keeps this reversed copy stable across the same
+  // unrelated re-renders without a second copy of that dependency pair.
+  const orderedTurns = useMemo(() => [...mergedColumn].reverse(), [mergedColumn]);
   /**
    * How many tool calls failed across the turns ON SCREEN, or `null` when no
    * turn read carries the field at all.
@@ -11472,7 +11316,7 @@ export function DetailPanel(props: DetailPanelProps) {
   // the transcript's markdown AND the Files tab's markdown preview, which
   // share one component map. See `out-actions.ts`.
   return <OutActionsProvider value={outActions}>{pane}</OutActionsProvider>;
-}
+});
 
 /**
  * What a right-click on an In bubble offers.
@@ -11581,7 +11425,7 @@ function gapLabel(ms: number): string {
 }
 
 export function promptMenuItems(
-  turn: Decision,
+  _turn: Decision,
   how: {
     readonly live: boolean;
     readonly interruptRefusal: string | null;

@@ -1546,4 +1546,236 @@ describe('loadClaudeCodeProjects', () => {
       expect('slashCommandGap' in (project?.sessions[0] ?? {})).toBe(false);
     });
   });
+
+  /**
+   * `loadClaudeCodeProjects` used to read each session's transcript inside a
+   * sequential `for` loop, so a batch of N sessions cost N reads back to
+   * back. The read seam (`readTranscriptOf`, the function's last parameter)
+   * lets a test control when each session's read resolves, to prove the
+   * batch is now ONE concurrent wave rather than N waits in a row.
+   */
+  describe('concurrent transcript reads', () => {
+    const emptyRead = (branch: string) => ({
+      facts: { aiTitle: null, branch, activity: null, decisions: [], questions: [] },
+      roster: { agents: [], running: 0 },
+      mtimeMs: null,
+    });
+
+    const boundedWait = (promise: Promise<unknown>, ms: number, message: string) =>
+      Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+      ]);
+
+    it('starts every session read before any of them resolves', async () => {
+      const sessionIds = ['sess-1', 'sess-2', 'sess-3', 'sess-4', 'sess-5'];
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const starts: string[] = [];
+      let releaseAll: () => void = () => {};
+      const allStarted = new Promise<void>((resolve) => {
+        releaseAll = resolve;
+      });
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        starts.push(sessionId);
+        if (starts.length === sessionIds.length) releaseAll();
+        // A SEQUENTIAL implementation only ever has ONE call in flight, so
+        // `starts` never reaches 5 and this wait times out -- bounded, so the
+        // proof fails fast rather than hanging the suite.
+        await boundedWait(allStarted, 200, 'did not observe all five reads start');
+        return emptyRead(sessionId);
+      };
+
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+
+      expect(starts.length).toBe(5);
+      expect(project?.sessions.map((s) => s.epic).sort()).toEqual([...sessionIds].sort());
+    });
+
+    /**
+     * S3 (review finding): unbounded concurrency was correct for a handful
+     * of sessions but would spawn one `claude` read per session for a very
+     * large project set. Twelve sessions, none released, must start no more
+     * than 8 reads -- `mapWithConcurrencyLimit`'s own unit test
+     * (`claude-code-concurrency-limit.test.ts`) pins the limiter in
+     * isolation; this pins that `loadClaudeCodeProjects` actually wires it
+     * in rather than still calling the bare `Promise.all` it used to.
+     */
+    it('never starts more than the concurrency bound at once, with a large session set', async () => {
+      const sessionIds = Array.from({ length: 12 }, (_, i) => `sess-${i}`);
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const starts: string[] = [];
+      const releases = new Map<string, () => void>();
+      let releaseEighthWave: () => void = () => {};
+      const eighthWaveStarted = new Promise<void>((resolve) => {
+        releaseEighthWave = resolve;
+      });
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        starts.push(sessionId);
+        if (starts.length === 8) releaseEighthWave();
+        await new Promise<void>((resolve) => releases.set(sessionId, resolve));
+        return emptyRead(sessionId);
+      };
+
+      const loadPromise = loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+
+      // Give every read that WILL start without another resolving first the
+      // chance to -- bounded, so an unbounded regression (all 12 start, this
+      // never resolves waiting for a ninth-that-never-comes) fails fast
+      // rather than hanging the suite.
+      await boundedWait(eighthWaveStarted, 500, 'did not observe exactly 8 reads start');
+      // Give a would-be regression one more turn of the loop to prove a
+      // ninth does NOT also start on its own.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(starts.length).toBe(8);
+
+      // Drain in waves: releasing the first 8 frees their slots, which lets
+      // the next few start -- but only as each wave's OWN releases resolve
+      // and the worker loop picks up the next item, a few of which need
+      // their own wave after that. Keep releasing whatever is currently
+      // waiting until all 12 have started.
+      while (starts.length < sessionIds.length) {
+        const waiting = [...releases.values()];
+        releases.clear();
+        for (const release of waiting) release();
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      for (const release of releases.values()) release();
+      await loadPromise;
+      expect(starts.length).toBe(12);
+    });
+
+    it('lets the other sessions land data when one session read rejects', async () => {
+      const sessionIds = ['sess-1', 'sess-2', 'sess-3'];
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        if (sessionId === 'sess-2') throw new Error('boom');
+        return emptyRead(sessionId);
+      };
+
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+
+      const bySession = new Map(project?.sessions.map((s) => [s.epic, s]));
+      expect(bySession.get('sess-1')).toBeDefined();
+      expect(bySession.get('sess-3')).toBeDefined();
+      // The failing session's read never landed a branch, so its session
+      // carries the NO_TRANSCRIPT sentinel's `epic: null` untouched.
+      const failing = project?.sessions.find((s) => s.id === 'sess-2#1');
+      expect(failing?.epic).toBeNull();
+    });
+
+    /**
+     * THE EMPTY BATCH. `Promise.all` over zero reads must resolve immediately
+     * to an empty map rather than hang or throw -- the concurrent form has no
+     * loop body to skip the way the old `for` loop did trivially.
+     */
+    it('resolves with no projects when there are no live sessions to read', async () => {
+      const readTranscriptOf = async () => {
+        throw new Error('must never be called with zero agents');
+      };
+      const projects = await loadClaudeCodeProjects(
+        root,
+        [],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+      expect(projects).toEqual([]);
+    });
+
+    /**
+     * EVERY READ REJECTS. The per-item try/catch has to be truly per item --
+     * a batch where every promise in `Promise.all` rejects must still resolve
+     * the whole call (never reject `loadClaudeCodeProjects` itself), with
+     * every session carrying its own `NO_TRANSCRIPT` sentinel rather than one
+     * rejection aborting the others' otherwise-successful bookkeeping.
+     */
+    it('still returns every session, each with the sentinel, when all reads reject', async () => {
+      const sessionIds = ['sess-1', 'sess-2', 'sess-3'];
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        throw new Error(`boom-${sessionId}`);
+      };
+
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+
+      expect(project?.sessions).toHaveLength(3);
+      for (const session of project?.sessions ?? []) {
+        expect(session.epic).toBeNull();
+      }
+    });
+  });
 });

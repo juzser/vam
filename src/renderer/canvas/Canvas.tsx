@@ -35,6 +35,7 @@ import { Pencil, Plus } from 'lucide-react';
 import {
   type ComponentProps,
   lazy,
+  memo,
   type DragEvent as ReactDragEvent,
   type ReactNode,
   Suspense,
@@ -134,26 +135,20 @@ import { TABS, tabForDigit, visibleTabs } from '../panels/tabs.js';
 import { PhoneShell } from '../phone/PhoneShell.js';
 import { usePhoneViewport } from '../phone/viewport.js';
 import { type FocusCandidate, resolveFocusNodeId } from '../prefs/focus.js';
-import { DEFAULT_PANES, layoutWidths, PANE_RESIZE_STEP } from '../prefs/panes.js';
+import { DEFAULT_PANES, PANE_RESIZE_STEP } from '../prefs/panes.js';
 import {
   addProjectToGroup,
-  applyPalette,
   applyProjectIcons,
   applyRenames,
-  applyTheme,
   browserStorage,
   countDismissedSessions,
   createGroup,
   deleteGroup,
-  type EffectiveTheme,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
   isSessionDismissed,
-  type Prefs,
-  paletteFor,
   prRepoFor,
-  readPrefs,
   removeProjectFromGroup,
   renameGroup,
   restoreAllDismissedSessions,
@@ -176,13 +171,8 @@ import {
   setSessionFilters,
   setTheme,
   setViewOptions,
-  type Theme,
-  watchOsTheme,
-  writePrefs,
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
-import { setActiveTerminalScheme } from '../prefs/terminal-scheme.js';
-import type { SectionId } from '../settings/sections.js';
 import { capabilitiesFor } from '../sources/members.js';
 import {
   canWriteTo,
@@ -192,6 +182,9 @@ import {
 } from '../sources/port.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
+import { useCanvasOverlays } from './canvas-overlays.js';
+import { useCanvasPrefs } from './canvas-prefs.js';
+import { useCanvasTheme } from './canvas-theme.js';
 import {
   adoptOrphans,
   canSplit,
@@ -1715,6 +1708,56 @@ function SplitLayout({
   );
 }
 
+/**
+ * One pane's `DetailPanel` props, memoized on that pane's OWN inputs so a
+ * keystroke in a SIBLING pane -- which replaces the whole
+ * `draftsBySession`/`composingBySession`/`writingBySession`/
+ * `actionIndexBySession` maps, see `mapsRef` above `buildDetailProps` --
+ * does not rebuild this pane's props object and defeat `DetailPanel`'s own
+ * `memo()`.
+ *
+ * `draft`/`composing`/`writing`/`actionIndex` are this pane's own slice of
+ * those four maps, read by the CALLER (`renderLeaf`) and passed down as
+ * plain values purely so THIS memo's dependency array can key on them --
+ * `buildDetailProps` itself does not take them as arguments; it reads the
+ * maps through `mapsRef.current` at call time, which is why it is safe for
+ * this component to omit those four maps from its own dependency list and
+ * still recompute exactly when this pane's own slice changes.
+ */
+const PaneDetail = memo(function PaneDetail({
+  buildDetailProps,
+  entry,
+  sessionId,
+  paneId,
+  isFocused,
+  draft,
+  composing,
+  writing,
+  actionIndex,
+}: {
+  buildDetailProps: (
+    entry: SessionEntry | null,
+    sessionId: string | null,
+    paneId: string,
+    isFocused: boolean,
+  ) => ComponentProps<typeof DetailPanel>;
+  entry: SessionEntry | null;
+  sessionId: string | null;
+  paneId: string;
+  isFocused: boolean;
+  draft: string;
+  composing: boolean;
+  writing: boolean;
+  actionIndex: number;
+}) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draft`/`composing`/`writing`/`actionIndex` are not read inside the callback -- `buildDetailProps` reads its own copies through `mapsRef` -- they are listed ONLY so this pane's memo recomputes exactly when this pane's own slice of the four maps changes, which is the whole point of passing them down as plain values (see the component doc comment above)
+  const paneProps = useMemo(
+    () => buildDetailProps(entry, sessionId, paneId, isFocused),
+    [buildDetailProps, entry, sessionId, paneId, isFocused, draft, composing, writing, actionIndex],
+  );
+  return <DetailPanel {...paneProps} />;
+});
+
 function CanvasInner({
   model: factoryModel,
   source,
@@ -1727,44 +1770,18 @@ function CanvasInner({
   const usageSnapshot = useUsageSnapshot(window.api?.usage?.get);
   const usage = describeUsage(usageSnapshot, new Date());
 
-  /**
-   * What you arranged, as opposed to what the factory reported. Read once —
-   * `localStorage` is synchronous and this is two small maps — and written on
-   * every change, so a reload finds the canvas as you left it.
-   */
   const storage = useMemo(() => browserStorage(), []);
-  const [prefs, setPrefs] = useState<Prefs>(() => readPrefs(storage));
-  const savePrefs = useCallback(
-    (next: Prefs) => {
-      setPrefs(next);
-      writePrefs(storage, next);
-    },
-    [storage],
-  );
-
-  /**
-   * The two pane widths, live. `viewportWidth` re-renders the clamp on every
-   * resize but never writes (epic.md §4.2 point 2). `liveWidths` holds a
-   * pane's in-progress drag value so the other pane's rendered width can
-   * react to it without touching storage; it is cleared and `savePrefs` is
-   * called only at drag end, never mid-drag (AC-2(c)).
-   */
-  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
-  useEffect(() => {
-    function onResize() {
-      setViewportWidth(window.innerWidth);
-    }
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const [liveWidths, setLiveWidths] = useState<{
-    sidebar: number | null;
-    detail: number | null;
-  }>({ sidebar: null, detail: null });
-
-  const storedSidebar = liveWidths.sidebar ?? prefs.panes.sidebar;
-  const storedDetail = liveWidths.detail ?? prefs.panes.detail;
+  const {
+    prefs,
+    savePrefs,
+    viewportWidth,
+    storedSidebar,
+    storedDetail,
+    sidebarWidth,
+    detailWidth,
+    onPaneChange,
+    onPaneCommit,
+  } = useCanvasPrefs(storage);
   /**
    * Which shell this viewport gets. `false` wherever `matchMedia` is missing,
    * so every environment without one -- jsdom, happy-dom, the tests -- keeps
@@ -1772,59 +1789,13 @@ function CanvasInner({
    */
   const phone = usePhoneViewport();
 
-  const { sidebar: sidebarWidth, detail: detailWidth } = layoutWidths(
-    { sidebar: storedSidebar, detail: storedDetail },
-    viewportWidth,
-  );
-
-  const onPaneChange = useCallback((pane: 'sidebar' | 'detail', width: number) => {
-    setLiveWidths((prev) => ({ ...prev, [pane]: width }));
-  }, []);
-
-  const onPaneCommit = useCallback(
-    (pane: 'sidebar' | 'detail', width: number) => {
-      setLiveWidths((prev) => ({ ...prev, [pane]: null }));
-      savePrefs(setPaneWidth(prefs, pane, width));
-    },
-    [prefs, savePrefs],
-  );
+  const { effective } = useCanvasTheme(prefs);
 
   /**
    * The factory's model with your icons on it. Done here, once, so the tab
    * strip does not have to know that an icon comes from somewhere
    * different than the rest of a session.
    */
-  // The class on <html> is what styles.css switches on, and prefs is the only
-  // source for it — so this effect, not the toggle's click handler, is what
-  // moves the document. A handler that also wrote the class would be a second
-  // writer, and the two disagree the first time prefs is restored from storage.
-  // `system` is a subscription, not a sample: without the listener the OS
-  // flipping at sunset leaves a dashboard on the appearance it had at mount,
-  // which is not what the overlay's own hint promises. Keeping the resolved
-  // value in state is what lets the sidebar's label and its click describe the
-  // screen rather than the store.
-  // The colour overrides move HERE too, in the same statement, because they are
-  // stored per theme: the class and the bucket in force are two halves of one
-  // appearance, and a flip that moved only the class would leave a light theme
-  // wearing dark's canvas until the next write. `writePrefs` covers an edit;
-  // only this covers the OS changing its mind with nothing else happening.
-  // The terminal's scheme is the third half of the same appearance and is
-  // stored per theme for the same reason, so it moves in the same statement:
-  // without this line an open terminal would keep its dark scheme after the
-  // OS flipped to light under `system`, with nothing else on screen wrong.
-  const [effective, setEffective] = useState<EffectiveTheme>('dark');
-  useEffect(() => {
-    const show = (theme: Theme) => {
-      const next = applyTheme(theme);
-      setEffective(next);
-      applyPalette(paletteFor(prefs.palette, next));
-      setActiveTerminalScheme(prefs.terminalScheme, next);
-    };
-    show(prefs.theme);
-    if (prefs.theme !== 'system') return;
-    return watchOsTheme(() => show('system'));
-  }, [prefs.theme, prefs.palette, prefs.terminalScheme]);
-
   const sourceModel = useMemo(
     // Renames after icons, and in the same one place, for the same reason:
     // the sidebar, the tab strip and the detail panel all render `session.title`,
@@ -2188,29 +2159,26 @@ function CanvasInner({
     },
     [setFocusedPaneId],
   );
-  const [jumping, setJumping] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [keySheetOpen, setKeySheetOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  /** Which section Settings opens on next — `appearance` unless the Remote
-   *  icon or its key just asked for `remote` directly (see `openSettings`). */
-  const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
-  const [errorLogOpen, setErrorLogOpen] = useState(false);
-  /**
-   * The row a close refused without being able to prove it is not vam's own
-   * -- `SourceError.forcible` -- and offered the operator a confirmed kill
-   * for. `null` means no such prompt is on screen. See `ConfirmForceClose`.
-   */
-  const [confirmForceClose, setConfirmForceClose] = useState<{
-    sessionId: string;
-    title: string;
-    /** The refusal that opened this prompt, carried along so declining it
-     *  (`onCancel`) can dismiss the row with the SAME reason rather than a
-     *  second, disconnected one -- see `closeSession`'s own dismissal path. */
-    reason: string;
-  } | null>(null);
+  const {
+    jumping,
+    setJumping,
+    status,
+    setStatus,
+    query,
+    setQuery,
+    paletteOpen,
+    setPaletteOpen,
+    keySheetOpen,
+    setKeySheetOpen,
+    settingsOpen,
+    setSettingsOpen,
+    settingsSection,
+    setSettingsSection,
+    errorLogOpen,
+    setErrorLogOpen,
+    confirmForceClose,
+    setConfirmForceClose,
+  } = useCanvasOverlays();
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
     paletteOpen || keySheetOpen || settingsOpen || errorLogOpen || confirmForceClose !== null;
@@ -2529,6 +2497,7 @@ function CanvasInner({
    * below, for the same reason -- a project with no source has nowhere to
    * store the new title.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const beginSessionRename = useCallback((entry: SessionEntry) => {
     const projectSource = entry.project.source;
     if (projectSource === undefined) {
@@ -2894,7 +2863,7 @@ function CanvasInner({
       savePrefs(createGroup(prefs, source, id, name));
       setStatus(`${name} — a project kept on this machine, never in the event log`);
     },
-    [groupHomeSource, prefs, savePrefs],
+    [groupHomeSource, prefs, savePrefs, setStatus],
   );
 
   const renameOneGroup = useCallback(
@@ -2922,7 +2891,7 @@ function CanvasInner({
       savePrefs(deleteGroup(prefs, source, group.id));
       setStatus(`${group.name} ungrouped — ${moved} ${moved === 1 ? 'repo' : 'repos'} moved up`);
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, setStatus],
   );
 
   /**
@@ -4074,7 +4043,7 @@ function CanvasInner({
       );
       setFocusedPaneId(newId);
     },
-    [focusedSessionId, panes, setFocusedPaneId],
+    [focusedSessionId, panes, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -4127,7 +4096,7 @@ function CanvasInner({
     }
     setPanes(next);
     setFocusedPaneId(fallback);
-  }, [panes, focusedPaneId, setFocusedPaneId]);
+  }, [panes, focusedPaneId, setFocusedPaneId, setStatus]);
 
   /** Cycle the keyboard between splits, wrapping — vim's `Ctrl-w w`/`W`. */
   const stepFocusedSplit = useCallback(
@@ -4138,7 +4107,7 @@ function CanvasInner({
       }
       setFocusedPaneId(stepPane(panes, focusedPaneId, delta));
     },
-    [panes, focusedPaneId, setFocusedPaneId],
+    [panes, focusedPaneId, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -4380,7 +4349,7 @@ function CanvasInner({
       });
       setFocusedPaneId(newId);
     },
-    [dragging, panes, entriesById, setFocusedPaneId],
+    [dragging, panes, entriesById, setFocusedPaneId, setStatus],
   );
 
   const onPaneDrop = useCallback(
@@ -4450,9 +4419,39 @@ function CanvasInner({
    * shell always made, just no longer needing a zero-argument wrapper of
    * its own now that its one caller passes the entry directly.
    */
+  /**
+   * A RENDER-TIME MIRROR of the four per-session maps `buildDetailProps` and
+   * `sendPromptFor` read, so neither has to list them in its own dependency
+   * array.
+   *
+   * `setDraftFor` replaces the WHOLE `draftsBySession` map on every keystroke
+   * in ANY pane, so a `useCallback` that lists it directly takes a new
+   * identity on a keystroke it has nothing to do with -- and `sendPromptFor`
+   * is itself a dependency of `buildDetailProps`, so that identity change
+   * would ripple into every split pane's per-pane props memo, defeating even
+   * a SIBLING pane's `DetailPanel` memo for a keystroke in this one.
+   * Assigned in the render body, NOT in an effect: both callbacks read
+   * `mapsRef.current` at CALL time (after the keystroke that triggered the
+   * render has already committed), and an effect would not have written the
+   * current values yet when an event handler fires synchronously within the
+   * same render pass in some paths.
+   */
+  const mapsRef = useRef({
+    draftsBySession,
+    composingBySession,
+    writingBySession,
+    actionIndexBySession,
+  });
+  mapsRef.current = {
+    draftsBySession,
+    composingBySession,
+    writingBySession,
+    actionIndexBySession,
+  };
   const sendPromptFor = useCallback(
     async (entry: SessionEntry | null) => {
-      const entryDraft = entry === null ? '' : (draftsBySession[entry.session.id] ?? '');
+      const entryDraft =
+        entry === null ? '' : (mapsRef.current.draftsBySession[entry.session.id] ?? '');
       if (entry === null || entryDraft.trim() === '') {
         return;
       }
@@ -4468,7 +4467,7 @@ function CanvasInner({
         setStatus('still connecting to the source — there is nothing to send to yet');
         return;
       }
-      if (writingBySession[entry.session.id] ?? false) {
+      if (mapsRef.current.writingBySession[entry.session.id] ?? false) {
         return;
       }
       const text = entryDraft;
@@ -4601,14 +4600,15 @@ function CanvasInner({
       }
     },
     [
-      draftsBySession,
+      // `draftsBySession` and `writingBySession` are read through `mapsRef`
+      // above, deliberately absent here -- see the comment on `mapsRef`.
       source,
-      writingBySession,
       sourceModel,
       setDraftFor,
       setComposingFor,
       setWritingFor,
       setSendFailureFor,
+      setStatus,
     ],
   );
 
@@ -4657,7 +4657,7 @@ function CanvasInner({
    * `activity` regardless of whether today's view happens to be showing it.
    */
   const dismissSession = useCallback(
-    (sessionId: string, title: string, reason: string): void => {
+    (sessionId: string, _title: string, reason: string): void => {
       const entry = allEntries.find((e) => e.session.id === sessionId);
       const sourceId = entry?.session.source ?? entry?.project.source ?? 'unknown';
       savePrefs(
@@ -4673,7 +4673,7 @@ function CanvasInner({
         `${reason} — vam removed it from your list here; it returns if it shows new activity.`,
       );
     },
-    [allEntries, prefs, savePrefs],
+    [allEntries, prefs, savePrefs, setStatus],
   );
 
   const closeSession = useCallback(
@@ -4756,7 +4756,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction, dismissSession],
+    [source, pendingAction, dismissSession, setStatus, setConfirmForceClose],
   );
 
   /**
@@ -4839,6 +4839,7 @@ function CanvasInner({
       startingPaneByKey,
       beginStartingPane,
       clearStartingPane,
+      setStatus,
     ],
   );
 
@@ -4908,6 +4909,7 @@ function CanvasInner({
       startingPaneByKey,
       beginStartingPane,
       clearStartingPane,
+      setStatus,
     ],
   );
 
@@ -4961,7 +4963,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, setStatus],
   );
 
   /**
@@ -5017,7 +5019,7 @@ function CanvasInner({
         setFocusedPaneId(stepPane(panes, paneId, 1));
       }
     },
-    [panes, setFocusedPaneId, closeSession],
+    [panes, setFocusedPaneId, closeSession, setStatus],
   );
 
   /**
@@ -5146,7 +5148,7 @@ function CanvasInner({
           : `removed "${project.name}" from vam — ended ${ended} session${ended === 1 ? '' : 's'} vam started; nothing left this machine`,
       );
     },
-    [allEntries, closeSession, pendingAction, setProjectRemoved],
+    [allEntries, closeSession, pendingAction, setProjectRemoved, setStatus],
   );
 
   /**
@@ -5227,7 +5229,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, setStatus],
   );
 
   /**
@@ -5336,7 +5338,7 @@ function CanvasInner({
       // turns a clear one into an apparent hang.
       setPendingAction(null);
     }
-  }, [source, pendingAction]);
+  }, [source, pendingAction, setStatus]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
@@ -5391,7 +5393,7 @@ function CanvasInner({
       }
       void createSession(target.project.id, target.project.name, paneId);
     },
-    [allEntries, activeProjectId, createSession, setFocusedPaneId],
+    [allEntries, activeProjectId, createSession, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -5414,7 +5416,7 @@ function CanvasInner({
         ? `"${target.title}" goes back to the name its source gives it`
         : `renamed to "${renameDraft.trim()}" — vam's own name for it, kept on this machine`,
     );
-  }, [renameTarget, renameDraft, prefs, savePrefs]);
+  }, [renameTarget, renameDraft, prefs, savePrefs, setStatus]);
 
   const copyAllCommands = useCallback(async () => {
     const commands = focusedDecision?.commands ?? [];
@@ -5426,7 +5428,7 @@ function CanvasInner({
     setStatus(
       copied ? `copied ${commands.length} commands` : `could not copy ${commands.length} commands`,
     );
-  }, [focusedDecision]);
+  }, [focusedDecision, setStatus]);
 
   /**
    * `gt` / `gT` — THE MOVE THAT THINKS IN PROJECTS.
@@ -5492,7 +5494,7 @@ function CanvasInner({
         focusSession(landing.session.id);
       }
     },
-    [entries, focusedEntry, focusSession],
+    [entries, focusedEntry, focusSession, setStatus],
   );
 
   /**
@@ -6268,9 +6270,19 @@ function CanvasInner({
       stepFocusedSplit,
       setFocusedSessionId,
       setViewFor,
+      setConfirmForceClose,
+      setJumping,
+      setSettingsOpen,
+      setStatus,
+      setQuery,
+      setSettingsSection,
+      setPaletteOpen,
+      setErrorLogOpen,
+      setKeySheetOpen,
     ],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: listing the useCanvasOverlays() setters would touch the keydown effect's deps; they are stable like useState setters.
   useEffect(() => {
     // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
     // that does not exist, `Mod-<digit>` resolves against panes that are not
@@ -6537,6 +6549,7 @@ function CanvasInner({
     setFiltering(true);
   }, [focusedSessionId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setQuery` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const onSidebarFilterChange = useCallback((next: string) => {
     // incsearch: the answer arrives while you type, not after you
     // commit. Without it the list narrows under a focus ring that is
@@ -6564,7 +6577,7 @@ function CanvasInner({
     setFiltering(false);
     setQuery('');
     setFocusedSessionId(searchOrigin.current);
-  }, [setFocusedSessionId]);
+  }, [setFocusedSessionId, setQuery]);
 
   const onSidebarRenameCancel = useCallback(() => {
     setRenamingId(null);
@@ -6679,6 +6692,7 @@ function CanvasInner({
 
   const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const onSidebarPickIcon = useCallback((project: Project) => {
     // Same refusal as the session picker (§ above): a project with no
     // source has no bucket to store under, and guessing one would
@@ -6713,17 +6727,17 @@ function CanvasInner({
           : `renamed to "${name.trim()}" — vam's own name for it, kept on this machine`,
       );
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, setStatus],
   );
 
   const onSidebarSettings = useCallback(() => {
     setSettingsSection('appearance');
     setSettingsOpen(true);
-  }, []);
+  }, [setSettingsSection, setSettingsOpen]);
   const onSidebarRemote = useCallback(() => {
     setSettingsSection('remote');
     setSettingsOpen(true);
-  }, []);
+  }, [setSettingsSection, setSettingsOpen]);
 
   const onSidebarToggleTheme = useCallback(
     () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
@@ -6929,6 +6943,13 @@ function CanvasInner({
    * the keyboard there first — the same "clicking into it is how you focus
    * it" contract a real click already has everywhere else in this shell.
    */
+  /**
+   * `buildDetailProps` reads the four per-session maps through `mapsRef`
+   * (declared above, beside `sendPromptFor`, for the same reason), so it can
+   * stop listing them in its own dependency array -- every split pane's
+   * per-pane props memo lists `buildDetailProps` as a dependency, so an
+   * identity change here would defeat every sibling pane's memo too.
+   */
   const buildDetailProps = useCallback(
     (
       entry: SessionEntry | null,
@@ -6936,10 +6957,12 @@ function CanvasInner({
       paneId: string,
       isFocused: boolean,
     ): ComponentProps<typeof DetailPanel> => {
-      const paneDraft = sessionId === null ? '' : (draftsBySession[sessionId] ?? '');
-      const paneComposing = sessionId === null ? false : (composingBySession[sessionId] ?? false);
-      const paneWriting = sessionId === null ? false : (writingBySession[sessionId] ?? false);
-      const paneActionIndex = sessionId === null ? 0 : (actionIndexBySession[sessionId] ?? 0);
+      const maps = mapsRef.current;
+      const paneDraft = sessionId === null ? '' : (maps.draftsBySession[sessionId] ?? '');
+      const paneComposing =
+        sessionId === null ? false : (maps.composingBySession[sessionId] ?? false);
+      const paneWriting = sessionId === null ? false : (maps.writingBySession[sessionId] ?? false);
+      const paneActionIndex = sessionId === null ? 0 : (maps.actionIndexBySession[sessionId] ?? 0);
       /**
        * WHERE THIS PROJECT'S PULL REQUESTS ARE READ FROM, and the two acts
        * that change it -- built HERE because this is where `prefs` and
@@ -7166,10 +7189,10 @@ function CanvasInner({
       };
     },
     [
-      draftsBySession,
-      composingBySession,
-      writingBySession,
-      actionIndexBySession,
+      // `draftsBySession`, `composingBySession`, `writingBySession` and
+      // `actionIndexBySession` are read through `mapsRef` above, deliberately
+      // NOT listed here: each one is replaced whole on any pane's keystroke,
+      // and listing them would take this callback's identity with it.
       sendFailureBySession,
       startingPaneByKey,
       viewBySession,
@@ -7206,9 +7229,19 @@ function CanvasInner({
    * room for a split, and the chord grammar that would create one is
    * already off there — see the `onKeyDown` effect's own guard).
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `draft`/`composing`/`writing`/`actionIndex` below are not read directly here -- `buildDetailProps` reads its own copies through `mapsRef` -- they are listed ONLY so this memo recomputes exactly when the FOCUSED session's slice of the four maps changes, mirroring `PaneDetail`'s own memo above for the same reason: PhoneShell is handed this object directly (no per-pane wrapper), so without these deps a keystroke in the phone composer would never recompute it.
   const detailProps = useMemo(
     () => buildDetailProps(focusedEntry, focusedSessionId, focusedPaneId, true),
-    [buildDetailProps, focusedEntry, focusedSessionId, focusedPaneId],
+    [
+      buildDetailProps,
+      focusedEntry,
+      focusedSessionId,
+      focusedPaneId,
+      focusedSessionId === null ? undefined : draftsBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : composingBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : writingBySession[focusedSessionId],
+      focusedSessionId === null ? undefined : actionIndexBySession[focusedSessionId],
+    ],
   );
 
   /**
@@ -7346,7 +7379,28 @@ function CanvasInner({
           {starting !== null && starting.paneId === leaf.id ? (
             <StartingSession projectName={starting.projectName} />
           ) : (
-            <DetailPanel {...buildDetailProps(entry, leaf.sessionId, leaf.id, isFocused)} />
+            <PaneDetail
+              buildDetailProps={buildDetailProps}
+              entry={entry}
+              sessionId={leaf.sessionId}
+              paneId={leaf.id}
+              isFocused={isFocused}
+              // This pane's OWN slice of the four per-session maps, read
+              // here (not inside `PaneDetail`) so a keystroke in ANOTHER
+              // pane -- which replaces the whole map by reference -- still
+              // hands `PaneDetail` the SAME primitive values for this
+              // pane's session, and its `memo()` bails out.
+              draft={leaf.sessionId === null ? '' : (draftsBySession[leaf.sessionId] ?? '')}
+              composing={
+                leaf.sessionId === null ? false : (composingBySession[leaf.sessionId] ?? false)
+              }
+              writing={
+                leaf.sessionId === null ? false : (writingBySession[leaf.sessionId] ?? false)
+              }
+              actionIndex={
+                leaf.sessionId === null ? 0 : (actionIndexBySession[leaf.sessionId] ?? 0)
+              }
+            />
           )}
           {dropTarget !== null && dropTarget.paneId === leaf.id && (
             <DropZoneOverlay zone={dropTarget.zone} />
@@ -7377,12 +7431,23 @@ function CanvasInner({
       newTabInPane,
       newSessionDecline,
       dropTarget,
-      // The strip's two indicator inputs. `buildDetailProps` above already
-      // re-derives on every draft keystroke, so `draftsBySession` costs this
-      // hook nothing it was not paying. Without them the strip would draw a
-      // stale pencil. (The indicator LIST is a constant now, so it is not a
-      // dependency: see `prefs/tab-indicators.ts`.)
+      // `draftsBySession` feeds the strip's pencil indicator directly
+      // (`drafts={draftsBySession}` above) AND is read here, per leaf, to
+      // pass `PaneDetail` this pane's own draft as a plain string --
+      // `buildDetailProps` no longer depends on any of these four maps
+      // (they are read through `mapsRef` there instead), so listing them
+      // here is what keeps THIS closure from handing `PaneDetail` a stale
+      // slice. `composingBySession`, `writingBySession` and
+      // `actionIndexBySession` are the other three for the same reason.
+      // Recreating `renderLeaf` itself on every keystroke costs nothing:
+      // `PaneDetail`'s own `memo()` compares the PRIMITIVE values it
+      // receives, not this function's identity. (The indicator LIST is a
+      // constant now, so it is not a dependency: see
+      // `prefs/tab-indicators.ts`.)
       draftsBySession,
+      composingBySession,
+      writingBySession,
+      actionIndexBySession,
       pending,
       // The tab strip's own `emptyText` guard -- see `hasOwnSession`'s own
       // header for why `entries.length === 0` alone is not enough.

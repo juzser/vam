@@ -108,6 +108,24 @@ const BACKED_OFF_INTERVAL_MS = SOURCE_POLL_INTERVAL_MS * 2;
  *  this poller specifically may not use `useVisibilityInterval`'s `'pause'`. */
 const HIDDEN_SLOWDOWN = 4;
 
+/**
+ * C10: `window`'s `focus` and `document`'s `visibilitychange` (`load`'s own
+ * two effects, further down -- the latter through `useVisibilityInterval`'s
+ * "BECOMING VISIBLE" immediate call) both mark their call to `load` a
+ * RETURN SIGNAL, and both fire for the SAME real-world event, the operator
+ * returning to vam, one DOM event apart. `load`'s in-flight guard QUEUES a
+ * call that arrives while one is already running (`reloadQueued`'s own doc,
+ * below) -- correct for a write's `reload` or a genuinely later poll, since
+ * dropping THOSE outright was the bug this queue exists to fix -- but a
+ * RETURN SIGNAL landing this soon after another one already started a read
+ * is the same signal arriving twice, not a second reason to ask again, so
+ * it is dropped instead of queued. Deliberately short: two real browser
+ * events for one user action land single-digit milliseconds apart,
+ * measured; this is slack, not a debounce the operator could feel, and it
+ * never delays the FIRST read of a return -- only a redundant second one.
+ */
+export const COALESCE_WINDOW_MS = 200;
+
 function subscribeVisibility(onChange: () => void): () => void {
   document.addEventListener('visibilitychange', onChange);
   return () => document.removeEventListener('visibilitychange', onChange);
@@ -144,6 +162,21 @@ export function useSourceModel(source: SessionSource | null): {
    *  one clears. See this file's header for why dropping it outright was the
    *  bug. */
   const reloadQueued = useRef(false);
+  /** When the current in-flight load STARTED -- read only by the RETURN
+   *  SIGNAL coalescing window above (C10), never by the generic queue. */
+  const inFlightSince = useRef(0);
+  /** Whether the CURRENT in-flight load was itself started by a return
+   *  signal (S2, a review finding on C10 above). The coalescing window must
+   *  only ever absorb the second half of a focus/visibilitychange PAIR --
+   *  never a periodic tick's own read that a return signal happens to land
+   *  inside. Without this a return signal arriving while an ordinary
+   *  10s-cadence poll was in flight was silently dropped instead of queued,
+   *  because the window only ever checked WHEN the in-flight load started,
+   *  never WHY -- so a poll that began reading a few hundred milliseconds
+   *  before the operator alt-tabbed back in ate the return signal, and the
+   *  view the operator came back to see stayed stale until the next
+   *  scheduled tick, up to 40s away while hidden. */
+  const inFlightIsReturn = useRef(false);
   const issued = useRef(0);
   /** The previous successful load's `projects`, serialised -- `null` until
    *  the first one lands, so that answer alone can never look "unchanged". */
@@ -154,17 +187,34 @@ export function useSourceModel(source: SessionSource | null): {
   const unchangedStreak = useRef(0);
 
   const load = useCallback(
-    function load() {
+    // `isReturnSignal`: true only from the `focus` listener and the
+    // visibility poll below (C10) -- never from a periodic tick, mount, or
+    // `reload` in this hook's own return value (a write's `source.onWrote`).
+    function load(isReturnSignal = false) {
       if (source === null) {
         return;
       }
       if (inFlight.current) {
+        if (
+          isReturnSignal &&
+          inFlightIsReturn.current &&
+          performance.now() - inFlightSince.current < COALESCE_WINDOW_MS
+        ) {
+          // The other half of a focus/visibilitychange pair -- dropped, not
+          // queued: see this file's header. Gated on `inFlightIsReturn` too
+          // (S2): the in-flight load must ALSO have been a return signal, or
+          // this is a return landing on top of an unrelated poll/write, and
+          // must queue like any other overlap.
+          return;
+        }
         // Queued rather than dropped -- see this file's header. Still never
         // joined: this returns exactly as before, nothing is issued here.
         reloadQueued.current = true;
         return;
       }
       inFlight.current = true;
+      inFlightSince.current = performance.now();
+      inFlightIsReturn.current = isReturnSignal;
       issued.current += 1;
       const seq = issued.current;
       // Only the newest ISSUED load may write. Without this a slow load
@@ -241,14 +291,17 @@ export function useSourceModel(source: SessionSource | null): {
 
   // Coming back to vam is both when its numbers matter most and when they
   // are stalest -- unchanged since before visibility gating existed, and
-  // orthogonal to it: a focus event is a discrete act, not a rate.
+  // orthogonal to it: a focus event is a discrete act, not a rate. Marked a
+  // RETURN SIGNAL (C10): a `visibilitychange` landing beside it must not
+  // queue a second read.
+  const onFocus = useCallback(() => load(true), [load]);
   useEffect(() => {
     if (source === null) {
       return;
     }
-    window.addEventListener('focus', load);
-    return () => window.removeEventListener('focus', load);
-  }, [source, load]);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [source, onFocus]);
 
   const documentHidden = useSyncExternalStore(
     subscribeVisibility,
@@ -259,7 +312,16 @@ export function useSourceModel(source: SessionSource | null): {
   // the worked argument. The backed-off visible value is handed over ONLY
   // while visible; hidden always gets the base, whatever the streak is.
   const intervalMs = documentHidden ? SOURCE_POLL_INTERVAL_MS : visibleIntervalMs;
-  useVisibilityInterval(source !== null, intervalMs, { slowBy: HIDDEN_SLOWDOWN }, load);
+  // A RETURN SIGNAL ONLY WHEN `useVisibilityInterval` SAYS SO (S2, a review
+  // finding on C10): its own `resumedFromHidden` argument is `true` only for
+  // the hidden -> visible transition's own immediate call, matching `focus`
+  // above -- `false` for the initial mount call and every ordinary interval
+  // tick. Forwarding it directly is what lets `load` tell a genuine return
+  // apart from a routine poll that happens to still be in flight when one
+  // lands -- previously this always passed `true`, so an in-flight periodic
+  // tick could swallow a real return instead of queuing behind it.
+  const onVisible = useCallback((resumedFromHidden: boolean) => load(resumedFromHidden), [load]);
+  useVisibilityInterval(source !== null, intervalMs, { slowBy: HIDDEN_SLOWDOWN }, onVisible);
 
   return { model, error, loading, reload: load };
 }

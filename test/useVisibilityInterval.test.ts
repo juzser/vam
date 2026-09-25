@@ -160,6 +160,37 @@ describe('useVisibilityInterval', () => {
     expect(callback).toHaveBeenCalledTimes(before);
   });
 
+  it('tells a periodic tick apart from a real return-from-hidden -- a caller that treats them differently needs to know which fired it', () => {
+    // useSourceModel.ts (S2) conflated the two by ignoring this argument: it
+    // marked EVERY call through this hook a "return signal", including the
+    // ordinary interval tick, which meant a routine poll already in flight
+    // could eat a genuine focus/visibilitychange pair that landed a moment
+    // later. The contract this pins: `false` for the initial mount call and
+    // every plain interval tick, `true` only for the hidden -> visible
+    // transition's own immediate call.
+    vi.useFakeTimers();
+    const visibility = spyVisibility();
+    const callback = vi.fn();
+    mount({ enabled: true, intervalMs: 1000, hidden: { slowBy: 4 } }, callback);
+    expect(callback).toHaveBeenLastCalledWith(false); // mount
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(callback).toHaveBeenLastCalledWith(false); // an ordinary tick
+
+    visibility.mockReturnValue('hidden');
+    changeVisibility();
+    visibility.mockReturnValue('visible');
+    changeVisibility();
+    expect(callback).toHaveBeenLastCalledWith(true); // the real return
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(callback).toHaveBeenLastCalledWith(false); // back to an ordinary tick
+  });
+
   it('tears down the same way, hidden-and-paused, when `enabled` flips to false mid-run', () => {
     vi.useFakeTimers();
     const visibility = spyVisibility();

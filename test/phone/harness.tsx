@@ -61,6 +61,10 @@ export function phoneSource(
     declines?: SourceDeclines;
     /** Present makes the source able to close, and records what it was asked. */
     closeSession?: (sessionId: string) => Promise<void>;
+    /** Overrides the default (immediately-resolving) `recordPrompt`, so a
+     * test can hold the promise open and observe the in-flight `sending`
+     * state before letting it settle. */
+    recordPrompt?: (sessionId: string, text: string) => Promise<void>;
   } = {},
 ): CanvasSource {
   const inner = {
@@ -86,7 +90,7 @@ export function phoneSource(
     viewerScope: { kind: 'connection', note: 'one local process' },
     load: async () => [],
     write: {
-      recordPrompt: async () => {},
+      recordPrompt: over.recordPrompt ?? (async () => {}),
       ...(over.closeSession === undefined ? {} : { closeSession: over.closeSession }),
     },
   };
