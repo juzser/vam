@@ -644,3 +644,173 @@ of the cursor's own colour against the scheme's `cursor` token (the block/
 no-blink STYLE is measured, its colour is not, separately from the ANSI
 colours already falsified above); and multi-pane handling (task-breakdown
 item 13, still open, unrelated to frame parity).
+
+## 15. The latency guards, now in the automatic checks
+
+The operator's own ask (translated): "the terminal latency/resource
+measurement scripts are not in the automatic checks -- fix it." Until this
+task both `e2e/terminal-stream-latency-shots.mjs` and
+`e2e/terminal-typing-latency-shots.mjs` ran only by hand; the latter was
+already registered in `e2e/run-web-guards.mjs`'s `GUARDS` list from an
+earlier task but had no retry hardening, and the former asserted nothing
+past "eventually seen" -- no p95 bound at all.
+
+### Inventory
+
+Every `e2e/*.mjs` script with "latency" or "perf" in scope, and what each
+actually measures:
+
+| script | measures | needs real tmux | wall-clock assertions before this task | now |
+|---|---|---|---|---|
+| `terminal-typing-latency-shots.mjs` | the POLL path's keystroke chain (`terminal.read`/`terminal.send`), two panes (`sh`, real `claude` fullscreen) | yes | one p95 bound (pane A only; pane B checked but shared A's bound) | per-pane bounds, retry-once-alone on both |
+| `terminal-stream-latency-shots.mjs` | the SHIPPED `StreamClient` (control-mode streaming), one throwaway xterm.js harness | yes | none -- only "n of N eventually painted" | three p95 bounds, a write-call batching bound, two structural client-count checks, retry-once-alone on the three p95 checks |
+| `terminal-stream-frame-shots.mjs` | visual/CSS parity between the two Terminal tabs | no (stubbed) | n/a -- not a latency script | unchanged, out of this task's scope |
+| `terminal-stream-glitch-shots.mjs` | streaming-mode rendering correctness (width, seed line-endings) | yes | n/a -- not a latency script | unchanged, out of this task's scope, and still not registered in `GUARDS` (a correctness guard, not this task's brief) |
+
+Both latency scripts are now registered in `run-web-guards.mjs`'s `GUARDS`
+list, which the `web-guards` CI job (`.github/workflows/ci.yml`) already
+runs via `pnpm run test:e2e:web` -- that job already installs tmux
+(`sudo apt-get install -y tmux`, originally for `terminal-echo-scroll-
+shots.mjs`) before the guards run, so no new CI infrastructure was needed,
+only the registration and the hardening below. Both guards degrade to a
+loud, exit-0 SKIP when tmux is absent (unchanged, pre-existing behaviour);
+`terminal-typing-latency-shots.mjs`'s pane B additionally SKIPS (pane A
+still gates) when `claude` is not on `PATH`, which is always true on the CI
+runner -- pane B has never run in CI and does not today.
+
+### Why a wall-clock threshold needed care here specifically
+
+Two standing lessons this repo already carries make a naive `p95 < X`
+threshold a flake generator: `starvation-stretches-11ms-to-5022ms` (how far
+scheduling noise alone can stretch a wall-clock number) and a measured
+constant differing between this machine and a CI Linux runner. Both guards
+now follow the same three-part discipline: (b) a GENEROUS absolute ceiling,
+calibrated from real runs with headroom rather than asserted back from the
+measured number; (c) asserted only after warm-up (the app/harness is
+already interacted with before a test's own timing window starts) and with
+enough samples (n=50/30/20/5 depending on the test, matching each
+measurement's own natural cadence); and a RETRY-ONCE-ALONE policy: if a p95
+misses its bound on the first pass, the SAME measurement is taken fresh
+once more before the guard fails for real. Both guards already run truly
+ALONE by construction -- `run-web-guards.mjs` runs its `GUARDS` list
+serially, one Chromium at a time (its own header: "a flaky guard is the one
+the next person disables"), and each script owns a private tmux socket
+nothing else touches -- so the retry adds a genuinely fresh sample, not a
+re-read of numbers a one-off blip already produced. Deterministic
+assertions (matched counts, spawn counts, byte bounds, the write-call
+batching count, the control-client counts) get no retry: retrying those
+would only hide a real defect.
+
+### `terminal-stream-latency-shots.mjs` -- calibration
+
+Three wall-clock bounds (criterion (b), no in-run poll-path baseline to
+ratio against -- this script measures the streaming path alone, via its own
+throwaway harness, in a different process than the poll-path script),
+calibrated over 11 full runs on a shared MacBook that got visibly busier
+partway through:
+
+| test | worst p95 observed (11 runs + 2 earlier "shipped path" runs already on record above) | bound set | headroom |
+|---|---|---|---|
+| typing (keydown→paint, n=50) | 18.40ms | 150ms | ~8x |
+| echo (print→paint, one at a time, n=30) | 92.70ms | 350ms | ~3.8x |
+| burst (print→paint, `yes \| head -n 2000`, n=5) | 189.60ms | 700ms | ~3.7x |
+
+Plus one STRUCTURAL (non-wall-clock) bound: `term.write()` calls per burst
+loop (5 runs of ~2001 lines each, ~10,005 lines total) stayed in the low
+hundreds across 10 measured runs -- 235 / 238 / 281 / 286 / 297 / 311 / 313
+/ 395 / 403 / 590 -- because tmux's own control-mode framer coalesces
+multiple pty reads into one `%output` notification rather than one per
+line. Set at 1200, ~2x the worst of those ten and still ~8x below the raw
+line count -- generous enough for the same load variance the p95 bounds
+carry retry-once-alone for, while still catching a real regression (writing
+once per line would land in the thousands).
+
+Two STRUCTURAL client-count checks, both deterministic: exactly one
+control-mode client is attached to the streamed session for the life of the
+guard's own connection, and zero remain once it disposes -- the "one client
+per open view, zero once it closes" invariant this doc's own Risks section
+(above) already names for a real Terminal-stream tab.
+
+### `terminal-typing-latency-shots.mjs` -- pane B's own bound
+
+Pane A (plain `sh`) kept its existing 120ms bound (`PAINT_P95_BOUND_MS`,
+already carrying solid headroom -- every calibration run in this task
+landed p95 10-17ms). Pane B (a real `claude`, fullscreen TUI) got a NEW,
+separate bound: it pays real, inherent paint cost this doc's own "Before"
+table already names (rendering a ~900-byte, 137x41, SGR-coloured screen),
+and sharing pane A's 120ms bound turned out to be exactly the "known to be
+load-flaky" case this task was asked to check. Measured: five clean runs
+landed p95 90.10-93.50ms; a full-gate run later in this same task, on a
+machine visibly busier (this repo's `node_modules` is a tree SHARED across
+every worktree on this machine, and another session's `pnpm install`
+landed mid-run), pushed it to 171.20ms, then 174.00ms on the immediate
+retry -- a SUSTAINED elevation a single retry cannot absorb, exactly as
+retry-once-alone is supposed to behave (it does not mask a persistent
+condition, only a one-off blip). `PANE_B_PAINT_P95_BOUND_MS` is set at
+300ms, ~1.7x the worst observed. Pane B never runs in CI (no `claude` CLI
+on the runner's `PATH`), so this bound only protects a by-hand local run
+with `claude` installed from crying wolf on a machine this doc already
+calls "shared and loaded"; it has no bearing on what gates a PR.
+
+### Falsification
+
+**The three p95 checks (`terminal-stream-latency-shots.mjs`) and both p95
+checks (`terminal-typing-latency-shots.mjs`).** An `artificialPaintDelayMs`
+query param / `VAM_E2E_ARTIFICIAL_PAINT_DELAY_MS` env var (default 0 on
+every real run) delays each recorded paint by a fixed amount after the real
+render. Injected at 300-350ms: every p95 check in both files went red, on
+BOTH the first attempt and the retry (the injected delay is deterministic,
+so the retry correctly still fails rather than masking it) -- pane A
+228-285ms → retry 305-366ms (bound 120ms), pane B 393-444ms → retry
+391-449ms (bound 300ms), stream typing/echo/burst all 330-1062ms (bounds
+150/350/700ms). Removed after (the env var reverts to unset; nothing in
+the shipped code path changed). One bug this falsification pass found and
+fixed along the way, in BOTH files: matching a paint to a keystroke/marker
+by `array.find(p => p.t >= threshold)` from the start of the array every
+time let one early, delayed paint satisfy SEVERAL keystrokes' thresholds at
+once (each looking "faster" than the last), understating a genuine, uniform
+injected delay rather than reporting it -- fixed with a monotonically
+advancing cursor (`terminal-typing-latency-shots.mjs`'s `stageTable`) and by
+reading paint TEXT synchronously at render time rather than inside the
+delayed commit (`terminal-stream-latency-harness.html`, the same root
+cause: a late read observing a buffer a LATER write had already mutated).
+
+**The "exactly one control client" structural check
+(`terminal-stream-latency-shots.mjs`).** `VAM_E2E_INJECT_EXTRA_CONTROL_CLIENT=1`
+spawns a second real `tmux -C attach-session` against the same target right
+after the guard's own client connects (kept alive with a never-ending stdin
+pipe -- a real control-mode client exits the instant it sees EOF on stdin,
+found by hand while building this lever). With it set: `FAIL exactly one
+control-mode client is attached to the streamed session -- 2 client(s)
+attached`, while every other check in the file stayed green, including
+"zero clients once disposed" (the injected extra client is torn down
+alongside the real one). Removed after (the env var reverts to unset).
+
+### The one-line hook for the streaming resource guard
+
+`e2e/terminal-stream-resource-shots.mjs` (CPU, memory, client count, tmux
+pause-after backpressure -- branch `vam/stream-default`, not yet landed)
+measures the same shipped `StreamClient` the same way this task's own
+`terminal-stream-latency-shots.mjs` does: a private tmux socket, its own
+throwaway harness. Once it lands, add it to `run-web-guards.mjs`'s `GUARDS`
+array as the entry right after `'terminal-stream-latency-shots'` (the very
+last two entries in the list) -- see that file's own comment at that spot,
+which already names the exact line to add. No new CI job, no new tmux
+install: it belongs in the same "runs last, alone, after every other guard's
+Chromium has closed" slot for the same reason.
+
+### Gate
+
+`biome check .`, all four `tsc` steps, `vitest run`, `electron-vite build
+&& vitest run --config vitest.app.config.ts`, `vite build --config
+vite.web.config.ts`, `node scripts/check-bundle-externals.mjs`, the full
+58-guard `run-web-guards.mjs` (`VAM_E2E_CHECK_ORPHANS=1`) and
+`playwright test --config=e2e/playwright.phone.config.ts` (59 tests) all
+passed on this branch. One `run-web-guards.mjs` run mid-task failed two
+unrelated guards (`settings-panels-shots.mjs`, then both latency guards on
+a separate run) while this task's own concurrent local commands (builds,
+`vitest run --config vitest.app.config.ts`) and another session's `pnpm
+install` against the shared `node_modules` tree were competing for the same
+machine at the same moment -- re-run alone, all 58 passed
+(`rerun-suite-isolated-before-triaging.md`, `parallel-suite-runs-fake-mass-
+failures.md`, both standing lessons this finding matches exactly).
