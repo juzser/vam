@@ -3750,6 +3750,27 @@ const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
 
 /**
+ * THE OPTION ROW'S OWN FOCUS RING -- subtler than `FOCUS_RING`, and scoped to
+ * this card rather than a fifth copy of the app's own.
+ *
+ * A PICKED OPTION ALREADY WEARS A COLOUR (`border-running`) AND A FILL
+ * (`OPTION_FILL`); the operator's ask was that focus read as a CURSOR beside
+ * those, not as a second, competing "this is chosen" signal. `FOCUS_RING`'s own
+ * `outline-ink` is the app's boldest ink for the reason its own comment gives --
+ * it has to clear a fill on every OTHER surface it is drawn on -- and next to a
+ * green picked border that weight reads as a second selection rather than a
+ * cursor. `ink-dim` is the one already measured on THIS card, one step down
+ * (`OPTION_QUIET_INK`'s own comment): 5.942:1 dark, 5.304:1 light against
+ * `bg-card`, both comfortably clear of the 3:1 WCAG 1.4.11 floor a non-text
+ * outline owes, and visibly quieter than `ink`. `outline-offset-1` (not `-2`)
+ * keeps the ring close without touching the border it sits beside -- an
+ * offset outline is drawn OUTSIDE the border box either way, so a picked
+ * row's own border is never covered, only bordered again a pixel further out.
+ */
+const OPTION_FOCUS_RING =
+  'focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-ink-dim';
+
+/**
  * THE FILL A CONTROL ON THIS CARD TAKES WHEN IT IS TOUCHED, and the reason it
  * is not `raised`.
  *
@@ -4199,6 +4220,17 @@ function QuestionCard({
    */
   readonly phone?: boolean;
 }) {
+  /**
+   * THE SEND KEY, off the same preference the composer itself reads
+   * (`prefs/submit-key.ts`) -- Submit's own chord chip, below, follows
+   * whichever key the operator chose, the same subscription `DetailPanel`
+   * already holds for its composer's use.
+   */
+  const submitKey = useSyncExternalStore(
+    subscribePromptSubmitKey,
+    activePromptSubmitKey,
+    activePromptSubmitKey,
+  );
   /** Which step is showing, and what has been marked on EACH of them. */
   const [showing, setShowing] = useState(0);
   /**
@@ -4978,6 +5010,7 @@ function QuestionCard({
                         // `group` is what lets the quiet spans below hear about a
                         // hover on this button -- see `OPTION_QUIET_INK`.
                         'group vam-tap flex cursor-pointer flex-col items-start gap-0.5 rounded-[6px] border px-1.5 py-1 text-left',
+                        OPTION_FOCUS_RING,
                         picked.includes(option.label)
                           ? `border-running ${OPTION_FILL}`
                           : armed
@@ -4986,6 +5019,25 @@ function QuestionCard({
                       ].join(' ')}
                     >
                       <span className="flex max-w-full items-baseline gap-1.5 text-control text-ink">
+                        {/* THE PICKED MARK -- a lucide `Check`, not a second
+                            colour: the border and fill above already say
+                            "chosen"; this is what says it to someone who
+                            cannot use either (a screen reader gets it for
+                            free off `aria-selected`, but a sighted operator
+                            scanning a list of similarly-bordered rows gets
+                            an icon, not a hue to eyeball). `aria-hidden`
+                            because `aria-selected` already carries the fact
+                            on the row itself -- a second announcement would
+                            repeat it. */}
+                        {picked.includes(option.label) && (
+                          <Check
+                            aria-hidden="true"
+                            data-question-picked-mark
+                            size={13}
+                            strokeWidth={2.5}
+                            className="flex-none text-running"
+                          />
+                        )}
                         {NUMBERED_OPTIONS[index] !== undefined && (
                           <span className={`text-meta tabular-nums ${OPTION_QUIET_INK}`}>
                             {NUMBERED_OPTIONS[index]}
@@ -5152,31 +5204,53 @@ function QuestionCard({
             data-question-short={unmarked.length > 0 ? 'true' : undefined}
             onClick={trySend}
             className={[
-              'rounded-[6px] border px-1.5 py-1 text-control',
+              'flex items-center gap-1.5 rounded-[6px] border px-1.5 py-1 text-control',
               sending
                 ? 'cursor-default border-line text-ink-faint'
                 : `cursor-pointer border-running text-ink hover:${OPTION_FILL}`,
             ].join(' ')}
           >
-            {sending ? 'Submitting…' : 'Submit'}
+            {sending ? (
+              'Submitting…'
+            ) : (
+              <>
+                Submit
+                {/* THE CHORD THAT SENDS, drawn the way every other one on
+                    this card is (`ChordGlyphs`, the Send-key option's own
+                    flat rendering) and read off the SAME preference the
+                    composer itself sends on (`prefs/submit-key.ts`) -- a
+                    card that said "Enter submits" while the operator had
+                    chosen Shift-Enter would be naming a key that does
+                    nothing, the exact defect `InlineChord`'s own doc argues
+                    against for a withdrawn chord. `aria-hidden`: the chip is
+                    a repeat of what native activation already promises a
+                    focused button, not new information a reader lacks. */}
+                <span
+                  data-question-submit-key
+                  aria-hidden="true"
+                  className="rounded-[4px] border border-line-strong px-1 py-px font-mono text-ink-dim text-meta"
+                >
+                  <ChordGlyphs chord={submitKey === 'shift-enter' ? 'Shift-Enter' : 'Enter'} />
+                </span>
+              </>
+            )}
           </button>
           {/* WHAT IS STILL MISSING, and now for one question as well as for
               several. This was `questions.length > 1`, so the commonest call
               there is -- a single question -- had a faint Submit above a
               sentence about marking and nothing saying the mark was what it
-              was waiting for. USED TO be silent once the set was complete --
-              that silence was two different facts wearing one blank line: for
-              years there was nothing to report, and now there is a route
-              nobody had said out loud, so the line stays lit rather than going
-              quiet at the one moment it has something to say. */}
+              was waiting for. Silent once the set is complete: the chord chip
+              on Submit itself says what used to be said here ("Enter
+              submits"), and a control that already carries its own key need
+              not be repeated beside it. */}
           <span data-question-progress className="text-meta text-ink-faint">
             {pending.length > 1
               ? unmarked.length > 0
                 ? `${pending.length - unmarked.length} of ${pending.length} marked`
-                : 'Enter submits'
+                : null
               : unmarked.length > 0
                 ? 'not marked yet — pick an option above'
-                : 'Enter submits'}
+                : null}
           </span>
         </div>
       )}
@@ -5195,30 +5269,35 @@ function QuestionCard({
           {outcomeWording(outcome)}
         </p>
       )}
-      {open && (
+      {/* `onAnswer === null` ONLY. The other half of this sentence --
+          "a pick is only a mark until you press Submit…" -- is gone: Submit
+          now carries its own chord chip and a picked option carries its own
+          Check, which is what that sentence used to have to say in words.
+          `data-question-note` stays undrawn rather than emptied for the
+          delivering case: `WaitingNote`'s own suppression test
+          (`newestQuestion === null || !openQuestion`, above) never reads this
+          attribute, so nothing downstream depends on the node existing with
+          nothing in it. */}
+      {open && onAnswer === null && (
         <p data-question-note className="text-control text-ink-faint">
-          {onAnswer === null
-            ? // Still exactly true where there is no delivery: nothing here can
-              // reach the tool call, and a control that implied otherwise would
-              // be the lie this sentence was written against.
-              //
-              // IT USED TO END "type your choice in the box below", AND THERE
-              // IS NO BOX BELOW. `composerHidden` withdraws the composer for an
-              // unanswered question -- on the desktop as well as the phone, so
-              // this was never a phone bug -- and measured at 390x844 the card
-              // sat over `[data-composer-bar]` count 0 and `textarea` count 0.
-              // Picking an option does not draw one either. The one route from
-              // a card to a box is the card's own last row, so the sentence
-              // names THAT -- a control drawn just above it, which already says
-              // "it opens the box below" in its own caption. Drawing the
-              // composer instead was the other candidate and was measured and
-              // refused: it costs 140px on the one screen this whole change is
-              // about, and it would put two surfaces under one prompt.
-              'vam cannot answer this for you — a pick is only a mark, and nothing goes back to the session; tap Chat about this to open the box and type your choice.'
-            : // And still true where there is: picking sends nothing. Submit is
-              // the thing that sends, and it sends the whole set at once, the
-              // way the call was asked.
-              'a pick is only a mark until you press Submit — Submit walks the session own picker through every step and says what it read back.'}
+          {/* Still exactly true where there is no delivery: nothing here can
+              reach the tool call, and a control that implied otherwise would
+              be the lie this sentence was written against.
+
+              IT USED TO END "type your choice in the box below", AND THERE
+              IS NO BOX BELOW. `composerHidden` withdraws the composer for an
+              unanswered question -- on the desktop as well as the phone, so
+              this was never a phone bug -- and measured at 390x844 the card
+              sat over `[data-composer-bar]` count 0 and `textarea` count 0.
+              Picking an option does not draw one either. The one route from
+              a card to a box is the card's own last row, so the sentence
+              names THAT -- a control drawn just above it, which already says
+              "it opens the box below" in its own caption. Drawing the
+              composer instead was the other candidate and was measured and
+              refused: it costs 140px on the one screen this whole change is
+              about, and it would put two surfaces under one prompt. */}
+          vam cannot answer this for you — a pick is only a mark, and nothing goes back to the
+          session; tap Chat about this to open the box and type your choice.
         </p>
       )}
     </div>

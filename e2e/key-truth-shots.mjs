@@ -1514,6 +1514,168 @@ check(
 await page.screenshot({ path: `${outDir}/key-truth-question-enter-submits.png` });
 console.log(`${outDir}/key-truth-question-enter-submits.png`);
 
+// ---------------------------------------------------------------------------
+// THE CARD'S OWN UI PASS: a picked option's Check and tint, a subtler
+// focus-visible ring that never wears the picked accent, Submit's own chord
+// chip, and the two sentences withdrawn along with them ("Enter submits", "a
+// pick is only a mark until you press Submit…"). Same stubbed `window.api`
+// as the section above (the ONE real Submit this file can draw), re-navigated
+// so `asking-1`'s question comes back unanswered -- the previous section just
+// spent it.
+//
+// PAINT, NOT CLASS NAMES: `data-picked`/`data-question-picked-mark` are read
+// in `DetailPanel.question-picked-ui.test.tsx` already; what only a real
+// browser can add is the COMPUTED style two states resolve to (a colour is
+// not visible to a class-name assertion) and a REAL, cancelable Enter
+// keydown Chromium dispatches rather than one `fireEvent` assembles.
+console.log('\n=== the picked option, the focus ring and Submit, as paint');
+
+for (const theme of ['dark', 'light']) {
+  await page.goto(origin, { waitUntil: 'networkidle' });
+  if (theme === 'light') {
+    await page.evaluate(() => document.documentElement.classList.add('light'));
+  }
+  await page.locator('[data-session-row="asking-1"]').click();
+  await page.waitForSelector('[data-question-option]');
+  // A REAL Tab, once, so Chromium's own focus-visible MODALITY -- a
+  // document-wide flag, not a per-element one -- reads "keyboard" for every
+  // `.focus()` call below. The click just above set it to "mouse", and a
+  // script-invoked `.focus()` alone does not move it back: measured, the
+  // first cut of this loop called `.focus()` straight after that click and
+  // every ring below painted `outlineStyle: none`. Where it actually lands
+  // does not matter -- every state after this explicitly focuses or blurs
+  // its own target.
+  await page.keyboard.press('Tab');
+  await page.evaluate(() => document.activeElement?.blur());
+
+  const cardText = () => page.locator('[data-question]').innerText();
+  const paintOf = (selector) =>
+    page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      if (el === null) return null;
+      const cs = getComputedStyle(el);
+      return {
+        background: cs.backgroundColor,
+        borderColor: cs.borderColor,
+        outlineStyle: cs.outlineStyle,
+        outlineColor: cs.outlineColor,
+      };
+    }, selector);
+
+  // -------------------------------------------------------------- IDLE
+  const idleNote = await page.evaluate(
+    () => document.querySelector('[data-question] [data-question-note]') !== null,
+  );
+  check(
+    `${theme}/idle: the withdrawn hint never draws where Submit is real`,
+    !idleNote,
+  );
+  const idleText = await cardText();
+  check(
+    `${theme}/idle: neither retired sentence is anywhere on the card`,
+    !idleText.includes('Enter submits') &&
+      !idleText.includes('a pick is only a mark until you press Submit'),
+    idleText,
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-idle-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-idle-${theme}.png`);
+
+  // ----------------------------------------------------------- FOCUSED
+  await page.locator('[data-question-option]').first().focus();
+  const focusedOnly = await paintOf('[data-question-option]');
+  check(
+    `${theme}/focused: a merely-focused option draws no picked fill`,
+    focusedOnly !== null && !/^rgb\(\s*\d/.test(focusedOnly.background),
+    JSON.stringify(focusedOnly),
+  );
+  check(
+    `${theme}/focused: the ring itself paints (focus-visible, not the browser default)`,
+    focusedOnly !== null && focusedOnly.outlineStyle !== 'none',
+    JSON.stringify(focusedOnly),
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-focused-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-focused-${theme}.png`);
+
+  // ------------------------------------------------------------ PICKED
+  // The digit key MARKS (`onKeys`' `mark` branch) without folding the list
+  // (folding is pointer-only) and without submitting (only Enter/Space
+  // "confirm" a step) -- so the row stays on screen, picked, to photograph.
+  await page.keyboard.press('1');
+  await page.waitForSelector('[data-question-option][data-picked="true"]');
+  await page.evaluate(() => document.activeElement?.blur());
+  const picked = await paintOf('[data-question-option][data-picked="true"]');
+  const pickedMark = await page.evaluate(
+    () =>
+      document.querySelector('[data-question-option][data-picked="true"] [data-question-picked-mark]') !==
+      null,
+  );
+  check(`${theme}/picked: the row carries a Check mark`, pickedMark);
+  check(
+    `${theme}/picked: a DIFFERENT background from the merely-focused row above`,
+    picked !== null &&
+      /^rgb\(\s*\d/.test(picked.background) &&
+      picked.background !== focusedOnly?.background,
+    `picked ${JSON.stringify(picked)} vs focused-only ${JSON.stringify(focusedOnly)}`,
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-picked-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-picked-${theme}.png`);
+
+  // ------------------------------------------------------ PICKED + FOCUSED
+  await page.locator('[data-question-option][data-picked="true"]').focus();
+  const pickedFocused = await paintOf('[data-question-option][data-picked="true"]');
+  check(
+    `${theme}/picked+focused: both signals hold at once -- the fill/border AND the ring`,
+    pickedFocused !== null &&
+      /^rgb\(\s*\d/.test(pickedFocused.background) &&
+      pickedFocused.outlineStyle !== 'none',
+    JSON.stringify(pickedFocused),
+  );
+  check(
+    `${theme}/picked+focused: the focus colour is not the picked accent`,
+    pickedFocused !== null && pickedFocused.outlineColor !== pickedFocused.borderColor,
+    JSON.stringify(pickedFocused),
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-picked-focused-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-picked-focused-${theme}.png`);
+
+  // ----------------------------------------------------------- SUBMIT
+  await page.locator('[data-question-submit]').focus();
+  const chip = await page.evaluate(
+    () => document.querySelector('[data-question-submit] [data-question-submit-key]')?.textContent ?? null,
+  );
+  check(
+    `${theme}/submit: Submit carries its own chord chip, not the retired caption`,
+    chip !== null && chip.length > 0,
+    String(chip),
+  );
+  await page.locator('[data-question]').screenshot({
+    path: `${outDir}/question-card-submit-${theme}.png`,
+  });
+  console.log(`${outDir}/question-card-submit-${theme}.png`);
+
+  // Enter, on Submit itself, TWICE -- the second must do nothing further. The
+  // first press answers the call (`asking-1` is fresh again this pass) and
+  // removes Submit from the DOM entirely (`open` goes false the instant the
+  // question is answered), which is what makes a second Enter here a real
+  // test of the `sending` gate rather than a press with nothing left to hit.
+  await page.evaluate(() => {
+    globalThis.window.__answered = [];
+  });
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-question-outcome]');
+  const fired = await page.evaluate(() => globalThis.window.__answered.length);
+  check(`${theme}: Enter-Enter on Submit fires the call exactly once`, fired === 1, `${fired} call(s)`);
+}
+
 /**
  * THE PREVIEW PANEL — see the header. Its own pages, not the shared `page`
  * above: the wide case needs a card past the panel's 720px container-query
