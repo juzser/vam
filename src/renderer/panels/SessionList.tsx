@@ -1977,7 +1977,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    * regression this filter must never cause. `Status`/`None` grouping has
    * no "Worktrees" row to nest under in the first place (`WorktreesSection`
    * only ever renders under `groupBy === 'project'`), so neither mode is
-   * touched here -- #486's pane-only fallback and every filter/grouping
+   * touched here -- PR 486's pane-only fallback and every filter/grouping
    * mode besides `project` see exactly what they always did.
    */
   const isSuppressedWorktreeChild = (projectId: string): boolean => {
