@@ -1,15 +1,19 @@
-# Terminal streaming: a spike, then a shipped feature
+# Terminal streaming: a spike, then a shipped feature, then the default
 
-**Status:** shipped behind a setting (`streamingTerminal`, Settings ->
-Behaviour, default OFF), on branch `vam/terminal-stream` (cut from this
-spike's own `vam/terminal-stream-spike`, in turn cut from
-`origin/smith/vam/0.2-tab-shell`). The rest of this document below the
-"After: the SHIPPED path" section is left intact as the spike's original
-report; see that section and "Task breakdown" for what actually landed, item
-by item, against what was proposed. The shipping code lives at
-`src/main/terminal/stream/client.ts`, `src/main/terminal/stream-ipc.ts` and
-`src/renderer/panels/terminal-stream/TerminalStreamTab.tsx` -- `panels/
-TerminalTab.tsx` (the polling path) is untouched and stays the default.
+**Status:** the DEFAULT Terminal tab now (`streamingTerminal`, Settings ->
+Behaviour, default ON), on branch `vam/stream-default` (cut from `origin/
+smith/vam/0.2-tab-shell` at `a78f867e`, which already carried the shipped
+beta this doc's earlier sections describe). See "Flipping the default", at
+the end of this document, for the performance measurement, the fallback and
+the migration that made the flip -- everything ABOVE that section is left
+intact as it was written for the beta and is now history, not current
+status. The shipping code lives at `src/main/terminal/stream/client.ts`,
+`src/main/terminal/stream-ipc.ts`, `src/renderer/panels/terminal-stream/
+TerminalStreamTab.tsx` and, new in this task, `src/renderer/panels/terminal-
+stream/TerminalAutoTab.tsx` (the live pick-and-fallback) -- `panels/
+TerminalTab.tsx` (the polling path) is untouched in its own rendering logic
+and is now the explicit opt-out AND the automatic fallback, never the
+default.
 
 ## The operator's report
 
@@ -814,3 +818,295 @@ install` against the shared `node_modules` tree were competing for the same
 machine at the same moment -- re-run alone, all 58 passed
 (`rerun-suite-isolated-before-triaging.md`, `parallel-suite-runs-fake-mass-
 failures.md`, both standing lessons this finding matches exactly).
+
+## Flipping the default
+
+The operator's own decision (translated): "OK, make streaming the default,
+but be careful about the performance." "OK" to retiring the capture-pane
+renderer as the shipping path, keeping it as the explicit opt-out and the
+fallback for tmux < 3.2.
+
+### Performance, measured before the flip, on this branch's own base
+
+Every number below is against `a78f867e` (this branch's cut point, `#478`
+streaming + `#484` frame parity + `#488` paste/width/glitch fixes), the same
+code this task flips the default on, on this machine, real tmux 3.7b on a
+private socket. The latency table already in this document ("After: the
+SHIPPED path", above) is the keystroke/output-latency baseline and was not
+re-measured for this task -- it is current (same base commit) and its own
+conclusion (program output roughly an order of magnitude faster streaming
+than polling; typing stays fast either way) is unchanged. What follows is
+new: CPU, memory and the client-count invariant, none of which the beta's
+own measurement pass covered.
+
+**Idle CPU**, `e2e/terminal-stream-resource-shots.mjs`, this SCRIPT's own
+`process.cpuUsage()` (the same process shape `capture-pane` spawns run
+inside of and `StreamClient` runs inside of, in `main`), 3 seconds:
+
+| path | mechanism | CPU |
+|---|---|---|
+| poll (`TerminalTab.tsx`) | 12 `capture-pane` spawns at `REFRESH_MS` (250ms) | 24.5-34.9ms |
+| stream (`TerminalStreamTab.tsx`) | one open `tmux -C` connection, nothing printed | 2.5-3.3ms |
+
+Streaming is idle-cheaper by roughly an order of magnitude -- an open pipe
+that never wakes up costs less than any interval that spawns a process, at
+any interval. Not a surprise, but not previously measured either.
+
+**Heavy-output CPU**, same script, `yes | head -c 5000000` (a real 5MB-class
+unthrottled flood) into the pane:
+
+| path | CPU | wall | what it read |
+|---|---|---|---|
+| poll | 85-119ms | 3s (12 ticks, same as idle) | 12 CURRENT-SCREEN snapshots -- `capture-pane` does not see the bytes in between, so the flood's SIZE never reaches this cost at all |
+| stream | 985-990ms | 2.5s (until the flood drains) | every `%output` chunk, decoded (115k+ chunks, 7.5MB) |
+
+**This is the real trade-off the operator's "be careful" asked to see
+disclosed, not smoothed over.** The poll path's cost is CONSTANT and small
+regardless of output volume, because it only ever reads a snapshot; the
+stream path's cost is PROPORTIONAL to output volume, because it forwards and
+decodes every byte the pane prints. Against an extreme, sustained,
+unthrottled flood (`yes` with no pipe of its own to slow it down -- not a
+realistic coding-agent workload, which prints at process/tool speed, not
+disk-to-pipe speed) streaming spends roughly 1 second of CPU across a
+2.5-second flood on THIS machine. It is bounded (stops the instant the flood
+does, never accumulates) and self-limiting (nothing here can run away
+indefinitely the way an unbounded buffer could), but it is real and higher
+than the poll path pays for the identical flood, and an operator watching a
+very chatty build log stream by should expect to see it. Not fixed, because
+there is no fix that keeps streaming's whole value (every byte, promptly)
+without paying for every byte -- this is disclosed as the cost of the
+feature, not hidden as free.
+
+**`%pause`/`%continue`, checked against a REAL tmux for the first time.**
+The original spike's own Risks section left this an open question:
+"whether tmux enforces this by default or only when a client opts in was not
+verified against tmux's own source." Measured here with a raw control-mode
+child (`spawnRealControlChild`, bypassing `StreamClient`'s own filtering) and
+a consumer that spins 20ms per chunk -- roughly a real DOM render's own order
+of magnitude, chosen so a genuinely slow renderer is what this simulates,
+not merely a slow test -- against the same 5MB flood: tmux 3.7b on this
+machine, with this pane's default configuration, **never sent `%pause` at
+all**, reading 19.5MB of raw control-mode bytes over 6 seconds with no sign
+of being asked to slow down. **`StreamClient#handlePauseOrContinue`
+(`main/terminal/stream/client.ts`) is real, correct code (falsified against
+a fake child in `test/sources/tmux-stream-client.test.ts`) that this
+measurement could not get a REAL tmux to ever exercise** -- either the
+threshold is configured differently than this default, or this tmux version
+does not enforce control-mode backpressure without an explicit opt-in this
+codebase does not set. This is disclosed as an OPEN RISK, matching the
+original spike's own honesty policy, now with a measurement behind it rather
+than an unverified guess: the actual backstop against a slow renderer
+falling behind a fast producer is xterm.js's own internal write queue
+(coalesces, does not drop) and Electron's own IPC queuing, neither of which
+this task added or verified has a ceiling. Real coding-agent output (a tool's
+own print rate) is far slower than an unthrottled `yes`, which is why this is
+named as a disclosed risk for an extreme case rather than blocked on.
+
+**Renderer memory, scrollback**, same script, a real `@xterm/xterm` in a real
+Chromium (`--enable-precise-memory-info`, `performance.memory`), heap growth
+after filling the buffer:
+
+| scrollback | lines written | heap growth |
+|---|---|---|
+| 5000 (the shipped cap, `TerminalStreamTab.tsx`) | 5,000 (fills it exactly) | 6.34 MB |
+| 5000 | 15,000 (3x the cap) | 6.36 MB -- unchanged, because the cap is DOING its job: the oldest 10,000 lines were evicted, not retained |
+| 100,000 (an effectively uncapped comparison) | the SAME 15,000 | 33.87 MB -- more than 5x the capped run's growth, for the identical input |
+
+**5000 is justified, not merely asserted**: capping it is what keeps memory
+proportional to the cap rather than to however long a session has been open,
+demonstrated by the flat line between "exactly at the cap" and "3x past it"
+against the SAME field's uncapped growth for the SAME input. 5000 lines at
+this machine's measured ~1.3KB/line (6.34MB / 5000) is a reasonable ceiling
+for a terminal scrollback -- an order of magnitude more than a typical
+80x24-200 screen's worth of history, small against typical available memory,
+and already the shipped value (`TerminalStreamTab.tsx`'s `scrollback: 5000`
+predates this task; this section justifies keeping it, not a change).
+
+**Renderer CPU (an approximation, named as one)**, CDP `Performance.
+getMetrics()` `TaskDuration` over a session attached to the SAME harness
+page, before/after one `term.write()` call carrying 5,000 lines (a burst,
+not 5,000 separate writes): **21-22ms of TaskDuration for the WHOLE burst**,
+one synchronous call. This is `process.cpuUsage()`'s renderer-process
+equivalent, approximated because the renderer runs in Chromium's own process
+tree, not this script's; it stands in for "how much main-thread time did
+that cost" without claiming the precision a same-process measurement would
+have. Bundled together into one write rather than 5,000 xterm.js already
+batches the input on its own (a single `term.write()` call queues the whole
+string through its internal parser in one pass) -- this measurement is what
+that claim rests on: a caller handing xterm one big string, or 5,000 small
+`%output`-sized ones arriving over the SAME macrotask window, both resolve
+through the SAME internal write buffer, and neither blocks per-chunk on a
+render (xterm's own render is RAF-scheduled, decoupled from the parse).
+
+**One control client per visible terminal, and zero after leaving the
+view** -- the other half of "be careful about performance", proven against a
+real tmux rather than read off the source: `test/main/terminal/stream/
+stream-client-count.test.ts` opens a `StreamClient` (real `tmux -C attach-
+session` child) against a real private-socket tmux, counts `list-clients`
+(1), disposes it and polls `list-clients` back to 0, then repeats the
+dispose-before-open sequence `TerminalStreamTab.tsx`'s own visibility/
+session-switch effect actually uses and asserts the count is NEVER 2 at any
+point in between. Falsified: a temporary variant of the same test that opens
+two clients without disposing the first read `list-clients` as 2, proving
+the counter is a real measurement and not a stub that would pass regardless.
+This is the mechanism half of the requirement; `TerminalStreamTab.tsx`'s own
+`document.visibilitychange` handling (`teardownStream()` on hide, a fresh
+`connect()` on show, unit-tested in `TerminalStreamTab.test.tsx`'s "closes
+the stream when the window is hidden…" case, unchanged by this task) is what
+actually drives that sequence from the UI, so exactly one client exists per
+OPEN, VISIBLE Terminal-stream view in the real app, and none once the tab or
+window is hidden, the session is switched, or the view is left.
+
+**Phone and web build, re-confirmed rather than re-derived.** `src/main/
+remote/server.ts`'s `UNSERVED.terminal` entry and `test/main/remote/
+server.test.ts`'s matching assertion are both still present on this base;
+no `e2e/*.spec.ts` (the phone Playwright suite) references the Terminal
+surface at all. The flip changes nothing here: there is no `window.api` in
+the web/phone bundle either way, so `TerminalAutoTab`'s pick between the two
+renderers never reaches a working pane there regardless of the setting's
+now-ON default -- the SAME "desktop only" text (`NOT_AVAILABLE_TEXT`) both
+renderers already drew for this case, unchanged.
+
+### The flip
+
+`DEFAULT_STREAMING_TERMINAL` (`prefs/streaming-terminal.ts`) is now `true`.
+`TerminalAutoTab.tsx` is the one place `DetailPanel.tsx` now calls for the
+Terminal tab -- it reads the live pref (as `DetailPanel.tsx` used to) and
+additionally owns the runtime fallback below; `DetailPanel.tsx`'s own diff
+for this task is the ternary it used to hold collapsing into one component
+call, since that file is a 9,000+ line surface several other epics are
+editing concurrently.
+
+### Existing users who were storing the OLD default: migrated, not respected
+
+**Decision: migrate.** `readStreamingTerminal` (`prefs/streaming-terminal.
+ts`) has always been TOTAL -- `raw === true`, nothing else -- and
+`writePrefs` (`prefs.ts`) has always persisted the WHOLE `Prefs` object on
+every save, not a diff. Put together, this means an operator who NEVER
+opened Settings at all was still storing `streamingTerminal: false` (the
+OLD default) the moment any OTHER preference changed, indistinguishable in
+the stored payload from an operator who opened Settings and chose off on
+purpose -- there is no third state and never was one. Respecting "whatever
+is stored" would have meant the flip took effect for precisely the
+population with NO prefs.json at all (a fresh install), and left every
+existing operator silently on the polling path forever, which is not what
+"make streaming the default" asked for.
+
+The fix is a one-time ratchet, `streamingTerminalMigrated` (`Prefs`,
+`prefs.ts`): a payload that does not yet carry `streamingTerminalMigrated:
+true` has its `streamingTerminal` forced to the new default (`true`)
+REGARDLESS of what was stored, and the flag is set so every LATER load
+respects whatever the operator has chosen since -- including turning it back
+off, which sticks from that point on. This is the same shape
+`migrateSourceKey` already uses elsewhere in this file for a one-time
+reshuffle, applied to a boolean instead of a keyed bucket. Tested
+(`test/prefs/prefs.streaming-terminal.test.ts`): a payload predating the
+field, a payload with the OLD stored `false` and no migration flag, the SAME
+payload re-read after migration (proving it is consumed, not re-applied),
+and an explicit `false` recorded AFTER migration (proving a real later
+opt-out is respected, never bumped back on).
+
+### The fallback
+
+`stream-ipc.ts`'s `tmux -V` gate (`meetsMinimumTmuxVersion`, major.minor >=
+3.2, already shipped in the beta) got a more permissive parser for this
+task: the original regex required `tmux ` immediately before the digits,
+which read a plain release (`tmux 3.2`) and a lettered point release (`tmux
+3.2a`) correctly but refused two REAL `-V` shapes outright -- tmux's own
+development-branch naming (`tmux next-3.4`) and OpenBSD's long-standing habit
+of tagging its bundled tmux with the OS release rather than upstream's
+version (`tmux openbsd-7.4`). Both now parse to a `major.minor` pair (3.4 and
+7.4 respectively) rather than failing closed on a real operator's real
+tmux for a build tag this codebase never asked about. `parseTmuxVersion`/
+`meetsMinimumTmuxVersion` are exported and directly unit-tested
+(`test/main/terminal/tmux-version-parse.test.ts`) for the first time --
+previously only reachable through the IPC handler's own integration test.
+
+**What "unsupported-tmux" DOES now, which it did not before this task**:
+`TerminalStreamTab.tsx` gained an `onFallback` prop
+(`StreamFallbackReason = 'unsupported-tmux' | 'max-attempts' |
+'session-gone'`), fired -- once, alongside its own existing refusal/down
+text, never instead of it -- when `terminalStreamOpen` refuses specifically
+`unsupported-tmux`, or when `StreamClient`'s own `onDown` reports `gave-up`
+(both `'max-attempts'`, its bounded reconnect retries exhausted, and
+`'session-gone'`, folded in for the same reason: a frozen pane with no
+explanation is worse than a fallback that says plainly why). Every OTHER
+refusal (`bad-request`, `unavailable`, `unresolved-session`) is about THIS
+request, not this operator's tmux, and does not fall back -- falling back
+would not help (the classic renderer resolves the same session the same
+way) and would hide a real refusal behind a renderer swap.
+
+**`TerminalAutoTab.tsx`** (new) is what actually acts on the callback: it
+owns the live `streamingTerminal` pref read AND a small `fallback` state,
+reset on every project/row change (a tmux that could not stream says
+nothing about the NEXT session an operator opens). While `fallback` is set,
+`TerminalTab.tsx` draws instead, carrying a new `notice` prop -- a one-line
+sentence (`data-terminal-fallback-notice`, e.g. "vam switched to the classic
+terminal: this tmux is older than streaming needs.") drawn ABOVE the pane in
+every one of `TerminalTab.tsx`'s existing return branches (pending, refused,
+unavailable, mispaired, gone/ambiguous, and the ordinary screen), computed
+once and shared, so the notice is visible even when the SAME tmux that
+failed the version gate also cannot answer a `capture-pane` read. Unit
+tested end to end: `unsupported-tmux` and both `gave-up` reasons each drop
+`TerminalAutoTab` to the classic tab with the matching notice text
+(`TerminalAutoTab.test.tsx`), and a session switch after a fallback gives
+the NEW session a fresh attempt at streaming rather than carrying the old
+one's verdict forward.
+
+`TerminalTab.tsx` itself is now documented as the fallback/opt-out path, not
+the primary one -- its own header was never framed around "the default" (it
+describes what it draws, which is unchanged), but `prefs.ts`'s field
+comment and this file's own status line, which DID call it "shipping" and
+the beta's own "the polling path... stays the default", are updated to say
+so plainly.
+
+### Guards
+
+- **The default is streaming**, asserted three ways: `DEFAULT_STREAMING_
+  TERMINAL === true` (`test/prefs/prefs.streaming-terminal.test.ts`), a fresh
+  `readPrefs` on an empty/predating payload resolving `streamingTerminal:
+  true` (same file), and a real browser against the real web build
+  (`e2e/terminal-streaming-settings-shots.mjs`, `aria-checked === 'true'` on
+  the Settings row with nothing overridden).
+- **One control client per visible terminal, zero after leaving the view**:
+  `test/main/terminal/stream/stream-client-count.test.ts`, covered in the
+  performance section above.
+- **The version-parse fix**: `test/main/terminal/tmux-version-parse.test.ts`,
+  the four real `-V` shapes named above plus the existing below-floor and
+  unparsable cases.
+- **The fallback path**: `TerminalStreamTab.test.tsx` (the `onFallback`
+  callback fires for `unsupported-tmux` and both `gave-up` reasons, never for
+  a mere `reconnecting` event, and never for the other three refusal
+  reasons) and `TerminalAutoTab.test.tsx` (the callback actually drops the
+  rendered tab and carries the right notice, and a session switch resets
+  it).
+- **Web guards updated for the new default**, not merely left to fail: every
+  `e2e/*.mjs` guard whose subject is the CLASSIC `[data-terminal-pane]`
+  renderer specifically (chrome/width measurement, scheme/colour settings,
+  echo/scroll, IME, Insert-mode focus, scrollback, typing-latency, the
+  terminal-only and start-screen smoke checks) now seeds `streamingTerminal:
+  false` explicitly in its own `localStorage` payload -- each was silently
+  relying on the OLD default before this task, since none of their stub
+  `window.api` objects carry a `terminalStream` member at all.
+  `terminal-streaming-settings-shots.mjs`'s own default-value check flipped
+  from asserting `aria-checked === 'false'` to `'true'`. The two guards that
+  already drove `streamingTerminal` explicitly either way
+  (`terminal-stream-frame-shots.mjs`, `terminal-stream-glitch-shots.mjs`)
+  needed no change.
+- **A new resource-measurement script**, `e2e/terminal-stream-resource-
+  shots.mjs` (informational, run by hand, not wired into `run-web-guards.
+  mjs`'s automated list -- the same convention `terminal-stream-latency-
+  shots.mjs` already follows) -- everything in the performance section above
+  is reproducible by running it.
+
+### Settings label
+
+`settings.behaviour.streamingTerminal.label` dropped its `(beta)` suffix
+(`"streaming terminal"`); the hint text is unchanged
+(`"a live xterm.js pane instead of periodic capture"`) -- a longer
+description naming the automatic fallback was drafted and then trimmed back
+to the original wording, because `test/settings/copy-budget.test.tsx` caps
+the whole Behaviour panel's prose at 210 words and the longer version pushed
+it to 217; the fallback itself is still disclosed, just at the point it
+actually happens (`TerminalAutoTab`'s notice), not pre-emptively in a
+settings hint few operators read before they need it.
