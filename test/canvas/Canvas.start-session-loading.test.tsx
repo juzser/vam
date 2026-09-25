@@ -23,6 +23,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   Canvas,
+  PROVIDER_CONFIRMATION_EXPIRY_MS,
   START_PANE_WAIT_TIMEOUT_MS,
   START_SCREEN_UNKNOWN_STALL_MS,
 } from '../../src/renderer/canvas/Canvas.js';
@@ -449,6 +450,147 @@ describe('Start session — the wait for the agent to register', () => {
         await vi.advanceTimersByTimeAsync(20_000);
       });
       expect(startScreen).not.toHaveBeenCalled();
+    });
+
+    /**
+     * THE S2 REVIEW FOUND: a stale confirmation could hold `PaneReady` up
+     * FOREVER. The fast poll's `ready` used to survive until the row's own
+     * `status` left `unstarted`/`terminal` -- but a CLI that crashes before
+     * ever registering an agent never DOES leave `unstarted`, so nothing
+     * closed the confirmation, and the operator's first message would have
+     * gone into a bare shell prompt. `runningProvider` on the fixture stays
+     * `undefined` throughout here -- the model NEVER agrees, which is the
+     * whole point: this is the crash-before-registering shape, not the
+     * long-running-then-crashes one (`hands off to the model` below covers
+     * that one).
+     *
+     * `PROVIDER_CONFIRMATION_EXPIRY_MS` is what closes it: once the model has
+     * had a fresh look PAST that bound and still reads a shell, the
+     * confirmation was wrong and must not hold the ready state up forever.
+     */
+    it('the confirmation expires once a fresh model read, past its own bound, still says shell — Start comes back', async () => {
+      vi.useFakeTimers();
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'claude-code' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, release } = gatedSource();
+      const view = render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {
+        release();
+      });
+      await act(async () => {});
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+
+      // Time and a FRESH model read both matter: advancing the clock alone,
+      // with no new poll, must not be what clears it either -- there is
+      // nothing here for the effect to react to until a new model arrives.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(PROVIDER_CONFIRMATION_EXPIRY_MS);
+      });
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+
+      // NOW a fresh poll lands -- a new model object, the row still
+      // `unstarted`, still reading a plain shell -- past the bound.
+      await act(async () => {
+        view.rerender(<Canvas model={modelWith({ ...UNSTARTED })} source={source} />);
+      });
+      expect(document.querySelector('[data-pane-ready]')).toBeNull();
+      expect(startButton()).not.toBeNull();
+      expect(startButton()?.disabled).toBe(false);
+    });
+
+    /**
+     * THE OTHER HALF OF THE SAME FIX, FALSIFIED THE OTHER DIRECTION: a fresh
+     * model read landing WELL UNDER the expiry bound, still showing the
+     * pre-launch shell (the ordinary case -- the model's poll simply has not
+     * caught up with the CLI yet), must NOT un-confirm the pane. Without
+     * this, "clear whenever the model disagrees" would flash back to the
+     * start screen on every ordinary Start press, which is the bug this
+     * whole feature exists to avoid.
+     */
+    it('does not flash back to the start screen for a fresh-but-early model read that still says shell', async () => {
+      vi.useFakeTimers();
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'claude-code' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, release } = gatedSource();
+      const view = render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {
+        release();
+      });
+      await act(async () => {});
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(PROVIDER_CONFIRMATION_EXPIRY_MS).toBeGreaterThan(1_000);
+      await act(async () => {
+        view.rerender(<Canvas model={modelWith({ ...UNSTARTED })} source={source} />);
+      });
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+      expect(startButton()).toBeNull();
+    });
+
+    /**
+     * THE HANDOFF HALF OF THE DESIGN: the moment the MODEL independently
+     * agrees a provider is running, the fast poll's own confirmation is
+     * retired -- the model owns the fact from there on, so a revert reaches
+     * the Response view on the model's own next poll, not bounded by
+     * `PROVIDER_CONFIRMATION_EXPIRY_MS` at all (the long-running-then-
+     * crashes shape, distinct from the never-registered one above).
+     */
+    it('hands off to the model the moment it agrees, so a later revert returns Start faster than the expiry bound', async () => {
+      vi.useFakeTimers();
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'claude-code' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, release } = gatedSource();
+      const view = render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {
+        release();
+      });
+      await act(async () => {});
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+
+      // The model catches up and agrees -- still `unstarted` (no live agent
+      // ever registered), but the pane's own foreground command now reads
+      // as Claude Code too.
+      await act(async () => {
+        view.rerender(
+          <Canvas
+            model={modelWith({ ...UNSTARTED, runningProvider: 'claude-code' })}
+            source={source}
+          />,
+        );
+      });
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+
+      // Immediately -- no time advanced at all, well under the expiry bound
+      // -- the CLI crashes and the very next poll reverts.
+      await act(async () => {
+        view.rerender(<Canvas model={modelWith({ ...UNSTARTED })} source={source} />);
+      });
+      expect(document.querySelector('[data-pane-ready]')).toBeNull();
+      expect(startButton()).not.toBeNull();
     });
 
     it('shows the trust card once the pane reports trust, and does not clear the wait', async () => {

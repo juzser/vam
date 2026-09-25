@@ -117,6 +117,7 @@ describe('terminalRow -- the pure shape', () => {
       decisions: [],
       branch: null,
       resumeCommand: null,
+      createdAt: null,
     });
     expect(row.runningProvider).toBeUndefined();
   });
@@ -129,6 +130,7 @@ describe('terminalRow -- the pure shape', () => {
       decisions: [],
       branch: null,
       resumeCommand: null,
+      createdAt: null,
     });
     expect(row.runningProvider).toBe('codex');
   });

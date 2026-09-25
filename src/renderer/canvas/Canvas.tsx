@@ -185,6 +185,7 @@ import {
 } from '../sources/port.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
+import { SOURCE_POLL_INTERVAL_MS } from '../sources/useSourceModel.js';
 import { useCanvasOverlays } from './canvas-overlays.js';
 import { useCanvasPrefs } from './canvas-prefs.js';
 import { useCanvasTheme } from './canvas-theme.js';
@@ -316,6 +317,29 @@ export const START_SCREEN_POLL_MS = 1_500;
  * than inventing a second sentence for the identical honest admission.
  */
 export const START_SCREEN_UNKNOWN_STALL_MS = 9_000;
+
+/**
+ * HOW STALE A `providerRunningByKey` CONFIRMATION IS ALLOWED TO GET WHILE THE
+ * MODEL STILL DISAGREES -- the S2 this closes: a CLI that crashes before an
+ * agent ever registers leaves the row's `status` at `unstarted` forever, so
+ * the "ends when the row itself says so" effect (`providerRunningByKey`'s own
+ * header) never fires, and the fast poll's stale `ready` would otherwise hold
+ * `PaneReady` up with no way back to Start.
+ *
+ * Not a magic number: tied to `useSourceModel`'s own poll cadence
+ * (`SOURCE_POLL_INTERVAL_MS`) because that poll -- not a timer of this
+ * effect's own -- is what refreshes `entry.session.runningProvider`, the
+ * signal this bound is waiting on. Doubled so one merely-slow poll (the
+ * model's own backoff can already double its OWN interval, `useSourceModel`'s
+ * header) is never mistaken for a crash; only a confirmation stale across two
+ * full cycles is treated as wrong.
+ *
+ * Only a backstop for the case the model never agrees at all -- once it DOES
+ * (`entry.session.runningProvider !== undefined` for the row), the cleanup
+ * effect hands the fact off to the model immediately and this bound no longer
+ * applies; see that effect's own comment.
+ */
+export const PROVIDER_CONFIRMATION_EXPIRY_MS = SOURCE_POLL_INTERVAL_MS * 2;
 
 /**
  * A status message shortened for the bar, never for the log.
@@ -2616,81 +2640,6 @@ function CanvasInner({
     Readonly<Record<string, StartingPaneWait>>
   >({});
   /**
-   * CONFIRMED RUNNING BY THE FAST POLL, KEYED THE SAME WAY `startingPaneByKey`
-   * IS -- and ONLY EVER POPULATED FOR A KEY THAT POLL IS ALREADY WATCHING,
-   * i.e. an ACTIVE Start/Resume wait. A first cut of this feature also ran a
-   * SECOND, background poll across every idle `unstarted`/`terminal` row so
-   * a reload or a by-hand `claude` would resolve without a Start press --
-   * caught in review as a performance concern (an unbounded, per-row,
-   * forever-repeating `capture-pane`-equivalent IPC). That idle case is now
-   * answered from the MODEL instead: `Session.runningProvider` (`model.ts`),
-   * read straight off the SAME tmux listing `source.ts`'s own poll already
-   * fetches `pane_current_command` from, at that poll's own cadence -- no
-   * second read, no interval of its own. `runningProvider` below merges the
-   * two: this map first (the fast, bounded case), the model's own field
-   * otherwise.
-   *
-   * `ready` used to CLEAR the wait outright, which dropped the Response view
-   * back to the ordinary "Nothing is running in this pane yet" screen with
-   * an idle Start button while `allEntries` still had not caught up -- the
-   * operator's second report ("even when the terminal has finished starting
-   * the session, the Response view is still stuck") in a new shape, and
-   * worse: a second press there types the provider's command into a pane
-   * that already has it running. This map is what `ready` sets instead.
-   *
-   * A KEY'S PRESENCE IS THE FACT, never its value alone -- the map's value
-   * is the provider `readStartScreen` identified from the pane's own
-   * foreground command (`identifyRunningProvider`, `sources/tmux/shell.ts`),
-   * or `null` when something is confirmed running but the command named
-   * neither provider. `null` here is not "not confirmed" (`in` is what
-   * answers that); folding the two into one falsy check would un-confirm a
-   * pane vam has already proven is not a shell.
-   *
-   * SURVIVES UNTIL THE ROW ITSELF SAYS SO, the same rule `startingPaneByKey`
-   * follows a few lines down: nothing here clears a key on a timer or on a
-   * write resolving, only the "ends when the row itself says so" effect
-   * below, once `allEntries` shows this pane's row is no longer `unstarted`/
-   * `terminal` -- which is what lets the Response view hold the ready state
-   * with no flash back to the start screen while it waits for the slower
-   * agents-list poll to agree.
-   */
-  const [providerRunningByKey, setProviderRunningByKey] = useState<
-    Readonly<Record<string, ProviderId | null>>
-  >({});
-  const clearProviderRunning = useCallback((key: string) => {
-    setProviderRunningByKey((current) => {
-      if (!(key in current)) return current;
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
-  }, []);
-  /** `providerRunningByKey`'s own read for a row's key -- `undefined` when
-   *  not confirmed, distinct from a confirmed-but-unidentified `null`, which
-   *  `providerRunningByKey[key] ?? null` alone cannot tell apart. */
-  const providerRunningFor = useCallback(
-    (key: string): ProviderId | null | undefined =>
-      key in providerRunningByKey ? providerRunningByKey[key] : undefined,
-    [providerRunningByKey],
-  );
-  // Cleared by the SAME fact that ends `startingPaneByKey` waits -- see that
-  // effect's own header a few lines down for why membership in `allEntries`,
-  // not a timer, is what a background-confirmed fact like this one must wait
-  // on too.
-  useEffect(() => {
-    const keys = Object.keys(providerRunningByKey);
-    if (keys.length === 0) return;
-    for (const key of keys) {
-      const row = allEntries.find(
-        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
-      );
-      const stillPending =
-        row !== undefined &&
-        (row.session.status === 'unstarted' || row.session.status === 'terminal');
-      if (!stillPending) clearProviderRunning(key);
-    }
-  }, [allEntries, providerRunningByKey, clearProviderRunning]);
-  /**
    * D12: THE RACE `startingPaneByKey` COULD NOT CLOSE ON ITS OWN.
    *
    * Two presses within a few milliseconds -- two rapid clicks, or Enter's own
@@ -2781,6 +2730,134 @@ function CanvasInner({
     }
   }, [allEntries, startingPaneByKey, clearStartingPane]);
   /**
+   * CONFIRMED RUNNING BY THE FAST POLL, KEYED THE SAME WAY `startingPaneByKey`
+   * IS -- and ONLY EVER POPULATED FOR A KEY THAT POLL IS ALREADY WATCHING,
+   * i.e. an ACTIVE Start/Resume wait. A first cut of this feature also ran a
+   * SECOND, background poll across every idle `unstarted`/`terminal` row so
+   * a reload or a by-hand `claude` would resolve without a Start press --
+   * caught in review as a performance concern (an unbounded, per-row,
+   * forever-repeating `capture-pane`-equivalent IPC). That idle case is now
+   * answered from the MODEL instead: `Session.runningProvider` (`model.ts`),
+   * read straight off the SAME tmux listing `source.ts`'s own poll already
+   * fetches `pane_current_command` from, at that poll's own cadence -- no
+   * second read, no interval of its own. `runningProvider` below merges the
+   * two: this map first (the fast, bounded case), the model's own field
+   * otherwise.
+   *
+   * `ready` used to CLEAR the wait outright, which dropped the Response view
+   * back to the ordinary "Nothing is running in this pane yet" screen with
+   * an idle Start button while `allEntries` still had not caught up -- the
+   * operator's second report ("even when the terminal has finished starting
+   * the session, the Response view is still stuck") in a new shape, and
+   * worse: a second press there types the provider's command into a pane
+   * that already has it running. This map is what `ready` sets instead.
+   *
+   * A KEY'S PRESENCE IS THE FACT, never its value alone -- the map's value
+   * is the provider `readStartScreen` identified from the pane's own
+   * foreground command (`identifyRunningProvider`, `sources/tmux/shell.ts`),
+   * or `null` when something is confirmed running but the command named
+   * neither provider. `null` here is not "not confirmed" (`in` is what
+   * answers that); folding the two into one falsy check would un-confirm a
+   * pane vam has already proven is not a shell.
+   *
+   * SURVIVES UNTIL THE ROW ITSELF SAYS SO, THE MODEL HANDS OFF, OR THE
+   * CONFIRMATION EXPIRES -- three distinct ways out, not one:
+   *
+   * 1. The row leaves `unstarted`/`terminal` (an agent registered) -- the
+   *    original mechanism, still the common case.
+   * 2. The MODEL independently agrees a provider is running
+   *    (`entry.session.runningProvider !== undefined`) -- ownership hands off
+   *    to the model right then, so any LATER revert to a shell reaches the
+   *    Response view on the model's own next poll, immediately, with no
+   *    bound of this effect's own. This is what a CLI that runs for a while
+   *    and later crashes needs: an elapsed-time expiry alone would either
+   *    fire too early (while it is still legitimately running) or too late.
+   *    `clearStartingPane` is called here TOO, not just `clearProviderRunning`
+   *    -- otherwise the fast poll effect below (guarded on THIS map, not on
+   *    `startingPaneByKey`) sees the key un-confirmed the instant this effect
+   *    clears it, polls again, and a pane that is genuinely still showing the
+   *    ready screen re-confirms itself right back, forever, at
+   *    `START_SCREEN_POLL_MS` -- the exact unbounded background IPC the
+   *    header above already paid down once. Ending the wait outright is what
+   *    the model's own agreement has made safe: nothing is left in
+   *    `startingPaneByKey` for that poll to iterate.
+   * 3. The model NEVER agrees, and enough of ITS OWN polls have gone by
+   *    (`PROVIDER_CONFIRMATION_EXPIRY_MS`, that constant's own header) that a
+   *    confirmation still standing is more likely wrong than merely early --
+   *    the crash-before-registering S2 this closes: `confirmedAt` on each
+   *    entry is what a stale confirmation is measured against, and only a
+   *    FRESH model read past that bound (not the clock alone) closes it, so
+   *    the effect must run on both `allEntries` changing AND time passing.
+   *    `clearStartingPane` is called here too -- `ProviderStartControls`
+   *    disables Start on `startingPane !== null` ALONE, regardless of
+   *    `.screen`/`.timedOut`, so leaving the wait standing would revert the
+   *    READY state correctly while leaving Start itself disabled: still
+   *    "withdrawn" in every way the operator can see, the exact complaint
+   *    this S2 exists to close. Ending the wait here is what lets a stale
+   *    confirmation return to a genuinely ordinary, pressable Start screen
+   *    rather than a different-looking stuck one.
+   */
+  const [providerRunningByKey, setProviderRunningByKey] = useState<
+    Readonly<Record<string, { readonly provider: ProviderId | null; readonly confirmedAt: number }>>
+  >({});
+  const clearProviderRunning = useCallback((key: string) => {
+    setProviderRunningByKey((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+  /** `providerRunningByKey`'s own read for a row's key -- `undefined` when
+   *  not confirmed, distinct from a confirmed-but-unidentified `null`, which
+   *  `providerRunningByKey[key]?.provider ?? null` alone cannot tell apart. */
+  const providerRunningFor = useCallback(
+    (key: string): ProviderId | null | undefined => providerRunningByKey[key]?.provider,
+    [providerRunningByKey],
+  );
+  // Cleared by whichever of the three facts above comes first -- see
+  // `providerRunningByKey`'s own header. Deliberately keyed to `allEntries`
+  // ALONE for when it runs (a fresh model poll landing, the same trigger the
+  // original effect used) -- no timer of this effect's own, because the
+  // expiry branch means "the model has had a fresh chance to see the pane
+  // and still disagrees", a fact only an actual new poll can supply. A raw
+  // elapsed-time timer would close a confirmation the model never even got a
+  // chance to revisit yet, no more trustworthy than the crash this closes.
+  useEffect(() => {
+    const keys = Object.keys(providerRunningByKey);
+    if (keys.length === 0) return;
+    const now = Date.now();
+    for (const key of keys) {
+      const confirmed = providerRunningByKey[key];
+      if (confirmed === undefined) continue;
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      const stillPending =
+        row !== undefined &&
+        (row.session.status === 'unstarted' || row.session.status === 'terminal');
+      if (!stillPending) {
+        clearProviderRunning(key);
+        continue;
+      }
+      // 2: THE MODEL AGREES -- hand off, AND end the wait outright; see the
+      // header's own reasoning for why both must happen together here.
+      if (row.session.runningProvider !== undefined) {
+        clearProviderRunning(key);
+        clearStartingPane(key);
+        continue;
+      }
+      // 3: THE MODEL STILL DISAGREES -- only close once THIS fresh read is
+      // itself past the bound, not merely once the clock is. Also ends the
+      // wait outright (see the header's own reasoning) so Start returns
+      // genuinely pressable, not merely un-labelled "ready".
+      if (now - confirmed.confirmedAt >= PROVIDER_CONFIRMATION_EXPIRY_MS) {
+        clearProviderRunning(key);
+        clearStartingPane(key);
+      }
+    }
+  }, [allEntries, providerRunningByKey, clearProviderRunning, clearStartingPane]);
+  /**
    * D-START: THE PANE ITSELF IS A SECOND, FASTER, INDEPENDENT SIGNAL --
    * the operator's own two reports, both traced to the SAME gap: the effect
    * above only ever learns a wait is over from `allEntries`, which is
@@ -2841,7 +2918,12 @@ function CanvasInner({
             if (cancelled || view.kind !== 'ok') return;
             if (view.screen === 'ready') {
               setProviderRunningByKey((current) =>
-                key in current ? current : { ...current, [key]: view.provider },
+                key in current
+                  ? current
+                  : {
+                      ...current,
+                      [key]: { provider: view.provider, confirmedAt: Date.now() },
+                    },
               );
               return;
             }
