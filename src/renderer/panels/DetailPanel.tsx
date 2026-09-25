@@ -10021,7 +10021,20 @@ export function DetailPanel(props: DetailPanelProps) {
                     ? 'Pick a session first'
                     : promptSuggestion !== null && !phone
                       ? `${promptSuggestion} — Tab to use`
-                      : 'Reply to agent, answer with a number, or paste a plan…'
+                      : phone
+                        ? // PHONE ONLY, SHORTER: the desktop sentence wraps to
+                          // three lines at the merged row's own width, cramped
+                          // inside a box now pinned to one line's height
+                          // (docs/design/phone-core-loop.md §4.7's own
+                          // postmortem closed that height, which is what
+                          // exposed this). Measured to fit one line at 390px
+                          // with the "+"/mic/Send buttons still in the row
+                          // (`e2e/phone-shell.pw.ts`'s hidden-probe check).
+                          // Drops "paste a plan" -- the one function this
+                          // shorter copy does not name -- pasting itself is
+                          // unaffected; only the hint is gone.
+                          'Reply or answer 1–9'
+                        : 'Reply to agent, answer with a number, or paste a plan…'
                 }
                 /* `vam-tap` IS THE TOUCH FLOOR, and the box you type in is a
                    touch target like any other: measured at 390px it came back

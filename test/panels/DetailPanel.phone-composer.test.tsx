@@ -309,4 +309,26 @@ describe("AC-7's height half: the phone row is merged, not stacked (docs/design/
     );
     expect(spacer?.className).toBe('hidden');
   });
+
+  /**
+   * THE PLACEHOLDER, SHRUNK WITH THE BOX. The desktop sentence ("Reply to
+   * agent, answer with a number, or paste a plan…") wraps to three lines at
+   * the merged row's own width and reads as cramped inside a box now pinned
+   * to one line's height (`e2e/phone-shell.pw.ts`'s own hidden-probe
+   * measurement proves the real-browser fit; jsdom/happy-dom lay nothing
+   * out, so this only pins which STRING is on screen, not its wrap). Phone
+   * gets its own, shorter copy; desktop's is untouched.
+   */
+  it('carries a short, phone-only placeholder -- not the desktop sentence', () => {
+    draw();
+    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(textarea?.placeholder).not.toContain('paste a plan');
+    expect(textarea?.placeholder).toBe('Reply or answer 1–9');
+  });
+
+  it('desktop keeps its own, longer sentence, untouched', () => {
+    draw({ phone: false });
+    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(textarea?.placeholder).toBe('Reply to agent, answer with a number, or paste a plan…');
+  });
 });

@@ -650,6 +650,66 @@ test.describe('the phone shell at 390px', () => {
       'measured bounding boxes under 44x44 with focus view on',
     ).toEqual([]);
   });
+
+  /**
+   * THE COMPOSER PLACEHOLDER FITS ONE LINE, at the merged row's own real
+   * width -- "+", the textarea, mic and Send all present, none of them
+   * hidden to make room. `field-sizing`/`scrollHeight` do not answer this:
+   * neither one grows the box for PLACEHOLDER text (only for a real value),
+   * so a wrapping placeholder does not blow out the 44px box, it just gets
+   * clipped inside it -- invisible to a height assertion, and exactly what
+   * the operator's screenshot caught. The hidden probe measures the STRING
+   * at the textarea's own font/line-height/width, off-screen, which is the
+   * only way to answer "would this wrap" without trusting a box that clips
+   * its own overflow either way.
+   */
+  test('the composer placeholder fits one line at 390px, with attach/mic/Send still in the row', async ({
+    page,
+  }) => {
+    await openDemo(page);
+    await openFirstSession(page);
+    // `crosscheck-2`-shaped state: no question open, so the composer (not a
+    // question card) is what is on screen -- same route `data-question-chat`
+    // reaches from a question-first fixture, taken directly here by opening
+    // whichever session's tab strip currently shows a plain composer.
+    const composer = page.locator('[data-phone-shell] [data-composer-bar]');
+    if ((await composer.count()) === 0) {
+      await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
+    }
+    const probe = await page.evaluate(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        '[data-phone-shell] textarea[aria-label="prompt to session"]',
+      );
+      if (ta === null) return null;
+      const text = ta.placeholder;
+      const cs = getComputedStyle(ta);
+      const div = document.createElement('div');
+      div.style.position = 'absolute';
+      div.style.visibility = 'hidden';
+      div.style.left = '-9999px';
+      div.style.whiteSpace = 'pre-wrap';
+      div.style.width = cs.width;
+      div.style.fontFamily = cs.fontFamily;
+      div.style.fontSize = cs.fontSize;
+      div.style.fontWeight = cs.fontWeight;
+      div.style.letterSpacing = cs.letterSpacing;
+      div.style.lineHeight = cs.lineHeight;
+      div.textContent = text;
+      document.body.append(div);
+      const height = div.getBoundingClientRect().height;
+      const lineHeight = Number.parseFloat(cs.lineHeight);
+      div.remove();
+      return { text, height, lineHeight, boxWidth: cs.width };
+    });
+    if (probe === null) throw new Error('no phone composer textarea to measure');
+    expect(probe.text, 'the phone placeholder, not the desktop sentence').not.toContain(
+      'paste a plan',
+    );
+    expect(
+      probe.height,
+      `"${probe.text}" at ${probe.boxWidth} wide measured ${probe.height}px tall against a ${probe.lineHeight}px line`,
+    ).toBeLessThanOrEqual(probe.lineHeight * 1.15);
+  });
 });
 
 /**
