@@ -84,7 +84,7 @@ import { createTmuxRunner, listVamSessions, type TmuxRun } from '../tmux/spawn.j
 import { type Liveness, livenessOf, type ProbeLock, probeLockViaOpen } from './liveness.js';
 import { queueMessage, type RunCodex, runCodexViaCli } from './queue.js';
 import { resumeThread } from './resume.js';
-import { readRolloutTail } from './rollout.js';
+import { readRolloutTail, threadStartOf } from './rollout.js';
 import {
   codexHome,
   type RunSqlite,
@@ -382,6 +382,12 @@ async function sessionFor(
     activity: facts?.activity ?? null,
     age: row.recencyAtMs === null ? null : compactAge(nowMs - row.recencyAtMs),
     branch: row.branch,
+    // NEVER `row.recencyAtMs` -- `docs/design/vam-owns-the-session.md`'s own
+    // trap, restated: a recency moves on every touch and is not a start
+    // time. `threadStartOf` reads the instant Codex itself embedded in the
+    // rollout's own file name (`rollout.ts`), so this costs no read of the
+    // file at all.
+    createdAt: threadStartOf(row.rolloutPath),
     decisions: facts?.decisions ?? [],
     source: CODEX_SOURCE_ID,
     // ABSENT, NOT EMPTY, on `Session.agents`' own rule: empty is a source that

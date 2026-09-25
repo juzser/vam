@@ -128,6 +128,27 @@ describe('a Codex row', () => {
     expect(project?.sessions[0]?.model).toBeNull();
   });
 
+  it('reads createdAt from the instant Codex embedded in the rollout’s own file name, never from recency', async () => {
+    const [project] = await projectsFrom(
+      [
+        row({
+          rolloutPath:
+            '/invented/sessions/2026/08/11/rollout-2026-08-11T18-49-11-019ff0a7-b87e-72e1-a90b-c35b1c66c45d.jsonl',
+          // Deliberately a completely different day -- if `createdAt` ever
+          // reads `recencyAtMs` by mistake, this assertion catches it.
+          recencyAtMs: NOW,
+        }),
+      ],
+      NOW,
+    );
+    expect(project?.sessions[0]?.createdAt).toBe('2026-08-11T18:49:11.000Z');
+  });
+
+  it('is null for a rollout path that does not carry Codex’s own timestamp shape', async () => {
+    const [project] = await projectsFrom([row({ rolloutPath: '/invented/not-a-rollout.jsonl' })], NOW);
+    expect(project?.sessions[0]?.createdAt).toBeNull();
+  });
+
   it('has no agent list at all, rather than an empty one', async () => {
     const [project] = await projectsFrom([row()], NOW);
     // ABSENT and EMPTY differ: empty is a source that looked.
