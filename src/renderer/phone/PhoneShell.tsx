@@ -614,7 +614,14 @@ export function PhoneShell({
       data-phone-keyboard={typing ? 'open' : 'closed'}
       className={`flex h-[100dvh] min-h-0 flex-col bg-ground ${typing ? 'vam-phone-typing' : ''}`}
     >
-      <header className="flex h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-2">
+      {/* `data-phone-top-bar`: B13, `styles.css`'s own comment on the rule --
+          `min-h-12`, not `h-12`, so `env(safe-area-inset-top)` GROWS this bar
+          under a landscape status-bar-shaped cutout rather than squeezing its
+          icons into a box that stayed fixed at 48px. */}
+      <header
+        data-phone-top-bar
+        className="flex min-h-12 flex-none select-none items-center gap-2 border-line border-b bg-panel px-2"
+      >
         <button
           type="button"
           aria-label="back to sessions"

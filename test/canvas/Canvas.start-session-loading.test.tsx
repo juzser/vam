@@ -272,6 +272,29 @@ describe('Start session — the wait for the agent to register', () => {
     expect(recorded).toHaveLength(1);
   });
 
+  /**
+   * D12: THE RACE THE `disabled` STATE COULD NOT CLOSE ON ITS OWN.
+   *
+   * The test above presses twice in two SEPARATE `act()` calls, so React has
+   * already committed the first press's `disabled` before the second one is
+   * even dispatched -- which proves the state works once it has landed, and
+   * proves nothing about the gap before it does. Two clicks in the SAME tick
+   * (a real fast double-click, or Enter's native activation landing beside a
+   * mouse click) both run `startSessionIn` off the SAME closure, from the
+   * SAME last commit, before either has caused a re-render -- so a guard
+   * that reads only React state passes both. This is the shape a ref-based
+   * synchronous guard closes and a state-only one cannot.
+   */
+  it('D12: two clicks in the SAME tick, before any re-render, still record once', async () => {
+    const { source, recorded } = sourceWith(async () => {});
+    render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+    await act(async () => {
+      startButton()?.click();
+      startButton()?.click();
+    });
+    expect(recorded).toHaveLength(1);
+  });
+
   it('drops the spinner and offers the Terminal view once the wait passes the timeout', async () => {
     vi.useFakeTimers();
     const { source } = gatedSource();
@@ -347,6 +370,17 @@ describe('Resume — the same wait, on the terminal-only screen', () => {
     });
     expect(recorded).toHaveLength(1);
     await act(async () => {
+      resumeButton()?.click();
+    });
+    expect(recorded).toHaveLength(1);
+  });
+
+  // D12's own twin here -- see the Start section's own comment for the shape.
+  it('D12: two clicks in the SAME tick, before any re-render, still record once', async () => {
+    const { source, recorded } = sourceWith(async () => {});
+    render(<Canvas model={modelWith(TERMINAL)} source={source} />);
+    await act(async () => {
+      resumeButton()?.click();
       resumeButton()?.click();
     });
     expect(recorded).toHaveLength(1);

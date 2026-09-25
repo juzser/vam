@@ -494,6 +494,114 @@ test.describe('the phone shell at 390px', () => {
   });
 
   /**
+   * B13: THE TOP EDGE, review finding closed the same way the bottom one
+   * was -- CDP's real inset, not headless Chromium's own permanent 0.
+   *
+   * THE DOUBLE-PAD CHECK IS THE POINT of asserting an EXACT figure rather
+   * than `toBeGreaterThanOrEqual`: the list screen's own top bar already
+   * carries a flat 12px (`p-3`) before this rule exists at all, so a rule
+   * that ADDED the inset on top of it, rather than growing to `max()` of the
+   * two, would read 12 + 44 = 56 here -- wrong, and a passing
+   * `toBeGreaterThanOrEqual` would never catch it. The session screen's own
+   * app bar had no top padding at all, so its figure is the inset alone.
+   */
+  test('B13: the top bar clears a top safe-area inset, without stacking its own baseline on top of it', async ({
+    page,
+  }) => {
+    const INSET = 44;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: INSET } });
+    await openDemo(page);
+
+    const padTop = async (selector: string) =>
+      page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (el === null) return null;
+        return Math.round(Number.parseFloat(getComputedStyle(el).paddingTop));
+      }, selector);
+
+    expect(
+      await padTop('[data-phone-shell] [data-phone-list-top-bar]'),
+      'max(12px, the inset), never 12px plus the inset',
+    ).toBe(INSET);
+
+    await openFirstSession(page);
+    expect(
+      await padTop('[data-phone-shell] [data-phone-top-bar]'),
+      'the session screen’s own app bar, which carried no top padding before this rule',
+    ).toBe(INSET);
+  });
+
+  /**
+   * B13: THE SIDE GUTTERS, IN LANDSCAPE -- the case a portrait-only suite can
+   * never see for itself: a notch/pill whose long axis is on the LEFT or
+   * RIGHT edge instead of the top. The viewport is swapped to a
+   * landscape-shaped one for this one test; every other test in this file
+   * stays portrait.
+   *
+   * WIDTH 500, NOT A REAL PHONE'S LANDSCAPE WIDTH, and that is a fact about
+   * this app worth stating rather than papering over: `usePhoneViewport`
+   * (`phone/viewport.ts`) gates the phone shell on `max-width: 519px`
+   * (`PHONE_MAX_WIDTH`) alone, no orientation term at all, and every
+   * mainstream phone's landscape width -- 667px and up -- is well past that
+   * gate, so the phone shell as shipped today never mounts in a real phone's
+   * landscape rotation; the desktop columns do. 500x350 is the closest
+   * landscape-SHAPED viewport (wider than tall) that still clears the gate,
+   * so this proves the rule works everywhere the shell itself can currently
+   * appear -- it does not, and cannot, claim to have measured a real
+   * landscape phone, which this codebase has no route to show the shell on
+   * at all yet.
+   *
+   * ONCE, AT THE ROOT, NOT DOUBLED: `[data-phone-shell]`'s own padding is the
+   * ENTIRE gutter -- the composer bar and the app bar inside it carry no
+   * left/right safe-area rule of their own, so their painted position moves
+   * by exactly the inset, not by the inset plus a second helping of it.
+   */
+  test('B13: side gutters clear a landscape left/right inset, applied once at the shell root', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 500, height: 350 });
+    const INSET = 44;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { left: INSET, right: INSET } });
+    await openDemo(page);
+
+    const gutter = await page.evaluate(() => {
+      const el = document.querySelector('[data-phone-shell]');
+      if (el === null) return null;
+      const cs = getComputedStyle(el);
+      return {
+        left: Math.round(Number.parseFloat(cs.paddingLeft)),
+        right: Math.round(Number.parseFloat(cs.paddingRight)),
+      };
+    });
+    expect(gutter, 'the shell root carries both gutters, once').toEqual({
+      left: INSET,
+      right: INSET,
+    });
+
+    await openFirstSession(page);
+    // The fixture's first row opens on an open question, which withdraws the
+    // composer (`composerHidden`) -- `Chat about this` is the same route the
+    // portrait inset test above uses to reach it.
+    await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
+    const shellBox = await page.locator('[data-phone-shell]').boundingBox();
+    const composerBox = await page.locator('[data-phone-shell] [data-composer-bar]').boundingBox();
+    if (shellBox === null || composerBox === null) throw new Error('missing geometry');
+    // `deviceScaleFactor: 3` rounds sub-pixel geometry, so this allows the 1px
+    // either side that comes from that -- not a wider tolerance that could
+    // also pass a doubled gutter (88px) by accident.
+    expect(
+      composerBox.x - shellBox.x,
+      'the composer sits in exactly the shell’s own gutter -- not a second one stacked on it',
+    ).toBeGreaterThanOrEqual(INSET - 1);
+    expect(
+      composerBox.x - shellBox.x,
+      'the composer sits in exactly the shell’s own gutter -- not a second one stacked on it',
+    ).toBeLessThanOrEqual(INSET + 1);
+  });
+
+  /**
    * ARRIVING AT A SESSION IS ARRIVING AT WHAT IT JUST DID.
    *
    * `show()` already says that about the STEP -- "every push opens on the
@@ -541,6 +649,66 @@ test.describe('the phone shell at 390px', () => {
       undersized(boxes),
       'measured bounding boxes under 44x44 with focus view on',
     ).toEqual([]);
+  });
+
+  /**
+   * THE COMPOSER PLACEHOLDER FITS ONE LINE, at the merged row's own real
+   * width -- "+", the textarea, mic and Send all present, none of them
+   * hidden to make room. `field-sizing`/`scrollHeight` do not answer this:
+   * neither one grows the box for PLACEHOLDER text (only for a real value),
+   * so a wrapping placeholder does not blow out the 44px box, it just gets
+   * clipped inside it -- invisible to a height assertion, and exactly what
+   * the operator's screenshot caught. The hidden probe measures the STRING
+   * at the textarea's own font/line-height/width, off-screen, which is the
+   * only way to answer "would this wrap" without trusting a box that clips
+   * its own overflow either way.
+   */
+  test('the composer placeholder fits one line at 390px, with attach/mic/Send still in the row', async ({
+    page,
+  }) => {
+    await openDemo(page);
+    await openFirstSession(page);
+    // `crosscheck-2`-shaped state: no question open, so the composer (not a
+    // question card) is what is on screen -- same route `data-question-chat`
+    // reaches from a question-first fixture, taken directly here by opening
+    // whichever session's tab strip currently shows a plain composer.
+    const composer = page.locator('[data-phone-shell] [data-composer-bar]');
+    if ((await composer.count()) === 0) {
+      await page.locator('[data-phone-shell] [data-question-chat]').first().tap();
+    }
+    const probe = await page.evaluate(() => {
+      const ta = document.querySelector<HTMLTextAreaElement>(
+        '[data-phone-shell] textarea[aria-label="prompt to session"]',
+      );
+      if (ta === null) return null;
+      const text = ta.placeholder;
+      const cs = getComputedStyle(ta);
+      const div = document.createElement('div');
+      div.style.position = 'absolute';
+      div.style.visibility = 'hidden';
+      div.style.left = '-9999px';
+      div.style.whiteSpace = 'pre-wrap';
+      div.style.width = cs.width;
+      div.style.fontFamily = cs.fontFamily;
+      div.style.fontSize = cs.fontSize;
+      div.style.fontWeight = cs.fontWeight;
+      div.style.letterSpacing = cs.letterSpacing;
+      div.style.lineHeight = cs.lineHeight;
+      div.textContent = text;
+      document.body.append(div);
+      const height = div.getBoundingClientRect().height;
+      const lineHeight = Number.parseFloat(cs.lineHeight);
+      div.remove();
+      return { text, height, lineHeight, boxWidth: cs.width };
+    });
+    if (probe === null) throw new Error('no phone composer textarea to measure');
+    expect(probe.text, 'the phone placeholder, not the desktop sentence').not.toContain(
+      'paste a plan',
+    );
+    expect(
+      probe.height,
+      `"${probe.text}" at ${probe.boxWidth} wide measured ${probe.height}px tall against a ${probe.lineHeight}px line`,
+    ).toBeLessThanOrEqual(probe.lineHeight * 1.15);
   });
 });
 

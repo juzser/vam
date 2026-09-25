@@ -2618,6 +2618,21 @@ function CanvasInner({
     Readonly<Record<string, StartingPaneWait>>
   >({});
   /**
+   * D12: THE RACE `startingPaneByKey` COULD NOT CLOSE ON ITS OWN.
+   *
+   * Two presses within a few milliseconds -- two rapid clicks, or Enter's own
+   * native activation landing beside a mouse click -- can both call
+   * `startSessionIn`/`resumeInPane` off the SAME closure, from the SAME last
+   * commit, before either has caused a re-render: React state describes the
+   * LAST commit, not "is a call for this pane on the stack right now", so a
+   * guard reading only `startingPaneByKey`/`writingBySession` passes both and
+   * both type into the same pane. Main now refuses the second write at the
+   * source of truth (`start-in-pane.ts`'s own in-flight set) either way, but
+   * the operator's ask was both layers: a `ref` is mutated synchronously and
+   * is visible to the very next call in the same tick, which state is not.
+   */
+  const paneWritesInFlight = useRef(new Set<string>());
+  /**
    * PAST THIS, NOTHING IS WORTH WAITING FOR SILENTLY -- the operator's own
    * bound (`START_PANE_WAIT_TIMEOUT_MS` above), and `StartingSession`'s
    * neighbour rather than its twin: that indicator (new session, a pane that
@@ -4783,11 +4798,16 @@ function CanvasInner({
         return;
       }
       if (
+        // D12: checked first and set synchronously, before the state read
+        // beside it -- see `paneWritesInFlight`'s own header for why the
+        // state check alone lets two same-tick presses both through.
+        paneWritesInFlight.current.has(paneKey) ||
         (writingBySession[entry.session.id] ?? false) ||
         startingPaneByKey[paneKey] !== undefined
       ) {
         return;
       }
+      paneWritesInFlight.current.add(paneKey);
       setWritingFor(entry.session.id, true);
       // THE WAIT BECOMES VISIBLE HERE, before the write is even issued -- the
       // operator's own "immediately" -- and OUTLIVES it: cleared only by the
@@ -4808,6 +4828,7 @@ function CanvasInner({
         clearStartingPane(paneKey);
         setStatus(noteFailure(`start ${provider.label}`, cause));
       } finally {
+        paneWritesInFlight.current.delete(paneKey);
         setWritingFor(entry.session.id, false);
       }
     },
@@ -4855,11 +4876,16 @@ function CanvasInner({
         return;
       }
       if (
+        // D12: see `startSessionIn`'s own comment on the same guard -- Start
+        // and Resume share ONE in-flight set, keyed by pane, because only one
+        // write may be in flight against a pane at a time either way.
+        paneWritesInFlight.current.has(paneKey) ||
         (writingBySession[entry.session.id] ?? false) ||
         startingPaneByKey[paneKey] !== undefined
       ) {
         return;
       }
+      paneWritesInFlight.current.add(paneKey);
       setWritingFor(entry.session.id, true);
       beginStartingPane(paneKey, { kind: 'resume', timedOut: false });
       setStatus(`resuming "${title}"…`);
@@ -4871,6 +4897,7 @@ function CanvasInner({
         clearStartingPane(paneKey);
         setStatus(noteFailure('resume', cause));
       } finally {
+        paneWritesInFlight.current.delete(paneKey);
         setWritingFor(entry.session.id, false);
       }
     },

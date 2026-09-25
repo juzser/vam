@@ -771,6 +771,47 @@ itself, and it is met with margin) — so it was not written this pass.
 Flagged here, honestly, the same way §4.1 flagged its own gap rather than
 rounding a number to make a checkbox green.
 
+**UPDATE — the stretch target is now met, at 75px, and the JS resize
+handler this section said closing it would need turned out to already
+exist.** `DetailPanel.tsx`'s desktop composer had carried its own
+`scrollHeight`-measuring `useEffect` since before this file's own PR 1 —
+grow on a non-empty draft, reset to `auto` first so it can shrink too, the
+cap left to the CSS class rather than clamped in JS. It was never gated on
+`phone`, but `field-sizing: content` made it MOOT there: that property, per
+spec, has the UA size the box off its own intrinsic content and ignore an
+author-set `height`, which is exactly what this effect writes every
+render. Two resize mechanisms were running on the phone box; only the
+native one ever painted anything.
+
+Removing `[field-sizing:content]` from the phone textarea's className is
+the whole fix — no second effect was written, because one was already
+there and correct. What it exposed once the override was gone: the
+`draft === ''` branch leaves `style.height` at `'auto'`, which resolves
+against `rows={1}` (the property's OWN default algorithm, `field-sizing:
+fixed`) to the same **44px** `vam-tap` floor §4.7 measured by hand above —
+closing the 16-19px gap this section named without adding a byte of new
+sizing logic.
+
+That closed 95 → 79px (95 − 16, the textarea's own share). The remaining
+79 → 75px came from the composer bar's own top padding, `py-2` (8px) →
+`pt-1` (4px) — `data-composer-bar`'s own comment in `DetailPanel.tsx`
+carries the reasoning: the BOTTOM edge was never available to trim, it is
+floored to 12px by the safe-area rule (`max(12px,
+env(safe-area-inset-bottom))`, `styles.css`) regardless of what padding
+class asks for less, so only the top edge was a real lever. Both changes
+are phone-only; desktop's `gap-2.5 py-3` and `rows={2}` are untouched.
+
+**Measured, both themes, real Chromium
+(`e2e/phone-question-shots.mjs`)**: `data-composer-bar` is **75px**, down
+from **95px**, down from the pre-merge **145px** — inside AC-7's ≤76px
+stretch target, with the Send button still a real 44×44 `vam-tap` hit area
+(paint unchanged, 30×30 skin inside it) and growth to multiple lines still
+working (`scrollHeight`-driven, capped visually at `max-h-[132px]` /
+`overflow-y-auto`, unchanged from §4.7). B13 (top/side safe-area insets)
+and D12 (a second Start/Resume press refused rather than typed twice) are
+this same follow-up's other two fixes; see `start-in-pane.ts` and
+`styles.css`'s own comments for those.
+
 ### 4.8 The transcript's top block, collapsed to one line on phone
 
 The second follow-up: "N turns read / This is as far back as vam has

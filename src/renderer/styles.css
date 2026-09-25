@@ -2905,6 +2905,45 @@ html {
   padding-bottom: max(12px, env(safe-area-inset-bottom));
 }
 
+/* B13: THE OTHER THREE EDGES -- only the bottom one, above, had ever been
+ * given the safe-area treatment. A landscape phone with the pill/notch's long
+ * axis on the LEFT or RIGHT draws over the shell's own content with nothing
+ * pushing it in, and the TOP bar sits flush under a status-bar-shaped cutout
+ * the same way the list's own footer used to sit under the home indicator
+ * before the rule above existed.
+ *
+ * LEFT/RIGHT, ONCE, AT THE SHELL'S OWN ROOT: every row inside -- the app bar,
+ * the transcript, the composer, the list's own header and footer -- spans the
+ * shell's full width, and none of them carries its own left/right padding
+ * rule, so one rule here gutters all of them without double-padding any one
+ * of them twice. In portrait both insets resolve to 0 and nothing painted
+ * today moves; a landscape phone is the case this closes. */
+[data-phone-shell] {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* TOP, AT THE ONE ROW THAT TOUCHES IT, not at the root: the transcript below
+ * the app bar must not gain a matching gap of empty space, only the bar
+ * itself sits under a status-bar-shaped cutout. `data-phone-top-bar` marks
+ * the session screen's own `<header>` (`PhoneShell.tsx`), whose height was
+ * `h-12` -- fixed, no padding of its own -- now `min-h-12` so this padding
+ * GROWS the bar rather than squeezing its icons into a shorter box. */
+[data-phone-shell] [data-phone-top-bar] {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* The list screen's own top bar (`SessionList.tsx`'s avatar row) already
+ * carries a flat `p-3` (12px on every side) -- `max()`, not a bare `env()`,
+ * is what keeps that 12px look intact at the 0 inset every ordinary device
+ * reports, and only grows past it under a real one. Marked
+ * `data-phone-list-top-bar`, distinct from the session screen's bar above,
+ * because the two start from different baselines (12px here, 0 there) and a
+ * shared selector could only get one of them right. */
+[data-phone-shell] [data-phone-list-top-bar] {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
 /* The rule that stood here hid `[data-view-tabs]` while the soft keyboard was
    up -- 44px of tab bar out of the ~400px the keyboard leaves. It is GONE
    because the bar is: the phone does not draw the view tabs at all now

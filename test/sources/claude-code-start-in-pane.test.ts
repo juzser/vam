@@ -79,6 +79,60 @@ describe('typeIntoOwnPane -- Start session', () => {
     expect(failed?.code).not.toBe('not-vam-started');
     expect(failed?.message).toMatch(/listing sessions/);
   });
+
+  // D12: two presses of Start (or Start's Resume twin) within a few
+  // milliseconds -- two rapid clicks, or Enter's native activation landing
+  // beside a mouse click -- used to both pass `ownEmptyPane`'s proof before
+  // either had typed a single key: the pane is still a shell to BOTH calls,
+  // because the first has not run its own `send-keys` yet, so both typed the
+  // provider's command into the one pane, one after the other. The guard has
+  // to live here, ahead of the tmux round trip, because it is the only point
+  // two overlapping calls for the SAME pane both pass through before doing
+  // anything a second call could double.
+  it('D12: a second call for the same pane, fired before the first settles, is refused rather than typed twice', async () => {
+    const { run, calls } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tzsh\n`);
+    const [first, second] = await Promise.all([
+      typeIntoOwnPane({ run, name: PANE, text: 'claude' }),
+      typeIntoOwnPane({ run, name: PANE, text: 'claude' }),
+    ]);
+    const settled = [first, second];
+    expect(settled.filter((r) => r === null)).toHaveLength(1);
+    const refused = settled.find((r) => r !== null);
+    expect(refused).toMatchObject({ kind: 'refused', code: 'start-in-flight' });
+    // THE PROOF: not merely that one result LOOKS refused, but that tmux was
+    // only ever asked to type the command once. `send-keys ... -l` is the
+    // literal-text write; `-l` fails to appear a second time is what "typed
+    // twice into the same pane" would have looked like here.
+    const typed = calls.filter((c) => c[0] === 'send-keys' && c.includes('-l'));
+    expect(typed).toHaveLength(1);
+  });
+
+  it('a call for a DIFFERENT pane is unaffected by one in flight on this one', async () => {
+    const OTHER_PANE = 'vam-atlas-cc33dd';
+    const run: TmuxRun = async (argv) => {
+      const verb = argv[0] ?? '';
+      if (verb === 'list-sessions') {
+        return {
+          failure: null,
+          stdout: `${PROJECT}\t4242\t${PANE}\tzsh\n${PROJECT}\t4243\t${OTHER_PANE}\tzsh\n`,
+          stderr: '',
+        };
+      }
+      return { failure: null, stdout: '', stderr: '' };
+    };
+    const [first, second] = await Promise.all([
+      typeIntoOwnPane({ run, name: PANE, text: 'claude' }),
+      typeIntoOwnPane({ run, name: OTHER_PANE, text: 'codex' }),
+    ]);
+    expect(first).toBeNull();
+    expect(second).toBeNull();
+  });
+
+  it('releases the guard once settled, so the SAME pane can be started again afterwards', async () => {
+    const { run } = fakeTmux(`${PROJECT}\t4242\t${PANE}\tzsh\n`);
+    await expect(typeIntoOwnPane({ run, name: PANE, text: 'claude' })).resolves.toBeNull();
+    await expect(typeIntoOwnPane({ run, name: PANE, text: 'claude' })).resolves.toBeNull();
+  });
 });
 
 describe('killOwnPane -- Close on a pane with no agent in it', () => {

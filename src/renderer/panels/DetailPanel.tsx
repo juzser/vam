@@ -7067,13 +7067,32 @@ export function DetailPanel(props: DetailPanelProps) {
   // Grow with the text instead of scrolling a one-line slot. Measured from the
   // content each time: shrinking needs the reset to `auto` first, or the box
   // only ever gets taller. The cap lives in the class list, not here.
+  //
+  // THIS IS ALSO THE PHONE COMPOSER'S OWN GROWTH NOW, and it did not used to
+  // be: phone wore `field-sizing: content` (`data-prompt-box`'s own comment
+  // used to explain it), which -- per spec -- has the UA size the box off its
+  // OWN intrinsic content, ignoring an author-set `height` such as the one
+  // this effect writes; the two mechanisms were both running, and only the
+  // native one was ever visible. Verified by hand, in real Chromium:
+  // `field-sizing: content` computes an EMPTY, single-row textarea's own
+  // intrinsic content height at ~60px (three lines' worth at the phone's
+  // forced 16px/20px font/line-height) regardless of `rows` or removing the
+  // attribute entirely, while `field-sizing: fixed` (the property's own
+  // default -- what phone is left with now) with the identical `rows={1}`
+  // measures 44px, the `vam-tap` floor, for the same box
+  // (`e2e/phone-question-shots.mjs` holds the real-browser figures). The
+  // 16-19px this closed was that property's own sizing algorithm for an
+  // EMPTY box, not padding, a control, or a border this file could still
+  // trim -- and closing it needed exactly the JS resize handler this effect
+  // already was, not a second one kept in step with it.
   useEffect(() => {
     const box = inputRef.current;
     if (box === null) return;
     box.style.height = 'auto';
     // An empty box returns to its `rows` height, not to one line's worth:
-    // `auto` on a textarea is the placeholder's two lines, `scrollHeight` is
-    // the content's, and with no content those are not the same number.
+    // `auto` on a textarea is the placeholder's two lines (desktop) or one
+    // (phone), `scrollHeight` is the content's, and with no content those
+    // are not the same number.
     if (draft !== '') {
       box.style.height = `${box.scrollHeight}px`;
     }
@@ -9572,11 +9591,18 @@ export function DetailPanel(props: DetailPanelProps) {
             // down the pane. See that constant for the measurement behind it.
             'relative flex flex-none flex-col bg-pane px-3.5',
             // PHONE: the bar's own chrome shrinks from `gap-2.5 py-3` (10/24px)
-            // to `gap-1.5 py-2` (6/16px) -- half of AC-7's height budget
-            // (docs/design/phone-core-loop.md §3.4/§4.1). Desktop keeps the
-            // original figures untouched; this is the one place the shared
-            // padding class the §4.1 postmortem named finally splits in two.
-            phone ? 'gap-1.5 py-2' : 'gap-2.5 py-3',
+            // to `gap-1.5 pt-1 pb-2` (6/4/8px) -- half of AC-7's height budget
+            // (docs/design/phone-core-loop.md §3.4/§4.1/§4.7). Desktop keeps
+            // the original figures untouched. TOP AND BOTTOM SPLIT, not
+            // `py-*`: the bottom edge is already floored to 12px by the
+            // safe-area rule below (`max(12px, env(safe-area-inset-bottom))`,
+            // `styles.css`) regardless of what this class asks for, so `pb-2`
+            // here is inert paint-time filler for the one frame before that
+            // rule resolves -- the TOP edge is the only one this class still
+            // controls, and it is what closed AC-7's ≤76px stretch target
+            // once the textarea itself stopped over-measuring (§4.7's own
+            // postmortem, followed up).
+            phone ? 'gap-1.5 pt-1 pb-2' : 'gap-2.5 py-3',
             newestQuestion === null ? 'border-line border-t' : '',
             // NARROWED WITH THE TRANSCRIPT, on the operator's own instruction
             // -- see the body's comment for the decision and the seam argument
@@ -9995,7 +10021,20 @@ export function DetailPanel(props: DetailPanelProps) {
                     ? 'Pick a session first'
                     : promptSuggestion !== null && !phone
                       ? `${promptSuggestion} — Tab to use`
-                      : 'Reply to agent, answer with a number, or paste a plan…'
+                      : phone
+                        ? // PHONE ONLY, SHORTER: the desktop sentence wraps to
+                          // three lines at the merged row's own width, cramped
+                          // inside a box now pinned to one line's height
+                          // (docs/design/phone-core-loop.md §4.7's own
+                          // postmortem closed that height, which is what
+                          // exposed this). Measured to fit one line at 390px
+                          // with the "+"/mic/Send buttons still in the row
+                          // (`e2e/phone-shell.pw.ts`'s hidden-probe check).
+                          // Drops "paste a plan" -- the one function this
+                          // shorter copy does not name -- pasting itself is
+                          // unaffected; only the hint is gone.
+                          'Reply or answer 1–9'
+                        : 'Reply to agent, answer with a number, or paste a plan…'
                 }
                 /* `vam-tap` IS THE TOUCH FLOOR, and the box you type in is a
                    touch target like any other: measured at 390px it came back
@@ -10005,19 +10044,16 @@ export function DetailPanel(props: DetailPanelProps) {
                    (`styles.css`), so the desktop box is untouched, and
                    `max-h-[120px]` still caps the grown height.
 
-                   PHONE ONLY: `[field-sizing:content]` (Chromium 123+, well
-                   under Electron 44's own) is a NATIVE platform feature, not
-                   a resize handler this file would otherwise own and keep in
-                   step with every edit/paste/backspace path above -- the
-                   textarea's own intrinsic height follows its content, `rows`
-                   drops to 1 (still floored at 44px by `vam-tap`, still
-                   capped by `max-h`), and once five lines' worth is typed
-                   `max-h-[132px]` plus `overflow-y-auto` (scrollbar hidden by
-                   `vam-no-scrollbar`, still scrollable) takes over, exactly
-                   the "grows upward to a max, then scrolls" §3.4 asks for. */
+                   PHONE ONLY: no more `[field-sizing:content]` -- grown by
+                   the SAME `scrollHeight` effect the desktop box already
+                   used (below `pickImage`), which this property used to
+                   override/ignore per spec; see that effect's own comment
+                   for the real-browser measurement this closes. `rows={1}`
+                   (not 2) and `max-h-[132px]` (not 120) are the two figures
+                   that still differ from desktop. */
                 className={[
                   'vam-no-scrollbar vam-tap min-w-0 flex-1 resize-none overflow-y-auto bg-transparent text-body text-ink outline-none placeholder:text-ink-faint',
-                  phone ? '[field-sizing:content] max-h-[132px]' : 'max-h-[120px]',
+                  phone ? 'max-h-[132px]' : 'max-h-[120px]',
                 ].join(' ')}
                 aria-label="prompt to session"
               />

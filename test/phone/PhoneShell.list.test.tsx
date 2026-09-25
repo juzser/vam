@@ -57,6 +57,17 @@ describe('the phone list screen', () => {
     expect(document.querySelector('[data-phone-status-bar]')).not.toBeNull();
   });
 
+  // B13: the top bar's own safe-area hook. jsdom lays nothing out, so the
+  // actual padding this rule closes is only provable in a browser
+  // (`e2e/phone-shell.pw.ts`); what a unit test can pin is that the hook the
+  // CSS rule keys off is actually on the element, on a phone.
+  it('marks its own top bar for the B13 safe-area rule (styles.css)', () => {
+    render(<Canvas model={MODEL} source={phoneSource()} />);
+    const bar = document.querySelector('[data-phone-list-top-bar]');
+    expect(bar).not.toBeNull();
+    expect(bar?.tagName).toBe('HEADER');
+  });
+
   it('pushes the session screen on a tap and pops it on the chevron', () => {
     render(<Canvas model={MODEL} source={phoneSource()} />);
     const row = rows()[0];

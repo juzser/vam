@@ -121,6 +121,28 @@ export async function typeThenEnter(
 }
 
 /**
+ * D12: PANES WITH A START/RESUME WRITE ALREADY IN FLIGHT.
+ *
+ * Two presses within a few milliseconds -- two rapid Start clicks, or Enter's
+ * own native activation landing beside a mouse click -- both reach here
+ * before either has run a single `send-keys`, so `ownEmptyPane`'s proof (the
+ * pane is still a shell) was true for BOTH: the race is not in the renderer's
+ * `disabled` state, which only ever describes the LAST commit, it is that two
+ * calls can be in flight for the same pane at once with nothing between them
+ * that has said so. A `Set`, mutated synchronously the moment a call is
+ * accepted and before its first `await`, is what closes it -- JS runs a
+ * function synchronously up to that point, so a second call for the same
+ * name arriving anywhere after the first has been accepted, even
+ * microseconds later, sees it in the set.
+ *
+ * MODULE-LEVEL AND PROCESS-WIDE ON PURPOSE: this is the one write path with
+ * the poll-gap race `ownEmptyPane`'s own header describes, and main is the
+ * one process every Start/Resume press reaches through, however many
+ * `createTmuxRunner()`s the caller minted for the occasion.
+ */
+const paneWritesInFlight = new Set<string>();
+
+/**
  * Type `text` into the pane `name`, then press Return once -- `typeThenEnter`
  * plus `ownEmptyPane`'s proof, for Start session, the one caller with a real
  * gap between the row being drawn and this running.
@@ -131,9 +153,21 @@ export async function typeIntoOwnPane(input: {
   text: string;
 }): Promise<SourceError | null> {
   const { run, name, text } = input;
-  const found = await ownEmptyPane(run, name, 'type');
-  if ('error' in found) return found.error;
-  return typeThenEnter(run, name, text);
+  if (paneWritesInFlight.has(name)) {
+    return {
+      kind: 'refused',
+      code: 'start-in-flight',
+      message: `vam is already typing into "${name}" from a press a moment ago -- this one is refused rather than sent again`,
+    };
+  }
+  paneWritesInFlight.add(name);
+  try {
+    const found = await ownEmptyPane(run, name, 'type');
+    if ('error' in found) return found.error;
+    return await typeThenEnter(run, name, text);
+  } finally {
+    paneWritesInFlight.delete(name);
+  }
 }
 
 /**
