@@ -301,10 +301,14 @@ describe('tmux argv', () => {
     // real cwd come LAST, in that order -- see `listVamSessions` for why each
     // is optional and why the order lets an older, shorter listing still
     // parse.
+    // The seventh field is tmux's own `session_created`, unix seconds --
+    // what `Session.createdAt` reads for a pane with no transcript yet
+    // (`pane-row.ts`). It comes LAST, after the real cwd, for the identical
+    // reason.
     expect(listSessionsArgv()).toEqual([
       'list-sessions',
       '-F',
-      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}`,
+      `#{${VAM_PROJECT_OPTION}}\t#{${VAM_PID_OPTION}}\t#{session_name}\t#{pane_current_command}\t#{${VAM_SESSION_OPTION}}\t#{pane_current_path}\t#{session_created}`,
     ]);
   });
 

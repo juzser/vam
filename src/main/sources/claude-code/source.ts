@@ -104,7 +104,7 @@ import {
 } from './stop.js';
 import { withLiveAgentTurn } from './subagent.js';
 import { MAX_TAIL_READ_BYTES, readLiveTail, TAIL_WINDOW_BYTES } from './tail.js';
-import { compactAge, EMPTY_FACTS, type TranscriptFacts } from './transcript.js';
+import { compactAge, EMPTY_FACTS, isoOrNull, type TranscriptFacts } from './transcript.js';
 import { defaultTranscriptRoot, indexTranscripts, locateTranscript } from './transcript-index.js';
 import { fileTranscriptSource, readTranscriptWindow, type TranscriptSource } from './window.js';
 
@@ -173,6 +173,17 @@ type TranscriptRead = {
   readonly roster: AgentRoster;
   /** Last activity, which `startedAt` is not. `null` when there is no file. */
   readonly mtimeMs: number | null;
+  /**
+   * WHEN THE FILE WAS CREATED -- the same `stat()` this already pays for,
+   * read a second way. Never the FIRST LINE'S own timestamp: `transcript.ts`
+   * 's own header is why nothing here opens the head of a file that can run
+   * to 157 MB -- birthtime is the honest, zero-extra-cost proxy for "when did
+   * this session begin" a tail-only reader can still answer. `null` when
+   * there is no file, or when this filesystem does not track one (Node
+   * reports `0` for that; `readTranscript` below turns it into `null` rather
+   * than the epoch).
+   */
+  readonly birthtimeMs: number | null;
 };
 
 /**
@@ -193,6 +204,7 @@ const NO_TRANSCRIPT: TranscriptRead = {
   // different thing from a source that cannot answer at all (model.ts).
   roster: { agents: [], running: 0 },
   mtimeMs: null,
+  birthtimeMs: null,
 };
 
 /**
@@ -248,6 +260,9 @@ export async function readTranscript(
       facts: await withLiveAgentTurn(facts, roster, subagentsDirOf(path), sessionId),
       roster,
       mtimeMs: info.mtimeMs,
+      // `0` is Node's own "this filesystem does not track it" (measured,
+      // `fs.Stats` docs) -- not a claim the file was created at the epoch.
+      birthtimeMs: info.birthtimeMs === 0 ? null : info.birthtimeMs,
     };
   } catch {
     // An unreadable transcript costs its own turns, never the whole load: the
@@ -297,6 +312,11 @@ async function rowForEmptyPane(
     decisions: read.facts.decisions,
     branch: read.facts.branch,
     resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
+    // The transcript's own birthtime -- this row HAS one (`path` above
+    // proved it), so it reads the identical source a live row's own
+    // `createdAt` does. No `agent.startedAt` to fall back to: there is no
+    // process here at all.
+    createdAt: isoOrNull(read.birthtimeMs),
   });
 }
 
@@ -558,6 +578,14 @@ export async function loadClaudeCodeProjects(
       // while it is answering right now, so it stands last, because a row
       // with neither a status file nor a transcript has nothing better.
       age: compactAge(nowMs - (statusUpdatedAt ?? read.mtimeMs ?? agent.startedAt ?? nowMs)),
+      // CREATED is a different question from AGE, and reads a different
+      // chain: never `statusUpdatedAt` (last activity, not a start), and the
+      // transcript's BIRTHTIME rather than its mtime -- a file's creation
+      // moment, not whatever it last did. `agent.startedAt` (this PROCESS's
+      // own launch) is the fallback for a session with no transcript yet --
+      // a real gap right after `Start session`, before the CLI has written
+      // its first line -- and `null` is honest when neither answers.
+      createdAt: isoOrNull(read.birthtimeMs ?? agent.startedAt),
       branch,
       // Absent, not empty, when nobody injected a reader: an empty list is
       // "vam asked GitHub and this branch has none", which a load that never

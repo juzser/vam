@@ -1222,6 +1222,60 @@ describe('loadClaudeCodeProjects', () => {
     expect(without?.sessions[0]?.age).toBe('3d');
   });
 
+  describe('createdAt', () => {
+    /** `writeTranscript`'s `ageMs` sets the file's mtime via `utimesSync`
+     *  before this test suite's `readTranscript` was ever read this way --
+     *  on this machine that also moves `birthtimeMs`, the fact this reads. */
+    it('reads the transcript file’s own birthtime, not its last-activity mtime', async () => {
+      const createdAgo = 3 * 3_600_000;
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')), createdAgo);
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const createdAt = project?.sessions[0]?.createdAt;
+      expect(createdAt).not.toBeNull();
+      // Whole-second precision (`utimesSync`'s own contract), so the
+      // assertion tolerates sub-second truncation rather than pinning an
+      // exact millisecond no real filesystem promises.
+      expect(Math.abs(Date.parse(createdAt as string) - (NOW - createdAgo))).toBeLessThan(2000);
+    });
+
+    it('falls back to the process start time when there is no transcript at all', async () => {
+      const startedAt = NOW - 3 * 86_400_000;
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ sessionId: 'absent', startedAt })],
+        NOW,
+      );
+      expect(project?.sessions[0]?.createdAt).toBe(new Date(startedAt).toISOString());
+    });
+
+    it('is null, never the epoch, when neither a transcript nor a start time exists', async () => {
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ sessionId: 'absent', startedAt: null })],
+        NOW,
+      );
+      expect(project?.sessions[0]?.createdAt).toBeNull();
+    });
+
+    it('never reads statusUpdatedAt -- that is last activity, not a creation time', async () => {
+      // A session resumed long after it was created: `statusUpdatedAt` (5m
+      // ago) would make a terrible `createdAt` if the chain ever picked it
+      // up by mistake -- the transcript's own, much older birthtime must win.
+      const createdAgo = 20 * 3_600_000;
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')), createdAgo);
+      writeStatusFile(4242, NOW - 5 * 60_000);
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent({ key: 'sess-1#4242', pid: 4242 })],
+        NOW,
+        async () => null,
+        sessionsRoot,
+      );
+      const createdAt = project?.sessions[0]?.createdAt;
+      expect(Math.abs(Date.parse(createdAt as string) - (NOW - createdAgo))).toBeLessThan(2000);
+    });
+  });
+
   it('ages two processes that resumed one session apart, from their own status files', async () => {
     // The regression. Both rows share ONE transcript, so an age taken from
     // the transcript's mtime is identical for both -- measured on a real
@@ -1559,6 +1613,7 @@ describe('loadClaudeCodeProjects', () => {
       facts: { aiTitle: null, branch, activity: null, decisions: [], questions: [] },
       roster: { agents: [], running: 0 },
       mtimeMs: null,
+      birthtimeMs: null,
     });
 
     const boundedWait = (promise: Promise<unknown>, ms: number, message: string) =>
