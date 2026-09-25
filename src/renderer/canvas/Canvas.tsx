@@ -4438,7 +4438,7 @@ function CanvasInner({
     [entries, focusedEntry, focusSession, setStatus],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: listing the useCanvasOverlays() setters would touch the keydown effect's deps; they are stable like useState setters.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: setJumping, setStatus, setQuery, setPaletteOpen, setKeySheetOpen, setSettingsOpen, setSettingsSection, setErrorLogOpen and setConfirmForceClose come from useCanvasOverlays() and are each a useState setter, stable across renders; the overlay values this listener reads (jumping, query, overlayOpen) are listed.
   useEffect(() => {
     // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
     // that does not exist, `Mod-<digit>` resolves against panes that are not
