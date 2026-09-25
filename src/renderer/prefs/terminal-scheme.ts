@@ -957,8 +957,12 @@ export function terminalSchemeStyle(
   return style;
 }
 
-/** `#rrggbb` at an alpha, spelled the way `getComputedStyle` spells it. */
-function withAlpha(hex: string, alpha: number): string {
+/** `#rrggbb` at an alpha, spelled the way `getComputedStyle` spells it. Exported
+ *  for `TerminalStreamTab.tsx`'s own `mapScheme`, which composites the SAME
+ *  ground at the SAME opacity for xterm's `ITheme.background` -- the frame
+ *  div and xterm's canvas would otherwise round the identical colour twice,
+ *  independently, and could drift a channel apart. */
+export function withAlpha(hex: string, alpha: number): string {
   const channel = (at: number): number => Number.parseInt(hex.slice(at, at + 2), 16);
   return `rgba(${channel(1)}, ${channel(3)}, ${channel(5)}, ${alpha})`;
 }

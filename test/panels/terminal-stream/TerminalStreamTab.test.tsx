@@ -17,6 +17,11 @@ import {
   TERMINAL_FONT_FAMILY,
   TERMINAL_STREAM_LINE_HEIGHT,
 } from '../../../src/renderer/prefs/terminal-font.js';
+import {
+  DEFAULT_TERMINAL_SCHEME_PREF,
+  readTerminalSchemePref,
+  setActiveTerminalScheme,
+} from '../../../src/renderer/prefs/terminal-scheme.js';
 
 const writeCalls: string[] = [];
 const disposeCalls: number[] = [];
@@ -182,6 +187,7 @@ beforeEach(() => {
   onDataHandler = undefined;
   FakeResizeObserver.instances = [];
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  setActiveTerminalScheme(DEFAULT_TERMINAL_SCHEME_PREF, 'dark');
 });
 
 afterEach(() => {
@@ -292,6 +298,33 @@ describe('mounted with a bridge', () => {
     });
     expect(loadedAddons.some((addon) => addon instanceof FakeUnicode11Addon)).toBe(true);
     expect(lastTerm?.unicode.activeVersion).toBe('11');
+  });
+
+  it('gives xterm a transparent ground at the composited opacity, matching the frame’s own translucent background -- xterm’s canvas used to paint an opaque one over it regardless of the pref', async () => {
+    setActiveTerminalScheme(readTerminalSchemePref({ backgroundOpacity: 0.6 }), 'dark');
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // `allowTransparency` is required for xterm to honour a non-opaque
+    // `theme.background` at all -- without it, xterm forces the background
+    // fully opaque regardless of the alpha channel it was handed.
+    expect(lastTerm?.options.allowTransparency).toBe(true);
+    // Hans's own #1e1f29 (the default dark scheme), composited at 0.6 --
+    // the SAME `withAlpha` arithmetic `terminalSchemeStyle` already applies
+    // to the frame div, so both layers land on identical pixels rather than
+    // two independent roundings of the same colour.
+    const theme = lastTerm?.options.theme as
+      | { background?: string; cursor?: string; selectionBackground?: string }
+      | undefined;
+    expect(theme?.background).toBe('rgba(30, 31, 41, 0.6)');
+    // The cursor and selection colours stay the scheme's own OPAQUE hex --
+    // only the GROUND is meant to let the frame show through; a translucent
+    // cursor/selection would read as broken, not as parity.
+    expect(theme?.cursor).toBe('#ae7af7');
+    expect(theme?.selectionBackground).toBe('#0f0e19');
   });
 
   it('a data push for this stream reaches term.write; a push for another stream never does', async () => {

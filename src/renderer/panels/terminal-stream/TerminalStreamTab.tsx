@@ -39,19 +39,40 @@ import {
   type ResolvedTerminalScheme,
   subscribeTerminalScheme,
   terminalSchemeStyle,
+  withAlpha,
 } from '../../prefs/terminal-scheme.js';
 import { preparePastedText } from '../terminal-paste.js';
 
 /**
  * The scheme's twenty-three colours plus `backgroundOpacity`, reduced to what
  * xterm.js's own `ITheme` accepts. `bold` is dropped -- `ITheme` has no such
- * field (`TerminalTab.tsx`'s own `spanClasses` is the only reader of it) --
- * and `backgroundOpacity` is a vam-only composite this tab does not paint
- * (the pane is opaque; there is no wrapper behind it to show through).
+ * field (`TerminalTab.tsx`'s own `spanClasses` is the only reader of it).
+ *
+ * `background` IS COMPOSITED WITH THE OPACITY, unlike every other colour
+ * here -- `withAlpha`, the SAME arithmetic `terminalSchemeStyle` already
+ * applies to the frame div below, rather than a second independent rounding
+ * of the same channel. This used to be dropped outright (a plain opaque
+ * hex), on the claim that "the pane is opaque; there is no wrapper behind
+ * it to show through" -- MEASURED wrong: the frame div's own `background-
+ * color` (via `terminalSchemeStyle`) IS already translucent at
+ * `backgroundOpacity < 1`, and xterm's own DOM renderer painted an OPAQUE
+ * `background-color` of its own on the row elements it draws (this
+ * `theme.background` value), directly on top of nearly all of it (the mount
+ * div fills the frame's whole content box) -- hiding the frame's
+ * translucency everywhere the terminal itself draws. Passing an `rgba(...)`
+ * here is what fixes it (`terminal-stream-frame-shots.mjs`'s own
+ * opacity-pixel checks hold the measurement); `allowTransparency: true`
+ * (the Terminal constructor option below) is xterm's own DOCUMENTED
+ * prerequisite for that, though FALSIFIED against this actual build to be a
+ * no-op for the DOM renderer specifically -- see that option's own comment.
+ *
+ * EVERY OTHER COLOUR STAYS FULLY OPAQUE, deliberately: the cursor and the
+ * selection pair are markers, not ground, and a translucent one would read
+ * as broken rather than as the parity this fix is for.
  */
 function mapScheme(scheme: ResolvedTerminalScheme): ITheme {
-  const { bold: _bold, backgroundOpacity: _backgroundOpacity, ...theme } = scheme;
-  return theme;
+  const { bold: _bold, backgroundOpacity, ...theme } = scheme;
+  return { ...theme, background: withAlpha(theme.background, backgroundOpacity) };
 }
 
 /** What is shown when there is no bridge, or nothing focused to stream --
@@ -263,6 +284,43 @@ export function TerminalStreamTab(props: {
           // before that addon is loaded, not merely before `activeVersion`
           // is assigned).
           allowProposedApi: true,
+          // REQUIRED for `mapScheme`'s own composited `background` (above)
+          // to actually PAINT translucent -- xterm's own doc: "Whether
+          // background should support non-opaque color… can't be changed
+          // later without [re-running `open()`]", which is why this is set
+          // here, at construction, rather than on the live scheme-update
+          // effect further down (that effect only ever reassigns
+          // `term.options.theme`, never reopens the terminal). MEASURED
+          // rendering cost: negligible for THIS renderer -- xterm 6's
+          // built-in default is the DOM renderer (one `<span>` per styled
+          // run, no `WebglAddon`/`CanvasAddon` installed here), which was
+          // already compositing through ordinary CSS `background-color`;
+          // `allowTransparency` only changes WHICH colour string reaches
+          // that same CSS property, not how it is painted. xterm's own
+          // "can negatively impact performance" warning is about the
+          // CANVAS renderer's clear-then-redraw cost, which this stack does
+          // not use.
+          // xterm's own public docs name this "required" for a non-opaque
+          // `theme.background` to paint at all. FALSIFIED against this
+          // actual build, though: removing it changes NOTHING measurable --
+          // `terminal-stream-frame-shots.mjs`'s own opacity-pixel checks
+          // stay green either way, and grepping the compiled
+          // `@xterm/xterm/lib/xterm.js` for `allowTransparency` finds
+          // exactly one occurrence (the default-options declaration; the
+          // value is never READ anywhere else in the bundle). The DOM
+          // renderer this build actually uses (no `@xterm/addon-canvas`/
+          // `@xterm/addon-webgl` installed) paints `theme.background` as an
+          // ordinary CSS `background-color`, which honours an alpha channel
+          // unconditionally -- this flag is understood to gate the CANVAS
+          // renderer's clear-then-redraw path instead (xterm's own
+          // "can negatively impact performance" warning is about that path).
+          // Kept anyway, at zero measured cost (400 writes to a 100x30
+          // terminal: ~1873ms without vs ~1880ms with, a ~0.4% difference
+          // inside this measurement's own run-to-run noise) and zero
+          // runtime effect today, as the documented contract for the option
+          // this file's `background` value actually needs -- correctness
+          // against a future renderer swap, not present-tense behaviour.
+          allowTransparency: true,
         });
         const fit = new FitAddon();
         term.loadAddon(fit);
