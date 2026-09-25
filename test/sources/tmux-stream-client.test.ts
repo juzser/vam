@@ -9,7 +9,7 @@
 
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RECONNECT_BACKOFF_MS } from '../../src/main/sources/tmux/control.js';
+import { CONTROL_TIMEOUT_MS, RECONNECT_BACKOFF_MS } from '../../src/main/sources/tmux/control.js';
 import {
   type ControlChildProcess,
   MAX_RECONNECT_ATTEMPTS,
@@ -508,6 +508,131 @@ describe('StreamClient', () => {
       expect(spawnChild).toHaveBeenCalledTimes(2);
       await vi.advanceTimersByTimeAsync(1);
       expect(spawnChild).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ── Review finding on #505: a `;`-chained reseed (`#sendChain`) queues
+  // ONE resolver per sub-command BEFORE writing the line, then waits on
+  // ALL of them (`Promise.all`) -- but a real tmux, when the FIRST
+  // sub-command of a `;`-chained line fails to parse (or otherwise errors
+  // at parse time -- an unknown command, an unknown flag), answers with
+  // exactly ONE `%begin`/`%error`/`%end` for the WHOLE line and never
+  // runs -- or answers -- anything chained after it (MEASURED against a
+  // real tmux 3.7b on a private socket: a bogus first command followed by
+  // a `display-message` second command left the second command's own
+  // marker text completely unobserved, while an immediately-following,
+  // SEPARATE command was answered normally -- the connection itself stays
+  // healthy, only the aborted line's own trailing replies never arrive).
+  // Before this fix, the second resolver `#sendChain` queued for that
+  // trailing command was NEVER settled, `Promise.all` never resolved, and
+  // `#reseed` -- and through it `connect()`, `#reconnect()` and
+  // `#finishResume()` -- hung forever. ─────────────────────────────────
+  describe('a `;`-chained reseed that does not get a reply per queued resolver (review finding)', () => {
+    /** The real-tmux shape a `;`-chained line's FIRST sub-command answers
+     * with when it fails to parse: one `%begin`/%error`/`%end`, and NO
+     * second block ever follows it (unlike `answerCapturePaneWithError`,
+     * which answers the cursor query normally and only errors the SECOND
+     * command -- a already-reachable, already-handled shape). */
+    async function answerFirstBlockOnlyWithError(
+      child: FakeChild,
+      errorText: string,
+      time = 2,
+    ): Promise<void> {
+      child.data(`%begin ${time} ${time} 1\n${errorText}\n%error ${time} ${time} 1\n`);
+      await tick();
+    }
+
+    it('settles the WHOLE chain the instant the first block errors -- no second block ever arrives, and no timer is needed', async () => {
+      const { client, children } = harness();
+      let settled = false;
+      const connecting = client.connect();
+      connecting.catch(() => {
+        settled = true;
+      });
+      const child = at(children, 0);
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+
+      await answerFirstBlockOnlyWithError(child, 'parse error: unknown command: bogus-command-xyz');
+
+      // Settled after a plain microtask tick -- no fake timer was ever
+      // advanced -- proving this is the SYNCHRONOUS abort-flush, not the
+      // timeout fallback (the next test) catching it many seconds later.
+      expect(settled).toBe(true);
+      await expect(connecting).rejects.toThrow(/could not capture the initial screen/);
+    });
+
+    it('carries on to answer the NEXT, unrelated command normally -- the connection itself is not presumed dead by an aborted chain', async () => {
+      // Real tmux itself stays healthy after aborting one chained line
+      // (MEASURED, see this block's own header) -- a chain-abort must not
+      // kill the connection or give up reconnecting; only its own missing
+      // replies are synthesised.
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+      await answerFirstBlockOnlyWithError(child, 'parse error: unknown command: bogus');
+      await expect(connecting).rejects.toThrow();
+
+      expect(child.killed).toBe(0);
+    });
+
+    it('times out a chain that gets NO reply at all, kills the connection, and surfaces it through onDown instead of hanging forever', async () => {
+      vi.useFakeTimers();
+      const { client, children } = harness();
+      let settled = false;
+      const connecting = client.connect();
+      connecting.catch(() => {
+        settled = true;
+      });
+      const downEvents: unknown[] = [];
+      client.onDown((event) => downEvents.push(event));
+
+      const child = at(children, 0);
+      await answerPauseAfter(child);
+      await answerListPanes(child, '%3');
+      // Neither the cursor query nor capture-pane is ever answered.
+
+      await vi.advanceTimersByTimeAsync(CONTROL_TIMEOUT_MS - 1);
+      expect(settled).toBe(false);
+      expect(child.killed).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+      expect(child.killed).toBe(1);
+      expect(downEvents).toEqual([{ kind: 'reconnecting', attempt: 1 }]);
+
+      await expect(connecting).rejects.toThrow(/could not capture the initial screen/);
+    });
+
+    it('a reseed that fails after %pause/%continue surfaces through onDown immediately -- not silently, waiting on some later drop that may never come', async () => {
+      vi.useFakeTimers();
+      const { client, children } = harness();
+      const connecting = client.connect();
+      const child = at(children, 0);
+      await connectWith(child, '%3', 'initial');
+      await connecting;
+
+      const downEvents: unknown[] = [];
+      const seeds: string[] = [];
+      client.onDown((event) => downEvents.push(event));
+      client.onSeed((seed) => seeds.push(seed));
+
+      child.data('%pause %3\n');
+      await tick();
+      // The explicit -A continue itself -- a plain #send, not a chain --
+      // so #finishResume's own reseed, chained, is what is under test.
+      child.data('%begin 2 2 1\n%continue %3\n%end 2 2 1\n');
+      await tick();
+
+      // The reseed's own cursor query -- the FIRST of its two chained
+      // commands -- errors; tmux never answers capture-pane after it.
+      await answerFirstBlockOnlyWithError(child, 'parse error: unknown command: bogus', 3);
+
+      expect(seeds).toEqual([]);
+      expect(downEvents).toEqual([{ kind: 'reconnecting', attempt: 1 }]);
+      expect(child.killed).toBe(1);
     });
   });
 });
