@@ -358,12 +358,30 @@ describe('paneForRow refuses a pane whose foreground is a shell', () => {
  * `vamSessionId` already names a DIFFERENT session is proof of an existing
  * occupant, the same kind of proof a disagreeing PUBLISHED pane already is
  * above (not the absence of evidence, evidence of the opposite). A pane whose
- * foreground command is neither a shell NOR Claude Code's own is proof of a
- * different program, read off the exact fact `isShellCommand` already reads
- * -- `pane_current_command` -- rather than a second vocabulary invented for
- * it: `shared/providers.ts` is the one table of runnable commands, and
- * `codex` is 'the pane the operator typed a different provider into' as far
- * as this reader is concerned, with no need to name Codex specially.
+ * foreground command is PROVABLY a different, configured provider is proof
+ * of a foreign occupant, read off the exact fact `isShellCommand` already
+ * reads -- `pane_current_command` -- and off `shared/providers.ts`, the one
+ * table of runnable commands vam has.
+ *
+ * NOT AN ALLOWLIST OF CLAUDE CODE'S OWN COMMAND. That was this veto's first
+ * shape, and it was wrong: MEASURED against a real native install on a
+ * private `-L` socket, tmux 3.7b -- `~/.local/bin/claude` symlinks to
+ * `~/.local/share/claude/versions/2.1.282`, and tmux's OWN
+ * `#{pane_current_command}` resolves the symlink and reports the TARGET's
+ * name, `2.1.282`, never `claude` (`ps -o comm`, which reads argv[0] rather
+ * than the resolved path, still says `claude` -- the two disagree). An
+ * allowlist checked against `'claude'` refused every legitimate native-install
+ * pane on this tier, which is the common case on a machine using the official
+ * installer -- a regression worse than the mispairing it fixed. There is no
+ * vocabulary of "what Claude Code's own command can look like" this file can
+ * enumerate and stay correct across install methods and versions, so it does
+ * not try to: only a command PROVEN to be a DIFFERENT, configured provider
+ * (Codex's own name, measured the same way to still be `codex` at every hop
+ * of its own symlink chain) is vetoed. A pane running anything else --
+ * Claude Code itself, whatever shape its name takes, or a program vam simply
+ * does not recognise -- is not vetoed by this tier; the `vamSessionId` veto
+ * above is what actually closes the reported scenario for a pane vam has
+ * ever proven a pairing for.
  */
 describe('paneForRow refuses a pane proven to be a different session or a different program', () => {
   it('refuses the iTerm+Codex scenario: one live Claude row, one vam pane already running Codex', () => {
@@ -392,13 +410,37 @@ describe('paneForRow refuses a pane proven to be a different session or a differ
     expect(paneForRow(claimedById, [ALPHA], ALPHA, new Map())).toBeNull();
   });
 
-  it('refuses a pane running a plain, unrecognised program -- not only Codex by name', () => {
-    // The veto is "not a shell and not Claude Code's own command", never a
-    // hand-picked list of programs to exclude -- `vim`, `ssh`, anything.
+  it('refuses Codex by its OWN command alone, with no conflicting id yet', () => {
+    // Isolates the command veto from the id veto: a pane running Codex that
+    // vam has never written `@vam-session` onto (a thread just started,
+    // never resumed through vam) is still refused -- the command alone is
+    // proof enough.
+    const codexNoId: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', command: 'codex' },
+    ];
+    expect(paneForRow(codexNoId, [ALPHA], ALPHA, new Map())).toBeNull();
+  });
+
+  it('does NOT refuse a native-install Claude Code pane -- the regression this measurement caught', () => {
+    // `2.1.282` is exactly what a real native install's OWN pane reports,
+    // measured above -- never `claude`. A veto that refused this would
+    // refuse the fallback's own reason for existing on the common install.
+    const nativeInstallPane: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', command: '2.1.282' },
+    ];
+    expect(paneForRow(nativeInstallPane, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+  });
+
+  it('does not refuse an unrecognised program by command alone -- the accepted tradeoff', () => {
+    // `vim`, `ssh`, anything vam cannot prove is a configured OTHER provider:
+    // refusing these too would require an allowlist of Claude Code's own
+    // command, which the measurement above rules out. This tier accepts the
+    // gap; a pane vam has ever proven a pairing for is still protected by the
+    // `vamSessionId` veto once that tag exists.
     const otherProgram: readonly TmuxSession[] = [
       { project, name: 'vam-atlas-aa11bb', command: 'vim' },
     ];
-    expect(paneForRow(otherProgram, [ALPHA], ALPHA, new Map())).toBeNull();
+    expect(paneForRow(otherProgram, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
   });
 
   it('still pairs the legitimate fallback: same program, no conflicting id', () => {

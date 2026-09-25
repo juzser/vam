@@ -51,14 +51,33 @@ import { projectIdOf } from './project-id.js';
 import { claimedPanes } from './session-pane.js';
 
 /**
- * The command a pane's foreground reads as when Claude Code is what is
- * actually running in it -- `shared/providers.ts`'s own table, the one place
- * vam already names every command it can start a session with, rather than a
- * second vocabulary invented here. See the fallback's own veto below for why
- * this is compared against, and never any other provider's command by name.
+ * Every command a DIFFERENT configured provider runs, read off
+ * `shared/providers.ts` -- the one table of runnable commands vam has, so a
+ * pane found running one of them is PROVEN to be running a foreign provider.
+ *
+ * A BLOCKLIST, NOT AN ALLOWLIST OF CLAUDE CODE'S OWN COMMAND -- and that was
+ * this veto's first shape, and it was wrong. MEASURED against a real native
+ * install, private `-L` socket, tmux 3.7b: `~/.local/bin/claude` symlinks to
+ * `~/.local/share/claude/versions/2.1.282`, and tmux's OWN
+ * `#{pane_current_command}` resolves the symlink and reports the TARGET's
+ * name -- `2.1.282`, never `claude` (`ps -o comm`, which reads argv[0] rather
+ * than the resolved path, still answers `claude`; the two disagree). An
+ * allowlist checked against `'claude'` refused every legitimate native-install
+ * pane on this exact tier -- the common case on a machine using the official
+ * installer -- a regression worse than the mispairing it fixed. There is no
+ * vocabulary of "what Claude Code's own command can look like" this file can
+ * enumerate and stay correct across install methods and versions, so it does
+ * not try to: it only vetoes a command PROVEN to be someone else's. Codex's
+ * own install keeps `codex` as its resolved binary's name at every hop of its
+ * own symlink chain, measured the same way, so the one other provider vam
+ * currently ships is reliably named. Should a third provider ever join
+ * `shared/providers.ts`, its command joins this list with no edit here.
  */
-const CLAUDE_CODE_COMMAND = PROVIDERS.find((provider) => provider.id === 'claude-code')
-  ?.command[0] as string;
+const OTHER_PROVIDER_COMMANDS: ReadonlySet<string> = new Set(
+  PROVIDERS.filter((provider) => provider.id !== 'claude-code')
+    .map((provider) => provider.command[0])
+    .filter((command): command is string => command !== undefined),
+);
 
 /** The part of a live row this module needs. `LiveAgent` satisfies it. */
 export type ReplyRow = {
@@ -239,14 +258,18 @@ export function paneForRow(
   ) {
     return null;
   }
-  // A FOURTH VETO: a pane whose foreground is neither a shell NOR Claude
-  // Code's own command is proven to be running something else -- Codex, or
-  // any other program typed into it by hand -- and the two counts above say
-  // nothing about WHAT is in the pane, only how many candidates there are.
-  // `shared/providers.ts` is the one table of runnable commands vam already
-  // has; nothing here invents a second one to name Codex specially. Absent,
-  // this vetoes nothing, the same rule the shell check above states.
-  if (only.command !== undefined && only.command !== CLAUDE_CODE_COMMAND) return null;
+  // A FOURTH VETO: a pane whose foreground is PROVABLY a different,
+  // configured provider is proven to be running something else, and the two
+  // counts above say nothing about WHAT is in the pane, only how many
+  // candidates there are. See `OTHER_PROVIDER_COMMANDS`'s own doc for why
+  // this is a blocklist of what is provably someone else's rather than an
+  // allowlist of Claude Code's own command -- the shape that once refused a
+  // real native-install pane. A command absent from that list -- including
+  // Claude Code's own, whatever shape it takes, and a program vam simply does
+  // not recognise -- vetoes nothing here; the `vamSessionId` veto above is
+  // what actually closes the reported scenario once a pairing has ever been
+  // proven for this pane.
+  if (only.command !== undefined && OTHER_PROVIDER_COMMANDS.has(only.command)) return null;
   return only.name;
 }
 
