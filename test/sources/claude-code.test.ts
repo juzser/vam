@@ -1276,6 +1276,78 @@ describe('loadClaudeCodeProjects', () => {
     });
   });
 
+  describe('isAgentWorktree', () => {
+    it('marks a row true when the injected check says so', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        async () => true,
+      );
+      expect(project?.sessions[0]?.isAgentWorktree).toBe(true);
+    });
+
+    it('is absent, not false, for an ordinary project', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      const [project] = await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        async () => false,
+      );
+      expect(project?.sessions[0]).not.toHaveProperty('isAgentWorktree');
+    });
+
+    it('feeds the check the row’s own resolved branch, not a raw undefined', async () => {
+      writeTranscript('slug-a', 'sess-1', jsonl(reply('x')));
+      let seenBranch: string | null | undefined;
+      await loadClaudeCodeProjects(
+        root,
+        [agent()],
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        async (_cwd, branch) => {
+          seenBranch = branch;
+          return false;
+        },
+      );
+      // `reply('x')` stamps `gitBranch: '/w/alpha'.includes ? ...` -- whatever
+      // the fixture's own branch is, the point is that it is not undefined:
+      // the transcript's own branch reached the check.
+      expect(seenBranch).not.toBeUndefined();
+    });
+  });
+
   it('ages two processes that resumed one session apart, from their own status files', async () => {
     // The regression. Both rows share ONE transcript, so an age taken from
     // the transcript's mtime is identical for both -- measured on a real

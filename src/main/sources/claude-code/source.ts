@@ -56,6 +56,7 @@ import type { AgentWork } from '../../../shared/agent-work.js';
 import type { HistoryCursor, TranscriptPage } from '../../../shared/history.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
+import { isAgentWorktreeCwd } from '../agent-worktree.js';
 import type { MainSource } from '../source.js';
 import { tagVamSessionArgv } from '../tmux/argv.js';
 import {
@@ -295,29 +296,51 @@ async function rowForEmptyPane(
   index: ReadonlyMap<string, string>,
   reads: Map<string, TranscriptRead>,
   nowMs: number,
+  // Same seam and same default as `loadClaudeCodeProjects`'s own parameter
+  // -- this function is its helper, not a second source of truth about how
+  // the check is made.
+  isAgentWorktreeOf: (
+    cwd: string,
+    branch: string | null,
+  ) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<Session> {
   const sessionId = empty.vamSessionId;
   const path = sessionId === undefined || sessionId === '' ? undefined : index.get(sessionId);
-  if (sessionId === undefined || path === undefined) return paneRow(empty);
+  // NO CWD TO CHECK, on this row's own terms: `paneRow` and `terminalRow`
+  // are both keyed by PANE, not by project, and a pane vam only knows by its
+  // `@vam-project` digest (never handed a real cwd this load) is simply not
+  // checkable -- the digest cannot be turned back into a directory, the same
+  // limit `source.ts`'s own project-bucketing comment already states for it.
+  const cwd = empty.cwd;
+  if (sessionId === undefined || path === undefined) {
+    const isAgentWorktree =
+      cwd === undefined || cwd === '' ? false : await isAgentWorktreeOf(cwd, null);
+    return { ...paneRow(empty), ...(isAgentWorktree ? { isAgentWorktree: true } : {}) };
+  }
   const read = reads.get(sessionId) ?? (await readTranscript(path, sessionId, nowMs));
   reads.set(sessionId, read);
   const resumeCommand = claudeResumeCommand(sessionId);
-  return terminalRow(empty, {
-    sessionId,
-    // THE SAME FALLBACK CHAIN A LIVE ROW'S TITLE USES (below): the operator's
-    // own name is never available here (there is no `LiveAgent` for a pane
-    // with no process in it), so this starts one rung down, at the
-    // transcript's own generated title.
-    title: read.facts.aiTitle ?? sessionId,
-    decisions: read.facts.decisions,
-    branch: read.facts.branch,
-    resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
-    // The transcript's own birthtime -- this row HAS one (`path` above
-    // proved it), so it reads the identical source a live row's own
-    // `createdAt` does. No `agent.startedAt` to fall back to: there is no
-    // process here at all.
-    createdAt: isoOrNull(read.birthtimeMs),
-  });
+  const isAgentWorktree =
+    cwd === undefined || cwd === '' ? false : await isAgentWorktreeOf(cwd, read.facts.branch);
+  return {
+    ...terminalRow(empty, {
+      sessionId,
+      // THE SAME FALLBACK CHAIN A LIVE ROW'S TITLE USES (below): the
+      // operator's own name is never available here (there is no
+      // `LiveAgent` for a pane with no process in it), so this starts one
+      // rung down, at the transcript's own generated title.
+      title: read.facts.aiTitle ?? sessionId,
+      decisions: read.facts.decisions,
+      branch: read.facts.branch,
+      resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
+      // The transcript's own birthtime -- this row HAS one (`path` above
+      // proved it), so it reads the identical source a live row's own
+      // `createdAt` does. No `agent.startedAt` to fall back to: there is no
+      // process here at all.
+      createdAt: isoOrNull(read.birthtimeMs),
+    }),
+    ...(isAgentWorktree ? { isAgentWorktree: true } : {}),
+  };
 }
 
 /**
@@ -450,6 +473,13 @@ export async function loadClaudeCodeProjects(
     sessionId: string,
     nowMs: number,
   ) => Promise<TranscriptRead> = readTranscript,
+  // Injectable for the same reason as `branchOf`: a test hands over an
+  // invented answer rather than resolving a real path on the machine
+  // running it. `CLAUDE_CODE_SOURCE` passes the real `isAgentWorktreeCwd`.
+  isAgentWorktreeOf: (
+    cwd: string,
+    branch: string | null,
+  ) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -526,6 +556,10 @@ export async function loadClaudeCodeProjects(
     // is already read. `.git/HEAD` only stands in when there is no transcript
     // yet, or an older one that never wrote `gitBranch`.
     const branch = read.facts.branch ?? (await branchOf(agent.cwd));
+    // `Session.isAgentWorktree` -- `agent-worktree.ts`'s own two-signal rule,
+    // fed the branch this row already resolved so a worktree whose path was
+    // renamed can still answer from its branch alone.
+    const isAgentWorktree = await isAgentWorktreeOf(agent.cwd, branch);
     /**
      * One question per session, and the directory it is asked in is the
      * session's own UNLESS the operator pointed this project somewhere else.
@@ -658,6 +692,7 @@ export async function loadClaudeCodeProjects(
       ...(pane === null ? {} : { pane }),
       ...(tmuxSessions === null ? {} : { vamControlled: pane !== null }),
       ...(vamListingGap === null ? {} : { vamListingGap }),
+      ...(isAgentWorktree ? { isAgentWorktree: true } : {}),
     };
     const group = grouped.get(agent.cwd) ?? { cwd: agent.cwd, sessions: [] };
     group.sessions.push(session);
@@ -692,7 +727,9 @@ export async function loadClaudeCodeProjects(
         grouped.set(cwd, bucket);
         byProjectId.set(projectId, bucket);
       }
-      bucket.sessions.push(await rowForEmptyPane(empty, index, reads, nowMs));
+      bucket.sessions.push(
+        await rowForEmptyPane(empty, index, reads, nowMs, isAgentWorktreeOf),
+      );
     }
   }
 
