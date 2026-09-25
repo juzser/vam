@@ -209,8 +209,23 @@ await page.addInitScript(
  * the Nth size the Nth script runs last and its value is the one in force.
  */
 async function openTerminal(size) {
+  // `streamingTerminal: false` -- STREAMING DEFAULTS ON NOW
+  // (`prefs/streaming-terminal.ts`), and this file measures the CLASSIC
+  // `[data-terminal-pane]` renderer specifically; the stub `window.api`
+  // above carries no `terminalStream` member at all.
+  // `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+  // own one-time migration ratchet, which treats an UN-migrated payload's
+  // `streamingTerminal` as unwritten and forces it back to the new default
+  // regardless of what this sets.
   await page.addInitScript((px) => {
-    globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ terminalFontSize: px }));
+    globalThis.localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({
+        terminalFontSize: px,
+        streamingTerminal: false,
+        streamingTerminalMigrated: true,
+      }),
+    );
   }, size);
   await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');

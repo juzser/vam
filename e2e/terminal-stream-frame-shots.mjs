@@ -218,7 +218,14 @@ await page.addInitScript(
 /** Put the setting in the store, then open the Terminal tab -- an init
  *  script rather than an `evaluate` + reload, for the exact race
  *  `terminal-chrome-shots.mjs`'s own `openTerminal` names (`activatePrefs`
- *  writing the whole prefs object back over a live edit). */
+ *  writing the whole prefs object back over a live edit).
+ *
+ *  `streamingTerminalMigrated: true` -- STREAMING DEFAULTS ON NOW
+ *  (`prefs/streaming-terminal.ts`), and omitting this hits `prefs.ts`'s own
+ *  one-time migration ratchet, which treats an UN-migrated payload's
+ *  `streamingTerminal` as unwritten and forces it back to the new default
+ *  regardless of what `on` says -- which broke exactly the `on: false` half
+ *  of this file's own comparison. */
 async function openTerminal(streaming, theme = 'dark', backgroundOpacity = 1) {
   await page.addInitScript(
     ({ on, appTheme, opacity }) => {
@@ -226,6 +233,7 @@ async function openTerminal(streaming, theme = 'dark', backgroundOpacity = 1) {
         'vam.prefs.v1',
         JSON.stringify({
           streamingTerminal: on,
+          streamingTerminalMigrated: true,
           theme: appTheme,
           terminalScheme: { backgroundOpacity: opacity },
         }),

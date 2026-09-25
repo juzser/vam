@@ -274,6 +274,20 @@ const browser = await chromium.launch();
     resumeCommand: RESUME_COMMAND,
     screen: SHELL_SCREEN,
   });
+  // STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this block is
+  // about the CLASSIC `[data-terminal-pane]` renderer specifically, and
+  // `install` above carries no `terminalStream` member at all, so the
+  // explicit opt-out is what keeps it testing the renderer it names.
+  // `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+  // own one-time migration ratchet, which treats an UN-migrated payload's
+  // `streamingTerminal` as unwritten and forces it back to the new default
+  // regardless of what this sets.
+  await page.addInitScript(() => {
+    globalThis.localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+    );
+  });
   await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');
   await page.locator(`[data-session-row="${ROW}"]`).first().click();

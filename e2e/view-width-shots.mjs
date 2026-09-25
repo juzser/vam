@@ -859,11 +859,26 @@ await term.addInitScript(
 );
 
 async function openTerminal(size, narrowed) {
+  // `streamingTerminal: false` -- STREAMING DEFAULTS ON NOW
+  // (`prefs/streaming-terminal.ts`), and this measures the CLASSIC
+  // `[data-terminal-pane]` renderer's own width/column arithmetic
+  // specifically ("the operator's width choice does not land here" is about
+  // THIS renderer, per `TerminalTab.tsx`'s own header -- the streaming
+  // renderer's sizing is `FitAddon`'s, a different mechanism).
+  // `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+  // own one-time migration ratchet, which treats an UN-migrated payload's
+  // `streamingTerminal` as unwritten and forces it back to the new default
+  // regardless of what this sets.
   await term.addInitScript(
     ([px, value]) => {
       globalThis.localStorage.setItem(
         'vam.prefs.v1',
-        JSON.stringify({ terminalFontSize: px, narrowViews: value }),
+        JSON.stringify({
+          terminalFontSize: px,
+          narrowViews: value,
+          streamingTerminal: false,
+          streamingTerminalMigrated: true,
+        }),
       );
     },
     [size, narrowed],
@@ -1365,8 +1380,23 @@ await termSplit.addInitScript(
   },
   { session: STUB_SESSION, branch: STUB_BRANCH },
 );
+// `streamingTerminal: false` -- STREAMING DEFAULTS ON NOW
+// (`prefs/streaming-terminal.ts`), and this measures the CLASSIC
+// `[data-terminal-pane]` renderer specifically; the stub `window.api` above
+// carries no `terminalStream` member at all. `streamingTerminalMigrated:
+// true` too -- omitting it hits `prefs.ts`'s own one-time migration
+// ratchet, which forces `streamingTerminal` back to the new default
+// regardless of what this sets.
 await termSplit.addInitScript(() => {
-  globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ terminalFontSize: 12.5, narrowViews: true }));
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({
+      terminalFontSize: 12.5,
+      narrowViews: true,
+      streamingTerminal: false,
+      streamingTerminalMigrated: true,
+    }),
+  );
 });
 await termSplit.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
 await termSplit.waitForSelector('[data-tab-strip]');

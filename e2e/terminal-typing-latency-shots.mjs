@@ -338,6 +338,20 @@ await page.addInitScript(
   },
   { session: SESSION, branch: BRANCH },
 );
+// STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this guard
+// measures the POLLING path specifically (its whole subject, per the header
+// above), regardless of which renderer a fresh install would default to, and
+// the stub `window.api` above carries no `terminalStream` member at all.
+// `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+// own one-time migration ratchet, which treats an UN-migrated payload's
+// `streamingTerminal` as unwritten and forces it back to the new default
+// regardless of what this sets.
+await page.addInitScript(() => {
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+  );
+});
 
 /* ── PANE A must exist BEFORE the tab ever asks, or it never draws one ──── */
 tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');

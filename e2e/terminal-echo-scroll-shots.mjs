@@ -318,6 +318,20 @@ await page.addInitScript(
   },
   { session: SESSION, branch: BRANCH },
 );
+// STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this file is
+// about the CLASSIC `[data-terminal-pane]` renderer's echo/scroll behaviour
+// specifically, and the stub `window.api` above carries no `terminalStream`
+// member at all, so the explicit opt-out is what keeps it testing the
+// renderer it names. `streamingTerminalMigrated: true` too -- omitting it
+// hits `prefs.ts`'s own one-time migration ratchet, which treats an
+// UN-migrated payload's `streamingTerminal` as unwritten and forces it back
+// to the new default regardless of what this sets.
+await page.addInitScript(() => {
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+  );
+});
 
 try {
   await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });

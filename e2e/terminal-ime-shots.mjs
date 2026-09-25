@@ -239,6 +239,22 @@ await page.addInitScript(() => {
     },
   };
 });
+// STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this file is
+// about the CLASSIC `[data-terminal-pane]` renderer's hidden-input IME path
+// specifically (the streaming renderer's own composition path is a DIFFERENT
+// mechanism, `term.textarea`'s own `CompositionHelper` -- see `docs/design/
+// terminal-streaming.md`), and the stub `window.api` above carries no
+// `terminalStream` member at all, so the explicit opt-out is what keeps this
+// testing the renderer it names. `streamingTerminalMigrated: true` too --
+// omitting it hits `prefs.ts`'s own one-time migration ratchet, which
+// treats an UN-migrated payload's `streamingTerminal` as unwritten and
+// forces it back to the new default regardless of what this sets.
+await page.addInitScript(() => {
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+  );
+});
 
 await page.goto(origin, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-tab-strip]');
