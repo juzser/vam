@@ -512,6 +512,15 @@ const browser = await chromium.launch();
   });
   const rowsShown = await rowCount(page);
   check('Show brings both rows back', rowsShown === 2, `${rowsShown}`);
+  // `foreignHiddenCount` hits 0 the instant `Show` flips the pref, but the
+  // note's own exit FADE (`FOREIGN_HIDDEN_NOTE_FADE_MS`, `SessionList.tsx`)
+  // keeps it mounted, opacity-0, for a beat past that -- so the count has to
+  // wait for the fade to finish rather than being read the instant the row
+  // count settles, or this would read a still-fading (not yet gone) note as
+  // a failure.
+  await page.waitForFunction(() => document.querySelector('[data-foreign-hidden]') === null, {
+    timeout: 2_000,
+  });
   check(
     'and the quiet line goes with them',
     (await page.locator('[data-foreign-hidden]').count()) === 0,

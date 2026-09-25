@@ -322,6 +322,12 @@ const GUARDS = [
   // reading of the reason text a degraded load leaves on screen
   // (`sidebar-ownership-shots.mjs`'s own header holds the falsifications).
   'sidebar-ownership-shots',
+  // THE QUIET LINE'S OWN DISMISS BUTTON, AS RECTANGLES: inside the note, at
+  // least as large as the sidebar's own icon buttons (Settings/Remote/
+  // theme) -- neither of which happy-dom's zero-layout DOM can answer.
+  // Regenerates `docs/ui/hidden-sessions-note-{dark,light}.png`.
+  // `hidden-sessions-note-shots.mjs`'s own header holds the falsification.
+  'hidden-sessions-note-shots',
   // DISMISS, THROUGH THE REAL PRELOAD CONTRACT AND A REAL CLICK -- the
   // operator's own report, "some sessions cannot be closed and report a
   // failure — they stay there forever." Stubs `window.api` and throws
