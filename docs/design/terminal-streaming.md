@@ -321,6 +321,27 @@ etc. can tell the difference) or suppress it deliberately in the new path
 too, matching today's posture. This doc takes no position; it is listed here
 so the decision is made rather than defaulted into.
 
+**REVERSED.** The operator asked, in as many words, for paste in Insert mode
+back: "paste in the terminal's Insert mode is currently refused -- fix it:
+allow it." Both renderers now deliver it. `renderer/panels/terminal-paste.ts`'s
+`preparePastedText` is the one sanitiser both share -- CRLF/LF collapsed to a
+single CR, NUL stripped, an embedded bracketed-paste marker's ESC byte
+dropped so pasted content cannot forge the END sentinel and have whatever
+follows read as if typed (xterm.js's own default paste handling does not
+guard against that, which is why this component owns the wrap rather than
+letting xterm's default paste run: measured against the shipped `@xterm/xterm`
+6.0.0 bundle, its `prepareTextForTerminal`/paste helper normalises newlines
+and wraps in bracket codes but performs no such escaping of its own). This
+streaming renderer decides whether to wrap in bracket codes itself, from
+xterm's own `modes.bracketedPasteMode` -- the SAME fact tmux tracks per pane,
+consulted here instead of there because there is no tmux verb on this write
+path at all, only a raw write to the control-mode connection. The
+capture-pane renderer (`TerminalTab.tsx`) instead hands the sanitised text to
+`sendPasteArgv`, which delivers it through tmux's OWN paste buffer
+(`set-buffer`/`paste-buffer -p -r -S -d`) so tmux itself -- not this bridge --
+decides whether the pane's program gets bracket codes, exactly as it would
+for any other paste into that pane.
+
 **Phone / the remote server.** Checked directly (`remote/server.ts`'s own
 `UNSERVED` map): the remote endpoint does not expose the Terminal surface AT
 ALL today -- "read, send, answer and resize type into a running agent and
@@ -471,12 +492,11 @@ what actually landed on `vam/terminal-stream`.
    CDP-level technique `TerminalTab.openkey.test.tsx` uses for the polling
    path's own IME coverage is the same shape this file's test uses, which is
    the strongest evidence available short of a real OS-level IME session.
-8. **Paste: a deliberate decision.** DONE, decided as "suppress" --
-   `7db34eab feat(terminal): refuse paste silently, matching
-   TerminalTab.tsx's own posture` -- so the streaming pane keeps today's
-   safety boundary (no large, unreviewed block of text delivered into a
-   running agent via paste) rather than adopting xterm's native paste
-   support.
+8. **Paste: a deliberate decision.** Decided as "suppress" in `7db34eab
+   feat(terminal): refuse paste silently, matching TerminalTab.tsx's own
+   posture` -- REVERSED since: the operator asked for paste in Insert mode
+   back, in both renderers. See "REVERSED" above and `terminal-paste.ts`,
+   `sendPasteArgv` (`sources/tmux/argv.ts`).
 9. **`%pause`/`%extended-output` handling** with reseed-on-resume. DONE --
    `StreamClient`'s `#handlePauseOrContinue` sets `#paused` on `%pause` (drops
    `%output` while paused rather than trusting it is complete) and reseeds
