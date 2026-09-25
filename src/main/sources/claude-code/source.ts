@@ -79,6 +79,12 @@ import {
   type ReadPullRequests,
   readPullRequestsViaCli,
 } from './pull-requests.js';
+import {
+  createQuestionIndex,
+  mergeOpenQuestion,
+  type QuestionIndex,
+  readOpenQuestion,
+} from './question-index.js';
 import { paneForRow, replyToSession } from './reply.js';
 import { createBranchLookup } from './repo-branch.js';
 import { claudeResumeCommand, resumeClaudeSession } from './resume.js';
@@ -189,10 +195,25 @@ const NO_TRANSCRIPT: TranscriptRead = {
   mtimeMs: null,
 };
 
-async function readTranscript(
+/**
+ * ONE PROCESS'S MEMORY OF EVERY LIVE TRANSCRIPT'S OPEN QUESTION, for the life
+ * of the app -- the same pattern `PR_READER` and `BUILTIN_COMMANDS` below are:
+ * a cache that pays off only if it survives longer than one `load()`.
+ * `question-index.ts` says why a per-poll cache is the whole point of that
+ * module rather than an optimisation on top of it.
+ */
+const QUESTION_INDEX: QuestionIndex = createQuestionIndex();
+
+/**
+ * EXPORTED FOR THE TEST THAT PROVES THE CACHE ACTUALLY PERSISTS ACROSS POLLS
+ * (`claude-code-question-window.test.ts`) -- every other caller keeps using
+ * this exactly as before, through the default parameter.
+ */
+export async function readTranscript(
   path: string,
   sessionId: string,
   nowMs: number,
+  questionIndex: QuestionIndex = QUESTION_INDEX,
 ): Promise<TranscriptRead> {
   try {
     const info = await stat(path);
@@ -203,15 +224,22 @@ async function readTranscript(
     // The size is the one this `stat` already answered rather than a second
     // one of its own: the file cannot be stat'd twice per poll just to learn a
     // number that is sitting here.
-    const { facts } = await readLiveTail(
-      {
-        size: async () => info.size,
-        read: (from, to) => readTranscriptWindow(path, from, to),
-      },
+    const source = {
+      size: async () => info.size,
+      read: (from: number, to: number) => readTranscriptWindow(path, from, to),
+    };
+    const { facts: windowFacts } = await readLiveTail(
+      source,
       sessionId,
       TAIL_WINDOW_BYTES,
       MAX_TAIL_READ_BYTES,
     );
+    // KEEPS AN OPEN `AskUserQuestion` IN VIEW PAST WHERE THE TAIL WINDOW
+    // STOPPED -- `question-index.ts`'s whole reason to exist. Cheap on every
+    // poll after the first: an append-only file only ever hands this the
+    // bytes written since the last look, typically one line.
+    const open = await readOpenQuestion(questionIndex, path, info.size, info.mtimeMs, source);
+    const facts = { ...windowFacts, questions: mergeOpenQuestion(windowFacts.questions, open) };
     // The roster's walk is what names the live agents, and it has already been
     // paid for the `●N` badge -- so a session with none costs nothing new here
     // and reads no file it did not read before (`subagent.ts`).
