@@ -301,6 +301,33 @@ for (const width of STRIP_WIDTHS) {
       await page.waitForSelector('[data-binding-slot]', { timeout: 5_000 });
 
       const slots = await page.evaluate(() => {
+        // `ChordGlyphs` (`ShortcutTip.tsx`) now paints a slot's chord as
+        // several sibling nodes — a `font-sans` span per Apple glyph
+        // segment, plain text beside it — rather than the one flat string
+        // this range held when this measurement was written. A `Range`
+        // gives back one rect PER NODE'S OWN fragment, so a chord that never
+        // wraps at all reports several rects: one physical line read as
+        // several. Grouped by `top`, which recovers the count "how many
+        // lines" always meant — same-line fragments differ by at most ~1px
+        // (the sans span's own ascent against the mono text beside it,
+        // measured live), a real wrap by a full line-height (14-15px at
+        // this size), so a 4px tolerance tells the two apart without being
+        // tuned to either font.
+        const visualLines = (rects) => {
+          const groups = [];
+          for (const rect of rects) {
+            const group = groups.find((g) => Math.abs(g.top - rect.top) < 4);
+            if (group === undefined) {
+              groups.push({ top: rect.top, rects: [rect] });
+            } else {
+              group.rects.push(rect);
+            }
+          }
+          return groups.map((g) => ({
+            width:
+              Math.max(...g.rects.map((r) => r.right)) - Math.min(...g.rects.map((r) => r.left)),
+          }));
+        };
         const rows = [];
         for (const slot of document.querySelectorAll('[data-binding-slot]')) {
           const kbd = slot.querySelector('[data-settings-keys]');
@@ -309,11 +336,11 @@ for (const width of STRIP_WIDTHS) {
           if (kbd === null) continue;
           const range = document.createRange();
           range.selectNodeContents(kbd);
-          const lines = [...range.getClientRects()];
+          const boxLines = visualLines([...range.getClientRects()]);
           rows.push({
             keys: (kbd.textContent ?? '').trim(),
-            inkW: Math.max(...lines.map((r) => r.width)),
-            lines: lines.length,
+            inkW: Math.max(...boxLines.map((l) => l.width), 0),
+            lines: boxLines.length,
             innerW: slot.clientWidth,
             scrollW: slot.scrollWidth,
             scrollH: slot.scrollHeight,
@@ -436,13 +463,33 @@ for (const width of [1100, NARROWEST_DESKTOP]) {
   await page.waitForSelector('[data-binding-slot]', { timeout: 5_000 });
 
   const planted = await page.evaluate(() => {
+    // Same regrouping as the ITEM 4 loop above, and the same reason:
+    // `ChordGlyphs` paints this chord (`⌥ ⌘ AudioVolumeDown`, two Mac glyph
+    // segments) as several sibling nodes, so a `Range` over it now reports
+    // one rect per node — grouped back into physical lines by `top`.
+    const visualLines = (rects) => {
+      const groups = [];
+      for (const rect of rects) {
+        const group = groups.find((g) => Math.abs(g.top - rect.top) < 4);
+        if (group === undefined) {
+          groups.push({ top: rect.top, rects: [rect] });
+        } else {
+          group.rects.push(rect);
+        }
+      }
+      return groups.map((g) => ({
+        left: Math.min(...g.rects.map((r) => r.left)),
+        right: Math.max(...g.rects.map((r) => r.right)),
+        width: Math.max(...g.rects.map((r) => r.right)) - Math.min(...g.rects.map((r) => r.left)),
+      }));
+    };
     const slot = document.querySelector('[data-binding-slot="rename:0"]');
     if (slot === null) return null;
     const kbd = slot.querySelector('[data-settings-keys]');
     if (kbd === null) return null;
     const range = document.createRange();
     range.selectNodeContents(kbd);
-    const lines = [...range.getClientRects()];
+    const boxLines = visualLines([...range.getClientRects()]);
     // The nearest ancestor that actually clips — the scrolling panel, not the
     // slot. A chord that overflows its slot is fine; a chord that overflows
     // THIS is cut off the screen.
@@ -454,9 +501,9 @@ for (const width of [1100, NARROWEST_DESKTOP]) {
     }
     return {
       keys: (kbd.textContent ?? '').trim(),
-      lines: lines.length,
-      inkW: Math.max(...lines.map((r) => r.width)),
-      inkRight: Math.max(...lines.map((r) => r.right)),
+      lines: boxLines.length,
+      inkW: Math.max(...boxLines.map((l) => l.width), 0),
+      inkRight: Math.max(...boxLines.map((l) => l.right), 0),
       innerW: slot.clientWidth,
       scrollH: slot.scrollHeight,
       clientH: slot.clientHeight,
@@ -757,10 +804,23 @@ console.log('\n=== the settings case ladder');
           // never runs out" -- which takes sentence case; there are seventy of
           // them down one list and title-casing that is a wall of capitals.
           // Both are checked below, in the rank they belong to.
+          //
+          // AND A CHORD GLYPH IS NOT A NAME EITHER. `ChordGlyphs` (audit A22)
+          // wraps a Mac modifier segment (⌘⇧⌥⌃, a named key) in its own
+          // `<span class="font-sans">`, which is a `span` with a direct own
+          // text node -- exactly this rank's own test for "is a control" --
+          // so a symbol that has no case at all (`text-transform: capitalize`
+          // does nothing to `⌘`) started showing up here as a "control named
+          // none". `data-settings-keys` marks the chord chip these spans live
+          // in, the same shape `data-settings-unit`/`data-verbatim` already
+          // use to name a rank this sweep does not govern; the ITEM 4 block
+          // above and `chord-symbol-shots.mjs` are what actually check this
+          // rank.
           return (
             el.closest('[data-settings-unit]') === null &&
             el.closest('[data-binding-label]') === null &&
-            el.closest('[data-verbatim]') === null
+            el.closest('[data-verbatim]') === null &&
+            el.closest('[data-settings-keys]') === null
           );
         })
         .map(read),
