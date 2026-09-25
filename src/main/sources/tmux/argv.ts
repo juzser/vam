@@ -637,14 +637,21 @@ const PASTE_BUFFER_PREFIX = 'vam-paste-';
 /**
  * How many UTF-8 BYTES may sit in one `set-buffer` argv element.
  *
- * BYTES, NOT JS STRING LENGTH, because the real constraint this bounds is
- * `execve`'s own argv/environ size limit on the far side of `execFile` -- and
- * a run of CJK or emoji text can be two to four bytes per UTF-16 code unit,
- * so counting code units would let a chunk carry several times more raw bytes
- * than the number promises. 8 KiB is far under the smallest ARG_MAX this app
- * is likely to run under (Linux's historical floor was 128 KiB; macOS is
- * roughly 1 MiB, shared with the environment tmux's own child inherits), so
- * there is room to spare even on a heavily populated environment.
+ * BYTES, NOT JS STRING LENGTH, because a run of CJK or emoji text can be two
+ * to four bytes per UTF-16 code unit, and counting code units would let a
+ * chunk carry several times more raw bytes than the number promises.
+ *
+ * MEASURED, on tmux 3.7b over a private `-L` socket, because the real ceiling
+ * here is NOT `execve`'s own ARG_MAX -- it is tmux's OWN command-line parser.
+ * A single `set-buffer -b <name> -- <data>` answered `command too long` and
+ * exited 1 (not a spawn failure; `execFile` ran tmux, and tmux itself
+ * refused) starting at 16,350 bytes of `data` and succeeded at every size
+ * tried below 16,300 -- a real, tmux-side limit around 16 KiB for the WHOLE
+ * command line, reached long before `execve`'s own argv/environ ceiling
+ * (which only failed, with a genuine `spawn E2BIG`, at 1 MiB). 8 KiB is
+ * chosen to sit at roughly half that measured ceiling, leaving headroom for
+ * the buffer name and flags that share the same command line and for
+ * whatever a different tmux build's own limit turns out to be.
  */
 export const PASTE_CHUNK_BYTES = 8192;
 
