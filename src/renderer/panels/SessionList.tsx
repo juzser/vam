@@ -832,6 +832,7 @@ export type SessionListProps = {
     readonly ended: number;
     readonly foreign: number;
     readonly idle: number;
+    readonly agentWorktree: number;
   };
   /**
    * HOW MANY ROWS `hideForeign` IS HIDING RIGHT NOW -- NOT `hiddenCounts.
@@ -3487,6 +3488,22 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       originFilters.hideIdle,
                       hiddenCounts.idle,
                     ],
+                    // THE SIXTH ROW -- the operator's own report: "I see a
+                    // worktree-agent showing when I press New session." ON
+                    // BY DEFAULT, `foreign`'s own shape rather than `idle`'s
+                    // -- `session-filter.ts`'s own header on
+                    // `hideAgentWorktrees` says why. A waiting session under
+                    // this rule is never actually hidden (same file), so the
+                    // count here can undercount what `isAgentWorktreeSession`
+                    // alone would say, on purpose.
+                    [
+                      'agent-worktree',
+                      GitBranch,
+                      'Hide agent worktrees',
+                      'Hide Claude Code’s own temporary worktrees for isolated subagents — not a project you opened yourself.',
+                      originFilters.hideAgentWorktrees,
+                      hiddenCounts.agentWorktree,
+                    ],
                   ] as const
                 ).map(([key, Icon, label, note, on, hides]) => (
                   <Note key={key} text={note}>
@@ -3505,7 +3522,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 ? { ...originFilters, hideForeign: !on }
                                 : key === 'idle'
                                   ? { ...originFilters, hideIdle: !on }
-                                  : { ...originFilters, onlyPrompted: !on },
+                                  : key === 'agent-worktree'
+                                    ? { ...originFilters, hideAgentWorktrees: !on }
+                                    : { ...originFilters, onlyPrompted: !on },
                         )
                       }
                       className={[

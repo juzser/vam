@@ -777,6 +777,7 @@ describe('SessionList projects header', () => {
         hideEnded: false,
         hideForeign: true,
         hideIdle: false,
+        hideAgentWorktrees: true,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
@@ -790,6 +791,7 @@ describe('SessionList projects header', () => {
         hideEnded: false,
         hideForeign: true,
         hideIdle: false,
+        hideAgentWorktrees: true,
       },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -858,7 +860,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 0, unprompted: 0, ended: 11, foreign: 0, idle: 0 },
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 11, foreign: 0, idle: 0, agentWorktree: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="ended"]') as HTMLElement;
     expect(row).not.toBeNull();
@@ -883,6 +885,7 @@ describe('SessionList filter popover', () => {
         hideEnded: false,
         hideForeign: true,
         hideIdle: false,
+        hideAgentWorktrees: true,
       },
     ]);
   });
@@ -899,7 +902,7 @@ describe('SessionList filter popover', () => {
     // rules the badge counts -- even though it does narrow the list.
     const { container } = mountWith(twoProjects(), {
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0, agentWorktree: 0 },
     });
     expect(container.querySelector('[data-filter-badge]')).toBeNull();
     cleanup();
@@ -920,6 +923,7 @@ describe('SessionList filter popover', () => {
         hideEnded: false,
         hideForeign: true,
         hideIdle: false,
+        hideAgentWorktrees: true,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -934,7 +938,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0 },
+      hiddenCounts: { agent: 3, unprompted: 0, ended: 0, foreign: 0, idle: 0, agentWorktree: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="agent"]') as HTMLElement;
     expect(row.getAttribute('aria-checked')).toBe('true');
@@ -957,6 +961,7 @@ describe('SessionList filter popover', () => {
         hideEnded: true,
         hideForeign: true,
         hideIdle: false,
+        hideAgentWorktrees: true,
       },
     ]);
   });
@@ -969,7 +974,7 @@ describe('SessionList filter popover', () => {
     const { container } = mountWith(twoProjects(), {
       filterMenuOpen: true,
       originFilters: DEFAULT_SESSION_FILTERS,
-      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 11, idle: 0 },
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 11, idle: 0, agentWorktree: 0 },
     });
     const row = container.querySelector('[data-origin-toggle="foreign"]') as HTMLElement;
     expect(row).not.toBeNull();
@@ -994,6 +999,7 @@ describe('SessionList filter popover', () => {
         hideEnded: true,
         hideForeign: false,
         hideIdle: false,
+        hideAgentWorktrees: true,
       },
     ]);
   });
@@ -1007,6 +1013,46 @@ describe('SessionList filter popover', () => {
   it('says nothing extra when there is no listing gap', () => {
     const { container } = mountWith(twoProjects(), { filterMenuOpen: true });
     expect(container.querySelector('[data-vam-listing-gap]')).toBeNull();
+  });
+
+  /**
+   * THE SIXTH ROW -- the operator's own report: "I see a worktree-agent
+   * showing when I press New session." ON BY DEFAULT, the same shape
+   * `foreign` is: `session-filter.ts`'s own header explains why this one is
+   * not `hideIdle`'s off-by-default shape.
+   */
+  it('offers a row for agent worktrees, on by default and saying how many it holds back', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      hiddenCounts: { agent: 0, unprompted: 0, ended: 0, foreign: 0, idle: 0, agentWorktree: 4 },
+    });
+    const row = container.querySelector('[data-origin-toggle="agent-worktree"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(row.getAttribute('aria-checked')).toBe('true');
+    expect(row.textContent).toContain('4 hidden');
+  });
+
+  it('turns the agent-worktree rule off without disturbing the other five', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(container.querySelector('[data-origin-toggle="agent-worktree"]') as Element);
+    });
+    expect(seen).toEqual([
+      {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: true,
+        hideForeign: true,
+        hideIdle: false,
+        hideAgentWorktrees: false,
+      },
+    ]);
   });
 
   it('shows the reason on screen while vam cannot read its own tmux spine', () => {

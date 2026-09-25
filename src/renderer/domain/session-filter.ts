@@ -77,6 +77,17 @@ export type SessionFilters = {
    * before the operator asked for it on.
    */
   readonly hideIdle: boolean;
+  /**
+   * THE SIXTH TOGGLE: a Claude Code AGENT WORKTREE -- `<repo>/.claude/
+   * worktrees/agent-<id>`, a subagent's own throwaway checkout
+   * (`agent-worktree.ts`'s own header), never a project the operator opened
+   * themselves. The operator's report: pressing "New session" surfaces one
+   * of these with no way to say "I don't want to see it". ON by default,
+   * unlike `hideIdle` -- this is closer to `hideForeign`'s own shape (a
+   * category of session the operator is unlikely to ever want on screen)
+   * than to a status a fresh install has no opinion about yet.
+   */
+  readonly hideAgentWorktrees: boolean;
 };
 
 /**
@@ -94,6 +105,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
   hideEnded: true,
   hideForeign: true,
   hideIdle: false,
+  hideAgentWorktrees: true,
 };
 
 /**
@@ -304,4 +316,43 @@ export function isHiddenByIdleFilter(
   if (!filters.hideIdle) return false;
   if (status !== 'all') return false;
   return isIdle(session);
+}
+
+/** Toggle F's predicate -- exactly what `Session.isAgentWorktree` measured
+ *  (`model.ts`, `agent-worktree.ts`). Absent or `false` both read as "not
+ *  one", the same direction every rule in this file takes. */
+export function isAgentWorktreeSession(session: Session): boolean {
+  return session.isAgentWorktree === true;
+}
+
+/**
+ * Does the agent-worktree rule remove this session from the list?
+ *
+ * STANDS DOWN FOR `waiting`, UNLIKE `isHiddenByForeignFilter` -- see this
+ * file's own header for the argument: a foreign session is not vam's to act
+ * on at any status, but an agent worktree session is vam's own, and one
+ * asking the operator something must stay reachable however this toggle is
+ * set. Every other status hides normally.
+ */
+export function isHiddenByAgentWorktreeFilter(
+  session: Session,
+  filters: SessionFilters,
+): boolean {
+  if (!filters.hideAgentWorktrees) return false;
+  if (session.status === 'waiting') return false;
+  return isAgentWorktreeSession(session);
+}
+
+/**
+ * How many rows the agent-worktree rule is hiding RIGHT NOW -- the same
+ * "count what the rule actually takes away today" shape
+ * `countHiddenByForeignFilter` already established, and for the identical
+ * reason: a waiting session this rule stood down for was never hidden, so
+ * it must not be counted as if it were.
+ */
+export function countHiddenByAgentWorktreeFilter(
+  sessions: readonly Session[],
+  filters: SessionFilters,
+): number {
+  return sessions.filter((session) => isHiddenByAgentWorktreeFilter(session, filters)).length;
 }
