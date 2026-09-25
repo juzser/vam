@@ -867,6 +867,7 @@ export function TerminalTab({
   resize,
   send,
   branch,
+  notice,
 }: {
   readonly projectId: string | null;
   /**
@@ -902,6 +903,16 @@ export function TerminalTab({
    * this is a sentence, and a sentence says nothing rather than saying a dash.
    */
   readonly branch?: string | null;
+  /**
+   * ONE LINE, drawn above the pane exactly like `data-terminal-blank`/
+   * `data-terminal-refused` already are, when this tab is standing in for
+   * streaming rather than being the operator's own choice
+   * (`TerminalAutoTab.tsx`, `docs/design/terminal-streaming.md`'s "Flipping
+   * the default"). `undefined`/`null` draw nothing -- the ordinary case,
+   * every existing caller of this tab today, none of which know this prop
+   * exists.
+   */
+  readonly notice?: string | null;
 }) {
   /**
    * `null` is "has not answered yet", and it is a state rather than an
@@ -1879,72 +1890,101 @@ export function TerminalTab({
     // one, and the only symptom would be lines wrapping in the wrong place.
   }, [showing, resize, projectId, rowId, fontSize]);
 
+  // THE FALLBACK NOTICE (`notice`'s own header, `TerminalAutoTab.tsx`),
+  // computed once and prepended to EVERY branch below, including the ones
+  // that never reach a real screen -- an operator whose tmux just failed
+  // the streaming version gate deserves to know why this tab changed even
+  // when the SAME tmux also cannot answer a `capture-pane` read. `<>...</>`
+  // rather than folding it into each `<p>`'s own text: this is a sentence
+  // about the SWITCH, not part of the sentence about the pane's own state.
+  const noticeEl =
+    typeof notice === 'string' && notice !== '' ? (
+      <p data-terminal-fallback-notice className="flex-none font-sans text-control text-ink-faint">
+        {notice}
+      </p>
+    ) : null;
+
   // Nothing is focused, so there is no project to ask about and the effect
   // above never asks. Saying "reading the session's screen" here -- which is
   // what the pending state below says -- would be vam claiming to be looking
   // at something it had not asked a single question about, forever.
   if (projectId === null) {
     return (
-      <p data-terminal data-terminal-empty className="text-control text-ink-faint">
-        No session selected — pick one in the sidebar.
-      </p>
+      <>
+        {noticeEl}
+        <p data-terminal data-terminal-empty className="text-control text-ink-faint">
+          No session selected — pick one in the sidebar.
+        </p>
+      </>
     );
   }
   if (view === null) {
     return (
-      <p data-terminal data-terminal-pending className="text-control text-ink-faint">
-        Reading the session’s screen…
-      </p>
+      <>
+        {noticeEl}
+        <p data-terminal data-terminal-pending className="text-control text-ink-faint">
+          Reading the session’s screen…
+        </p>
+      </>
     );
   }
   if (view.kind === 'unavailable') {
     return (
-      <p
-        data-terminal
-        data-terminal-unavailable
-        data-terminal-code={view.error.code}
-        className="text-control text-ink-faint"
-      >
-        {/* vam could not ask. Not "there is no session". */}
-        {view.error.message}
-      </p>
+      <>
+        {noticeEl}
+        <p
+          data-terminal
+          data-terminal-unavailable
+          data-terminal-code={view.error.code}
+          className="text-control text-ink-faint"
+        >
+          {/* vam could not ask. Not "there is no session". */}
+          {view.error.message}
+        </p>
+      </>
     );
   }
   if (view.kind === 'mispaired') {
     return (
-      <p
-        data-terminal
-        data-terminal-empty
-        data-terminal-mispaired
-        className="text-control text-ink-faint"
-      >
-        {/* NOT "vam did not start a session for this one", which is what stood
-            here and was false in the way that costs an operator time: vam did
-            start sessions for this project, it just cannot prove that any of
-            them is THIS row's. The row published the pane it believes it is
-            in, and vam is refusing to substitute a different live session for
-            it -- so the name it published is the one useful thing to say. The
-            same refusal is why nothing is typed here: there is no pane
-            element on this branch at all, so the surface cannot take a key it
-            could not deliver. */}
-        {`vam cannot tell which screen is this session's: it reports that it is running in the tmux pane ${view.published}, which is not one vam started for this project. Rather than show another session's screen, it is showing none.`}
-      </p>
+      <>
+        {noticeEl}
+        <p
+          data-terminal
+          data-terminal-empty
+          data-terminal-mispaired
+          className="text-control text-ink-faint"
+        >
+          {/* NOT "vam did not start a session for this one", which is what stood
+              here and was false in the way that costs an operator time: vam did
+              start sessions for this project, it just cannot prove that any of
+              them is THIS row's. The row published the pane it believes it is
+              in, and vam is refusing to substitute a different live session for
+              it -- so the name it published is the one useful thing to say. The
+              same refusal is why nothing is typed here: there is no pane
+              element on this branch at all, so the surface cannot take a key it
+              could not deliver. */}
+          {`vam cannot tell which screen is this session's: it reports that it is running in the tmux pane ${view.published}, which is not one vam started for this project. Rather than show another session's screen, it is showing none.`}
+        </p>
+      </>
     );
   }
   if (view.kind !== 'ok') {
     return (
-      <p data-terminal data-terminal-empty className="text-control text-ink-faint">
-        {view.kind === 'gone'
-          ? 'The tmux session vam started for this one has ended.'
-          : view.kind === 'ambiguous'
-            ? // Neither screen, and both names. Drawing one of them would be a
-              // coin toss the operator has no way of seeing was tossed.
-              `vam started more than one tmux session for this project, so it will not guess which screen you meant: ${view.names.join(', ')}.`
-            : // No offer to connect to anything: vam can show the sessions it
-              // started and no others, because no process can take over
-              // another's controlling TTY.
-              'vam did not start a tmux session for this one, so there is no screen to show.'}
-      </p>
+      <>
+        {noticeEl}
+        <p data-terminal data-terminal-empty className="text-control text-ink-faint">
+          {view.kind === 'gone'
+            ? 'The tmux session vam started for this one has ended.'
+            : view.kind === 'ambiguous'
+              ? // Neither screen, and both names. Drawing one of them would be a
+                // coin toss the operator has no way of seeing was tossed.
+                `vam started more than one tmux session for this project, so it will not guess which screen you meant: ${view.names.join(', ')}.`
+              : // No offer to connect to anything: vam can show the sessions it
+                // started and no others, because no process can take over
+                // another's controlling TTY.
+                'vam did not start a tmux session for this one, so there is no screen to show.'}
+        </p>
+      </>
     );
   }
   return (
@@ -1991,6 +2031,12 @@ export function TerminalTab({
           nothing said about it, which is the exact silence this tab exists to
           replace. `trim` because tmux pads every row to the pane's width, so
           a screen of only spaces is the same fact as an empty string. */}
+      {/* THE FALLBACK NOTICE, computed once above and shared with every
+          early-return branch -- drawn first, in the same `font-sans`
+          register `data-terminal-blank`/`data-terminal-refused` below
+          already use for a sentence ABOUT the pane rather than a line OF
+          it. */}
+      {noticeEl}
       {view.text.trim() === '' && (
         /* `font-sans` because the element above carries `font-mono` purely so
            that `ch` means one terminal cell -- see its own note. This is an

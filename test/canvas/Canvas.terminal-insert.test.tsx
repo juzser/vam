@@ -34,6 +34,7 @@ import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
+import { setActiveStreamingTerminal } from '../../src/renderer/prefs/streaming-terminal.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
 
@@ -142,11 +143,32 @@ beforeEach(() => {
       send: vi.fn(async () => 'sent'),
     },
   };
+  // THIS FILE'S SUBJECT IS THE CLASSIC `[data-terminal-pane]` RENDERER'S OWN
+  // keyboard/insert-mode behaviour, and the bridge above carries no
+  // `terminalStream` member at all. Streaming defaults ON now
+  // (`prefs/streaming-terminal.ts`), so the explicit opt-out is what keeps
+  // `TerminalAutoTab` drawing the renderer this file actually tests --
+  // SEEDED INTO `localStorage`, not set on the live store directly:
+  // `Canvas.tsx`'s own `useState(() => readPrefs(storage))` initializer runs
+  // `activatePrefs` (and so `setActiveStreamingTerminal`) DURING `render()`,
+  // AFTER this `beforeEach` -- a direct `setActiveStreamingTerminal(false)`
+  // here would just be overwritten the moment `Canvas` reads its own real
+  // (real, empty) `localStorage` and gets the new default back.
+  // `streamingTerminalMigrated: true` so `readStreamingTerminal` reads this
+  // value literally rather than the one-time migration ratchet overriding it
+  // (`prefs.ts`'s own `streamingTerminalMigrated` header).
+  globalThis.window.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+  );
+  setActiveStreamingTerminal(false);
 });
 
 afterEach(() => {
   cleanup();
   (globalThis.window as unknown as { api?: unknown }).api = undefined;
+  globalThis.window.localStorage.removeItem('vam.prefs.v1');
+  setActiveStreamingTerminal(true);
 });
 
 describe('arriving at the Terminal view leaves the keyboard on the shell', () => {

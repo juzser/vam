@@ -229,6 +229,36 @@ describe('a refused open', () => {
     expect(el?.textContent).toMatch(expected);
   });
 
+  it('asks to fall back only for unsupported-tmux, never for the other three refusals', async () => {
+    for (const reason of ['bad-request', 'unavailable', 'unresolved-session'] as const) {
+      const onFallback = vi.fn();
+      withBridge({ open: async () => ({ ok: false, reason }) });
+      const { unmount } = render(
+        <TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(onFallback).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  it('asks its caller to fall back on unsupported-tmux, still drawing its own refusal text too', async () => {
+    const onFallback = vi.fn();
+    withBridge({ open: async () => ({ ok: false, reason: 'unsupported-tmux' }) });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onFallback).toHaveBeenCalledExactlyOnceWith('unsupported-tmux');
+    expect(q('[data-terminal-stream-refused]')?.getAttribute('data-terminal-stream-reason')).toBe(
+      'unsupported-tmux',
+    );
+  });
+
   it('never leaves a blank pane -- no container is drawn once refused', async () => {
     withBridge({ open: async () => ({ ok: false, reason: 'unavailable' }) });
     render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
@@ -798,6 +828,43 @@ describe('the onDown banner (review finding)', () => {
       expect(banner?.getAttribute('data-terminal-stream-down-kind')).toBe('gave-up');
     },
   );
+
+  it.each([['max-attempts'], ['session-gone']] as const)(
+    'asks its caller to fall back once gave-up fires for %s',
+    async (reason) => {
+      const down = withDownCapture();
+      const onFallback = vi.fn();
+      withBridge({ onDown: down.onDown });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => {
+        down.fire({ kind: 'gave-up', reason });
+      });
+
+      expect(onFallback).toHaveBeenCalledExactlyOnceWith(reason);
+    },
+  );
+
+  it('never asks to fall back on a mere reconnecting event', async () => {
+    const down = withDownCapture();
+    const onFallback = vi.fn();
+    withBridge({ onDown: down.onDown });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      down.fire({ kind: 'reconnecting', attempt: 1 });
+    });
+
+    expect(onFallback).not.toHaveBeenCalled();
+  });
 
   it('clears the banner once a fresh seed arrives', async () => {
     const down = withDownCapture();
