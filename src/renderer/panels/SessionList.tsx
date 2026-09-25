@@ -1073,6 +1073,15 @@ export type SessionListProps = {
    * `Canvas.tsx`. See the effect below for what that bought.
    */
   readonly revealRequest?: { readonly projectId: string } | null;
+  /**
+   * `revealRequest`'s own shape, for the `newWorktree` palette action
+   * (`Mod-Shift-w`, or `/New worktree…`): a fresh object each press, read by
+   * the effect below to open that project's "Worktrees" create form even
+   * with zero worktrees yet -- the same route the project menu's own "New
+   * worktree…" item opens locally, so the two never disagree about how a
+   * first worktree gets created.
+   */
+  readonly createWorktreeRequest?: { readonly projectId: string } | null;
   readonly onSettings: () => void;
   /**
    * Opens the same Settings overlay `onSettings` does, focused directly on
@@ -1328,6 +1337,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onPickIcon,
     onRenameProject,
     revealRequest,
+    createWorktreeRequest,
     collapsedProjects,
     onToggleCollapse,
     groups = [],
@@ -1749,6 +1759,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     setRevealed(projectId);
     foldRefs.current.get(projectId)?.focus();
   }, [entries, revealRequest]);
+
+  /**
+   * `newWorktree`'s own one-shot request -- `revealRequest`'s effect above,
+   * for a project's "Worktrees" create form instead of its fold. Also
+   * reveals the project's own section first, the same way pressing `p`
+   * would, so the operator can actually see the form `creatingWorktreeFor`
+   * is about to draw rather than it opening off-screen.
+   */
+  useEffect(() => {
+    if (createWorktreeRequest === null || createWorktreeRequest === undefined) {
+      return;
+    }
+    const { projectId } = createWorktreeRequest;
+    if (!entries.some((candidate) => candidate.project.id === projectId)) {
+      return;
+    }
+    setRevealed(projectId);
+    setCreatingWorktreeFor(projectId);
+  }, [entries, createWorktreeRequest]);
 
   /**
    * Bring the focused row into view when it is not.

@@ -2551,6 +2551,12 @@ function CanvasInner({
     setViewNote(null);
   }, [focusedSessionId]);
   const [revealRequest, setRevealRequest] = useState<{ readonly projectId: string } | null>(null);
+  /** The `newWorktree` action's own one-shot request -- `revealRequest`'s
+   *  own shape, a fresh object per press, read by `SessionList.tsx` to open
+   *  that project's "Worktrees" create form. */
+  const [createWorktreeRequest, setCreateWorktreeRequest] = useState<{
+    readonly projectId: string;
+  } | null>(null);
   /** True while a write is in flight for THAT session — Enter must not fire
    *  twice, and a send in one tab must not gate Enter in another. */
   const [writingBySession, setWritingBySession] = useState<Readonly<Record<string, boolean>>>({});
@@ -6044,6 +6050,17 @@ function CanvasInner({
           }
           setRevealRequest({ projectId: focusedEntry.project.id });
           return;
+        case 'newWorktree':
+          // `revealProject`'s own guard: a worktree is created OF a project,
+          // and there is no directory-picker fallback the way bare
+          // `newProject` has for "nothing focused" -- see the action's own
+          // doc comment in `chords.ts`.
+          if (focusedEntry === null) {
+            setStatus('pick a session first');
+            return;
+          }
+          setCreateWorktreeRequest({ projectId: focusedEntry.project.id });
+          return;
         case 'moveToGroup':
           if (focusedEntry === null) {
             setStatus('pick a session first');
@@ -6898,6 +6915,7 @@ function CanvasInner({
     onHideProject: setProjectRemoved,
     onRemoveProject: onSidebarRemoveProject,
     revealRequest: revealRequest,
+    createWorktreeRequest: createWorktreeRequest,
     onNewProject: onSidebarNewProject,
     newSessionDecline: newSessionDecline,
     // The phone's own getting-started screen (`GettingStarted.tsx`, drawn by
