@@ -51,8 +51,26 @@ export const MAX_STREAM_WRITE_BYTES = MAX_PASTE_TEXT * 4;
 const MIN_TMUX_MAJOR = 3;
 const MIN_TMUX_MINOR = 2;
 
-function parseTmuxVersion(text: string): { readonly major: number; readonly minor: number } | null {
-  const match = /tmux (\d+)\.(\d+)/.exec(text);
+/**
+ * `major.minor`, read from `tmux -V`'s own text -- exported for its own
+ * direct test (`tmux-version-parse.test.ts`), not only through the IPC
+ * handler below.
+ *
+ * NOT ANCHORED RIGHT AFTER `tmux `, on purpose: a plain release (`tmux
+ * 3.2\n`) has the pair immediately there, but a lettered point release
+ * (`tmux 3.2a`) still has to match with the trailing letter ignored, and
+ * two real, differently-shaped `-V` outputs put something else in front of
+ * the number entirely -- tmux's OWN development-branch naming (`tmux
+ * next-3.4`) and OpenBSD's long-standing habit of tagging its bundled tmux
+ * with the OS release instead of upstream's version (`tmux openbsd-7.4`).
+ * `\S*?` (lazy, no whitespace) skips exactly that kind of prefix without
+ * reaching past a real word boundary into a SECOND number a differently
+ * shaped `-V` might print later on the line.
+ */
+export function parseTmuxVersion(
+  text: string,
+): { readonly major: number; readonly minor: number } | null {
+  const match = /tmux\s+\S*?(\d+)\.(\d+)/.exec(text);
   if (match === null) return null;
   const major = Number(match[1]);
   const minor = Number(match[2]);
@@ -60,7 +78,7 @@ function parseTmuxVersion(text: string): { readonly major: number; readonly mino
   return { major, minor };
 }
 
-function meetsMinimumTmuxVersion(text: string): boolean {
+export function meetsMinimumTmuxVersion(text: string): boolean {
   const parsed = parseTmuxVersion(text);
   if (parsed === null) return false;
   return (
