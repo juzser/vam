@@ -416,7 +416,16 @@ export function TerminalStreamTab(props: {
         // different question, "how many codepoints form one glyph", not
         // "how many columns wide").
         term.loadAddon(new Unicode11Addon());
-        term.unicode.activeVersion = '11';
+        // GUARDED (a CI finding): a `Terminal` whose `.unicode` is missing
+        // entirely -- a test double built before this task's own real one
+        // gained the field, or any future shape this file has not seen --
+        // used to throw `Cannot set properties of undefined (setting
+        // 'activeVersion')` here and abort the WHOLE open, silently, one
+        // `.catch()` away (`connect().catch(...)` below). The width-table
+        // fix this line makes is real and worth keeping for every Terminal
+        // that HAS `.unicode` (the module note above); it was never worth
+        // crashing the entire stream over for one that does not.
+        if (term.unicode !== undefined) term.unicode.activeVersion = '11';
         term.open(container);
         // WHERE `I`/A CLICK LANDS. `focus-scope.ts`'s `focusInsertStop` finds
         // the first `data-insert-stop` inside the nearest `data-insert-scope`

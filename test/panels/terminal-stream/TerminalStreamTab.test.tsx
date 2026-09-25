@@ -34,6 +34,14 @@ let onDataHandler: ((text: string) => void) | undefined;
  * onto `lastTerm.writeCallbacks` instead, for the backpressure tests below
  * to fire on their own schedule, simulating xterm still being mid-parse. */
 let deferWriteCallbacks = false;
+/** `false` (the default): the constructed `FakeTerminal` gets a real
+ * `.unicode` object, matching a real xterm.js instance. `true`: `.unicode`
+ * is left `undefined`, standing in for an incomplete `Terminal` (a test
+ * double elsewhere in this repo, or a future xterm build shaped
+ * differently) -- CI caught `TerminalStreamTab.tsx` crashing `connect()`
+ * against exactly this shape (`DetailPanel.streaming-terminal.test.tsx`'s
+ * own `FakeTerminal` never had `.unicode` at all). */
+let omitUnicode = false;
 
 class FakeTerminal {
   cols = 80;
@@ -60,9 +68,11 @@ class FakeTerminal {
   // The real `Terminal.unicode` API surface this component touches:
   // `activeVersion` starts at xterm's own built-in default ('6') until a
   // provider addon (`Unicode11Addon`) is loaded and this is reassigned.
-  unicode: { activeVersion: string } = { activeVersion: '6' };
+  // `undefined` while `omitUnicode` is set -- see that flag's own comment.
+  unicode: { activeVersion: string } | undefined = { activeVersion: '6' };
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
+    if (omitUnicode) this.unicode = undefined;
     lastTerm = this;
   }
   loadAddon(addon: unknown) {
@@ -198,6 +208,7 @@ beforeEach(() => {
   lastTerm = undefined;
   onDataHandler = undefined;
   deferWriteCallbacks = false;
+  omitUnicode = false;
   FakeResizeObserver.instances = [];
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   setActiveTerminalScheme(DEFAULT_TERMINAL_SCHEME_PREF, 'dark');
@@ -340,7 +351,30 @@ describe('mounted with a bridge', () => {
       await Promise.resolve();
     });
     expect(loadedAddons.some((addon) => addon instanceof FakeUnicode11Addon)).toBe(true);
-    expect(lastTerm?.unicode.activeVersion).toBe('11');
+    expect(lastTerm?.unicode?.activeVersion).toBe('11');
+  });
+
+  // ── CI finding: DetailPanel.streaming-terminal.test.tsx's own FakeTerminal
+  // never had `.unicode` at all, and `connect()` crashed reaching for it
+  // (`TypeError: Cannot set properties of undefined (setting
+  // 'activeVersion')`), swallowed by that call site's own `.catch()` --
+  // that test was passing for the wrong reason, not proving this path ever
+  // actually completed. This is the direct regression test: a `Terminal`
+  // with no `.unicode` at all must not crash the open, and must not log an
+  // error either. ──────────────────────────────────────────────────────
+  it('does not crash (or log an error) opening a stream against a Terminal with no .unicode', async () => {
+    omitUnicode = true;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(q('[data-terminal-stream]')).not.toBeNull();
+    expect(q('[data-terminal-stream-mount]')?.childElementCount).toBeGreaterThan(0);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it('gives xterm a transparent ground at the composited opacity, matching the frame’s own translucent background -- xterm’s canvas used to paint an opaque one over it regardless of the pref', async () => {

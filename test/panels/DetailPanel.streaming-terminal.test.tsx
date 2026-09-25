@@ -30,11 +30,32 @@ class FakeTerminal {
   cols = 80;
   rows = 24;
   options: Record<string, unknown> = {};
+  // `TerminalStreamTab.tsx`'s own `connect()` reads AND writes this (loading
+  // `Unicode11Addon`, then `term.unicode.activeVersion = '11'`) -- a CI
+  // finding: without it, that assignment threw `Cannot set properties of
+  // undefined (setting 'activeVersion')`, swallowed by `connect()`'s own
+  // `.catch()`, so this file's own tests were passing without that whole
+  // code path ever completing. Fixing that alone then surfaced the IDENTICAL
+  // failure mode one line further down (`attachCustomKeyEventHandler is not
+  // a function`) -- this stub is now complete enough for `connect()` to run
+  // to the end without throwing, matching the level `TerminalStreamTab.
+  // test.tsx`'s own (fuller) `FakeTerminal` already keeps for the same
+  // reason.
+  unicode: { activeVersion: string } = { activeVersion: '6' };
+  // A REAL element, the same reason `TerminalStreamTab.test.tsx`'s own
+  // `FakeTerminal` uses one: the paste listener below calls
+  // `.addEventListener` on it directly.
+  textarea: HTMLTextAreaElement = document.createElement('textarea');
+  modes: { bracketedPasteMode: boolean } = { bracketedPasteMode: false };
   loadAddon() {}
   open() {}
   write() {}
   reset() {}
   onData() {}
+  attachCustomKeyEventHandler() {}
+  scrollPages() {}
+  scrollToTop() {}
+  scrollToBottom() {}
   dispose() {}
 }
 
