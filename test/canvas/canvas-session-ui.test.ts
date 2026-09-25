@@ -130,9 +130,7 @@ describe('useCanvasSessionUi', () => {
   it('setViewFor does not call savePrefs when the view already matches prefs.detailTab', () => {
     const saved: Prefs[] = [];
     const prefsOnPRs = setDetailTab(EMPTY_PREFS, 'PRs');
-    const { result } = renderHook(() =>
-      useCanvasSessionUi(prefsOnPRs, (next) => saved.push(next)),
-    );
+    const { result } = renderHook(() => useCanvasSessionUi(prefsOnPRs, (next) => saved.push(next)));
 
     act(() => {
       result.current.setViewFor('s1', 'PRs');
