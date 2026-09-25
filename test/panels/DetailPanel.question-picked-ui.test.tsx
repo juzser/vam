@@ -146,6 +146,14 @@ describe("Submit's own chord chip", () => {
     expect(chip?.textContent).toBe(chordSymbols('Enter', mac));
   });
 
+  it('draws the key before the word, as the operator asked', () => {
+    draw({ answer: answering({ kind: 'sent', answer: 'Crimson' }) });
+    fireEvent.click(options()[0] as HTMLElement);
+    const button = submit() as HTMLElement;
+    expect(button.firstElementChild?.hasAttribute('data-question-submit-key')).toBe(true);
+    expect(button.textContent).toBe(`${chordSymbols('Enter', mac)}Submit`);
+  });
+
   it('follows the Shift-Enter preference', () => {
     setActivePromptSubmitKey('shift-enter');
     draw({ answer: answering({ kind: 'sent', answer: 'Crimson' }) });

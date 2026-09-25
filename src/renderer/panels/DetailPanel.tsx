@@ -5214,7 +5214,6 @@ function QuestionCard({
               'Submitting…'
             ) : (
               <>
-                Submit
                 {/* THE CHORD THAT SENDS, drawn the way every other one on
                     this card is (`ChordGlyphs`, the Send-key option's own
                     flat rendering) and read off the SAME preference the
@@ -5232,6 +5231,7 @@ function QuestionCard({
                 >
                   <ChordGlyphs chord={submitKey === 'shift-enter' ? 'Shift-Enter' : 'Enter'} />
                 </span>
+                Submit
               </>
             )}
           </button>
