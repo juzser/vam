@@ -80,7 +80,7 @@ import type { SourceError } from '../../ipc/channels.js';
 import { whyNotARepository } from '../repo.js';
 import { vamSessionName } from '../tmux/argv.js';
 import { loginShellCommand } from '../tmux/shell.js';
-import { createVamSession, type TmuxRun } from '../tmux/spawn.js';
+import { createVamSession, type TmuxRun, type TmuxSession } from '../tmux/spawn.js';
 import type { LiveAgent } from './agents.js';
 import { projectIdOf } from './project-id.js';
 
@@ -111,10 +111,24 @@ export async function createSessionInProject(input: {
   provider?: string;
   /** The shell the pane runs; a parameter only so a test can fix it. */
   shell?: readonly string[];
+  /**
+   * The tmux sessions vam knows about, panes included -- consulted ONLY when
+   * no live agent answers `projectId` below. A project right after Start is
+   * all pane rows and no live agent yet (`create-session.ts`'s own header,
+   * Stage 2 of `docs/design/vam-owns-the-session.md`: the pane exists before
+   * anything has been typed into it), so the live-agent lookup alone answered
+   * `unknown-project` for a project vam's own Terminal tab was drawing that
+   * moment. OPTIONAL, and defaults to none consulted: every caller and every
+   * fixture in this suite that predates this parameter keeps the exact
+   * behaviour it always had -- a `projectId` no live agent answers for is
+   * refused, never guessed at from nothing.
+   */
+  panes?: readonly TmuxSession[];
 }): Promise<SourceError | null> {
   const { agents, projectId, title, run } = input;
   const match = agents.find((candidate) => projectIdOf(candidate.cwd) === projectId);
-  if (match === undefined) {
+  const cwd = match?.cwd ?? paneProjectDirectory(input.panes ?? [], projectId);
+  if (cwd === null) {
     return {
       kind: 'refused',
       code: 'unknown-project',
@@ -124,11 +138,12 @@ export async function createSessionInProject(input: {
   // NOT through `createSessionInDirectory`, and the difference is the
   // repository check that one applies. This path's cwd was not chosen in a
   // dialog: it is the directory a session is ALREADY running in, resolved by
-  // digest from the live agent list. Narrowing it to repositories would refuse
-  // a second session beside a first one vam is drawing at that very moment --
-  // a refusal about a directory the operator never picked.
+  // digest from the live agent list or a pane already tagged for it.
+  // Narrowing it to repositories would refuse a second session beside a first
+  // one vam is drawing at that very moment -- a refusal about a directory the
+  // operator never picked.
   return spawnSessionIn({
-    cwd: match.cwd,
+    cwd,
     title,
     run,
     name: input.name,
@@ -136,6 +151,33 @@ export async function createSessionInProject(input: {
     // and a Terminal view to be typed into from its first frame.
     command: input.shell ?? loginShellCommand(),
   });
+}
+
+/**
+ * The one directory every pane tagged for `projectId` agrees on, or `null` --
+ * for "no pane answers it" AND for "more than one answer disagrees", which is
+ * refused rather than guessed, the same rule the caller above already applies
+ * to a `projectId` no live agent names either.
+ *
+ * THE SAME PROJECT IDENTITY THE SIDEBAR GROUPS BY (`source.ts`'s own grouping
+ * of pane rows into projects): a pane's `@vam-project` tag first -- stamped
+ * once at creation and stable for its whole life -- and its live `cwd`
+ * re-hashed only when the tag itself is unset, which is what a bare `tmux
+ * new-session`, never handed to `createVamSession` at all, looks like.
+ *
+ * A tag that matches but carries no live `cwd` at all (an older tmux, or any
+ * fixture that predates the field) answers nothing here -- absence is not a
+ * directory to guess from, the same rule every other reader of an optional
+ * `TmuxSession` field in this tree follows.
+ */
+function paneProjectDirectory(panes: readonly TmuxSession[], projectId: string): string | null {
+  const cwds = new Set<string>();
+  for (const pane of panes) {
+    if (pane.cwd === undefined || pane.cwd === '') continue;
+    const id = pane.project !== '' ? pane.project : projectIdOf(pane.cwd);
+    if (id === projectId) cwds.add(pane.cwd);
+  }
+  return cwds.size === 1 ? (cwds.values().next().value as string) : null;
 }
 
 /**
