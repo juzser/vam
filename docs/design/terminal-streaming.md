@@ -1031,6 +1031,89 @@ dropped, the very next reconnect a real client performs restores a correct
 screen, exactly like a `%pause`-triggered reseed already does one layer
 down.
 
+### Heavy-output ceilings, calibrated from real CI + local data
+
+The measurements above (**"Heavy-output CPU"**, **"The 5MB flood,
+re-measured"**) were logged as informational only when this guard was first
+registered (`e2e/terminal-stream-resource-shots.mjs`'s own header names the
+reason: no calibration history yet, and an uncalibrated absolute ceiling is
+how a guard becomes the flaky one the next person disables). This section is
+that calibration, done after enough real runs existed to do it honestly.
+
+**Samples, CI** (`ubuntu-latest`, the `web-guards` job -- `gh run list
+--repo juzser/vam --workflow CI --limit 100`, then `gh run view <id> --log`,
+grepping this guard's own "heavy output ... stream path" and "renderer
+TaskDuration" lines):
+
+| run | CPU (5MB flood, stream path) | decoded bytes | CPU/MB | peak renderer heap |
+|---|---|---|---|---|
+| PR #495 (`36118555962`) | 1025.6ms | 7,500,025 | 136.75ms/MB | 23.19MB |
+| push main after #497 (`36121271588`) | 1006.6ms | 7,500,025 | 134.21ms/MB | 16.07MB |
+| "Ship the 0.2 tab shell" (`36121264340`) | 1003.8ms | 7,500,025 | 133.84ms/MB | 23.32MB |
+
+PR #496 (`36118785107`) and the earlier main push (`35969967616`,
+2026-09-24) both predate this guard's registration in the branch snapshot
+their own CI run actually checked out -- their `web-guards` logs have no
+`terminal-stream-resource-shots.mjs` section at all (confirmed by grepping
+the FULL `--log` output for both, not a narrower filter missing it), so
+they contribute no sample. The failed precursor of #495
+(`vam/stream-default`, `36111783558`) is the same story: it failed before
+this guard existed on that branch.
+
+**Samples, local** (this machine, `node e2e/terminal-stream-resource-
+shots.mjs`, run 5x serially, nothing else concurrent):
+
+| run | CPU/MB | peak renderer heap |
+|---|---|---|
+| 1 | 134.23ms/MB | 25.96MB |
+| 2 | 129.99ms/MB | 25.08MB |
+| 3 | 124.45ms/MB | 25.99MB |
+| 4 | 126.24ms/MB | 26.09MB |
+| 5 | 127.92ms/MB | 26.20MB |
+
+**The bounds**, both in `STREAM_HEAVY_CPU_MS_PER_MB_BOUND` and
+`FLOOD_PEAK_HEAP_MB_BOUND` (`terminal-stream-resource-shots.mjs`), normalised
+PER BYTE actually forwarded (never the nominal "5MB" flood constant, so a
+future change to the flood size does not, on its own, move either bound --
+the same reason the latency guards' own `MAX_BURST_WRITE_CALLS` counts
+deliveries rather than lines):
+
+| bound | value | headroom over worst CI sample | headroom over worst overall sample |
+|---|---|---|---|
+| main-process CPU per MB streamed | 700ms/MB | ~5.1x (136.75ms/MB) | ~5.1x (136.75ms/MB, CI is also the overall worst) |
+| peak renderer heap during the flood | 80MB | ~3.4x (23.32MB) | ~3.1x (26.20MB, local run 5) |
+
+Both clear the task's own "≥3x the worst CI sample" floor with room to
+spare -- loose enough to absorb a slower or noisier runner without becoming
+the guard the next person disables, tight enough to still catch an
+order-of-magnitude regression. `retry-once-alone` (the same pattern
+`terminal-stream-latency-shots.mjs`'s own `withP95RetryOnce` uses for its
+p95 bounds, generalised past wall-clock numbers) covers both: a single noisy
+pass re-measures once, alone, before either check fails for real. Renderer
+`TaskDuration` and time-to-quiet stay informational -- the data above does
+not yet support a stable bound for either the way it does for CPU/MB and
+peak heap.
+
+**Falsified.** `VAM_E2E_ARTIFICIAL_CHUNK_CPU_MS` (default off, never set by a
+real run) burns the given number of milliseconds of real CPU on every
+`%output` chunk the main-process measurement receives -- the same shape
+`terminal-stream-latency-shots.mjs`'s own `VAM_E2E_ARTIFICIAL_PAINT_DELAY_MS`
+lever takes, moved from an injected paint delay to an injected CPU cost
+because what this bound measures is CPU, not wall clock. Set to 40ms per
+chunk, the CPU/MB check reads 613,088.6ms/MB on its first pass and
+736,839.2ms/MB on the retry (both far past the 700ms/MB bound), and the
+guard exits 1:
+
+```
+heavy output (yes | head -c 5MB), stream path: 11573.9ms CPU, 11648ms wall, 291 %output chunks, 18878 decoded bytes, 613088.6ms CPU/MB -- ...
+  retry: heavy-output stream CPU/MB missed its bound on the first pass -- re-measuring once, alone, before failing for real
+heavy output (yes | head -c 5MB), stream path: 13580.7ms CPU, 13648ms wall, 341 %output chunks, 18431 decoded bytes, 736839.2ms CPU/MB -- ...
+FAIL  heavy output, stream path: main-process CPU stays under 700ms/MB streamed -- 736839.2ms/MB (13580.7ms / 0.02MB)
+terminal-stream-resource-shots.mjs: 1 check(s) FAILED: heavy output, stream path: main-process CPU stays under 700ms/MB streamed
+```
+
+Removing the env var (the normal case) returns the guard to a clean exit 0.
+
 **One control client per visible terminal, and zero after leaving the
 view** -- the other half of "be careful about performance", proven against a
 real tmux rather than read off the source: `test/main/terminal/stream/
@@ -1187,10 +1270,12 @@ so plainly.
   (`terminal-stream-frame-shots.mjs`, `terminal-stream-glitch-shots.mjs`)
   needed no change.
 - **A new resource-measurement script**, `e2e/terminal-stream-resource-
-  shots.mjs` (informational, run by hand, not wired into `run-web-guards.
-  mjs`'s automated list -- the same convention `terminal-stream-latency-
-  shots.mjs` already follows) -- everything in the performance section above
-  is reproducible by running it.
+  shots.mjs` -- everything in the performance section above is reproducible
+  by running it. Registered in `run-web-guards.mjs`'s `GUARDS` array; most of
+  its checks stay informational (see "Heavy-output ceilings, calibrated from
+  real CI + local data" above for the two that do not: main-process CPU per
+  MB streamed and peak renderer heap during the flood, both calibrated
+  ceilings, retry-once-alone).
 
 ### Settings label
 
