@@ -819,11 +819,16 @@ export type Session = {
    * sessions never ask through the tool. Neither is a reason to draw an empty
    * box where a question would go.
    *
-   * A question older than the transcript tail vam reads (`TAIL_BYTES` in
-   * `sources/claude-code/source.ts`) has scrolled out of the window and is
-   * absent here -- which is why a pane may show none while a session is in
-   * fact blocked on one, and why nothing in this app treats an empty list as
-   * "this session is not waiting on you".
+   * A STILL-OPEN question survives past the transcript tail vam reads
+   * (`TAIL_WINDOW_BYTES` in `sources/claude-code/tail.ts`): a burst of
+   * ordinary output after the question used to push it out of the window and
+   * silently close the card in the Response view while the session was still
+   * waiting, and `sources/claude-code/question-index.ts` now keeps the newest
+   * OPEN one in view independently of where the tail window stopped. That
+   * memory is itself bounded (`QUESTION_SCAN_CAP_BYTES`), so a question older
+   * than even that -- already answered, or asked further back than the cold-
+   * start scan reaches -- can still be absent here. Nothing in this app may
+   * treat an empty list as "this session is not waiting on you".
    */
   readonly questions?: readonly AgentQuestion[];
   /**

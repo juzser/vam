@@ -35,8 +35,16 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? 
 const obj = (v: unknown): Line | null =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Line) : null;
 
-/** The content parts of a `message`, or an empty list when there are none. */
-function parts(line: Line): Line[] {
+/**
+ * The content parts of a `message`, or an empty list when there are none.
+ *
+ * EXPORTED FOR `question-index.ts`, the bounded scan that keeps an OPEN
+ * question in view past the byte window this file's own caller
+ * (`transcript.ts`) is handed -- see that module's header for why a second
+ * reading of the same shape, rather than a shared pass, is what the offsets
+ * it tracks require.
+ */
+export function contentParts(line: Line): Line[] {
   const content = obj(line['message'])?.['content'];
   if (!Array.isArray(content)) return [];
   return content.map(obj).filter((part): part is Line => part !== null);
@@ -84,6 +92,21 @@ function readQuestion(value: unknown, id: string): AgentQuestion | null {
   };
 }
 
+/**
+ * One tool_use's `questions` array, read into `AgentQuestion`s -- `id` is the
+ * call's own id plus each question's position, so two questions asked in one
+ * call are distinct while sharing that call's openness. EXPORTED for
+ * `question-index.ts`, which asks it the same question `collectQuestions`
+ * below does, off a `tool_use` line found outside the tail window.
+ */
+export function questionsFromToolUse(part: Line, toolUseId: string): readonly AgentQuestion[] {
+  const list = obj(part['input'])?.['questions'];
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((value, index) => readQuestion(value, `${toolUseId}:${index}`))
+    .filter((question): question is AgentQuestion => question !== null);
+}
+
 /** The text of a `tool_result`, whichever of its two shapes it arrived in. */
 function resultText(part: Line): string | null {
   const content = part['content'];
@@ -107,18 +130,13 @@ export function collectQuestions(lines: readonly Line[]): readonly AgentQuestion
   const answers = new Map<string, string | null>();
 
   for (const line of lines) {
-    for (const part of parts(line)) {
+    for (const part of contentParts(line)) {
       if (part['type'] === 'tool_use' && part['name'] === 'AskUserQuestion') {
         const toolUseId = str(part['id']);
         if (toolUseId === null) continue;
-        const list = obj(part['input'])?.['questions'];
-        if (!Array.isArray(list)) continue;
-        list.forEach((value, index) => {
-          // The id is the tool_use's own plus the position, so two questions
-          // asked in one call are distinct while sharing that call's openness.
-          const question = readQuestion(value, `${toolUseId}:${index}`);
-          if (question !== null) asked.push({ toolUseId, question });
-        });
+        for (const question of questionsFromToolUse(part, toolUseId)) {
+          asked.push({ toolUseId, question });
+        }
       } else if (part['type'] === 'tool_result') {
         const toolUseId = str(part['tool_use_id']);
         // Present-but-unreadable still CLOSES the question: the answer was
