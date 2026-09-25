@@ -258,3 +258,59 @@ describe('the start screen card -- what the pane is actually asking', () => {
     expect(q('[data-start-timeout-hint]')).not.toBeNull();
   });
 });
+
+/**
+ * THE COORDINATOR'S OWN BLOCKER: `runningProvider` confirmed running while
+ * `entry.session.status` still reads `unstarted`/`terminal` must draw the
+ * ready state, never fall back to the start screen -- see `runningProvider`'s
+ * own header on `DetailPanelProps` for the bug this closes.
+ */
+describe('the ready state -- confirmed running, ahead of the agents-list poll', () => {
+  it('draws the ready state instead of the start screen, and withdraws Start entirely', () => {
+    draw({ onStartSession: () => {}, runningProvider: 'claude-code' });
+    expect(q('[data-start-session]')).toBeNull();
+    expect(q('[data-start-session-button]')).toBeNull();
+    expect(q('[data-start-providers]')).toBeNull();
+    expect(q('[data-pane-ready]')).not.toBeNull();
+    expect(q('[data-pane-ready]')?.textContent).toContain('Claude Code is ready');
+  });
+
+  it('names codex too, from the confirmed provider rather than any picker default', () => {
+    draw({ onStartSession: () => {}, defaultProvider: 'claude-code', runningProvider: 'codex' });
+    expect(q('[data-pane-ready]')?.textContent).toContain('Codex is ready');
+  });
+
+  it('still draws the ready state for a `null` provider -- confirmed running, command unrecognised', () => {
+    draw({ onStartSession: () => {}, runningProvider: null });
+    expect(q('[data-pane-ready]')).not.toBeNull();
+    expect(q('[data-pane-ready]')?.textContent).toContain('already has an agent running');
+    expect(q('[data-start-session-button]')).toBeNull();
+  });
+
+  it('draws the ready state on a `terminal` row too, ahead of `TerminalOnlyStart`', () => {
+    const TERMINAL_ENTRY: SessionEntry = {
+      project: PROJECT,
+      session: { ...EMPTY, status: 'terminal', resumeCommand: 'claude --resume aaaa' },
+    };
+    draw({
+      entry: TERMINAL_ENTRY,
+      onStartSession: () => {},
+      onResumeInPane: () => {},
+      runningProvider: 'claude-code',
+    });
+    expect(q('[data-terminal-only-start]')).toBeNull();
+    expect(q('[data-pane-ready]')).not.toBeNull();
+    expect(q('[data-resume-in-pane]')).toBeNull();
+  });
+
+  it('enables the composer once the pane is confirmed running', () => {
+    draw({ onStartSession: () => {}, runningProvider: 'claude-code', records: true });
+    expect(q('textarea[aria-label="prompt to session"]')).not.toBeNull();
+  });
+
+  it('leaves the ordinary start screen untouched while `runningProvider` is absent', () => {
+    draw({ onStartSession: () => {} });
+    expect(q('[data-pane-ready]')).toBeNull();
+    expect(q('[data-start-session]')).not.toBeNull();
+  });
+});

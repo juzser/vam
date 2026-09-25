@@ -316,6 +316,16 @@ export const START_SCREEN_POLL_MS = 1_500;
 export const START_SCREEN_UNKNOWN_STALL_MS = 9_000;
 
 /**
+ * HOW OFTEN A VISIBLE `unstarted`/`terminal` ROW WITH NO ACTIVE WAIT IS
+ * CHECKED FOR A PROVIDER ALREADY RUNNING IN IT -- the reload case
+ * (`providerRunningByKey`'s own header). Slower than `START_SCREEN_POLL_MS`
+ * on purpose: that cadence is for a pane the operator is actively watching a
+ * spinner on; this is a quiet background check across however many idle rows
+ * are on screen, and nothing here draws anything until it finds a `ready`.
+ */
+export const PROVIDER_WATCH_POLL_MS = 3_000;
+
+/**
  * A status message shortened for the bar, never for the log.
  *
  * `describeFailure` renders failures as `code: message` and the codes are
@@ -2614,6 +2624,69 @@ function CanvasInner({
     Readonly<Record<string, StartingPaneWait>>
   >({});
   /**
+   * CONFIRMED RUNNING, KEYED THE SAME WAY `startingPaneByKey` IS -- the
+   * coordinator's own blocker on the first cut of this feature: `ready`
+   * used to CLEAR the wait outright, which dropped the Response view back
+   * to the ordinary "Nothing is running in this pane yet" screen with an
+   * idle Start button, while `allEntries` still had not caught up -- still
+   * the operator's second report ("even when the terminal has finished
+   * starting the session, the Response view is still stuck") in a new
+   * shape, and worse: a second press there types the provider's command
+   * into a pane that already has it running.
+   *
+   * A KEY'S PRESENCE IS THE FACT, never its value alone -- the map's value
+   * is the provider `readStartScreen` identified from the pane's own
+   * foreground command (`identifyRunningProvider`, main), or `null` when
+   * something is confirmed running but the command named neither provider.
+   * `null` here is not "not confirmed" (`in` is what answers that); folding
+   * the two into one falsy check would un-confirm a pane vam has already
+   * proven is not a shell.
+   *
+   * SURVIVES UNTIL THE ROW ITSELF SAYS SO, the same rule `startingPaneByKey`
+   * follows a few lines down: nothing here clears a key on a timer or on a
+   * write resolving, only the "ends when the row itself says so" effect
+   * below, once `allEntries` shows this pane's row is no longer `unstarted`/
+   * `terminal` -- which is what lets the Response view hold the ready state
+   * with no flash back to the start screen while it waits for the slower
+   * agents-list poll to agree.
+   */
+  const [providerRunningByKey, setProviderRunningByKey] = useState<
+    Readonly<Record<string, ProviderId | null>>
+  >({});
+  const clearProviderRunning = useCallback((key: string) => {
+    setProviderRunningByKey((current) => {
+      if (!(key in current)) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }, []);
+  /** `providerRunningByKey`'s own read for a row's key -- `undefined` when
+   *  not confirmed, distinct from a confirmed-but-unidentified `null`, which
+   *  `providerRunningByKey[key] ?? null` alone cannot tell apart. */
+  const providerRunningFor = useCallback(
+    (key: string): ProviderId | null | undefined =>
+      key in providerRunningByKey ? providerRunningByKey[key] : undefined,
+    [providerRunningByKey],
+  );
+  // Cleared by the SAME fact that ends `startingPaneByKey` waits -- see that
+  // effect's own header a few lines down for why membership in `allEntries`,
+  // not a timer, is what a background-confirmed fact like this one must wait
+  // on too.
+  useEffect(() => {
+    const keys = Object.keys(providerRunningByKey);
+    if (keys.length === 0) return;
+    for (const key of keys) {
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      const stillPending =
+        row !== undefined &&
+        (row.session.status === 'unstarted' || row.session.status === 'terminal');
+      if (!stillPending) clearProviderRunning(key);
+    }
+  }, [allEntries, providerRunningByKey, clearProviderRunning]);
+  /**
    * D12: THE RACE `startingPaneByKey` COULD NOT CLOSE ON ITS OWN.
    *
    * Two presses within a few milliseconds -- two rapid clicks, or Enter's own
@@ -2751,13 +2824,21 @@ function CanvasInner({
     let cancelled = false;
     const poll = () => {
       for (const key of keys) {
+        // ALREADY CONFIRMED -- nothing left for THIS poll to learn. The wait
+        // itself is still cleared, but only by the "ends when the row itself
+        // says so" effect above, once `allEntries` agrees; see
+        // `providerRunningByKey`'s own header for why `ready` no longer
+        // clears it here directly.
+        if (providerRunningFor(key) !== undefined) continue;
         const wait = startingPaneByKey[key];
         if (wait === undefined) continue;
         getStartScreen(wait.projectId, wait.rowId)
           .then((view) => {
             if (cancelled || view.kind !== 'ok') return;
             if (view.screen === 'ready') {
-              clearStartingPane(key);
+              setProviderRunningByKey((current) =>
+                key in current ? current : { ...current, [key]: view.provider },
+              );
               return;
             }
             // Narrowed here, in the OUTER closure, and read back through this
@@ -2783,7 +2864,60 @@ function CanvasInner({
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [startingPaneByKey, clearStartingPane, armUnknownStall]);
+  }, [startingPaneByKey, providerRunningFor, armUnknownStall]);
+  /**
+   * D-RELOAD: THE SAME "SOMETHING IS ALREADY RUNNING" FACT, FOR A PANE THE
+   * OPERATOR NEVER PRESSED START ON THIS SESSION.
+   *
+   * `startingPaneByKey` above only ever holds a wait for a press this
+   * renderer itself made (`beginStartingPane`, `startSessionIn`/
+   * `resumeInPane`) -- so it starts EMPTY on every fresh mount, a reload
+   * included, no matter what the pane already has running: the operator may
+   * have typed `claude` by hand in the Terminal view (`start-in-pane.ts`'s
+   * own header says this is an ordinary thing to happen), or simply reloaded
+   * the window while a session they started minutes ago was already up. The
+   * coordinator's own words: "The start screen must not reappear for a pane
+   * whose program is a provider, even after a reload." So this polls every
+   * VISIBLE row still reading `unstarted`/`terminal` that neither state above
+   * already accounts for, and asks the identical question `readStartScreen`
+   * answers for an active wait -- the only difference is there is no spinner
+   * to freeze and no blocking-screen card to draw while it waits: a pane
+   * this renderer never pressed Start on stays silent until it is either
+   * confirmed running or the operator acts on it themselves.
+   */
+  useEffect(() => {
+    const getStartScreen = window.api?.terminal?.startScreen;
+    if (getStartScreen === undefined) return;
+    const candidates = allEntries.filter((entry) => {
+      const key = entry.session.pane ?? entry.session.id;
+      return (
+        (entry.session.status === 'unstarted' || entry.session.status === 'terminal') &&
+        startingPaneByKey[key] === undefined &&
+        providerRunningFor(key) === undefined
+      );
+    });
+    if (candidates.length === 0) return;
+    let cancelled = false;
+    const poll = () => {
+      for (const entry of candidates) {
+        const key = entry.session.pane ?? entry.session.id;
+        getStartScreen(entry.project.id, entry.session.id)
+          .then((view) => {
+            if (cancelled || view.kind !== 'ok' || view.screen !== 'ready') return;
+            setProviderRunningByKey((current) =>
+              key in current ? current : { ...current, [key]: view.provider },
+            );
+          })
+          .catch(() => {});
+      }
+    };
+    poll();
+    const id = window.setInterval(poll, PROVIDER_WATCH_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [allEntries, startingPaneByKey, providerRunningFor]);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -7204,6 +7338,13 @@ function CanvasInner({
           entry === null
             ? null
             : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
+        // CONFIRMED RUNNING, EVEN THOUGH THE ROW STILL READS `unstarted`/
+        // `terminal` -- `providerRunningByKey`'s own header. `undefined`
+        // (the ordinary case) draws the start screen exactly as before;
+        // present (even `null`) is what tells `DetailPanel` to draw the
+        // ready state instead and to stop offering Start.
+        runningProvider:
+          entry === null ? undefined : providerRunningFor(entry.session.pane ?? entry.session.id),
         // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
         // when THIS pane holds nothing, vam has no session to show ANYWHERE
         // (`entries`, the same filtered set the sidebar and the tab strip
@@ -7328,6 +7469,7 @@ function CanvasInner({
       // and listing them would take this callback's identity with it.
       sendFailureBySession,
       startingPaneByKey,
+      providerRunningFor,
       viewBySession,
       viewSeed,
       source,

@@ -311,8 +311,23 @@ describe('Start session — the wait for the agent to register', () => {
       Reflect.deleteProperty(window, 'api');
     });
 
-    it('clears the wait the instant the pane reports ready, with the row still unstarted', async () => {
-      const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'ready' as const }));
+    /**
+     * THE COORDINATOR'S OWN BLOCKER, on the first cut of this feature: this
+     * test used to assert `ready` cleared the wait back to the ORDINARY
+     * picker -- an idle, re-enabled Start button, with the row still
+     * `unstarted` -- which is the operator's second report all over again
+     * ("even when the terminal has finished starting the session, the
+     * Response view is still stuck") and a standing invitation to type the
+     * provider's command into a pane that already has it running. `ready`
+     * now confirms the pane is running an agent and the Response view shows
+     * that instead, never re-offering Start.
+     */
+    it('shows the ready state once the pane reports ready, never re-offering Start', async () => {
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'claude-code' as const,
+      }));
       (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
       const { source, release } = gatedSource();
       render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
@@ -324,13 +339,69 @@ describe('Start session — the wait for the agent to register', () => {
       });
       // The poll fires on mount, before any interval tick -- one flush is
       // enough, and NOTHING here ever rerenders with the `LIVE` model: the
-      // row is STILL `unstarted`, so the start screen itself stays up --
-      // only the WAIT it was frozen by is gone.
+      // row is STILL `unstarted`, so this is `providerRunningByKey`'s own
+      // proof, independent of `allEntries` ever agreeing.
       await act(async () => {});
       expect(startScreen).toHaveBeenCalledWith('p1', UNSTARTED.id);
-      expect(startButton()?.disabled).toBe(false);
-      expect(providerPicker()?.hasAttribute('disabled')).toBe(false);
-      expect(startButton()?.textContent).not.toContain('Starting Claude Code');
+      expect(document.querySelector('[data-pane-ready]')?.textContent).toContain(
+        'Claude Code is ready',
+      );
+      expect(startButton()).toBeNull();
+      expect(providerPicker()).toBeNull();
+      expect(document.querySelector('[data-start-session]')).toBeNull();
+    });
+
+    /**
+     * D-RELOAD: NO WAIT EVER BEGAN -- a fresh mount, exactly what a page
+     * reload gives Canvas, with the pane already running a provider from
+     * before the reload (or typed by hand). `startingPaneByKey` starts empty
+     * on every mount, so this is the OTHER poll (`PROVIDER_WATCH_POLL_MS`'s
+     * own effect) proving the ready state does not depend on ever having
+     * pressed Start in this render tree at all.
+     */
+    it('shows the ready state on a fresh mount with no Start ever pressed — the reload case', async () => {
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'codex' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {});
+      expect(startScreen).toHaveBeenCalledWith('p1', UNSTARTED.id);
+      expect(document.querySelector('[data-pane-ready]')?.textContent).toContain('Codex is ready');
+      expect(startButton()).toBeNull();
+    });
+
+    it('sends a first message from the ready state through the normal composer path', async () => {
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen: 'ready' as const,
+        provider: 'claude-code' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, recorded } = sourceWith(async () => {});
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {});
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull();
+      const box = document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="prompt to session"]',
+      );
+      expect(box, 'the composer must be enabled once the pane is confirmed ready').not.toBeNull();
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', bubbles: true }));
+      });
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')
+          ?.set as (this: HTMLElement, v: string) => void;
+        setter.call(box as HTMLTextAreaElement, 'hello there');
+        box?.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => {
+        box?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      expect(recorded).toEqual([[UNSTARTED.id, 'hello there']]);
     });
 
     it('shows the trust card once the pane reports trust, and does not clear the wait', async () => {

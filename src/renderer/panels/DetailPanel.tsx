@@ -1069,6 +1069,27 @@ export type DetailPanelProps = {
    */
   readonly startingPane?: StartingPaneWait | null;
   /**
+   * CONFIRMED RUNNING, even while `entry.session.status` still reads
+   * `unstarted`/`terminal` -- `Canvas.tsx`'s `providerRunningByKey`, read off
+   * the pane's own foreground command (`readStartScreen`'s `provider`,
+   * `identifyRunningProvider` in main) once `detectStartScreen` reports
+   * `ready`. `undefined` (absent) is the ordinary case and draws the start
+   * screen exactly as before this existed; PRESENT -- even `null`, for a
+   * confirmed pane whose command named neither provider -- draws the ready
+   * state instead (`PaneReady`) and withdraws the Start/Resume controls, so
+   * a pane already running an agent is never offered a second one.
+   *
+   * THE BLOCKER THIS CLOSES: the first cut of the start-screen work cleared
+   * `startingPane` outright on `ready`, which dropped straight back to the
+   * ordinary picker -- "Nothing is running in this pane yet" with an idle
+   * Start button -- for however long `allEntries` took to agree, and invited
+   * exactly the double-start `start-in-pane.ts`'s own `pane-occupied` refusal
+   * exists to catch. This prop is the second, faster, independent proof of
+   * "something is running" the operator asked for, the same role
+   * `startingPane.screen` plays for a blocking dialog.
+   */
+  readonly runningProvider?: ProviderId | null;
+  /**
    * SWITCH THIS PANE TO ITS TERMINAL TAB -- the escape hatch
    * `StartTimeoutHint` offers once `startingPane.timedOut` is true. Built by
    * the caller from `onTabChange`/`pickTab` (`DetailPanel`'s own, further
@@ -3087,6 +3108,42 @@ function StartTimeoutHint({
         </>
       )}
     </p>
+  );
+}
+
+/**
+ * THE READY STATE -- a pane `runningProvider` has confirmed is running an
+ * agent, while `entry.session.status` still reads `unstarted`/`terminal`
+ * because the slower agents-list poll has not caught up yet.
+ *
+ * REPLACES THE START SCREEN OUTRIGHT, drawn wherever `StartSession`/
+ * `TerminalOnlyStart` would otherwise go (see the render site below) -- not
+ * a variant of either: there is no picker and no Start/Resume button to
+ * freeze or offer, because there is nothing left to start. The composer is
+ * enabled for this pane instead (`composerHidden`'s own header), which is
+ * the whole of what "ready" means here: send the first message, the normal
+ * way, through the same path the transcript view's own composer already
+ * uses once the row itself finishes catching up.
+ *
+ * THE LABEL NAMES THE PROVIDER WHEN IT IS KNOWN -- `readStartScreen`'s own
+ * read of the pane's foreground command, never the picker's last selection:
+ * the operator may have typed the OTHER provider by hand since this pane was
+ * last drawn, and this screen is reporting what is actually running, not
+ * what vam expected to find. `null` (confirmed running, command unrecognised)
+ * gets the honest generic sentence rather than a guessed provider name.
+ */
+function PaneReady({ provider }: { readonly provider: ProviderId | null }) {
+  return (
+    <div
+      data-pane-ready
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
+    >
+      <p className="text-control text-ink">
+        {provider === null
+          ? 'This pane already has an agent running — send your first message.'
+          : `${resolveProvider(provider).label} is ready — send your first message.`}
+      </p>
+    </div>
   );
 }
 
@@ -6151,6 +6208,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     onStartSession,
     onResumeInPane,
     startingPane = null,
+    runningProvider,
     gettingStarted,
     paneFocused = true,
   } = props;
@@ -7839,15 +7897,19 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     // run as a shell command, and a prompt box promises an answer that no
     // agent is there to give. The start screen (`StartSession` below) is the
     // whole Response view for this status; the Terminal view is the other
-    // way in.
-    entry.session.status === 'unstarted' ||
+    // way in. UNLESS `runningProvider` says otherwise -- see its own header
+    // on `DetailPanelProps`: a pane already proven to be running an agent
+    // has exactly the opposite problem, someone TO prompt and no box to do
+    // it with, which is the bug this condition now avoids reintroducing.
+    (entry.session.status === 'unstarted' && runningProvider === undefined) ||
     // A `terminal` ROW HAS NO AGENT EITHER -- the whole of what tells it
     // apart from `unstarted` is that vam knows WHICH conversation last held
     // this pane, not that one is running now. Text typed here would land on
     // the shell prompt exactly as it would for `unstarted`, so the getting-
     // started screen (`TerminalOnlyStart` below) takes the same composer-free
-    // treatment.
-    entry.session.status === 'terminal' ||
+    // treatment -- again unless `runningProvider` has already confirmed a
+    // program is running there now.
+    (entry.session.status === 'terminal' && runningProvider === undefined) ||
     (openQuestion && chattingAbout !== setId);
   /**
    * Is the corner overlay on screen?
@@ -8684,7 +8746,17 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         // see its own comment for why. This slot contributes nothing so the
         // Response-column branches below it never run for a tab that is not
         // Response.
-        null : entry !== null && entry.session.status === 'unstarted' ? (
+        null : entry !== null &&
+          (entry.session.status === 'unstarted' || entry.session.status === 'terminal') &&
+          runningProvider !== undefined ? (
+          // CONFIRMED RUNNING, AHEAD OF THE AGENTS-LIST POLL -- see
+          // `runningProvider`'s own header on `DetailPanelProps`. Takes
+          // priority over BOTH the `unstarted` and `terminal` branches below,
+          // which is the point: a pane vam has already proven is running an
+          // agent must never fall back to offering Start again, on either
+          // status.
+          <PaneReady provider={runningProvider} />
+        ) : entry !== null && entry.session.status === 'unstarted' ? (
           <StartSession
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
