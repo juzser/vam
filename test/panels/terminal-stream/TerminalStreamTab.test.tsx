@@ -28,6 +28,20 @@ const disposeCalls: number[] = [];
 const loadedAddons: unknown[] = [];
 let lastTerm: FakeTerminal | undefined;
 let onDataHandler: ((text: string) => void) | undefined;
+/** `false` (the default): `FakeTerminal#write`'s own callback fires
+ * synchronously, standing in for xterm parsing a small write instantly --
+ * every EXISTING test's own small strings. `true`: the callback is queued
+ * onto `lastTerm.writeCallbacks` instead, for the backpressure tests below
+ * to fire on their own schedule, simulating xterm still being mid-parse. */
+let deferWriteCallbacks = false;
+/** `false` (the default): the constructed `FakeTerminal` gets a real
+ * `.unicode` object, matching a real xterm.js instance. `true`: `.unicode`
+ * is left `undefined`, standing in for an incomplete `Terminal` (a test
+ * double elsewhere in this repo, or a future xterm build shaped
+ * differently) -- CI caught `TerminalStreamTab.tsx` crashing `connect()`
+ * against exactly this shape (`DetailPanel.streaming-terminal.test.tsx`'s
+ * own `FakeTerminal` never had `.unicode` at all). */
+let omitUnicode = false;
 
 class FakeTerminal {
   cols = 80;
@@ -41,6 +55,10 @@ class FakeTerminal {
   scrollPages = vi.fn();
   scrollToTop = vi.fn();
   scrollToBottom = vi.fn();
+  /** Callbacks `write()` deferred rather than firing synchronously -- only
+   * populated while `deferWriteCallbacks` is `true` (see its own comment).
+   * FIFO, matching real xterm's own in-order parse. */
+  writeCallbacks: Array<() => void> = [];
   customKeyEventHandler: ((event: KeyboardEvent) => boolean) | undefined;
   // The one field of the real `Terminal.modes` getter the paste handler
   // reads -- a plain, test-settable property standing in for xterm's own
@@ -50,9 +68,11 @@ class FakeTerminal {
   // The real `Terminal.unicode` API surface this component touches:
   // `activeVersion` starts at xterm's own built-in default ('6') until a
   // provider addon (`Unicode11Addon`) is loaded and this is reassigned.
-  unicode: { activeVersion: string } = { activeVersion: '6' };
+  // `undefined` while `omitUnicode` is set -- see that flag's own comment.
+  unicode: { activeVersion: string } | undefined = { activeVersion: '6' };
   constructor(options: Record<string, unknown>) {
     this.options = { ...options };
+    if (omitUnicode) this.unicode = undefined;
     lastTerm = this;
   }
   loadAddon(addon: unknown) {
@@ -61,8 +81,11 @@ class FakeTerminal {
   open(container: HTMLElement) {
     container.appendChild(this.textarea);
   }
-  write(text: string) {
+  write(text: string, callback?: () => void) {
     writeCalls.push(text);
+    if (callback === undefined) return;
+    if (deferWriteCallbacks) this.writeCallbacks.push(callback);
+    else callback();
   }
   reset() {}
   onData(handler: (text: string) => void) {
@@ -96,9 +119,8 @@ vi.mock('@xterm/xterm/css/xterm.css', () => ({}));
 
 // Imported AFTER the mocks above are registered (vitest hoists `vi.mock`
 // calls, so this ordering in source is fine either way, but kept explicit).
-const { TerminalStreamTab } = await import(
-  '../../../src/renderer/panels/terminal-stream/TerminalStreamTab.js'
-);
+const { TerminalStreamTab, TERMINAL_STREAM_HIGH_WATER_MARK, TERMINAL_STREAM_LOW_WATER_MARK } =
+  await import('../../../src/renderer/panels/terminal-stream/TerminalStreamTab.js');
 
 class FakeResizeObserver {
   static instances: FakeResizeObserver[] = [];
@@ -185,6 +207,8 @@ beforeEach(() => {
   loadedAddons.length = 0;
   lastTerm = undefined;
   onDataHandler = undefined;
+  deferWriteCallbacks = false;
+  omitUnicode = false;
   FakeResizeObserver.instances = [];
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
   setActiveTerminalScheme(DEFAULT_TERMINAL_SCHEME_PREF, 'dark');
@@ -227,6 +251,36 @@ describe('a refused open', () => {
     expect(el?.getAttribute('data-terminal-stream-reason')).toBe(reason);
     expect(el?.textContent ?? '').not.toBe('');
     expect(el?.textContent).toMatch(expected);
+  });
+
+  it('asks to fall back only for unsupported-tmux, never for the other three refusals', async () => {
+    for (const reason of ['bad-request', 'unavailable', 'unresolved-session'] as const) {
+      const onFallback = vi.fn();
+      withBridge({ open: async () => ({ ok: false, reason }) });
+      const { unmount } = render(
+        <TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />,
+      );
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(onFallback).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+
+  it('asks its caller to fall back on unsupported-tmux, still drawing its own refusal text too', async () => {
+    const onFallback = vi.fn();
+    withBridge({ open: async () => ({ ok: false, reason: 'unsupported-tmux' }) });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(onFallback).toHaveBeenCalledExactlyOnceWith('unsupported-tmux');
+    expect(q('[data-terminal-stream-refused]')?.getAttribute('data-terminal-stream-reason')).toBe(
+      'unsupported-tmux',
+    );
   });
 
   it('never leaves a blank pane -- no container is drawn once refused', async () => {
@@ -297,7 +351,30 @@ describe('mounted with a bridge', () => {
       await Promise.resolve();
     });
     expect(loadedAddons.some((addon) => addon instanceof FakeUnicode11Addon)).toBe(true);
-    expect(lastTerm?.unicode.activeVersion).toBe('11');
+    expect(lastTerm?.unicode?.activeVersion).toBe('11');
+  });
+
+  // ── CI finding: DetailPanel.streaming-terminal.test.tsx's own FakeTerminal
+  // never had `.unicode` at all, and `connect()` crashed reaching for it
+  // (`TypeError: Cannot set properties of undefined (setting
+  // 'activeVersion')`), swallowed by that call site's own `.catch()` --
+  // that test was passing for the wrong reason, not proving this path ever
+  // actually completed. This is the direct regression test: a `Terminal`
+  // with no `.unicode` at all must not crash the open, and must not log an
+  // error either. ──────────────────────────────────────────────────────
+  it('does not crash (or log an error) opening a stream against a Terminal with no .unicode', async () => {
+    omitUnicode = true;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    withBridge({});
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(q('[data-terminal-stream]')).not.toBeNull();
+    expect(q('[data-terminal-stream-mount]')?.childElementCount).toBeGreaterThan(0);
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it('gives xterm a transparent ground at the composited opacity, matching the frame’s own translucent background -- xterm’s canvas used to paint an opaque one over it regardless of the pref', async () => {
@@ -658,6 +735,121 @@ describe('frame parity with TerminalTab.tsx (docs/design/terminal-streaming.md)'
   });
 });
 
+describe('renderer-side backpressure (coordinator follow-up: bytes handed to xterm vs. parsed)', () => {
+  it('never trips the high-water mark for an ordinary small chunk', async () => {
+    let capturedListener: ((chunk: string) => void) | undefined;
+    withBridge({
+      onData: (_streamId, listener) => {
+        capturedListener = listener;
+        return () => {};
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    writeCalls.length = 0;
+    act(() => {
+      capturedListener?.('an ordinary line of output\r\n');
+    });
+    expect(writeCalls).toEqual(['an ordinary line of output\r\n']);
+  });
+
+  it('stops handing further chunks to xterm once pending (unparsed) bytes cross the high-water mark', async () => {
+    deferWriteCallbacks = true;
+    let capturedListener: ((chunk: string) => void) | undefined;
+    withBridge({
+      onData: (_streamId, listener) => {
+        capturedListener = listener;
+        return () => {};
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(capturedListener).toBeDefined();
+
+    // xterm never gets to PARSE this (its callback is deferred, per
+    // `deferWriteCallbacks`) -- crosses the high-water mark on its own.
+    const big = 'x'.repeat(TERMINAL_STREAM_HIGH_WATER_MARK + 1);
+    act(() => {
+      capturedListener?.(big);
+    });
+    expect(writeCalls).toContain(big);
+
+    writeCalls.length = 0;
+    act(() => {
+      capturedListener?.('dropped chunk');
+    });
+    expect(writeCalls).toEqual([]);
+  });
+
+  it('keeps dropping while pending bytes are still above the low-water mark, even after some drain', async () => {
+    deferWriteCallbacks = true;
+    let capturedListener: ((chunk: string) => void) | undefined;
+    let openCount = 0;
+    const { close } = withBridge({
+      open: async () => {
+        openCount += 1;
+        return {
+          ok: true,
+          streamId: `stream-${openCount}`,
+          seed: `seed-${openCount}`,
+          name: `vam-stub-${openCount}`,
+        };
+      },
+      onData: (_streamId, listener) => {
+        capturedListener = listener;
+        return () => {};
+      },
+    });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(openCount).toBe(1);
+
+    // Two chunks, summing to just over the high-water mark -- so draining
+    // only the FIRST one's callback leaves pending bytes still above the
+    // low-water mark (a quarter of the high one), proving the hysteresis
+    // gap is real rather than one shared threshold.
+    const chunk1 = 'a'.repeat(TERMINAL_STREAM_HIGH_WATER_MARK / 2);
+    const chunk2 = 'b'.repeat(TERMINAL_STREAM_HIGH_WATER_MARK / 2 + 1);
+    // The premise this whole test rests on: chunk2 ALONE must still be
+    // above the low-water mark, or draining only chunk1 would already
+    // trigger the reconnect and the "still dropping" assertion below would
+    // hold by accident rather than by the hysteresis gap actually working.
+    expect(chunk2.length).toBeGreaterThan(TERMINAL_STREAM_LOW_WATER_MARK);
+    act(() => {
+      capturedListener?.(chunk1);
+      capturedListener?.(chunk2);
+    });
+
+    await act(async () => {
+      const first = lastTerm?.writeCallbacks.shift();
+      first?.();
+      await Promise.resolve();
+    });
+    // Still above TERMINAL_STREAM_LOW_WATER_MARK -- no reconnect yet.
+    expect(openCount).toBe(1);
+    expect(close).not.toHaveBeenCalled();
+
+    await act(async () => {
+      for (const cb of lastTerm?.writeCallbacks.splice(0) ?? []) cb();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Now drained under the low-water mark -- the reconnect (drop and
+    // reseed) fires.
+    expect(close).toHaveBeenCalledWith('stream-1');
+    expect(openCount).toBe(2);
+  });
+});
+
 describe('visibility-driven connect/disconnect', () => {
   it('closes the stream when the window is hidden and opens a fresh one, reseeded, when it returns', async () => {
     const visibility = vi.spyOn(document, 'visibilityState', 'get');
@@ -798,6 +990,43 @@ describe('the onDown banner (review finding)', () => {
       expect(banner?.getAttribute('data-terminal-stream-down-kind')).toBe('gave-up');
     },
   );
+
+  it.each([['max-attempts'], ['session-gone']] as const)(
+    'asks its caller to fall back once gave-up fires for %s',
+    async (reason) => {
+      const down = withDownCapture();
+      const onFallback = vi.fn();
+      withBridge({ onDown: down.onDown });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      act(() => {
+        down.fire({ kind: 'gave-up', reason });
+      });
+
+      expect(onFallback).toHaveBeenCalledExactlyOnceWith(reason);
+    },
+  );
+
+  it('never asks to fall back on a mere reconnecting event', async () => {
+    const down = withDownCapture();
+    const onFallback = vi.fn();
+    withBridge({ onDown: down.onDown });
+    render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} onFallback={onFallback} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      down.fire({ kind: 'reconnecting', attempt: 1 });
+    });
+
+    expect(onFallback).not.toHaveBeenCalled();
+  });
 
   it('clears the banner once a fresh seed arrives', async () => {
     const down = withDownCapture();

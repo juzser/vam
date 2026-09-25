@@ -94,6 +94,24 @@ export const MAX_RECONNECT_ATTEMPTS = 5;
  */
 export const MAX_RECONNECT_BACKOFF_MS = RECONNECT_BACKOFF_MS * 8;
 
+/**
+ * `refresh-client -f pause-after=<N>` seconds -- without this flag tmux
+ * NEVER sends `%pause` at all (MEASURED against a real tmux 3.7b on a
+ * private socket, a 20ms-per-chunk slow consumer draining a 5MB flood: zero
+ * `%pause` in 8s of continuous `%extended-output`), so an unbounded backlog
+ * can pile up in this file's own read buffer, the IPC bridge to the
+ * renderer, and xterm's write queue while a long flood is in flight (a
+ * verbose build log, `cat` of a large file). `1` -- the low end of the
+ * operator's suggested 1-2s range -- bounds that backlog to roughly one
+ * second's worth of output before tmux itself stops pumping the pty to this
+ * client, while staying well above the round-trip cost of an ordinary
+ * IPC hop, so a ordinary burst (a fast `ls`, a shell prompt redraw) never
+ * spuriously pauses. This client is never the one CHOOSING to fall behind --
+ * see `#continueAfterPause` -- so pause-after here is a backstop against a
+ * stalled drain, not a throttle this file ever wants to hold open.
+ */
+export const PAUSE_AFTER_SECONDS = 1;
+
 /** What `onDown` hands its listeners -- a transient drop this file is still
  * trying to recover from, or a permanent give-up and why. */
 export type StreamDownEvent =
@@ -164,6 +182,13 @@ export class StreamClient {
    * dropped rather than forwarded; the reseed after `%continue` is what
    * catches listeners back up. */
   #paused = false;
+  /** `true` from the moment `#continueAfterPause` sends its own
+   * `refresh-client -A "<pane>:continue"` until that command's reply lands
+   * -- guards against writing a second one if `%pause` (for whatever real
+   * tmux reason) arrives again before the first round-trip finishes, and
+   * against the defensive bare-`%continue`/`%unpause` branch below double-
+   * reseeding while that round-trip is already in flight. */
+  #resuming = false;
 
   constructor(options: StreamClientOptions) {
     this.#binary = options.binary ?? 'tmux';
@@ -193,6 +218,7 @@ export class StreamClient {
     }
     const child = this.#spawn();
     this.#wire(child);
+    await this.#requestPauseAfter();
     const panes = await this.#send(`list-panes -t ${paneTarget(this.#target)} -F "#{pane_id}"`);
     if (!panes.ok) {
       throw new Error(`could not list panes for ${this.#target}: ${panes.body.trim()}`);
@@ -275,6 +301,7 @@ export class StreamClient {
     this.#decoder = new StringDecoder('utf8');
     this.#seeded = false;
     this.#paused = false;
+    this.#resuming = false;
     child.stdout.on('data', (chunk) => {
       if (this.#child === child) this.#onData(this.#decoder.write(chunk as Buffer));
     });
@@ -295,6 +322,17 @@ export class StreamClient {
     const result = await this.#send(`capture-pane -p -e -J -t ${paneTarget(this.#target)}`);
     if (result.ok) this.#seeded = true;
     return result;
+  }
+
+  /** Best-effort: a real tmux answers `%error` for an unsupported flag
+   * rather than an unsupported request typing an unknown option, and this
+   * file already refuses to offer streaming below the minimum tmux version
+   * `stream-ipc.ts` gates on -- but even if the reply were ever a failure,
+   * this must never block `connect()`/`#reconnect()` on it: the stream still
+   * works perfectly well without `%pause` ever firing, exactly as it did
+   * before this fix existed. The result is intentionally discarded. */
+  async #requestPauseAfter(): Promise<void> {
+    await this.#send(`refresh-client -f pause-after=${PAUSE_AFTER_SECONDS}`);
   }
 
   #write(line: string): void {
@@ -361,24 +399,68 @@ export class StreamClient {
     const pause = /^%pause (%\d+)/.exec(line);
     if (pause !== null && pause[1] === this.#paneId) {
       this.#paused = true;
+      // tmux never resumes a paused pane on its own -- MEASURED against a
+      // real tmux 3.7b on a private socket: a client that set `pause-after`
+      // and then fell behind stayed paused for as long as it was observed,
+      // with no auto-`%continue`, until an explicit `refresh-client -A
+      // "<pane>:continue"` was sent. This client is never intentionally the
+      // slow party (`PAUSE_AFTER_SECONDS`'s own note), so it answers every
+      // pause immediately rather than waiting on anything else to decide to.
+      // `#resuming` guards against writing a second one if `%pause` somehow
+      // repeats before the first round-trip finishes.
+      const paneId = pause[1];
+      if (!this.#resuming) {
+        this.#resuming = true;
+        void this.#continueAfterPause(paneId);
+      }
       return;
     }
+    // Defensive: kept in case a future tmux (or a shape this task's own
+    // measurement did not cover) ever emits a bare `%continue`/`%unpause`
+    // line outside a block. `#resuming` guards against this racing the
+    // primary path below, which drives the SAME reseed off the `-A`
+    // command's own reply instead (see `#continueAfterPause`) -- measured:
+    // the `%continue` that command produces is nested INSIDE its own
+    // %begin/%end reply block, not emitted as a line like this one.
     const resume = /^%(?:continue|unpause) (%\d+)/.exec(line);
-    if (resume !== null && resume[1] === this.#paneId) {
-      this.#paused = false;
-      // RESEED rather than trust nothing was missed while paused -- `%output`
-      // that arrived during the pause was dropped above (see the module
-      // header), so a fresh `capture-pane` is the only way to know the
-      // screen is caught up. A failed reseed here (the session vanished
-      // between the pause and the resume) is left for the NEXT drop to
-      // discover through the ordinary reconnect path -- rare enough
-      // (`%continue` implies the connection was never lost) not to earn its
-      // own give-up branch.
-      void this.#reseed().then((result) => {
-        if (!result.ok) return;
-        for (const listener of this.#seedListeners) listener(result.body);
-      });
+    if (resume !== null && resume[1] === this.#paneId && !this.#resuming) {
+      this.#finishResume();
     }
+  }
+
+  /** The explicit resume tmux requires (see `#handlePauseOrContinue`'s own
+   * note) -- `pane:state` MUST be quoted: MEASURED against a real tmux
+   * 3.7b, `refresh-client -A %0:continue` (unquoted) is a parse error in
+   * tmux's own command grammar, while `refresh-client -A "%0:continue"`
+   * succeeds. Sent through `#send()`, not the fire-and-forget `#write()`
+   * `write()` (keystrokes) uses, so its reply is tracked in `#blockQueue`
+   * like every other command this file waits on, rather than risking that
+   * reply being mistaken for whatever ELSE this file might be waiting on. */
+  async #continueAfterPause(paneId: string): Promise<void> {
+    await this.#send(`refresh-client -A "${paneId}:continue"`);
+    this.#resuming = false;
+    this.#finishResume();
+  }
+
+  /** Reseed after a pause resume, however it was learned about -- shared by
+   * the primary (`#continueAfterPause`'s own reply landing) and defensive
+   * (a bare `%continue`/`%unpause` line) paths, guarded so a pause already
+   * resolved is never reseeded twice. */
+  #finishResume(): void {
+    if (!this.#paused) return;
+    this.#paused = false;
+    // RESEED rather than trust nothing was missed while paused -- `%output`
+    // that arrived during the pause was dropped above (see the module
+    // header), so a fresh `capture-pane` is the only way to know the
+    // screen is caught up. A failed reseed here (the session vanished
+    // between the pause and the resume) is left for the NEXT drop to
+    // discover through the ordinary reconnect path -- rare enough
+    // (`%continue` implies the connection was never lost) not to earn its
+    // own give-up branch.
+    void this.#reseed().then((result) => {
+      if (!result.ok) return;
+      for (const listener of this.#seedListeners) listener(result.body);
+    });
   }
 
   #handleDown(): void {
@@ -454,6 +536,7 @@ export class StreamClient {
   async #reconnect(): Promise<void> {
     const child = this.#spawn();
     this.#wire(child);
+    await this.#requestPauseAfter();
     const result = await this.#reseed();
     if (this.#disposed || this.#givenUp) return;
     if (!result.ok) {

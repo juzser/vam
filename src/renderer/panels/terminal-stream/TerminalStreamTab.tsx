@@ -87,6 +87,48 @@ const NOT_AVAILABLE_TEXT = 'the terminal is only available in the vam desktop ap
  *  scroll. */
 const SCROLL_CHORD_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End']);
 
+/**
+ * RENDERER-SIDE BACKPRESSURE (the coordinator's own follow-up to the
+ * pause-after fix in `main/terminal/stream/client.ts`). This pane used to
+ * hand every `onData` chunk straight to `term.write()` with nothing ever
+ * tracking how much of it xterm had actually finished PARSING -- `write()`
+ * queues internally and returns immediately, so a long flood (a verbose
+ * build log, `cat` of a large file) could grow that internal queue
+ * unboundedly with nothing here ever noticing, REGARDLESS of whether
+ * `pause-after` also bounds what MAIN's own drain of tmux falls behind by
+ * -- that fix is one layer up and does not know or care how fast xterm
+ * itself can keep up.
+ *
+ * `term.write(data, callback)`'s callback fires once xterm has actually
+ * PARSED that call's data (xterm's own documented contract) -- `pendingBytes`
+ * below tracks exactly that: bytes handed to `term.write` but not yet
+ * parsed, never merely "received over IPC".
+ *
+ * `HIGH_WATER_MARK` -- the low end of the operator's own suggested 1-2MB
+ * range. `LOW_WATER_MARK` -- a quarter of it, a wide hysteresis gap so
+ * draining right at the edge does not flap between dropping and forwarding
+ * on every single chunk.
+ *
+ * DROP AND RESEED, not "ask main to pause the stream" (the coordinator's own
+ * other option): once dropping starts, no new chunk is EVER handed to
+ * `term.write()`, so `pendingBytes` can only fall from there -- renderer
+ * memory is bounded with no new main<->renderer pause/resume IPC round trip
+ * at all. Once it drains back under the low mark the screen is PROVABLY
+ * stale (real data was silently dropped in between), so "resume" means
+ * reconnecting -- the exact `teardownStream()`-then-`connect()` pair this
+ * file already runs for a hidden pane becoming visible again, reused rather
+ * than inventing a second, narrower resync primitive.
+ *
+ * `chunk.length` (UTF-16 code units), NOT a real UTF-8 byte count, is what
+ * this file adds to `pendingBytes` -- measuring the exact byte length would
+ * cost a `TextEncoder().encode()` pass over every chunk, real CPU work
+ * paid on exactly the hot path this exists to protect, for a threshold
+ * whose whole point is an order-of-magnitude guard rail, not an exact
+ * count.
+ */
+export const TERMINAL_STREAM_HIGH_WATER_MARK = 2 * 1024 * 1024;
+export const TERMINAL_STREAM_LOW_WATER_MARK = TERMINAL_STREAM_HIGH_WATER_MARK / 4;
+
 /** The four ways `terminalStreamOpen` refuses (`main/terminal/stream-ipc.ts`'s
  *  own `StreamOpenRefusal`), named here rather than imported: that module
  *  reaches `node:crypto`, and this file is typechecked under
@@ -120,6 +162,27 @@ const REFUSAL_TEXT: Record<RefusalReason, string> = {
 type StreamDownEvent =
   | { readonly kind: 'reconnecting'; readonly attempt: number }
   | { readonly kind: 'gave-up'; readonly reason: 'max-attempts' | 'session-gone' };
+
+/**
+ * WHY THIS PANE ASKS TO BE REPLACED, rather than falling back itself
+ * (`docs/design/terminal-streaming.md`'s "Flipping the default" section,
+ * task 3). Two of the four ways `terminalStreamOpen` can refuse, and one of
+ * the two ways `StreamClient` can give up, are not about THIS request --
+ * they are about THIS operator's tmux, which the polling `TerminalTab.tsx`
+ * does not need control-mode's `%output`/`%pause` notifications to run at
+ * all. `unsupported-tmux` names the version gate directly; `'max-attempts'`
+ * is what `StreamClient` reports after its own bounded reconnect retries are
+ * exhausted (`StreamDownEvent`, `main/terminal/stream/client.ts`); `'session-
+ * gone'` is included too, deliberately, even though a vanished session will
+ * not read any differently under the fallback -- the fallback renderer says
+ * so in its OWN honest words rather than this one staying frozen on whatever
+ * it last painted forever. This component decides NONE of this on its own:
+ * it has no way to know whether it is the setting's default choice or an
+ * operator's own opt-in, and does not carry `TerminalTab.tsx`'s own props
+ * (`read`/`resize`/`send`) to render the fallback itself even if it wanted
+ * to. `TerminalAutoTab.tsx` is the one place both facts are in scope.
+ */
+export type StreamFallbackReason = 'unsupported-tmux' | 'max-attempts' | 'session-gone';
 
 /** One honest sentence for the banner drawn over the pane while `down` is
  *  set -- `reconnecting…` for a retry still in flight, `disconnected —
@@ -165,8 +228,15 @@ export function TerminalStreamTab(props: {
   readonly projectId: string | null;
   readonly rowId?: string | undefined;
   readonly branch: string | null;
+  /** Fired at most once per mount, the moment this pane learns its tmux
+   *  cannot stream at all or has given up reconnecting -- see the type's own
+   *  header. This pane keeps drawing its OWN refusal/down text regardless
+   *  (unchanged, so it is never blank even for the one render before a
+   *  caller acts on this), rather than going silent and trusting a caller
+   *  to replace it in time. */
+  readonly onFallback?: (reason: StreamFallbackReason) => void;
 }) {
-  const { projectId, rowId, branch } = props;
+  const { projectId, rowId, branch, onFallback } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -243,6 +313,10 @@ export function TerminalStreamTab(props: {
       if (cancelled) return;
       if (!result.ok) {
         setRefusal(result.reason);
+        // Only THIS refusal is about the operator's tmux rather than this
+        // request (see `StreamFallbackReason`'s own header) -- the other
+        // three stay a refused pane, not a silent swap to the poller.
+        if (result.reason === 'unsupported-tmux') onFallback?.('unsupported-tmux');
         return;
       }
       const { streamId } = result;
@@ -342,7 +416,16 @@ export function TerminalStreamTab(props: {
         // different question, "how many codepoints form one glyph", not
         // "how many columns wide").
         term.loadAddon(new Unicode11Addon());
-        term.unicode.activeVersion = '11';
+        // GUARDED (a CI finding): a `Terminal` whose `.unicode` is missing
+        // entirely -- a test double built before this task's own real one
+        // gained the field, or any future shape this file has not seen --
+        // used to throw `Cannot set properties of undefined (setting
+        // 'activeVersion')` here and abort the WHOLE open, silently, one
+        // `.catch()` away (`connect().catch(...)` below). The width-table
+        // fix this line makes is real and worth keeping for every Terminal
+        // that HAS `.unicode` (the module note above); it was never worth
+        // crashing the entire stream over for one that does not.
+        if (term.unicode !== undefined) term.unicode.activeVersion = '11';
         term.open(container);
         // WHERE `I`/A CLICK LANDS. `focus-scope.ts`'s `focusInsertStop` finds
         // the first `data-insert-stop` inside the nearest `data-insert-scope`
@@ -471,7 +554,28 @@ export function TerminalStreamTab(props: {
       window.api?.terminal?.resize(openProjectId, term.cols, term.rows, rowId);
       term.write(asXtermSeed(result.seed));
 
-      unsubscribeData = openBridge.onData(streamId, (chunk) => term?.write(chunk));
+      // See `TERMINAL_STREAM_HIGH_WATER_MARK`'s own header for the full
+      // reasoning. `pendingBytes`/`dropping` are fresh for every `connect()`
+      // call, deliberately: a backpressure-triggered reconnect (below) calls
+      // `connect()` again, which re-declares both here, in the SAME motion
+      // that already resets everything else this function sets up.
+      let pendingBytes = 0;
+      let dropping = false;
+      unsubscribeData = openBridge.onData(streamId, (chunk) => {
+        if (dropping) return;
+        pendingBytes += chunk.length;
+        term?.write(chunk, () => {
+          pendingBytes -= chunk.length;
+          if (!dropping || pendingBytes > TERMINAL_STREAM_LOW_WATER_MARK) return;
+          dropping = false;
+          pendingBytes = 0;
+          teardownStream();
+          void connect().catch((error: unknown) => {
+            console.error('vam: terminal stream backpressure reconnect failed:', error);
+          });
+        });
+        if (pendingBytes > TERMINAL_STREAM_HIGH_WATER_MARK) dropping = true;
+      });
       unsubscribeSeed = openBridge.onSeed(streamId, (seed) => {
         // A FRESH SEED IS THE ALL-CLEAR (review finding, paired with
         // `onDown` below): `StreamClient` only ever pushes one after a
@@ -505,6 +609,11 @@ export function TerminalStreamTab(props: {
       });
       unsubscribeDown = openBridge.onDown(streamId, (event) => {
         setDown(event);
+        // `StreamClient` only ever reaches `gave-up` after its OWN bounded
+        // reconnect retries are exhausted (`RECONNECT_BACKOFF_MS` growing to
+        // `MAX_RECONNECT_ATTEMPTS`, `main/terminal/stream/client.ts`) -- a
+        // still-in-flight `reconnecting` event is not this.
+        if (event.kind === 'gave-up') onFallback?.(event.reason);
       });
     }
 
@@ -535,7 +644,7 @@ export function TerminalStreamTab(props: {
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [bridge, projectId, rowId]);
+  }, [bridge, projectId, rowId, onFallback]);
 
   // The font size, pushed live -- cell metrics change with it, so the fit
   // addon has to re-measure and tell the running program the new size.

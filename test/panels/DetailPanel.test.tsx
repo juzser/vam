@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { useState } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // The real parser, not a hand-picked id -- see "a selected historical turn
 // survives a poll" below for why this crosses from a renderer test into
 // `main/`: `test/canvas/Canvas.new-project.test.tsx` already does the same
@@ -57,6 +57,7 @@ import {
   isAtBottom,
 } from '../../src/renderer/panels/stick-to-bottom.js';
 import { OUT_FONT_SIZE_VAR } from '../../src/renderer/prefs/prefs.js';
+import { setActiveStreamingTerminal } from '../../src/renderer/prefs/streaming-terminal.js';
 import {
   DEFAULT_PROMPT_SUBMIT_KEY,
   setActivePromptSubmitKey,
@@ -4173,8 +4174,21 @@ describe('the Terminal tab costs nothing until it is opened', () => {
     });
   };
 
+  // THIS DESCRIBE BLOCK'S OWN `withBridge` wires `window.api.terminal` alone
+  // -- no `window.api.terminalStream`, which the real Electron preload
+  // always pairs with it (`preload/api.ts`). Streaming defaults ON now
+  // (`prefs/streaming-terminal.ts`), and what these tests are actually about
+  // -- the CLASSIC read/send wiring, `poll` mode, keys reaching
+  // `data-terminal-pane` -- is `TerminalTab`'s own surface, not
+  // `TerminalStreamTab`'s; the explicit opt-out is what puts `TerminalAutoTab`
+  // on the renderer these tests were written against.
+  beforeEach(() => {
+    setActiveStreamingTerminal(false);
+  });
+
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+    setActiveStreamingTerminal(true);
   });
 
   it('issues no read at all while another tab is showing', async () => {
@@ -4273,6 +4287,17 @@ describe('the Terminal tab costs nothing until it is opened', () => {
  * no visible effect, which is worse than no flag.
  */
 describe('the Terminal tab is offered only by a source that has one', () => {
+  // `data-terminal` is `TerminalTab`'s own marker -- see the earlier describe
+  // block's note on why the explicit opt-out is what these tests need now
+  // that streaming defaults ON.
+  beforeEach(() => {
+    setActiveStreamingTerminal(false);
+  });
+
+  afterEach(() => {
+    setActiveStreamingTerminal(true);
+  });
+
   it('drops the tab entirely for a source that says it has no terminal', () => {
     draw({ terminal: false });
     expect(q('[data-view="terminal"]')).toBeNull();
@@ -4321,8 +4346,16 @@ describe('the composer is hidden while the Terminal tab is open', () => {
     });
   };
 
+  // `data-terminal` is `TerminalTab`'s own marker -- see the first Terminal
+  // describe block's note on why the explicit opt-out is what these tests
+  // need now that streaming defaults ON.
+  beforeEach(() => {
+    setActiveStreamingTerminal(false);
+  });
+
   afterEach(() => {
     Reflect.deleteProperty(window, 'api');
+    setActiveStreamingTerminal(true);
   });
 
   const openTerminal = () =>

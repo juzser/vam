@@ -394,14 +394,19 @@ const GUARDS = [
   // run rather than adding a second CI job for one guard.
   // `terminal-stream-latency-shots.mjs`'s own header holds the calibration,
   // the bounds and their headroom, and the falsification.
-  //
-  // THE ONE-LINE HOOK for the streaming resource guard (CPU/memory/client
-  // count, `e2e/terminal-stream-resource-shots.mjs`, `vam/stream-default`):
-  // once that branch lands, add `'terminal-stream-resource-shots',` as the
-  // next entry, right here -- it measures the same shipped `StreamClient`
-  // the same way (a private tmux socket, its own throwaway harness), so it
-  // belongs in this same "runs last, alone" slot, not a new CI job.
   'terminal-stream-latency-shots',
+  // The streaming resource guard (CPU/memory, `e2e/terminal-stream-
+  // resource-shots.mjs`, `vam/stream-default`): measures the same shipped
+  // `StreamClient` the same way (a private tmux socket, its own throwaway
+  // harness), so it belongs in this same "runs last, alone" slot, not a new
+  // CI job. Only its STRUCTURAL/RATIO properties are hard-asserted (idle
+  // stream cheaper than idle poll; the scrollback cap bounds growth; a
+  // reseed from ground truth always produces a correct screen; `%pause`
+  // recovers correctly) -- each machine-independent, unlike the absolute
+  // CPU/heap/time-to-quiet numbers the script also logs, which stay
+  // informational (no multi-run calibration exists for those yet, unlike
+  // the latency guard's own 11-run p95 bounds above).
+  'terminal-stream-resource-shots',
 ];
 
 const port = Number(process.env.VAM_E2E_PORT ?? 5520);

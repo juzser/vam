@@ -259,6 +259,20 @@ const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
   await page.addInitScript(stubApiScript, { row: ROW, pane: PANE, hangRecordPrompt: false });
+  // STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this block is
+  // about the CLASSIC `[data-terminal-pane]` renderer specifically, and
+  // `stubApiScript` carries no `terminalStream` member at all, so the
+  // explicit opt-out is what keeps it testing the renderer it names.
+  // `streamingTerminalMigrated: true` too -- omitting it hits `prefs.ts`'s
+  // own one-time migration ratchet, which treats an UN-migrated payload's
+  // `streamingTerminal` as unwritten and forces it back to the new default
+  // regardless of what this sets.
+  await page.addInitScript(() => {
+    globalThis.localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+    );
+  });
   await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');
   await page.locator(`[data-session-row="${ROW}"]`).first().click();

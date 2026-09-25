@@ -1,6 +1,8 @@
 /**
- * THE STREAMING TERMINAL SETTING, AS PAINT: the "Streaming terminal (beta)"
- * row in Settings -> Behaviour, in both app themes.
+ * THE STREAMING TERMINAL SETTING, AS PAINT: the "streaming terminal" row in
+ * Settings -> Behaviour, in both app themes -- ON by default now
+ * (`docs/design/terminal-streaming.md`'s "Flipping the default"; this row's
+ * own label dropped the "(beta)" suffix in the same change).
  *
  * ── WHY THIS IS THE MEANINGFUL SCREENSHOT FOR THIS FEATURE ────────────────
  * Requirement 4 ("Phone: unchanged -- remote server does not serve the
@@ -10,9 +12,10 @@
  * never mounts a working pane here regardless of the setting's value
  * (`?demo=1` stubs a read-only fixture, not a live stream). The one thing
  * this bundle CAN show honestly is the setting itself -- the row an
- * operator flips to opt in, drawn for real, in both themes -- which is what
- * this file captures. A real xterm-rendered pane needs the Electron app
- * harness instead (see the task report for whether that was also captured).
+ * operator can now turn OFF, drawn for real, in both themes -- which is
+ * what this file captures. A real xterm-rendered pane needs the Electron
+ * app harness instead (see the task report for whether that was also
+ * captured).
  *
  * Same `openSettings` shape `settings-panels-shots.mjs` uses (demo fixture,
  * click the settings gear, wait for the nav), and the same sun-click theme
@@ -55,7 +58,10 @@ check('starts in dark theme', isLightDark === false, `documentElement light clas
 
 const switchLocator = page.locator('[data-switch="streaming-terminal"]');
 check('the streaming-terminal switch is drawn in Behaviour', (await switchLocator.count()) === 1, `count ${await switchLocator.count()}`);
-check('it starts off (default OFF, per the design doc)', (await switchLocator.getAttribute('aria-checked')) === 'false');
+check(
+  'it starts on (default ON now, per the design doc)',
+  (await switchLocator.getAttribute('aria-checked')) === 'true',
+);
 
 await page.locator('[data-settings-panel="behaviour"]').scrollIntoViewIfNeeded().catch(() => {});
 await switchLocator.scrollIntoViewIfNeeded();

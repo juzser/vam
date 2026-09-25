@@ -12,9 +12,16 @@
  * file's shape for a boolean instead of a size.
  */
 
-/** Off: the beta is opt-in until it has seen real use against a real
- *  workload. */
-export const DEFAULT_STREAMING_TERMINAL = false;
+/** On: streaming is the shipping Terminal tab now, measured against the
+ *  capture-pane poll it replaces as the default (`docs/design/terminal-
+ *  streaming.md`'s "Flipping the default" section) and backed by an
+ *  automatic fallback (`stream-ipc.ts`'s tmux-version gate,
+ *  `TerminalAutoTab.tsx`'s reconnect give-up handling) for the tmux that
+ *  cannot run it. `prefs.ts`'s `parsePrefs` carries a ONE-TIME migration for
+ *  an operator whose stored payload predates this flip -- see
+ *  `streamingTerminalMigrated` there for why a bare default here is not
+ *  enough on its own to move an existing installation. */
+export const DEFAULT_STREAMING_TERMINAL = true;
 
 /** Total, like `readConciseOutput`: only a literal `true` is on, so a
  *  hand-edited or unreadable payload never silently switches the Terminal
