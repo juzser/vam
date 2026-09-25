@@ -149,6 +149,28 @@ describe('a Codex row', () => {
     expect(project?.sessions[0]?.createdAt).toBeNull();
   });
 
+  it('marks isAgentWorktree true when the injected check says so, fed the row’s own cwd and branch', async () => {
+    let seen: readonly [string, string | null] | null = null;
+    const [project] = await projectsFrom(
+      [row({ cwd: '/invented/work/a-repo', branch: 'a-branch' })],
+      NOW,
+      () => 'unknown',
+      new Set(),
+      null,
+      async (cwd, branch) => {
+        seen = [cwd, branch];
+        return true;
+      },
+    );
+    expect(project?.sessions[0]?.isAgentWorktree).toBe(true);
+    expect(seen).toEqual(['/invented/work/a-repo', 'a-branch']);
+  });
+
+  it('is absent, not false, when the injected check says no', async () => {
+    const [project] = await projectsFrom([row()], NOW, () => 'unknown', new Set(), null, async () => false);
+    expect(project?.sessions[0]).not.toHaveProperty('isAgentWorktree');
+  });
+
   it('has no agent list at all, rather than an empty one', async () => {
     const [project] = await projectsFrom([row()], NOW);
     // ABSENT and EMPTY differ: empty is a source that looked.

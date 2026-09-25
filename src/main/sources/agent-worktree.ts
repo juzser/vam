@@ -10,7 +10,7 @@
  * `loadClaudeCodeProjects` is concerned it is exactly as real a project as
  * the repo it was cut from.
  *
- * THIS IS NOT vam's OWN WORKTREE FEATURE (#496, `src/main/worktrees/`).
+ * THIS IS NOT vam's OWN WORKTREE FEATURE (PR 496, `src/main/worktrees/`).
  * That one lays worktrees out SIDE BY SIDE with the repo, at
  * `<repoParent>/<repoName>-worktrees/<slug>` (`worktreesRootFor`) -- a
  * different literal string that the segment check below never matches, so

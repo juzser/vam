@@ -722,7 +722,7 @@ export type Session = {
    * `agent-worktree.ts`'s own header carries the two-signal rule this is
    * computed by (a realpath'd path segment, or a `worktree-agent-*`
    * branch) and the reason it cannot be confused with vam's OWN worktree
-   * feature (#496), a different directory layout entirely.
+   * feature (PR 496), a different directory layout entirely.
    *
    * `true` ONLY, on the SAME rule `pane`/`vamControlled` already use for a
    * fact a source either measured or did not: absent means "not this",
