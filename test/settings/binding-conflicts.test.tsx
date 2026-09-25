@@ -28,6 +28,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildBindingSheet } from '../../src/renderer/keyboard/keysheet.js';
 import { EMPTY_PREFS, type Prefs } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
+import { onBothPlatforms } from '../support/platform.js';
 
 afterEach(cleanup);
 
@@ -40,6 +41,20 @@ const AFTER_TWO_STEPS: Prefs = {
 /** What step 3 used to produce, and what an upgrade can still produce: `close`
  *  holds `r`, `rename` is back on its shipped `r` and dead. */
 const CONTESTED: Prefs = { ...EMPTY_PREFS, keyBindings: { close: ['r'] } };
+
+/**
+ * THE SAME TWO SHAPES, ON A MODIFIED CHORD — `r` and `close` never exercise
+ * the rendering, since `chordSymbols('r')` is `r` on both platforms and a
+ * token-vs-symbol defect has nothing to hide behind. `palette` ships on
+ * `Mod-k`; moving it to the free `b` and giving `newProject` the freed
+ * `Mod-k` is `AFTER_TWO_STEPS`'s own shape, and `newProject` alone on
+ * `Mod-k` (`palette` left on its shipped default) is `CONTESTED`'s.
+ */
+const AFTER_TWO_STEPS_MOD: Prefs = {
+  ...EMPTY_PREFS,
+  keyBindings: { palette: ['b'], newProject: ['Mod-k'] },
+};
+const CONTESTED_MOD: Prefs = { ...EMPTY_PREFS, keyBindings: { newProject: ['Mod-k'] } };
 
 function open(prefs: Prefs = EMPTY_PREFS) {
   const onChange = vi.fn();
@@ -111,6 +126,25 @@ describe('the reset that could steal a key', () => {
     fireEvent.click(screen.getByRole('button', { name: 'reset shortcuts' }));
     expect(changed(onChange).keyBindings).toEqual({});
   });
+
+  /**
+   * THE REFUSAL NAMES THE KEY IN THE OPERATOR'S OWN SYMBOLS, NOT THE STORED
+   * TOKEN. `bind`'s message interpolated `clash.chord` straight from the
+   * map — the grammar's own spelling, `Mod-k` — while the reserved-key
+   * refusal two lines above it in the same file already ran that string
+   * through `chordSymbols`. `r`/`close` never a `Mod-` chord, so the bare-key
+   * fixture above could never show the difference; this one can.
+   */
+  it('names the contested key in platform symbols, never the stored token', () => {
+    onBothPlatforms((mac) => {
+      open(AFTER_TWO_STEPS_MOD);
+      fireEvent.click(reset('palette'));
+      const said = mac ? '⌘ K' : 'Ctrl+K';
+      expect(message()).toContain(`"${said}"`);
+      expect(message(), `"${message()}" leaked the stored token`).not.toContain('Mod-k');
+      cleanup();
+    });
+  });
 });
 
 describe('a dead binding is shown, not hidden', () => {
@@ -135,5 +169,17 @@ describe('a dead binding is shown, not hidden', () => {
     expect(clashNote()).toBe('');
     expect(slot('rename', 0).getAttribute('aria-label')).not.toContain('dead');
     expect(slot('close', 0).getAttribute('aria-label')).not.toContain('dead');
+  });
+
+  /** The standing notice, same defect as the refusal message above: it
+   *  interpolated `clash.chord` raw rather than through `chordSymbols`. */
+  it('names a modified contested key in symbols in the standing notice too', () => {
+    onBothPlatforms((mac) => {
+      open(CONTESTED_MOD);
+      const said = mac ? '⌘ K' : 'Ctrl+K';
+      expect(clashNote()).toContain(`"${said}"`);
+      expect(clashNote(), `"${clashNote()}" leaked the stored token`).not.toContain('Mod-k');
+      cleanup();
+    });
   });
 });
