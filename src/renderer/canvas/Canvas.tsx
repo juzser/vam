@@ -118,6 +118,7 @@ import {
   DetailPanel,
   type Tab as DetailTab,
   type StartingPaneWait,
+  type StartScreenWait,
 } from '../panels/DetailPanel.js';
 import { GroupPicker, type GroupPickerChoice } from '../panels/GroupPicker.js';
 import { IconPicker } from '../panels/IconPicker.js';
@@ -293,6 +294,26 @@ const REPEAT_WINDOW_MS = 1_500;
  * the day this changes.
  */
 export const START_PANE_WAIT_TIMEOUT_MS = 30_000;
+
+/**
+ * HOW OFTEN THE PANE ITSELF IS POLLED WHILE A START/RESUME WAIT IS UP --
+ * `useStartScreenPolling`'s own doc. Cheap: one `capture-pane` for however
+ * many panes are actually waiting, which is normally zero or one, and it
+ * only runs at all while `startingPaneByKey` is non-empty.
+ */
+export const START_SCREEN_POLL_MS = 1_500;
+
+/**
+ * THE OPERATOR'S OWN BOUND FOR OUTPUT THAT MATCHES NONE OF THE FOUR NAMED
+ * SCREENS -- shorter than `START_PANE_WAIT_TIMEOUT_MS` on purpose. That
+ * timeout is for the CASE `detectStartScreen` cannot even ask about yet (the
+ * pane is still a shell); once the CLI has visibly taken the pane over and is
+ * showing something vam does not recognise, there is no reason to keep
+ * spinning for the FULL 30s -- the operator's own words were "after a bounded
+ * wait, e.g. 8-10s". Reuses `timedOut`/`StartTimeoutHint` outright rather
+ * than inventing a second sentence for the identical honest admission.
+ */
+export const START_SCREEN_UNKNOWN_STALL_MS = 9_000;
 
 /**
  * A status message shortened for the bar, never for the log.
@@ -2682,6 +2703,87 @@ function CanvasInner({
       if (!stillWaiting) clearStartingPane(key);
     }
   }, [allEntries, startingPaneByKey, clearStartingPane]);
+  /**
+   * D-START: THE PANE ITSELF IS A SECOND, FASTER, INDEPENDENT SIGNAL --
+   * the operator's own two reports, both traced to the SAME gap: the effect
+   * above only ever learns a wait is over from `allEntries`, which is
+   * `source.ts`'s own ~`SOURCE_POLL_INTERVAL_MS` poll, and that poll has
+   * NOTHING to report at all while the CLI sits on a first-run dialog --
+   * measured against a real `claude`, continuously, for 36+ seconds of a
+   * trust dialog sitting unanswered (`start-screen.ts`'s own header). This
+   * effect polls the pane DIRECTLY, through the exact `capture-pane` path
+   * `terminalPrompt` already reads a running session's own picker through,
+   * and acts on what it finds without waiting for the slower poll to agree:
+   *
+   *  - `ready` clears the wait OUTRIGHT, the same act `clearStartingPane`
+   *    above performs, faster than `allEntries` would have.
+   *  - `trust`/`update`/`login`/`onboarding` are stored on the wait itself
+   *    (`screen`), which is what makes `DetailPanel.tsx`'s `StartScreenCard`
+   *    draw the actual question instead of an unexplained spinner.
+   *  - `unknown` shrinks the remaining wait to
+   *    `START_SCREEN_UNKNOWN_STALL_MS` (`armUnknownStall`) rather than
+   *    leaving the operator to sit through the full
+   *    `START_PANE_WAIT_TIMEOUT_MS` for output that matches nothing named.
+   *
+   * `window.api?.terminal?.startScreen` IS ABSENT IN THE BROWSER BUILD, the
+   * same rule `useUsageSnapshot`'s own `getUsage` follows: this then polls
+   * nothing at all, and `START_PANE_WAIT_TIMEOUT_MS`'s own timer -- unaimed
+   * at anything this effect does -- is the only fallback left, exactly the
+   * behaviour this repo shipped before this effect existed.
+   */
+  const unknownStallArmed = useRef(new Set<string>());
+  const armUnknownStall = useCallback((key: string) => {
+    if (unknownStallArmed.current.has(key)) return;
+    unknownStallArmed.current.add(key);
+    setTimeout(() => {
+      unknownStallArmed.current.delete(key);
+      setStartingPaneByKey((current) => {
+        const value = current[key];
+        if (value === undefined || value.timedOut) return current;
+        return { ...current, [key]: { ...value, timedOut: true } };
+      });
+    }, START_SCREEN_UNKNOWN_STALL_MS);
+  }, []);
+  useEffect(() => {
+    const getStartScreen = window.api?.terminal?.startScreen;
+    const keys = Object.keys(startingPaneByKey);
+    if (getStartScreen === undefined || keys.length === 0) return;
+    let cancelled = false;
+    const poll = () => {
+      for (const key of keys) {
+        const wait = startingPaneByKey[key];
+        if (wait === undefined) continue;
+        getStartScreen(wait.projectId, wait.rowId)
+          .then((view) => {
+            if (cancelled || view.kind !== 'ok') return;
+            if (view.screen === 'ready') {
+              clearStartingPane(key);
+              return;
+            }
+            // Narrowed here, in the OUTER closure, and read back through this
+            // binding rather than `view.screen` inside the updater below:
+            // TypeScript does not carry a narrowing into a callback that may
+            // run later (`setStartingPaneByKey`'s own updater), so re-reading
+            // the union member through it would still type as the WHOLE
+            // `StartScreenKind`, `ready` included.
+            const screen: StartScreenWait = view.screen;
+            setStartingPaneByKey((current) => {
+              const value = current[key];
+              if (value === undefined || value.screen === screen) return current;
+              return { ...current, [key]: { ...value, screen } };
+            });
+            if (screen === 'unknown') armUnknownStall(key);
+          })
+          .catch(() => {});
+      }
+    };
+    poll();
+    const id = window.setInterval(poll, START_SCREEN_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [startingPaneByKey, clearStartingPane, armUnknownStall]);
   /** The same guard for `x`: one keypress must not become two stop attempts. */
   /**
    * THE ONE PENDING FLAG, and it is one on purpose.
@@ -4819,7 +4921,14 @@ function CanvasInner({
       // operator's own "immediately" -- and OUTLIVES it: cleared only by the
       // row leaving `unstarted`/`terminal` (the effect above) or by this same
       // press being refused below, never by the write resolving.
-      beginStartingPane(paneKey, { kind: 'start', provider: providerId, timedOut: false });
+      beginStartingPane(paneKey, {
+        kind: 'start',
+        provider: providerId,
+        timedOut: false,
+        projectId: entry.project.id,
+        rowId: entry.session.id,
+        screen: null,
+      });
       setStatus(`starting ${provider.label} in "${title}"…`);
       try {
         await sessionSource.write.recordPrompt(entry.session.id, provider.command.join(' '));
@@ -4894,7 +5003,13 @@ function CanvasInner({
       }
       paneWritesInFlight.current.add(paneKey);
       setWritingFor(entry.session.id, true);
-      beginStartingPane(paneKey, { kind: 'resume', timedOut: false });
+      beginStartingPane(paneKey, {
+        kind: 'resume',
+        timedOut: false,
+        projectId: entry.project.id,
+        rowId: entry.session.id,
+        screen: null,
+      });
       setStatus(`resuming "${title}"…`);
       try {
         await sessionSource.write.recordPrompt(entry.session.id, command);

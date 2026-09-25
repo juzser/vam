@@ -60,7 +60,7 @@ function check(label, ok, detail) {
  * promise that never resolves is "the agent registers a moment later" held
  * open for exactly as long as the screenshot below needs it.
  */
-function stubApiScript({ row, pane, hangRecordPrompt }) {
+function stubApiScript({ row, pane, hangRecordPrompt, startScreen, answerTrustSpy }) {
   const SCREEN = ['Last login: Mon Sep 21 10:12:03 on ttys006', `~/w/notes $ `].join('\n');
   const unavailable = () =>
     Promise.resolve({
@@ -153,6 +153,24 @@ function stubApiScript({ row, pane, hangRecordPrompt }) {
       send: async () => 'sent',
       answer: async () => ({ kind: 'unavailable' }),
       prompt: async () => ({ kind: 'unavailable' }),
+      // WHAT `Canvas.tsx`'s OWN POLL READS while a Start-session wait is up
+      // (`start-screen.ts`) -- `startScreen` is `undefined` in most blocks
+      // below, which answers `unavailable` and leaves the wait to the
+      // ordinary spinner, exactly as it always has. The two blocks that DO
+      // pass it are what draw the trust card and prove the wait clearing on
+      // `ready`, without needing a real tmux pane behind either.
+      startScreen: async () =>
+        startScreen === undefined ? { kind: 'unavailable' } : { kind: 'ok', screen: startScreen },
+      // `answerTrustSpy` records the call on `window` rather than closing
+      // over a real function -- `page.addInitScript` serialises this whole
+      // script into the page, so nothing outside JSON survives the trip.
+      answerTrust: async (projectId, rowId, trust) => {
+        if (answerTrustSpy) {
+          globalThis.window.__vamAnswerTrustCalls ??= [];
+          globalThis.window.__vamAnswerTrustCalls.push([projectId, rowId, trust]);
+        }
+        return null;
+      },
     },
   };
 }
@@ -413,6 +431,115 @@ await loadingStateShot({
   phone: true,
   outName: 'start-session-loading-phone',
 });
+
+/**
+ * THE OPERATOR'S FIRST REPORT, SEEN: "if the CLI has an update or needs to
+ * trust the folder, the Response view is stuck in the loading state while
+ * the terminal is asking about the update and trust." `startScreen: 'trust'`
+ * is `Canvas.tsx`'s own poll (`start-screen.ts`) reporting the real trust
+ * dialog's shape, measured against the real `claude` CLI
+ * (`test/main/terminal/start-screen-live-screens.ts`); `hangRecordPrompt:
+ * true` keeps the write in flight the same way `loadingStateShot` does, so
+ * the card is drawn INSTEAD of the plain spinner, not after it.
+ */
+async function trustCardShot({ theme }) {
+  const outName = `start-screen-trust-${theme}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript(stubApiScript, {
+    row: ROW,
+    pane: PANE,
+    hangRecordPrompt: true,
+    startScreen: 'trust',
+    answerTrustSpy: true,
+  });
+  await page.addInitScript(
+    (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),
+    theme,
+  );
+  await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-tab-strip]');
+  await page.locator(`[data-session-row="${ROW}"]`).first().click();
+  await page.waitForSelector('[data-start-session]');
+  await page.locator('[data-start-session-button]').click();
+  const cardDrawn = await page
+    .waitForSelector('[data-start-screen-card][data-start-screen-kind="trust"]', { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${outName}: the trust card is drawn instead of the bare spinner`, cardDrawn);
+  const text = await page.evaluate(
+    () => document.querySelector('[data-start-screen-card]')?.textContent ?? '',
+  );
+  check(
+    `${outName}: it names the actual question`,
+    /Do you trust the files in this folder\?/.test(text),
+    text,
+  );
+  check(
+    `${outName}: the ordinary timeout hint is not ALSO drawn`,
+    (await page.locator('[data-start-timeout-hint]').count()) === 0,
+  );
+  await page.screenshot({ path: `${outDir}/${outName}.png` });
+
+  await page.locator('[data-start-screen-trust-yes]').click();
+  const calls = await page.evaluate(() => globalThis.window.__vamAnswerTrustCalls ?? []);
+  check(
+    `${outName}: "Yes, trust it" answers through window.api.terminal.answerTrust, aimed at this row`,
+    calls.length === 1 && calls[0][0] === 'notes' && calls[0][1] === ROW && calls[0][2] === true,
+    JSON.stringify(calls),
+  );
+  await page.close();
+}
+
+/**
+ * THE OPERATOR'S SECOND REPORT, SEEN: "even when the terminal has finished
+ * starting the session, the Response view is still stuck loading."
+ * `startScreen: 'ready'` is the pane itself proving the CLI is up -- the fix
+ * this guard is for -- and `hangRecordPrompt: false` lets the write resolve
+ * normally, so this is the FULL real path: press Start, the wait appears,
+ * the poll reads `ready`, the wait clears. The screenshot is the Start
+ * screen UNFROZEN again -- there is no second screen to show once the wait
+ * is over; the fixture's `load()` is static and never actually promotes the
+ * row (`stubApiScript`'s own header), so "ready" here means what the fix
+ * actually delivers: the loading state does not outlive the CLI being ready,
+ * not a claim that this fixture models the row's own status changing too.
+ */
+async function readyClearsShot({ theme }) {
+  const outName = `start-screen-ready-clears-${theme}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript(stubApiScript, {
+    row: ROW,
+    pane: PANE,
+    hangRecordPrompt: false,
+    startScreen: 'ready',
+  });
+  await page.addInitScript(
+    (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),
+    theme,
+  );
+  await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-tab-strip]');
+  await page.locator(`[data-session-row="${ROW}"]`).first().click();
+  await page.waitForSelector('[data-start-session]');
+  await page.locator('[data-start-session-button]').click();
+  const cleared = await page
+    .waitForSelector('[data-start-session-button]:not([disabled])', { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${outName}: the wait clears on its own -- never stuck on "Starting…"`, cleared);
+  const text = await page.evaluate(
+    () => document.querySelector('[data-start-session-button]')?.textContent ?? '',
+  );
+  check(`${outName}: back to the ordinary "Start session" label`, /Start session/.test(text), text);
+  await page.screenshot({ path: `${outDir}/${outName}.png` });
+  await page.close();
+}
+
+for (const theme of ['dark', 'light']) {
+  await trustCardShot({ theme });
+  await readyClearsShot({ theme });
+}
 
 await browser.close();
 console.log(failures.length === 0 ? '\nstart-screen-shots: all checks passed.' : '');

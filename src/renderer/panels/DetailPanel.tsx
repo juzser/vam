@@ -118,6 +118,7 @@ import {
   type ProviderId,
   resolveProvider,
 } from '../../shared/providers.js';
+import type { StartScreenKind } from '../../shared/start-screen.js';
 import type {
   ModelSwitchResult,
   PaneKey,
@@ -2805,10 +2806,42 @@ function AgentDetail({
  * (`ProviderStartControls`/`TerminalOnlyStart`'s own Resume button): Start
  * names the provider it typed, Resume does not need to -- there is only ever
  * one command a resume pane can type.
+ *
+ * `projectId`/`rowId` ARE CAPTURED AT THE PRESS, not read back off the live
+ * entry: `Canvas.tsx`'s own polling effect needs them to ask
+ * `window.api.terminal.startScreen` for THIS pane specifically, and by the
+ * time that poll runs the row this wait began on may already have changed
+ * identity (`pane-row.ts`'s own point) -- `rowId` is the pane-row id the
+ * press was made from (`pane:<name>`), which `targetSession`'s own-pane
+ * branch resolves straight back to the pane, with no dependency on the
+ * entry that named it still existing under that id.
+ *
+ * `screen` is the operator's own second report made concrete: `null` while
+ * the pane is still a shell or vam has not polled it yet; one of the four
+ * named blocking screens once the CLI's own dialog is recognised, which
+ * `StartScreenCard` draws INSTEAD of the ordinary spinner; `'unknown'` for
+ * non-shell output that matches nothing named, which only changes how SOON
+ * `timedOut` arrives, never what is drawn. `'ready'` never appears here --
+ * the poll that observes it clears the wait outright instead of storing it.
  */
+export type StartScreenWait = Exclude<StartScreenKind, 'ready'>;
+
 export type StartingPaneWait =
-  | { readonly kind: 'start'; readonly provider: ProviderId; readonly timedOut: boolean }
-  | { readonly kind: 'resume'; readonly timedOut: boolean };
+  | {
+      readonly kind: 'start';
+      readonly provider: ProviderId;
+      readonly timedOut: boolean;
+      readonly projectId: string;
+      readonly rowId: string;
+      readonly screen: StartScreenWait | null;
+    }
+  | {
+      readonly kind: 'resume';
+      readonly timedOut: boolean;
+      readonly projectId: string;
+      readonly rowId: string;
+      readonly screen: StartScreenWait | null;
+    };
 
 /**
  * THE PROVIDER PICKER AND THE START BUTTON, on their own -- the one act
@@ -2927,6 +2960,91 @@ function ProviderStartControls({
 }
 
 /**
+ * ONE SENTENCE PER NAMED SCREEN, and nothing invented beyond it: the operator
+ * asked for "an inline card" naming what the CLI is asking, not a paraphrase
+ * of its whole dialog. `trust` is the one screen this card may answer FROM --
+ * `onAnswerTrust` sends the exact keys `answerTrustDialog` (main) verifies
+ * against the pane before pressing (`start-screen.ts`'s own header, measured
+ * against the real CLI). Every other kind gets the identical escape hatch
+ * `StartTimeoutHint` already offers below it: "Open Terminal to answer" --
+ * an update prompt, a login screen and anything vam's own onboarding markers
+ * were not measured against all need the operator's own hand, never a guess
+ * pressed on their behalf.
+ */
+const START_SCREEN_COPY: Readonly<Record<Exclude<StartScreenKind, 'ready' | 'unknown'>, string>> = {
+  trust: 'is asking: Do you trust the files in this folder?',
+  update: 'wants to update.',
+  login: 'needs you to log in.',
+  onboarding: 'needs a quick setup step.',
+};
+
+/**
+ * THE CARD ITSELF -- drawn instead of the ordinary spinner the moment
+ * `Canvas.tsx`'s poll recognises one of the four named screens, which is the
+ * operator's first report made concrete: "the Response view is stuck in the
+ * loading state while the terminal is asking about the update and trust."
+ * This is what replaces the stuck spinner with the actual question.
+ */
+function StartScreenCard({
+  providerLabel,
+  screen,
+  onAnswerTrust,
+  onShowTerminal,
+}: {
+  readonly providerLabel: string;
+  readonly screen: Exclude<StartScreenKind, 'ready' | 'unknown'>;
+  readonly onAnswerTrust: ((trust: boolean) => void) | undefined;
+  readonly onShowTerminal: (() => void) | undefined;
+}) {
+  return (
+    <div
+      data-start-screen-card
+      data-start-screen-kind={screen}
+      className="flex max-w-[36ch] flex-col items-center gap-2 rounded-[10px] border border-line-strong bg-card p-3 text-center"
+    >
+      <p className="text-meta text-ink">
+        {providerLabel} {START_SCREEN_COPY[screen]}
+      </p>
+      {screen === 'trust' && onAnswerTrust !== undefined && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-start-screen-trust-yes
+            onClick={() => onAnswerTrust(true)}
+            className="vam-tap cursor-pointer rounded-[6px] bg-ink px-2.5 py-1 text-control text-panel hover:opacity-90"
+          >
+            Yes, trust it
+          </button>
+          <button
+            type="button"
+            data-start-screen-trust-no
+            onClick={() => onAnswerTrust(false)}
+            className="vam-tap cursor-pointer rounded-[6px] border border-line-strong px-2.5 py-1 text-control text-ink-dim hover:bg-raised hover:text-ink"
+          >
+            No
+          </button>
+        </div>
+      )}
+      {/* ALWAYS OFFERED, EVEN ON `trust` -- the Yes/No buttons above send keys
+          through the same aim-then-act path every write in this app uses, and
+          a refusal there (the pane closed, the screen moved on) has nowhere
+          else on this card to say so. The Terminal view is where the operator
+          can see why and finish it by hand either way. */}
+      {onShowTerminal !== undefined && (
+        <button
+          type="button"
+          data-start-screen-open-terminal
+          onClick={onShowTerminal}
+          className="vam-tap cursor-pointer text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >
+          Open Terminal to answer
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * THE ESCAPE HATCH, past the operator's own 30s timeout.
  *
  * Operator: a spinner that could be wrong forever is worse than one that
@@ -2937,6 +3055,12 @@ function ProviderStartControls({
  * (`ProviderStartControls`' own `spinning`) and this quiet sentence takes
  * over: not a failure (nothing failed; the write landed), just a way out that
  * does not depend on guessing right.
+ *
+ * ALSO WHAT DRAWS WHEN THE PANE ITSELF SAYS `unknown` PAST THE SHORTER BOUND
+ * (`Canvas.tsx`'s own `START_SCREEN_UNKNOWN_STALL_MS`) -- the operator's
+ * second report's own fallback: output that matches none of the four named
+ * screens must never leave the spinner running forever either, and this is
+ * the same honest admission for that case, just reached sooner.
  *
  * SHARED BY BOTH START SCREENS because it says the exact same thing about the
  * exact same fact, the same reason `StartShortcuts` below is shared by both.
@@ -3003,12 +3127,14 @@ function StartSession({
   onStart,
   startingPane = null,
   onShowTerminal,
+  onAnswerTrust,
 }: {
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
   readonly onShowTerminal?: () => void;
+  readonly onAnswerTrust?: (trust: boolean) => void;
 }) {
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
   const starting = startingPane ?? null;
@@ -3052,7 +3178,16 @@ function StartSession({
           }
         />
       )}
-      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
+      {starting !== null && starting.screen !== null && starting.screen !== 'unknown' ? (
+        <StartScreenCard
+          providerLabel={resolveProvider(chosen).label}
+          screen={starting.screen}
+          onAnswerTrust={onAnswerTrust}
+          onShowTerminal={onShowTerminal}
+        />
+      ) : (
+        starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />
+      )}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -3122,6 +3257,7 @@ function TerminalOnlyStart({
   onResumeInPane,
   startingPane = null,
   onShowTerminal,
+  onAnswerTrust,
 }: {
   readonly title: string;
   readonly paneName: string;
@@ -3132,6 +3268,7 @@ function TerminalOnlyStart({
   readonly onResumeInPane: (() => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
   readonly onShowTerminal?: () => void;
+  readonly onAnswerTrust?: (trust: boolean) => void;
 }) {
   // `ProviderStartControls` is CONTROLLED (see its own header) -- this
   // screen's own mark above stays `source`, the session's PAST agent, never
@@ -3205,7 +3342,16 @@ function TerminalOnlyStart({
           )}
         </button>
       )}
-      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
+      {starting !== null && starting.screen !== null && starting.screen !== 'unknown' ? (
+        <StartScreenCard
+          providerLabel={resolveProvider(chosen).label}
+          screen={starting.screen}
+          onAnswerTrust={onAnswerTrust}
+          onShowTerminal={onShowTerminal}
+        />
+      ) : (
+        starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />
+      )}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -6544,6 +6690,29 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    */
   const onShowTerminal = tabs.includes('Terminal') ? () => pickTab('Terminal') : undefined;
 
+  /**
+   * `StartScreenCard`'s own Yes/No -- the ONE screen `startingPane.screen`
+   * names that vam may answer on its own (the operator's own words: "answer
+   * the simple ones inline where it's safe and unambiguous"). Reached for
+   * directly, the same way `TerminalStreamTab.tsx` reaches `window.api?.
+   * terminal?.resize` itself rather than being handed it: this is a WRITE
+   * whose only listener is the poll `Canvas.tsx` already owns, so there is
+   * nothing for a caller-supplied callback to add here that the next poll
+   * does not already do on its own once the keys land.
+   *
+   * `startingPane.projectId`/`.rowId` ARE WHAT AIMS IT -- captured at the
+   * press (`StartingPaneWait`'s own header), not re-derived from `entry`,
+   * which may already have moved on to a different id by the time this
+   * fires. ABSENT when there is no wait at all, which the card is never
+   * drawn without one to begin with.
+   */
+  const onAnswerTrust =
+    startingPane === null
+      ? undefined
+      : (trust: boolean) => {
+          void window.api?.terminal?.answerTrust(startingPane.projectId, startingPane.rowId, trust);
+        };
+
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
   /**
@@ -8522,6 +8691,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             onStart={onStartSession}
             startingPane={startingPane}
             onShowTerminal={onShowTerminal}
+            onAnswerTrust={onAnswerTrust}
           />
         ) : entry !== null && entry.session.status === 'terminal' ? (
           <TerminalOnlyStart
@@ -8534,6 +8704,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
             startingPane={startingPane}
             onShowTerminal={onShowTerminal}
+            onAnswerTrust={onAnswerTrust}
           />
         ) : entry === null && gettingStarted !== undefined ? (
           // THE APP HAS NO SESSION TO SHOW ANYWHERE -- `Canvas.tsx`'s own

@@ -21,7 +21,11 @@
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { Canvas, START_PANE_WAIT_TIMEOUT_MS } from '../../src/renderer/canvas/Canvas.js';
+import {
+  Canvas,
+  START_PANE_WAIT_TIMEOUT_MS,
+  START_SCREEN_UNKNOWN_STALL_MS,
+} from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 import type { SessionSource } from '../../src/renderer/sources/port.js';
 import type { CanvasSource } from '../../src/renderer/sources/source.js';
@@ -293,6 +297,92 @@ describe('Start session — the wait for the agent to register', () => {
       startButton()?.click();
     });
     expect(recorded).toHaveLength(1);
+  });
+
+  /**
+   * D-START: THE PANE ITSELF IS A SECOND, FASTER SIGNAL -- the operator's
+   * two reports, both traced to `source.ts`'s own poll never learning about
+   * a pane the live-agent list has nothing to say about yet
+   * (`start-screen.ts`'s own header). These prove `Canvas.tsx`'s own direct
+   * poll of the pane, independent of `allEntries` ever changing at all.
+   */
+  describe('the pane itself, polled directly -- independent of the row ever changing', () => {
+    afterEach(() => {
+      Reflect.deleteProperty(window, 'api');
+    });
+
+    it('clears the wait the instant the pane reports ready, with the row still unstarted', async () => {
+      const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'ready' as const }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, release } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {
+        release();
+      });
+      // The poll fires on mount, before any interval tick -- one flush is
+      // enough, and NOTHING here ever rerenders with the `LIVE` model: the
+      // row is STILL `unstarted`, so the start screen itself stays up --
+      // only the WAIT it was frozen by is gone.
+      await act(async () => {});
+      expect(startScreen).toHaveBeenCalledWith('p1', UNSTARTED.id);
+      expect(startButton()?.disabled).toBe(false);
+      expect(providerPicker()?.hasAttribute('disabled')).toBe(false);
+      expect(startButton()?.textContent).not.toContain('Starting Claude Code');
+    });
+
+    it('shows the trust card once the pane reports trust, and does not clear the wait', async () => {
+      const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'trust' as const }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {});
+      const card = document.querySelector('[data-start-screen-card]');
+      expect(card?.getAttribute('data-start-screen-kind')).toBe('trust');
+      // Still waiting -- the picker/Start button stay frozen, unlike `ready`.
+      expect(startButton()?.disabled).toBe(true);
+    });
+
+    it('shortens the wait to the unknown-stall bound, well under the full 30s timeout', async () => {
+      vi.useFakeTimers();
+      const startScreen = vi.fn(async () => ({ kind: 'ok' as const, screen: 'unknown' as const }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      // The first poll's promise resolves on a microtask, which this flushes
+      // WITHOUT advancing the fake clock -- so the stall timer it just armed
+      // is pending but not yet due.
+      await act(async () => {});
+      expect(timeoutHint()).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(START_SCREEN_UNKNOWN_STALL_MS);
+      });
+      expect(timeoutHint()?.textContent).toContain('Still starting');
+      // Well short of the ordinary 30s bound this same wait would otherwise
+      // have run the full length of.
+      expect(START_SCREEN_UNKNOWN_STALL_MS).toBeLessThan(START_PANE_WAIT_TIMEOUT_MS);
+    });
+
+    it('never polls at all in the browser build -- no window.api, and the 30s fallback is untouched', async () => {
+      const { source } = gatedSource();
+      render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {});
+      // No card, no crash -- the ordinary spinner, exactly as before this
+      // feature existed.
+      expect(document.querySelector('[data-start-screen-card]')).toBeNull();
+      expect(startButton()?.querySelector('.vam-spin')).not.toBeNull();
+    });
   });
 
   it('drops the spinner and offers the Terminal view once the wait passes the timeout', async () => {

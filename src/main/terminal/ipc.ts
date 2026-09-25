@@ -13,6 +13,7 @@
  */
 
 import { type AnswerResult, isAnswerRequest, type PromptView } from '../../shared/answer.js';
+import type { StartScreenView } from '../../shared/start-screen.js';
 import {
   isModelChoice,
   isPaneKey,
@@ -43,6 +44,7 @@ import {
   sendToPane,
   targetSession,
 } from './pane.js';
+import { type AnswerTrustResult, answerTrustOnPane, readStartScreen } from './start-screen.js';
 
 /**
  * A project id is a digest (`sources/claude-code/project-id.ts`), and it
@@ -425,6 +427,63 @@ export function registerTerminalIpc(
         run,
         projectId,
         rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
+
+  /**
+   * The pane's own screen, for a row a Start-session/Resume wait is up on --
+   * `terminalStartScreen`'s own doc (`channels.ts`). A READ, safe to poll,
+   * aimed by the same rule as the prompt read above it.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalStartScreen,
+    async (_event, ...args: unknown[]): Promise<StartScreenView> => {
+      const [projectId, rowId] = args;
+      if (
+        args.length < 1 ||
+        args.length > 2 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        (rowId !== undefined && (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH))
+      ) {
+        return { kind: 'unaimed' };
+      }
+      return readStartScreen(
+        run,
+        projectId,
+        rowId,
+        rowId === undefined ? undefined : await readPanes(),
+      );
+    },
+  );
+
+  /**
+   * Answer the trust dialog on the pane behind a Start-session/Resume wait --
+   * `terminalAnswerTrust`'s own doc (`channels.ts`). Nothing here is drawn
+   * from the read above without a re-check: `answerTrustOnPane` re-reads the
+   * pane itself before pressing anything.
+   */
+  ipcMain.handle(
+    CHANNELS.terminalAnswerTrust,
+    async (_event, ...args: unknown[]): Promise<AnswerTrustResult> => {
+      const [projectId, rowId, trust] = args;
+      if (
+        args.length !== 3 ||
+        typeof projectId !== 'string' ||
+        projectId.length > MAX_PROJECT_ID_LENGTH ||
+        (rowId !== undefined &&
+          (typeof rowId !== 'string' || rowId.length > MAX_PROJECT_ID_LENGTH)) ||
+        typeof trust !== 'boolean'
+      ) {
+        return { kind: 'unaimed' };
+      }
+      return answerTrustOnPane(
+        run,
+        projectId,
+        rowId,
+        trust,
         rowId === undefined ? undefined : await readPanes(),
       );
     },
