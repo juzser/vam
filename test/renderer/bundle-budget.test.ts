@@ -132,6 +132,15 @@ const SETTINGS_OVERLAY_MARKER = 'data-settings-overlay';
 // `grep -rl data-files-editor node_modules` finds nothing.
 const FILES_TAB_MARKER = 'data-files-editor';
 
+// `TerminalStreamTab`'s own unpadded xterm mount, one level in from the
+// pane's bare `data-terminal-stream` root for the same reason
+// `FILES_TAB_MARKER` is not `data-files`: this one is exact, never a prefix
+// another attribute shares. Verified unique the same way as the three
+// markers above: `grep -rn data-terminal-stream-mount src` outside
+// `TerminalStreamTab.tsx` finds nothing, and `grep -rl
+// data-terminal-stream-mount node_modules` finds nothing.
+const TERMINAL_STREAM_MARKER = 'data-terminal-stream-mount';
+
 describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
   let outDir: string;
   let entryBytes: number;
@@ -265,6 +274,23 @@ describe.skipIf(!buildAvailable)('electron renderer entry chunk budget', () => {
 
   it('FilesTab still ships, in a lazy chunk', () => {
     expect(otherAssetTexts.some((text) => text.includes(FILES_TAB_MARKER))).toBe(true);
+  });
+
+  it('TerminalStreamTab (xterm.js) is not in the eager entry chunk', () => {
+    // Streaming is the DEFAULT renderer now (`prefs/streaming-terminal.ts`),
+    // which makes this boundary matter MORE than it did as a beta, not less
+    // -- xterm.js is not small, and `TerminalAutoTab.tsx` still only needs
+    // it once a session's Terminal tab is actually opened. Falsify by
+    // importing `TerminalStreamTab` from `./TerminalStreamTab.js` directly
+    // in `TerminalAutoTab.tsx` again instead of through its own
+    // `lazy(() => import(...).then(...))` -- this line goes red:
+    //   expect(entryText.includes('data-terminal-stream-mount')).toBe(false)
+    //   AssertionError: expected true to be false
+    expect(entryText.includes(TERMINAL_STREAM_MARKER)).toBe(false);
+  });
+
+  it('TerminalStreamTab still ships, in a lazy chunk', () => {
+    expect(otherAssetTexts.some((text) => text.includes(TERMINAL_STREAM_MARKER))).toBe(true);
   });
 });
 
