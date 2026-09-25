@@ -20,6 +20,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
+import type { Project, Session } from '../../src/renderer/domain/model.js';
+import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { DEMO_MODEL } from '../../src/renderer/fixtures/demo.js';
 import { NO_BINDINGS, setActiveBindings } from '../../src/renderer/keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../../src/renderer/keyboard/ShortcutTip.js';
@@ -28,8 +30,6 @@ import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/De
 import { SessionList } from '../../src/renderer/panels/SessionList.js';
 import { EMPTY_PREFS } from '../../src/renderer/prefs/prefs.js';
 import { SettingsOverlay } from '../../src/renderer/settings/SettingsOverlay.js';
-import type { Project, Session } from '../../src/renderer/domain/model.js';
-import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
 import { baseProps, entriesOf, makeSession } from '../panels/session-list-props.js';
 import { findUnwrappedGlyphs, type GlyphViolation } from '../support/chord-glyph-guard.js';
 import { MAC_PLATFORM, onBothPlatformsAsync, withPlatform } from '../support/platform.js';
@@ -67,8 +67,7 @@ describe('the falsifier: the guard actually finds the shape it looks for', () =>
   });
 
   it('clears once the glyph segment is wrapped the way ChordGlyphs wraps it', () => {
-    document.body.innerHTML =
-      '<span class="font-mono"><span class="font-sans">⌘</span>K</span>';
+    document.body.innerHTML = '<span class="font-mono"><span class="font-sans">⌘</span>K</span>';
     expect(findUnwrappedGlyphs(document.body)).toEqual([]);
   });
 
@@ -91,9 +90,7 @@ describe('every chord-painting surface routes a Mac glyph through ChordGlyphs', 
         />,
       );
       // Unarmed list first.
-      expect(
-        describeAll('settings: keyboard list', findUnwrappedGlyphs(document.body)),
-      ).toBe('');
+      expect(describeAll('settings: keyboard list', findUnwrappedGlyphs(document.body))).toBe('');
       // Then mid-capture: one row swaps to the input, its neighbours keep
       // painting theirs — the "rebinding editor" the operator asked to
       // recheck, not only the list behind it.
