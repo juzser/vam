@@ -45,8 +45,8 @@ const SESSION: Session = {
 const PROJECT: Project = { id: 'p1', name: 'atlas', sessions: [SESSION] };
 const ENTRY: SessionEntry = { project: PROJECT, session: SESSION };
 
-function draw(over: Partial<DetailPanelProps> = {}) {
-  const props: DetailPanelProps = {
+function propsFor(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
+  return {
     entry: ENTRY,
     decision: DECISION,
     draft: '',
@@ -66,7 +66,10 @@ function draw(over: Partial<DetailPanelProps> = {}) {
     onSetDefaultProvider: () => {},
     ...over,
   };
-  render(<DetailPanel {...props} />);
+}
+
+function draw(over: Partial<DetailPanelProps> = {}) {
+  return render(<DetailPanel {...propsFor(over)} />);
 }
 
 const q = <T extends Element>(selector: string) => document.querySelector<T>(selector);
@@ -266,12 +269,36 @@ describe("AC-7's height half: the phone row is merged, not stacked (docs/design/
     expect(textarea?.className).toContain('flex-1');
   });
 
-  it('the textarea grows by its own content (field-sizing: content) and caps rather than filling the composer forever', () => {
+  /**
+   * AC-7's stretch target, closed: `field-sizing: content` removed from the
+   * phone box, so growth is now the SAME `scrollHeight` effect the desktop
+   * box already had (`inputRef`'s own `useEffect`, below `pickImage` in
+   * `DetailPanel.tsx`) -- see that effect's own comment for the real-browser
+   * measurement this closes (docs/design/phone-core-loop.md §4.7's
+   * postmortem, followed up).
+   *
+   * NOT ASSERTED HERE VIA A MOCKED `scrollHeight`: tried first, and it does
+   * not distinguish the fix from its absence -- happy-dom does not implement
+   * `field-sizing` at all, so the shared effect's OWN `style.height` write
+   * reads back identically whether or not the class removed here is still
+   * present in the className string. The one thing a unit test CAN still pin
+   * is the className/attribute SHAPE; the actual pixel figure is only
+   * provable in a browser (`e2e/phone-question-shots.mjs`, updated
+   * alongside this).
+   */
+  it('grows by the shared scrollHeight effect, not field-sizing: content, and still caps at 132px', () => {
     draw();
     const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
-    expect(textarea?.className).toContain('[field-sizing:content]');
+    expect(textarea?.className).not.toContain('field-sizing');
     expect(textarea?.className).toMatch(/max-h-\[132px\]/);
     expect(textarea?.getAttribute('rows')).toBe('1');
+  });
+
+  it('desktop never carried field-sizing either -- its own rows stay 2, untouched', () => {
+    draw({ phone: false });
+    const textarea = q<HTMLTextAreaElement>('textarea[aria-label="prompt to session"]');
+    expect(textarea?.className).not.toContain('field-sizing');
+    expect(textarea?.getAttribute('rows')).toBe('2');
   });
 
   it("the row's own second flex-1 spacer is hidden, so it cannot split growth with the textarea", () => {

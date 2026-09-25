@@ -374,8 +374,8 @@ const GUARDS = [
   // THE PHONE CORE LOOP'S OWN TWO SCREENS (docs/design/phone-core-loop.md):
   // the inline question (one shared scroller, no retired fixed card, every
   // option clears 44px) and the composer with none open (exactly 4 controls,
-  // and now -- since the tools row merged onto the textarea's own line --
-  // AC-7's height half too, real-browser-measured at 95px, down from 145).
+  // and AC-7's height half, real-browser-measured at 75px -- the ≤76px
+  // stretch target, down from 95px, down from the pre-merge 145px).
   // Held out of this list until that merge shipped, per this file's own
   // header note on why: unlike every other guard here, a real layout change
   // was the only way to close it, not a class this list could paper over.
