@@ -353,10 +353,15 @@ await page.addInitScript(
   },
   { session: SESSION, branch: BRANCH, tmuxName: TMUX_SESSION },
 );
+// `streamingTerminalMigrated: true` -- STREAMING DEFAULTS ON NOW
+// (`prefs/streaming-terminal.ts`), and omitting this hits `prefs.ts`'s own
+// one-time migration ratchet, which treats an UN-migrated payload's
+// `streamingTerminal` as unwritten and forces it back to the new default
+// regardless of what `on` says.
 await page.addInitScript(({ on }) => {
   globalThis.localStorage.setItem(
     'vam.prefs.v1',
-    JSON.stringify({ streamingTerminal: on, theme: 'dark' }),
+    JSON.stringify({ streamingTerminal: on, streamingTerminalMigrated: true, theme: 'dark' }),
   );
 }, { on: true });
 
@@ -617,10 +622,13 @@ await new Promise((r) => setTimeout(r, 3000));
 tmux('send-keys', '-t', `=${TMUX_SESSION}:`, '-l', '--', `clear; cat ${fixturePath}`);
 tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
 await new Promise((r) => setTimeout(r, 300));
+// `streamingTerminalMigrated: true` too -- see the earlier `openInitScript`
+// call's own note; this is the `on: false` half of the same comparison,
+// which is the half the omission actually broke.
 await page.addInitScript(({ on }) => {
   globalThis.localStorage.setItem(
     'vam.prefs.v1',
-    JSON.stringify({ streamingTerminal: on, theme: 'dark' }),
+    JSON.stringify({ streamingTerminal: on, streamingTerminalMigrated: true, theme: 'dark' }),
   );
 }, { on: false });
 await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });

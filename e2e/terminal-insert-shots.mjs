@@ -193,6 +193,20 @@ await page.addInitScript(
   },
   { one: ONE, two: TWO },
 );
+// STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`) -- this file is
+// about the CLASSIC `[data-terminal-pane]` renderer's Insert-mode focus
+// scoping specifically, and the stub `window.api` above carries no
+// `terminalStream` member at all, so the explicit opt-out is what keeps this
+// testing the renderer it names. `streamingTerminalMigrated: true` too --
+// omitting it hits `prefs.ts`'s own one-time migration ratchet, which
+// treats an UN-migrated payload's `streamingTerminal` as unwritten and
+// forces it back to the new default regardless of what this sets.
+await page.addInitScript(() => {
+  globalThis.localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({ streamingTerminal: false, streamingTerminalMigrated: true }),
+  );
+});
 
 await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-tab-strip]');

@@ -343,8 +343,19 @@ await page.addInitScript(
  * `terminal-chrome-shots.mjs` records.
  */
 async function openSettingsOverTerminal(prefs) {
+  // `streamingTerminal: false`, FOLDED IN HERE rather than left to each
+  // caller: STREAMING DEFAULTS ON NOW (`prefs/streaming-terminal.ts`), and
+  // this file measures the colour settings repainting the CLASSIC
+  // `[data-terminal-pane]` renderer specifically. `streamingTerminalMigrated:
+  // true` too -- omitting it hits `prefs.ts`'s own one-time migration
+  // ratchet, which treats an UN-migrated payload's `streamingTerminal` as
+  // unwritten and forces it back to the new default regardless of what
+  // this sets.
   await page.addInitScript((payload) => {
-    globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify(payload));
+    globalThis.localStorage.setItem(
+      'vam.prefs.v1',
+      JSON.stringify({ ...payload, streamingTerminal: false, streamingTerminalMigrated: true }),
+    );
   }, prefs);
   await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-tab-strip]');
