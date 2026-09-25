@@ -36,6 +36,23 @@
  *     removed at all, force or not; branch deletion is always `git branch
  *     -d` (never `-D`) and a branch `-d` refuses is PRESERVED, reported as
  *     `preservedBranch`, never silently discarded.
+ *  6. REMOVAL IS CONFINED TO A KNOWN PROJECT'S OWN WORKTREES, exactly like
+ *     rules 1-3 above -- `removeWorktree` takes a `projectId`, checked
+ *     against `knownProjectIds()` and resolved through
+ *     `resolveProjectDirectory` the same as `list`/`create`, and the
+ *     candidate `worktreeId` must pass the SAME `authorize()` call against
+ *     THAT project's `<repoRoot>-worktrees/` root. A second, independent
+ *     check reads the worktree's own `.git` -> `commondir` chain and
+ *     refuses unless it agrees with the resolved project's own repo root --
+ *     belt-and-suspenders against a directory that merely sits inside the
+ *     confined root without actually being a linked worktree of it. Without
+ *     rule 6, `worktreeId` alone (an absolute path) would let a
+ *     compromised renderer `remove --force` any linked worktree of ANY git
+ *     repository on disk, known to vam or not -- `removeWorktree` used to
+ *     derive its own repo root purely from the untrusted path's `.git`
+ *     file, with no check that the repo it found was one vam manages at
+ *     all. See `test/main/worktrees/worktrees.integration.test.ts`'s
+ *     "removeWorktree confinement" suite for the three shapes this closes.
  */
 
 import { mkdir, readFile } from 'node:fs/promises';
@@ -209,6 +226,36 @@ async function checkRefFormat(
   }
 }
 
+/**
+ * `git rev-parse --verify --quiet --end-of-options <baseRef>^{commit}` --
+ * `baseRef` is an OPERATOR-TYPED STRING that would otherwise be handed to
+ * `git worktree add` as a bare trailing argv element, where git's own flag
+ * parser reads it BEFORE deciding it is a revision: a typed base ref of
+ * `-f` is indistinguishable from the flag `--force`, `--detach` from the
+ * flag of the same name, `--upload-pack=x` likewise -- proven against a
+ * real git binary, not assumed (this function's own test file). `--end-of-
+ * options` (git >= 2.24) is what makes `rev-parse` itself treat a leading
+ * `-` as part of the revision text rather than a flag, so THIS check cannot
+ * be fooled by the same trick it exists to catch; a candidate that starts
+ * with `-` and is not a real revision fails `rev-parse` and is refused here,
+ * before `createWorktree` ever puts it in argv at all. The `^{commit}`
+ * suffix additionally refuses a tag or ref that does not point AT a commit
+ * (an annotated tag of a blob, for instance) -- `worktree add` needs a
+ * commit to check out, not merely something that exists.
+ */
+async function validateBaseRef(
+  baseRef: string,
+  run: GitRun,
+  cwd: string,
+): Promise<SourceError | null> {
+  try {
+    await run(['rev-parse', '--verify', '--quiet', '--end-of-options', `${baseRef}^{commit}`], cwd);
+    return null;
+  } catch {
+    return refused('invalid-base-ref', `"${baseRef}" is not a ref git can resolve to a commit`);
+  }
+}
+
 function classifyCreateFailure(error: unknown, slug: string, targetPath: string): SourceError {
   const failure = error as GitFailure;
   if (failure.code === 'ENOENT') {
@@ -279,6 +326,12 @@ export async function createWorktree(
   const refFormatError = await checkRefFormat(slug, deps.run, repoRoot);
   if (refFormatError !== null) return refFormatError;
 
+  const hasBaseRef = input.baseRef !== undefined && input.baseRef !== '';
+  if (hasBaseRef) {
+    const baseRefError = await validateBaseRef(input.baseRef as string, deps.run, repoRoot);
+    if (baseRefError !== null) return baseRefError;
+  }
+
   const worktreesRoot = worktreesRootFor(repoRoot);
   try {
     await mkdir(worktreesRoot, { recursive: true });
@@ -305,6 +358,10 @@ export async function createWorktree(
     return refused('already-exists', `${targetPath} already exists`);
   }
 
+  // `--` before `baseRef`, VERIFIED against a real git binary (this
+  // module's own header): without it, a validated-but-still-hyphen-shaped
+  // ref would still reach `worktree add`'s own flag parser first. Belt and
+  // suspenders alongside `validateBaseRef` above, not a substitute for it.
   const argv = [
     'worktree',
     'add',
@@ -312,7 +369,7 @@ export async function createWorktree(
     '-b',
     slug,
     targetPath,
-    ...(input.baseRef !== undefined && input.baseRef !== '' ? [input.baseRef] : []),
+    ...(hasBaseRef ? ['--', input.baseRef as string] : []),
   ];
   try {
     await deps.run(argv, repoRoot);
@@ -417,18 +474,54 @@ function classifyRemoveFailure(error: unknown, worktreePath: string): SourceErro
  * (`code: 'dirty'`) UNLESS `force` is `true` AND `confirmName` equals the
  * worktree's own directory name exactly -- a checkbox is not proof anyone
  * read what they were about to discard.
+ *
+ * CONFINED TO `input.projectId`'S OWN WORKTREES (rule 6, this module's
+ * header): `worktreeId` is never trusted to name its own repository. The
+ * repo root comes ONLY from `resolveProjectDirectory(input.projectId)` --
+ * the same live-agent-or-pane resolution `list`/`create` already use -- and
+ * the candidate must pass `authorize()` against THAT repo's own
+ * `<repoRoot>-worktrees/` root before anything else runs. A second,
+ * independent check then reads the candidate's OWN `.git` -> `commondir`
+ * chain and refuses unless it names the SAME repo root -- a directory that
+ * merely sits inside the confined root without actually being one of that
+ * repo's registered linked worktrees is refused here, not treated as one.
  */
 export async function removeWorktree(
   input: RemoveWorktreeInput,
-  deps: Pick<WorktreesDeps, 'run' | 'realpathFn'>,
+  deps: WorktreesDeps,
 ): Promise<SourceError | RemoveWorktreeOutcome> {
+  const known = await deps.knownProjectIds();
+  if (!known.includes(input.projectId)) return unknownProject(input.projectId);
+  const resolvedDir = await deps.resolveProjectDirectory(input.projectId);
+  if (resolvedDir === null) return unknownProject(input.projectId);
+  const repoRoot = repoRootOf(resolvedDir);
+  if (repoRoot === null) return whyNotARepository(resolvedDir) ?? unknownProject(input.projectId);
+
   const realWorktreeId = await safeRealpath(input.worktreeId, deps.realpathFn);
   if (realWorktreeId === null) {
     return refused('not-found', `${input.worktreeId} does not exist`);
   }
-  const repoRoot = await findRepoRootFromWorktree(realWorktreeId, deps.realpathFn);
-  if (repoRoot === null) {
-    return refused('not-a-worktree', `${input.worktreeId} is not a git worktree vam can manage`);
+
+  const worktreesRoot = worktreesRootFor(repoRoot);
+  const realWorktreesRoot = await safeRealpath(worktreesRoot, deps.realpathFn);
+  const authorization =
+    realWorktreesRoot === null
+      ? ({ authorized: false } as const)
+      : await authorize(realWorktreeId, [realWorktreesRoot], deps.realpathFn);
+  if (!authorization.authorized) {
+    return refused(
+      'path-confinement',
+      `${input.worktreeId} is not inside ${worktreesRoot}, the known worktrees root for this project`,
+    );
+  }
+
+  const realRepoRoot = await safeRealpath(repoRoot, deps.realpathFn);
+  const claimedRepoRoot = await findRepoRootFromWorktree(realWorktreeId, deps.realpathFn);
+  if (claimedRepoRoot === null || realRepoRoot === null || claimedRepoRoot !== realRepoRoot) {
+    return refused(
+      'not-a-worktree',
+      `${input.worktreeId} is not a linked worktree of the project it was asked to remove from`,
+    );
   }
 
   const entries = await listRaw(repoRoot, deps.run);

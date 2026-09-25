@@ -83,10 +83,10 @@ describe('registerWorktreesIpc — validation', () => {
   });
 
   it('refuses worktree:remove whose worktreeId is not an absolute path', async () => {
-    const { handlers } = harness(tempRepo());
+    const { handlers, projectId } = harness(tempRepo());
     const result = (await handlers.get(CHANNELS.worktreeRemove)?.(
       {},
-      { worktreeId: 'relative/path' },
+      { projectId, worktreeId: 'relative/path' },
     )) as IpcResult<unknown>;
     expect(result).toEqual({
       ok: false,
@@ -95,10 +95,22 @@ describe('registerWorktreesIpc — validation', () => {
   });
 
   it('refuses worktree:remove whose force flag is the wrong type', async () => {
+    const { handlers, projectId } = harness(tempRepo());
+    const result = (await handlers.get(CHANNELS.worktreeRemove)?.(
+      {},
+      { projectId, worktreeId: '/tmp/x', force: 'yes' },
+    )) as IpcResult<unknown>;
+    expect(result).toEqual({
+      ok: false,
+      error: expect.objectContaining({ code: 'invalid-payload' }),
+    });
+  });
+
+  it('refuses worktree:remove with no projectId at all -- rule 6, not merely a bad shape elsewhere', async () => {
     const { handlers } = harness(tempRepo());
     const result = (await handlers.get(CHANNELS.worktreeRemove)?.(
       {},
-      { worktreeId: '/tmp/x', force: 'yes' },
+      { worktreeId: '/tmp/x' },
     )) as IpcResult<unknown>;
     expect(result).toEqual({
       ok: false,
@@ -154,7 +166,7 @@ describe('registerWorktreesIpc — the envelope, end to end against a real repo'
 
     const removed = (await handlers.get(CHANNELS.worktreeRemove)?.(
       {},
-      { worktreeId },
+      { projectId, worktreeId },
     )) as IpcResult<{ preservedBranch: boolean }>;
 
     expect(removed).toEqual({ ok: true, value: { preservedBranch: false } });

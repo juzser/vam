@@ -69,6 +69,17 @@ export type CreateWorktreeInput = {
 
 export type RemoveWorktreeInput = {
   readonly worktreeId: string;
+  /**
+   * REQUIRED, not optional -- the same known-project confinement `list()`
+   * and `create()` already enforce. Without this, `worktreeId` alone would
+   * let a compromised renderer name ANY linked worktree of ANY git
+   * repository on disk and have main derive its own repo root from that
+   * directory's `.git` file; main refuses unless this project id is one
+   * `knownProjectIds()` reports AND the worktree's realpath lies inside
+   * THAT project's own `<repoRoot>-worktrees/` (`worktrees.ts`'s security
+   * rule 6).
+   */
+  readonly projectId: string;
   /** The confirmed kill-anyway route for a DIRTY worktree -- same bargain as
    *  `closeSession`'s own `force`. Ignored for a clean worktree, which never
    *  needed it. */

@@ -38,12 +38,21 @@ function isCreateInput(value: unknown): value is CreateWorktreeInput {
  * plain label -- it is the realpath `list()` handed back, and the same
  * absolute-and-NUL-free bound every other path-shaped argument on this
  * bridge already carries (`create-session-in`'s own `cwd`).
+ *
+ * `projectId` is REQUIRED (`isText`, not `isOptionalText`) -- `worktrees.ts`
+ * rule 6: without it, `removeWorktree` has no known repo to confine
+ * `worktreeId` against at all, so a missing `projectId` is refused at the
+ * SHAPE gate here rather than reaching main's own "unknown project" refusal
+ * one call deeper.
  */
 function isRemoveInput(value: unknown): value is RemoveWorktreeInput {
   if (typeof value !== 'object' || value === null) return false;
   const row = value as Record<string, unknown>;
   return (
-    isDirectoryPath(row.worktreeId) && isOptionalBool(row.force) && isOptionalText(row.confirmName)
+    isText(row.projectId) &&
+    isDirectoryPath(row.worktreeId) &&
+    isOptionalBool(row.force) &&
+    isOptionalText(row.confirmName)
   );
 }
 
@@ -89,7 +98,7 @@ export function registerWorktreesIpc(ipcMain: IpcMainLike, deps: WorktreesDeps):
           ok: false,
           error: refused(
             'invalid-payload',
-            'worktree:remove takes {worktreeId, force?, confirmName?}',
+            'worktree:remove takes {projectId, worktreeId, force?, confirmName?}',
           ),
         };
       }

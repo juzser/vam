@@ -71,7 +71,12 @@ type WorktreeInfo = {
 };
 
 type CreateWorktreeInput = { projectId: string; name: string; baseRef?: string };
-type RemoveWorktreeInput = { worktreeId: string; force?: boolean; confirmName?: string };
+type RemoveWorktreeInput = {
+  projectId: string;   // required -- see §5 rule 6
+  worktreeId: string;
+  force?: boolean;
+  confirmName?: string;
+};
 type RemoveWorktreeOutcome = { preservedBranch: boolean };
 ```
 
@@ -129,6 +134,22 @@ row it already has, and draws the match as a child rather than a sibling.
 Phase 2's dirty/ahead-behind badges and adopted-worktree detection both
 build on this same `projectId`, unchanged.
 
+**The duplicate this creates is closed, not merely disclosed.** The v1
+report this doc originally shipped against flagged that a worktree's own
+`Project` would ALSO draw a normal top-level sidebar section — the same
+`projectId` match above, used the other direction: `SessionList.tsx`'s
+`useWorktreeParents` hook asks every visible project's `worktrees.list()`
+and builds the reverse map (child id → parent id); a project found in that
+map, whose parent is itself still visible, does not get its own top-level
+section — its sessions are only reachable by nesting under the parent's
+"Worktrees" row (`WorktreesSection.tsx`, via the SAME `onPick` handler a
+top-level row's click already used). "Whose parent is itself still
+visible" is deliberate: hiding the parent must never make the child's
+sessions unreachable, so a hidden parent un-suppresses its children rather
+than hiding them twice. The suppression only ever applies under
+`Group by: Project` — `Status`/`None` grouping has no "Worktrees" row to
+nest under at all.
+
 This also answers the "does this break #486/#490" question directly: a
 worktree's session is created through the unmodified
 `createSessionInDirectory` (`cwd` = the worktree's path), which already
@@ -178,12 +199,47 @@ Security rules, and where each is enforced:
    what they were about to discard." Branch deletion is always
    `git branch -d`, never `-D`; a refusal is reported as
    `preservedBranch: true`, never silently discarded.
-6. **`remove()` needs no `projectId` at all.** The parent repository root is
-   derived purely from the worktree's own `.git` file
-   (`gitdir:` → `commondir` → the shared `.git` directory's parent — the
-   same layout git itself relies on), which also means `git worktree remove`
-   always runs with `cwd` set to a directory that is **not** the one being
+6. **`remove()` is confined to a KNOWN project's own worktrees.** Revised
+   after a fresh review found the original version of this rule ("`remove()`
+   needs no `projectId` at all") was itself the hole: `worktreeId` alone (an
+   absolute path) let a compromised renderer derive a repo root from
+   *whatever* directory's own `.git` file it was handed, with no check that
+   vam managed that repo at all — `remove --force` on any linked worktree of
+   any git repository on disk, known to vam or not. `RemoveWorktreeInput`
+   now carries a **required** `projectId`, checked against
+   `knownProjectIds()` and resolved through `resolveProjectDirectory` —
+   exactly rules 1–2 above, applied to `remove()` too. The candidate
+   `worktreeId` must then pass the **same `authorize()`** call `create()`
+   makes, against *that* project's own `<repoRoot>-worktrees/` root — proven
+   necessary, not merely plausible: disabling this check while developing
+   the fix let a real `git worktree remove` run on a worktree living outside
+   the confined root (`test/main/worktrees/worktrees.integration.test.ts`'s
+   "confinement (S2)" suite has the falsification in its header). A second,
+   independent check reads the candidate's own `.git` → `commondir` chain
+   and refuses unless it names the *same* repo root as the resolved
+   project — belt-and-suspenders against a directory that merely sits
+   inside the confined root without being a linked worktree of it at all.
+   Only once both agree does `removeWorktree` ask git whether this path is
+   one of that repo's *registered* linked worktrees at all (`git worktree
+   list`, matched by realpath) — three independent, overlapping proofs
+   before anything is deleted. `git worktree remove` still runs with `cwd`
+   set to the resolved repo root, which is never the directory being
    deleted.
+7. **`baseRef` cannot be mistaken for a git flag.** A typed base ref of
+   `-f`, `--detach`, or `--upload-pack=x` is indistinguishable from the
+   flag of the same name to `git worktree add`'s own argv parser —
+   reproduced against a real git binary while fixing this (`-f` silently
+   force-created the worktree, no error at all). `createWorktree` validates
+   `baseRef` first with `git rev-parse --verify --quiet --end-of-options
+   <baseRef>^{commit}` (the `--end-of-options` flag is what stops `rev-
+   parse` itself from reading a leading `-` as one of *its own* flags,
+   closing the identical hole one layer up), then — belt-and-suspenders,
+   not a substitute — passes it to `git worktree add` after a literal `--`,
+   confirmed against real git to still resolve the ref correctly.
+   `test/main/worktrees/worktrees.integration.test.ts`'s "baseRef injection
+   (S3)" suite falsifies both layers together: with `validateBaseRef`
+   skipped and `--` removed, `-f` stops being refused and a worktree is
+   force-created instead.
 
 ## 6. Phase 2 (named, not built)
 
