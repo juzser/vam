@@ -74,10 +74,17 @@ describe('SessionList — UI1: a worktree does not also draw its own top-level s
     );
     // The parent's own heading is untouched.
     expect(container.querySelector('[data-project-heading][data-project-id="p1"]')).not.toBeNull();
-    // The child's session still exists in the model -- just not as its own
-    // section; `WorktreesSection` (already covered by its own test file) is
-    // what nests it under the parent's "Worktrees" row.
-    expect(container.querySelector('[data-session-row="s-child"]')).toBeNull();
+    // The child's session still draws its row -- through the exact same
+    // `renderSessionRow` a top-level row uses (`data-session-row`, `rowRefs`,
+    // jump labels, the context menu all still apply, per the review that
+    // asked for this) -- but NESTED under the parent's "Worktrees" row
+    // rather than in its own top-level `data-project-rows` section.
+    await waitFor(() =>
+      expect(
+        container.querySelector('[data-worktrees-section="p1"] [data-session-row="s-child"]'),
+      ).not.toBeNull(),
+    );
+    expect(container.querySelector('[data-project-rows="claude-code:feat-00000000"]')).toBeNull();
   });
 
   it('does NOT suppress the child when its parent is hidden -- a session must stay reachable', async () => {

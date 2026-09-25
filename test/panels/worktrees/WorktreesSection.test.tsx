@@ -2,9 +2,28 @@
 
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { SessionEntry } from '../../../src/renderer/domain/selectors.js';
 import { WorktreesSection } from '../../../src/renderer/panels/worktrees/WorktreesSection.js';
 import type { WorktreeInfo } from '../../../src/shared/worktree.js';
 import { makeProject } from '../session-list-props.js';
+
+/**
+ * A STAND-IN for `SessionList.tsx`'s real `renderSessionRow` -- this file
+ * tests `WorktreesSection` in isolation, so it injects a minimal row rather
+ * than importing the real (unexported, closure-heavy) function. The real
+ * function's OWN behaviour -- `rowRefs`, jump labels, the context menu, `j`/
+ * `k` reachability -- is proven end to end against the genuine `SessionList`/
+ * `Canvas` pairing in `test/canvas/Canvas.worktree-nested-rows.test.tsx`;
+ * this stand-in only has to prove `WorktreesSection` CALLS the function it
+ * was handed, once per nested session, with that session's own entry.
+ */
+function fakeRenderSessionRow(entry: SessionEntry) {
+  return (
+    <button type="button" data-session-row={entry.session.id} key={entry.session.id}>
+      {entry.session.title}
+    </button>
+  );
+}
 
 function worktree(over: Partial<WorktreeInfo> = {}): WorktreeInfo {
   return {
@@ -44,8 +63,7 @@ describe('WorktreesSection — visibility', () => {
         allEntries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     expect(container.firstChild).toBeNull();
@@ -59,8 +77,7 @@ describe('WorktreesSection — visibility', () => {
         allEntries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() => expect(container.querySelector('[data-worktrees-section]')).toBeNull());
@@ -74,8 +91,7 @@ describe('WorktreesSection — visibility', () => {
         allEntries={[]}
         forceOpenCreate={true}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() =>
@@ -97,8 +113,7 @@ describe('WorktreesSection — visibility', () => {
         allEntries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() =>
@@ -119,8 +134,7 @@ describe('WorktreesSection — create', () => {
         // for a project with no worktrees yet.
         forceOpenCreate={true}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() =>
@@ -159,8 +173,7 @@ describe('WorktreesSection — create', () => {
         allEntries={[]}
         forceOpenCreate={true}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() =>
@@ -193,8 +206,7 @@ describe('WorktreesSection — delete', () => {
         allEntries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() => expect(container.querySelector('[data-worktree-delete]')).not.toBeNull());
@@ -226,8 +238,7 @@ describe('WorktreesSection — delete', () => {
         allEntries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() => expect(container.querySelector('[data-worktree-delete]')).not.toBeNull());
@@ -276,8 +287,7 @@ describe('WorktreesSection — start a session here', () => {
         allEntries={[]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={vi.fn()}
-        focusedSessionId={null}
+        renderSessionRow={fakeRenderSessionRow}
       />,
     );
     await waitFor(() =>
@@ -289,7 +299,7 @@ describe('WorktreesSection — start a session here', () => {
     );
   });
 
-  it('shows a nested, clickable session row instead, when allEntries already has sessions for that worktree (UI1)', async () => {
+  it('draws a nested row through renderSessionRow, once per session, when allEntries already has sessions for that worktree (UI1)', async () => {
     installApi({
       worktrees: {
         list: vi.fn().mockResolvedValue([worktree()]),
@@ -298,7 +308,7 @@ describe('WorktreesSection — start a session here', () => {
       },
     });
     const childProject = makeProject({ id: 'claude-code:feat-00000000', name: 'feat' });
-    const onPickSession = vi.fn();
+    const rendered: string[] = [];
     const { container } = render(
       <WorktreesSection
         project={project}
@@ -320,24 +330,20 @@ describe('WorktreesSection — start a session here', () => {
         ]}
         forceOpenCreate={false}
         onCloseCreate={vi.fn()}
-        onPickSession={onPickSession}
-        focusedSessionId={null}
+        renderSessionRow={(entry) => {
+          rendered.push(entry.session.id);
+          return fakeRenderSessionRow(entry);
+        }}
       />,
     );
-    await waitFor(() =>
-      expect(container.querySelector('[data-worktree-session-row="s1"]')).not.toBeNull(),
-    );
-    expect(container.querySelector('[data-worktree-session-row="s1"]')?.textContent).toContain(
+    await waitFor(() => expect(container.querySelector('[data-session-row="s1"]')).not.toBeNull());
+    expect(container.querySelector('[data-session-row="s1"]')?.textContent).toContain(
       'a session in the worktree',
     );
+    expect(rendered).toEqual(['s1']);
     // No count badge, and no "Start a session here" -- a live session means
     // the nested row IS the affordance now.
     expect(container.querySelector('[data-worktree-session-count]')).toBeNull();
     expect(container.querySelector('[data-worktree-start-here]')).toBeNull();
-
-    fireEvent.click(
-      container.querySelector('[data-worktree-session-row="s1"]') as HTMLButtonElement,
-    );
-    expect(onPickSession).toHaveBeenCalledWith('s1');
   });
 });

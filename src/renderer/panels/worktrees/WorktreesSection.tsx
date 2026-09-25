@@ -32,19 +32,33 @@
  * SECTION (UI1, closed after the v1 report disclosed it): `SessionList.tsx`'s
  * `useWorktreeParents` hook now suppresses that duplicate whenever this
  * section's own parent project is visible, so the rows this section draws
- * below (via `onPickSession`) are the ONLY way to reach a worktree's session
- * from the sidebar in `Group by: Project` mode -- see
- * `docs/design/worktrees.md`'s identity decision for the full rationale on
- * why a worktree's session keeps its own, different `Project.id` regardless.
+ * below are the ONLY way to reach a worktree's session from the sidebar in
+ * `Group by: Project` mode -- see `docs/design/worktrees.md`'s identity
+ * decision for the full rationale on why a worktree's session keeps its own,
+ * different `Project.id` regardless.
+ *
+ * NESTED SESSIONS DRAW THROUGH `renderSessionRow`, `SessionList.tsx`'s OWN
+ * row-rendering function, passed down whole rather than reimplemented here.
+ * A second review found the first cut of UI1 drew its own small button
+ * instead -- reachable by click, but outside `rowRefs`, the jump-label map
+ * and the context menu, so a session that used to answer `j`/`k`, a jump
+ * letter and right-click stopped answering all three the moment its
+ * top-level row was suppressed. `renderSessionRow` is the literal same
+ * function a top-level row calls: same `data-session-row`, same
+ * `rowRefs` registration (so the reveal-scroll effect and Canvas.tsx's own
+ * `j`/`k` walk over `entries` -- untouched by this suppression, since it
+ * never looked at the DOM -- both keep working), same jump-label badge, same
+ * context menu, same close button, same phone treatment. Nothing here knows
+ * or needs to know what is inside that function.
  */
 
 import { Play } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import type { WorktreeInfo } from '../../../shared/worktree.js';
 import type { Project } from '../../domain/model.js';
 import type { SessionEntry } from '../../domain/selectors.js';
 import { ShortcutTip } from '../../keyboard/ShortcutTip.js';
-import { StatusMark } from '../status-mark.js';
 import { ConfirmDeleteWorktree } from './ConfirmDeleteWorktree.js';
 import { useWorktrees } from './useWorktrees.js';
 
@@ -85,15 +99,11 @@ export type WorktreesSectionProps = {
   readonly forceOpenCreate: boolean;
   readonly onCloseCreate: () => void;
   /**
-   * `SessionList.tsx`'s own `onPick` prop, unchanged -- the SAME handler a
-   * top-level `data-session-row` click already calls. UI1: since
-   * `SessionList.tsx` now suppresses a worktree's own top-level project
-   * section (`useWorktreeParents.ts`), this is the nested row's only route
-   * back to "select this session" -- reusing the real handler rather than
-   * re-deriving what "pick a session" means a second time.
+   * `SessionList.tsx`'s own row-rendering function, handed down whole --
+   * see this file's header. Every nested session in this section draws
+   * through this, not through anything defined here.
    */
-  readonly onPickSession: (sessionId: string) => void;
-  readonly focusedSessionId: string | null;
+  readonly renderSessionRow: (entry: SessionEntry) => ReactNode;
 };
 
 export function WorktreesSection({
@@ -101,8 +111,7 @@ export function WorktreesSection({
   allEntries,
   forceOpenCreate,
   onCloseCreate,
-  onPickSession,
-  focusedSessionId,
+  renderSessionRow,
 }: WorktreesSectionProps) {
   const api = window.api?.worktrees;
   const { state, reload } = useWorktrees({ projectId: project.id, api });
@@ -364,32 +373,15 @@ export function WorktreesSection({
                   a COUNT for -- `SessionList.tsx` now suppresses this
                   worktree's own top-level project section whenever it is
                   visible here, so this is the only route left to reach one
-                  of its sessions in `Group by: Project` mode. `onPickSession`
-                  is `SessionList.tsx`'s own `onPick`, the exact handler a
-                  top-level row's click already calls -- reused, not
-                  re-derived. */}
+                  of its sessions in `Group by: Project` mode. `renderSessionRow`
+                  is `SessionList.tsx`'s own row-rendering function -- see this
+                  file's header for why nothing here reimplements it. */}
               {worktreeSessions.length > 0 && (
                 <div
                   data-worktree-sessions={worktree.worktreeId}
                   className="flex flex-col gap-0.5 pt-0.5"
                 >
-                  {worktreeSessions.map((entry) => (
-                    <button
-                      key={entry.session.id}
-                      type="button"
-                      data-worktree-session-row={entry.session.id}
-                      onClick={() => onPickSession(entry.session.id)}
-                      className={[
-                        'vam-tap flex w-full items-center gap-1.5 rounded-[5px] px-1.5 py-1 text-left text-control',
-                        entry.session.id === focusedSessionId
-                          ? 'bg-raised text-ink'
-                          : 'text-ink-dim hover:bg-line hover:text-ink',
-                      ].join(' ')}
-                    >
-                      <StatusMark status={entry.session.status} lane={11} glyph={9} />
-                      <span className="min-w-0 flex-1 truncate">{entry.session.title}</span>
-                    </button>
-                  ))}
+                  {worktreeSessions.map((entry) => renderSessionRow(entry))}
                 </div>
               )}
             </div>
