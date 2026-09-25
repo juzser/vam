@@ -576,19 +576,30 @@ parity for the beta, not the flip itself, which the operator will test first.
 | cursor | steady block, never blinks (this file's own design: a poll cannot honestly animate liveness) | steady block, `cursorBlink: false` set to MATCH -- this pane really is live, but the operator's ask is that the two screens look the same |
 | Insert/Select marks | `insertScopeMark`+`insertStopMark` on the pane, the hidden `<textarea>` forwarded to | `insertScopeMark` on the pane, `INSERT_STOP` on xterm's own `term.textarea` directly (already shipped, task-breakdown item 4) |
 
-**The one real gap, named rather than hidden: `backgroundOpacity` under 1.**
-`terminalSchemeStyle()` composites the scheme's background with the
-operator's opacity slider (`prefs/terminal-scheme.ts`) as a translucent
-`rgba()`, painted on `TerminalTab.tsx`'s pane directly. `TerminalStreamTab.tsx`
-now paints its OWN frame (`[data-terminal-stream]`'s `style`) with that exact
-same composite -- but xterm.js's `ITheme.background` is passed the OPAQUE hex
-(`mapScheme` still drops `backgroundOpacity`), because xterm's DOM/canvas
-renderer painting a truly translucent cell background was not attempted or
-verified for this task. At the shipped default (`backgroundOpacity: 1`,
-opaque) the two are pixel-identical, which is the row the comparison table
-above measures and the case the operator will actually see; an operator who
-has moved the slider off 1 would see the padding ring go translucent while
-the text area under it stays opaque -- a real, narrow, follow-up gap.
+**`backgroundOpacity` under 1 -- CLOSED, a follow-up to the gap this section
+used to name.** `terminalSchemeStyle()` composites the scheme's background
+with the operator's opacity slider (`prefs/terminal-scheme.ts`) as a
+translucent `rgba()`, painted on `TerminalTab.tsx`'s pane directly.
+`TerminalStreamTab.tsx` paints its OWN frame (`[data-terminal-stream]`'s
+`style`) with that exact same composite, AND `mapScheme` now passes xterm's
+`ITheme.background` the SAME `withAlpha(...)` composite (exported from
+`terminal-scheme.ts`) rather than the opaque hex it used to drop
+`backgroundOpacity` from -- xterm's DOM renderer (no `@xterm/addon-canvas`/
+`@xterm/addon-webgl` installed here) honours the alpha channel in an ordinary
+CSS `background-color`, so passing the composited value is the whole fix.
+`allowTransparency: true` is set per xterm's own documented prerequisite for
+a non-opaque background, though FALSIFIED against this actual build to be a
+no-op for the DOM renderer specifically (grepping the compiled
+`@xterm/xterm/lib/xterm.js` finds exactly one occurrence of the option, the
+default-options declaration, never read elsewhere) -- kept anyway as the
+documented contract, at zero measured cost. `terminal-stream-frame-shots.mjs`
+now measures the PAINTED pixel (a real screenshot, decoded back through the
+page's own compositor, never `getComputedStyle`) at opacity 1 and 0.6, in
+both themes, against `TerminalTab.tsx`'s own; both match within a small
+(≤5-per-channel) tolerance measured against a genuine, reproducible
+Chromium compositing-layer rounding in light theme's near-white ground
+(absent in dark), not against a logic defect -- see that guard's own header
+for the falsification and the measurement.
 
 **Why the row height needed a SEPARATE constant
 (`TERMINAL_STREAM_LINE_HEIGHT`, not `TERMINAL_LINE_HEIGHT` again).** The two
