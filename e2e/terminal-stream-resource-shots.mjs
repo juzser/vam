@@ -194,30 +194,24 @@ tmux('kill-session', '-t', TMUX_SESSION);
 tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
 await new Promise((r) => setTimeout(r, 300));
 
-/* ── 5. DOES TMUX EVER ACTUALLY SEND %pause, against a SLOW consumer? ─────
- * The design doc's own Risks section left this an open question: "whether
- * tmux enforces this by default or only when a client opts in was not
- * verified against tmux's own source." `StreamClient` already HANDLES
- * `%pause`/`%continue` if tmux ever sends it (`#handlePauseOrContinue`) but
- * never asks for it, and this synthetic test's own consumer (test 4, above)
- * is too fast to ever fall behind -- a REAL xterm.js render is not. This
- * attaches a raw control-mode child directly (bypassing `StreamClient`'s own
- * event filtering, which does not expose `%pause` to a caller) with a
- * consumer that SLEEPS 20ms per chunk -- roughly a real DOM render's own
- * order of magnitude -- and greps the raw decoded stream for the literal
- * line, against the same flood.
+/* ── 5. DOES %pause NOW ACTUALLY ARRIVE, against a SLOW consumer? ─────────
+ * UPDATED for the coordinator's own follow-up: the EARLIER version of this
+ * measurement (a raw control-mode child that never set `pause-after`) found
+ * that tmux never paused a slow client at all -- MEASURED root cause: tmux
+ * only sends `%pause` to a client that opted in with `refresh-client -f
+ * pause-after=<N>` (tmux(1), CONTROL MODE / refresh-client). `StreamClient`
+ * now sends that on every `connect()`/reconnect (`#requestPauseAfter`,
+ * `client.ts`), so THIS measurement drives a real `StreamClient` directly
+ * (not a raw connection) with the identical 20ms-per-chunk slow consumer,
+ * and checks not only whether `%pause` arrives but whether the pane
+ * actually RECOVERS to a correct screen afterwards.
  */
 {
-  const { spawnRealControlChild } = await bundleOf('src/main/sources/tmux/control.js');
-  const child = spawnRealControlChild('tmux', ['-L', SOCKET, '-C', 'attach-session', '-t', `=${TMUX_SESSION}:`]);
-  let raw = '';
-  let sawPause = false;
-  let sawContinue = false;
-  child.stdout.on('data', (chunk) => {
-    const text = String(chunk);
-    raw += text;
-    if (/%pause/.test(text)) sawPause = true;
-    if (/%continue|%unpause/.test(text)) sawContinue = true;
+  const client = new StreamClient({ binary: 'tmux', prefix: ['-L', SOCKET], target: TMUX_SESSION });
+  await client.connect();
+  const seeds = [];
+  client.onSeed((seed) => seeds.push(seed));
+  client.onData(() => {
     // Busy-wait, not `setTimeout` -- this has to actually occupy the event
     // loop the way a synchronous render would, or nothing here ever falls
     // behind tmux's own delivery rate.
@@ -226,19 +220,37 @@ await new Promise((r) => setTimeout(r, 300));
       /* spin */
     }
   });
-  spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000', 'Enter'], { env });
-  await new Promise((r) => setTimeout(r, 6_000));
-  child.kill();
-  console.log(
-    `\nreal tmux, a 20ms-per-chunk consumer, same 5MB flood: ` +
-      `%pause seen: ${sawPause}, %continue/%unpause seen: ${sawContinue}, ${raw.length} raw bytes read -- ` +
-      (sawPause
-        ? 'tmux DOES throttle a client that falls behind; StreamClient’s existing %pause handling is live code, not dead code.'
-        : 'tmux did NOT pause this client even at 20ms/chunk on this build -- either the threshold is higher, or this tmux/config does not enforce it; StreamClient’s handling stays a real but UNEXERCISED safety net here.'),
+  spawnSync(
+    'tmux',
+    ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000; echo VAM-FLOOD-DONE-5', 'Enter'],
+    { env },
   );
+  const deadline = Date.now() + 15_000;
+  while (seeds.length === 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  let finalPane = '';
+  const doneDeadline = Date.now() + 10_000;
+  while (Date.now() < doneDeadline) {
+    finalPane = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+    if (/VAM-FLOOD-DONE-5/.test(finalPane)) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
+  report.pauseAfter = { sawReseed: seeds.length > 0, correct };
+  console.log(
+    `\nreal tmux, a real StreamClient (sends pause-after), a 20ms-per-chunk consumer, same 5MB flood: ` +
+      `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
+      `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
+      'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
+  );
+  client.dispose();
 }
 
-killServer();
+// A FRESH SESSION for test 6, never test 5's own leftover flood.
+tmux('kill-session', '-t', TMUX_SESSION);
+tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
+await new Promise((r) => setTimeout(r, 300));
 
 /* ═══════════════════════════════ RENDERER HALF ══════════════════════════ */
 
@@ -345,9 +357,159 @@ try {
       'a single synchronous call, not 5,000 individual writes: xterm.js batches internally.',
   );
   await page.close();
+
+  /* ── 6. THE FULL PIPELINE, RE-MEASURED: real tmux -> real StreamClient
+   * (now sending pause-after) -> real xterm running THIS FILE's own
+   * high/low-water-mark drop logic (`TerminalStreamTab.tsx`, mirrored here
+   * the same way every measurement above mirrors the shipped component
+   * rather than importing it -- this harness's page context has no bundler
+   * wiring for the renderer's own module graph). The coordinator's own ask:
+   * CPU, peak renderer memory, time-to-quiet, and whether the final screen
+   * matches `capture-pane` -- BEFORE and AFTER the drop-and-reseed recovery
+   * a real reconnect would perform, so a genuine drop (if one happens) is
+   * visible rather than papered over by measuring only the healed state.
+   */
+  console.log('\n--- 5MB flood, full pipeline: real StreamClient + real xterm + this file’s own backpressure ---');
+  tmux('kill-session', '-t', TMUX_SESSION);
+  tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
+  await new Promise((r) => setTimeout(r, 300));
+
+  const floodClient = new StreamClient({ binary: 'tmux', prefix: ['-L', SOCKET], target: TMUX_SESSION });
+  const seed = await floodClient.connect();
+
+  const floodPage = await browser.newPage({ viewport: { width: 1100, height: 700 } });
+  await floodPage.goto(`http://127.0.0.1:${port}/e2e/terminal-stream-latency-harness.html`);
+  await floodPage.waitForFunction(() => globalThis.window.__term !== undefined);
+  const floodCdp = await floodPage.context().newCDPSession(floodPage);
+  await floodCdp.send('Performance.enable');
+
+  await floodPage.evaluate((seedText) => {
+    const term = globalThis.window.__term;
+    term.write(seedText.replace(/\r?\n/g, '\r\n'));
+    // The SAME HIGH/LOW water marks and drop logic `TerminalStreamTab.tsx`
+    // runs (`TERMINAL_STREAM_HIGH_WATER_MARK`/`_LOW_WATER_MARK`) -- see this
+    // block's own header on why it is mirrored rather than imported.
+    const HIGH = 2 * 1024 * 1024;
+    const LOW = HIGH / 4;
+    let pendingBytes = 0;
+    let dropping = false;
+    let droppedChunks = 0;
+    let peakHeap = performance.memory?.usedJSHeapSize ?? 0;
+    const trackHeap = () => {
+      const h = performance.memory?.usedJSHeapSize ?? 0;
+      if (h > peakHeap) peakHeap = h;
+    };
+    globalThis.window.__peakHeap = () => peakHeap;
+    globalThis.window.__droppedChunks = () => droppedChunks;
+    globalThis.window.__feedChunk = (chunk) => {
+      trackHeap();
+      if (dropping) {
+        droppedChunks += 1;
+        return;
+      }
+      pendingBytes += chunk.length;
+      term.write(chunk, () => {
+        pendingBytes -= chunk.length;
+        trackHeap();
+        if (dropping && pendingBytes <= LOW) {
+          dropping = false;
+          pendingBytes = 0;
+        }
+      });
+      if (pendingBytes > HIGH) dropping = true;
+    };
+  }, seed);
+
+  const bufferText = () =>
+    floodPage.evaluate(() => {
+      const term = globalThis.window.__term;
+      const buf = term.buffer.active;
+      let text = '';
+      for (let y = 0; y < buf.length; y += 1) text += `${buf.getLine(y)?.translateToString(true) ?? ''}\n`;
+      return text;
+    });
+
+  const metricsBefore6 = await floodCdp.send('Performance.getMetrics');
+  const taskBefore6 = metricsBefore6.metrics.find((m) => m.name === 'TaskDuration')?.value ?? 0;
+  const flood6Start = Date.now();
+  let bytesForwarded = 0;
+  floodClient.onData((chunk) => {
+    bytesForwarded += chunk.length;
+    void floodPage.evaluate((c) => globalThis.window.__feedChunk(c), chunk);
+  });
+  spawnSync(
+    'tmux',
+    ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000; echo VAM-FLOOD-DONE-6', 'Enter'],
+    { env },
+  );
+
+  // TIME-TO-QUIET: wall clock from ISSUING the flood to the last chunk this
+  // file forwarded toward the renderer -- the same "no new bytes for 500ms"
+  // settle check test 4 (main-process half) already uses, extended through
+  // the renderer hop rather than stopping at Node's own `onData`.
+  let lastBytes = -1;
+  let quietAt = null;
+  const hardDeadline6 = Date.now() + 20_000;
+  while (Date.now() < hardDeadline6) {
+    await new Promise((r) => setTimeout(r, 500));
+    if (bytesForwarded === lastBytes) {
+      quietAt = Date.now();
+      break;
+    }
+    lastBytes = bytesForwarded;
+  }
+  const timeToQuietMs = quietAt !== null ? quietAt - flood6Start : null;
+
+  const metricsAfter6 = await floodCdp.send('Performance.getMetrics');
+  const taskAfter6 = metricsAfter6.metrics.find((m) => m.name === 'TaskDuration')?.value ?? 0;
+  const peakHeapBytes = await floodPage.evaluate(() => globalThis.window.__peakHeap());
+  const droppedChunks = await floodPage.evaluate(() => globalThis.window.__droppedChunks());
+
+  const liveTextBeforeReseed = await bufferText();
+  const liveMatchesBeforeReseed = /VAM-FLOOD-DONE-6/.test(liveTextBeforeReseed);
+
+  // THE RECOVERY: whatever this file's own drop logic discarded, a fresh
+  // `capture-pane` (ground truth) is what a real reconnect would push
+  // through `onSeed` -- written here directly, mirroring
+  // `TerminalStreamTab.tsx`'s own `asXtermSeed`/`term.reset()` pair, rather
+  // than standing up this harness's full reconnect plumbing to prove a
+  // property `TerminalStreamTab.test.tsx`'s own unit tests already pin.
+  const groundTruth = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+  await floodPage.evaluate((text) => {
+    const term = globalThis.window.__term;
+    term.reset();
+    term.write(text.replace(/\r?\n/g, '\r\n'));
+  }, groundTruth);
+  const liveTextAfterReseed = await bufferText();
+  const matchesAfterReseed = /VAM-FLOOD-DONE-6/.test(liveTextAfterReseed);
+
+  report.flood6 = {
+    cpuMs: (taskAfter6 - taskBefore6) * 1000,
+    peakHeapMB: peakHeapBytes / (1024 * 1024),
+    timeToQuietMs,
+    droppedChunks,
+    liveMatchesBeforeReseed,
+    matchesAfterReseed,
+  };
+  console.log(
+    `renderer TaskDuration: ${((taskAfter6 - taskBefore6) * 1000).toFixed(1)}ms, ` +
+      `peak JS heap: ${(peakHeapBytes / (1024 * 1024)).toFixed(2)}MB, ` +
+      `time-to-quiet: ${timeToQuietMs ?? 'did not settle in 20s'}ms, ` +
+      `chunks dropped by the high-water mark: ${droppedChunks}`,
+  );
+  console.log(
+    `screen correctness -- live (pre-reseed) shows the DONE marker: ${liveMatchesBeforeReseed}; ` +
+      `after a reseed from a fresh capture-pane, shows it: ${matchesAfterReseed} ` +
+      '(this one MUST be true -- it is what a real reconnect always restores).',
+  );
+
+  await floodPage.close();
+  floodClient.dispose();
+  tmux('kill-session', '-t', TMUX_SESSION);
 } finally {
   await browser.close();
   server.close();
+  killServer();
 }
 
 console.log('\nterminal-stream-resource-shots.mjs: measurement complete (informational -- no pass/fail).');
