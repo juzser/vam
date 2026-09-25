@@ -279,9 +279,7 @@ export function TerminalStreamTab(props: {
             if (raw === '') return;
             const text = preparePastedText(raw);
             if (text === '') return;
-            const payload = liveTerm.modes.bracketedPasteMode
-              ? `\x1b[200~${text}\x1b[201~`
-              : text;
+            const payload = liveTerm.modes.bracketedPasteMode ? `\x1b[200~${text}\x1b[201~` : text;
             const currentStreamId = streamIdRef.current;
             if (currentStreamId !== null) {
               openBridge.write(currentStreamId, new TextEncoder().encode(payload));

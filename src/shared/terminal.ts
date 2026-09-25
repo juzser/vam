@@ -687,9 +687,7 @@ export function isPaneKey(value: unknown): value is PaneKey {
   // A paste is bounded by its OWN, much larger constant -- never `MAX_KEY_TEXT`,
   // which exists to bound a keystroke, not a clipboard.
   if (key.kind === 'paste') {
-    return (
-      typeof key.text === 'string' && key.text.length > 0 && key.text.length <= MAX_PASTE_TEXT
-    );
+    return typeof key.text === 'string' && key.text.length > 0 && key.text.length <= MAX_PASTE_TEXT;
   }
   // Every number a report carries is bounded here and only here, so main can
   // format them without a clamp of its own: a clamp is a value invented for

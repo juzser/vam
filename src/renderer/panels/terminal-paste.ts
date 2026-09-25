@@ -55,6 +55,7 @@ import { MAX_PASTE_TEXT } from '../../shared/terminal.js';
 
 /** Either bracket sentinel, with its ESC byte captured separately so the
  *  replacement below can drop exactly that one byte and keep the rest. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching the literal ESC byte is the whole point -- it is the one byte of a forged bracket marker this pattern exists to find.
 const BRACKET_MARKER = /\x1b(\[20[01]~)/g;
 
 /**
@@ -77,6 +78,7 @@ function truncateAtCodePoint(text: string, limit: number): string {
 
 export function preparePastedText(raw: string, limit: number = MAX_PASTE_TEXT): string {
   const bounded = truncateAtCodePoint(raw, limit);
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: NUL is the one byte this step exists to strip.
   const withoutNul = bounded.replace(/\u0000/g, '');
   // `\r\n` matched before a bare `\n` in the same alternation, so a CRLF pair
   // is consumed WHOLE and becomes one CR -- matched the other way around, the

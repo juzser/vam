@@ -18,8 +18,8 @@
 
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { preparePastedText } from '../../src/renderer/panels/terminal-paste.js';
 import { TerminalTab } from '../../src/renderer/panels/TerminalTab.js';
+import { preparePastedText } from '../../src/renderer/panels/terminal-paste.js';
 import type { PaneKey, PaneSendResult, PaneView } from '../../src/shared/terminal.js';
 
 afterEach(cleanup);
