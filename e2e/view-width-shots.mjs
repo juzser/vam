@@ -224,15 +224,26 @@ const browser = await chromium.launch();
  * ago — between the write and the reload. Init scripts run before any page
  * script, and they STACK in registration order, so the last one registered is
  * the one in force.
+ *
+ * `sortBy: 'needs-you'` IS SEEDED HERE TOO, PINNED. Every demo fixture
+ * session carries no `createdAt`, so `Created` (the shipped default since
+ * the sort-by-created feature) orders them alphabetically by id — which
+ * disagrees with the `needs-you` order this whole file was measured
+ * against, including which session a plain `openDemo(page, false)` lands on
+ * with no explicit row click (the app auto-selects the sidebar's first
+ * entry). Pinning keeps `factory-sse-1` first, as every assertion below
+ * assumes.
  */
 async function openDemo(target, narrow, { phone = false, outFontSize } = {}) {
   await target.addInitScript(
     ([value, size]) => {
       globalThis.localStorage.setItem(
         'vam.prefs.v1',
-        JSON.stringify(
-          size === undefined ? { narrowViews: value } : { narrowViews: value, outFontSize: size },
-        ),
+        JSON.stringify({
+          ...(size === undefined ? { narrowViews: value } : { narrowViews: value, outFontSize: size }),
+          viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+          sortByMigrated: true,
+        }),
       );
     },
     [narrow, outFontSize],
