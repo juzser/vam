@@ -47,6 +47,36 @@ describe('the shortcut editor paints each platform’s own keyboard', () => {
     });
   });
 
+  /**
+   * THE SLOT USED TO PAINT `chordSymbols` AS A FLAT STRING — #471/#482 routed
+   * every other chip in the app through `ChordGlyphs`, which wraps a Mac
+   * glyph segment (⌘⇧⌥⌃, a named key) in the body sans stack so it reads like
+   * the Send key option (`data-submit-key-option`) rather than thin in Geist
+   * Mono. A slot's `SLOT_BOX` is `font-mono`, exactly the ambient face
+   * `ChordGlyphs`' own doc comment names as the one that draws a noticeably
+   * narrower ⌘ — so this list was the one surface the wrap never reached.
+   * `.textContent` stays identical either way (`chordSymbols` character for
+   * character — `ChordGlyphs`' own contract), which is why the test above
+   * cannot see this defect and a span has to be inspected directly.
+   */
+  it('paints a slot’s glyph segments in the sans stack, matching the Send key option', () => {
+    onBothPlatforms((mac) => {
+      open();
+      const kbd = slot('palette')?.querySelector('[data-settings-keys]');
+      const span = kbd?.querySelector('span');
+      if (mac) {
+        expect(span?.textContent).toBe('⌘');
+        expect(span?.className).toContain('font-sans');
+      } else {
+        // Off a Mac nothing is tagged a glyph at all — the word spellings are
+        // untouched, exactly as `ChordGlyphs` leaves them everywhere else.
+        expect(span).toBeNull();
+      }
+      expect(kbd?.textContent).toBe(mac ? '⌘ K' : 'Ctrl+K');
+      cleanup();
+    });
+  });
+
   it('leaves no token spelling anywhere in the list', () => {
     onBothPlatforms(() => {
       open();

@@ -297,8 +297,12 @@ export function SettingsOverlay({
     const clash = newClashes(prefs.keyBindings, next)[0];
     if (clash !== undefined) {
       const other = clash.winner === editing ? (clash.shadowed[0] ?? clash.winner) : clash.winner;
+      // RENDERED, NOT THE STORED TOKEN — the same rule the reserved-key
+      // refusal below already states out loud: the quoted key is named the
+      // way the operator's own keyboard makes it (⌘K on a Mac, Ctrl+K off
+      // one), never the grammar's internal `Mod-k` spelling.
       setMessage(
-        `"${clash.chord}" already does: ${labelFor(next, other)} — move that first, or use "reset shortcuts"`,
+        `"${chordSymbols(clash.chord)}" already does: ${labelFor(next, other)} — move that first, or use "reset shortcuts"`,
       );
       return;
     }
@@ -1333,7 +1337,11 @@ export function SettingsOverlay({
                       {clashes
                         .map(
                           (clash) =>
-                            `two actions claim "${clash.chord}" — ${labelFor(prefs.keyBindings, clash.winner)} has it, ${clash.shadowed
+                            // RENDERED, AS ABOVE — `clash.chord` is the same
+                            // grammar token `bind`'s own refusal carries, and
+                            // the standing notice owes the operator the same
+                            // symbols rather than its internal spelling.
+                            `two actions claim "${chordSymbols(clash.chord)}" — ${labelFor(prefs.keyBindings, clash.winner)} has it, ${clash.shadowed
                               .map((id) => labelFor(prefs.keyBindings, id))
                               .join(', ')} does not.`,
                         )
@@ -1893,11 +1901,25 @@ function BindingLine({
                   : 'border-waiting bg-transparent text-ink-dim line-through'
             }`}
           >
-            {said === undefined ? (
+            {keys === undefined ? (
               <Plus size={12} strokeWidth={2} className="mx-auto" aria-hidden="true" />
             ) : (
+              // PAINTED THROUGH `ChordGlyphs`, NOT `said` DIRECTLY — every
+              // other chip in the app (`ShortcutTip.tsx`'s `Chip`/
+              // `InlineChord`, `KeySheet.tsx`, `CommandPalette.tsx`, the
+              // phone's key strip) reaches for it so a Mac glyph segment gets
+              // the body sans stack the Send key option's own ambient font
+              // already gives its buttons (`ChordGlyphs`' own doc comment).
+              // A slot's `SLOT_BOX` is `font-mono`, exactly the ambient face
+              // that comment names as the one that draws a noticeably
+              // narrower ⌘ — so painting `said` here as a flat string left
+              // this list the one surface the wrap never reached. `.textContent`
+              // is unchanged either way: `ChordGlyphs` still equals
+              // `chordSymbols` character for character, which is what keeps
+              // `said` itself in `title`/`aria-label` below correct — those
+              // are native string attributes with no element to wrap.
               <kbd data-settings-keys className="border-none bg-transparent">
-                {said}
+                <ChordGlyphs chord={keys} />
               </kbd>
             )}
           </button>
