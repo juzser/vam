@@ -334,10 +334,7 @@ export function isAgentWorktreeSession(session: Session): boolean {
  * asking the operator something must stay reachable however this toggle is
  * set. Every other status hides normally.
  */
-export function isHiddenByAgentWorktreeFilter(
-  session: Session,
-  filters: SessionFilters,
-): boolean {
+export function isHiddenByAgentWorktreeFilter(session: Session, filters: SessionFilters): boolean {
   if (!filters.hideAgentWorktrees) return false;
   if (session.status === 'waiting') return false;
   return isAgentWorktreeSession(session);

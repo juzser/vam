@@ -205,9 +205,9 @@ describe('the Sort by drill-in', () => {
   it('shows Created checked at the shipped default', () => {
     const { container } = mount();
     fireEvent.click(container.querySelector('[data-sort-by-open]') as Element);
-    expect(container.querySelector('[data-sort-by-option="created"]')?.getAttribute('aria-checked')).toBe(
-      'true',
-    );
+    expect(
+      container.querySelector('[data-sort-by-option="created"]')?.getAttribute('aria-checked'),
+    ).toBe('true');
   });
 
   it('writes the pref, keeping groupBy untouched, and returns to the main view', () => {

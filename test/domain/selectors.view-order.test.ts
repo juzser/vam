@@ -159,10 +159,7 @@ describe('applyViewOrder — sortBy: created', () => {
   it('does not reorder when only status changes -- the whole point of the operator’s ask', () => {
     const input = [
       entry(alpha, session('a1', 'a1', { createdAt: '2026-01-01T00:00:00.000Z', status: 'idle' })),
-      entry(
-        alpha,
-        session('a2', 'a2', { createdAt: '2026-01-02T00:00:00.000Z', status: 'idle' }),
-      ),
+      entry(alpha, session('a2', 'a2', { createdAt: '2026-01-02T00:00:00.000Z', status: 'idle' })),
     ];
     const before = applyViewOrder(input, view({ sortBy: 'created' })).map((e) => e.session.id);
     const afterStatusChange = [

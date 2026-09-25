@@ -539,7 +539,11 @@ export async function listVamSessions(run: TmuxRun): Promise<TmuxSessions> {
     // fragment as a timestamp.
     const sixthTab = fifthTab === -1 ? -1 : line.indexOf('\t', fifthTab + 1);
     const cwd = (
-      fifthTab === -1 ? '' : sixthTab === -1 ? line.slice(fifthTab + 1) : line.slice(fifthTab + 1, sixthTab)
+      fifthTab === -1
+        ? ''
+        : sixthTab === -1
+          ? line.slice(fifthTab + 1)
+          : line.slice(fifthTab + 1, sixthTab)
     ).trim();
     const sessionCreated = sixthTab === -1 ? '' : line.slice(sixthTab + 1).trim();
     sessions.push({

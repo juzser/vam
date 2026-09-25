@@ -145,7 +145,10 @@ describe('a Codex row', () => {
   });
 
   it('is null for a rollout path that does not carry Codex’s own timestamp shape', async () => {
-    const [project] = await projectsFrom([row({ rolloutPath: '/invented/not-a-rollout.jsonl' })], NOW);
+    const [project] = await projectsFrom(
+      [row({ rolloutPath: '/invented/not-a-rollout.jsonl' })],
+      NOW,
+    );
     expect(project?.sessions[0]?.createdAt).toBeNull();
   });
 
@@ -167,7 +170,14 @@ describe('a Codex row', () => {
   });
 
   it('is absent, not false, when the injected check says no', async () => {
-    const [project] = await projectsFrom([row()], NOW, () => 'unknown', new Set(), null, async () => false);
+    const [project] = await projectsFrom(
+      [row()],
+      NOW,
+      () => 'unknown',
+      new Set(),
+      null,
+      async () => false,
+    );
     expect(project?.sessions[0]).not.toHaveProperty('isAgentWorktree');
   });
 

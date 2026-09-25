@@ -299,10 +299,7 @@ async function rowForEmptyPane(
   // Same seam and same default as `loadClaudeCodeProjects`'s own parameter
   // -- this function is its helper, not a second source of truth about how
   // the check is made.
-  isAgentWorktreeOf: (
-    cwd: string,
-    branch: string | null,
-  ) => Promise<boolean> = isAgentWorktreeCwd,
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<Session> {
   const sessionId = empty.vamSessionId;
   const path = sessionId === undefined || sessionId === '' ? undefined : index.get(sessionId);
@@ -476,10 +473,7 @@ export async function loadClaudeCodeProjects(
   // Injectable for the same reason as `branchOf`: a test hands over an
   // invented answer rather than resolving a real path on the machine
   // running it. `CLAUDE_CODE_SOURCE` passes the real `isAgentWorktreeCwd`.
-  isAgentWorktreeOf: (
-    cwd: string,
-    branch: string | null,
-  ) => Promise<boolean> = isAgentWorktreeCwd,
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<readonly Project[]> {
   const index = await indexTranscripts(root);
   // What the sessions publish about themselves: `sessionId` -> tmux session,
@@ -727,9 +721,7 @@ export async function loadClaudeCodeProjects(
         grouped.set(cwd, bucket);
         byProjectId.set(projectId, bucket);
       }
-      bucket.sessions.push(
-        await rowForEmptyPane(empty, index, reads, nowMs, isAgentWorktreeOf),
-      );
+      bucket.sessions.push(await rowForEmptyPane(empty, index, reads, nowMs, isAgentWorktreeOf));
     }
   }
 

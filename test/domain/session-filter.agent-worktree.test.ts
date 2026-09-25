@@ -71,9 +71,7 @@ describe('isAgentWorktreeSession', () => {
 
 describe('isHiddenByAgentWorktreeFilter', () => {
   it('hides an agent worktree session while the rule is in force', () => {
-    expect(
-      isHiddenByAgentWorktreeFilter(session({ isAgentWorktree: true }), filters()),
-    ).toBe(true);
+    expect(isHiddenByAgentWorktreeFilter(session({ isAgentWorktree: true }), filters())).toBe(true);
   });
 
   it('never hides an ordinary session', () => {

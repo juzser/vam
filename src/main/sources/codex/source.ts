@@ -347,10 +347,7 @@ async function sessionFor(
   // load -- see `Session.vamListingGap`. `null` is the ordinary case.
   vamListingGap: { readonly code: string; readonly message: string } | null = null,
   // Same seam `claude-code/source.ts`'s own parameter of the same name is.
-  isAgentWorktreeOf: (
-    cwd: string,
-    branch: string | null,
-  ) => Promise<boolean> = isAgentWorktreeCwd,
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<Session> {
   let facts: Awaited<ReturnType<typeof readRolloutTail>> | null = null;
   try {
@@ -438,10 +435,7 @@ export async function projectsFrom(
   vamSessionIds: ReadonlySet<string> | null = new Set(),
   vamListingGap: { readonly code: string; readonly message: string } | null = null,
   // See `sessionFor`'s own doc.
-  isAgentWorktreeOf: (
-    cwd: string,
-    branch: string | null,
-  ) => Promise<boolean> = isAgentWorktreeCwd,
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<readonly Project[]> {
   const byProject = new Map<string, { cwd: string; sessions: Session[] }>();
   const order: string[] = [];
