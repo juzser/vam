@@ -475,7 +475,19 @@ export type PaneKey =
       readonly ticks: number;
       readonly column: number;
       readonly row: number;
-    };
+    }
+  /**
+   * A REAL PASTE -- the operator's clipboard, delivered by a `paste` event
+   * the browser handed over unprompted, never a keystroke. It is its own
+   * kind rather than a longer `text` for the reason `MAX_KEY_TEXT` exists at
+   * all: `text` is bounded to what one keydown could ever produce, and a
+   * paste routinely carries a whole file. `sources/tmux/argv.ts`'s
+   * `sendPasteArgv` delivers it through tmux's OWN paste buffer
+   * (`set-buffer`/`paste-buffer -p`) rather than one `send-keys -l` per
+   * chunk, so tmux -- not this bridge -- decides whether the pane's own
+   * program asked for bracketed paste.
+   */
+  | { readonly kind: 'paste'; readonly text: string };
 
 /**
  * The most notches one wheel key may carry. A trackpad fling accumulates
@@ -608,6 +620,20 @@ export function isNavKey(value: unknown): value is NavKey {
 export const MAX_KEY_TEXT = 16;
 
 /**
+ * The longest a REAL paste may carry, in code points -- deliberately far
+ * above `MAX_KEY_TEXT`, because a `paste` key is not a keystroke and is not
+ * bounded by what one keydown could ever produce.
+ *
+ * SAME MAGNITUDE AS `MAX_CLIPBOARD_LENGTH` (`main/clipboard/ipc.ts`), and for
+ * the identical reason: this is not a guess at how big a real paste is, it is
+ * a backstop against a renderer that is no longer vam's handing main an
+ * unbounded string. `renderer/panels/terminal-paste.ts`'s `preparePastedText`
+ * truncates to exactly this bound before a `paste` key is ever built, so a
+ * legitimate paste never reaches `isPaneKey` only to be refused as malformed.
+ */
+export const MAX_PASTE_TEXT = 1_000_000;
+
+/**
  * What became of one keystroke. FIVE ANSWERS, and the split exists because a
  * boolean made the tab lie.
  *
@@ -658,6 +684,13 @@ export function isPaneKey(value: unknown): value is PaneKey {
   // bounded in length: `letter` and `nav` are looked up, never spliced.
   if (key.kind === 'control') return isControlLetter(key.letter);
   if (key.kind === 'nav') return isNavKey(key.nav);
+  // A paste is bounded by its OWN, much larger constant -- never `MAX_KEY_TEXT`,
+  // which exists to bound a keystroke, not a clipboard.
+  if (key.kind === 'paste') {
+    return (
+      typeof key.text === 'string' && key.text.length > 0 && key.text.length <= MAX_PASTE_TEXT
+    );
+  }
   // Every number a report carries is bounded here and only here, so main can
   // format them without a clamp of its own: a clamp is a value invented for
   // a caller that sent one main would not have.
