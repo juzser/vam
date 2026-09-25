@@ -49,20 +49,43 @@
       // "painted" means after the browser actually laid the frame out, and
       // the spike's own stream-harness.html on why `baseY` (not row 0) is
       // the true top of the VIEWPORT once anything has scrolled.
+      //
+      // `artificialPaintDelayMs` (query param, default 0): a FALSIFICATION
+      // knob only, never used by a real run -- terminal-stream-latency-
+      // shots.mjs's own task report holds the falsification, injecting a
+      // delay here between "xterm actually rendered" and "the harness
+      // recorded the paint" to prove the p95 checks below actually go red
+      // for a real regression rather than passing no matter what.
+      const __artificialPaintDelayMs = Number(
+        new URLSearchParams(location.search).get('artificialPaintDelayMs') ?? '0',
+      );
       window.__paints = [];
       term.onRender(() => {
-        requestAnimationFrame(() => {
-          const buf = term.buffer.active;
-          let text = '';
-          for (let y = 0; y < term.rows; y += 1) {
-            text += `${buf.getLine(buf.baseY + y)?.translateToString(true) ?? ''}\n`;
-          }
-          window.__paints.push({
-            epoch: performance.timeOrigin + performance.now(),
-            t: performance.now(),
-            text,
+        // The TEXT is read synchronously, right here at the real render --
+        // never inside the delayed callback below. Reading it late would
+        // let a LATER write's content leak into an EARLIER, still-delayed
+        // paint record once enough writes have landed in between (measured
+        // while building this falsification lever: burst/echo bursts write
+        // fast enough that a delayed buffer read often already showed the
+        // NEXT marker, undercounting the injected delay). Only the RECORD
+        // -- when this paint becomes visible to the measuring script -- is
+        // delayed, which is what "a slow paint" actually means.
+        const buf = term.buffer.active;
+        let text = '';
+        for (let y = 0; y < term.rows; y += 1) {
+          text += `${buf.getLine(buf.baseY + y)?.translateToString(true) ?? ''}\n`;
+        }
+        const commit = () => {
+          requestAnimationFrame(() => {
+            window.__paints.push({
+              epoch: performance.timeOrigin + performance.now(),
+              t: performance.now(),
+              text,
+            });
           });
-        });
+        };
+        if (__artificialPaintDelayMs > 0) setTimeout(commit, __artificialPaintDelayMs);
+        else commit();
       });
 
       window.__keydowns = [];
@@ -80,7 +103,14 @@
         const seed = await window.__realConnect();
         term.write(seed);
       };
+      // Counted separately from the seed write above: this is the number of
+      // `term.write()` calls a burst of PROGRAM OUTPUT actually costs, which
+      // is what `terminal-stream-latency-shots.mjs`'s own batching check
+      // reads -- one call per `%output` NOTIFICATION `ControlFramer` handed
+      // `StreamClient`, not one per line/byte tmux's own pty produced.
+      window.__outputWriteCount = 0;
       window.__deliverOutput = (chunk) => {
+        window.__outputWriteCount += 1;
         term.write(chunk);
       };
       // The SHIPPED `StreamClient.write(text: string)` takes the raw string

@@ -21,24 +21,42 @@
  * file's own header for why it needs a static HTTP server rather than
  * `file://`.
  *
- * THREE MEASUREMENTS, matching the spike's own two scripts' shape:
- *   1. keydown -> paint, steady typing cadence (n>=30, matching this
- *      branch's OTHER latency guard's sample-size convention)
+ * THREE MEASUREMENTS, matching the spike's own two scripts' shape, EACH
+ * WITH A WALL-CLOCK CEILING (criterion (b) of this task's own brief -- see
+ * the bound constants below for the calibration and the headroom) AND A
+ * RETRY-ONCE-ALONE (criterion (c)): if a p95 misses its bound on the first
+ * pass, the SAME measurement is taken fresh, once, before the guard fails
+ * for real -- this guard already runs alone (`run-web-guards.mjs` runs its
+ * list serially, and this file owns a private tmux socket nothing else
+ * touches), so "alone" is already true; what the retry adds is a second,
+ * independent sample rather than re-reading numbers a one-off scheduling
+ * blip already produced (`starvation-stretches-11ms-to-5022ms` is the
+ * standing reason a single miss is not trusted outright):
+ *   1. keydown -> paint, steady typing cadence (n=50)
  *   2. print -> paint, one `echo` at a time (n=30, matching the spike's own
  *      `measure-stream-prototype-latency.mjs` TEST 2)
  *   3. print -> paint, a burst (`yes | head -n N`, matching the spike's own
- *      TEST 3)
+ *      TEST 3), plus a STRUCTURAL, non-wall-clock check alongside it: how
+ *      many `term.write()` calls the burst actually cost, which should stay
+ *      far below the ~2000 lines the burst prints -- tmux's own
+ *      control-mode framer batches multiple pty reads into one `%output`
+ *      notification, so a healthy burst writes xterm tens of times, not
+ *      once per line.
  *
- * Run TWICE by the caller (see the task report) to show machine-load
- * variance honestly, exactly like the design doc's own existing tables
- * already do for the poll path's before/after numbers.
+ * TWO MORE STRUCTURAL CHECKS, deterministic and preferred over a second
+ * wall-clock number wherever they can express the same property (this
+ * task's own brief): exactly one tmux control-mode client is attached to
+ * the streamed session for the life of this guard's own connection, and
+ * zero remain once it disposes -- the same "one client per open view, zero
+ * once it closes" invariant `docs/design/terminal-streaming.md`'s own Risks
+ * section names for a real Terminal-stream tab.
  *
  * `tmux -L vam-stream-e2e-latency`, killed on the way out -- a DISTINCT
  * socket from `terminal-typing-latency-shots.mjs`'s own `vam-e2e-latency`,
  * so the two guards never collide if run concurrently on this shared
  * machine.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createReadStream, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -47,12 +65,81 @@ import { extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright-core';
 
-const outDir = process.argv[2] ?? 'docs/ui';
+/**
+ * `argv[3] ?? argv[2]`, not a bare `argv[2]` -- `run-web-guards.mjs` calls
+ * every guard in its list as `node e2e/<guard>.mjs <origin> <outDir>`. This
+ * script has never needed `origin` (it serves its own throwaway harness
+ * HTTP server, never the built web bundle `vite preview` answers), but once
+ * registered in that list `argv[2]` IS the origin string, not an outDir --
+ * `argv[3]` is. Falls back to `argv[2]` so a manual one-argument invocation
+ * (`node e2e/terminal-stream-latency-shots.mjs docs/ui`) still works
+ * unchanged, the same two-shape contract `shell-first-ctrlc-survives.mjs`
+ * documents for the same reason (that file ignores both argv slots
+ * entirely; this one only ignores `origin`).
+ */
+const outDir = process.argv[3] ?? process.argv[2] ?? 'docs/ui';
 
 const SOCKET = 'vam-stream-e2e-latency';
 const TMUX_SESSION = 'vam-stream-e2e-latency-a1b2c3';
 const COLUMNS = 137;
 const ROWS = 41;
+
+/**
+ * Generous absolute ceilings (criterion (b) in this task's own brief), not
+ * ratios: these three tests have no in-run poll-path baseline to ratio
+ * against -- this script measures the streaming path alone, via its own
+ * throwaway harness, in a different process against a different server than
+ * `terminal-typing-latency-shots.mjs` (which DOES measure the poll path and
+ * has its own in-run background-interval structural checks).
+ *
+ * Calibrated by running this guard 11x, serially, on a shared MacBook that
+ * got visibly busier partway through (this task's own report holds the
+ * full transcript, including the one run that named the noise):
+ *   typing p95: 10.00 - 12.60ms across 6 measured runs (worst 12.60ms)
+ *   echo   p95: 36.00 - 92.70ms across 9 measured runs (worst 92.70ms, the
+ *               one run on the busier machine)
+ *   burst  p95: 45.60 - 189.60ms across 9 measured runs (worst 189.60ms,
+ *               same busier run -- burst is the noisiest of the three, the
+ *               smallest sample (n=5) and the heaviest paint)
+ * plus two earlier "shipped path" runs already on record
+ * (`docs/design/terminal-streaming.md`'s own "After: the SHIPPED path"
+ * table, a different session, same machine): typing 18.40 / 16.70ms, echo
+ * 58.90 / 72.70ms, burst 79.00 / 161.90ms -- all inside the bounds below.
+ *
+ * Each bound is roughly 3.5-12x the worst of those numbers: generous enough
+ * that a CI Linux runner running this guard alone (nothing else concurrent
+ * -- `run-web-guards.mjs` runs its list serially) can be meaningfully
+ * slower and noisier than even this task's own "busier" local run without
+ * tripping it, while still catching an order-of-magnitude regression (a
+ * paint that silently stops being driven by the real `onRender` chain, a
+ * reconnect loop, a return to something REFRESH_MS-shaped). Not a precise
+ * regression-vs-poll-path discriminator -- the same honest limit
+ * `terminal-typing-latency-shots.mjs`'s own `PAINT_P95_BOUND_MS` already
+ * documents for its bound.
+ */
+const STREAM_TYPING_P95_BOUND_MS = 150;
+const STREAM_ECHO_P95_BOUND_MS = 350;
+const STREAM_BURST_P95_BOUND_MS = 700;
+
+/**
+ * STRUCTURAL-ish, not wall-clock: how many `term.write()` calls TEST 3's
+ * burst loop (5 runs of `yes burstline | head -n 2000`, ~10,005 lines
+ * total) may cost. tmux's own control-mode framer coalesces multiple pty
+ * reads into one `%output` notification per delivery rather than one per
+ * line, so a healthy burst costs low hundreds of calls, not thousands --
+ * but HOW MANY hundreds turns out to depend on scheduling too (this is a
+ * count of DELIVERIES, and delivery chunking is itself load-sensitive, not
+ * a pure function of the data): calibrated over 10 full guard runs (this
+ * task's own report holds the raw counts), 235 / 238 / 281 / 286 / 297 /
+ * 311 / 313 / 395 / 403 / 590 -- stable in the 200s-300s on a quiet pass,
+ * one run at 590 when this machine was visibly busier. Set at 1200, ~2x the
+ * worst of ten runs and still ~8x below the ~10,005 raw line count: enough
+ * headroom to absorb the same kind of load variance the p95 bounds above
+ * carry retry-once-alone for, while still catching the regression this
+ * exists to catch -- a future change that starts writing once per line (or
+ * per byte) would land in the thousands, not the low hundreds.
+ */
+const MAX_BURST_WRITE_CALLS = 1200;
 
 const which = spawnSync('tmux', ['-V'], { encoding: 'utf8' });
 if (which.error || which.status !== 0) {
@@ -103,6 +190,40 @@ function percentile(values, p) {
   const sorted = [...values].sort((a, b) => a - b);
   const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
   return sorted[Math.max(0, idx)];
+}
+
+/**
+ * RETRY-ONCE-ALONE for a wall-clock p95 check only (criterion (c)). Every
+ * OTHER assertion in this file (matched counts, the write-call bound, the
+ * client-count checks) is deterministic and gets no retry -- retrying those
+ * would only hide a real defect. `measure` is re-invoked in full (a fresh
+ * sample of the same size, not a re-read of the same numbers) so a retry
+ * genuinely tests whether the first miss was a one-off.
+ */
+async function withP95RetryOnce(label, boundMs, measure) {
+  let result = await measure();
+  if (result.p95 !== null && result.p95 < boundMs) return result;
+  console.warn(
+    `  retry: ${label} p95 (${result.p95 === null ? 'n/a' : `${result.p95.toFixed(2)}ms`}) missed the ${boundMs}ms bound on the first pass -- re-measuring once, alone, before failing for real`,
+  );
+  result = await measure();
+  return result;
+}
+
+/** Polls `list-clients` until it reports `expected` control-mode clients
+ * attached to `TMUX_SESSION`, or gives up at the deadline and returns
+ * whatever it last saw -- a `kill()` is asynchronous (SIGTERM, not
+ * instant), so the count right after disposing a client is not yet
+ * meaningful without a short poll. */
+async function waitForClientCount(expected, deadlineMs) {
+  const until = Date.now() + deadlineMs;
+  for (;;) {
+    const out = tmux('list-clients', '-t', `=${TMUX_SESSION}:`, '-F', '#{client_control_mode}');
+    const count = out.split('\n').filter((line) => line.trim().length > 0).length;
+    if (count === expected) return count;
+    if (Date.now() > until) return count;
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
@@ -158,10 +279,50 @@ await page.exposeFunction('__realWrite', (text) => {
   client?.write(text);
 });
 
-await page.goto(`http://127.0.0.1:${port}/e2e/terminal-stream-latency-harness.html`);
+/**
+ * FALSIFICATION ONLY, never set by a real run: forwarded to the harness as
+ * `artificialPaintDelayMs`, which delays every recorded paint by this many
+ * ms after xterm's own `onRender` actually fires. This task's own report
+ * holds the falsification run (a 300ms injection turning every p95 check
+ * below red) and its removal.
+ */
+const artificialPaintDelayMs = Number(process.env.VAM_E2E_ARTIFICIAL_PAINT_DELAY_MS ?? '0');
+await page.goto(
+  `http://127.0.0.1:${port}/e2e/terminal-stream-latency-harness.html?artificialPaintDelayMs=${artificialPaintDelayMs}`,
+);
 await page.waitForFunction(() => globalThis.window.__term !== undefined);
 await page.evaluate(() => globalThis.window.__streamStart());
 await page.waitForTimeout(500);
+
+/**
+ * FALSIFICATION ONLY for the "exactly one control client" check below: when
+ * set, spawns a SECOND real `tmux -C attach-session` against the same
+ * target right after the real client has connected, so the check has to
+ * see two clients rather than one. Its stdin is a never-ending pipe (a real
+ * `-C` client reads commands from stdin and exits the instant it sees EOF --
+ * measured against this exact tmux binary while building this guard: the
+ * default `spawn()` pipe stdio, never written to and never explicitly kept
+ * open, still delivers EOF immediately under Node, which made the
+ * "extra client" vanish before `list-clients` ever saw it. A `sleep`
+ * feeding its stdin, never closed, is what keeps it attached -- the same
+ * fix this task's own report documents finding by hand first).
+ */
+let extraClient = null;
+if (process.env.VAM_E2E_INJECT_EXTRA_CONTROL_CLIENT) {
+  const keepAlive = spawn('sleep', ['600'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  extraClient = spawn('tmux', ['-L', SOCKET, '-C', 'attach-session', '-t', `=${TMUX_SESSION}:`], {
+    stdio: [keepAlive.stdout, 'ignore', 'ignore'],
+  });
+  extraClient.on('exit', () => keepAlive.kill());
+  await new Promise((r) => setTimeout(r, 500));
+}
+
+const clientsAfterConnect = await waitForClientCount(extraClient === null ? 1 : 2, 3_000);
+check(
+  'exactly one control-mode client is attached to the streamed session',
+  clientsAfterConnect === 1,
+  `${clientsAfterConnect} client(s) attached`,
+);
 
 const resetPerf = () =>
   page.evaluate(() => {
@@ -174,10 +335,21 @@ const readPerf = () =>
     paints: globalThis.window.__paints.map((p) => ({ epoch: p.epoch, t: p.t })),
   }));
 
-const results = {};
+async function waitForPaintContaining(needle, deadlineMs) {
+  const until = Date.now() + deadlineMs;
+  for (;;) {
+    const hit = await page.evaluate(
+      (n) => globalThis.window.__paints.find((p) => p.text.includes(n)),
+      needle,
+    );
+    if (hit !== undefined) return hit;
+    if (Date.now() > until) return null;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
 
-try {
-  /* ── TEST 1: steady typing, keydown-to-paint, n=50 at 80ms ─────────────── */
+/* ── TEST 1: steady typing, keydown-to-paint, n=50 at 80ms ─────────────── */
+async function measureTyping() {
   await resetPerf();
   await page.locator('#pane').click();
   await page.keyboard.type('x'.repeat(50), { delay: 80 });
@@ -185,51 +357,26 @@ try {
   const typing = await readPerf();
 
   const typingLatencies = [];
-  {
-    let cursor = 0;
-    for (const kd of typing.keydowns) {
-      while (cursor < typing.paints.length && typing.paints[cursor].t < kd.t) cursor += 1;
-      if (cursor >= typing.paints.length) break;
-      typingLatencies.push(typing.paints[cursor].t - kd.t);
-      cursor += 1;
-    }
+  let cursor = 0;
+  for (const kd of typing.keydowns) {
+    while (cursor < typing.paints.length && typing.paints[cursor].t < kd.t) cursor += 1;
+    if (cursor >= typing.paints.length) break;
+    typingLatencies.push(typing.paints[cursor].t - kd.t);
+    cursor += 1;
   }
   console.log(
     `\nstream -- steady typing (80ms cadence, n=${typing.keydowns.length}), ${typingLatencies.length} matched to a paint`,
   );
+  const p50 = percentile(typingLatencies, 50);
+  const p95 = percentile(typingLatencies, 95);
   console.log(
-    `  keydown-to-paint: p50 ${percentile(typingLatencies, 50)?.toFixed(2)}ms, p95 ${percentile(typingLatencies, 95)?.toFixed(2)}ms, max ${typingLatencies.length > 0 ? Math.max(...typingLatencies).toFixed(2) : '-'}ms`,
+    `  keydown-to-paint: p50 ${p50?.toFixed(2)}ms, p95 ${p95?.toFixed(2)}ms, max ${typingLatencies.length > 0 ? Math.max(...typingLatencies).toFixed(2) : '-'}ms`,
   );
-  check(
-    'stream typing: nearly every keystroke matched to a paint',
-    typingLatencies.length >= 45,
-    `${typingLatencies.length} of 50`,
-  );
-  results.typing = {
-    n: typing.keydowns.length,
-    matched: typingLatencies.length,
-    p50: percentile(typingLatencies, 50),
-    p95: percentile(typingLatencies, 95),
-  };
+  return { n: typing.keydowns.length, matched: typingLatencies.length, p50, p95 };
+}
 
-  // Flush the 50 unsubmitted `x` characters before test 2's `echo` commands.
-  tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
-  await page.waitForTimeout(200);
-
-  /* ── TEST 2: output loop, one echo at a time, n=30 ──────────────────────── */
-  async function waitForPaintContaining(needle, deadlineMs) {
-    const until = Date.now() + deadlineMs;
-    for (;;) {
-      const hit = await page.evaluate(
-        (n) => globalThis.window.__paints.find((p) => p.text.includes(n)),
-        needle,
-      );
-      if (hit !== undefined) return hit;
-      if (Date.now() > until) return null;
-      await new Promise((r) => setTimeout(r, 10));
-    }
-  }
-
+/* ── TEST 2: output loop, one echo at a time, n=30 ──────────────────────── */
+async function measureEcho() {
   await page.evaluate(() => {
     globalThis.window.__paints.length = 0;
   });
@@ -244,20 +391,19 @@ try {
     await page.waitForTimeout(150);
   }
   console.log(`\nstream -- output loop (one echo at a time, n=${outputLatencies.length} of 30 matched)`);
+  const p50 = percentile(outputLatencies, 50);
+  const p95 = percentile(outputLatencies, 95);
   console.log(
-    `  print-to-paint: p50 ${percentile(outputLatencies, 50)?.toFixed(2)}ms, p95 ${percentile(outputLatencies, 95)?.toFixed(2)}ms, max ${outputLatencies.length > 0 ? Math.max(...outputLatencies).toFixed(2) : '-'}ms`,
+    `  print-to-paint: p50 ${p50?.toFixed(2)}ms, p95 ${p95?.toFixed(2)}ms, max ${outputLatencies.length > 0 ? Math.max(...outputLatencies).toFixed(2) : '-'}ms`,
   );
-  check('stream output loop: every echo was eventually seen', outputLatencies.length >= 28, `${outputLatencies.length} of 30`);
-  results.echo = {
-    n: 30,
-    matched: outputLatencies.length,
-    p50: percentile(outputLatencies, 50),
-    p95: percentile(outputLatencies, 95),
-  };
+  return { n: 30, matched: outputLatencies.length, p50, p95 };
+}
 
-  /* ── TEST 3: burst, `yes | head`, n=5 ───────────────────────────────────── */
+/* ── TEST 3: burst, `yes | head`, n=5, plus the write-call batching count ── */
+async function measureBurst() {
   await page.evaluate(() => {
     globalThis.window.__paints.length = 0;
+    globalThis.window.__outputWriteCount = 0;
   });
   const burstLatencies = [];
   for (let i = 0; i < 5; i += 1) {
@@ -270,23 +416,100 @@ try {
     if (hit !== null) burstLatencies.push(hit.epoch - t0);
     await page.waitForTimeout(300);
   }
+  const writeCount = await page.evaluate(() => globalThis.window.__outputWriteCount);
   console.log(`\nstream -- burst (\`yes | head -n 2000\`, n=${burstLatencies.length} of 5 matched)`);
+  const p50 = percentile(burstLatencies, 50);
+  const p95 = percentile(burstLatencies, 95);
   console.log(
-    `  print-to-paint: p50 ${percentile(burstLatencies, 50)?.toFixed(2)}ms, p95 ${percentile(burstLatencies, 95)?.toFixed(2)}ms, max ${burstLatencies.length > 0 ? Math.max(...burstLatencies).toFixed(2) : '-'}ms`,
+    `  print-to-paint: p50 ${p50?.toFixed(2)}ms, p95 ${p95?.toFixed(2)}ms, max ${burstLatencies.length > 0 ? Math.max(...burstLatencies).toFixed(2) : '-'}ms`,
   );
-  check('stream burst: every run eventually showed its done marker', burstLatencies.length >= 4, `${burstLatencies.length} of 5`);
-  results.burst = {
-    n: 5,
-    matched: burstLatencies.length,
-    p50: percentile(burstLatencies, 50),
-    p95: percentile(burstLatencies, 95),
-  };
+  console.log(`  term.write() calls for ~2001 lines of output, over 5 bursts: ${writeCount}`);
+  return { n: 5, matched: burstLatencies.length, p50, p95, writeCount };
+}
+
+const results = {};
+
+try {
+  const typingResult = await withP95RetryOnce(
+    'stream typing (keydown-to-paint)',
+    STREAM_TYPING_P95_BOUND_MS,
+    measureTyping,
+  );
+  check(
+    'stream typing: nearly every keystroke matched to a paint',
+    typingResult.matched >= 45,
+    `${typingResult.matched} of 50`,
+  );
+  check(
+    `stream typing: p95 keydown-to-paint is under the ${STREAM_TYPING_P95_BOUND_MS}ms bound`,
+    typingResult.p95 !== null && typingResult.p95 < STREAM_TYPING_P95_BOUND_MS,
+    `p95 ${typingResult.p95?.toFixed(2) ?? 'n/a'}ms`,
+  );
+  results.typing = typingResult;
+
+  // Flush the 50 unsubmitted `x` characters before test 2's `echo` commands.
+  tmux('send-keys', '-t', `=${TMUX_SESSION}:`, 'Enter');
+  await page.waitForTimeout(200);
+
+  const echoResult = await withP95RetryOnce(
+    'stream output loop (print-to-paint)',
+    STREAM_ECHO_P95_BOUND_MS,
+    measureEcho,
+  );
+  check(
+    'stream output loop: every echo was eventually seen',
+    echoResult.matched >= 28,
+    `${echoResult.matched} of 30`,
+  );
+  check(
+    `stream output loop: p95 print-to-paint is under the ${STREAM_ECHO_P95_BOUND_MS}ms bound`,
+    echoResult.p95 !== null && echoResult.p95 < STREAM_ECHO_P95_BOUND_MS,
+    `p95 ${echoResult.p95?.toFixed(2) ?? 'n/a'}ms`,
+  );
+  results.echo = echoResult;
+
+  const burstResult = await withP95RetryOnce(
+    'stream burst (print-to-paint)',
+    STREAM_BURST_P95_BOUND_MS,
+    measureBurst,
+  );
+  check(
+    'stream burst: every run eventually showed its done marker',
+    burstResult.matched >= 4,
+    `${burstResult.matched} of 5`,
+  );
+  check(
+    `stream burst: p95 print-to-paint is under the ${STREAM_BURST_P95_BOUND_MS}ms bound`,
+    burstResult.p95 !== null && burstResult.p95 < STREAM_BURST_P95_BOUND_MS,
+    `p95 ${burstResult.p95?.toFixed(2) ?? 'n/a'}ms`,
+  );
+  check(
+    `stream burst: term.write() calls stay batched, under ${MAX_BURST_WRITE_CALLS} for ~2001 lines of output`,
+    burstResult.writeCount < MAX_BURST_WRITE_CALLS,
+    `${burstResult.writeCount} call(s)`,
+  );
+  results.burst = burstResult;
+
+  // "Zero clients once the view leaves" -- disposed HERE, inside the try
+  // block, rather than only in `finally`, so a failure in this check is a
+  // real assertion (`check`, counted in `failures`) and not merely cleanup.
+  client?.dispose();
+  extraClient?.kill();
+  const clientsAfterDispose = await waitForClientCount(0, 3_000);
+  check(
+    'zero control-mode clients remain once the view disposes its connection',
+    clientsAfterDispose === 0,
+    `${clientsAfterDispose} client(s) still attached`,
+  );
+  client = null;
+  extraClient = null;
 
   await page.screenshot({ path: `${outDir}/terminal-stream-latency.png` }).catch(() => {});
   console.log(`${outDir}/terminal-stream-latency.png`);
 } finally {
   await browser.close();
   client?.dispose();
+  extraClient?.kill();
   server.close();
   tmux('kill-session', '-t', `=${TMUX_SESSION}:`);
   killServer();
