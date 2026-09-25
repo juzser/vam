@@ -2276,7 +2276,7 @@ function CanvasInner({
    * below, for the same reason -- a project with no source has nowhere to
    * store the new title.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const beginSessionRename = useCallback((entry: SessionEntry) => {
     const projectSource = entry.project.source;
     if (projectSource === undefined) {
@@ -2292,7 +2292,7 @@ function CanvasInner({
     setRenamingId(entry.session.id);
   }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const openSessionIconPicker = useCallback((entry: SessionEntry) => {
     // A project with no source cannot store an icon under one: guessing a
     // fallback here would reintroduce the exact cross-source collision this
@@ -2530,7 +2530,6 @@ function CanvasInner({
     return null;
   }, [model]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const createNewGroup = useCallback(
     (name: string) => {
       const source = groupHomeSource();
@@ -2544,7 +2543,7 @@ function CanvasInner({
       savePrefs(createGroup(prefs, source, id, name));
       setStatus(`${name} — a project kept on this machine, never in the event log`);
     },
-    [groupHomeSource, prefs, savePrefs],
+    [groupHomeSource, prefs, savePrefs, setStatus],
   );
 
   const renameOneGroup = useCallback(
@@ -2564,7 +2563,6 @@ function CanvasInner({
    * on screen, one level up. The status line is the whole disclosure, and it
    * is enough because the outcome is already visible.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const ungroup = useCallback(
     (group: Group) => {
       const source = groupSource(prefs.groups, group.id);
@@ -2573,7 +2571,7 @@ function CanvasInner({
       savePrefs(deleteGroup(prefs, source, group.id));
       setStatus(`${group.name} ungrouped — ${moved} ${moved === 1 ? 'repo' : 'repos'} moved up`);
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, setStatus],
   );
 
   /**
@@ -3327,7 +3325,6 @@ function CanvasInner({
    * focused" for the keyboard route — dragging (see `onPaneDrop` below)
    * lets the operator choose left/right/top/bottom directly instead.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const splitFocused = useCallback(
     (orientation: SplitOrientation) => {
       if (focusedSessionId === null) {
@@ -3384,7 +3381,7 @@ function CanvasInner({
       );
       setFocusedPaneId(newId);
     },
-    [focusedSessionId, panes, setFocusedPaneId],
+    [focusedSessionId, panes, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -3423,7 +3420,6 @@ function CanvasInner({
    * closing the last one would leave nothing to show, which `closePane`
    * itself makes unrepresentable by returning `null` for that case.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const closeFocusedSplit = useCallback(() => {
     if (leaves(panes).length <= 1) {
       setStatus('only one pane open — nothing to close');
@@ -3438,10 +3434,9 @@ function CanvasInner({
     }
     setPanes(next);
     setFocusedPaneId(fallback);
-  }, [panes, focusedPaneId, setFocusedPaneId]);
+  }, [panes, focusedPaneId, setFocusedPaneId, setStatus]);
 
   /** Cycle the keyboard between splits, wrapping — vim's `Ctrl-w w`/`W`. */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const stepFocusedSplit = useCallback(
     (delta: 1 | -1) => {
       if (leaves(panes).length <= 1) {
@@ -3450,7 +3445,7 @@ function CanvasInner({
       }
       setFocusedPaneId(stepPane(panes, focusedPaneId, delta));
     },
-    [panes, focusedPaneId, setFocusedPaneId],
+    [panes, focusedPaneId, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -3626,7 +3621,6 @@ function CanvasInner({
    * session shown yet, or one filtered/closed out from under it) has no
    * project of its own to conflict with, so it always accepts.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const dropTabInPane = useCallback(
     (paneId: string, zone: DropZone) => {
       const drag = dragging;
@@ -3693,7 +3687,7 @@ function CanvasInner({
       });
       setFocusedPaneId(newId);
     },
-    [dragging, panes, entriesById, setFocusedPaneId],
+    [dragging, panes, entriesById, setFocusedPaneId, setStatus],
   );
 
   const onPaneDrop = useCallback(
@@ -3792,7 +3786,6 @@ function CanvasInner({
     writingBySession,
     actionIndexBySession,
   };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const sendPromptFor = useCallback(
     async (entry: SessionEntry | null) => {
       const entryDraft =
@@ -3931,6 +3924,7 @@ function CanvasInner({
       setComposingFor,
       setWritingFor,
       setSendFailureFor,
+      setStatus,
     ],
   );
 
@@ -3959,7 +3953,6 @@ function CanvasInner({
    * instead. `removeProject` did exactly that, and told the operator it had
    * ended sessions that were still running.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const closeSession = useCallback(
     async (sessionId: string, title: string, force = false): Promise<boolean> => {
       if (pendingAction !== null) {
@@ -4013,7 +4006,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, setStatus, setConfirmForceClose],
   );
 
   /**
@@ -4049,7 +4042,6 @@ function CanvasInner({
    * the tab is the last tab of the last pane — `removeTab` returns `null` for
    * exactly that case.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const closePaneTab = useCallback(
     (paneId: string, sessionId: string) => {
       const live = entriesByIdRef.current.get(sessionId);
@@ -4070,7 +4062,7 @@ function CanvasInner({
         setFocusedPaneId(stepPane(panes, paneId, 1));
       }
     },
-    [panes, setFocusedPaneId, closeSession],
+    [panes, setFocusedPaneId, closeSession, setStatus],
   );
 
   /**
@@ -4158,7 +4150,6 @@ function CanvasInner({
    * is left drawn: the sessions stay reachable and Remove can be pressed again
    * once the source is.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const removeProject = useCallback(
     async (project: Project, plan: RemovalPlan) => {
       if (pendingAction !== null) {
@@ -4200,7 +4191,7 @@ function CanvasInner({
           : `removed "${project.name}" from vam — ended ${ended} session${ended === 1 ? '' : 's'} vam started; nothing left this machine`,
       );
     },
-    [allEntries, closeSession, pendingAction, setProjectRemoved],
+    [allEntries, closeSession, pendingAction, setProjectRemoved, setStatus],
   );
 
   /**
@@ -4219,7 +4210,6 @@ function CanvasInner({
    * "it failed" two different sentences -- and, on the success side, what
    * keeps "it started" and "you can see it" two different sentences too.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const createSession = useCallback(
     async (projectId: string, projectName: string, paneId?: string) => {
       if (pendingAction !== null) {
@@ -4282,7 +4272,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, setStatus],
   );
 
   /**
@@ -4316,7 +4306,6 @@ function CanvasInner({
    * `showOpenDialog`), and nothing was chosen (cancel is an answer, not a
    * failure). Only past all three does anything spawn.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const newProject = useCallback(async () => {
     if (pendingAction !== null) {
       // OUT LOUD, like `removeProject` one screen up. A refused click that
@@ -4392,7 +4381,7 @@ function CanvasInner({
       // turns a clear one into an apparent hang.
       setPendingAction(null);
     }
-  }, [source, pendingAction]);
+  }, [source, pendingAction, setStatus]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
@@ -4432,7 +4421,6 @@ function CanvasInner({
    * filtered `focusedEntry` every other assertion in this file is written
    * against, and an unfocused leaf its own lookup.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const newTabInPane = useCallback(
     (paneId: string, entry: SessionEntry | null, tabs: readonly SessionEntry[]) => {
       setFocusedPaneId(paneId);
@@ -4448,7 +4436,7 @@ function CanvasInner({
       }
       void createSession(target.project.id, target.project.name, paneId);
     },
-    [allEntries, activeProjectId, createSession, setFocusedPaneId],
+    [allEntries, activeProjectId, createSession, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -4458,7 +4446,6 @@ function CanvasInner({
    * `RenameChoice` in `prefs.ts`. An empty name clears the override and the
    * source's own title comes back, which is the undo.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const commitRename = useCallback(() => {
     const target = renameTarget;
     setRenamingId(null);
@@ -4472,9 +4459,8 @@ function CanvasInner({
         ? `"${target.title}" goes back to the name its source gives it`
         : `renamed to "${renameDraft.trim()}" — vam's own name for it, kept on this machine`,
     );
-  }, [renameTarget, renameDraft, prefs, savePrefs]);
+  }, [renameTarget, renameDraft, prefs, savePrefs, setStatus]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const copyAllCommands = useCallback(async () => {
     const commands = focusedDecision?.commands ?? [];
     if (commands.length === 0) {
@@ -4485,7 +4471,7 @@ function CanvasInner({
     setStatus(
       copied ? `copied ${commands.length} commands` : `could not copy ${commands.length} commands`,
     );
-  }, [focusedDecision]);
+  }, [focusedDecision, setStatus]);
 
   /**
    * `gt` / `gT` — THE MOVE THAT THINKS IN PROJECTS.
@@ -4516,7 +4502,6 @@ function CanvasInner({
    * that, so a repeated project id could at worst land on the earlier of the
    * two rather than somewhere unrelated.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const stepProject = useCallback(
     (delta: 1 | -1) => {
       // The cursor on nothing this list holds — an empty list, or a focus the
@@ -4552,10 +4537,10 @@ function CanvasInner({
         focusSession(landing.session.id);
       }
     },
-    [entries, focusedEntry, focusSession],
+    [entries, focusedEntry, focusSession, setStatus],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: listing the useCanvasOverlays() setters would touch the keydown effect's deps; they are stable like useState setters.
   useEffect(() => {
     // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
     // that does not exist, `Mod-<digit>` resolves against panes that are not
@@ -5564,7 +5549,7 @@ function CanvasInner({
     setFiltering(true);
   }, [focusedSessionId]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setQuery` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const onSidebarFilterChange = useCallback((next: string) => {
     // incsearch: the answer arrives while you type, not after you
     // commit. Without it the list narrows under a focus ring that is
@@ -5582,12 +5567,11 @@ function CanvasInner({
 
   const onSidebarFilterCommit = useCallback(() => setFiltering(false), []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const onSidebarFilterCancel = useCallback(() => {
     setFiltering(false);
     setQuery('');
     setFocusedSessionId(searchOrigin.current);
-  }, [setFocusedSessionId]);
+  }, [setFocusedSessionId, setQuery]);
 
   const onSidebarRenameCancel = useCallback(() => {
     setRenamingId(null);
@@ -5644,7 +5628,6 @@ function CanvasInner({
     [allEntries, closeSession],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const onSidebarAdd = useCallback(() => {
     // The footer strip names no project, so it uses the focused
     // session's, exactly as `o` does — the two controls are one path.
@@ -5653,7 +5636,7 @@ function CanvasInner({
       return;
     }
     void createSession(focusedEntry.project.id, focusedEntry.project.name);
-  }, [focusedEntry, createSession]);
+  }, [focusedEntry, createSession, setStatus]);
 
   const onSidebarAddInProject = useCallback(
     (project: Project) => void createSession(project.id, project.name),
@@ -5689,7 +5672,7 @@ function CanvasInner({
 
   const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const onSidebarPickIcon = useCallback((project: Project) => {
     // Same refusal as the session picker (§ above): a project with no
     // source has no bucket to store under, and guessing one would
@@ -5711,7 +5694,6 @@ function CanvasInner({
    * local override `commitRename` writes for a session, one field over. An
    * empty name clears it and the source's own name comes back.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const renameOneProject = useCallback(
     (project: Project, name: string) => {
       if (project.source === undefined) {
@@ -5725,19 +5707,17 @@ function CanvasInner({
           : `renamed to "${name.trim()}" — vam's own name for it, kept on this machine`,
       );
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, setStatus],
   );
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
   const onSidebarSettings = useCallback(() => {
     setSettingsSection('appearance');
     setSettingsOpen(true);
-  }, []);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the overlay setters (e.g. setStatus/setJumping/setQuery/setPaletteOpen/setKeySheetOpen/setSettingsOpen/setSettingsSection/setErrorLogOpen/setConfirmForceClose) are the stable setters returned by useCanvasOverlays(), analogous to useState setters, and are not reactive dependencies.
+  }, [setSettingsSection, setSettingsOpen]);
   const onSidebarRemote = useCallback(() => {
     setSettingsSection('remote');
     setSettingsOpen(true);
-  }, []);
+  }, [setSettingsSection, setSettingsOpen]);
 
   const onSidebarToggleTheme = useCallback(
     () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
