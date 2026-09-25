@@ -157,7 +157,7 @@ describe('reading the pane', () => {
     expect(argvs[0]).toEqual([
       'list-sessions',
       '-F',
-      '#{@vam-project}\t#{@vam-pid}\t#{session_name}\t#{pane_current_command}\t#{@vam-session}\t#{pane_current_path}',
+      '#{@vam-project}\t#{@vam-pid}\t#{session_name}\t#{pane_current_command}\t#{@vam-session}\t#{pane_current_path}\t#{session_created}',
     ]);
     // Exact targeting: `-t vam-atlas-a1` would reach `vam-atlas-a1b2c3` by
     // tmux's own prefix resolution, and on send-keys that is someone else's
