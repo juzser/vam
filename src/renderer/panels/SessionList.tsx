@@ -45,6 +45,7 @@ import {
   Sun,
   Terminal,
   Trash2,
+  X,
 } from 'lucide-react';
 import {
   memo,
@@ -69,6 +70,10 @@ import { DEFAULT_SESSION_FILTERS, STATUS_FILTERS } from '../domain/session-filte
 import type { KeyAction } from '../keyboard/chords.js';
 import { InlineChord, ShortcutTip } from '../keyboard/ShortcutTip.js';
 import { usePhoneViewport } from '../phone/viewport.js';
+import {
+  readAcknowledgedForeignHiddenCount,
+  writeAcknowledgedForeignHiddenCount,
+} from '../prefs/foreign-hidden-note.js';
 import type { EffectiveTheme } from '../prefs/prefs.js';
 import { markRegisterOf, SourceMark } from '../sources/provider-marks.js';
 import { ConfirmRemoveProject } from './ConfirmRemoveProject.js';
@@ -418,6 +423,44 @@ export const FILTER_POPOVER_WIDTH = 320;
  * value rather than a guessed one.
  */
 export const RESTORE_STRIP_VISIBLE_MS = 8_000;
+
+/**
+ * How long the "N sessions hidden — vam did not start them" note stays up
+ * once it has appeared (or grown), before it hides itself — the operator's
+ * own ask, so an on-by-default filter's own receipt does not become
+ * furniture at the foot of every sidebar. Same order of magnitude as
+ * `RESTORE_STRIP_VISIBLE_MS` and for the same reason: long enough to read
+ * and act on (`Show`), short enough not to sit there forever. Exported so
+ * the test asserting the auto-hide can advance fake timers past the real
+ * value rather than a guessed one.
+ *
+ * PAUSED, NOT RESET, WHILE THE OPERATOR IS ON IT: hovering the note or
+ * focusing something inside it (the `Show` link, the Dismiss button) stops
+ * this clock rather than letting it fire out from under a still-reading
+ * operator, and leaving resumes it for whatever was left — see the note's
+ * own render site.
+ */
+export const FOREIGN_HIDDEN_NOTE_AUTO_HIDE_MS = 8_000;
+
+/**
+ * How long the note's own exit fade runs, once it is about to go (auto-hide
+ * or Dismiss) — `OverlayScroll`'s own `opacity-0 transition-opacity
+ * duration-150`, reused rather than invented, so leaving is a fade rather
+ * than a snap and the footer never shows an empty gap where a still-mounted,
+ * now-invisible note would otherwise hold space. Zero under
+ * `prefersReducedMotion` below, which skips straight to the unmount.
+ */
+export const FOREIGN_HIDDEN_NOTE_FADE_MS = 150;
+
+/**
+ * Same fallback `phone/viewport.ts`'s own `usePhoneViewport` uses for the
+ * same reason: `matchMedia` is absent in the `node` environment most of this
+ * suite runs in, and "motion is fine" is the safe default for an environment
+ * that never paints anything at all.
+ */
+function prefersReducedMotion(): boolean {
+  return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
 
 /**
  * 12px on each side of the WINDOW, not the sidebar -- the popover floats
@@ -1329,6 +1372,107 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
    */
   const showGettingStarted =
     phone && entries.length === 0 && filter.trim() === '' && !loading && !hasOwnSession;
+
+  /**
+   * THE WATERMARK BEHIND THE FOREIGN-HIDDEN NOTE: the count it was last left
+   * at, by an auto-hide or a Dismiss. Read once per mount from
+   * `localStorage` (`prefs/foreign-hidden-note.ts`) so a relaunch does not
+   * nag about a count the operator already saw; written back by
+   * `acknowledgeForeignHiddenCount` below, the ONE place either exit path
+   * (the timer, or the button) records it.
+   *
+   * `foreignHiddenCount > 0` ALONE would put the note back on screen on
+   * every poll for as long as anything is foreign-hidden — the operator's
+   * own ask was the opposite of that: seen once, it stays gone FOR THAT
+   * COUNT, and comes back only once the count GROWS past this watermark, a
+   * session vam did not start joining the ones already named.
+   */
+  const [acknowledgedForeignCount, setAcknowledgedForeignCount] = useState(
+    readAcknowledgedForeignHiddenCount,
+  );
+  const acknowledgeForeignHiddenCount = useCallback((count: number) => {
+    setAcknowledgedForeignCount(count);
+    writeAcknowledgedForeignHiddenCount(count);
+  }, []);
+  const foreignNoteShown = foreignHiddenCount > acknowledgedForeignCount && !showGettingStarted;
+  /** Paused while the pointer is over the note, or focus is inside it — see
+   * the note's own render site for the handlers that set this. */
+  const [foreignNotePaused, setForeignNotePaused] = useState(false);
+  /**
+   * LAGS `foreignNoteShown` ON THE WAY OUT ONLY, so a hide is a fade
+   * (`FOREIGN_HIDDEN_NOTE_FADE_MS`) rather than a snap, and unmounts for real
+   * once the fade ends — never earlier, and never later than a fresh
+   * appearance needs: if the count grows again mid-fade, `foreignNoteShown`
+   * flips back to `true` and this effect cancels the fade outright.
+   */
+  const [foreignNoteClosing, setForeignNoteClosing] = useState(false);
+  const foreignNoteCloseTimer = useRef<number | null>(null);
+  /** The PREVIOUS render's `foreignNoteShown`, so the effect below can tell a
+   * real true-to-false TRANSITION (the only case that should fade) apart from
+   * a component mounted already-acknowledged, where `foreignNoteShown` is
+   * `false` from the very first render and there is nothing to fade FROM —
+   * without this, that mount ran the same effect body once regardless, and
+   * a relaunch flashed a fully-invisible note for one `FOREIGN_HIDDEN_NOTE_
+   * FADE_MS` before it disappeared for real. */
+  const foreignNoteWasShown = useRef(foreignNoteShown);
+  useEffect(() => {
+    const wasShown = foreignNoteWasShown.current;
+    foreignNoteWasShown.current = foreignNoteShown;
+    if (foreignNoteShown) {
+      if (foreignNoteCloseTimer.current !== null) {
+        window.clearTimeout(foreignNoteCloseTimer.current);
+        foreignNoteCloseTimer.current = null;
+      }
+      setForeignNoteClosing(false);
+      return;
+    }
+    if (!wasShown) return;
+    setForeignNoteClosing(true);
+    const ms = prefersReducedMotion() ? 0 : FOREIGN_HIDDEN_NOTE_FADE_MS;
+    foreignNoteCloseTimer.current = window.setTimeout(() => setForeignNoteClosing(false), ms);
+    return () => {
+      if (foreignNoteCloseTimer.current !== null) {
+        window.clearTimeout(foreignNoteCloseTimer.current);
+      }
+    };
+  }, [foreignNoteShown]);
+  const foreignNoteMounted = foreignNoteShown || foreignNoteClosing;
+  /**
+   * THE AUTO-HIDE COUNTDOWN ITSELF. `foreignNoteRemainingMs` survives a
+   * pause: leaving clears the live timer and banks the elapsed time back
+   * into this ref (the cleanup below), rather than either letting the old
+   * timer fire underneath the pause or restarting a full window on every
+   * hover. `foreignNoteCycleCount` is what tells "the same appearance,
+   * still counting down" apart from "the count grew again while the note
+   * was already up", which gets the full window back — the same fresh-start
+   * `RESTORE_STRIP_VISIBLE_MS`'s own effect gives a second hide mid-countdown.
+   */
+  const foreignNoteRemainingMs = useRef(FOREIGN_HIDDEN_NOTE_AUTO_HIDE_MS);
+  const foreignNoteCycleCount = useRef<number | null>(null);
+  useEffect(() => {
+    if (!foreignNoteShown) {
+      foreignNoteRemainingMs.current = FOREIGN_HIDDEN_NOTE_AUTO_HIDE_MS;
+      foreignNoteCycleCount.current = null;
+      return;
+    }
+    if (foreignNoteCycleCount.current !== foreignHiddenCount) {
+      foreignNoteCycleCount.current = foreignHiddenCount;
+      foreignNoteRemainingMs.current = FOREIGN_HIDDEN_NOTE_AUTO_HIDE_MS;
+    }
+    if (foreignNotePaused) return;
+    const startedAt = Date.now();
+    const id = window.setTimeout(
+      () => acknowledgeForeignHiddenCount(foreignHiddenCount),
+      foreignNoteRemainingMs.current,
+    );
+    return () => {
+      window.clearTimeout(id);
+      foreignNoteRemainingMs.current = Math.max(
+        0,
+        foreignNoteRemainingMs.current - (Date.now() - startedAt),
+      );
+    };
+  }, [foreignNoteShown, foreignNotePaused, foreignHiddenCount, acknowledgeForeignHiddenCount]);
   /**
    * Is the provisional "your project is starting" row (below,
    * `data-project-section-provisional`) about to draw inside the scroller?
@@ -4444,11 +4588,45 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
        * it. The desktop never withdraws this strip -- its getting-started
        * screen lives in the detail pane, so there is no second copy here to
        * collide with.
+       *
+       * NOT A STANDING COST EITHER, per the operator's own follow-on ask:
+       * `foreignNoteShown`/`foreignNoteClosing`/`foreignNoteMounted` above
+       * are what make this auto-hide after `FOREIGN_HIDDEN_NOTE_AUTO_HIDE_MS`
+       * and stay quiet for the count it was left at, the same "receipt, not
+       * furniture" rule `RESTORE_STRIP_VISIBLE_MS` already applies to the
+       * strip below. Hover/focus PAUSE that clock rather than letting it fire
+       * out from under a still-reading operator; Dismiss ends it right away.
        */}
-      {foreignHiddenCount > 0 && !showGettingStarted && (
+      {foreignNoteMounted && (
         <div
           data-foreign-hidden
-          className="flex flex-wrap items-center gap-1.5 border-line border-t px-[11px] py-2 text-control text-ink-faint"
+          // A TRANSIENT STATUS MESSAGE, not a static block of chrome: `role`
+          // is what tells `noStaticElementInteractions` (and, more to the
+          // point, a screen reader) that hover/focus on this element mean
+          // something, and `status`'s own implicit `aria-live="polite"` is
+          // the right way to hear "N sessions hidden" arrive without an
+          // operator having had to go looking for it.
+          role="status"
+          onMouseEnter={() => setForeignNotePaused(true)}
+          onMouseLeave={() => setForeignNotePaused(false)}
+          // React's `onFocus`/`onBlur` are the bubbling kind (unlike the DOM
+          // events they are named for), so these fire once for the whole
+          // subtree rather than needing a handler on every focusable child --
+          // `Show` today, `Dismiss` below. `relatedTarget` is what tells
+          // "focus moved to Dismiss, still inside" apart from "focus left the
+          // note entirely": only the second should resume the clock.
+          onFocus={() => setForeignNotePaused(true)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) {
+              setForeignNotePaused(false);
+            }
+          }}
+          className={[
+            'flex flex-wrap items-center gap-1.5 border-line border-t px-[11px] py-2',
+            'text-control text-ink-faint transition-opacity motion-reduce:transition-none',
+            foreignNoteClosing ? 'opacity-0' : 'opacity-100',
+          ].join(' ')}
+          style={{ transitionDuration: `${FOREIGN_HIDDEN_NOTE_FADE_MS}ms` }}
         >
           <span data-foreign-hidden-count>
             {foreignHiddenCount} session{foreignHiddenCount === 1 ? '' : 's'} hidden — vam did not
@@ -4468,6 +4646,25 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           >
             Show
           </button>
+          {/* Same 26px square, same radius, same colours as the header's own
+              icon buttons (Settings/Remote/theme) -- `vam-tap` added on top
+              of that fixed size, exactly the `Show` button's own trick just
+              above, so `min-height`/`min-width: 44px` wins over the 26px on
+              a phone without a `[data-tap-skin]` layer: a borderless glyph
+              button needs no separate paint box, the same reasoning
+              `styles.css`'s own `.vam-phone .vam-tap` header gives for the
+              tab strip's close `×`. */}
+          <ShortcutTip label="Dismiss">
+            <button
+              type="button"
+              data-foreign-hidden-dismiss
+              aria-label="Dismiss"
+              onClick={() => acknowledgeForeignHiddenCount(foreignHiddenCount)}
+              className="vam-tap flex h-[26px] w-[26px] flex-none cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+            >
+              <X size={14} strokeWidth={1.5} />
+            </button>
+          </ShortcutTip>
         </div>
       )}
 
