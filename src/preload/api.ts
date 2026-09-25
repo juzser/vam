@@ -59,6 +59,12 @@ import type {
 } from '../shared/terminal.js';
 import type { UpdateStatus } from '../shared/update.js';
 import type { UsageSnapshot } from '../shared/usage.js';
+import type {
+  CreateWorktreeInput,
+  RemoveWorktreeInput,
+  RemoveWorktreeOutcome,
+  WorktreeInfo,
+} from '../shared/worktree.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
 export type InvokerLike = { invoke(channel: string, ...args: unknown[]): Promise<unknown> };
@@ -971,3 +977,29 @@ export function createRemoteApi(ipc: InvokerLike): RemoteApi {
 }
 
 export type { RemoteState };
+
+/**
+ * The worktrees feature's own member -- desktop-only, like `files` above,
+ * and for the same reason `CHANNELS.worktreeList/Create/Remove`'s own
+ * comment gives: not part of `DesktopSourceApi`/`PreloadSourceApi`, so a
+ * paired phone has no route to any of the three. `list`/`create`/`remove`
+ * all forward through `unwrap`, exactly like `files.read`/`files.write`:
+ * there IS a refusal behind each in `worktrees.ts`'s own words (unknown
+ * project, dirty tree, locked, a branch that already exists), and the
+ * renderer draws that sentence rather than a rejected promise electron has
+ * rewritten.
+ */
+export type WorktreesApi = {
+  list(projectId: string): Promise<readonly WorktreeInfo[]>;
+  create(input: CreateWorktreeInput): Promise<WorktreeInfo>;
+  remove(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>;
+};
+
+export function createWorktreesApi(ipc: InvokerLike): WorktreesApi {
+  return {
+    list: (projectId) =>
+      unwrap<readonly WorktreeInfo[]>(ipc.invoke(CHANNELS.worktreeList, projectId)),
+    create: (input) => unwrap<WorktreeInfo>(ipc.invoke(CHANNELS.worktreeCreate, input)),
+    remove: (input) => unwrap<RemoveWorktreeOutcome>(ipc.invoke(CHANNELS.worktreeRemove, input)),
+  };
+}
