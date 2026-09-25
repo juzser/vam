@@ -1452,15 +1452,16 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle, hideAgentWorktrees } =
-    (typeof raw === 'object' && raw !== null ? raw : {}) as {
-      hideAgentStarted?: unknown;
-      onlyPrompted?: unknown;
-      hideEnded?: unknown;
-      hideForeign?: unknown;
-      hideIdle?: unknown;
-      hideAgentWorktrees?: unknown;
-    };
+  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle, hideAgentWorktrees } = (
+    typeof raw === 'object' && raw !== null ? raw : {}
+  ) as {
+    hideAgentStarted?: unknown;
+    onlyPrompted?: unknown;
+    hideEnded?: unknown;
+    hideForeign?: unknown;
+    hideIdle?: unknown;
+    hideAgentWorktrees?: unknown;
+  };
   return {
     hideAgentStarted:
       typeof hideAgentStarted === 'boolean'

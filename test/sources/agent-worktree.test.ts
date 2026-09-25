@@ -43,9 +43,7 @@ describe('hasAgentWorktreeSegment', () => {
   });
 
   it('does NOT match an ordinary project that merely contains ".claude" as a directory name', () => {
-    expect(hasAgentWorktreeSegment('/Users/ser/code/dotclaude-tools/worktrees/readme')).toBe(
-      false,
-    );
+    expect(hasAgentWorktreeSegment('/Users/ser/code/dotclaude-tools/worktrees/readme')).toBe(false);
   });
 
   it('does not match a bare ".claude/worktrees" with no trailing content, which is not a real row', () => {
@@ -72,9 +70,9 @@ describe('isAgentWorktreeCwd', () => {
     const realpathFn = async () => {
       throw new Error('must not be called when the branch already answers');
     };
-    await expect(
-      isAgentWorktreeCwd('/w/anything', 'worktree-agent-x', realpathFn),
-    ).resolves.toBe(true);
+    await expect(isAgentWorktreeCwd('/w/anything', 'worktree-agent-x', realpathFn)).resolves.toBe(
+      true,
+    );
   });
 
   it('is true from a realpath’d segment when the branch does not say', async () => {

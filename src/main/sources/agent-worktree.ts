@@ -62,6 +62,9 @@ export function hasAgentWorktreeSegment(path: string): boolean {
  *  absence is never evidence either way, the rule every optional fact in
  *  this source follows. */
 export function isAgentWorktreeBranch(branch: string | null): boolean {
+  // Not `branch?.startsWith(...)`: that widens the expression to `boolean |
+  // undefined`, which this function's own `: boolean` return type refuses.
+  // biome-ignore lint/complexity/useOptionalChain: see above.
   return branch !== null && branch.startsWith(AGENT_WORKTREE_BRANCH_PREFIX);
 }
 
