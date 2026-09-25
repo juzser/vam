@@ -176,15 +176,24 @@ type TranscriptRead = {
   readonly mtimeMs: number | null;
   /**
    * WHEN THE FILE WAS CREATED -- the same `stat()` this already pays for,
-   * read a second way. Never the FIRST LINE'S own timestamp: `transcript.ts`
-   * 's own header is why nothing here opens the head of a file that can run
-   * to 157 MB -- birthtime is the honest, zero-extra-cost proxy for "when did
-   * this session begin" a tail-only reader can still answer. `null` when
-   * there is no file, or when this filesystem does not track one (Node
-   * reports `0` for that; `readTranscript` below turns it into `null` rather
-   * than the epoch).
+   * read a second way, WHEN THE FILESYSTEM CAN BE TRUSTED TO REPORT ONE.
+   * `null` when there is no file, or when this filesystem does not track a
+   * birthtime at all (Node reports `0` for that; `readTranscript` below
+   * turns it into `null` rather than the epoch). A NON-null value here is
+   * still not automatically trusted: CI's Linux runners (ext4/overlayfs)
+   * were measured returning a birthtime that does not move with the file's
+   * real creation, so `createdAtMsOf`'s own `isUsableBirthtime` re-checks a
+   * present value against `mtimeMs` before believing it -- this field is the
+   * raw `stat()` answer, not the verdict.
    */
   readonly birthtimeMs: number | null;
+  /**
+   * The file's own byte length, from the SAME `stat()` -- kept only so
+   * `createdAtMsOf`'s first-line-timestamp fallback can cache its answer
+   * per `(path, size)` without a second `stat()` call of its own. `null`
+   * when there is no file.
+   */
+  readonly size: number | null;
 };
 
 /**
@@ -206,6 +215,7 @@ const NO_TRANSCRIPT: TranscriptRead = {
   roster: { agents: [], running: 0 },
   mtimeMs: null,
   birthtimeMs: null,
+  size: null,
 };
 
 /**
@@ -264,12 +274,134 @@ export async function readTranscript(
       // `0` is Node's own "this filesystem does not track it" (measured,
       // `fs.Stats` docs) -- not a claim the file was created at the epoch.
       birthtimeMs: info.birthtimeMs === 0 ? null : info.birthtimeMs,
+      size: info.size,
     };
   } catch {
     // An unreadable transcript costs its own turns, never the whole load: the
     // session is live and the operator should still see it.
     return NO_TRANSCRIPT;
   }
+}
+
+/**
+ * Is `birthtimeMs` a creation moment this row can actually trust?
+ *
+ * `readTranscript` already turns Node's `0` ("this filesystem does not
+ * track a birthtime") into `null`; this catches the other shapes a
+ * filesystem can hand back that are not a real creation time either --
+ * measured on CI's Linux runners (ext4/overlayfs), which returned `0`
+ * there too but are documented to sometimes answer a small nonzero garbage
+ * value instead, and a birthtime strictly LATER than the file's own last
+ * write is impossible for a real creation time regardless of platform (a
+ * file cannot be modified before it was created). Both get the same
+ * "cannot trust this" verdict as `null`.
+ */
+function isUsableBirthtime(
+  birthtimeMs: number | null,
+  mtimeMs: number | null,
+): birthtimeMs is number {
+  if (birthtimeMs === null || !Number.isFinite(birthtimeMs) || birthtimeMs <= 0) return false;
+  return mtimeMs === null || birthtimeMs <= mtimeMs;
+}
+
+/**
+ * How many leading bytes `firstLineTimestampMs` reads to answer "what does
+ * the transcript's OWN first timestamped line say" -- the fallback of the
+ * fallback, paid only when neither `birthtimeMs` nor `agent.startedAt` can
+ * answer `createdAt`. Bounded so even the operator's largest transcript (157
+ * MB, `transcript.ts`'s own note) costs what a small file costs: this reads
+ * the front of the file once, never the whole thing, for exactly the same
+ * reason `transcript.ts`'s header gives for reading the tail alone.
+ */
+const CREATED_AT_HEAD_READ_BYTES = 8192;
+
+/**
+ * `path` -> the head-read's own answer, valid for as long as `size` has not
+ * changed. Keyed by `(path, size)` rather than by `path` alone: an
+ * append-only transcript's own first line never changes once written, so a
+ * cache entry stays correct for the life of the process UNLESS the file at
+ * that path has grown (or shrunk) since -- which `size` alone already tells
+ * apart from "still the same file, just polled again a moment later", the
+ * common case this cache exists to make free.
+ */
+const FIRST_LINE_TIMESTAMP_CACHE = new Map<
+  string,
+  { readonly size: number; readonly ms: number | null }
+>();
+
+/**
+ * The transcript's own first TIMESTAMPED line, read from at most
+ * `CREATED_AT_HEAD_READ_BYTES` at the front of the file. Most transcripts'
+ * literal first line already carries one (`transcript.ts`'s own corpus
+ * note: 100% of prompt and assistant lines do), but a `last-prompt` marker
+ * never does, so this scans forward through whatever whole lines fit in the
+ * bounded head rather than trusting line zero alone -- still one bounded
+ * read, never a second one.
+ */
+async function firstLineTimestampMs(path: string): Promise<number | null> {
+  let size: number;
+  try {
+    size = (await stat(path)).size;
+  } catch {
+    return null;
+  }
+  const cached = FIRST_LINE_TIMESTAMP_CACHE.get(path);
+  if (cached !== undefined && cached.size === size) return cached.ms;
+  let ms: number | null = null;
+  try {
+    const head = await readTranscriptWindow(path, 0, Math.min(size, CREATED_AT_HEAD_READ_BYTES));
+    for (const line of head.text.split('\n')) {
+      if (line.trim() === '') continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const timestamp =
+        parsed !== null && typeof parsed === 'object'
+          ? (parsed as Record<string, unknown>)['timestamp']
+          : undefined;
+      if (typeof timestamp !== 'string') continue;
+      const parsedMs = Date.parse(timestamp);
+      if (Number.isFinite(parsedMs)) {
+        ms = parsedMs;
+        break;
+      }
+    }
+  } catch {
+    ms = null;
+  }
+  FIRST_LINE_TIMESTAMP_CACHE.set(path, { size, ms });
+  return ms;
+}
+
+/**
+ * CREATED, resolved through the full fallback chain -- `docs/design`'s own
+ * "vam cannot say" convention applies at every rung, never a guess:
+ *
+ *  1. the transcript's own birthtime, when `isUsableBirthtime` can trust it;
+ *  2. this PROCESS's own launch (`agent.startedAt`) -- free, already in
+ *     memory, and unavailable for a terminal-only row with no live process;
+ *  3. the transcript's own first timestamped line -- a bounded read, paid
+ *     only once neither of the above answered;
+ *  4. the transcript's mtime -- last ACTIVITY, not a creation moment, but
+ *     still better than reporting nothing when a file plainly exists.
+ *
+ * `null` only when none of the four can say anything at all.
+ */
+async function createdAtMsOf(
+  read: TranscriptRead,
+  path: string | undefined,
+  agentStartedAt: number | null | undefined,
+): Promise<number | null> {
+  if (isUsableBirthtime(read.birthtimeMs, read.mtimeMs)) return read.birthtimeMs;
+  if (agentStartedAt !== null && agentStartedAt !== undefined) return agentStartedAt;
+  if (path !== undefined) {
+    const fromFirstLine = await firstLineTimestampMs(path);
+    if (fromFirstLine !== null) return fromFirstLine;
+  }
+  return read.mtimeMs;
 }
 
 /**
@@ -330,11 +462,11 @@ async function rowForEmptyPane(
       decisions: read.facts.decisions,
       branch: read.facts.branch,
       resumeCommand: resumeCommand === null ? null : resumeCommand.join(' '),
-      // The transcript's own birthtime -- this row HAS one (`path` above
-      // proved it), so it reads the identical source a live row's own
-      // `createdAt` does. No `agent.startedAt` to fall back to: there is no
-      // process here at all.
-      createdAt: isoOrNull(read.birthtimeMs),
+      // The same `createdAtMsOf` chain a live row's own `createdAt` runs,
+      // minus one rung: no `agent.startedAt` to fall back to, since there is
+      // no process here at all -- a terminal-only row goes straight from an
+      // unusable birthtime to the transcript's own first timestamped line.
+      createdAt: isoOrNull(await createdAtMsOf(read, path, null)),
     }),
     ...(isAgentWorktree ? { isAgentWorktree: true } : {}),
   };
@@ -513,6 +645,11 @@ export async function loadClaudeCodeProjects(
   const claimed = new Set<string>();
   for (const agent of agents) {
     const read = reads.get(agent.sessionId) ?? NO_TRANSCRIPT;
+    // Re-derived from the same `index` the concurrent read wave above
+    // already built, rather than threaded out of the `reads` map: this loop
+    // has never carried `path` alongside `read`, and `createdAtMsOf`'s
+    // first-line fallback is the first reader in this function to need one.
+    const path = index.get(agent.sessionId);
     const pane = tmuxSessions === null ? null : paneForRow(tmuxSessions, agents, agent, panes);
     if (pane !== null) claimed.add(pane);
     // GUESS ONCE, THEN WRITE IT DOWN -- except this is not a guess.
@@ -607,13 +744,17 @@ export async function loadClaudeCodeProjects(
       // with neither a status file nor a transcript has nothing better.
       age: compactAge(nowMs - (statusUpdatedAt ?? read.mtimeMs ?? agent.startedAt ?? nowMs)),
       // CREATED is a different question from AGE, and reads a different
-      // chain: never `statusUpdatedAt` (last activity, not a start), and the
-      // transcript's BIRTHTIME rather than its mtime -- a file's creation
-      // moment, not whatever it last did. `agent.startedAt` (this PROCESS's
-      // own launch) is the fallback for a session with no transcript yet --
-      // a real gap right after `Start session`, before the CLI has written
-      // its first line -- and `null` is honest when neither answers.
-      createdAt: isoOrNull(read.birthtimeMs ?? agent.startedAt),
+      // chain (`createdAtMsOf`): never `statusUpdatedAt` (last activity, not
+      // a start), and the transcript's BIRTHTIME first -- a file's creation
+      // moment, not whatever it last did, when the filesystem can be
+      // trusted to report one. `agent.startedAt` (this PROCESS's own
+      // launch) is the next rung -- the fallback for a session with no
+      // transcript yet (a real gap right after `Start session`, before the
+      // CLI has written its first line) AND for a birthtime CI's own Linux
+      // runners were measured unable to report -- then the transcript's
+      // first timestamped line, then its mtime, and `null` is honest when
+      // none of the four answers.
+      createdAt: isoOrNull(await createdAtMsOf(read, path, agent.startedAt)),
       branch,
       // Absent, not empty, when nobody injected a reader: an empty list is
       // "vam asked GitHub and this branch has none", which a load that never
