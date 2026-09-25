@@ -358,6 +358,28 @@ await new Promise((r) => setTimeout(r, 300));
  * Node's stream from draining the OS pipe for EVERY listener, forcing
  * genuine backpressure regardless of chunk size or system load, rather
  * than racing tmux's own batching to out-spin it.
+ *
+ * UPDATED A THIRD TIME -- MEASURED: even the single-window pause above still
+ * FLAKES on CI (PR #504, run 36137150536, job 108078099793 -- an UNRELATED
+ * change, both the first pass and its own lone retry logged `%pause ->
+ * reseed round trip seen: false (0 reseed(s))`). A single fixed pause/resume
+ * window is a gamble regardless of which way a runner's speed differs from
+ * this machine's: a bounded `head -c 5000000` flood can fully drain before
+ * tmux ever notices this client fell behind (a fast runner schedules the
+ * pipeline and this reader's resume close enough together that the backlog
+ * never ages past `PAUSE_AFTER_SECONDS`), or the pipeline's own start can be
+ * delayed past the window entirely (a starved runner -- the EXACT bug
+ * `stream-client-pause-after.test.ts`'s own header RCA's (1) already
+ * measured and fixed there). Ported HERE, the same fix that test already
+ * uses successfully: a DUTY-CYCLE stall (pause, briefly resume so a
+ * `%pause` -> `%continue` -> reseed round trip already in flight can land,
+ * repeat) against a generous deadline, fed by a CONTINUOUS `yes` (never a
+ * bounded `head -c`, so there is always more output on the way no matter
+ * how slowly -- or quickly -- this runner gets around to producing it) that
+ * this function explicitly stops (`C-c`) only once it has observed a reseed
+ * or given up. This never weakens the assertion: `sawReseed` below is still
+ * "a real reseed actually happened", never "no pause is fine too" -- see
+ * this file's own `check()` for `pauseAfter.sawReseed`, unchanged.
  */
 async function measurePauseAfter() {
   let realStdout;
@@ -376,19 +398,39 @@ async function measurePauseAfter() {
   const seeds = [];
   client.onSeed((seed) => seeds.push(seed));
   try {
+    // CONTINUOUS, not a fixed 5MB `head -c` (see this function's own header,
+    // third update): a size-capped flood can finish producing before a
+    // single window -- or even this duty cycle's own first couple of
+    // iterations -- ever lines up with it. `yes` alone never stops on its
+    // own; interrupted explicitly below only once a reseed has been
+    // observed (or the deadline gives up).
+    spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes', 'Enter'], { env });
+
+    // A DUTY-CYCLE stall, not one fixed window (this function's own header,
+    // third update) -- the SAME technique `stream-client-pause-after.test.ts`
+    // uses: pause the real reader, briefly resume it so a `%pause` already
+    // on the wire can be processed and this client's own `-A "...:continue"`
+    // round trip can land, and repeat -- up to a generous deadline -- rather
+    // than gambling that one fixed window overlaps with however fast (or
+    // slow) this runner happens to produce and schedule the flood today.
+    const pauseDeadline = Date.now() + 25_000;
+    while (seeds.length === 0 && Date.now() < pauseDeadline) {
+      realStdout?.pause();
+      await new Promise((r) => setTimeout(r, 1_000));
+      realStdout?.resume();
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    // Only NOW, with the duty cycle done (a reseed observed, or the
+    // deadline exhausted), interrupt the continuous flood and print a
+    // marker this attempt can wait on.
+    spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'C-c'], { env });
     spawnSync(
       'tmux',
-      ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000; echo VAM-FLOOD-DONE-5', 'Enter'],
+      ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'echo VAM-FLOOD-DONE-5', 'Enter'],
       { env },
     );
-    // Deterministic stall: pause the REAL stream (not a per-chunk delay).
-    realStdout?.pause();
-    await new Promise((r) => setTimeout(r, 1_500));
-    realStdout?.resume();
-    const deadline = Date.now() + 15_000;
-    while (seeds.length === 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
-    }
+
     let finalPane = '';
     const doneDeadline = Date.now() + 10_000;
     while (Date.now() < doneDeadline) {
@@ -398,8 +440,8 @@ async function measurePauseAfter() {
     }
     const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
     console.log(
-      `\nreal tmux, a real StreamClient (sends pause-after), a paused real stdout (not a busy-wait), same 5MB flood: ` +
-        `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
+      `\nreal tmux, a real StreamClient (sends pause-after), a duty-cycled real stdout (not a fixed window), a ` +
+        `continuous flood: %pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
         `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
         'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
     );
