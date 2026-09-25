@@ -23,7 +23,7 @@
  */
 
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
 
@@ -58,6 +58,22 @@ const MODEL: CanvasModel = {
 };
 
 afterEach(cleanup);
+
+// The canonical order this whole file pins is `needs-you`'s (`new` waiting,
+// `mid` running, `old` done) -- explicit, so the sort-default feature
+// (`created`, now the shipped default) cannot silently change what
+// "canonical order" means here. `sortByMigrated: true` stops the seed's
+// explicit choice from being read as the OLD default baked in and moved
+// onto the new one (`prefs.ts`'s own ratchet).
+beforeEach(() => {
+  localStorage.setItem(
+    'vam.prefs.v1',
+    JSON.stringify({
+      viewOptions: { groupBy: 'project', sortBy: 'needs-you' },
+      sortByMigrated: true,
+    }),
+  );
+});
 
 function press(key: string) {
   act(() => {

@@ -28,25 +28,47 @@ import type { CanvasModel, Command, Decision, Group, Project, Session } from './
  * order` do not -- see `docs/design/workspace-options.md` for the reasons --
  * and are not offered here.
  *
- * `Sort by` has exactly two cheap members. `needs-you` is `orderedSessions`'
- * own order left alone (urgent-first within a project, most-urgent-project
- * first): the default, and the only order that ever shipped. `name` is the
- * one other fact every session already carries that sorts meaningfully --
+ * `Sort by` has three cheap members. `needs-you` is `orderedSessions`' own
+ * order left alone (urgent-first within a project, most-urgent-project
+ * first): the order that shipped first, and still offered. `name` is the one
+ * other fact every session already carries that sorts meaningfully --
  * `Session.title`. Orca's own "Agent Activity" has no vam equivalent: `age`
  * is a pre-formatted display string ("2m", "6h"), not a timestamp, so nothing
  * here can sort by it without inventing a new source fact.
+ *
+ * `created` IS THE THIRD, and now the default -- the operator's own report:
+ * `needs-you` reorders on every status change, which reads as a sidebar that
+ * "jumps around". `created` sorts oldest-first on `Session.createdAt`
+ * (`model.ts` says what each source reads for it) and never once consults
+ * `status`, so a session moving from `idle` to `waiting` to `done` stays
+ * exactly where it always sat. OLDEST FIRST, not newest: a session list is
+ * read the way a log is, top to bottom, and the newest arrival taking the
+ * TOP would itself be a row that keeps moving everything below it down --
+ * the same complaint under a different name. There is no direction toggle to
+ * offer instead: `Sort by` has never had one (`SessionList.tsx`'s own
+ * `SortByMenu` is a plain radiogroup), so this ships the one order rather
+ * than inventing UI a fresh feature would be the first to need.
  */
 export type GroupBy = 'project' | 'status' | 'none';
-export type SortBy = 'needs-you' | 'name';
+export type SortBy = 'needs-you' | 'name' | 'created';
 
 export type ViewOptions = {
   readonly groupBy: GroupBy;
   readonly sortBy: SortBy;
 };
 
-/** `project` + `needs-you`: today's only behaviour, so a fresh install and
- *  an upgraded one draw the identical order. */
-export const DEFAULT_VIEW_OPTIONS: ViewOptions = { groupBy: 'project', sortBy: 'needs-you' };
+/**
+ * `project` + `created`: grouping is unchanged from the first release, and
+ * the sort is the operator's own "stop jumping around" ask, made the default
+ * for every install -- new ones outright, and existing ones through
+ * `Prefs.sortByMigrated`'s one-time ratchet (`prefs.ts`), the same shape
+ * `streamingTerminalMigrated` (PR 495) already carries: a payload that never
+ * recorded an explicit sort choice cannot be told apart from one baking in
+ * the OLD default, so it moves once; an operator who had genuinely picked
+ * `needs-you` or `name` keeps it, because that choice is not `needs-you`
+ * baked in by a payload that predates this field at all.
+ */
+export const DEFAULT_VIEW_OPTIONS: ViewOptions = { groupBy: 'project', sortBy: 'created' };
 
 /**
  * The four buckets `groupBy: 'status'` draws its section headings from --
@@ -87,11 +109,41 @@ export const STATUS_BUCKET_LABELS: Readonly<Record<StatusBucket, string>> = {
   done: 'Done',
 };
 
+/**
+ * Two sessions, ordered oldest-`createdAt`-first -- `sortRun`'s `'created'`
+ * arm.
+ *
+ * A SESSION VAM COULD NOT TIME-STAMP (`createdAt` absent or `null`) SORTS
+ * AFTER EVERY ONE VAM COULD. There is no honest position to invent for it
+ * among real timestamps, and burying it at the bottom rather than the top
+ * keeps it from displacing the very thing this sort exists to stop moving --
+ * a row with a real, ordered history.
+ *
+ * TIES BREAK BY ID, the operator's own ask, and the reason is the same one
+ * `orderedInProject`'s own stability argument makes: two sessions that
+ * happen to read identically (two unknowns, or two stamped the same second)
+ * must still land in ONE order, or a list you navigate by muscle reshuffles
+ * itself for no reason a person could see.
+ */
+function compareCreated(a: Session, b: Session): number {
+  const aAt = a.createdAt ?? null;
+  const bAt = b.createdAt ?? null;
+  if (aAt === null && bAt !== null) return 1;
+  if (aAt !== null && bAt === null) return -1;
+  if (aAt !== null && bAt !== null && aAt !== bAt) return aAt < bAt ? -1 : 1;
+  return a.id.localeCompare(b.id);
+}
+
 /** One run, reordered by `sortBy` -- `needs-you` leaves it exactly as
  *  handed in, because that order already came from `orderedSessions`. */
 function sortRun(run: readonly SessionEntry[], sortBy: SortBy): SessionEntry[] {
-  if (sortBy !== 'name') return [...run];
-  return [...run].sort((a, b) => a.session.title.localeCompare(b.session.title));
+  if (sortBy === 'name') {
+    return [...run].sort((a, b) => a.session.title.localeCompare(b.session.title));
+  }
+  if (sortBy === 'created') {
+    return [...run].sort((a, b) => compareCreated(a.session, b.session));
+  }
+  return [...run];
 }
 
 /** How many decision rows a session shows at once. */

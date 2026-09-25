@@ -616,6 +616,28 @@ export type Session = {
    * concept of.
    */
   readonly branch: string | null;
+  /**
+   * WHEN THIS SESSION WAS CREATED, ISO-8601 -- the fact `sortBy: 'created'`
+   * (`selectors.ts`) orders on, so a poll that changes `status` or `age`
+   * never moves a row under it.
+   *
+   * OPTIONAL, on the rule every fact-a-source-may-not-have follows here
+   * (`origin`, `pullRequests`): absent is "nobody asked or nobody could
+   * say", not "created at the epoch" -- and dozens of fixtures across this
+   * suite build a `Session` literal with no opinion about it.
+   *
+   * A SOURCE'S BEST EVIDENCE, not a promise of ground truth. `claude-code`
+   * reads it off the transcript file's own birthtime (`source.ts`; a tail
+   * read never opens the file's FIRST line -- `transcript.ts`'s own header
+   * says why -- so birthtime is what the same `stat()` the age already
+   * costs can answer for free) and falls back to the tmux pane's
+   * `session_created` for a row with no transcript yet. `codex` reads the
+   * timestamp Codex itself embeds in the rollout's own file name
+   * (`rollout.ts`), never `recency_at_ms` -- `docs/design/vam-owns-the-
+   * session.md`'s own trap: a recency moves every poll and is not a start
+   * time.
+   */
+  readonly createdAt?: string | null;
   /** Newest first. The canvas shows the first three. */
   readonly decisions: readonly Decision[];
   /**
