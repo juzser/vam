@@ -768,6 +768,99 @@ that claim rests on: a caller handing xterm one big string, or 5,000 small
 through the SAME internal write buffer, and neither blocks per-chunk on a
 render (xterm's own render is RAF-scheduled, decoupled from the parse).
 
+### UPDATE: pause-after, renderer backpressure, and the flood re-measured
+
+The paragraph above (**"%pause/%continue, checked against a REAL tmux for
+the first time"**) is now WRONG about the root cause, kept rather than
+rewritten so the record shows what was actually measured at the time: a raw
+connection genuinely never received `%pause`, but not because this tmux
+does not enforce control-mode backpressure -- because tmux (`refresh-client`,
+tmux(1) CONTROL MODE) only ever sends `%pause` to a control client that
+explicitly opts in with `refresh-client -f pause-after=<N>`. Without it, a
+client is NEVER paused, no matter how far behind it falls -- confirmed with
+the SAME raw-connection, 20ms-per-chunk-consumer setup the original
+paragraph used, now kept as the negative half of `test/main/terminal/stream/
+stream-client-pause-after.test.ts`'s own falsification (a real-tmux test
+that fails if `StreamClient` ever stops sending the flag).
+
+**The fix.** `StreamClient#connect`/`#reconnect` (`main/terminal/stream/
+client.ts`) now send `refresh-client -f pause-after=1` as their first
+command, before `list-panes`/`capture-pane`. `1` second -- the low end of
+the operator's own suggested 1-2s range -- bounds the worst-case backlog a
+stalled drain could build to one second's worth of output before tmux
+itself stops pumping the pty to this client, while staying well above an
+ordinary IPC round trip, so a normal burst (a fast `ls`, a prompt redraw)
+never spuriously pauses. Also measured, and NOT something the original spike
+or this task's own brief anticipated: tmux never resumes a paused pane on
+its own -- an explicit `refresh-client -A "<pane>:continue"` is required, its
+`pane:state` argument MUST be quoted (unquoted is a parse error in tmux's
+own command grammar), and the `%continue` it produces arrives INSIDE that
+command's own `%begin`/`%end` reply block rather than as a bare notification
+line. `#continueAfterPause` sends that resume immediately on every `%pause`
+for this client's own pane (this client is never intentionally the slow
+party -- see `PAUSE_AFTER_SECONDS`'s own comment), and the reseed that
+follows is driven off that command's own reply landing, not off spotting a
+bare `%continue` line (kept as a defensive fallback, but measured to never
+be the actual path). `test/sources/tmux-stream-client.test.ts`'s new
+`describe('pause-after (real-tmux measured fix)')` pins the fake-child argv
+and ordering; `stream-client-pause-after.test.ts` proves it end to end
+against a real tmux, with the falsification described above.
+
+**Renderer-side backpressure, independently.** The pause-after fix bounds
+how far MAIN can fall behind tmux; it says nothing about xterm.js itself
+falling behind MAIN, which forwards every decoded chunk over IPC
+immediately regardless of whether the renderer has finished parsing the
+previous one. `TerminalStreamTab.tsx` now tracks bytes handed to
+`term.write(data, callback)` but not yet PARSED (the callback's own
+contract) in `pendingBytes`. Above a 2MB high-water mark, further chunks are
+DROPPED (never reach `term.write()` at all) rather than asking main to pause
+the stream over a new IPC round trip -- simpler, and it bounds renderer
+memory unconditionally, since `pendingBytes` can only fall once dropping
+starts. Below a 512KB low-water mark (a wide hysteresis gap, so draining
+right at the edge does not flap) the screen is PROVABLY stale -- real output
+was silently dropped -- so resuming reconnects the stream
+(`teardownStream()` then `connect()`), the exact pair this component already
+runs for a hidden pane becoming visible again, reseeding it correctly rather
+than inventing a second resync primitive. `TerminalStreamTab.test.tsx`'s own
+`describe('renderer-side backpressure…')` drives this with a controllable
+fake `term.write()` callback and pins: an ordinary small chunk never trips
+it, a chunk that crosses the high-water mark is written but every chunk
+after it is dropped until draining, and the hysteresis gap is real (draining
+only PART of the backlog does not yet trigger the reconnect).
+
+**The 5MB flood, re-measured with both fixes live**,
+`e2e/terminal-stream-resource-shots.mjs`, real tmux, a real `StreamClient`
+(now sending `pause-after`), a real xterm.js running the SAME high/low-water
+-mark logic as the shipped component (mirrored into the measurement
+harness, the same way every other renderer measurement in that script
+mirrors the shipped component rather than importing it):
+
+| metric | value |
+|---|---|
+| renderer `TaskDuration` (CDP, the whole flood) | 2238.0ms |
+| peak JS heap during the flood | 25.67 MB |
+| time-to-quiet (flood issued -> last chunk forwarded to the renderer) | 5142ms |
+| chunks dropped by the high-water mark | 0 |
+| live screen shows the flood's own trailing marker, BEFORE any reseed | true |
+| screen shows the marker AFTER a reseed from a fresh `capture-pane` | true |
+
+**Zero chunks dropped is a real result, not a gap in the measurement**: on
+this machine, over a local loopback IPC hop, xterm's own DOM renderer parsed
+faster than `StreamClient` could decode and forward -- `pendingBytes` never
+sustained above the 2MB mark for this flood. The drop-and-reseed path is a
+genuine safety net for a slower device, a heavier DOM (more panes open, a
+busier renderer process) or a larger flood than this one, not something
+THIS measurement exercised -- that correctness property (dropping actually
+stops writes, and the reconnect actually heals a screen that dropped data)
+is what `TerminalStreamTab.test.tsx`'s deterministic fake-callback tests
+prove instead, the same "measured where real tmux can show it, unit-tested
+where the shape needs to be forced" split this whole document already uses
+for `%pause` itself. The AFTER-reseed check being unconditionally `true`
+here is the property that actually matters end to end: whatever gets
+dropped, the very next reconnect a real client performs restores a correct
+screen, exactly like a `%pause`-triggered reseed already does one layer
+down.
+
 **One control client per visible terminal, and zero after leaving the
 view** -- the other half of "be careful about performance", proven against a
 real tmux rather than read off the source: `test/main/terminal/stream/
