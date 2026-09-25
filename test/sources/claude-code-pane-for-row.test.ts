@@ -337,3 +337,88 @@ describe('paneForRow refuses a pane whose foreground is a shell', () => {
     expect(paneForRow(shellPane, [ALPHA], ALPHA, panes)).toBe('vam-atlas-aa11bb');
   });
 });
+
+/**
+ * D1 -- A ROW CAN PAIR WITH A PANE RUNNING A DIFFERENT PROGRAM.
+ *
+ * THE DEFECT. The project-tag fallback vetoed a SHELL (nothing running yet)
+ * but nothing else: any other foreground command was accepted, and a pane's
+ * own `@vam-session` tag -- vam's bonus proof of who is actually in it,
+ * written once vam knows (`VAM_SESSION_OPTION`) -- was never consulted here at
+ * all. So a vam pane created for a project (the project tag is stamped once,
+ * at creation, and never re-derives from what later runs in the pane --
+ * `create-session.ts`) can go on to run Codex, or anything else typed by
+ * hand, and a Claude Code session sharing the project's cwd -- one running
+ * OUTSIDE vam entirely, in the operator's own terminal, which is exactly the
+ * shape `here.length === 1` cannot distinguish from vam's own row -- pairs
+ * with it anyway. Reply then types into the wrong program, and Close would
+ * kill it without ever having proven whose pane it was.
+ *
+ * THE FIX, TWO INDEPENDENT VETOES, NEITHER MERELY A NARROWING. A pane whose
+ * `vamSessionId` already names a DIFFERENT session is proof of an existing
+ * occupant, the same kind of proof a disagreeing PUBLISHED pane already is
+ * above (not the absence of evidence, evidence of the opposite). A pane whose
+ * foreground command is neither a shell NOR Claude Code's own is proof of a
+ * different program, read off the exact fact `isShellCommand` already reads
+ * -- `pane_current_command` -- rather than a second vocabulary invented for
+ * it: `shared/providers.ts` is the one table of runnable commands, and
+ * `codex` is 'the pane the operator typed a different provider into' as far
+ * as this reader is concerned, with no need to name Codex specially.
+ */
+describe('paneForRow refuses a pane proven to be a different session or a different program', () => {
+  it('refuses the iTerm+Codex scenario: one live Claude row, one vam pane already running Codex', () => {
+    // The Claude session is not under tmux at all (no `pid` published, no
+    // `tmux` field) -- exactly what an operator's own `claude` in iTerm looks
+    // like from vam's side. The project's one vam pane was created for this
+    // same cwd and is now running Codex, tagged with the thread's own uuid.
+    const codexPane: readonly TmuxSession[] = [
+      {
+        project,
+        name: 'vam-atlas-aa11bb',
+        command: 'codex',
+        vamSessionId: 'codex-thread-11111111',
+      },
+    ];
+    expect(paneForRow(codexPane, [ALPHA], ALPHA, new Map())).toBeNull();
+  });
+
+  it('refuses a pane whose @vam-session already names a DIFFERENT session', () => {
+    // Same shape, but the foreground command itself is silent (an older tmux,
+    // or a listing that did not carry it) -- the tag alone is what proves
+    // this pane is already somebody else's.
+    const claimedById: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', vamSessionId: 'sess-beta' },
+    ];
+    expect(paneForRow(claimedById, [ALPHA], ALPHA, new Map())).toBeNull();
+  });
+
+  it('refuses a pane running a plain, unrecognised program -- not only Codex by name', () => {
+    // The veto is "not a shell and not Claude Code's own command", never a
+    // hand-picked list of programs to exclude -- `vim`, `ssh`, anything.
+    const otherProgram: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', command: 'vim' },
+    ];
+    expect(paneForRow(otherProgram, [ALPHA], ALPHA, new Map())).toBeNull();
+  });
+
+  it('still pairs the legitimate fallback: same program, no conflicting id', () => {
+    // The fix must not over-refuse the case the fallback exists for: a pane
+    // proven to be running Claude Code itself, with no `@vam-session` at all
+    // (vam has not written it yet) or one that already agrees with this row.
+    const freshAgentPane: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', command: 'claude' },
+    ];
+    expect(paneForRow(freshAgentPane, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+
+    const agreeingPane: readonly TmuxSession[] = [
+      { project, name: 'vam-atlas-aa11bb', command: 'claude', vamSessionId: 'sess-alpha' },
+    ];
+    expect(paneForRow(agreeingPane, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+  });
+
+  it('still pairs when neither the command nor the id was in the listing at all', () => {
+    // Absence is not evidence either way -- the pre-existing behaviour for an
+    // older tmux, or any fixture that predates these two fields.
+    expect(paneForRow(one, [ALPHA], ALPHA, new Map())).toBe('vam-atlas-aa11bb');
+  });
+});

@@ -332,6 +332,24 @@ describe('replyToSession with published panes', () => {
     ]);
   });
 
+  it('D1: refuses the iTerm+Codex scenario end-to-end -- Claude row, project pane already running Codex', async () => {
+    // The operator's own `claude`, running in iTerm and not under tmux at
+    // all (no published `tmux` field), shares a cwd with the one vam pane
+    // this project has -- and that pane is running Codex, tagged with the
+    // thread's own uuid. `replyToSession` must type nothing anywhere.
+    const project = projectIdOf(CWD);
+    const tmux = fakeTmux(`${project}\t\tvam-atlas-aa11bb\tcodex\tcodex-thread-11111111\n`);
+    const error = await replyToSession({
+      agents,
+      rowId: `${SESSION}#7`,
+      prompt: 'ship it',
+      run: tmux.run,
+    });
+
+    expect(tmux.sent()).toEqual([]);
+    expect(error?.code).toBe('no-terminal');
+  });
+
   it('refuses the project-tag fallback when the only tagged pane was published by another row', async () => {
     // THE VETO THE FALLBACK ENDS ON, exercised on its own. One live row in the
     // project, one tmux session tagged with the project -- every count the

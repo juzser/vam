@@ -409,6 +409,26 @@ describe('closing a session vam itself started', () => {
     expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
   });
 
+  it('D1: refuses the iTerm+Codex scenario -- Close does not kill a pane proven to run Codex', async () => {
+    // `owned` is alone in its project (`here.length === 1`), and the one vam
+    // pane tagged for that project is running Codex, tagged with the
+    // thread's own uuid -- `paneForRow`'s fallback must refuse it, and Close
+    // must never reach `kill-session` for a program it never proved was this
+    // row's own.
+    const { calls, run } = runner(
+      ok,
+      listing(`${projectIdOf('/w/alpha')}\t\t${OWNED}\tcodex\tcodex-thread-11111111`),
+    );
+    const error = await stopSession(
+      [owned],
+      'sess-9#12',
+      vi.fn(async () => null),
+      run,
+    );
+    expect(error?.code).toBe('pane-unresolved');
+    expect(calls.some((argv) => argv[0] === 'kill-session')).toBe(false);
+  });
+
   /**
    * THE DEFECT THIS TASK EXISTS FOR, closed. Same shape as the test above --
    * two live rows in one project, neither published -- except now the tmux

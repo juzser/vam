@@ -33,6 +33,7 @@
  * so the answer is `null` and the refusal above.
  */
 
+import { PROVIDERS } from '../../../shared/providers.js';
 import type { SourceError } from '../../ipc/channels.js';
 import { withConciseLead } from '../../terminal/concise.js';
 import { plain } from '../../terminal/plain.js';
@@ -48,6 +49,16 @@ import {
 import { sessionIdOf } from './deliver.js';
 import { projectIdOf } from './project-id.js';
 import { claimedPanes } from './session-pane.js';
+
+/**
+ * The command a pane's foreground reads as when Claude Code is what is
+ * actually running in it -- `shared/providers.ts`'s own table, the one place
+ * vam already names every command it can start a session with, rather than a
+ * second vocabulary invented here. See the fallback's own veto below for why
+ * this is compared against, and never any other provider's command by name.
+ */
+const CLAUDE_CODE_COMMAND = PROVIDERS.find((provider) => provider.id === 'claude-code')
+  ?.command[0] as string;
 
 /** The part of a live row this module needs. `LiveAgent` satisfies it. */
 export type ReplyRow = {
@@ -210,7 +221,33 @@ export function paneForRow(
   // into a shell prompt. Applied LAST and only ever to `null`, like the claim
   // above; silence (no `command` in the listing) vetoes nothing.
   if (claimedPanes(panes).has(only.name)) return null;
-  return isShellCommand(only.command) ? null : only.name;
+  if (isShellCommand(only.command)) return null;
+  // A THIRD VETO, OF THE SAME SHAPE: a pane already carrying vam's OWN bonus
+  // proof of who is in it -- `@vam-session`, `VAM_SESSION_OPTION` -- for a
+  // DIFFERENT session is not silence, it is a pane already spoken for. The
+  // project tag is stamped once, at creation, and never re-derived from
+  // whatever later runs in the pane (`create-session.ts`), so a project's one
+  // tagged pane can go on to host any session or any provider at all; this is
+  // the one place left that still knows, once vam has written it once
+  // (`source.ts`'s own write-back, right after this proof is first made).
+  // Absent, or agreeing with this row, vetoes nothing -- the ordinary case for
+  // a pane no id has been written onto yet.
+  if (
+    only.vamSessionId !== undefined &&
+    only.vamSessionId !== '' &&
+    only.vamSessionId !== row.sessionId
+  ) {
+    return null;
+  }
+  // A FOURTH VETO: a pane whose foreground is neither a shell NOR Claude
+  // Code's own command is proven to be running something else -- Codex, or
+  // any other program typed into it by hand -- and the two counts above say
+  // nothing about WHAT is in the pane, only how many candidates there are.
+  // `shared/providers.ts` is the one table of runnable commands vam already
+  // has; nothing here invents a second one to name Codex specially. Absent,
+  // this vetoes nothing, the same rule the shell check above states.
+  if (only.command !== undefined && only.command !== CLAUDE_CODE_COMMAND) return null;
+  return only.name;
 }
 
 /**
