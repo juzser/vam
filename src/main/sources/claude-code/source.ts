@@ -68,6 +68,7 @@ import { type AgentRoster, readAgentRoster, subagentsDirOf } from './agent-roste
 import { readAgentWork } from './agent-work.js';
 import { type AgentsResult, type LiveAgent, listLiveAgents } from './agents.js';
 import { type BuiltinCommandList, createBuiltinCommandReader } from './builtin-commands.js';
+import { mapWithConcurrencyLimit } from './concurrency-limit.js';
 import { createSessionInDirectory, createSessionInProject } from './create-session.js';
 import { readTranscriptHistory } from './history.js';
 import { paneNameOf, paneRow, terminalRow, unclaimedPanes } from './pane-row.js';
@@ -167,6 +168,18 @@ type TranscriptRead = {
   /** Last activity, which `startedAt` is not. `null` when there is no file. */
   readonly mtimeMs: number | null;
 };
+
+/**
+ * The most transcript reads `loadClaudeCodeProjects` runs at once (S3, a
+ * review finding on the fix that made them concurrent at all -- see
+ * `concurrency-limit.ts`'s own header for the mechanism). Not independently
+ * measured the way `SOURCE_POLL_INTERVAL_MS` was: the reviewer's own number,
+ * picked as a small, deliberately conservative bound rather than the largest
+ * value that still helps -- a handful of sessions (the common case) still
+ * reads every one of them in the same wave this always ran as below this
+ * count.
+ */
+const TRANSCRIPT_READ_CONCURRENCY = 8;
 
 const NO_TRANSCRIPT: TranscriptRead = {
   facts: EMPTY_FACTS,
@@ -399,23 +412,25 @@ export async function loadClaudeCodeProjects(
   // project.
   const { panes, facts: processFacts } = await readPublishedPanesAndProcessFacts(sessionsRoot);
 
-  // Read each transcript once, however many processes resumed it -- and all
-  // of them AT ONCE: one session's read never waits on another's. Each
-  // mapper iteration keeps its own try/catch, so one session's rejection
-  // lands that session's NO_TRANSCRIPT sentinel and never fails the batch.
+  // Read each transcript once, however many processes resumed it -- and up
+  // to TRANSCRIPT_READ_CONCURRENCY of them AT ONCE: one session's read never
+  // waits behind another's unless the set is large enough to hit the bound
+  // (S3). Each mapper iteration keeps its own try/catch, so one session's
+  // rejection lands that session's NO_TRANSCRIPT sentinel and never fails
+  // the batch.
   const reads = new Map<string, TranscriptRead>(
-    await Promise.all(
-      [...new Set(agents.map((a) => a.sessionId))].map(
-        async (sessionId): Promise<[string, TranscriptRead]> => {
-          const path = index.get(sessionId);
-          if (path === undefined) return [sessionId, NO_TRANSCRIPT];
-          try {
-            return [sessionId, await readTranscriptOf(path, sessionId, nowMs)];
-          } catch {
-            return [sessionId, NO_TRANSCRIPT];
-          }
-        },
-      ),
+    await mapWithConcurrencyLimit(
+      [...new Set(agents.map((a) => a.sessionId))],
+      TRANSCRIPT_READ_CONCURRENCY,
+      async (sessionId): Promise<[string, TranscriptRead]> => {
+        const path = index.get(sessionId);
+        if (path === undefined) return [sessionId, NO_TRANSCRIPT];
+        try {
+          return [sessionId, await readTranscriptOf(path, sessionId, nowMs)];
+        } catch {
+          return [sessionId, NO_TRANSCRIPT];
+        }
+      },
     ),
   );
 

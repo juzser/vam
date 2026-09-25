@@ -1608,6 +1608,76 @@ describe('loadClaudeCodeProjects', () => {
       expect(project?.sessions.map((s) => s.epic).sort()).toEqual([...sessionIds].sort());
     });
 
+    /**
+     * S3 (review finding): unbounded concurrency was correct for a handful
+     * of sessions but would spawn one `claude` read per session for a very
+     * large project set. Twelve sessions, none released, must start no more
+     * than 8 reads -- `mapWithConcurrencyLimit`'s own unit test
+     * (`claude-code-concurrency-limit.test.ts`) pins the limiter in
+     * isolation; this pins that `loadClaudeCodeProjects` actually wires it
+     * in rather than still calling the bare `Promise.all` it used to.
+     */
+    it('never starts more than the concurrency bound at once, with a large session set', async () => {
+      const sessionIds = Array.from({ length: 12 }, (_, i) => `sess-${i}`);
+      for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
+      const agents = sessionIds.map((id) => agent({ key: `${id}#1`, sessionId: id }));
+
+      const starts: string[] = [];
+      const releases = new Map<string, () => void>();
+      let releaseEighthWave: () => void = () => {};
+      const eighthWaveStarted = new Promise<void>((resolve) => {
+        releaseEighthWave = resolve;
+      });
+
+      const readTranscriptOf = async (_path: string, sessionId: string) => {
+        starts.push(sessionId);
+        if (starts.length === 8) releaseEighthWave();
+        await new Promise<void>((resolve) => releases.set(sessionId, resolve));
+        return emptyRead(sessionId);
+      };
+
+      const loadPromise = loadClaudeCodeProjects(
+        root,
+        agents,
+        NOW,
+        undefined,
+        sessionsRoot,
+        null,
+        null,
+        [],
+        undefined,
+        null,
+        null,
+        null,
+        readTranscriptOf,
+      );
+
+      // Give every read that WILL start without another resolving first the
+      // chance to -- bounded, so an unbounded regression (all 12 start, this
+      // never resolves waiting for a ninth-that-never-comes) fails fast
+      // rather than hanging the suite.
+      await boundedWait(eighthWaveStarted, 500, 'did not observe exactly 8 reads start');
+      // Give a would-be regression one more turn of the loop to prove a
+      // ninth does NOT also start on its own.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(starts.length).toBe(8);
+
+      // Drain in waves: releasing the first 8 frees their slots, which lets
+      // the next few start -- but only as each wave's OWN releases resolve
+      // and the worker loop picks up the next item, a few of which need
+      // their own wave after that. Keep releasing whatever is currently
+      // waiting until all 12 have started.
+      while (starts.length < sessionIds.length) {
+        const waiting = [...releases.values()];
+        releases.clear();
+        for (const release of waiting) release();
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      for (const release of releases.values()) release();
+      await loadPromise;
+      expect(starts.length).toBe(12);
+    });
+
     it('lets the other sessions land data when one session read rejects', async () => {
       const sessionIds = ['sess-1', 'sess-2', 'sess-3'];
       for (const id of sessionIds) writeTranscript('proj', id, jsonl(reply('x')));
