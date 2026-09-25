@@ -91,6 +91,7 @@ import { revealScrollTop } from './reveal-row.js';
 import { useSessionListDrafts } from './session-list-drafts.js';
 import { StatusMark } from './status-mark.js';
 import { UsagePopover } from './UsagePopover.js';
+import { WorktreesSection } from './worktrees/WorktreesSection.js';
 
 /**
  * What `pendingAction` holds while "new project" is running.
@@ -1627,6 +1628,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   const hidden = hiddenProjects;
   /** The project whose removal is being confirmed, or null. One at a time. */
   const [confirming, setConfirming] = useState<Project | null>(null);
+  /**
+   * The project id whose "Worktrees" sub-list should draw its create form
+   * OPEN even though it has no worktrees yet -- the entry point for the
+   * FIRST worktree of a project, reached from that project's own "New
+   * worktree…" menu item below. `WorktreesSection` itself stays hidden for
+   * a project with none, matching this feature's own operator decision; this
+   * is the one exception, and it is cleared the moment the form closes
+   * (submitted or cancelled) so a later project's menu click cannot reopen a
+   * stale one.
+   */
+  const [creatingWorktreeFor, setCreatingWorktreeFor] = useState<string | null>(null);
   const {
     groupDraft,
     setGroupDraft,
@@ -3663,6 +3675,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             >
                               Change project icon
                             </button>
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-project-menu-item="new-worktree"
+                              onClick={() => {
+                                setCreatingWorktreeFor(section.project.id);
+                                setOpenMenu(null);
+                              }}
+                              className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                            >
+                              New worktree…
+                            </button>
                             {/* Last, and the only red thing in the menu. The icon is
                         LEFT of the label, where the two items above have
                         nothing, because this is the one item you must not
@@ -3773,6 +3797,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             </span>
                           </div>
                         )}
+                      {viewOptions.groupBy === 'project' && (
+                        <WorktreesSection
+                          project={section.project}
+                          allEntries={allEntries}
+                          forceOpenCreate={creatingWorktreeFor === section.project.id}
+                          onCloseCreate={() =>
+                            setCreatingWorktreeFor((current) =>
+                              current === section.project.id ? null : current,
+                            )
+                          }
+                        />
+                      )}
                       {section.items.map((entry) => {
                         const { session } = entry;
                         const isFocused = session.id === focusedSessionId;

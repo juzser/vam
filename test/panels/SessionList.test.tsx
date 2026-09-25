@@ -1411,6 +1411,10 @@ describe('SessionList project menu', () => {
       'new-session',
       'collapse',
       'icon',
+      // The entry point for a project's FIRST worktree: `WorktreesSection`
+      // stays hidden with none, so this is the only route to it until one
+      // exists (see `docs/design/worktrees.md`).
+      'new-worktree',
       'remove',
     ]);
     expect(container.textContent).not.toContain('Project settings');
