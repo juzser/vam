@@ -244,7 +244,7 @@ describe('mounted with a bridge', () => {
     expect(q('[data-terminal-stream]')).not.toBeNull();
   });
 
-  it('normalizes a bare-\\n seed to \\r\\n before writing it (capture-pane\'s own line separator, against convertEol: false)', async () => {
+  it("normalizes a bare-\\n seed to \\r\\n before writing it (capture-pane's own line separator, against convertEol: false)", async () => {
     // REPRODUCED against a real tmux + a real Terminal
     // (`e2e/terminal-stream-glitch-shots.mjs`): `tmux capture-pane -p` joins
     // its own rows with a bare `\n`, and `convertEol: false` (this
