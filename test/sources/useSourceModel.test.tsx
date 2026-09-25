@@ -195,6 +195,65 @@ describe('useSourceModel', () => {
     expect(pending).toHaveLength(2);
   });
 
+  /**
+   * C10: `window`'s `focus` and `document`'s `visibilitychange` are two
+   * separate listeners in this file, each calling `load` directly -- and a
+   * real "come back to vam" (alt-tab, a minimised window restored) fires
+   * BOTH, one DOM event apart. Before this fix each one called `load`
+   * independently: the first set `inFlight`, the second saw it and queued a
+   * SECOND read behind it (`reloadQueued`) -- two source reads for one
+   * return, on a source (`claude agents --json --all`) this file's own
+   * header prices at up to 0.41s. They are the same real-world event, not
+   * two reasons to ask twice, so returning must cost exactly one read --
+   * whether the two events land in the same tick or a few milliseconds
+   * apart, never two truly concurrent reads and never a queued second one
+   * for this pair specifically.
+   */
+  it('returning to vam costs exactly one read, focus and visibilitychange together', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const { source, pending } = gatedSource();
+    mount(source);
+    await act(async () => pending[0]?.resolve(projects('alpha')));
+    expect(pending).toHaveLength(1);
+
+    // Same tick: both listeners fire before either promise settles.
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      fireEvent(document, new Event('visibilitychange'));
+    });
+    expect(pending).toHaveLength(2);
+    // Let the one read settle, and give any queued follow-up a chance to
+    // start -- the bug this closes is a SECOND read queued behind the
+    // first, which would show up here as a third `pending` entry.
+    await act(async () => pending[1]?.resolve(projects('back')));
+    expect(pending).toHaveLength(2);
+  });
+
+  it('returning to vam costs exactly one read, focus and visibilitychange a few ms apart', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const { source, pending } = gatedSource();
+    mount(source);
+    await act(async () => pending[0]?.resolve(projects('alpha')));
+    expect(pending).toHaveLength(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(pending).toHaveLength(2);
+    await act(async () => {
+      vi.advanceTimersByTime(3);
+      fireEvent(document, new Event('visibilitychange'));
+    });
+    // Still one read for the pair: the second signal landed while the
+    // first was still in flight, close enough behind it to be the same
+    // "came back to vam" moment rather than a change to ask about again.
+    expect(pending).toHaveLength(2);
+    await act(async () => pending[1]?.resolve(projects('back')));
+    expect(pending).toHaveLength(2);
+  });
+
   it('does not touch state after unmount', async () => {
     const { source, pending } = gatedSource();
     const { seen } = mount(source);
