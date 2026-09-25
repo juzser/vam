@@ -448,6 +448,29 @@ describe('mounted with a bridge', () => {
       });
       expect(q('[data-terminal-stream-refused]')).toBeNull();
     });
+
+    it('does nothing for a paste outside Select mode -- the listener lives only on term.textarea', async () => {
+      // The operator's ask was Insert mode only; Select mode's own posture
+      // (no focus on `term.textarea`, `focusInsertStop`'s own note) is
+      // unchanged. The paste listener is wired to `liveTerm.textarea`
+      // exclusively (see the connect effect above), so a paste dispatched on
+      // the CONTAINER -- what a real paste would target while the textarea
+      // does not hold DOM focus -- never reaches it: a `paste` event does not
+      // propagate to a descendant, only to ancestors.
+      const write = vi.fn();
+      withBridge({ write });
+      render(<TerminalStreamTab projectId="p1" rowId="s1" branch={null} />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const container = q('[data-terminal-stream]');
+      if (container === null) throw new Error('no container');
+      act(() => {
+        container.dispatchEvent(pasteEvent('nope'));
+      });
+      expect(write).not.toHaveBeenCalled();
+    });
   });
 
   it('types into the stream via write()', async () => {
