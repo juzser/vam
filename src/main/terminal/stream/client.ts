@@ -52,6 +52,7 @@
  */
 
 import { StringDecoder } from 'node:string_decoder';
+import { CURSOR_FORMAT } from '../../sources/tmux/argv.js';
 import {
   type ControlChildProcess,
   RECONNECT_BACKOFF_MS,
@@ -65,6 +66,7 @@ import {
   SAFE_TARGET_RE,
 } from '../../sources/tmux/control-protocol.js';
 import { NO_SESSION } from '../../sources/tmux/spawn.js';
+import { seedWithCursor } from './seed.js';
 
 export type { ControlChildProcess, SpawnControlChild } from '../../sources/tmux/control.js';
 
@@ -317,11 +319,35 @@ export class StreamClient {
    * result IS the first seed) and by every later reseed (`%continue`,
    * reconnect), which instead push through `onSeed`. `ok` is carried
    * through unchanged: a `%error` here (the session is gone) must not be
-   * mistaken for a real screen by a caller that only reads `.body`. */
+   * mistaken for a real screen by a caller that only reads `.body`.
+   *
+   * CHAINED WITH A CURSOR QUERY, in ONE control-mode line (`#sendChain`),
+   * exactly `argv.ts`'s `capturePaneArgv` shape -- see `seed.ts`'s own
+   * header for why a plain `capture-pane` text dump on its own is not
+   * enough (it carries no cursor position at all) and why this asks for
+   * `-N` rather than this file's old `-J` (row-count exactness `cursor_y`
+   * depends on). `seedWithCursor` turns the pair into the one body this
+   * method returns -- xterm's cursor lands on tmux's own cell the moment
+   * this text is written, never wherever the text itself happened to end. */
   async #reseed(): Promise<BlockResult> {
-    const result = await this.#send(`capture-pane -p -e -J -t ${paneTarget(this.#target)}`);
-    if (result.ok) this.#seeded = true;
-    return result;
+    const target = paneTarget(this.#target);
+    const results = await this.#sendChain(
+      `display-message -p -t ${target} -F "${CURSOR_FORMAT}" ; capture-pane -p -e -N -t ${target}`,
+      2,
+    );
+    const cursor = results[0];
+    const screen = results[1];
+    // `#sendChain(line, 2)` always resolves an array of exactly two entries
+    // (it pushes exactly `count` promises before writing the line, and
+    // `Promise.all` preserves both their order and count) -- this is only
+    // reachable if that invariant itself is ever broken, never in ordinary
+    // operation, and TypeScript's `noUncheckedIndexedAccess` cannot see that
+    // invariant through a fixed-index destructure on a `readonly T[]`.
+    if (cursor === undefined || screen === undefined) {
+      throw new Error('StreamClient#reseed: #sendChain did not answer with two replies');
+    }
+    if (screen.ok) this.#seeded = true;
+    return { ok: screen.ok, body: seedWithCursor(screen.body, cursor.body) };
   }
 
   /** Best-effort: a real tmux answers `%error` for an unsupported flag
@@ -352,6 +378,30 @@ export class StreamClient {
       this.#blockQueue.push({ resolve });
       this.#write(line);
     });
+  }
+
+  /**
+   * A `;`-chained control-mode LINE, exactly `argv.ts`'s own `capturePaneArgv`
+   * shape (cursor query first, screen read second, ONE tmux invocation) --
+   * `#send` above only ever expects ONE `%begin`/`%end` per line it writes,
+   * so a chained line needs its own method: `count` block replies are queued
+   * in the SAME FIFO `#blockQueue` `#send` already uses (tmux answers a
+   * `;`-chained line with one block PER sub-command, in order -- this file's
+   * own `#handleEvent` already shifts one queued resolver per block event
+   * REGARDLESS of how many were pushed for a single write, so queueing
+   * `count` of them here needs no change there at all), then written as ONE
+   * line so tmux runs both commands back to back with no OTHER client's
+   * command -- and no `%output` this connection would otherwise have to
+   * wait out -- able to land in between (`argv.ts`'s own note: "THE ORDER IS
+   * LOAD-BEARING").
+   */
+  #sendChain(line: string, count: number): Promise<readonly BlockResult[]> {
+    const results: Promise<BlockResult>[] = [];
+    for (let i = 0; i < count; i += 1) {
+      results.push(new Promise<BlockResult>((resolve) => this.#blockQueue.push({ resolve })));
+    }
+    this.#write(line);
+    return Promise.all(results);
   }
 
   #onData(chunk: string): void {

@@ -309,20 +309,34 @@ export function TerminalStreamTab(props: {
       setRefusal(null);
       setDown(null);
       setName(null);
-      const result = await openBridge.open(openProjectId, rowId);
-      if (cancelled) return;
-      if (!result.ok) {
-        setRefusal(result.reason);
-        // Only THIS refusal is about the operator's tmux rather than this
-        // request (see `StreamFallbackReason`'s own header) -- the other
-        // three stay a refused pane, not a silent swap to the poller.
-        if (result.reason === 'unsupported-tmux') onFallback?.('unsupported-tmux');
-        return;
-      }
-      const { streamId } = result;
-      streamIdRef.current = streamId;
-      setName(result.name);
 
+      // A FRESH TERMINAL MUST TELL TMUX ITS REAL SIZE BEFORE THE STREAM'S
+      // OWN SEED IS EVER CAPTURED (a review finding, chasing the cursor-
+      // position fix in `main/terminal/stream/client.ts`/`seed.ts`). A vam
+      // session starts at tmux's own un-sized default -- `argv.ts`'s
+      // `newSessionArgv` passes no `-x`/`-y` at all -- not this pane's real
+      // pixel size, so opening the stream FIRST and resizing AFTERWARD (the
+      // old order here) let `capture-pane` run against a STALE, typically
+      // narrower window. That is not merely trimmed content: a line too
+      // wide for the stale width comes back WRAPPED across two tmux ROWS,
+      // and no LATER `resize-window` call un-wraps a screen that has
+      // already been captured that way -- `fitRef.current?.fit()` below
+      // only ever fixes how WIDE xterm itself draws, never what shape the
+      // TEXT already is by the time it arrives. MEASURED:
+      // `e2e/terminal-stream-glitch-shots.mjs`'s own check (c), a 98-column
+      // fixture, reddened by exactly this the moment `client.ts#reseed`
+      // started asking for `-N` instead of `-J` for the cursor fix's own
+      // sake -- `-J`'s row-JOINING had been silently re-assembling this
+      // exact staleness back into one line for as long as this pane has
+      // existed (which is also why it never had to carry `#{pane_height}`
+      // many rows -- the SAME reason that flag was wrong for `cursor_y`
+      // alignment in the first place). A RECONNECT (`term` already exists)
+      // does not re-run this: its tmux window was already sized by an
+      // earlier successful connect, and `StreamClient`'s own reconnect/
+      // pause-continue reseeds are driven entirely from main, with no hook
+      // here to resize ahead of them anyway (`onSeed`'s own fit+resize
+      // below is the best this file can do for that path).
+      const freshTerm = termRef.current === null;
       let term = termRef.current;
       if (term === null) {
         term = new Terminal({
@@ -523,7 +537,49 @@ export function TerminalStreamTab(props: {
           });
         });
         resizeObserver.observe(container);
-      } else {
+
+        // THE PRE-OPEN RESIZE ITSELF (module comment above `connect()`):
+        // `fit()` first, since a just-constructed `Terminal`'s `cols`/`rows`
+        // start at xterm's own default (80x24) until it runs, then `await`
+        // the resize so it has genuinely reached tmux -- `window.api.
+        // terminal.resize` is a real IPC round trip to a `resizeWindow` call
+        // (`terminal/ipc.ts`), never fire-and-forget -- before this function
+        // ever asks `openBridge.open()` to capture a screen.
+        fit.fit();
+        await window.api?.terminal?.resize(openProjectId, term.cols, term.rows, rowId);
+        if (cancelled) return;
+      }
+
+      const result = await openBridge.open(openProjectId, rowId);
+      if (cancelled) return;
+      if (!result.ok) {
+        setRefusal(result.reason);
+        // Only THIS refusal is about the operator's tmux rather than this
+        // request (see `StreamFallbackReason`'s own header) -- the other
+        // three stay a refused pane, not a silent swap to the poller.
+        if (result.reason === 'unsupported-tmux') onFallback?.('unsupported-tmux');
+        // A FRESH TERMINAL THAT NEVER GOT A STREAM is disposed here rather
+        // than left attached to `termRef` -- the refusal message below
+        // replaces this pane's own container in the JSX, so a Terminal left
+        // in the ref would sit detached from the DOM, never disposed until
+        // this whole effect unmounts (a review finding: creating the
+        // Terminal before `open()` now succeeds is what makes this cleanup
+        // newly necessary -- the old order never constructed one until
+        // AFTER a refusal was already ruled out).
+        if (freshTerm) {
+          resizeObserver?.disconnect();
+          resizeObserver = undefined;
+          termRef.current?.dispose();
+          termRef.current = null;
+          fitRef.current = null;
+        }
+        return;
+      }
+      const { streamId } = result;
+      streamIdRef.current = streamId;
+      setName(result.name);
+
+      if (!freshTerm) {
         // A RECONNECT, NOT A FIRST CONNECT: always reseed, on the same
         // "assume nothing was missed" posture the design doc names for
         // `StreamClient`'s own reconnect.
@@ -534,7 +590,14 @@ export function TerminalStreamTab(props: {
       // `fit()` runs, and a seed containing a box-drawn Claude Code prompt
       // (98 columns wide) written at 80 columns would soft-wrap once here
       // and never straighten back out (`asXtermSeed`'s own header covers the
-      // OTHER half of this same symptom).
+      // OTHER half of this same symptom). Run again even for a FRESH
+      // terminal, whose own pre-`open()` resize above already sent the
+      // identical numbers -- redundant only when the container's size truly
+      // has not changed in between (the ordinary case), and harmless
+      // (`resize-window` to the size it is already at) on the rare frame
+      // where it has; keeping ONE fit+resize+write sequence for both paths,
+      // rather than a fresh-vs-reconnect branch here too, is simpler and no
+      // less correct.
       //
       // NO `document.fonts.ready` AWAIT HERE, deliberately, despite this
       // task's own brief asking to check for one: `fontFamily`
