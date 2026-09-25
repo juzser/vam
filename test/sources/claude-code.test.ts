@@ -1663,6 +1663,8 @@ describe('loadClaudeCodeProjects', () => {
         [],
         undefined,
         null,
+        null,
+        null,
         readTranscriptOf,
       );
       expect(projects).toEqual([]);
@@ -1694,6 +1696,8 @@ describe('loadClaudeCodeProjects', () => {
         null,
         [],
         undefined,
+        null,
+        null,
         null,
         readTranscriptOf,
       );
