@@ -289,6 +289,32 @@ describe('readOpenQuestion', () => {
       expect(rebuilt).toBeNull();
     });
 
+    it('disambiguates a reused tool_use id across two separate polls', async () => {
+      const first = jsonl(ask('toolu_mock_1', [PROVIDERS]), answerLine('toolu_mock_1', 'first'));
+      const reader1 = readerOf(first);
+      const index = createQuestionIndex();
+      await readOpenQuestion(index, 'sess-1', reader1.bytes(), 1, reader1, CAP);
+
+      const secondAsk = { ...PROVIDERS, question: 'second ask' };
+      const second = first + jsonl(ask('toolu_mock_1', [secondAsk]));
+      const reader2 = readerOf(second);
+      const open = await readOpenQuestion(
+        index,
+        'sess-1',
+        Buffer.byteLength(second, 'utf8'),
+        2,
+        reader2,
+        CAP,
+      );
+
+      // The occurrence count is carried in the index's own state, not
+      // recomputed from scratch each poll -- the second ask, read alone in
+      // this poll's delta, still gets told apart from the first.
+      expect(open?.toolUseId).toBe('toolu_mock_1');
+      expect(open?.effectiveId).toBe('toolu_mock_1#2');
+      expect(open?.questions.map((q) => q.id)).toEqual(['toolu_mock_1#2:0']);
+    });
+
     it('rebuilds when the size matches but the mtime moved backward -- a same-size replacement', async () => {
       const first = jsonl(ask('toolu_1', [PROVIDERS]));
       const firstReader = readerOf(first);
@@ -341,6 +367,7 @@ describe('mergeOpenQuestion', () => {
   it('appends the open question when the window never saw its tool_use', () => {
     const merged = mergeOpenQuestion([], {
       toolUseId: 'toolu_2',
+      effectiveId: 'toolu_2',
       offset: 0,
       questions: [openOf('toolu_2')],
     });
@@ -351,6 +378,7 @@ describe('mergeOpenQuestion', () => {
     const windowQuestions = [{ ...openOf('toolu_1'), answer: 'yes' }];
     const merged = mergeOpenQuestion(windowQuestions, {
       toolUseId: 'toolu_1',
+      effectiveId: 'toolu_1',
       offset: 0,
       questions: [openOf('toolu_1')],
     });
@@ -361,9 +389,34 @@ describe('mergeOpenQuestion', () => {
     const windowQuestions = [openOf('toolu_1')];
     const merged = mergeOpenQuestion(windowQuestions, {
       toolUseId: 'toolu_2',
+      effectiveId: 'toolu_2',
       offset: 10,
       questions: [openOf('toolu_2')],
     });
     expect(merged.map((q) => q.id)).toEqual(['toolu_1:0', 'toolu_2:0']);
+  });
+
+  /**
+   * A REUSED raw id, disambiguated -- see `nextEffectiveId` in `questions.ts`.
+   * The window already holds the FIRST occurrence, answered; the open one
+   * IS the second, still waiting. Keying the merge's dedup check off the raw
+   * `toolUseId` (as it used to) would read the window's first-occurrence id
+   * as already covering this one -- same prefix, `toolu_mock_1:` -- and drop
+   * the genuinely open second occurrence on the floor. Keying it off
+   * `effectiveId` instead tells the two occurrences apart.
+   */
+  it("does not let a reused id's answered first occurrence swallow its open second", () => {
+    const answeredFirst = { ...openOf('toolu_mock_1'), answer: 'first answer' };
+    const openSecond = { ...openOf('toolu_mock_1'), id: 'toolu_mock_1#2:0' };
+    const merged = mergeOpenQuestion([answeredFirst], {
+      toolUseId: 'toolu_mock_1',
+      effectiveId: 'toolu_mock_1#2',
+      offset: 10,
+      questions: [openSecond],
+    });
+    expect(merged.map((q) => q.id)).toEqual(['toolu_mock_1:0', 'toolu_mock_1#2:0']);
+    // The merge never reopens what the window already settled.
+    expect(merged[0]?.answer).toBe('first answer');
+    expect(merged[1]?.answer).toBeNull();
   });
 });
