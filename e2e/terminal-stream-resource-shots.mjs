@@ -78,6 +78,7 @@ const bundleOf = async (entry) => {
 };
 const { StreamClient } = await bundleOf('src/main/terminal/stream/client.ts');
 const { readPane } = await bundleOf('src/main/sources/tmux/spawn.ts');
+const { spawnRealControlChild } = await bundleOf('src/main/sources/tmux/control.ts');
 
 const run = (argv) =>
   new Promise((resolve) => {
@@ -100,33 +101,87 @@ async function sampleWindow(fn, ms) {
 console.log(`tmux: ${which.stdout.trim()} on private socket -L ${SOCKET}\n`);
 const report = { idle: {}, heavy: {} };
 
-/* ── 1. IDLE CPU, POLL: a real capture-pane every REFRESH_MS (250ms) ─────── */
-{
-  const REFRESH_MS = 250;
-  const before = process.cpuUsage();
-  const t0 = Date.now();
-  let ticks = 0;
-  while (Date.now() - t0 < 3_000) {
-    await readPane(run, TMUX_SESSION);
-    ticks += 1;
-    await new Promise((r) => setTimeout(r, REFRESH_MS));
+// ── REAL ASSERTIONS, added for CI registration (`run-web-guards.mjs`) --
+// matching `terminal-stream-latency-shots.mjs`'s own `check`/`failures`
+// pattern exactly (#493), not a new convention. Only STRUCTURAL/RATIO
+// checks get asserted here: "stream is cheaper than poll while idle" and
+// "the scrollback cap actually bounds growth" hold regardless of how fast
+// or loaded the machine is, the same reason #493's own client-count checks
+// need no calibration. The ABSOLUTE numbers elsewhere in this file (heavy-
+// output ms, the full-pipeline flood's CPU/peak-memory/time-to-quiet) stay
+// informational-only (`console.log`, no `check`): unlike #493's p95
+// bounds, which were calibrated over 11 runs with a documented headroom
+// factor before being trusted as ceilings, these have no such calibration
+// history yet -- asserting an uncalibrated absolute ceiling is how a guard
+// becomes the flaky one the next person disables, not a safeguard.
+const failures = [];
+function check(label, ok, detail) {
+  if (ok) {
+    console.log(`  ok  ${label}`);
+    return;
   }
-  const cpu = msOf(process.cpuUsage(before));
-  report.idle.poll = { ticks, cpuMs: cpu };
-  console.log(`idle, poll path (${ticks} capture-pane spawns over 3s): ${cpu.toFixed(1)}ms CPU`);
+  console.error(`FAIL  ${label}${detail === undefined ? '' : ` -- ${detail}`}`);
+  failures.push(label);
 }
 
-/* ── 2. IDLE CPU, STREAM: one open connection, nothing printed ────────────── */
-{
-  const client = new StreamClient({ binary: 'tmux', prefix: ['-L', SOCKET], target: TMUX_SESSION });
-  await client.connect();
-  const before = process.cpuUsage();
-  await new Promise((r) => setTimeout(r, 3_000));
-  const cpu = msOf(process.cpuUsage(before));
-  report.idle.stream = { cpuMs: cpu };
-  console.log(`idle, stream path (one open tmux -C client over 3s): ${cpu.toFixed(1)}ms CPU`);
-  client.dispose();
+// A generic "retry-once-alone" helper (#493's own `withP95RetryOnce`
+// pattern in `terminal-stream-latency-shots.mjs`, generalised past wall-
+// clock p95s to any measurement whose ACCEPTABILITY, not its raw numbers,
+// is what gets asserted): re-run `measure` a single time, alone, if the
+// first pass does not satisfy `acceptable` -- a real tmux session and a
+// real Chromium renderer both carry enough incidental jitter that a single
+// noisy pass shouldn't fail the guard outright, but a SECOND bad pass is a
+// real finding, not noise.
+async function withRetryOnce(label, measure, acceptable) {
+  let result = await measure();
+  if (acceptable(result)) return result;
+  console.warn(`  retry: ${label} missed its bound on the first pass -- re-measuring once, alone, before failing for real`);
+  result = await measure();
+  return result;
 }
+
+/* ── 1+2. IDLE CPU, POLL vs STREAM: a real capture-pane every REFRESH_MS
+ * (250ms) against one open, idle `StreamClient` connection. The STRUCTURAL
+ * property -- streaming is cheaper than polling while idle, the whole
+ * reason this pair exists -- holds regardless of how fast or loaded the
+ * runner is, unlike either path's own absolute ms number.
+ */
+async function measureIdle() {
+  const REFRESH_MS = 250;
+  let ticks = 0;
+  let pollCpuMs;
+  {
+    const before = process.cpuUsage();
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3_000) {
+      await readPane(run, TMUX_SESSION);
+      ticks += 1;
+      await new Promise((r) => setTimeout(r, REFRESH_MS));
+    }
+    pollCpuMs = msOf(process.cpuUsage(before));
+    console.log(`idle, poll path (${ticks} capture-pane spawns over 3s): ${pollCpuMs.toFixed(1)}ms CPU`);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  let streamCpuMs;
+  {
+    const client = new StreamClient({ binary: 'tmux', prefix: ['-L', SOCKET], target: TMUX_SESSION });
+    await client.connect();
+    const before = process.cpuUsage();
+    await new Promise((r) => setTimeout(r, 3_000));
+    streamCpuMs = msOf(process.cpuUsage(before));
+    console.log(`idle, stream path (one open tmux -C client over 3s): ${streamCpuMs.toFixed(1)}ms CPU`);
+    client.dispose();
+  }
+  return { poll: { ticks, cpuMs: pollCpuMs }, stream: { cpuMs: streamCpuMs } };
+}
+
+const idle = await withRetryOnce('idle CPU ratio', measureIdle, (r) => r.stream.cpuMs < r.poll.cpuMs);
+report.idle = idle;
+check(
+  'idle CPU: stream path is cheaper than poll path',
+  idle.stream.cpuMs < idle.poll.cpuMs,
+  `stream=${idle.stream.cpuMs.toFixed(1)}ms poll=${idle.poll.cpuMs.toFixed(1)}ms`,
+);
 
 await new Promise((r) => setTimeout(r, 300));
 
@@ -202,50 +257,75 @@ await new Promise((r) => setTimeout(r, 300));
  * pause-after=<N>` (tmux(1), CONTROL MODE / refresh-client). `StreamClient`
  * now sends that on every `connect()`/reconnect (`#requestPauseAfter`,
  * `client.ts`), so THIS measurement drives a real `StreamClient` directly
- * (not a raw connection) with the identical 20ms-per-chunk slow consumer,
- * and checks not only whether `%pause` arrives but whether the pane
- * actually RECOVERS to a correct screen afterwards.
+ * (not a raw connection), and checks not only whether `%pause` arrives but
+ * whether the pane actually RECOVERS to a correct screen afterwards.
+ *
+ * UPDATED AGAIN -- the SAME finding this task's own CI-flake fix made in
+ * `test/main/terminal/stream/stream-client-pause-after.test.ts`: a
+ * per-chunk busy-wait's actual throttling effect depends on how much data
+ * tmux batches per read/write, which is unpredictable and machine-load-
+ * dependent (proven unreliable there under a full parallel test run, not
+ * just in theory). Replaced with the SAME deterministic technique that
+ * test now uses: pause the real control child's own `stdout` directly
+ * (`spawnChild` injection, `StreamClient`'s own test seam) -- this stops
+ * Node's stream from draining the OS pipe for EVERY listener, forcing
+ * genuine backpressure regardless of chunk size or system load, rather
+ * than racing tmux's own batching to out-spin it.
  */
-{
-  const client = new StreamClient({ binary: 'tmux', prefix: ['-L', SOCKET], target: TMUX_SESSION });
+async function measurePauseAfter() {
+  let realStdout;
+  const observingSpawn = (binary, argv) => {
+    const child = spawnRealControlChild(binary, argv);
+    realStdout = child.stdout;
+    return child;
+  };
+  const client = new StreamClient({
+    binary: 'tmux',
+    prefix: ['-L', SOCKET],
+    target: TMUX_SESSION,
+    spawnChild: observingSpawn,
+  });
   await client.connect();
   const seeds = [];
   client.onSeed((seed) => seeds.push(seed));
-  client.onData(() => {
-    // Busy-wait, not `setTimeout` -- this has to actually occupy the event
-    // loop the way a synchronous render would, or nothing here ever falls
-    // behind tmux's own delivery rate.
-    const until = Date.now() + 20;
-    while (Date.now() < until) {
-      /* spin */
+  try {
+    spawnSync(
+      'tmux',
+      ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000; echo VAM-FLOOD-DONE-5', 'Enter'],
+      { env },
+    );
+    // Deterministic stall: pause the REAL stream (not a per-chunk delay).
+    realStdout?.pause();
+    await new Promise((r) => setTimeout(r, 1_500));
+    realStdout?.resume();
+    const deadline = Date.now() + 15_000;
+    while (seeds.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 200));
     }
-  });
-  spawnSync(
-    'tmux',
-    ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000; echo VAM-FLOOD-DONE-5', 'Enter'],
-    { env },
-  );
-  const deadline = Date.now() + 15_000;
-  while (seeds.length === 0 && Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 200));
+    let finalPane = '';
+    const doneDeadline = Date.now() + 10_000;
+    while (Date.now() < doneDeadline) {
+      finalPane = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
+      if (/VAM-FLOOD-DONE-5/.test(finalPane)) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
+    console.log(
+      `\nreal tmux, a real StreamClient (sends pause-after), a paused real stdout (not a busy-wait), same 5MB flood: ` +
+        `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
+        `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
+        'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
+    );
+    return { sawReseed: seeds.length > 0, correct };
+  } finally {
+    client.dispose();
   }
-  let finalPane = '';
-  const doneDeadline = Date.now() + 10_000;
-  while (Date.now() < doneDeadline) {
-    finalPane = tmux('capture-pane', '-p', '-t', `=${TMUX_SESSION}:`);
-    if (/VAM-FLOOD-DONE-5/.test(finalPane)) break;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
-  report.pauseAfter = { sawReseed: seeds.length > 0, correct };
-  console.log(
-    `\nreal tmux, a real StreamClient (sends pause-after), a 20ms-per-chunk consumer, same 5MB flood: ` +
-      `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
-      `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
-      'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
-  );
-  client.dispose();
 }
+
+const pauseAfter = await withRetryOnce('pause-after recovery', measurePauseAfter, (r) => r.sawReseed && r.correct);
+report.pauseAfter = pauseAfter;
+check('pause-after: %pause triggered a reseed (a real StreamClient throttled by tmux)', pauseAfter.sawReseed);
+check('pause-after: the pane recovers to the correct final screen', pauseAfter.correct);
 
 // A FRESH SESSION for test 6, never test 5's own leftover flood.
 tmux('kill-session', '-t', TMUX_SESSION);
@@ -319,20 +399,57 @@ async function heapAfterLines(scrollback, lineCount) {
 
 try {
   console.log('\n--- renderer memory, scrollback ---');
-  const atCap = await heapAfterLines(5_000, 5_000);
-  console.log(
-    `scrollback:5000 (the shipped cap), 5,000 lines written (fills it exactly): ` +
-      `${atCap.deltaMB?.toFixed(2) ?? 'n/a'} MB heap growth`,
+  // STRUCTURAL, not absolute: "3x the writes at the same cap stays close to
+  // the same growth" and "the same writes at 20x the cap grow noticeably
+  // more" both hold regardless of how much RAM or how fast the runner's own
+  // Chromium is -- unlike any of the three deltaMB numbers alone, which is
+  // why only the RATIOS below are asserted (retry-once-alone: heap sampling
+  // through `performance.memory` carries real GC-timing jitter).
+  async function measureScrollbackCap() {
+    const atCap = await heapAfterLines(5_000, 5_000);
+    console.log(
+      `scrollback:5000 (the shipped cap), 5,000 lines written (fills it exactly): ` +
+        `${atCap.deltaMB?.toFixed(2) ?? 'n/a'} MB heap growth`,
+    );
+    const pastCap = await heapAfterLines(5_000, 15_000);
+    console.log(
+      `scrollback:5000, 15,000 lines written (3x the cap): ` +
+        `${pastCap.deltaMB?.toFixed(2) ?? 'n/a'} MB heap growth -- should track the CAP (5,000 retained), not the 15,000 written, if the cap is doing its job.`,
+    );
+    const uncapped = await heapAfterLines(100_000, 15_000);
+    console.log(
+      `scrollback:100000 (an effectively uncapped comparison), the SAME 15,000 lines: ` +
+        `${uncapped.deltaMB?.toFixed(2) ?? 'n/a'} MB heap growth -- the delta against the capped run above is what the cap is buying.`,
+    );
+    return { atCap, pastCap, uncapped };
+  }
+  function scrollbackCapAcceptable({ atCap, pastCap, uncapped }) {
+    if (atCap.deltaMB === null || pastCap.deltaMB === null || uncapped.deltaMB === null) return false;
+    // Generous ceiling (2x + 2MB headroom): 3x the writes at the SAME cap
+    // should not cost anywhere near 3x the memory if the cap is bounding
+    // retained lines rather than total lines ever written.
+    const pastStaysNearCap = pastCap.deltaMB < atCap.deltaMB * 2 + 2;
+    // Generous floor (1.2x): 20x the cap, same writes, should retain
+    // meaningfully more (all 15,000 lines vs. 5,000) and so grow measurably
+    // more than the capped run -- proof the cap is doing something, not
+    // just noise in the same direction.
+    const uncappedGrowsMore = uncapped.deltaMB > pastCap.deltaMB * 1.2;
+    return pastStaysNearCap && uncappedGrowsMore;
+  }
+  const { atCap, pastCap, uncapped } = await withRetryOnce(
+    'renderer scrollback-cap ratios',
+    measureScrollbackCap,
+    scrollbackCapAcceptable,
   );
-  const pastCap = await heapAfterLines(5_000, 15_000);
-  console.log(
-    `scrollback:5000, 15,000 lines written (3x the cap): ` +
-      `${pastCap.deltaMB?.toFixed(2) ?? 'n/a'} MB heap growth -- should track the CAP (5,000 retained), not the 15,000 written, if the cap is doing its job.`,
+  check(
+    'renderer memory: 3x the writes at the same cap stays near the at-cap growth (cap bounds RETAINED lines)',
+    atCap.deltaMB !== null && pastCap.deltaMB !== null && pastCap.deltaMB < atCap.deltaMB * 2 + 2,
+    `atCap=${atCap.deltaMB?.toFixed(2)}MB pastCap=${pastCap.deltaMB?.toFixed(2)}MB`,
   );
-  const uncapped = await heapAfterLines(100_000, 15_000);
-  console.log(
-    `scrollback:100000 (an effectively uncapped comparison), the SAME 15,000 lines: ` +
-      `${uncapped.deltaMB?.toFixed(2) ?? 'n/a'} MB heap growth -- the delta against the capped run above is what the cap is buying.`,
+  check(
+    'renderer memory: an effectively uncapped scrollback grows noticeably more than the capped one (the cap is buying something)',
+    pastCap.deltaMB !== null && uncapped.deltaMB !== null && uncapped.deltaMB > pastCap.deltaMB * 1.2,
+    `pastCap=${pastCap.deltaMB?.toFixed(2)}MB uncapped=${uncapped.deltaMB?.toFixed(2)}MB`,
   );
 
   console.log('\n--- renderer CPU proxy (CDP TaskDuration), burst write ---');
@@ -502,6 +619,14 @@ try {
       `after a reseed from a fresh capture-pane, shows it: ${matchesAfterReseed} ` +
       '(this one MUST be true -- it is what a real reconnect always restores).',
   );
+  // STRUCTURAL, unlike the CPU/heap/time-to-quiet numbers logged above (no
+  // calibration history yet -- see this file's header): whether a reseed
+  // from ground truth produces a correct screen is a property that must
+  // always hold, regardless of the flood's speed or the runner's load.
+  // `liveMatchesBeforeReseed` is deliberately NOT asserted here -- it is
+  // expected to be `false` exactly when the drop-and-reseed path correctly
+  // triggers, so it is a fact about what happened, not a pass/fail signal.
+  check('full pipeline: after a reseed from ground truth, the live screen matches capture-pane', matchesAfterReseed);
 
   await floodPage.close();
   floodClient.dispose();
@@ -512,4 +637,12 @@ try {
   killServer();
 }
 
-console.log('\nterminal-stream-resource-shots.mjs: measurement complete (informational -- no pass/fail).');
+if (failures.length > 0) {
+  console.error(`\nterminal-stream-resource-shots.mjs: ${failures.length} check(s) FAILED: ${failures.join(', ')}`);
+} else {
+  console.log(
+    '\nterminal-stream-resource-shots.mjs: all structural/ratio checks passed ' +
+      "(the absolute CPU/heap/time-to-quiet numbers logged above stay informational -- see this file's header on why).",
+  );
+}
+process.exit(failures.length > 0 ? 1 : 0);
