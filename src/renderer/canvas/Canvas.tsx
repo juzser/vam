@@ -125,7 +125,6 @@ import {
   browserStorage,
   createGroup,
   deleteGroup,
-  type FocusChoice,
   isGroupCollapsed,
   isProjectCollapsed,
   isProjectHidden,
@@ -152,10 +151,10 @@ import {
 } from '../prefs/prefs.js';
 import { isTabIndicatorOn, type TabIndicatorId } from '../prefs/tab-indicators.js';
 import { SettingsOverlay } from '../settings/SettingsOverlay.js';
-import type { SectionId } from '../settings/sections.js';
 import { canWriteTo, type SessionSource, type SourceWrites } from '../sources/port.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { type CanvasSource, READ_ONLY_SOURCE } from '../sources/source.js';
+import { useCanvasOverlays } from './canvas-overlays.js';
 import { useCanvasPrefs } from './canvas-prefs.js';
 import { useCanvasTheme } from './canvas-theme.js';
 import {
@@ -1985,25 +1984,26 @@ function CanvasInner({
     },
     [setFocusedPaneId],
   );
-  const [jumping, setJumping] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [keySheetOpen, setKeySheetOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  /** Which section Settings opens on next — `appearance` unless the Remote
-   *  icon or its key just asked for `remote` directly (see `openSettings`). */
-  const [settingsSection, setSettingsSection] = useState<SectionId>('appearance');
-  const [errorLogOpen, setErrorLogOpen] = useState(false);
-  /**
-   * The row a close refused without being able to prove it is not vam's own
-   * -- `SourceError.forcible` -- and offered the operator a confirmed kill
-   * for. `null` means no such prompt is on screen. See `ConfirmForceClose`.
-   */
-  const [confirmForceClose, setConfirmForceClose] = useState<{
-    sessionId: string;
-    title: string;
-  } | null>(null);
+  const {
+    jumping,
+    setJumping,
+    status,
+    setStatus,
+    query,
+    setQuery,
+    paletteOpen,
+    setPaletteOpen,
+    keySheetOpen,
+    setKeySheetOpen,
+    settingsOpen,
+    setSettingsOpen,
+    settingsSection,
+    setSettingsSection,
+    errorLogOpen,
+    setErrorLogOpen,
+    confirmForceClose,
+    setConfirmForceClose,
+  } = useCanvasOverlays();
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
     paletteOpen || keySheetOpen || settingsOpen || errorLogOpen || confirmForceClose !== null;
@@ -2276,6 +2276,7 @@ function CanvasInner({
    * below, for the same reason -- a project with no source has nowhere to
    * store the new title.
    */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const beginSessionRename = useCallback((entry: SessionEntry) => {
     const projectSource = entry.project.source;
     if (projectSource === undefined) {
@@ -2291,6 +2292,7 @@ function CanvasInner({
     setRenamingId(entry.session.id);
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const openSessionIconPicker = useCallback((entry: SessionEntry) => {
     // A project with no source cannot store an icon under one: guessing a
     // fallback here would reintroduce the exact cross-source collision this
@@ -2541,7 +2543,7 @@ function CanvasInner({
       savePrefs(createGroup(prefs, source, id, name));
       setStatus(`${name} — a project kept on this machine, never in the event log`);
     },
-    [groupHomeSource, prefs, savePrefs],
+    [groupHomeSource, prefs, savePrefs, setStatus],
   );
 
   const renameOneGroup = useCallback(
@@ -2569,7 +2571,7 @@ function CanvasInner({
       savePrefs(deleteGroup(prefs, source, group.id));
       setStatus(`${group.name} ungrouped — ${moved} ${moved === 1 ? 'repo' : 'repos'} moved up`);
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, setStatus],
   );
 
   /**
@@ -3379,7 +3381,7 @@ function CanvasInner({
       );
       setFocusedPaneId(newId);
     },
-    [focusedSessionId, panes, setFocusedPaneId],
+    [focusedSessionId, panes, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -3432,7 +3434,7 @@ function CanvasInner({
     }
     setPanes(next);
     setFocusedPaneId(fallback);
-  }, [panes, focusedPaneId, setFocusedPaneId]);
+  }, [panes, focusedPaneId, setFocusedPaneId, setStatus]);
 
   /** Cycle the keyboard between splits, wrapping — vim's `Ctrl-w w`/`W`. */
   const stepFocusedSplit = useCallback(
@@ -3443,7 +3445,7 @@ function CanvasInner({
       }
       setFocusedPaneId(stepPane(panes, focusedPaneId, delta));
     },
-    [panes, focusedPaneId, setFocusedPaneId],
+    [panes, focusedPaneId, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -3685,7 +3687,7 @@ function CanvasInner({
       });
       setFocusedPaneId(newId);
     },
-    [dragging, panes, entriesById, setFocusedPaneId],
+    [dragging, panes, entriesById, setFocusedPaneId, setStatus],
   );
 
   const onPaneDrop = useCallback(
@@ -3922,6 +3924,7 @@ function CanvasInner({
       setComposingFor,
       setWritingFor,
       setSendFailureFor,
+      setStatus,
     ],
   );
 
@@ -4003,7 +4006,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, setStatus, setConfirmForceClose],
   );
 
   /**
@@ -4059,7 +4062,7 @@ function CanvasInner({
         setFocusedPaneId(stepPane(panes, paneId, 1));
       }
     },
-    [panes, setFocusedPaneId, closeSession],
+    [panes, setFocusedPaneId, closeSession, setStatus],
   );
 
   /**
@@ -4188,7 +4191,7 @@ function CanvasInner({
           : `removed "${project.name}" from vam — ended ${ended} session${ended === 1 ? '' : 's'} vam started; nothing left this machine`,
       );
     },
-    [allEntries, closeSession, pendingAction, setProjectRemoved],
+    [allEntries, closeSession, pendingAction, setProjectRemoved, setStatus],
   );
 
   /**
@@ -4269,7 +4272,7 @@ function CanvasInner({
         setPendingAction(null);
       }
     },
-    [source, pendingAction],
+    [source, pendingAction, setStatus],
   );
 
   /**
@@ -4378,7 +4381,7 @@ function CanvasInner({
       // turns a clear one into an apparent hang.
       setPendingAction(null);
     }
-  }, [source, pendingAction]);
+  }, [source, pendingAction, setStatus]);
 
   /** The caption both `+` controls wear: the refusal, or nothing to say. */
   const newSessionDecline = useMemo(() => {
@@ -4433,7 +4436,7 @@ function CanvasInner({
       }
       void createSession(target.project.id, target.project.name, paneId);
     },
-    [allEntries, activeProjectId, createSession, setFocusedPaneId],
+    [allEntries, activeProjectId, createSession, setFocusedPaneId, setStatus],
   );
 
   /**
@@ -4456,7 +4459,7 @@ function CanvasInner({
         ? `"${target.title}" goes back to the name its source gives it`
         : `renamed to "${renameDraft.trim()}" — vam's own name for it, kept on this machine`,
     );
-  }, [renameTarget, renameDraft, prefs, savePrefs]);
+  }, [renameTarget, renameDraft, prefs, savePrefs, setStatus]);
 
   const copyAllCommands = useCallback(async () => {
     const commands = focusedDecision?.commands ?? [];
@@ -4468,7 +4471,7 @@ function CanvasInner({
     setStatus(
       copied ? `copied ${commands.length} commands` : `could not copy ${commands.length} commands`,
     );
-  }, [focusedDecision]);
+  }, [focusedDecision, setStatus]);
 
   /**
    * `gt` / `gT` — THE MOVE THAT THINKS IN PROJECTS.
@@ -4534,9 +4537,10 @@ function CanvasInner({
         focusSession(landing.session.id);
       }
     },
-    [entries, focusedEntry, focusSession],
+    [entries, focusedEntry, focusSession, setStatus],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: listing the useCanvasOverlays() setters would touch the keydown effect's deps; they are stable like useState setters.
   useEffect(() => {
     // The chord layer is OFF on a phone, not simulated: `hjkl` moves a cursor
     // that does not exist, `Mod-<digit>` resolves against panes that are not
@@ -5545,6 +5549,7 @@ function CanvasInner({
     setFiltering(true);
   }, [focusedSessionId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setQuery` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const onSidebarFilterChange = useCallback((next: string) => {
     // incsearch: the answer arrives while you type, not after you
     // commit. Without it the list narrows under a focus ring that is
@@ -5566,7 +5571,7 @@ function CanvasInner({
     setFiltering(false);
     setQuery('');
     setFocusedSessionId(searchOrigin.current);
-  }, [setFocusedSessionId]);
+  }, [setFocusedSessionId, setQuery]);
 
   const onSidebarRenameCancel = useCallback(() => {
     setRenamingId(null);
@@ -5631,7 +5636,7 @@ function CanvasInner({
       return;
     }
     void createSession(focusedEntry.project.id, focusedEntry.project.name);
-  }, [focusedEntry, createSession]);
+  }, [focusedEntry, createSession, setStatus]);
 
   const onSidebarAddInProject = useCallback(
     (project: Project) => void createSession(project.id, project.name),
@@ -5667,6 +5672,7 @@ function CanvasInner({
 
   const onSidebarNewProject = useCallback(() => void newProject(), [newProject]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `setStatus` comes from useCanvasOverlays() and is a useState setter, stable across renders.
   const onSidebarPickIcon = useCallback((project: Project) => {
     // Same refusal as the session picker (§ above): a project with no
     // source has no bucket to store under, and guessing one would
@@ -5701,17 +5707,17 @@ function CanvasInner({
           : `renamed to "${name.trim()}" — vam's own name for it, kept on this machine`,
       );
     },
-    [prefs, savePrefs],
+    [prefs, savePrefs, setStatus],
   );
 
   const onSidebarSettings = useCallback(() => {
     setSettingsSection('appearance');
     setSettingsOpen(true);
-  }, []);
+  }, [setSettingsSection, setSettingsOpen]);
   const onSidebarRemote = useCallback(() => {
     setSettingsSection('remote');
     setSettingsOpen(true);
-  }, []);
+  }, [setSettingsSection, setSettingsOpen]);
 
   const onSidebarToggleTheme = useCallback(
     () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
