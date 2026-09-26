@@ -13,6 +13,8 @@
  * Everything here is data at rest. No adapter, no fetching, no React.
  */
 
+import type { ProviderId } from '../../shared/providers.js';
+
 /**
  * Which system a project or session came from. Adapters set it; the canvas only
  * labels with it.
@@ -822,6 +824,39 @@ export type Session = {
    * transcript either way; only the secondary "Resume" action goes unoffered.
    */
   readonly resumeCommand?: string;
+  /**
+   * WHICH PROVIDER IS ALREADY RUNNING IN THIS ROW'S PANE, for an `unstarted`
+   * or `terminal` row only -- the fact that ends the coordinator's own
+   * performance concern with a per-row background poll: the same tmux
+   * listing `unclaimedPanes`/`paneRow`/`terminalRow` (`pane-row.ts`) already
+   * read to BUILD this row carries the pane's foreground command
+   * (`TmuxSession.command`, `#{pane_current_command}`), so there is no
+   * second read to make -- `identifyRunningProvider`
+   * (`sources/tmux/shell.ts`) classifies it at the SAME poll cadence this
+   * row itself arrives on.
+   *
+   * THREE STATES, the same shape `model` above already established for "a
+   * fact a source may or may not hold": ABSENT is the ordinary empty pane --
+   * a plain shell, or a listing with no command at all (`isShellCommand`'s
+   * own "ABSENCE IS NOT A SHELL" rule applies here too: silence asserts
+   * nothing, so the ordinary start screen draws exactly as it always has).
+   * `null` is CONFIRMED running -- the foreground command is neither
+   * provider's own -- an `htop`, an editor, anything the operator typed by
+   * hand that is not one of vam's two providers. The `ProviderId` is the
+   * confirmed, identified provider, `claude-code`'s own measured quirk
+   * (`sources/claude-code/start-screen.ts`'s header) included.
+   *
+   * READ BY THE RESPONSE VIEW to draw `PaneReady` instead of the start
+   * screen, and to withdraw Start/Resume outright, the instant this field is
+   * present -- `Canvas.tsx`'s own `paneProps`. A pane the operator started
+   * by hand in the Terminal view, or one still running from before a
+   * reload, is caught here on the SOURCE's own poll cadence (about 10s) with
+   * no separate mechanism of its own; an ACTIVE Start/Resume wait still gets
+   * the faster, bounded 1.5s pane poll (`startingPaneByKey`'s own screen
+   * read) for exactly as long as that wait is up, which is where the
+   * blocking-screen cards (trust/update) come from too.
+   */
+  readonly runningProvider?: ProviderId | null;
   /**
    * THE MODEL THIS SESSION IS ON, when its SOURCE holds that fact -- never
    * read off a screen, and never what vam last asked for.

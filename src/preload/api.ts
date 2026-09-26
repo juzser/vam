@@ -49,6 +49,7 @@ import type { NotifyVerdict } from '../shared/notify.js';
 import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
 import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
+import type { AnswerTrustResult, StartScreenView } from '../shared/start-screen.js';
 import type {
   ModelSwitchResult,
   PaneKey,
@@ -493,6 +494,23 @@ export type TerminalApi = {
    * bridge offers no second member that would.
    */
   switchModel(projectId: string, choice: string, rowId?: string): Promise<ModelSwitchResult>;
+  /**
+   * WHAT THE PANE BEHIND A START-SESSION/RESUME WAIT IS SHOWING RIGHT NOW --
+   * `trust`, `update`, `login`, `onboarding`, `ready` or `unknown`
+   * (`shared/start-screen.ts`). A read like `prompt`, safe to poll on a short
+   * interval while a wait is up: nothing here presses a key.
+   */
+  startScreen(projectId: string, rowId?: string): Promise<StartScreenView>;
+  /**
+   * ANSWER the trust dialog on that same pane -- `startScreen`'s own write,
+   * and the one screen it names vam may answer on its own. `null` when the
+   * keys landed; a refusal, never a guess, otherwise.
+   */
+  answerTrust(
+    projectId: string,
+    rowId: string | undefined,
+    trust: boolean,
+  ): Promise<AnswerTrustResult>;
 };
 
 /**
@@ -543,6 +561,17 @@ export function createTerminalApi(ipc: InvokerLike): TerminalApi {
             choice,
             rowId,
           )) as Promise<ModelSwitchResult>,
+    startScreen: (projectId, rowId) =>
+      (rowId === undefined
+        ? ipc.invoke(CHANNELS.terminalStartScreen, projectId)
+        : ipc.invoke(CHANNELS.terminalStartScreen, projectId, rowId)) as Promise<StartScreenView>,
+    answerTrust: (projectId, rowId, trust) =>
+      ipc.invoke(
+        CHANNELS.terminalAnswerTrust,
+        projectId,
+        rowId,
+        trust,
+      ) as Promise<AnswerTrustResult>,
   };
 }
 

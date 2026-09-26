@@ -350,6 +350,37 @@ export const CHANNELS = {
    */
   terminalSwitchModel: 'vam:terminal:switch-model',
   /**
+   * WHAT THE PANE ITSELF IS SHOWING, for a row a Start-session/Resume wait is
+   * up on -- `trust`, `update`, `login`, `onboarding`, `ready` or `unknown`
+   * (`shared/start-screen.ts`). The operator's own two reports: nothing
+   * before this channel ever looked at what the CLI was drawing while it
+   * blocked on a first-run dialog `claude agents --json` cannot see, and the
+   * live-agent poll that DOES eventually notice a ready session only runs
+   * every `SOURCE_POLL_INTERVAL_MS` -- this is a second, faster, independent
+   * read of the SAME fact, off the SAME pane, through the SAME `capture-pane`
+   * path `terminalPrompt` already reads a running session's picker through.
+   *
+   * A READ, safe to poll on a short interval while the wait is up -- nothing
+   * here presses a key. Aimed by `targetSession`, `terminalPrompt`'s own
+   * rule, and a pane-row id (`pane:<name>`) resolves through its OWN-PANE
+   * branch without needing a published-pane map at all.
+   */
+  terminalStartScreen: 'vam:terminal:start-screen',
+  /**
+   * ANSWER the trust dialog on the pane behind a Start-session/Resume wait --
+   * `terminalStartScreen`'s own write, and the ONE screen that channel names
+   * vam is allowed to answer on its own (the operator's own words: "answer
+   * the simple ones inline where it's safe and unambiguous"). Every other
+   * named screen -- update, login, onboarding -- and anything unrecognised
+   * gets "Open Terminal to answer" instead; there is no channel for those,
+   * because there is nothing here for vam to press.
+   *
+   * VERIFY THEN ACT, `terminalAnswer`'s own rule: the pane is re-read and
+   * confirmed to still be showing the trust dialog before a single key goes
+   * in (`sources/claude-code/start-screen.ts`'s `answerTrustDialog`).
+   */
+  terminalAnswerTrust: 'vam:terminal:answer-trust',
+  /**
    * OPEN the Terminal tab's STREAMING connection -- a second, persistent
    * `tmux -C` attached directly to the session the operator is viewing, so
    * `%output` can feed xterm.js instead of `terminalRead` polling

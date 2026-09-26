@@ -32,6 +32,8 @@
  * exists on every machine tmux does, and a GUI-launched vam may well carry no
  * `$SHELL` at all (`env/resolve-path.ts` measures that launch).
  */
+import { PROVIDERS, type ProviderId } from '../../../shared/providers.js';
+
 export function loginShellCommand(
   env: { readonly SHELL?: string } = process.env,
 ): readonly string[] {
@@ -85,4 +87,42 @@ const SHELLS: ReadonlySet<string> = new Set([
 export function isShellCommand(command: string | undefined): boolean {
   if (command === undefined || command === '') return false;
   return SHELLS.has(command.startsWith('-') ? command.slice(1) : command);
+}
+
+/**
+ * WHICH PROVIDER (if any) IS RUNNING IN A PANE, from the exact same fact
+ * `isShellCommand` above reads -- `pane_current_command` -- classified one
+ * step further. Lives beside it rather than in either provider's own source
+ * module because it is a SECOND question about the identical field, not a
+ * new one: `isShellCommand` answers "is anything running here at all?",
+ * this answers "if so, which of vam's two providers?" -- and both callers
+ * (`sources/claude-code/pane-row.ts`, building a row's `runningProvider`;
+ * `terminal/start-screen.ts`, aiming an ACTIVE wait's fast poll) need the
+ * identical classifier, not two.
+ *
+ * THREE STATES, the same shape `isShellCommand`'s own "ABSENCE IS NOT A
+ * SHELL" rule already established: `undefined` for a listing with no command
+ * at all, OR a command `isShellCommand` recognises -- a shell is not a
+ * provider either, and the two silences must read the same way to a caller
+ * deciding whether to draw the ordinary empty-pane screen. `null` for a
+ * foreground command that is neither shell nor provider -- confirmed
+ * running, unidentified (an `htop`, an editor, anything the operator typed
+ * by hand that names neither table entry). The `ProviderId` once the
+ * command matches the table directly (`codex`'s own bare command) or
+ * `claude`'s own measured quirk: its foreground command is a bare version
+ * string (e.g. `2.1.282`), never the word `claude`, on its ready screen AND
+ * its blocking dialogs alike (`sources/claude-code/start-screen.ts`'s own
+ * header, measured against the real CLI).
+ */
+const CLAUDE_VERSION_COMMAND = /^\d+\.\d+\.\d+$/;
+
+export function identifyRunningProvider(
+  command: string | undefined,
+): ProviderId | null | undefined {
+  if (command === undefined || command === '') return undefined;
+  if (isShellCommand(command)) return undefined;
+  const bare = command.startsWith('-') ? command.slice(1) : command;
+  const direct = PROVIDERS.find((provider) => provider.command[0] === bare);
+  if (direct !== undefined) return direct.id;
+  return CLAUDE_VERSION_COMMAND.test(bare) ? 'claude-code' : null;
 }

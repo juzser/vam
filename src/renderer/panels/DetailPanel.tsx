@@ -118,6 +118,7 @@ import {
   type ProviderId,
   resolveProvider,
 } from '../../shared/providers.js';
+import type { StartScreenKind } from '../../shared/start-screen.js';
 import type {
   ModelSwitchResult,
   PaneKey,
@@ -1067,6 +1068,46 @@ export type DetailPanelProps = {
    * wait ON, and a spinner with no end is worse than admitting that.
    */
   readonly startingPane?: StartingPaneWait | null;
+  /**
+   * CONFIRMED RUNNING, even while `entry.session.status` still reads
+   * `unstarted`/`terminal` -- `Canvas.tsx`'s own merge, never `entry.session.
+   * runningProvider` (`model.ts`) taken on its own. THE PROCESS NAME IS NOT
+   * PROOF OF READINESS -- a review-found S2: that field is only the pane's
+   * foreground COMMAND, off a tmux listing, true the instant the CLI process
+   * starts, even while a trust or update dialog is still blocking it. Three
+   * states, not two:
+   *
+   * 1. An ACTIVE wait is up for this key (`startingPaneByKey[key]` exists,
+   *    any of `start`/`resume`/`confirm`) -- the fast poll's OWN pane-content
+   *    read (`providerRunningByKey`, `readStartScreen`'s `provider` once
+   *    `detectStartScreen` reports `ready`) is the ONLY source consulted.
+   *    The model is ignored outright: it might be reporting the process
+   *    while the SAME pane is still showing a dialog this poll would catch.
+   * 2. No active wait, but this key was handed off once the fast poll
+   *    already confirmed `ready` AND the model agreed (`providerRunningByKey`
+   *    's own header, case 2) -- the model is trusted from then on, read
+   *    LIVE every render, so a later crash reaching the model's own next
+   *    poll is caught immediately.
+   * 3. Neither -- `undefined`, the ordinary case, draws the start screen.
+   *    `Canvas.tsx`'s own auto-classify effect begins polling THIS pane the
+   *    moment the model reports a provider running here (case 1 above,
+   *    `kind: 'confirm'`), so this state is transient, not a dead end.
+   *
+   * PRESENT -- even `null`, for a confirmed pane whose command named neither
+   * provider -- draws the ready state instead (`PaneReady`) and withdraws
+   * the Start/Resume controls, so a pane already running an agent is never
+   * offered a second one.
+   *
+   * THE BLOCKER THIS CLOSES: the first cut of the start-screen work cleared
+   * `startingPane` outright on `ready`, which dropped straight back to the
+   * ordinary picker -- "Nothing is running in this pane yet" with an idle
+   * Start button -- for however long `allEntries` took to agree, and invited
+   * exactly the double-start `start-in-pane.ts`'s own `pane-occupied` refusal
+   * exists to catch. This prop is the second, faster, independent proof of
+   * "something is running" the operator asked for, the same role
+   * `startingPane.screen` plays for a blocking dialog.
+   */
+  readonly runningProvider?: ProviderId | null;
   /**
    * SWITCH THIS PANE TO ITS TERMINAL TAB -- the escape hatch
    * `StartTimeoutHint` offers once `startingPane.timedOut` is true. Built by
@@ -2800,15 +2841,73 @@ function AgentDetail({
 /**
  * WHAT A PANE'S ROW IS WAITING ON, between a press and the agent registering
  * -- `Canvas.tsx`'s `startingPaneByKey`, and the shape crossing the boundary
- * `startingPane`'s own comment (`DetailPanelProps`) explains at length. Two
- * shapes because the two acts need different words once they are drawn
+ * `startingPane`'s own comment (`DetailPanelProps`) explains at length. Three
+ * shapes because the three acts need different words once they are drawn
  * (`ProviderStartControls`/`TerminalOnlyStart`'s own Resume button): Start
  * names the provider it typed, Resume does not need to -- there is only ever
- * one command a resume pane can type.
+ * one command a resume pane can type -- and `confirm` names neither, because
+ * the operator pressed nothing; see its own paragraph below.
+ *
+ * `projectId`/`rowId` ARE CAPTURED AT THE PRESS (or, for `confirm`, at the
+ * moment vam itself started classifying the pane), not read back off the
+ * live entry: `Canvas.tsx`'s own polling effect needs them to ask
+ * `window.api.terminal.startScreen` for THIS pane specifically, and by the
+ * time that poll runs the row this wait began on may already have changed
+ * identity (`pane-row.ts`'s own point) -- `rowId` is the pane-row id the
+ * press was made from (`pane:<name>`), which `targetSession`'s own-pane
+ * branch resolves straight back to the pane, with no dependency on the
+ * entry that named it still existing under that id.
+ *
+ * `screen` is the operator's own second report made concrete: `null` while
+ * the pane is still a shell or vam has not polled it yet; one of the four
+ * named blocking screens once the CLI's own dialog is recognised, which
+ * `StartScreenCard` draws INSTEAD of the ordinary spinner; `'unknown'` for
+ * non-shell output that matches nothing named, which only changes how SOON
+ * `timedOut` arrives, never what is drawn. `'ready'` never appears here --
+ * the poll that observes it clears the wait outright instead of storing it.
+ *
+ * `kind: 'confirm'` -- A REVIEW-FOUND S2: `Session.runningProvider`
+ * (`model.ts`) is only the pane's FOREGROUND COMMAND, read off a tmux
+ * listing -- true the instant the CLI process starts, even while a trust or
+ * update dialog is still blocking it. Trusting that field alone for a
+ * DISPLAYED `unstarted`/`terminal` row drew `PaneReady` ("send your first
+ * message") straight over a dialog the operator could not see or answer.
+ * `Canvas.tsx`'s own auto-classify effect begins THIS kind the moment the
+ * model reports a provider running in the row currently on screen, with no
+ * press behind it -- reusing the identical fast poll (`START_SCREEN_POLL_MS`)
+ * a real Start/Resume wait already runs, so a blocking `screen` renders the
+ * same `StartScreenCard` and only a confirmed `ready` read earns `PaneReady`.
+ * Ends the moment the row is no longer the one on screen (`Canvas.tsx`'s own
+ * "ends when no longer displayed" effect) -- unlike `start`/`resume`, which
+ * persist across navigation because the operator's own press deserves to
+ * survive it, nothing here was ever asked for, so there is nothing to keep
+ * polling a pane nobody is looking at.
  */
+export type StartScreenWait = Exclude<StartScreenKind, 'ready'>;
+
 export type StartingPaneWait =
-  | { readonly kind: 'start'; readonly provider: ProviderId; readonly timedOut: boolean }
-  | { readonly kind: 'resume'; readonly timedOut: boolean };
+  | {
+      readonly kind: 'start';
+      readonly provider: ProviderId;
+      readonly timedOut: boolean;
+      readonly projectId: string;
+      readonly rowId: string;
+      readonly screen: StartScreenWait | null;
+    }
+  | {
+      readonly kind: 'resume';
+      readonly timedOut: boolean;
+      readonly projectId: string;
+      readonly rowId: string;
+      readonly screen: StartScreenWait | null;
+    }
+  | {
+      readonly kind: 'confirm';
+      readonly timedOut: boolean;
+      readonly projectId: string;
+      readonly rowId: string;
+      readonly screen: StartScreenWait | null;
+    };
 
 /**
  * THE PROVIDER PICKER AND THE START BUTTON, on their own -- the one act
@@ -2927,6 +3026,91 @@ function ProviderStartControls({
 }
 
 /**
+ * ONE SENTENCE PER NAMED SCREEN, and nothing invented beyond it: the operator
+ * asked for "an inline card" naming what the CLI is asking, not a paraphrase
+ * of its whole dialog. `trust` is the one screen this card may answer FROM --
+ * `onAnswerTrust` sends the exact keys `answerTrustDialog` (main) verifies
+ * against the pane before pressing (`start-screen.ts`'s own header, measured
+ * against the real CLI). Every other kind gets the identical escape hatch
+ * `StartTimeoutHint` already offers below it: "Open Terminal to answer" --
+ * an update prompt, a login screen and anything vam's own onboarding markers
+ * were not measured against all need the operator's own hand, never a guess
+ * pressed on their behalf.
+ */
+const START_SCREEN_COPY: Readonly<Record<Exclude<StartScreenKind, 'ready' | 'unknown'>, string>> = {
+  trust: 'is asking: Do you trust the files in this folder?',
+  update: 'wants to update.',
+  login: 'needs you to log in.',
+  onboarding: 'needs a quick setup step.',
+};
+
+/**
+ * THE CARD ITSELF -- drawn instead of the ordinary spinner the moment
+ * `Canvas.tsx`'s poll recognises one of the four named screens, which is the
+ * operator's first report made concrete: "the Response view is stuck in the
+ * loading state while the terminal is asking about the update and trust."
+ * This is what replaces the stuck spinner with the actual question.
+ */
+function StartScreenCard({
+  providerLabel,
+  screen,
+  onAnswerTrust,
+  onShowTerminal,
+}: {
+  readonly providerLabel: string;
+  readonly screen: Exclude<StartScreenKind, 'ready' | 'unknown'>;
+  readonly onAnswerTrust: ((trust: boolean) => void) | undefined;
+  readonly onShowTerminal: (() => void) | undefined;
+}) {
+  return (
+    <div
+      data-start-screen-card
+      data-start-screen-kind={screen}
+      className="flex max-w-[36ch] flex-col items-center gap-2 rounded-[10px] border border-line-strong bg-card p-3 text-center"
+    >
+      <p className="text-meta text-ink">
+        {providerLabel} {START_SCREEN_COPY[screen]}
+      </p>
+      {screen === 'trust' && onAnswerTrust !== undefined && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            data-start-screen-trust-yes
+            onClick={() => onAnswerTrust(true)}
+            className="vam-tap cursor-pointer rounded-[6px] bg-ink px-2.5 py-1 text-control text-panel hover:opacity-90"
+          >
+            Yes, trust it
+          </button>
+          <button
+            type="button"
+            data-start-screen-trust-no
+            onClick={() => onAnswerTrust(false)}
+            className="vam-tap cursor-pointer rounded-[6px] border border-line-strong px-2.5 py-1 text-control text-ink-dim hover:bg-raised hover:text-ink"
+          >
+            No
+          </button>
+        </div>
+      )}
+      {/* ALWAYS OFFERED, EVEN ON `trust` -- the Yes/No buttons above send keys
+          through the same aim-then-act path every write in this app uses, and
+          a refusal there (the pane closed, the screen moved on) has nowhere
+          else on this card to say so. The Terminal view is where the operator
+          can see why and finish it by hand either way. */}
+      {onShowTerminal !== undefined && (
+        <button
+          type="button"
+          data-start-screen-open-terminal
+          onClick={onShowTerminal}
+          className="vam-tap cursor-pointer text-control text-ink-dim underline decoration-line-strong underline-offset-2 hover:text-ink"
+        >
+          Open Terminal to answer
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
  * THE ESCAPE HATCH, past the operator's own 30s timeout.
  *
  * Operator: a spinner that could be wrong forever is worse than one that
@@ -2937,6 +3121,12 @@ function ProviderStartControls({
  * (`ProviderStartControls`' own `spinning`) and this quiet sentence takes
  * over: not a failure (nothing failed; the write landed), just a way out that
  * does not depend on guessing right.
+ *
+ * ALSO WHAT DRAWS WHEN THE PANE ITSELF SAYS `unknown` PAST THE SHORTER BOUND
+ * (`Canvas.tsx`'s own `START_SCREEN_UNKNOWN_STALL_MS`) -- the operator's
+ * second report's own fallback: output that matches none of the four named
+ * screens must never leave the spinner running forever either, and this is
+ * the same honest admission for that case, just reached sooner.
  *
  * SHARED BY BOTH START SCREENS because it says the exact same thing about the
  * exact same fact, the same reason `StartShortcuts` below is shared by both.
@@ -2963,6 +3153,42 @@ function StartTimeoutHint({
         </>
       )}
     </p>
+  );
+}
+
+/**
+ * THE READY STATE -- a pane `runningProvider` has confirmed is running an
+ * agent, while `entry.session.status` still reads `unstarted`/`terminal`
+ * because the slower agents-list poll has not caught up yet.
+ *
+ * REPLACES THE START SCREEN OUTRIGHT, drawn wherever `StartSession`/
+ * `TerminalOnlyStart` would otherwise go (see the render site below) -- not
+ * a variant of either: there is no picker and no Start/Resume button to
+ * freeze or offer, because there is nothing left to start. The composer is
+ * enabled for this pane instead (`composerHidden`'s own header), which is
+ * the whole of what "ready" means here: send the first message, the normal
+ * way, through the same path the transcript view's own composer already
+ * uses once the row itself finishes catching up.
+ *
+ * THE LABEL NAMES THE PROVIDER WHEN IT IS KNOWN -- `readStartScreen`'s own
+ * read of the pane's foreground command, never the picker's last selection:
+ * the operator may have typed the OTHER provider by hand since this pane was
+ * last drawn, and this screen is reporting what is actually running, not
+ * what vam expected to find. `null` (confirmed running, command unrecognised)
+ * gets the honest generic sentence rather than a guessed provider name.
+ */
+function PaneReady({ provider }: { readonly provider: ProviderId | null }) {
+  return (
+    <div
+      data-pane-ready
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center"
+    >
+      <p className="text-control text-ink">
+        {provider === null
+          ? 'This pane already has an agent running — send your first message.'
+          : `${resolveProvider(provider).label} is ready — send your first message.`}
+      </p>
+    </div>
   );
 }
 
@@ -3003,12 +3229,14 @@ function StartSession({
   onStart,
   startingPane = null,
   onShowTerminal,
+  onAnswerTrust,
 }: {
   readonly paneName: string;
   readonly defaultProvider: ProviderId | undefined;
   readonly onStart: ((id: ProviderId) => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
   readonly onShowTerminal?: () => void;
+  readonly onAnswerTrust?: (trust: boolean) => void;
 }) {
   const [chosen, setChosen] = useState<ProviderId>(() => resolveProvider(defaultProvider).id);
   const starting = startingPane ?? null;
@@ -3052,7 +3280,16 @@ function StartSession({
           }
         />
       )}
-      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
+      {starting !== null && starting.screen !== null && starting.screen !== 'unknown' ? (
+        <StartScreenCard
+          providerLabel={resolveProvider(chosen).label}
+          screen={starting.screen}
+          onAnswerTrust={onAnswerTrust}
+          onShowTerminal={onShowTerminal}
+        />
+      ) : (
+        starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />
+      )}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -3122,6 +3359,7 @@ function TerminalOnlyStart({
   onResumeInPane,
   startingPane = null,
   onShowTerminal,
+  onAnswerTrust,
 }: {
   readonly title: string;
   readonly paneName: string;
@@ -3132,6 +3370,7 @@ function TerminalOnlyStart({
   readonly onResumeInPane: (() => void) | undefined;
   readonly startingPane?: StartingPaneWait | null;
   readonly onShowTerminal?: () => void;
+  readonly onAnswerTrust?: (trust: boolean) => void;
 }) {
   // `ProviderStartControls` is CONTROLLED (see its own header) -- this
   // screen's own mark above stays `source`, the session's PAST agent, never
@@ -3205,7 +3444,16 @@ function TerminalOnlyStart({
           )}
         </button>
       )}
-      {starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />}
+      {starting !== null && starting.screen !== null && starting.screen !== 'unknown' ? (
+        <StartScreenCard
+          providerLabel={resolveProvider(chosen).label}
+          screen={starting.screen}
+          onAnswerTrust={onAnswerTrust}
+          onShowTerminal={onShowTerminal}
+        />
+      ) : (
+        starting?.timedOut && <StartTimeoutHint onShowTerminal={onShowTerminal} />
+      )}
       <p className="max-w-[36ch] text-meta text-ink-quiet">
         {onStart === undefined
           ? 'Switch to the Terminal view and type the agent’s command — `claude` or `codex` — to start one here.'
@@ -6027,6 +6275,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     onStartSession,
     onResumeInPane,
     startingPane = null,
+    runningProvider,
     gettingStarted,
     paneFocused = true,
   } = props;
@@ -6565,6 +6814,29 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
    * 30s wait promising a view that is not on the bar would land nowhere.
    */
   const onShowTerminal = tabs.includes('Terminal') ? () => pickTab('Terminal') : undefined;
+
+  /**
+   * `StartScreenCard`'s own Yes/No -- the ONE screen `startingPane.screen`
+   * names that vam may answer on its own (the operator's own words: "answer
+   * the simple ones inline where it's safe and unambiguous"). Reached for
+   * directly, the same way `TerminalStreamTab.tsx` reaches `window.api?.
+   * terminal?.resize` itself rather than being handed it: this is a WRITE
+   * whose only listener is the poll `Canvas.tsx` already owns, so there is
+   * nothing for a caller-supplied callback to add here that the next poll
+   * does not already do on its own once the keys land.
+   *
+   * `startingPane.projectId`/`.rowId` ARE WHAT AIMS IT -- captured at the
+   * press (`StartingPaneWait`'s own header), not re-derived from `entry`,
+   * which may already have moved on to a different id by the time this
+   * fires. ABSENT when there is no wait at all, which the card is never
+   * drawn without one to begin with.
+   */
+  const onAnswerTrust =
+    startingPane === null
+      ? undefined
+      : (trust: boolean) => {
+          void window.api?.terminal?.answerTrust(startingPane.projectId, startingPane.rowId, trust);
+        };
 
   /** Whether the step counter has been asked for the sentence it abbreviates. */
 
@@ -7692,15 +7964,19 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
     // run as a shell command, and a prompt box promises an answer that no
     // agent is there to give. The start screen (`StartSession` below) is the
     // whole Response view for this status; the Terminal view is the other
-    // way in.
-    entry.session.status === 'unstarted' ||
+    // way in. UNLESS `runningProvider` says otherwise -- see its own header
+    // on `DetailPanelProps`: a pane already proven to be running an agent
+    // has exactly the opposite problem, someone TO prompt and no box to do
+    // it with, which is the bug this condition now avoids reintroducing.
+    (entry.session.status === 'unstarted' && runningProvider === undefined) ||
     // A `terminal` ROW HAS NO AGENT EITHER -- the whole of what tells it
     // apart from `unstarted` is that vam knows WHICH conversation last held
     // this pane, not that one is running now. Text typed here would land on
     // the shell prompt exactly as it would for `unstarted`, so the getting-
     // started screen (`TerminalOnlyStart` below) takes the same composer-free
-    // treatment.
-    entry.session.status === 'terminal' ||
+    // treatment -- again unless `runningProvider` has already confirmed a
+    // program is running there now.
+    (entry.session.status === 'terminal' && runningProvider === undefined) ||
     (openQuestion && chattingAbout !== setId);
   /**
    * Is the corner overlay on screen?
@@ -8537,13 +8813,24 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
         // see its own comment for why. This slot contributes nothing so the
         // Response-column branches below it never run for a tab that is not
         // Response.
-        null : entry !== null && entry.session.status === 'unstarted' ? (
+        null : entry !== null &&
+          (entry.session.status === 'unstarted' || entry.session.status === 'terminal') &&
+          runningProvider !== undefined ? (
+          // CONFIRMED RUNNING, AHEAD OF THE AGENTS-LIST POLL -- see
+          // `runningProvider`'s own header on `DetailPanelProps`. Takes
+          // priority over BOTH the `unstarted` and `terminal` branches below,
+          // which is the point: a pane vam has already proven is running an
+          // agent must never fall back to offering Start again, on either
+          // status.
+          <PaneReady provider={runningProvider} />
+        ) : entry !== null && entry.session.status === 'unstarted' ? (
           <StartSession
             paneName={entry.session.pane ?? entry.session.title}
             defaultProvider={defaultProvider}
             onStart={onStartSession}
             startingPane={startingPane}
             onShowTerminal={onShowTerminal}
+            onAnswerTrust={onAnswerTrust}
           />
         ) : entry !== null && entry.session.status === 'terminal' ? (
           <TerminalOnlyStart
@@ -8556,6 +8843,7 @@ export const DetailPanel = memo(function DetailPanel(props: DetailPanelProps) {
             onResumeInPane={entry.session.resumeCommand === undefined ? undefined : onResumeInPane}
             startingPane={startingPane}
             onShowTerminal={onShowTerminal}
+            onAnswerTrust={onAnswerTrust}
           />
         ) : entry === null && gettingStarted !== undefined ? (
           // THE APP HAS NO SESSION TO SHOW ANYWHERE -- `Canvas.tsx`'s own
