@@ -228,6 +228,29 @@ describe('the sidebar is wired to it', () => {
     expect(text).toContain('Settings');
     expect(text).toContain('Q');
   });
+
+  /**
+   * The `+` beside a project's own menu trigger -- back on the heading, at
+   * the operator's request. Its tooltip is `newSession`'s, the same action
+   * the (now-withdrawn) sidebar footer used to name, read live off the table
+   * exactly as every other tip here is.
+   */
+  it('gives each project row’s + a tooltip naming the project, with the newSession chord', () => {
+    render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
+    const both = bindingChords(NO_BINDINGS, actionId(NEW_SESSION));
+    const text = openByFocus(screen.getByLabelText('new session in vam')).textContent ?? '';
+    expect(text).toContain('New session in vam');
+    for (const chord of both) {
+      expect(text).toContain(chordSymbols(chord));
+    }
+  });
+
+  it('follows a rebind of newSession, on that same per-project +', () => {
+    setActiveBindings({ [actionId(NEW_SESSION)]: ['Q'] });
+    render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
+    const text = openByFocus(screen.getByLabelText('new session in vam')).textContent ?? '';
+    expect(text).toContain('Q');
+  });
 });
 
 describe('wrapping a button changes no DOM the panels around it depend on', () => {
@@ -252,18 +275,32 @@ describe('wrapping a button changes no DOM the panels around it depend on', () =
 
 /**
  * The two surfaces have different room, and the difference is the bug this
- * pins: `newSession` holds two chords out of the box, and the footer chip that
+ * pins: `newSession` holds two chords out of the box, and an inline chip that
  * used to read `o` would read `o or Mod-n` if it printed what a tooltip does.
+ *
+ * Built standalone, wiring `InlineChord` and `ShortcutTip` to the same action
+ * exactly as the sidebar's own controls do, rather than through the app: the
+ * one sidebar site that used to carry an inline `newSession` chip (the
+ * full-width footer button) was withdrawn once the per-project `+` and the
+ * Projects header's own `+` made it redundant, and this property belongs to
+ * the two shared components, not to any one control that happens to use them.
  */
 describe('an inline chip names one chord; a tooltip names them all', () => {
-  it('gives the sidebar footer one chord and its tooltip both', () => {
+  it('gives an inline "new session" control one chord and its tooltip both', () => {
     const both = bindingChords(NO_BINDINGS, actionId(NEW_SESSION));
     expect(both.length, 'newSession must hold two chords for this to test anything').toBe(2);
     // IN EACH PLATFORM'S OWN SPELLING, because one of these two chords carries
     // the command modifier and the other does not: `o` reads `o` everywhere,
     // and `Mod-n` is ⌘N on a Mac and Ctrl+N off one.
     onBothPlatforms((mac) => {
-      render(<SessionList {...baseProps(entriesOf([makeSession()]))} />);
+      render(
+        <ShortcutTip label="New session" action={NEW_SESSION}>
+          <button type="button" aria-label="new session">
+            New session
+            <InlineChord action={NEW_SESSION} className="ml-0.5" />
+          </button>
+        </ShortcutTip>,
+      );
       const button = screen.getByLabelText('new session');
       expect(button.textContent).toBe(`New session${chordSymbols(both[0] ?? '', mac)}`);
       expect(openByFocus(button).textContent).toContain(

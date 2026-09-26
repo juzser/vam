@@ -30,6 +30,7 @@ import {
   ChevronRight,
   Filter,
   Folder,
+  FolderGit2,
   FolderPlus,
   GitBranch,
   LoaderCircle,
@@ -115,6 +116,9 @@ const SEARCH_ACTION: KeyAction = { kind: 'search' };
 const FILTER_MENU_ACTION: KeyAction = { kind: 'filterMenu' };
 const CLOSE_ACTION: KeyAction = { kind: 'close' };
 const NEW_SESSION_ACTION: KeyAction = { kind: 'newSession' };
+/** The project menu's own "New worktree…" item -- its one bound chord,
+ *  `Mod-Shift-w` (`chords.ts`), read live rather than printed as a literal. */
+const NEW_WORKTREE_ACTION: KeyAction = { kind: 'newWorktree' };
 
 /** No jump is armed. A module-level constant rather than a `new Map()` in the
  *  destructuring default, for the reason `Canvas.tsx`'s `EMPTY_GROUPS` is one:
@@ -894,24 +898,14 @@ export type SessionListProps = {
    * level up.
    */
   readonly onRenameSession?: (sessionId: string) => void;
-  readonly onAdd: () => void;
   /**
-   * Whether `onAdd` is about to fall back to New project -- `Canvas.tsx`'s
-   * own `focusedEntry === null`, computed there and handed down rather than
-   * approximated here from `entries`/`focusedSessionId`: `onAdd`'s real
-   * target is `focusedEntry`, built off the UNFILTERED session set, and a
-   * second guess from this component's own FILTERED `entries` could disagree
-   * with it the moment a search or a status pill hides the focused row
-   * without un-focusing it. The footer's LABEL is read from this so it can
-   * never claim "New session" while a click is about to start a project
-   * instead -- the exact lie `newSessionDecline` already exists to prevent
-   * one layer up.
-   */
-  readonly addWillCreateProject: boolean;
-  /**
-   * The `+` in a project's heading. Separate from `onAdd` because it can say
-   * WHICH project the click was about, and the answer differs per project the
-   * moment there is a route to create a session in one.
+   * The `+` beside a project's own menu trigger. Back on the heading rather
+   * than the menu's first item -- the operator's own reversal of pull
+   * request 371's consolidation, once the sidebar's own full-width footer
+   * button (which used to cover the "nothing focused" fallback too) was
+   * withdrawn: the Projects header's `+` (`onNewProject`) already owns that
+   * fallback unconditionally, so this one only ever needs to say WHICH
+   * project.
    */
   readonly onAddInProject: (project: Project) => void;
   /**
@@ -1331,8 +1325,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onReopen,
     canReopen,
     onRenameSession,
-    onAdd,
-    addWillCreateProject,
     onAddInProject,
     onNewProject,
     newSessionDecline,
@@ -3504,6 +3496,31 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       originFilters.hideAgentWorktrees,
                       hiddenCounts.agentWorktree,
                     ],
+                    // THE SEVENTH ROW -- the operator's own report opening the
+                    // blacksmith project (the maestro repo): "I see a lot of
+                    // worktrees that aren't vam's, or are locked... Make the
+                    // hiding filter the default." STORED `hide`-shaped like
+                    // every row above (`session-filter.ts`'s own header on
+                    // `hideExternalWorktrees`), but the ONLY row whose LABEL
+                    // and SWITCH read the other way round -- the operator's
+                    // own words for it -- so `on` here is `!hideExternal
+                    // Worktrees` (checked means "showing"), and the click
+                    // handler below writes that same `on` back as the new
+                    // `hideExternalWorktrees` (flipping a already-inverted
+                    // value flips it back the right direction). This row's
+                    // own count is always absent: the worktree rows it holds
+                    // back live per-project, inside each project's own
+                    // `WorktreesSection`, never in this popover's flat
+                    // `sessions` list -- that section draws its OWN quiet "N
+                    // hidden" note instead, next to its own "Worktrees" count.
+                    [
+                      'external-worktree',
+                      FolderGit2,
+                      'Show external worktrees',
+                      'Show worktrees vam did not make, or that are locked — nested, dimmed, under the project they belong to.',
+                      !originFilters.hideExternalWorktrees,
+                      0,
+                    ],
                   ] as const
                 ).map(([key, Icon, label, note, on, hides]) => (
                   <Note key={key} text={note}>
@@ -3524,7 +3541,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   ? { ...originFilters, hideIdle: !on }
                                   : key === 'agent-worktree'
                                     ? { ...originFilters, hideAgentWorktrees: !on }
-                                    : { ...originFilters, onlyPrompted: !on },
+                                    : key === 'external-worktree'
+                                      ? // `on` IS ALREADY `!hideExternalWorktrees` (this
+                                        // row's own tuple, above) -- writing it straight
+                                        // back is the flip, not `!on`: old hidden=true
+                                        // (on=false) -> new hidden=false=on; old
+                                        // hidden=false (on=true) -> new hidden=true=on.
+                                        { ...originFilters, hideExternalWorktrees: on }
+                                      : { ...originFilters, onlyPrompted: !on },
                         )
                       }
                       className={[
@@ -4282,26 +4306,48 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           <MoreHorizontal size={12} strokeWidth={1.8} />
                         </button>
 
-                        {/* THE `+` THAT USED TO STAND HERE IS IN THE MENU NOW, and
-                  the whole argument for that is the column it left. Every
-                  heading carried three controls -- fold, menu, add -- over a
-                  narrow list whose rows are mostly quiet, and the operator
-                  read the result as clutter. Two of the three are about the
-                  heading itself; the third is the only one that makes
-                  something, and a menu is where a made thing belongs.
+                        {/* THE `+` IS BACK ON THE HEADING, beside the menu
+                  trigger -- the operator's own reversal of the move pull
+                  request 371 made (the comment that used to sit here, and
+                  the tests that used to prove it, argued the other way; both
+                  are gone with it). What that pull request bought -- one
+                  icon fewer over a mostly-quiet list -- cost a route:
+                  creating a session in a project you are not looking at
+                  took a click to OPEN the menu before the click that acted,
+                  and the keyboard-first gesture (`...` then Enter) was
+                  slower than a direct press of a control already on screen.
+                  The operator asked for the direct route back; the menu
+                  keeps everything else it gained (rename, collapse, icon,
+                  worktree, remove all still live there).
 
-                  What the move costs is one click, and what it buys back is
-                  more than that: the menu focuses its first item on open, and
-                  the add is that item, so `...` then Enter is the pointer-free
-                  gesture that the hover-revealed `+` never had. It also gets
-                  room for words -- see the refusal at the item itself, which
-                  used to need a tooltip because an icon button has nowhere to
-                  put a sentence.
-
-                  The reveal-on-hover reasoning this replaced is not lost, it
-                  is answered: the objection to a permanent `+` was a column of
-                  boxes standing over the session names, and no box now stands
-                  there at all. */}
+                  SAME SIZE AS BEFORE THAT PULL REQUEST, not the fold/menu's
+                  17px: one pixel more on each side reads correctly against
+                  those two glyphs at this weight -- measured then,
+                  unchanged now. */}
+                        <ShortcutTip
+                          label={newSessionDecline ?? `New session in ${section.project.name}`}
+                          action={newSessionDecline === null ? NEW_SESSION_ACTION : undefined}
+                        >
+                          <button
+                            type="button"
+                            data-new-session-in-project={section.project.id}
+                            onClick={() => onAddInProject(section.project)}
+                            aria-label={`new session in ${section.project.name}`}
+                            className={[
+                              'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
+                              isRevealed ||
+                              section.items.some((entry) => entry.session.id === focusedSessionId)
+                                ? 'opacity-100'
+                                : 'opacity-0',
+                            ].join(' ')}
+                            {...pending(
+                              section.project.id,
+                              `Starting a session in ${section.project.name}…`,
+                            )}
+                          >
+                            <Plus size={13} strokeWidth={1.7} />
+                          </button>
+                        </ShortcutTip>
 
                         {/* There is still no "Project settings": vam has no
                     per-project setting to open.
@@ -4319,16 +4365,12 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     and it is last, behind a confirm.
 
                     EVERY ITEM IN BOTH MENUS WEARS `vam-tap` NOW, which is
-                    inert on a desktop and a 44px floor on a phone. They did
-                    not, because on a phone these menus held nothing on the
-                    critical path -- a 28px "Change project icon" is a target
-                    somebody misses, not a task they cannot do. Moving the
-                    per-project new session in here changed that: it was a
-                    control with the floor, and the ONLY route to starting a
-                    session in a named project. A control that changes surface
-                    keeps its floor, and one item at 44px beside four at 28
-                    would be a menu that looks broken -- so the floor is the
-                    menu's, not the item's. */}
+                    inert on a desktop and a 44px floor on a phone. The add is
+                    not one of them any more -- it went back to the heading's
+                    own `+`, which carries its own `vam-tap` there -- but the
+                    remaining four are still the only route to what they do on
+                    a phone (rename, collapse, icon, worktree), so the floor
+                    stays the menu's rather than any one item's. */}
                         {openMenu === section.project.id && (
                           <div
                             ref={projectPanelRef}
@@ -4343,57 +4385,6 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             }}
                             className="absolute top-[19px] right-0 z-20 flex w-[168px] flex-col rounded-[9px] border border-line-strong bg-card p-1 shadow-lg"
                           >
-                            {/* FIRST, and first is a decision rather than an
-                          accident of when it was added. Everything else in
-                          this menu arranges the project or ends it; this is
-                          the only item that makes something, and the panel
-                          puts focus on its first item when it opens -- so
-                          first is what turns `...`+Enter into the accelerator
-                          the hover-revealed `+` could never be for a keyboard.
-                          It is also as far as the list can put it from the one
-                          red item at the bottom.
-
-                          The heading's own DOM order said the opposite ("the
-                          controls acting on the heading come first, the one
-                          that adds comes after them"), and that rule does not
-                          carry across: it was about TAB ORDER through a row of
-                          icons nothing focuses by default, where being last
-                          costs nothing. Here the first position is the focused
-                          one.
-
-                          THE REFUSAL IS THE ITEM'S OWN SECOND LINE. It used to
-                          need a tooltip -- an icon button has nowhere to put a
-                          sentence, and a `title` opens on hover and nothing
-                          else, so a keyboard user pressed and got silence. A
-                          menu item has the room, and visible text is the one
-                          channel that reaches everybody. The item stays
-                          clickable either way: refusing on click and saying
-                          why is honest, while a control that cannot be pressed
-                          just reads as broken.
-
-                          No chord is offered beside it. `o` starts a session
-                          in the FOCUSED session's project, which is a
-                          different project from the one this menu names
-                          whenever it matters -- printing it here would read as
-                          "press this instead" for a key that does something
-                          else. */}
-                            <button
-                              type="button"
-                              role="menuitem"
-                              data-project-menu-item="new-session"
-                              onClick={() => {
-                                onAddInProject(section.project);
-                                setOpenMenu(null);
-                              }}
-                              className="vam-tap flex cursor-pointer flex-col justify-center gap-0.5 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
-                            >
-                              New session
-                              {newSessionDecline !== null && (
-                                <span data-new-session-decline className="text-ink-faint text-meta">
-                                  {newSessionDecline}
-                                </span>
-                              )}
-                            </button>
                             {/* "Rename repo", not "Rename project" -- the group
                           menu already owns that label one level up (UI
                           "project" is the code's `Group`), and the
@@ -4440,6 +4431,33 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             >
                               Change project icon
                             </button>
+                            {/* THE ONE ITEM IN THIS MENU WITH A BOUND CHORD
+                          (`Mod-Shift-w` -- `chords.ts`), so it is the one
+                          item that prints one: right-aligned, through the
+                          same `InlineChord` every other chip in the app
+                          reaches for, which is what keeps this row honest
+                          through a rebind rather than a literal going stale.
+                          The four items around it have no matching action
+                          (rename/collapse/icon act on the FOCUSED session or
+                          have no chord at all; remove has none either), so
+                          they print nothing rather than a borrowed key that
+                          would read as "press this instead".
+
+                          THE LABEL TRUNCATES, THE CHIP NEVER DOES.
+                          `Ctrl+Shift+W` (the off-Mac spelling) measured wider
+                          than the row's own remaining width once the label
+                          sat beside it as a bare text node: with nothing
+                          stopping it, the label WRAPPED onto a second line,
+                          which grew the row to 44px and squeezed the chip
+                          half a pixel past its own right edge --
+                          `e2e/chord-symbol-shots.mjs` is what caught it, on
+                          the `pc` platform only (`⇧⌘W` never came close).
+                          `min-w-0 flex-1 truncate` on the label and
+                          `shrink-0` on the chip is the same split
+                          `ShortcutTip.tsx`'s own `Chip` already uses for the
+                          identical reason: a chord is the one thing on this
+                          row that must stay whole and pinned right; the
+                          words beside it may give way first. */}
                             <button
                               type="button"
                               role="menuitem"
@@ -4448,9 +4466,13 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 setCreatingWorktreeFor(section.project.id);
                                 setOpenMenu(null);
                               }}
-                              className="vam-tap cursor-pointer rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
+                              className="vam-tap flex cursor-pointer items-center gap-3 rounded-[6px] px-2 py-1.5 text-left text-control text-ink-dim hover:bg-line-strong hover:text-ink"
                             >
-                              New worktree…
+                              <span className="min-w-0 flex-1 truncate">New worktree…</span>
+                              <InlineChord
+                                action={NEW_WORKTREE_ACTION}
+                                className="shrink-0 font-mono text-meta text-ink-faint"
+                              />
                             </button>
                             {/* Last, and the only red thing in the menu. The icon is
                         LEFT of the label, where the two items above have
@@ -4562,7 +4584,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             </span>
                           </div>
                         )}
-                      {viewOptions.groupBy === 'project' && (
+                      {viewOptions.groupBy === 'project' ? (
                         <WorktreesSection
                           project={section.project}
                           allEntries={allEntries}
@@ -4573,9 +4595,32 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             )
                           }
                           renderSessionRow={renderSessionRow}
+                          // THE SAME TOGGLE A SESSION ROW ALREADY OBEYS
+                          // (`isHiddenByAgentWorktreeFilter`, this file's own
+                          // popover) -- an adopted Claude Code agent
+                          // worktree row respects the operator's existing
+                          // preference rather than growing a second one.
+                          hideAgentWorktrees={originFilters.hideAgentWorktrees}
+                          // THE SEVENTH ROW'S OWN TOGGLE, threaded the
+                          // identical way -- `worktree-visibility.ts`'s own
+                          // rule, independent of `hideAgentWorktrees` above.
+                          hideExternalWorktrees={originFilters.hideExternalWorktrees}
+                          // PHASE 2B'S OWN MOVE -- `WorktreesSection` now
+                          // draws this project's OWN top-level sessions
+                          // itself (between its plain worktree list and its
+                          // external/locked tree), so the operator's ask
+                          // that tree "hangs under the project's main
+                          // session row" is real DOM order, not a CSS
+                          // reorder. `section.items` is passed WHOLE, never
+                          // recomputed from `allEntries`: it is already the
+                          // exact filtered/ordered set `renderSessionRow`
+                          // would otherwise be mapped over right below,
+                          // one line down in every OTHER `groupBy` mode.
+                          mainSessionEntries={section.items}
                         />
+                      ) : (
+                        section.items.map((entry) => renderSessionRow(entry))
                       )}
-                      {section.items.map((entry) => renderSessionRow(entry))}
                     </div>
                   )}
                 </li>
@@ -4826,76 +4871,17 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
         />
       )}
 
-      {/* The mockup's own footer strip: workspace line, search, session rows,
-          then this — last, not first. It sits above the workspace/settings
-          footer rather than merged into it, because those two rows answer
-          different questions ("what am I in", not "what do I do next") and
-          the mockup keeps New session as its own full-width strip. */}
-      {/* WITHDRAWN, NOT DRAWN AND DUPLICATED, while the phone's own
-          getting-started screen owns this same act below: that screen carries
-          its own primary New project button, and a second one immediately
-          above it would be two controls for one act on a 390px screen. The
-          desktop never withdraws this strip -- its getting-started screen
-          lives in the DETAIL pane, a different piece of chrome entirely, so
-          there is no sibling button to collide with there. */}
-      {!showGettingStarted && (
-        <div className="border-line border-t px-[11px] py-2.5">
-          {/* Grey and small, at the operator's request. The fill and the medium
-              weight were doing as much of the shouting as the colour: an
-              ink-on-`line-strong` slab made the least urgent control in the
-              sidebar its loudest. It is an outline now, a step down the ink
-              ladder, and shorter and smaller in the same breath so the type
-              still fits the box. Hover restores full ink, so it still reads as
-              something you press. */}
-          {/* The footer names no project: it starts one in the FOCUSED
-              session's, exactly as `o` does, so it is pending for that same
-              project id and for no other.
-
-              NEVER A DEAD END. With nothing focused there is no project for
-              this button to add a session TO -- `addWillCreateProject`, the
-              exact condition `Canvas.tsx`'s `onAdd` itself branches on, so the
-              label can never claim "New session" while a click is about to
-              start a project instead. `o` still opens this same control (the
-              chip beside it never changes): in that state `o` ALSO falls back
-              to New project, so the chord shown here stays true regardless of
-              which act it currently performs. */}
-          <ShortcutTip
-            label={addWillCreateProject ? 'New project' : 'New session'}
-            action={NEW_SESSION_ACTION}
-          >
-            <button
-              type="button"
-              data-sidebar-add
-              onClick={onAdd}
-              aria-label={
-                addWillCreateProject ? 'new project (no session to add to)' : 'new session'
-              }
-              {...pending(
-                addWillCreateProject
-                  ? NEW_PROJECT_PENDING
-                  : (entries.find((candidate) => candidate.session.id === focusedSessionId)?.project
-                      .id ?? ''),
-                addWillCreateProject
-                  ? 'Starting a session in the chosen directory…'
-                  : 'Starting a session…',
-              )}
-              className="vam-tap flex h-7 w-full cursor-pointer items-center justify-center gap-[7px] rounded-[8px] border border-ink-quiet text-control text-ink-dim hover:border-ink-faint hover:text-ink"
-            >
-              {addWillCreateProject ? (
-                <FolderPlus size={13} strokeWidth={1.7} />
-              ) : (
-                <Plus size={13} strokeWidth={1.7} />
-              )}
-              {addWillCreateProject ? 'New project' : 'New session'}
-              {/* Read, not written: this cell used to spell `o`. */}
-              <InlineChord
-                action={NEW_SESSION_ACTION}
-                className="ml-0.5 font-mono text-meta text-ink-faint"
-              />
-            </button>
-          </ShortcutTip>
-        </div>
-      )}
+      {/* THE FULL-WIDTH "NEW SESSION" STRIP THAT USED TO STAND HERE IS GONE --
+          the operator's own request: it duplicated two routes that already
+          exist without it. Creating a session in a named project is the
+          project row's own `+` now (`data-new-session-in-project`, beside
+          each heading's menu trigger); falling back to a fresh project with
+          nothing focused is the Projects header's own `+` (`onNewProject`,
+          drawn unconditionally above the list, never gated on focus). The
+          keys are untouched -- `o` and `Mod-n` still resolve through
+          `Canvas.tsx`'s own `case 'newSession'`, which never called through
+          this button at all -- and both are still in the shortcut sheet and
+          in Settings. Only the redundant THIRD click target left. */}
       {/* THE PHONE'S OWN GETTING-STARTED SCREEN. `DetailPanel`'s copy
           (`GettingStarted.tsx`, wired in `Canvas.tsx`'s `gettingStarted` prop)
           is unreachable from a phone: `PhoneShell` mounts `SessionList` as

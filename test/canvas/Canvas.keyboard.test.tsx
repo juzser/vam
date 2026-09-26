@@ -934,7 +934,7 @@ describe('the sidebar', () => {
     // that can.
     render(<Canvas model={MODEL} />);
     act(() => {
-      screen.getByLabelText('new session').click();
+      screen.getByLabelText('new session in alpha').click();
     });
     expect(screen.getByText(/factory has no new-session command/)).toBeTruthy();
   });

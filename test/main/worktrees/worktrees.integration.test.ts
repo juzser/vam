@@ -263,11 +263,57 @@ describe('listWorktrees', () => {
     const result = await listWorktrees(projectIdOf(repo), deps);
 
     expect(Array.isArray(result)).toBe(true);
-    const worktrees = result as readonly { path: string; branch: string | null }[];
+    const worktrees = result as readonly {
+      path: string;
+      branch: string | null;
+      detached: boolean;
+      prunable: boolean;
+      prunableReason: string | null;
+    }[];
     expect(worktrees).toHaveLength(1);
     expect(worktrees[0]?.path).toBe(join(parent, 'repo-worktrees', 'feat'));
     expect(worktrees[0]?.branch).toBe('feat');
+    expect(worktrees[0]?.detached).toBe(false);
+    expect(worktrees[0]?.prunable).toBe(false);
+    expect(worktrees[0]?.prunableReason).toBeNull();
     expect(worktrees.some((w) => w.path === repo)).toBe(false);
+  });
+
+  it('marks a DETACHED HEAD worktree, branch reads as its short sha', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const created = await createWorktree({ projectId: projectIdOf(repo), name: 'feat' }, deps);
+    const worktreeId = (created as { worktreeId: string; branch: string }).worktreeId;
+    execFileSync('git', ['checkout', '--quiet', '--detach', 'HEAD'], { cwd: worktreeId });
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly {
+      path: string;
+      branch: string | null;
+      detached: boolean;
+    }[];
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]?.detached).toBe(true);
+    expect(worktrees[0]?.branch).not.toBeNull();
+    expect(worktrees[0]?.branch).toHaveLength(7);
+  });
+
+  it('marks a PRUNABLE worktree (its directory removed by hand) and carries the reason git gives', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const created = await createWorktree({ projectId: projectIdOf(repo), name: 'feat' }, deps);
+    const worktreeId = (created as { worktreeId: string }).worktreeId;
+    rmSync(worktreeId, { recursive: true, force: true });
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly { prunable: boolean; prunableReason: string | null }[];
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]?.prunable).toBe(true);
+    expect(worktrees[0]?.prunableReason).not.toBeNull();
   });
 
   it('answers an empty list for a repo with no linked worktrees', async () => {
@@ -288,6 +334,70 @@ describe('listWorktrees', () => {
     const result = await listWorktrees('claude-code:nope-00000000', deps);
 
     expect(result).toMatchObject({ kind: 'refused', code: 'unknown-project' });
+  });
+
+  /**
+   * DETECTION NEEDS NO NEW CODE -- this test is here to PROVE that, not to
+   * exercise anything new: `listRaw` already runs an unconditional
+   * `git worktree list --porcelain`, so a worktree a CLI, Orca, or
+   * `claude --worktree` made OUTSIDE `<repoRoot>-worktrees/` was already in
+   * this answer before phase 2a touched a single line here. What phase 2a
+   * actually changes is `removeWorktree`'s own confinement, below -- listing
+   * one and being able to safely delete it are two different questions.
+   */
+  it('lists a worktree made directly with `git worktree add`, entirely outside vam’s own root', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const manualPath = join(parent, 'manual-worktree');
+    execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+      cwd: repo,
+    });
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly { path: string; branch: string | null }[];
+    expect(worktrees.some((w) => w.path === manualPath && w.branch === 'manual')).toBe(true);
+  });
+
+  /**
+   * `external` IS PURELY PATH-BASED, MEASURED HERE AGAINST TWO REAL SHAPES --
+   * the UI's own new "Show external worktrees" filter (phase 2b) needs a way
+   * to tell "vam's own" from "somebody else's" that does not depend on
+   * having watched the `git worktree add` call happen. `worktreesRootFor`'s
+   * own sibling-of-the-repo path is the ONLY thing that means "vam made
+   * this" -- `createWorktree`'s own body never writes anywhere else -- so a
+   * worktree whose PARENT directory is that root is not external regardless
+   * of how it came to exist (by vam's own "+"  button, or by hand, placed
+   * there to look like one); everything else is.
+   */
+  it('reports `external: false` for a worktree created through `createWorktree`, inside vam’s own root', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    await createWorktree({ projectId: projectIdOf(repo), name: 'feat' }, deps);
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly { path: string; external: boolean }[];
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]?.external).toBe(false);
+  });
+
+  it('reports `external: true` for a worktree made directly with `git worktree add`, outside vam’s own root', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const manualPath = join(parent, 'manual-worktree');
+    execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+      cwd: repo,
+    });
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly { path: string; external: boolean }[];
+    const manual = worktrees.find((w) => w.path === manualPath);
+    expect(manual?.external).toBe(true);
   });
 });
 
@@ -422,6 +532,43 @@ describe('removeWorktree', () => {
     expect(existsSync(worktreeId)).toBe(true);
   });
 
+  /**
+   * THE MAIN WORKTREE ITSELF -- the project's own primary checkout, already
+   * a row in the sidebar, never one `listWorktrees` would ever hand back as
+   * a `WorktreeInfo` to delete (its own "filtered out by realpath
+   * comparison" rule). Before phase 2a's S4 review round this held only by
+   * READING `findRepoRootFromWorktree`'s own doc comment ("a `.git`
+   * DIRECTORY... is itself a main repository, not a linked worktree"), never
+   * by a test that actually calls `removeWorktree` on it. `resolvedDir`
+   * itself IS `repo` here (`depsFor`'s own `resolveProjectDirectory`), so
+   * `worktreeId: repo` is exactly what a compromised renderer sending the
+   * project's own directory back as a "worktree to delete" would look like.
+   *
+   * FALSIFIED BY HAND, MEASURED: disabling the `claimedRepoRoot === null ||
+   * ...` guard alone (the commondir check) is enough -- `matched` is found
+   * (the main worktree is a REAL entry in its own `git worktree list`,
+   * neither bare nor locked), so nothing else in `removeWorktree` catches
+   * it, and `git worktree remove` genuinely runs against the main checkout.
+   * `git` itself then refuses ("is a main working tree"), so the directory
+   * survives either way -- but the refusal changes from vam's own clean,
+   * pre-`git`-call `not-a-worktree` to git's own `git-failed`, proving this
+   * guard is the thing standing between "asked to delete the main worktree"
+   * and actually invoking `git worktree remove` on it, git's own refusal
+   * being a second, independent net rather than vam's only one.
+   */
+  it('refuses to remove the MAIN worktree itself, and touches nothing', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const projectId = projectIdOf(repo);
+
+    const result = await removeWorktree({ projectId, worktreeId: repo }, deps);
+
+    expect(result).toMatchObject({ kind: 'refused', code: 'not-a-worktree' });
+    expect(existsSync(repo)).toBe(true);
+    expect(existsSync(join(repo, '.git'))).toBe(true);
+  });
+
   it('refuses a directory inside the confined root that git never registered as a worktree', async () => {
     const parent = tempParent();
     const repo = tempRepo(parent);
@@ -440,21 +587,124 @@ describe('removeWorktree', () => {
   });
 
   /**
-   * THE THREE SHAPES S2 CLOSES -- a compromised renderer handing
-   * `removeWorktree` an absolute `worktreeId` it does not own, in the three
-   * ways that could have worked before rule 6 existed: a real worktree of a
-   * REPO vam never heard of; a real, git-registered worktree of a KNOWN
-   * repo that merely lives outside that repo's confined root; and a
-   * directory whose crafted `.git` file claims a KNOWN repo's own commondir
-   * while sitting outside that repo's root entirely. All three must be
-   * refused, and none may touch the filesystem.
+   * ADOPTION (phase 2a): a worktree made OUTSIDE vam -- by a CLI, by Orca,
+   * by `claude --worktree` -- gets the SAME affordances as one vam made
+   * itself, including safe delete. `listWorktrees` already surfaced these
+   * (the test above proves it needed no change); this is the half that DID
+   * change: `removeWorktree` no longer refuses a real, registered worktree
+   * of a KNOWN repo merely because it lives outside `<repoRoot>-worktrees/`.
    *
-   * FALSIFIED BY HAND: comment out the `authorize()` call in
-   * `removeWorktree` (or its `if (!authorization.authorized)` guard) and
-   * rerun this suite -- "outside the root" and "attacker .git" both start
-   * passing a `--force` removal of a directory the confinement rule exists
-   * to protect, proving these tests exercise that specific line rather than
-   * some other, coincidental refusal.
+   * FALSIFIED BY HAND: reintroduce the dropped `authorize()` call (confining
+   * `realWorktreeId` to `worktreesRootFor(repoRoot)`) ahead of the commondir
+   * check in `removeWorktree` and rerun this one test -- it goes red with
+   * `path-confinement`, proving THIS is the line that used to stand between
+   * listing a worktree and being able to remove it.
+   */
+  describe('adoption -- a worktree registered outside `<repoRoot>-worktrees/`', () => {
+    it('removes a CLEAN worktree made directly with `git worktree add`, entirely outside vam’s own root', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const manualPath = join(parent, 'manual-worktree');
+      execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+        cwd: repo,
+      });
+      expect(existsSync(manualPath)).toBe(true);
+
+      const result = await removeWorktree({ projectId, worktreeId: manualPath }, deps);
+
+      expect(result).toEqual({ preservedBranch: false });
+      expect(existsSync(manualPath)).toBe(false);
+    });
+
+    it('still refuses a DIRTY adopted worktree without confirmation, and removes nothing -- same rule as a vam-made one', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const manualPath = join(parent, 'manual-worktree');
+      execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+        cwd: repo,
+      });
+      writeFileSync(join(manualPath, 'untracked.txt'), 'oops');
+
+      const result = await removeWorktree({ projectId, worktreeId: manualPath }, deps);
+
+      expect(result).toMatchObject({ kind: 'refused', code: 'dirty' });
+      expect(existsSync(manualPath)).toBe(true);
+    });
+
+    it('never removes a LOCKED adopted worktree, force or not -- same rule as a vam-made one', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const manualPath = join(parent, 'manual-worktree');
+      execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+        cwd: repo,
+      });
+      execFileSync('git', ['worktree', 'lock', manualPath], { cwd: repo });
+
+      const result = await removeWorktree(
+        { projectId, worktreeId: manualPath, force: true, confirmName: 'manual-worktree' },
+        deps,
+      );
+
+      expect(result).toMatchObject({ kind: 'refused', code: 'locked' });
+      expect(existsSync(manualPath)).toBe(true);
+    });
+
+    it('PRESERVES an unmerged branch on an adopted worktree rather than discarding it -- same rule as a vam-made one', async () => {
+      const parent = tempParent();
+      const repo = tempRepo(parent);
+      const deps = depsFor(repo);
+      const projectId = projectIdOf(repo);
+      const manualPath = join(parent, 'manual-worktree');
+      execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+        cwd: repo,
+      });
+      writeFileSync(join(manualPath, 'new-file.txt'), 'unmerged work');
+      execFileSync('git', ['add', 'new-file.txt'], { cwd: manualPath });
+      execFileSync('git', ['commit', '--quiet', '-m', 'unmerged commit'], { cwd: manualPath });
+
+      const result = await removeWorktree({ projectId, worktreeId: manualPath }, deps);
+
+      expect(result).toEqual({ preservedBranch: true });
+      expect(existsSync(manualPath)).toBe(false);
+      const branches = execFileSync('git', ['branch', '--list', 'manual'], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+      expect(branches.trim()).not.toBe('');
+    });
+  });
+
+  /**
+   * THE TWO SHAPES THAT STILL MUST BE REFUSED even after adoption -- a
+   * compromised renderer handing `removeWorktree` an absolute `worktreeId`
+   * it does not own: a real worktree of a REPO vam never heard of, and a
+   * directory whose crafted `.git` file claims a KNOWN repo's own commondir
+   * without git itself ever having registered that directory as one of that
+   * repo's worktrees. Both must be refused, and neither may touch the
+   * filesystem -- location is no longer part of the proof (the suite
+   * above), but "is this really a registered worktree of the repo it
+   * claims" still is.
+   *
+   * FALSIFIED BY HAND, MEASURED (not merely argued): disabling the
+   * `claimedRepoRoot !== realRepoRoot` guard (the commondir check) alone
+   * leaves BOTH tests below passing -- `findMatchingEntry` independently
+   * catches both shapes too, since neither the stranger's worktree nor the
+   * attacker's directory is ever a path `known`'s own `git worktree list`
+   * actually names. Disabling the `matched === undefined` guard instead
+   * (with commondir intact) is what actually moves a needle: the first test
+   * still passes (the commondir check alone already refuses it, before
+   * `matched` is even computed), but the second CRASHES --
+   * `TypeError: Cannot read properties of undefined (reading 'locked')` --
+   * proving that guard is the one carrying shape 2 alone. The two checks
+   * are genuine belt-and-suspenders for shape 1 (either refuses it) and the
+   * ONLY guard for shape 2 is `findMatchingEntry`, not the commondir chain
+   * this describe block's name might suggest.
    */
   describe('confinement (S2) -- a worktreeId the renderer does not own', () => {
     it('refuses a linked worktree of an UNKNOWN repo, even though it is a real worktree', async () => {
@@ -481,28 +731,7 @@ describe('removeWorktree', () => {
       expect(existsSync(strangerWorktreeId)).toBe(true);
     });
 
-    it('refuses a path outside `-worktrees/`, even when `git worktree list` legitimately lists it', async () => {
-      const parent = tempParent();
-      const repo = tempRepo(parent);
-      const deps = depsFor(repo);
-      const projectId = projectIdOf(repo);
-      // A worktree of THIS repo, made the way an operator running `git`
-      // directly (outside vam) could -- registered in `repo`'s own git
-      // metadata, so `git worktree list` genuinely reports it, but never
-      // inside `repo-worktrees/`.
-      const manualPath = join(parent, 'manual-worktree');
-      execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
-        cwd: repo,
-      });
-      expect(existsSync(manualPath)).toBe(true);
-
-      const result = await removeWorktree({ projectId, worktreeId: manualPath }, deps);
-
-      expect(result).toMatchObject({ kind: 'refused', code: 'path-confinement' });
-      expect(existsSync(manualPath)).toBe(true);
-    });
-
-    it('refuses a directory OUTSIDE the root whose crafted `.git` file points at a KNOWN repo', async () => {
+    it('refuses a directory whose crafted `.git` file points at a KNOWN repo but that repo never registered as a worktree', async () => {
       const parent = tempParent();
       const repo = tempRepo(parent);
       const deps = depsFor(repo);
@@ -511,10 +740,10 @@ describe('removeWorktree', () => {
       const legitWorktreeId = (legit as { worktreeId: string }).worktreeId;
 
       // Read the REAL worktree's own `.git` file to find `repo`'s real
-      // admin gitdir for it, then point an attacker directory OUTSIDE
-      // `repo-worktrees/` at that exact same gitdir -- a `.git` file whose
-      // `gitdir:`/`commondir` chain resolves to a repo vam genuinely knows,
-      // from a directory that repo never registered as a worktree at all.
+      // admin gitdir for it, then point an attacker directory at that exact
+      // same gitdir -- a `.git` file whose `gitdir:`/`commondir` chain
+      // resolves to a repo vam genuinely knows, from a directory that repo
+      // never registered as a worktree at all.
       const legitGitFile = readFileSync(join(legitWorktreeId, '.git'), 'utf8');
       const attackerDir = join(parent, 'attacker-dir');
       mkdirSync(attackerDir, { recursive: true });
@@ -523,7 +752,7 @@ describe('removeWorktree', () => {
 
       const result = await removeWorktree({ projectId, worktreeId: attackerDir }, deps);
 
-      expect(result).toMatchObject({ kind: 'refused', code: 'path-confinement' });
+      expect(result).toMatchObject({ kind: 'refused', code: 'not-a-worktree' });
       expect(existsSync(attackerDir)).toBe(true);
       // The real worktree it impersonated is untouched too.
       expect(existsSync(legitWorktreeId)).toBe(true);

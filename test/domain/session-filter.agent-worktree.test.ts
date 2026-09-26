@@ -55,6 +55,10 @@ describe('the shipped default', () => {
     expect(DEFAULT_SESSION_FILTERS.hideAgentWorktrees).toBe(true);
     expect(DEFAULT_SESSION_FILTERS.hideForeign).toBe(true);
     expect(DEFAULT_SESSION_FILTERS.hideEnded).toBe(true);
+    // A DIFFERENT rule (`worktree-visibility.ts`'s own `WorktreeInfo` one,
+    // over worktree ROWS rather than sessions) but the same shipped
+    // direction: see this project's own filter row for both.
+    expect(DEFAULT_SESSION_FILTERS.hideExternalWorktrees).toBe(true);
   });
 });
 

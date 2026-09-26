@@ -69,6 +69,13 @@ export const isTextList = (value: unknown): value is string[] =>
 export const isDirectoryPath = (value: unknown): value is string =>
   isText(value) && value.startsWith('/') && !value.includes('\0');
 
+/** `worktree:status`'s own `worktreeIds` -- the same `MAX_LIST_LENGTH`
+ *  bound `isTextList` already enforces, applied to `isDirectoryPath`
+ *  instead of `isText`: every element is a worktree's own realpath, not
+ *  free text. */
+export const isDirectoryPathList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.length <= MAX_LIST_LENGTH && value.every(isDirectoryPath);
+
 /**
  * The provider a new session should run, which the renderer may omit -- a
  * renderer that predates the setting, or one whose store could not be read,

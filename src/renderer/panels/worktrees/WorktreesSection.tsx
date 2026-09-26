@@ -50,17 +50,36 @@
  * never looked at the DOM -- both keep working), same jump-label badge, same
  * context menu, same close button, same phone treatment. Nothing here knows
  * or needs to know what is inside that function.
+ *
+ * PHASE 2B ALSO MAKES THIS SECTION DRAW THE PROJECT'S OWN TOP-LEVEL SESSIONS
+ * (`mainSessionEntries`, its own prop doc has the mechanics): the operator's
+ * own ask for the external/locked tree is that it "hangs under the project's
+ * main session row" -- the session running in the repo's MAIN checkout, not
+ * any worktree's. Real DOM order, not a CSS trick, is what "hangs under"
+ * has to mean (a visual-only reorder would leave keyboard/`Tab` and
+ * screen-reader order pointing the other way), so this component's own
+ * return is now THREE pieces in order: the plain worktrees block, then
+ * `mainSessionEntries` (own rendering, moved here from `SessionList.tsx`),
+ * then the external/locked tree. A project with NO main-worktree session
+ * needs no special-cased fallback: with `mainSessionEntries` empty, the
+ * external group is simply the very next thing after the plain list --
+ * which is the exact position it already held before this move, so "falls
+ * back to the current spot" falls out of the ordering for free.
  */
 
-import { Play } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Play } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import type { WorktreeInfo } from '../../../shared/worktree.js';
+import { hasAgentWorktreeSegment, isAgentWorktreeBranch } from '../../../shared/agent-worktree.js';
+import type { WorktreeInfo, WorktreeStatus } from '../../../shared/worktree.js';
 import type { Project } from '../../domain/model.js';
 import type { SessionEntry } from '../../domain/selectors.js';
 import { ShortcutTip } from '../../keyboard/ShortcutTip.js';
 import { ConfirmDeleteWorktree } from './ConfirmDeleteWorktree.js';
+import { useWorktreeStatuses } from './useWorktreeStatuses.js';
 import { useWorktrees } from './useWorktrees.js';
+import { isWorktreeTreeCollapsed, setWorktreeTreeCollapsed } from './worktree-tree-collapse.js';
+import { isExternalOrLockedWorktree } from './worktree-visibility.js';
 
 /**
  * NOT IMPORTED FROM `SessionList.tsx`, which already exports its own
@@ -72,6 +91,26 @@ import { useWorktrees } from './useWorktrees.js';
  * ladder is what would catch the two drifting apart.
  */
 const SIDEBAR_STEP = 10;
+
+/**
+ * THE EXTERNAL/LOCKED TREE'S OWN DIMMER TEXT -- measured, not assumed
+ * (`e2e/worktrees-shots.mjs`'s own header on why this file never trusts a
+ * class string). `text-ink-faint` alone (the plain row's own meta/branch
+ * colour) read 7.247:1 dark / 4.642:1 light against this row's real,
+ * rendered background -- an operator report that a compact row was "barely
+ * dimmer than normal" was correct: `text-ink-dim` (normal rows' own name
+ * colour) reads 9.394:1/higher, so the two were close enough to read as one
+ * weight. `/80` (80% alpha) was chosen as the DARKEST (most-dimmed) opacity
+ * that still clears the 3:1 non-text floor in LIGHT theme (3.197:1) -- light
+ * has far less headroom than dark (dark still reads 5.168:1 at the same
+ * opacity) so light is the binding constraint for one shared class covering
+ * both themes. `token-contrast.test.ts`'s own floor is what this stays
+ * clear of; `ink-ghost` was ruled out outright (measured 1.75:1 dark /
+ * 2.39:1 light against `panel` -- a text call site there would be the exact
+ * regression that token's own split exists to prevent, `styles.css`'s own
+ * header on `ink-ghost`).
+ */
+const COMPACT_DIM_TEXT = 'text-ink-faint/80';
 
 function errorCode(error: unknown): string | null {
   return typeof error === 'object' && error !== null && 'code' in error
@@ -93,6 +132,21 @@ function displayName(path: string): string {
   return slash === -1 ? trimmed : trimmed.slice(slash + 1);
 }
 
+/**
+ * Is this row a Claude Code AGENT worktree -- `<repo>/.claude/worktrees/
+ * agent-<id>`, the Claude Agent SDK's own `isolation: "worktree"` mechanism,
+ * unrelated to this feature -- rather than one an operator (or a CLI, or
+ * Orca) actually asked vam to manage? The identical two-signal rule a
+ * SESSION is already filtered by (`shared/agent-worktree.ts`'s own header),
+ * applied here to a worktree ROW instead: `worktree.path` is already a
+ * realpath (main mints it that way, `worktrees.ts`'s own `WorktreeInfo`
+ * header), so no second `realpath` call is needed the way a session's own
+ * check pays for one.
+ */
+function isAgentWorktreeRow(worktree: WorktreeInfo): boolean {
+  return hasAgentWorktreeSegment(worktree.path) || isAgentWorktreeBranch(worktree.branch);
+}
+
 export type WorktreesSectionProps = {
   readonly project: Project;
   readonly allEntries: readonly SessionEntry[];
@@ -104,6 +158,59 @@ export type WorktreesSectionProps = {
    * through this, not through anything defined here.
    */
   readonly renderSessionRow: (entry: SessionEntry) => ReactNode;
+  /**
+   * The OPERATOR's OWN toggle, `SessionFilters.hideAgentWorktrees`
+   * (`domain/session-filter.ts`), threaded down from `SessionList.tsx` --
+   * this section respects the SAME preference a session row already does,
+   * rather than growing a second, independent one. Defaults to `true`
+   * (hidden) so every existing caller/test that predates phase 2a keeps its
+   * current behaviour -- vam never surfaced an agent worktree ROW before
+   * this feature existed to adopt worktrees at all, so "hidden" is the only
+   * default that changes nothing for them.
+   */
+  readonly hideAgentWorktrees?: boolean;
+  /**
+   * THE OPERATOR's OWN toggle, `SessionFilters.hideExternalWorktrees`
+   * (`domain/session-filter.ts`) -- a worktree vam did not make, or one that
+   * is locked (`worktree-visibility.ts`'s own `isExternalOrLockedWorktree`),
+   * threaded down exactly like `hideAgentWorktrees` above and INDEPENDENT of
+   * it: a Claude Code agent worktree that `hideAgentWorktrees` reveals is
+   * still, separately, external -- both toggles must open before it draws in
+   * the PLAIN list rather than the nested tree below. Defaults to `true`
+   * (hidden), the shipped default `worktree-visibility.ts`'s header states.
+   */
+  readonly hideExternalWorktrees?: boolean;
+  /**
+   * THIS PROJECT'S OWN top-level sessions -- ones running in the repo's MAIN
+   * checkout, never inside any worktree (those carry a DIFFERENT `Project
+   * .id`, this file's own header on `allEntries`). `SessionList.tsx`'s own
+   * `section.items` for `groupBy === 'project'` mode, threaded down whole
+   * rather than recomputed here: `section.items` is already the correctly
+   * filtered/ordered/status-narrowed subset (`visibleEntries`, `applyView
+   * Order`'s own contract) that `renderSessionRow` would otherwise draw
+   * directly; re-deriving the same set from `allEntries` (which is
+   * DELIBERATELY the broader, unfiltered list -- see this file's own header)
+   * would risk drifting from whatever narrowing SessionList.tsx applies next
+   * without this file ever finding out. Defaults to `[]` so every existing
+   * caller/test that predates the external-worktree tree keeps rendering
+   * exactly as before (nothing between the plain list and the external
+   * group).
+   *
+   * WHY THIS SECTION OWNS RENDERING THEM AT ALL (phase 2b's own move,
+   * `docs/design/worktrees.md` §8): the operator's own ask is that the
+   * external/locked tree "hangs under the project's main session row" --
+   * DOM order, not merely visual order (a CSS `order` trick would leave
+   * keyboard/`Tab` and screen-reader order pointing at the tree BEFORE the
+   * main session, the opposite of what "hangs under" means). The only way
+   * to place this section's OWN external-group markup after those rows in
+   * real DOM order, from ONE data-fetching component instance (so `use
+   * Worktrees`/`useWorktreeStatuses` still poll exactly once per project,
+   * `useWorktreeStatuses.ts`'s own performance rule), is for this component
+   * to render the rows itself, in between its own two other pieces --
+   * SessionList.tsx no longer maps over `section.items` a second time in
+   * `groupBy === 'project'` mode (see its own call site).
+   */
+  readonly mainSessionEntries?: readonly SessionEntry[];
 };
 
 export function WorktreesSection({
@@ -112,6 +219,9 @@ export function WorktreesSection({
   forceOpenCreate,
   onCloseCreate,
   renderSessionRow,
+  hideAgentWorktrees = true,
+  hideExternalWorktrees = true,
+  mainSessionEntries = [],
 }: WorktreesSectionProps) {
   const api = window.api?.worktrees;
   const { state, reload } = useWorktrees({ projectId: project.id, api });
@@ -128,13 +238,65 @@ export function WorktreesSection({
     if (forceOpenCreate) setCreating(true);
   }, [forceOpenCreate]);
 
-  if (state.kind === 'unavailable') {
-    return null;
-  }
-  const worktrees = state.kind === 'ok' ? state.worktrees : [];
-  if (worktrees.length === 0 && !creating) {
-    return null;
-  }
+  // FILTERED BEFORE ANYTHING BELOW READS `worktrees` -- the row count next
+  // to "Worktrees", the empty-section early return, AND the status poll
+  // below all have to agree with what actually gets a row, or the count
+  // would name a worktree the section itself never draws.
+  const rawWorktrees = state.kind === 'ok' ? state.worktrees : [];
+  const worktrees = hideAgentWorktrees
+    ? rawWorktrees.filter((worktree) => !isAgentWorktreeRow(worktree))
+    : rawWorktrees;
+
+  // PHASE 2B'S OWN SPLIT -- an ordinary row draws in the plain list above;
+  // an external-or-locked one (`worktree-visibility.ts`) either does not
+  // draw at all (the shipped default) or draws in its OWN nested, collapsible
+  // group below, never mixed into the plain list either way.
+  const plainWorktrees = worktrees.filter((worktree) => !isExternalOrLockedWorktree(worktree));
+  const externalWorktrees = worktrees.filter((worktree) => isExternalOrLockedWorktree(worktree));
+  const showExternalGroup = !hideExternalWorktrees && externalWorktrees.length > 0;
+
+  const [externalCollapsed, setExternalCollapsed] = useState(() =>
+    isWorktreeTreeCollapsed(project.id),
+  );
+  const toggleExternalCollapsed = () => {
+    const next = !externalCollapsed;
+    setExternalCollapsed(next);
+    setWorktreeTreeCollapsed(project.id, next);
+  };
+
+  // THE BADGE POLL SKIPS HIDDEN AND COLLAPSED ROWS -- an external/locked
+  // worktree the filter hides outright never gets a `git status` call
+  // (`plainWorktrees` alone, the shipped default); one shown but folded
+  // shut does not either (`showExternalGroup && !externalCollapsed` gates
+  // it back in). See `useWorktreeStatuses.ts`'s own header for why this
+  // section is the renderer's whole gate on that cost.
+  const polledWorktrees =
+    showExternalGroup && !externalCollapsed
+      ? [...plainWorktrees, ...externalWorktrees]
+      : plainWorktrees;
+
+  // PHASE 2A'S OWN BADGES -- called UNCONDITIONALLY (React's own rule: no
+  // hook after an early return), `enabled` by "this section actually has
+  // rows to draw" so a project with zero (or only filtered-out) worktrees
+  // never polls at all -- see `useWorktreeStatuses.ts`'s own header.
+  const statuses = useWorktreeStatuses({
+    projectId: project.id,
+    worktreeIds: polledWorktrees.map((worktree) => worktree.worktreeId),
+    statusFn: window.api?.worktrees?.status,
+    enabled: polledWorktrees.length > 0,
+  });
+
+  // NEITHER GUARD RETURNS EARLY ANY MORE (phase 2b) -- `mainSessionEntries`
+  // must keep drawing regardless of either: a source without a worktrees
+  // bridge, or a project with none, still has its own live sessions to show,
+  // and this component is now the ONLY thing that draws them in `groupBy ===
+  // 'project'` mode (`SessionList.tsx`'s own call site stopped mapping over
+  // `section.items` a second time). `worktreesAvailable` gates the
+  // worktrees-specific UI (heading, create form, plain list, external group)
+  // instead; `showWorktreesBlock` is this file's own former "return null"
+  // condition, now a boolean rather than an exit.
+  const worktreesAvailable = state.kind !== 'unavailable';
+  const showWorktreesBlock = worktreesAvailable && (worktrees.length > 0 || creating);
 
   const closeCreate = () => {
     setCreating(false);
@@ -205,189 +367,369 @@ export function WorktreesSection({
     }
   };
 
+  /**
+   * ONE WORKTREE ROW, shared between the plain list above and the compact
+   * external/locked tree below -- `compact` is the ONLY thing that differs
+   * (smaller, dimmer type; the tree's own dashed indent lives on ITS
+   * wrapper, above, not here). Every attribute, button and badge is
+   * IDENTICAL either way, on purpose: `data-worktree-row`, the delete
+   * button, "Start a session here", every marker -- an external/locked row
+   * keeps every affordance an ordinary one has, only drawn smaller and
+   * dimmer, never with less reach (keyboard included: every control here is
+   * a real `<button>`, native `Tab` order, regardless of which list calls
+   * this function).
+   */
+  function renderRow(
+    worktree: WorktreeInfo,
+    opts: { readonly compact: boolean } = { compact: false },
+  ) {
+    const worktreeSessions = allEntries.filter((entry) => entry.project.id === worktree.projectId);
+    const status: WorktreeStatus | undefined = statuses.get(worktree.worktreeId);
+    const { compact } = opts;
+    return (
+      <div
+        key={worktree.worktreeId}
+        data-worktree-row={worktree.worktreeId}
+        className={[
+          'flex flex-col gap-0.5 rounded-[7px] px-1.5 py-1 hover:bg-line',
+          compact ? `text-meta ${COMPACT_DIM_TEXT}` : 'text-control',
+        ].join(' ')}
+      >
+        {/* Line 1: the name gets the row's FULL width, same idiom as
+            `data-row-title` on a session row -- the delete button is
+            the only thing sharing this line, so `min-w-0 truncate`
+            here actually has room to matter instead of collapsing to
+            a couple of characters (the bug a real screenshot caught:
+            packing name, branch, "Start a session here" and delete
+            onto ONE line left name/branch a couple of px wide each). */}
+        <div className="flex items-center gap-[7px]">
+          <span
+            data-worktree-name
+            className={[
+              'min-w-0 flex-1 truncate',
+              compact ? COMPACT_DIM_TEXT : 'text-ink-dim',
+            ].join(' ')}
+          >
+            {displayName(worktree.path)}
+          </span>
+          {/* NEVER OFFERED ON A LOCKED WORKTREE -- `removeWorktree`
+              refuses one unconditionally, force or not
+              (`worktrees.ts`'s own rule), so a clickable × here would
+              only ever open a dialog whose one button always fails.
+              Phase 2a's own fix: the row now says so up front instead
+              of after a click. */}
+          {!worktree.locked && (
+            <button
+              type="button"
+              data-worktree-delete={worktree.worktreeId}
+              aria-label={`delete worktree ${displayName(worktree.path)}`}
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteDirty(false);
+                setPendingDelete(worktree);
+              }}
+              className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {/* Line 2: branch is the FLEXIBLE one here, `flex-1`, and
+            truncates LAST -- a real screenshot (`docs/ui/worktrees-
+            sidebar-dark.png`) caught it losing that fight to "Start a
+            session here"'s own fixed-width text and truncating to
+            "fix-t…" first. `locked` stays `flex-none`, and the
+            start-here control is now a compact icon (below) rather
+            than a text label competing for the same line's width. */}
+        <div className="flex items-center gap-[7px]">
+          {worktree.branch !== null ? (
+            <span
+              data-worktree-branch
+              className={[
+                'min-w-0 flex-1 truncate font-mono text-meta',
+                compact ? COMPACT_DIM_TEXT : 'text-ink-faint',
+              ].join(' ')}
+            >
+              {worktree.branch}
+            </span>
+          ) : (
+            <span className="flex-1" />
+          )}
+          {/* PHASE 2A'S OWN BADGES -- a dirty dot, then an ahead/behind
+              pair, drawn ONLY once `status.ts`'s own read answers
+              (never a placeholder while loading, the same "say
+              nothing rather than guess" rule `WorktreeInfo.branch:
+              null` already follows). `--color-diff-file` (a changed
+              FILE'S own colour in the diff renderer, `out-markdown.tsx`)
+              reused for "this worktree has changed files" -- the same
+              hue, not a new one, matching this app's own token
+              economy. Ahead/behind reuse `--color-diff-add`/`-del`,
+              the add/remove-line colours: green for commits ready to
+              push, red for commits not yet pulled. */}
+          {status?.dirty === true && (
+            <span
+              data-worktree-dirty
+              title="uncommitted changes"
+              className="h-1.5 w-1.5 flex-none rounded-full bg-diff-file"
+            />
+          )}
+          {status !== undefined && status.ahead !== null && status.behind !== null && (
+            <span
+              className="flex flex-none items-center gap-0.5 font-mono text-meta"
+              title={`${status.ahead} to push, ${status.behind} to pull`}
+            >
+              <ArrowUp size={10} strokeWidth={2} className="text-diff-add" />
+              <span data-worktree-ahead className="text-diff-add">
+                {status.ahead}
+              </span>
+              <ArrowDown size={10} strokeWidth={2} className="text-diff-del" />
+              <span data-worktree-behind className="text-diff-del">
+                {status.behind}
+              </span>
+            </span>
+          )}
+          {worktree.detached && (
+            <span
+              data-worktree-detached
+              className={[
+                'flex-none text-meta',
+                compact ? COMPACT_DIM_TEXT : 'text-ink-faint',
+              ].join(' ')}
+            >
+              detached
+            </span>
+          )}
+          {worktree.prunable && (
+            <span
+              data-worktree-prunable
+              title={worktree.prunableReason ?? undefined}
+              className={[
+                'flex-none text-meta',
+                compact ? COMPACT_DIM_TEXT : 'text-ink-faint',
+              ].join(' ')}
+            >
+              prunable
+            </span>
+          )}
+          {worktree.locked && (
+            <span
+              data-worktree-locked
+              className={[
+                'flex-none text-meta',
+                compact ? COMPACT_DIM_TEXT : 'text-ink-faint',
+              ].join(' ')}
+            >
+              locked
+            </span>
+          )}
+          {worktreeSessions.length === 0 && (
+            <ShortcutTip label={`Start a session in ${displayName(worktree.path)}`}>
+              <button
+                type="button"
+                data-worktree-start-here={worktree.worktreeId}
+                aria-label={`start a session in ${displayName(worktree.path)}`}
+                onClick={() => void startHere(worktree)}
+                className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
+              >
+                <Play size={11} strokeWidth={1.8} />
+              </button>
+            </ShortcutTip>
+          )}
+        </div>
+        {/* UI1: the nested rows a worktree's sessions used to only get
+            a COUNT for -- `SessionList.tsx` now suppresses this
+            worktree's own top-level project section whenever it is
+            visible here, so this is the only route left to reach one
+            of its sessions in `Group by: Project` mode. `renderSessionRow`
+            is `SessionList.tsx`'s own row-rendering function -- see this
+            file's header for why nothing here reimplements it. */}
+        {worktreeSessions.length > 0 && (
+          <div
+            data-worktree-sessions={worktree.worktreeId}
+            className="flex flex-col gap-0.5 pt-0.5"
+          >
+            {worktreeSessions.map((entry) => renderSessionRow(entry))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div data-worktrees-section={project.id} style={{ paddingLeft: SIDEBAR_STEP }}>
-      <div className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5">
-        {/* `text-control` (12px/16px), NOT the project heading's own 13px
+    <>
+      {showWorktreesBlock && (
+        <div data-worktrees-section={project.id} style={{ paddingLeft: SIDEBAR_STEP }}>
+          <div className="relative flex min-h-[21px] items-center gap-[7px] px-1 pb-0.5">
+            {/* `text-control` (12px/16px), NOT the project heading's own 13px
             `text-body`-sized exception (`type-scale.test.ts`'s own named
             list): this is a THIRD level, nested one step deeper than the
             project heading it sits under, and the named scale's role for a
             "secondary line under a title" is exactly that relationship --
             no new exception needed. */}
-        <span className="truncate font-semibold text-control text-ink-faint">Worktrees</span>
-        <span className="font-mono text-meta text-ink-faint">{worktrees.length}</span>
-        <span className="flex-1" />
-        {!creating && (
-          <button
-            type="button"
-            data-worktrees-add={project.id}
-            aria-label={`new worktree of ${project.name}`}
-            onClick={() => setCreating(true)}
-            className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
-          >
-            +
-          </button>
-        )}
-      </div>
+            <span className="truncate font-semibold text-control text-ink-faint">Worktrees</span>
+            {/* `plainWorktrees` PLUS whatever the external group ITSELF draws
+            right now -- this is "how many rows actually draw", the same
+            rule the pre-existing `hideAgentWorktrees` filtering already
+            established for this span, extended rather than replaced: a
+            worktree the filter hides outright is not counted here (the
+            quiet note beside it says so instead); one shown but folded
+            shut still is, the same way a collapsed project still counts
+            its own sessions elsewhere in this app. */}
+            <span className="font-mono text-meta text-ink-faint">
+              {plainWorktrees.length + (showExternalGroup ? externalWorktrees.length : 0)}
+            </span>
+            {/* THE QUIET NOTE -- `SessionList.tsx`'s own "· N hidden" style,
+            never `font-mono` (this file's own count span above is the
+            FIRST `.font-mono` under `data-worktrees-section` on purpose;
+            `WorktreesSection.test.tsx`'s own count assertion reads it by
+            that selector). Absent, not a "0 hidden": present only while
+            the filter is actually holding something back. */}
+            {hideExternalWorktrees && externalWorktrees.length > 0 && (
+              <span
+                data-worktrees-external-hidden-count
+                className="whitespace-nowrap text-ink-faint text-meta"
+              >
+                {externalWorktrees.length} hidden
+              </span>
+            )}
+            <span className="flex-1" />
+            {!creating && (
+              <button
+                type="button"
+                data-worktrees-add={project.id}
+                aria-label={`new worktree of ${project.name}`}
+                onClick={() => setCreating(true)}
+                className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
+              >
+                +
+              </button>
+            )}
+          </div>
 
-      {creating && (
-        <div
-          data-worktrees-create-form
-          className="mb-1 flex flex-col gap-1.5 rounded-[9px] border border-line-strong bg-card px-2 py-2"
-        >
-          <input
-            data-worktrees-create-name
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                closeCreate();
-              }
-            }}
-            placeholder="worktree name"
-            // biome-ignore lint/a11y/noAutofocus: the form opens because the operator just asked for it (the "+" or the project menu); focusing its first field is the point.
-            autoFocus
-            className="min-w-0 rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none focus:border-line-loud"
-          />
-          <input
-            data-worktrees-create-base
-            value={baseRef}
-            onChange={(event) => setBaseRef(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                closeCreate();
-              }
-            }}
-            placeholder="base ref (current branch)"
-            className="min-w-0 rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none focus:border-line-loud"
-          />
-          {createError !== null && (
-            <p data-worktrees-create-error className="text-control text-danger">
-              {createError}
+          {creating && (
+            <div
+              data-worktrees-create-form
+              className="mb-1 flex flex-col gap-1.5 rounded-[9px] border border-line-strong bg-card px-2 py-2"
+            >
+              <input
+                data-worktrees-create-name
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeCreate();
+                  }
+                }}
+                placeholder="worktree name"
+                // biome-ignore lint/a11y/noAutofocus: the form opens because the operator just asked for it (the "+" or the project menu); focusing its first field is the point.
+                autoFocus
+                className="min-w-0 rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none focus:border-line-loud"
+              />
+              <input
+                data-worktrees-create-base
+                value={baseRef}
+                onChange={(event) => setBaseRef(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeCreate();
+                  }
+                }}
+                placeholder="base ref (current branch)"
+                className="min-w-0 rounded-[5px] border border-line-strong bg-panel px-1.5 py-1 font-mono text-control text-ink outline-none focus:border-line-loud"
+              />
+              {createError !== null && (
+                <p data-worktrees-create-error className="text-control text-danger">
+                  {createError}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  data-worktrees-create-cancel
+                  onClick={closeCreate}
+                  className="cursor-pointer rounded-[var(--radius-sm)] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  data-worktrees-create-submit
+                  disabled={name.trim() === '' || busy}
+                  onClick={() => void submitCreate()}
+                  className="cursor-pointer rounded-[var(--radius-sm)] border border-line-strong px-2 py-1 text-control text-ink-dim hover:border-line-loud hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Create
+                </button>
+              </div>
+            </div>
+          )}
+
+          {deleteError !== null && (
+            <p data-worktrees-error className="px-1 pb-1 text-control text-danger">
+              {deleteError}
             </p>
           )}
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              data-worktrees-create-cancel
-              onClick={closeCreate}
-              className="cursor-pointer rounded-[var(--radius-sm)] border border-line px-2 py-1 text-control text-ink-dim hover:border-line-strong hover:text-ink"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              data-worktrees-create-submit
-              disabled={name.trim() === '' || busy}
-              onClick={() => void submitCreate()}
-              className="cursor-pointer rounded-[var(--radius-sm)] border border-line-strong px-2 py-1 text-control text-ink-dim hover:border-line-loud hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Create
-            </button>
+
+          <div className="flex flex-col gap-1">
+            {plainWorktrees.map((worktree) => renderRow(worktree))}
           </div>
         </div>
       )}
 
-      {deleteError !== null && (
-        <p data-worktrees-error className="px-1 pb-1 text-control text-danger">
-          {deleteError}
-        </p>
-      )}
+      {/* THIS PROJECT'S OWN TOP-LEVEL SESSIONS -- see this file's own header
+          and `mainSessionEntries`'s own prop doc for why this component (not
+          `SessionList.tsx`) draws them, and why that is what makes "hangs
+          under the project's main session row" a fact about the rendered
+          DOM rather than only about paint order. */}
+      {mainSessionEntries.map((entry) => renderSessionRow(entry))}
 
-      <div className="flex flex-col gap-1">
-        {worktrees.map((worktree) => {
-          const worktreeSessions = allEntries.filter(
-            (entry) => entry.project.id === worktree.projectId,
-          );
-          return (
-            <div
-              key={worktree.worktreeId}
-              data-worktree-row={worktree.worktreeId}
-              className="flex flex-col gap-0.5 rounded-[7px] px-1.5 py-1 text-control hover:bg-line"
-            >
-              {/* Line 1: the name gets the row's FULL width, same idiom as
-                  `data-row-title` on a session row -- the delete button is
-                  the only thing sharing this line, so `min-w-0 truncate`
-                  here actually has room to matter instead of collapsing to
-                  a couple of characters (the bug a real screenshot caught:
-                  packing name, branch, "Start a session here" and delete
-                  onto ONE line left name/branch a couple of px wide each). */}
-              <div className="flex items-center gap-[7px]">
-                <span data-worktree-name className="min-w-0 flex-1 truncate text-ink-dim">
-                  {displayName(worktree.path)}
-                </span>
-                <button
-                  type="button"
-                  data-worktree-delete={worktree.worktreeId}
-                  aria-label={`delete worktree ${displayName(worktree.path)}`}
-                  onClick={() => {
-                    setDeleteError(null);
-                    setDeleteDirty(false);
-                    setPendingDelete(worktree);
-                  }}
-                  className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-danger"
-                >
-                  ×
-                </button>
-              </div>
-              {/* Line 2: branch is the FLEXIBLE one here, `flex-1`, and
-                  truncates LAST -- a real screenshot (`docs/ui/worktrees-
-                  sidebar-dark.png`) caught it losing that fight to "Start a
-                  session here"'s own fixed-width text and truncating to
-                  "fix-t…" first. `locked` stays `flex-none`, and the
-                  start-here control is now a compact icon (below) rather
-                  than a text label competing for the same line's width. */}
-              <div className="flex items-center gap-[7px]">
-                {worktree.branch !== null ? (
-                  <span
-                    data-worktree-branch
-                    className="min-w-0 flex-1 truncate font-mono text-ink-faint text-meta"
-                  >
-                    {worktree.branch}
-                  </span>
-                ) : (
-                  <span className="flex-1" />
-                )}
-                {worktree.locked && (
-                  <span data-worktree-locked className="flex-none text-ink-faint text-meta">
-                    locked
-                  </span>
-                )}
-                {worktreeSessions.length === 0 && (
-                  <ShortcutTip label={`Start a session in ${displayName(worktree.path)}`}>
-                    <button
-                      type="button"
-                      data-worktree-start-here={worktree.worktreeId}
-                      aria-label={`start a session in ${displayName(worktree.path)}`}
-                      onClick={() => void startHere(worktree)}
-                      className="vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink"
-                    >
-                      <Play size={11} strokeWidth={1.8} />
-                    </button>
-                  </ShortcutTip>
-                )}
-              </div>
-              {/* UI1: the nested rows a worktree's sessions used to only get
-                  a COUNT for -- `SessionList.tsx` now suppresses this
-                  worktree's own top-level project section whenever it is
-                  visible here, so this is the only route left to reach one
-                  of its sessions in `Group by: Project` mode. `renderSessionRow`
-                  is `SessionList.tsx`'s own row-rendering function -- see this
-                  file's header for why nothing here reimplements it. */}
-              {worktreeSessions.length > 0 && (
-                <div
-                  data-worktree-sessions={worktree.worktreeId}
-                  className="flex flex-col gap-0.5 pt-0.5"
-                >
-                  {worktreeSessions.map((entry) => renderSessionRow(entry))}
-                </div>
-              )}
+      {/* PHASE 2B'S OWN TREE -- external/locked rows, nested under this
+          project's own worktrees, compact and dimmed, with a dotted
+          connector -- Orca's own worktree tree studied as a REFERENCE
+          (`docs/design/worktrees.md`'s phase-2b notes), never copied: this
+          app's own tokens (`--color-diff-file` etc. above are reused, not
+          new ones invented) and this app's own `vam-tap`/`vam-hit-24`
+          conventions carry the whole thing. */}
+      {showExternalGroup && (
+        <div data-worktrees-external-group={project.id} className="mt-0.5 flex flex-col gap-0.5">
+          <button
+            type="button"
+            data-worktrees-external-toggle={project.id}
+            aria-expanded={!externalCollapsed}
+            aria-label={`${externalCollapsed ? 'expand' : 'collapse'} external worktrees of ${project.name}`}
+            onClick={toggleExternalCollapsed}
+            className="vam-tap flex items-center gap-1 rounded-[5px] px-1 py-0.5 text-ink-faint text-meta hover:text-ink-dim"
+          >
+            {externalCollapsed ? (
+              <ChevronRight size={11} strokeWidth={1.8} className="flex-none" />
+            ) : (
+              <ChevronDown size={11} strokeWidth={1.8} className="flex-none" />
+            )}
+            <span className="truncate">External worktrees</span>
+            <span className="flex-none">{externalWorktrees.length}</span>
+          </button>
+          {!externalCollapsed && (
+            // THE TREE GUIDE -- MEASURED, per this file's own header on
+            // `COMPACT_DIM_TEXT`: `border-line` (the first cut) read
+            // 1.614:1 dark / 1.099:1 light against this row's real
+            // background, both far under the 3:1 non-text floor -- and NO
+            // `line-*` token clears it in light theme (`line-loudest`, the
+            // strongest, still only reads 2.804:1 there). `border-ink-faint`
+            // reuses the SAME token `COMPACT_DIM_TEXT` dims FROM (full
+            // strength here, not reduced -- the opposite direction: the
+            // guide has to read MORE clearly, not less), measured
+            // 7.247:1 dark / 4.642:1 light against this same background.
+            // `border-dotted` in place of `border-dashed` also matches the
+            // operator's own word for it ("a collapsible dotted line like
+            // Orca").
+            <div className="ml-2 flex flex-col gap-0.5 border-ink-faint border-l border-dotted pl-2">
+              {externalWorktrees.map((worktree) => renderRow(worktree, { compact: true }))}
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
 
       {pendingDelete !== null && (
         <ConfirmDeleteWorktree
@@ -401,6 +743,6 @@ export function WorktreesSection({
           }}
         />
       )}
-    </div>
+    </>
   );
 }

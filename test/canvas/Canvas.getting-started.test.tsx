@@ -352,21 +352,17 @@ describe('the getting-started screen does not trigger prematurely', () => {
   });
 });
 
+/**
+ * The sidebar's own full-width footer button used to read "New project" and
+ * trigger this same fallback -- withdrawn now that the Projects header's own
+ * `+` (`Canvas.new-project.test.tsx`'s `clickNewProject`) already covers that
+ * click unconditionally. What stays is the ONE thing the footer never
+ * owned exclusively: the `o` chord, still resolving through `Canvas.tsx`'s
+ * own `case 'newSession'` regardless of which control (if any) the operator
+ * used to reach it.
+ */
 describe('New session, with no project to start one in', () => {
-  it('the sidebar foot button reads "New project" and triggers it -- never a dead end', async () => {
-    const { source, spawned } = sourceWith(true);
-    withDialog(async () => CHOSEN);
-    render(<Canvas model={EMPTY_MODEL} source={source} />);
-    const button = document.querySelector('[data-sidebar-add]') as HTMLElement;
-    expect(button.textContent).toContain('New project');
-    expect(button.textContent).not.toContain('New session');
-    await act(async () => {
-      button.click();
-    });
-    expect(spawned).toEqual([[CHOSEN, 'orchard']]);
-  });
-
-  it('the `o` chord does the same -- one path, not two', async () => {
+  it('the `o` chord falls back to New project -- never a dead end', async () => {
     const { source, spawned } = sourceWith(true);
     withDialog(async () => CHOSEN);
     render(<Canvas model={EMPTY_MODEL} source={source} />);
