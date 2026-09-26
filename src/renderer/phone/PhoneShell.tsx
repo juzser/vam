@@ -64,6 +64,7 @@ import {
   GitPullRequest,
   type LucideIcon,
   MessageSquare,
+  Plus,
   SquareTerminal,
 } from 'lucide-react';
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -426,6 +427,9 @@ export function PhoneShell({
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
+  /** The list screen's own floating "+" targets this one -- see its own
+   *  comment, below, for which project and why. */
+  const firstEntry = sidebar.entries[0] ?? null;
   /**
    * THIS SCREEN'S OWN `SessionTabStrip`, scoped to `entry.project` -- the
    * status-rank order `orderedInProject` gives directly, for free:
@@ -523,7 +527,7 @@ export function PhoneShell({
             already draws for the avatar and the theme toggle -- a row that
             exists whether or not there is anything to say here, so the
             readout stops needing a bar of its own to be seen in. */}
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div className="relative flex min-h-0 flex-1 flex-col">
           <SessionList
             {...sidebar}
             width={undefined}
@@ -538,6 +542,66 @@ export function PhoneShell({
               show();
             }}
           />
+          {/* THE FLOATING "+", ORCA'S SHAPE: a round button over the list
+              rather than a row inside it, reachable from wherever the
+              operator has scrolled to. It is not a second way to do what the
+              Projects header's own `+` already does (`onNewProject`, a few
+              lines up in `SessionList.tsx`) -- that route needs a native
+              directory picker this build never has (`hasDirectoryPicker` is
+              false on every phone; `window.api?.dialog?.chooseDirectory` is
+              an Electron bridge), so it declines on a phone every time it is
+              pressed. This button calls `onAddInProject` instead, the SAME
+              handler the per-project `+` on each heading already wears
+              (`Canvas.tsx`'s `onSidebarAddInProject`,
+              `createSession(project.id, …)`) -- a session in a project vam
+              already knows, which needs no picker and is the one
+              create-route that actually works here. That is also what
+              "respects the pane-only-project behaviour" means for this
+              button: it is not a second implementation of that rule, it is
+              the first implementation, called from a second place.
+              WHICH PROJECT: `sidebar.entries` is `Canvas.tsx`'s own
+              urgency-first order, project-major -- the same order the list
+              is drawn in -- so its first entry's project is the one heading
+              the operator is already looking at without scrolling.
+              Not drawn at all when the list is empty: `GettingStarted`
+              (drawn by `SessionList` itself when `phone` and there is
+              nothing here) already carries this screen's one creation route
+              for that state, and a project to add a session TO is exactly
+              the thing an empty list does not have.
+              `absolute` INSIDE THIS `relative` FLEX-1 PANE, not `fixed` to
+              the viewport: a `fixed` FAB floated over the FOOTER below (the
+              status/failure-count bar), and the failure button that bar
+              sometimes draws was measured UNREACHABLE behind this button's
+              own paint (`phone-shell.pw.ts`'s own "sheets behind a source"
+              suite, falsified against the `fixed` version -- `subtree
+              intercepts pointer events` on a tap aimed at
+              `[data-error-log-button]`). This pane's own box already ends
+              exactly where the footer begins, whatever the footer's height
+              is at the moment (0 with nothing to say, taller with a status
+              or a failure count) -- so an `absolute` child of THIS pane can
+              never reach into the footer's box to cover a control drawn in
+              it, and it needs no `safe-area-inset-bottom` of its own either:
+              the footer already reserves that band below. */}
+          {firstEntry !== null && (
+            <button
+              type="button"
+              data-phone-fab
+              aria-label={sidebar.newSessionDecline ?? `new session in ${firstEntry.project.name}`}
+              disabled={sidebar.newSessionDecline !== null}
+              onClick={() => sidebar.onAddInProject(firstEntry.project)}
+              // `disabled:` carries the declined look -- one Tailwind
+              // variant, no ternary -- rather than a second class list this
+              // component would compute on every render. No re-entrancy
+              // guard of its own either: `createSession` (`Canvas.tsx`)
+              // already refuses a second press onto a wait already running,
+              // in the source's own words, through `setStatus` -- the same
+              // refusal every other `+` on this screen relies on rather than
+              // re-arming a check that already lives one call down.
+              className="vam-tap absolute right-4 bottom-4 z-30 flex h-14 w-14 cursor-pointer items-center justify-center rounded-full bg-ink text-ground shadow-lg active:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Plus size={24} strokeWidth={2} aria-hidden="true" />
+            </button>
+          )}
         </div>
         {/* WHAT THIS BAR NO LONGER SAYS. It opened with `2 running · 3 waiting
             · 1 done` -- a 44px band restating a view of itself, directly under

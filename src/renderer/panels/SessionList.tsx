@@ -2236,6 +2236,16 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     // in the words the session screen's IN region shows.
     // Newest first, which is the order `decisions` is in.
     const newestAsk = session.decisions[0]?.input ?? null;
+    // THE PHONE PREVIEW LINE'S OWN TEXT: what the session last SAID, preferred
+    // over what it was last ASKED -- `output` is `null` while a turn is still
+    // in flight, and `newestAsk` (the operator's own prompt) is the one honest
+    // thing left to show while it is. Drawn only on a row that is not
+    // `needsYou`: that row already carries `data-row-question` below, built
+    // from these same two fields (`waitingCause`, `newestAsk`) plus the reason
+    // it is waiting -- a second line repeating the same sentence would be the
+    // "invisible copy read twice" `StatusMark`'s own comment warns against,
+    // in prose rather than in ARIA.
+    const preview = session.decisions[0]?.output ?? newestAsk;
     // WHAT THE SESSION SAYS IT IS BLOCKED ON, or nothing.
     // Three states collapse to two here for the same reason
     // they do in `DetailPanel`: absent ("no surface reports
@@ -2596,6 +2606,30 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                     <span aria-hidden="true"> · </span>
                   )}
                   {newestAsk}
+                </span>
+              )}
+              {/* THE PREVIEW LINE: what a row not currently `needsYou` last
+                  said, so a row can be read without opening it -- the gap a
+                  mobile audit of Orca's own list named directly (its rows
+                  carry "the last message text", not only a status word). The
+                  provider mark opens it for the same reason the meta line
+                  above wears one: two rows sharing a title can still be told
+                  apart, and this is the line an operator is most likely to
+                  actually READ.
+                  NOT ON A WAITING ROW: `data-row-question` above already
+                  shows this session's newest turn (`waitingCause`, then
+                  `newestAsk`), and a second line built from the same
+                  `decisions[0]` would repeat it under a different name. NOT ON
+                  A ROW WITH NOTHING TO SHOW: `preview === null` is a session
+                  vam has no turn for yet (a fresh, `unstarted` pane), and an
+                  empty line is not information. */}
+              {phone && !needsYou && preview !== null && (
+                <span
+                  data-row-preview
+                  className="flex min-w-0 items-center gap-1 truncate text-control text-ink-dim"
+                >
+                  <ProviderLane source={rowSource} />
+                  <span className="min-w-0 flex-1 truncate">{preview}</span>
                 </span>
               )}
               {/* Branch on the left, time on the right, and nothing
@@ -4268,7 +4302,20 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           onClick={() => toggleCollapse(section.project)}
                           className={[
                             'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-[5px] text-ink-faint hover:text-ink focus:opacity-100',
-                            isRevealed || isCollapsed ? 'opacity-100' : 'opacity-0',
+                            // PHONE, ALWAYS REVEALED: `isRevealed` is
+                            // `onMouseEnter`/`onMouseLeave` state, and a touch
+                            // pointer has neither -- so before this line a
+                            // phone could reach the fold only on a project it
+                            // had ALREADY collapsed (`isCollapsed` forces the
+                            // chevron on), never the tap that collapses one in
+                            // the first place. `collapsedProjects` is already
+                            // wired to `prefs` for every surface
+                            // (`Canvas.tsx`'s own comment on the pair), so the
+                            // fold already persisted; it was simply unreachable
+                            // by finger. `styles.css` cannot answer this for a
+                            // JSX ternary, so the guard is a third disjunct, not
+                            // a new rule.
+                            isRevealed || isCollapsed || phone ? 'opacity-100' : 'opacity-0',
                           ].join(' ')}
                         >
                           {isCollapsed ? (
@@ -4298,7 +4345,11 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           }
                           className={[
                             'vam-tap vam-hit-24 flex h-[17px] w-[17px] flex-none cursor-pointer items-center justify-center rounded-full border border-transparent text-ink-faint hover:border-line-strong hover:text-ink focus:opacity-100',
-                            isRevealed || openMenu === section.project.id
+                            // Same reveal-on-phone rule as the fold beside it:
+                            // rename, icon and worktree all live behind this
+                            // trigger and a hover-only reveal put every one of
+                            // them out of a finger's reach.
+                            isRevealed || openMenu === section.project.id || phone
                               ? 'opacity-100'
                               : 'opacity-0',
                           ].join(' ')}
@@ -4336,7 +4387,10 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             className={[
                               'vam-tap vam-hit-24 flex h-[19px] w-[19px] flex-none cursor-pointer items-center justify-center rounded-[5px] border border-transparent text-ink-quiet hover:border-line-strong hover:text-ink-dim focus:opacity-100',
                               isRevealed ||
-                              section.items.some((entry) => entry.session.id === focusedSessionId)
+                              section.items.some(
+                                (entry) => entry.session.id === focusedSessionId,
+                              ) ||
+                              phone
                                 ? 'opacity-100'
                                 : 'opacity-0',
                             ].join(' ')}
