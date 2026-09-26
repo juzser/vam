@@ -14,6 +14,11 @@
  *   node_modules/.bin/vite preview --config vite.web.config.ts --port 5431
  *   node e2e/phone-list-shots.mjs http://localhost:5431 docs/images after
  *
+ * A fifth, optional argument is the CSS viewport width -- default 390 (the
+ * spec's own figure), so an existing call site's filenames are unchanged; any
+ * other width is suffixed onto the name (`-360`) rather than overwriting the
+ * 390 frame, so a narrower audit never costs the wider one its own file.
+ *
  * `?demo=1` is the committed fixture and the only thing safe to point a
  * screenshot at: live mode would put a real workspace, with real paths and
  * real session ids, into a public repo.
@@ -23,10 +28,12 @@ import { chromium } from 'playwright-core';
 const origin = process.argv[2] ?? 'http://localhost:5431';
 const outDir = process.argv[3] ?? 'docs/images';
 const label = process.argv[4] ?? 'after';
+const width = Number(process.argv[5] ?? 390);
+const suffix = width === 390 ? '' : `-${width}`;
 
 const browser = await chromium.launch();
 for (const theme of ['light', 'dark']) {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const page = await browser.newPage({ viewport: { width, height: 844 } });
   await page.addInitScript((t) => {
     localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t }));
   }, theme);
@@ -39,8 +46,8 @@ for (const theme of ['light', 'dark']) {
       a.pause();
     }
   });
-  await page.screenshot({ path: `${outDir}/phone-controls-list-${theme}-${label}.png` });
-  console.log(`${outDir}/phone-controls-list-${theme}-${label}.png`);
+  await page.screenshot({ path: `${outDir}/phone-controls-list-${theme}-${label}${suffix}.png` });
+  console.log(`${outDir}/phone-controls-list-${theme}-${label}${suffix}.png`);
   await page.close();
 }
 await browser.close();

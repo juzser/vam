@@ -395,6 +395,64 @@ for (const width of WIDTHS) {
   });
 }
 
+/**
+ * THE LIST SCREEN ITSELF, at the same three widths -- added for the phone/
+ * Orca pass: the floating "+" (`data-phone-fab`, `PhoneShell.tsx`) is a new,
+ * `fixed`-positioned element over the whole screen, and the project
+ * heading's fold/menu/`+` are newly PAINTED on a phone rather than merely
+ * present-but-invisible (`opacity-0` before this pass) -- both are exactly
+ * the kind of change this file's own header warns can grow the layout
+ * viewport or paint past its edge without either failing a `getBoundingClientRect()`
+ * check on the element itself. `PROJECTS` above already has one project
+ * (`alpha`) and a long branch name; that is enough surface for a fold, a
+ * menu and a `+` to have somewhere to draw.
+ */
+for (const width of WIDTHS) {
+  test.describe(`the list screen at ${width}px, with a floating + and a revealed project heading`, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+    });
+
+    test('no element sticks out past the viewport', async ({ page }) => {
+      await stubOverflowSource(page);
+      await page.waitForTimeout(200);
+
+      const offscreen = await offscreenElements(page, width);
+      expect(offscreen, JSON.stringify(offscreen, null, 2)).toEqual([]);
+    });
+
+    test('the floating + and the project heading’s fold/menu/+ all clear the 44px touch floor, painted', async ({
+      page,
+    }) => {
+      await stubOverflowSource(page);
+
+      const fab = page.locator('[data-phone-fab]');
+      await expect(fab).toBeVisible();
+      const fabBox = await fab.boundingBox();
+      if (fabBox === null) throw new Error('no FAB box');
+      expect(fabBox.width, 'FAB width').toBeGreaterThanOrEqual(44);
+      expect(fabBox.height, 'FAB height').toBeGreaterThanOrEqual(44);
+      // Entirely inside the configured viewport too -- a `fixed` element is
+      // exactly the shape that can float past an edge unnoticed by a check
+      // that only ever asks about `scrollWidth`.
+      expect(fabBox.x + fabBox.width, 'FAB right edge').toBeLessThanOrEqual(width + 0.5);
+
+      for (const hook of [
+        '[data-project-collapse="p1"]',
+        '[data-project-menu="p1"]',
+        '[data-new-session-in-project="p1"]',
+      ]) {
+        const el = page.locator(hook);
+        await expect(el, hook).toBeVisible();
+        const box = await el.boundingBox();
+        if (box === null) throw new Error(`no box for ${hook}`);
+        expect(box.width, `${hook} width`).toBeGreaterThanOrEqual(44);
+        expect(box.height, `${hook} height`).toBeGreaterThanOrEqual(44);
+      }
+    });
+  });
+}
+
 test.describe('the keystroke strip scrolls horizontally', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
