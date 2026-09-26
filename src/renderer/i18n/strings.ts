@@ -206,22 +206,80 @@ const EN = {
     "fold each turn's tool calls away, leaving your prompts and the agent's answers",
   'settings.behaviour.focusView.on': 'on',
   'settings.behaviour.focusView.off': 'off',
-  // CONCISE OUTPUT. The label names what the operator gets, never the skill it
-  // is vam's wording of: `i-have-adhd` is the source and is credited in
-  // `main/terminal/concise.ts`, but a settings row that named a third-party
-  // skill would be asking the operator to know what that is before they could
-  // decide anything.
+  // THE ADHD SKILL CARD -- what replaced the concise-output switch. Operator,
+  // translated: "turn Concise output into a card [an Orca screenshot]. Talk
+  // about the ADHD skill", and then, the design decision that followed:
+  // install the REAL skill (`ayghri/i-have-adhd`) into the agent's own skills
+  // directory, rather than typing vam's own wording of it into a session's
+  // first prompt. `src/shared/adhd-skill.ts` carries the whole story and the
+  // pinned source commit.
   //
-  // THE HINT SAYS WHO IS ASKING AND WHEN, because both are surprising. vam has
-  // no model: the only thing it can do is TYPE A REQUEST into the session, and
-  // it does that once per session rather than on every prompt. An operator who
-  // read this as "vam shortens the answers it draws" would be wrong about the
-  // whole product.
-  'settings.behaviour.conciseOutput.label': 'concise output',
-  'settings.behaviour.conciseOutput.hint':
-    'ask the agent for shorter, clearer answers — vam types the request into the session, it never rewrites what it draws',
-  'settings.behaviour.conciseOutput.on': 'on',
-  'settings.behaviour.conciseOutput.off': 'off',
+  // KEPT TERSE ON PURPOSE, MORE THAN THE OLD SWITCH'S OWN DISCLOSURE WAS: this
+  // catalogue ships whole inside the eager entry chunk regardless of
+  // `SettingsOverlay`'s own lazy split (`t()` and `EN` are one module, and the
+  // entry already imports it for surfaces that mount before Settings ever
+  // opens) -- `test/renderer/bundle-budget.test.ts` measures that chunk, not
+  // this file, so a longer sentence here is a real byte in something every
+  // launch parses. `AdhdSkillCard.test.tsx` pins the few words each string
+  // must still carry.
+  //
+  // THE TITLE NAMES THE SKILL, unlike the old switch's label: this is no
+  // longer a request vam types, it is a file vam writes, and the operator is
+  // choosing whether that file exists -- which is worth naming plainly. Title
+  // Case is `Block`'s own CSS transform (`capitalize`), which only touches the
+  // first letter of the word it reaches: 'ADHD skill' becomes "ADHD Skill",
+  // never "Adhd Skill".
+  'settings.behaviour.adhd.title': 'ADHD skill',
+  'settings.behaviour.adhd.hint': 'shorter, scannable answers',
+  // THREE STATES, and the pill's own words for each -- `src/shared/
+  // adhd-skill.ts`'s `AdhdSkillState` is the type these three cover. A
+  // FOURTH, TRANSIENT ONE HAS NO STRING: while the first status read is
+  // still in flight the pill is simply absent, the same "absent, not dimmed"
+  // rule `UpdatePanel.tsx` keeps for its own bridge-less state -- the read is
+  // one IPC round trip to a local disk, over before a reader could notice a
+  // blank pill.
+  'settings.behaviour.adhd.not-installed': 'Not installed',
+  'settings.behaviour.adhd.installed': 'Installed',
+  'settings.behaviour.adhd.outdated-modified': 'Outdated or modified',
+  'settings.behaviour.adhd.install': 'Install',
+  'settings.behaviour.adhd.reinstall': 'Reinstall',
+  'settings.behaviour.adhd.recheck': 'Re-check',
+  'settings.behaviour.adhd.remove': 'Remove',
+  // THE CONFIRM, SHOWN ONLY BEFORE OVERWRITING A DIRECTORY THAT DIFFERS --
+  // an operator's own edit, or an unrelated skill sharing this name. Either
+  // way vam cannot tell which, so both get the same pause before anything is
+  // overwritten. See `src/main/skills/adhd-skill.ts`'s header for why the
+  // comparison collapses both into one state.
+  'settings.behaviour.adhd.confirm.question': 'this was changed. Overwrite?',
+  'settings.behaviour.adhd.confirm.yes': 'Overwrite',
+  'settings.behaviour.adhd.confirm.no': 'Cancel',
+  // THE MANUAL ROUTE. `adhdSkillInstallCommand()` builds the exact text this
+  // copies; the hint here is only the invitation, never the command itself.
+  'settings.behaviour.adhd.copyHint': 'prefer your own terminal?',
+  'settings.behaviour.adhd.copy': 'Copy install command',
+  'settings.behaviour.adhd.copied': 'Copied',
+  // THE ATTRIBUTION. Never opens with the lower-case repo slug -- the
+  // structural rule in `styles.css` uppercases the first letter of every
+  // paragraph in this panel, and "Ayghri/i-have-adhd" would misspell a
+  // GitHub handle that is lower case everywhere else it appears.
+  'settings.behaviour.adhd.credit': 'pinned, unmodified copy of',
+  'settings.behaviour.adhd.creditLink': 'ayghri/i-have-adhd (MIT)',
+  'settings.behaviour.adhd.coverageTitle': 'Agent coverage',
+  'settings.behaviour.adhd.coverageHint': 'install above, then re-check',
+  'settings.behaviour.adhd.agentMissing': 'Missing',
+  'settings.behaviour.adhd.agentInstalled': 'Installed',
+  'settings.behaviour.adhd.agentModified': 'Modified',
+  // NO BRIDGE, NO BUTTONS -- `UpdatePanel`'s own rule: a browser tab (the
+  // demo, a paired phone) has no preload, so there is nothing on this machine
+  // for a status check or an install to reach.
+  'settings.behaviour.adhd.browser': 'lives in the desktop app.',
+  // THE ONE-TIME MIGRATION NOTE. Shown only to an operator who had the OLD
+  // concise-output switch on; `prefs.conciseOutput` is read, once, for
+  // exactly this and never written to `true` again. Dismissing it, or a
+  // successful install, both clear the flag -- neither auto-installs, which
+  // is the one thing this note may not do on its own.
+  'settings.behaviour.adhd.migration': 'concise output now installs the ADHD skill below.',
+  'settings.behaviour.adhd.migrationDismiss': 'Dismiss',
   // THE STREAMING TERMINAL: the shipping Terminal tab now
   // (`docs/design/terminal-streaming.md`'s "Flipping the default"), driven
   // by xterm.js over a persistent connection instead of periodic

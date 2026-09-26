@@ -13,6 +13,7 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+  createAdhdSkillApi,
   createClipboardApi,
   createDialogApi,
   createFilesApi,
@@ -85,4 +86,9 @@ contextBridge.exposeInMainWorld('api', {
   // `CHANNELS.worktreeList`'s own comment for why a paired phone has no
   // route to any of the three.
   worktrees: createWorktreesApi(ipcRenderer),
+  // The ADHD skill card's own three: read status, install (into
+  // `~/.claude/skills` and `~/.agents/skills`), remove. Desktop-only, for the
+  // reason `CHANNELS.adhdSkillInstall`'s own comment gives -- a paired phone
+  // must not be able to write into either directory.
+  adhdSkill: createAdhdSkillApi(ipcRenderer),
 });
