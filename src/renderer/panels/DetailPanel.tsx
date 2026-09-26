@@ -1070,19 +1070,33 @@ export type DetailPanelProps = {
   readonly startingPane?: StartingPaneWait | null;
   /**
    * CONFIRMED RUNNING, even while `entry.session.status` still reads
-   * `unstarted`/`terminal` -- `Canvas.tsx`'s own merge of TWO sources, both
-   * reading the pane's foreground command through the SAME classifier
-   * (`identifyRunningProvider`, `sources/tmux/shell.ts`): the fast, bounded
-   * `providerRunningByKey` map while an ACTIVE Start/Resume wait is up
-   * (`readStartScreen`'s `provider`, once `detectStartScreen` reports
-   * `ready`), and `entry.session.runningProvider` (`model.ts`) for the
-   * ordinary idle case -- read straight off the SAME tmux listing the
-   * source's own poll already fetches, no per-row IPC of its own. `undefined`
-   * (absent) is the ordinary case and draws the start screen exactly as
-   * before this existed; PRESENT -- even `null`, for a confirmed pane whose
-   * command named neither provider -- draws the ready state instead
-   * (`PaneReady`) and withdraws the Start/Resume controls, so a pane already
-   * running an agent is never offered a second one.
+   * `unstarted`/`terminal` -- `Canvas.tsx`'s own merge, never `entry.session.
+   * runningProvider` (`model.ts`) taken on its own. THE PROCESS NAME IS NOT
+   * PROOF OF READINESS -- a review-found S2: that field is only the pane's
+   * foreground COMMAND, off a tmux listing, true the instant the CLI process
+   * starts, even while a trust or update dialog is still blocking it. Three
+   * states, not two:
+   *
+   * 1. An ACTIVE wait is up for this key (`startingPaneByKey[key]` exists,
+   *    any of `start`/`resume`/`confirm`) -- the fast poll's OWN pane-content
+   *    read (`providerRunningByKey`, `readStartScreen`'s `provider` once
+   *    `detectStartScreen` reports `ready`) is the ONLY source consulted.
+   *    The model is ignored outright: it might be reporting the process
+   *    while the SAME pane is still showing a dialog this poll would catch.
+   * 2. No active wait, but this key was handed off once the fast poll
+   *    already confirmed `ready` AND the model agreed (`providerRunningByKey`
+   *    's own header, case 2) -- the model is trusted from then on, read
+   *    LIVE every render, so a later crash reaching the model's own next
+   *    poll is caught immediately.
+   * 3. Neither -- `undefined`, the ordinary case, draws the start screen.
+   *    `Canvas.tsx`'s own auto-classify effect begins polling THIS pane the
+   *    moment the model reports a provider running here (case 1 above,
+   *    `kind: 'confirm'`), so this state is transient, not a dead end.
+   *
+   * PRESENT -- even `null`, for a confirmed pane whose command named neither
+   * provider -- draws the ready state instead (`PaneReady`) and withdraws
+   * the Start/Resume controls, so a pane already running an agent is never
+   * offered a second one.
    *
    * THE BLOCKER THIS CLOSES: the first cut of the start-screen work cleared
    * `startingPane` outright on `ready`, which dropped straight back to the
@@ -2827,14 +2841,16 @@ function AgentDetail({
 /**
  * WHAT A PANE'S ROW IS WAITING ON, between a press and the agent registering
  * -- `Canvas.tsx`'s `startingPaneByKey`, and the shape crossing the boundary
- * `startingPane`'s own comment (`DetailPanelProps`) explains at length. Two
- * shapes because the two acts need different words once they are drawn
+ * `startingPane`'s own comment (`DetailPanelProps`) explains at length. Three
+ * shapes because the three acts need different words once they are drawn
  * (`ProviderStartControls`/`TerminalOnlyStart`'s own Resume button): Start
  * names the provider it typed, Resume does not need to -- there is only ever
- * one command a resume pane can type.
+ * one command a resume pane can type -- and `confirm` names neither, because
+ * the operator pressed nothing; see its own paragraph below.
  *
- * `projectId`/`rowId` ARE CAPTURED AT THE PRESS, not read back off the live
- * entry: `Canvas.tsx`'s own polling effect needs them to ask
+ * `projectId`/`rowId` ARE CAPTURED AT THE PRESS (or, for `confirm`, at the
+ * moment vam itself started classifying the pane), not read back off the
+ * live entry: `Canvas.tsx`'s own polling effect needs them to ask
  * `window.api.terminal.startScreen` for THIS pane specifically, and by the
  * time that poll runs the row this wait began on may already have changed
  * identity (`pane-row.ts`'s own point) -- `rowId` is the pane-row id the
@@ -2849,6 +2865,23 @@ function AgentDetail({
  * non-shell output that matches nothing named, which only changes how SOON
  * `timedOut` arrives, never what is drawn. `'ready'` never appears here --
  * the poll that observes it clears the wait outright instead of storing it.
+ *
+ * `kind: 'confirm'` -- A REVIEW-FOUND S2: `Session.runningProvider`
+ * (`model.ts`) is only the pane's FOREGROUND COMMAND, read off a tmux
+ * listing -- true the instant the CLI process starts, even while a trust or
+ * update dialog is still blocking it. Trusting that field alone for a
+ * DISPLAYED `unstarted`/`terminal` row drew `PaneReady` ("send your first
+ * message") straight over a dialog the operator could not see or answer.
+ * `Canvas.tsx`'s own auto-classify effect begins THIS kind the moment the
+ * model reports a provider running in the row currently on screen, with no
+ * press behind it -- reusing the identical fast poll (`START_SCREEN_POLL_MS`)
+ * a real Start/Resume wait already runs, so a blocking `screen` renders the
+ * same `StartScreenCard` and only a confirmed `ready` read earns `PaneReady`.
+ * Ends the moment the row is no longer the one on screen (`Canvas.tsx`'s own
+ * "ends when no longer displayed" effect) -- unlike `start`/`resume`, which
+ * persist across navigation because the operator's own press deserves to
+ * survive it, nothing here was ever asked for, so there is nothing to keep
+ * polling a pane nobody is looking at.
  */
 export type StartScreenWait = Exclude<StartScreenKind, 'ready'>;
 
@@ -2863,6 +2896,13 @@ export type StartingPaneWait =
     }
   | {
       readonly kind: 'resume';
+      readonly timedOut: boolean;
+      readonly projectId: string;
+      readonly rowId: string;
+      readonly screen: StartScreenWait | null;
+    }
+  | {
+      readonly kind: 'confirm';
       readonly timedOut: boolean;
       readonly projectId: string;
       readonly rowId: string;

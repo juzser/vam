@@ -167,17 +167,21 @@ function stubApiScript({
       send: async () => 'sent',
       answer: async () => ({ kind: 'unavailable' }),
       prompt: async () => ({ kind: 'unavailable' }),
-      // WHAT `Canvas.tsx`'s OWN FAST POLL READS while an ACTIVE Start-session
-      // wait is up (`main/terminal/start-screen.ts`) -- `startScreen` is
-      // `undefined` in most blocks below, which answers `unavailable` and
-      // leaves the wait to the ordinary spinner, exactly as it always has.
-      // The trust-card block is the one that passes it; the READY case is
-      // `runningProvider` on the fixture row above instead (the coordinator's
-      // own performance fix: an idle row's readiness comes from the model,
-      // never from this poll). `startScreenProvider` defaults to `null`
-      // (confirmed running, unidentified) rather than to `undefined` (not
-      // confirmed at all) -- `StartScreenView`'s own shape requires the
-      // field whenever `screen` is reported at all.
+      // WHAT `Canvas.tsx`'s OWN FAST POLL READS, whether a real Start/Resume
+      // press began the wait or `Canvas.tsx`'s own auto-classify effect did
+      // (`runningProvider` on the fixture row below says a provider is
+      // running, with no press at all) -- `main/terminal/start-screen.ts`.
+      // `startScreen` is `undefined` in most blocks below, which answers
+      // `unavailable` and leaves the wait to the ordinary spinner, exactly
+      // as it always has. `runningProvider` ALONE never earns `PaneReady`
+      // any more -- a review-found S2, since the pane's foreground COMMAND
+      // is not proof of readiness (a trust/update dialog is invisible to
+      // it) -- only a `startScreen: 'ready'` READ of the pane itself does,
+      // whichever effect began the wait that is polling it.
+      // `startScreenProvider` defaults to `null` (confirmed running,
+      // unidentified) rather than to `undefined` (not confirmed at all) --
+      // `StartScreenView`'s own shape requires the field whenever `screen`
+      // is reported at all.
       startScreen: async () =>
         startScreen === undefined
           ? { kind: 'unavailable' }
@@ -513,24 +517,28 @@ async function trustCardShot({ theme }) {
 }
 
 /**
- * THE OPERATOR'S SECOND REPORT, SEEN, AND TWO ROUNDS OF REVIEW ON THE FIRST
- * CUT OF THIS FIX: "even when the terminal has finished starting the
+ * THE OPERATOR'S SECOND REPORT, SEEN, AND THREE ROUNDS OF REVIEW ON THE
+ * FIRST CUT OF THIS FIX: "even when the terminal has finished starting the
  * session, the Response view is still stuck loading." `runningProvider:
  * 'claude-code'` on the fixture ROW is the pane's own tmux listing proving
  * the CLI is up, from the moment the page loads -- the RELOAD case
  * (`Session.runningProvider`, `pane-row.ts`'s header): no Start press
  * happens in this shot at all, which is the point.
  *
- * TWO BLOCKERS, IN ORDER. The first cut of this guard pressed Start and
+ * THREE BLOCKERS, IN ORDER. The first cut of this guard pressed Start and
  * screenshotted the wait clearing back to the ORDINARY, idle Start button --
  * caught as the exact bug being fixed wearing a different shape: a pane vam
  * has already proven is running an agent must never fall back to offering
  * Start. The second cut answered the reload case with a SECOND background
  * poll (`window.api.terminal.startScreen` on an interval, across every idle
- * row) -- caught as an unbounded per-row IPC that never stops. This shot now
- * proves the CURRENT shape: `PaneReady` (`DetailPanel.tsx`) drawn straight
- * off the row's OWN `runningProvider` field, no poll of any kind, no click
- * at all, no Start button anywhere, and the composer already enabled.
+ * row) -- caught as an unbounded per-row IPC that never stops. The THIRD --
+ * this shot's own fixture, until now -- drew `PaneReady` straight off
+ * `runningProvider` with no `startScreen` answer at all: a review-found S2,
+ * because the pane's foreground COMMAND is not proof of readiness (a trust
+ * or update dialog is invisible to it). `startScreen: 'ready'` is what earns
+ * `PaneReady` now: the auto-classify effect (`Canvas.tsx`) begins the SAME
+ * fast poll a real Start press would, with no press behind it, and only a
+ * `ready` READ of the pane itself -- not the model alone -- ends the wait.
  */
 async function readyStateShot({ theme }) {
   const outName = `start-screen-ready-${theme}`;
@@ -541,6 +549,8 @@ async function readyStateShot({ theme }) {
     pane: PANE,
     hangRecordPrompt: false,
     runningProvider: 'claude-code',
+    startScreen: 'ready',
+    startScreenProvider: 'claude-code',
   });
   await page.addInitScript(
     (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),

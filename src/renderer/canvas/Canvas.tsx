@@ -2732,17 +2732,14 @@ function CanvasInner({
   /**
    * CONFIRMED RUNNING BY THE FAST POLL, KEYED THE SAME WAY `startingPaneByKey`
    * IS -- and ONLY EVER POPULATED FOR A KEY THAT POLL IS ALREADY WATCHING,
-   * i.e. an ACTIVE Start/Resume wait. A first cut of this feature also ran a
-   * SECOND, background poll across every idle `unstarted`/`terminal` row so
-   * a reload or a by-hand `claude` would resolve without a Start press --
-   * caught in review as a performance concern (an unbounded, per-row,
-   * forever-repeating `capture-pane`-equivalent IPC). That idle case is now
-   * answered from the MODEL instead: `Session.runningProvider` (`model.ts`),
-   * read straight off the SAME tmux listing `source.ts`'s own poll already
-   * fetches `pane_current_command` from, at that poll's own cadence -- no
-   * second read, no interval of its own. `runningProvider` below merges the
-   * two: this map first (the fast, bounded case), the model's own field
-   * otherwise.
+   * i.e. an ACTIVE wait (`start`, `resume`, or the auto-classify `confirm`
+   * below). A first cut of this feature also ran a SECOND, background poll
+   * across every idle `unstarted`/`terminal` row so a reload or a by-hand
+   * `claude` would resolve without a Start press -- caught in review as a
+   * performance concern (an unbounded, per-row, forever-repeating
+   * `capture-pane`-equivalent IPC). That idle case is answered by `kind:
+   * 'confirm'` instead: a wait begun automatically, but ONLY for the row
+   * currently displayed, never for one nobody is looking at.
    *
    * `ready` used to CLEAR the wait outright, which dropped the Response view
    * back to the ordinary "Nothing is running in this pane yet" screen with
@@ -2760,6 +2757,15 @@ function CanvasInner({
    * answers that); folding the two into one falsy check would un-confirm a
    * pane vam has already proven is not a shell.
    *
+   * TWO SEPARATE THINGS THIS MAP DOES **NOT** DECIDE, both a review-found
+   * S2: (1) whether `runningProvider` may EVER be read straight off
+   * `entry.session.runningProvider` (the merge below decides that, and the
+   * answer is never while an active wait is up -- a trust/update dialog is
+   * invisible to that field, which is only the pane's foreground COMMAND);
+   * (2) whether the model is trusted ONGOING once a wait ends -- that is
+   * `handedOffKeys` below, a SEPARATE, more durable fact than anything
+   * stored here.
+   *
    * SURVIVES UNTIL THE ROW ITSELF SAYS SO, THE MODEL HANDS OFF, OR THE
    * CONFIRMATION EXPIRES -- three distinct ways out, not one:
    *
@@ -2767,11 +2773,12 @@ function CanvasInner({
    *    original mechanism, still the common case.
    * 2. The MODEL independently agrees a provider is running
    *    (`entry.session.runningProvider !== undefined`) -- ownership hands off
-   *    to the model right then, so any LATER revert to a shell reaches the
-   *    Response view on the model's own next poll, immediately, with no
-   *    bound of this effect's own. This is what a CLI that runs for a while
-   *    and later crashes needs: an elapsed-time expiry alone would either
-   *    fire too early (while it is still legitimately running) or too late.
+   *    to the model right then (`handedOffKeys.add(key)`), so any LATER
+   *    revert to a shell reaches the Response view on the model's own next
+   *    poll, immediately, with no bound of this effect's own. This is what a
+   *    CLI that runs for a while and later crashes needs: an elapsed-time
+   *    expiry alone would either fire too early (while it is still
+   *    legitimately running) or too late.
    *    `clearStartingPane` is called here TOO, not just `clearProviderRunning`
    *    -- otherwise the fast poll effect below (guarded on THIS map, not on
    *    `startingPaneByKey`) sees the key un-confirmed the instant this effect
@@ -2795,7 +2802,9 @@ function CanvasInner({
    *    "withdrawn" in every way the operator can see, the exact complaint
    *    this S2 exists to close. Ending the wait here is what lets a stale
    *    confirmation return to a genuinely ordinary, pressable Start screen
-   *    rather than a different-looking stuck one.
+   *    rather than a different-looking stuck one. Deliberately NOT handed
+   *    off: the model never agreed, so there is nothing to trust going
+   *    forward either.
    */
   const [providerRunningByKey, setProviderRunningByKey] = useState<
     Readonly<Record<string, { readonly provider: ProviderId | null; readonly confirmedAt: number }>>
@@ -2810,11 +2819,34 @@ function CanvasInner({
   }, []);
   /** `providerRunningByKey`'s own read for a row's key -- `undefined` when
    *  not confirmed, distinct from a confirmed-but-unidentified `null`, which
-   *  `providerRunningByKey[key]?.provider ?? null` alone cannot tell apart. */
+   *  `providerRunningByKey[key]?.provider ?? null` alone cannot tell apart.
+   *  ONLY MEANINGFUL WHILE A WAIT IS ACTIVE for this key -- the render merge
+   *  below is what enforces that, never this function alone. */
   const providerRunningFor = useCallback(
     (key: string): ProviderId | null | undefined => providerRunningByKey[key]?.provider,
     [providerRunningByKey],
   );
+  /**
+   * KEYS THE MODEL IS TRUSTED FOR, ONGOING -- a review-found S2's other half.
+   * Populated ONLY by case 2 below, the instant a real fast-poll `ready` AND
+   * the model AGREE: from then on `entry.session.runningProvider` is read
+   * LIVE, every render, for this key (the merge below), which is what lets a
+   * LATER crash (the model's own next poll reverting to a shell) reach the
+   * Response view immediately, with no poll of vam's own to re-arm.
+   *
+   * A REF, NOT STATE: nothing renders directly off membership changing --
+   * only the ALREADY-scheduled re-render the same effect's OTHER state
+   * updates (`clearProviderRunning`/`clearStartingPane`) trigger reads it,
+   * the same "mirrored during render, read in a later commit" contract
+   * `entriesByIdRef` above already relies on for a plain mutable set.
+   *
+   * NEVER populated by case 1 or case 3: leaving `unstarted`/`terminal`
+   * moots it (the merge only ever consults this for those two statuses),
+   * and expiry means the model NEVER agreed -- trusting it going forward
+   * would reintroduce the exact crash-before-registering S2 case 3 exists
+   * to close.
+   */
+  const handedOffKeys = useRef(new Set<string>());
   // Cleared by whichever of the three facts above comes first -- see
   // `providerRunningByKey`'s own header. Deliberately keyed to `allEntries`
   // ALONE for when it runs (a fresh model poll landing, the same trigger the
@@ -2837,12 +2869,14 @@ function CanvasInner({
         row !== undefined &&
         (row.session.status === 'unstarted' || row.session.status === 'terminal');
       if (!stillPending) {
+        handedOffKeys.current.delete(key);
         clearProviderRunning(key);
         continue;
       }
       // 2: THE MODEL AGREES -- hand off, AND end the wait outright; see the
       // header's own reasoning for why both must happen together here.
       if (row.session.runningProvider !== undefined) {
+        handedOffKeys.current.add(key);
         clearProviderRunning(key);
         clearStartingPane(key);
         continue;
@@ -2857,6 +2891,88 @@ function CanvasInner({
       }
     }
   }, [allEntries, providerRunningByKey, clearProviderRunning, clearStartingPane]);
+  /**
+   * WHICH ROW EACH VISIBLE PANE IS SHOWING RIGHT NOW -- every leaf's OWN
+   * active tab (`leaf.sessionId`, membership in `leaf.sessionIds` is not
+   * enough: that also counts a background tab nobody is looking at), keyed
+   * the same way every other map on this page is. This is the ENTIRE answer
+   * to "is the row on screen", by construction: `renderLeaf` a few hundred
+   * lines down never draws a `DetailPanel` for anything else, whether the
+   * canvas is split or not.
+   */
+  const displayedKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const leaf of leaves(panes)) {
+      if (leaf.sessionId === null) continue;
+      const entry = entriesByIdRef.current.get(leaf.sessionId);
+      if (entry === undefined) continue;
+      keys.add(entry.session.pane ?? entry.session.id);
+    }
+    return keys;
+  }, [panes]);
+  /**
+   * THE REVIEW-FOUND S2 THIS EFFECT CLOSES: `entry.session.runningProvider`
+   * is only the pane's foreground COMMAND -- true the instant the CLI
+   * process starts, even while a trust/update/login/onboarding dialog is
+   * still blocking it. Trusting it directly for a DISPLAYED row drew
+   * `PaneReady` ("send your first message") straight over a dialog the
+   * operator could not see or answer -- both with an ACTIVE wait up (the
+   * model's ~`SOURCE_POLL_INTERVAL_MS` poll landing mid-dialog) and with NONE
+   * (a reload, or a provider typed by hand, landing on the dialog too).
+   *
+   * Begins the SAME fast poll (`START_SCREEN_POLL_MS`, the effect a few
+   * screens down) a real Start/Resume press would have, but with NOTHING
+   * pressed: the moment the model reports a provider running in the row
+   * CURRENTLY ON SCREEN (`displayedKeys`), and only while nothing already
+   * has an answer for that key -- an active wait of ANY kind, a fast-poll
+   * confirmation already standing, or a key already `handedOffKeys` trusts.
+   * `kind: 'confirm'` is what tells the merge below and `ProviderStartControls`
+   * this was vam's own doing, not the operator's: no "Starting X…"/"Resuming…"
+   * label, just the same disabled controls a WAIT for the OTHER act already
+   * draws -- reused wholesale, not invented.
+   *
+   * NEVER for a row nobody is looking at: a session open in a background tab
+   * or a project that is not the active one gets NO wait, NO poll, exactly
+   * the perf fix above already earned for the idle case. The wait ends the
+   * instant the row stops being displayed too -- the next effect down.
+   */
+  useEffect(() => {
+    for (const key of displayedKeys) {
+      if (key in startingPaneByKey) continue;
+      if (providerRunningFor(key) !== undefined) continue;
+      if (handedOffKeys.current.has(key)) continue;
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      if (row === undefined) continue;
+      if (row.session.status !== 'unstarted' && row.session.status !== 'terminal') continue;
+      if (row.session.runningProvider === undefined) continue;
+      beginStartingPane(key, {
+        kind: 'confirm',
+        timedOut: false,
+        projectId: row.project.id,
+        rowId: row.session.id,
+        screen: null,
+      });
+    }
+  }, [displayedKeys, startingPaneByKey, providerRunningFor, allEntries, beginStartingPane]);
+  /**
+   * AND ENDS THE MOMENT THE ROW IS NO LONGER ON SCREEN -- unlike `start`/
+   * `resume`, which persist across navigation on purpose (`startingPaneByKey`
+   * 's own header: the operator's own press deserves to survive switching
+   * away and back). Nothing here was ever asked for, so there is nothing to
+   * keep polling a pane nobody is looking at; the auto-classify effect above
+   * will begin a fresh one if the operator comes back and the model still
+   * disagrees.
+   */
+  useEffect(() => {
+    for (const key of Object.keys(startingPaneByKey)) {
+      const wait = startingPaneByKey[key];
+      if (wait !== undefined && wait.kind === 'confirm' && !displayedKeys.has(key)) {
+        clearStartingPane(key);
+      }
+    }
+  }, [startingPaneByKey, displayedKeys, clearStartingPane]);
   /**
    * D-START: THE PANE ITSELF IS A SECOND, FASTER, INDEPENDENT SIGNAL --
    * the operator's own two reports, both traced to the SAME gap: the effect
@@ -7299,12 +7415,30 @@ function CanvasInner({
                 savePrefs(setProjectPrRepo(prefs, projectSource, projectId, ''));
               },
             };
-      // CONFIRMED RUNNING, from whichever of the two sources has an answer --
+      // CONFIRMED RUNNING, from whichever of the three states applies --
       // `runningProvider`'s own comment at its call site below.
       let runningProvider: ProviderId | null | undefined;
       if (entry !== null) {
-        const fromWait = providerRunningFor(entry.session.pane ?? entry.session.id);
-        runningProvider = fromWait !== undefined ? fromWait : entry.session.runningProvider;
+        const key = entry.session.pane ?? entry.session.id;
+        runningProvider =
+          key in startingPaneByKey
+            ? // AN ACTIVE WAIT IS UP -- the fast poll's own pane-content read is
+              // the ONLY source consulted; the model is ignored outright, even
+              // if it already agrees, because it might be reporting the SAME
+              // process while the pane is still showing a dialog this poll
+              // would catch.
+              providerRunningFor(key)
+            : handedOffKeys.current.has(key)
+              ? // NO ACTIVE WAIT, but a real poll already confirmed `ready` here
+                // once and the model agreed -- trusted ONGOING, read LIVE so a
+                // later crash reaching the model's own next poll is caught.
+                entry.session.runningProvider
+              : // NEITHER: never poll-confirmed. The process name alone is not
+                // proof of readiness -- the auto-classify effect a few screens
+                // up begins classifying THIS pane the moment it is displayed
+                // and the model reports one running, so this is transient, not
+                // a dead end.
+                undefined;
       }
       return {
         entry,
@@ -7388,16 +7522,12 @@ function CanvasInner({
             ? null
             : (startingPaneByKey[entry.session.pane ?? entry.session.id] ?? null),
         // CONFIRMED RUNNING, EVEN THOUGH THE ROW STILL READS `unstarted`/
-        // `terminal` -- `providerRunningByKey`'s own header. `undefined`
-        // (the ordinary case) draws the start screen exactly as before;
-        // present (even `null`) is what tells `DetailPanel` to draw the
-        // ready state instead and to stop offering Start. THE FAST POLL'S
-        // MAP TAKES PRIORITY, the model's own field otherwise (computed just
-        // above): an ACTIVE wait's `providerRunningByKey` entry is never
-        // stale by more than `START_SCREEN_POLL_MS`, while `entry.session.
-        // runningProvider` trails the source's own ~10s cadence -- exactly
-        // right for the idle case that field exists for, too slow for one
-        // this renderer is actively watching a spinner on.
+        // `terminal` -- `runningProvider`'s own three-way computation just
+        // above, and `DetailPanelProps.runningProvider`'s own header for the
+        // full case-by-case reasoning. `undefined` (the ordinary case) draws
+        // the start screen exactly as before; present (even `null`) is what
+        // tells `DetailPanel` to draw the ready state instead and to stop
+        // offering Start.
         runningProvider,
         // THE GETTING-STARTED SCREEN (`GettingStarted.tsx`) -- present only
         // when THIS pane holds nothing, vam has no session to show ANYWHERE
