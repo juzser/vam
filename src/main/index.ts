@@ -55,6 +55,8 @@ import { createPairing } from './remote/pairing.js';
 import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { openWritesPreference, writesPreferencePath } from './remote/writes-preference.js';
+import { defaultAdhdSkillDeps } from './skills/adhd-skill.js';
+import { registerAdhdSkillIpc } from './skills/ipc.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
 import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/pr-actions.js';
 import { prRepoOverride } from './sources/claude-code/pr-repos.js';
@@ -922,6 +924,15 @@ void app.whenReady().then(async () => {
     resolveProjectDirectory: resolveWorktreeProjectDirectory,
     knownProjectIds: async () => (await combineSources(DESKTOP_SOURCES).load()).map((p) => p.id),
   });
+  // Install the real `ayghri/i-have-adhd` skill into `~/.claude/skills` and
+  // `~/.agents/skills`, read its status back, or remove what vam wrote.
+  // `defaultAdhdSkillDeps` resolves BOTH of its inputs here, once: the real
+  // `os.homedir()` and the bundled pinned copy this build ships at
+  // `resources/skills/i-have-adhd` (`app.getAppPath()`, the same call
+  // `webRoot` above makes for `dist-web` -- repo root in dev, the asar root
+  // once packaged). DESKTOP-ONLY, like `registerWorktreesIpc` above -- see
+  // `CHANNELS.adhdSkillInstall`'s own comment.
+  registerAdhdSkillIpc(ipcMain, defaultAdhdSkillDeps(app.getAppPath()));
   // The file-editor tab's LAST channel, and the only one that carries no path
   // at all: how many of its buffers are unsaved, and what they are called.
   // Registered here rather than in `createWindow` because the guard it feeds
