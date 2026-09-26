@@ -382,10 +382,40 @@ await new Promise((r) => setTimeout(r, 300));
  * this file's own `check()` for `pauseAfter.sawReseed`, unchanged.
  */
 async function measurePauseAfter() {
+  // TEMPORARY DIAGNOSTIC (coordinator's own ask, CI flake investigation):
+  // this guard's own `check()` only ever asserts on `seeds.length` -- a full
+  // %pause -> %continue -> reseed round trip -- which cannot tell "tmux
+  // never sent %pause at all" apart from "%pause arrived but the round trip
+  // never finished". A SECOND, independent listener on the raw control-child
+  // stdout (the SAME technique `stream-client-pause-after.test.ts` already
+  // uses in its own passing CI run) answers that directly, without changing
+  // what this function returns or asserts on. Remove once the CI-only
+  // failure (run 36236036684, job 108387840295) is root-caused.
+  const diagT0 = Date.now();
+  let sawPauseRaw = false;
+  let sawContinueRaw = false;
+  let pauseRawAtMs = null;
+  let continueRawAtMs = null;
+  let rawBytes = 0;
+  let rawTail = '';
+  let cycles = 0;
   let realStdout;
   const observingSpawn = (binary, argv) => {
     const child = spawnRealControlChild(binary, argv);
     realStdout = child.stdout;
+    child.stdout.on('data', (chunk) => {
+      rawBytes += chunk.length;
+      const text = rawTail + String(chunk);
+      if (!sawPauseRaw && /%pause /.test(text)) {
+        sawPauseRaw = true;
+        pauseRawAtMs = Date.now() - diagT0;
+      }
+      if (!sawContinueRaw && /%continue/.test(text)) {
+        sawContinueRaw = true;
+        continueRawAtMs = Date.now() - diagT0;
+      }
+      rawTail = text.slice(-256);
+    });
     return child;
   };
   const client = new StreamClient({
@@ -419,6 +449,7 @@ async function measurePauseAfter() {
       await new Promise((r) => setTimeout(r, 1_000));
       realStdout?.resume();
       await new Promise((r) => setTimeout(r, 300));
+      cycles += 1;
     }
 
     // Only NOW, with the duty cycle done (a reseed observed, or the
@@ -444,6 +475,11 @@ async function measurePauseAfter() {
         `continuous flood: %pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
         `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
         'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
+    );
+    console.log(
+      `DIAGNOSTIC (temporary): cycles=${cycles} sawPauseRaw=${sawPauseRaw}(${pauseRawAtMs}ms) ` +
+        `sawContinueRaw=${sawContinueRaw}(${continueRawAtMs}ms) rawBytes=${rawBytes} sawReseed=${seeds.length > 0} ` +
+        `(${seeds.length}) elapsedMs=${Date.now() - diagT0}`,
     );
     return { sawReseed: seeds.length > 0, correct };
   } finally {
