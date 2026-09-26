@@ -16,11 +16,26 @@
  * identical thing either way (`CHANNELS.statsScan`'s own header).
  */
 
-import { RefreshCw } from 'lucide-react';
+import {
+  Bot,
+  CalendarDays,
+  Clock,
+  Coins,
+  Database,
+  GitPullRequest,
+  type LucideIcon,
+  RefreshCw,
+  Sparkles,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { StatsResult } from '../../preload/api.js';
 import { formatCompactNumber, formatDuration } from '../../shared/format-number.js';
-import type { ProviderStat, StatsSnapshot } from '../../shared/stats.js';
+import type {
+  ProviderStat,
+  PrsCreated,
+  PrsUnavailableReason,
+  StatsSnapshot,
+} from '../../shared/stats.js';
 import { PROVIDER_MARKS } from '../sources/provider-marks.js';
 import { Heatmap } from './Heatmap.js';
 
@@ -41,15 +56,54 @@ function updatedText(generatedAt: string, now: Date): string {
   return minutes === 0 ? 'Updated just now' : `Updated ${minutes}m ago`;
 }
 
+/** One sentence per reason a PR count could not be read — the Stats
+ *  screen's own tooltip, never a generic "connect GitHub" alone: an
+ *  operator who IS connected but hit a slow network deserves a different
+ *  answer than one who never logged in at all. */
+function prsReasonText(reason: PrsUnavailableReason): string {
+  switch (reason) {
+    case 'not-logged-in':
+      return 'not logged in to gh';
+    case 'no-gh':
+      return 'gh is not installed';
+    case 'timeout':
+      return 'gh took too long to answer';
+    case 'error':
+      return 'gh returned something unexpected';
+  }
+}
+
+/** The rounded icon square every headline card and overview tile draws to
+ *  its own left, on the Orca layout this screen otherwise does not copy
+ *  (vam's own tokens throughout — `bg-running`/`text-running`, already
+ *  proven to paint in both themes by `e2e/stats-usage-shots.mjs` and every
+ *  OTHER surface in this file that already used them before this tile
+ *  existed, rather than a fresh, unverified `bg-icon-*` per card). */
+function IconTile({ icon: Icon, small }: { readonly icon: LucideIcon; readonly small?: boolean }) {
+  return (
+    <span
+      data-stats-icon-tile
+      className={`flex flex-none items-center justify-center rounded-[9px] bg-running/15 text-running ${
+        small === true ? 'h-7 w-7' : 'h-9 w-9'
+      }`}
+    >
+      <Icon size={small === true ? 14 : 16} strokeWidth={1.75} />
+    </span>
+  );
+}
+
 /** One of the three headline cards — an icon tile, a big number and a
- *  label. `title` is a plain native tooltip: a definition worth stating
- *  (`agentsSpawned`'s own count) without building a second tooltip
- *  primitive for one card. */
+ *  label to its right. `title` is a plain native tooltip: a definition
+ *  worth stating (`agentsSpawned`'s own count, or a PR count's own
+ *  unavailable reason) without building a second tooltip primitive for one
+ *  card. */
 function HeadlineCard({
+  icon,
   label,
   value,
   hint,
 }: {
+  readonly icon: LucideIcon;
   readonly label: string;
   readonly value: string;
   readonly hint?: string;
@@ -57,24 +111,38 @@ function HeadlineCard({
   return (
     <div
       title={hint}
-      className="flex flex-1 flex-col gap-1 rounded-[9px] border border-line bg-card p-3"
+      className="flex flex-1 items-center gap-3 rounded-[9px] border border-line bg-card p-3"
     >
-      {/* `text-heading`, vam's own LARGEST named step (`test/renderer/
-          type-scale.test.ts`) -- not a bigger literal size for Orca's own
-          hero numbers: the scale's whole point is that a call site picks a
-          ROLE, and this is the role that already outranks every label
-          under it. */}
-      <span className="font-semibold text-heading text-ink leading-none">{value}</span>
-      <span className="text-control text-ink-dim">{label}</span>
+      <IconTile icon={icon} />
+      <div className="flex flex-col gap-1">
+        {/* `text-heading`, vam's own LARGEST named step (`test/renderer/
+            type-scale.test.ts`) -- not a bigger literal size for Orca's own
+            hero numbers: the scale's whole point is that a call site picks a
+            ROLE, and this is the role that already outranks every label
+            under it. */}
+        <span className="font-semibold text-heading text-ink leading-none">{value}</span>
+        <span className="text-control text-ink-dim">{label}</span>
+      </div>
     </div>
   );
 }
 
-function OverviewTile({ label, value }: { readonly label: string; readonly value: string }) {
+function OverviewTile({
+  icon,
+  label,
+  value,
+}: {
+  readonly icon: LucideIcon;
+  readonly label: string;
+  readonly value: string;
+}) {
   return (
-    <div className="flex flex-1 flex-col gap-0.5 rounded-[7px] border border-line-strong bg-raised p-2">
-      <span className="font-semibold text-ink text-control">{value}</span>
-      <span className="text-ink-faint text-meta">{label}</span>
+    <div className="flex flex-1 items-center gap-2 rounded-[7px] border border-line-strong bg-raised p-2">
+      <IconTile icon={icon} small />
+      <div className="flex flex-col gap-0.5">
+        <span className="font-semibold text-ink text-control">{value}</span>
+        <span className="text-ink-faint text-meta">{label}</span>
+      </div>
     </div>
   );
 }
@@ -169,23 +237,38 @@ function ScreenBody({
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row">
           <HeadlineCard
+            icon={Bot}
             label="Agents spawned"
             value={String(snapshot.agentsSpawned)}
             hint="Distinct session transcripts, plus subagent transcripts where they are their own file."
           />
           <HeadlineCard
+            icon={Clock}
             label="Time agents worked"
             value={formatDuration(snapshot.activeMs)}
             hint="Sum of active spans per session; a gap over 5 minutes between events ends a span."
           />
           <HeadlineCard
+            icon={GitPullRequest}
             label="PRs created"
-            value={snapshot.prsCreated.kind === 'ok' ? String(snapshot.prsCreated.count) : '—'}
-            hint={snapshot.prsCreated.kind === 'ok' ? undefined : snapshot.prsCreated.hint}
+            value={
+              snapshot.prsCreated.kind === 'ok'
+                ? String(snapshot.prsCreated.count)
+                : snapshot.prsCreated.kind === 'loading'
+                  ? '…'
+                  : '—'
+            }
+            hint={
+              snapshot.prsCreated.kind === 'unavailable'
+                ? `${snapshot.prsCreated.hint} (${prsReasonText(snapshot.prsCreated.reason)})`
+                : undefined
+            }
           />
         </div>
         {snapshot.prsCreated.kind === 'unavailable' && (
-          <p className="text-ink-faint text-meta">{snapshot.prsCreated.hint}</p>
+          <p className="text-ink-faint text-meta">
+            {snapshot.prsCreated.hint} — {prsReasonText(snapshot.prsCreated.reason)}
+          </p>
         )}
         <p className="text-ink-faint text-meta">
           Tracking since{' '}
@@ -218,12 +301,22 @@ function ScreenBody({
           </div>
           <div className="flex flex-wrap gap-2">
             <OverviewTile
+              icon={Sparkles}
               label="Total tokens"
               value={formatCompactNumber(snapshot.usageOverview.totalTokens)}
             />
-            <OverviewTile label="Est. cost" value={costText(snapshot.usageOverview.estCostUsd)} />
-            <OverviewTile label="Active days" value={String(snapshot.usageOverview.activeDays)} />
             <OverviewTile
+              icon={Coins}
+              label="Est. cost"
+              value={costText(snapshot.usageOverview.estCostUsd)}
+            />
+            <OverviewTile
+              icon={CalendarDays}
+              label="Active days"
+              value={String(snapshot.usageOverview.activeDays)}
+            />
+            <OverviewTile
+              icon={Database}
               label="Cache share"
               value={`${Math.round(snapshot.usageOverview.cacheSharePercent)}%`}
             />
@@ -263,8 +356,24 @@ function ScreenBody({
   );
 }
 
+/** The PR fetch's own safe fallback — never a wrong number if the follow-up
+ *  call itself rejects (it should not; `stats.prs()` never throws on the
+ *  main side), on the exact same "unavailable" shape `gh-prs.ts` writes. */
+const PRS_FOLLOWUP_FAILED: PrsCreated = {
+  kind: 'unavailable',
+  hint: 'connect GitHub in Settings → Integrations',
+  reason: 'error',
+};
+
 export function StatsScreen({ onClose }: StatsScreenProps) {
   const [result, setResult] = useState<StatsResult | null>(null);
+  // The PR count can arrive AFTER the rest of the snapshot (`worker.ts`'s
+  // own header) -- tracked separately so a follow-up answer patches ONLY
+  // this one card, never re-renders the whole screen from a second
+  // `result`. `null` means "read it off `result.snapshot.prsCreated`
+  // itself", which is enough whenever that already settled (or the
+  // snapshot has not loaded at all yet).
+  const [prsOverride, setPrsOverride] = useState<PrsCreated | null>(null);
   const bridge = window.api?.stats;
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -289,7 +398,9 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
     bridge
       .get()
       .then((next) => {
-        if (!cancelled) setResult(next);
+        if (cancelled) return;
+        setResult(next);
+        setPrsOverride(null); // a fresh scan's own answer wins over any prior follow-up
       })
       .catch(() => {
         if (!cancelled) setResult({ kind: 'error', message: 'the stats scan failed unexpectedly' });
@@ -299,10 +410,34 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
     };
   }, [bridge]);
 
+  // THE PR COUNT'S OWN FOLLOW-UP. Runs only when the scan's own answer said
+  // `'loading'` — `worker.ts`'s own protocol: the fold finished before the
+  // PR fetch did. Reruns whenever `result` changes (a fresh `get()`/
+  // `refresh()` may itself say `'loading'` again).
+  useEffect(() => {
+    if (bridge === undefined || result === null || result.kind !== 'ok') return;
+    if (result.snapshot.prsCreated.kind !== 'loading') return;
+    let cancelled = false;
+    bridge
+      .prs()
+      .then((answer) => {
+        if (!cancelled) setPrsOverride(answer.prsCreated);
+      })
+      .catch(() => {
+        if (!cancelled) setPrsOverride(PRS_FOLLOWUP_FAILED);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, result]);
+
   const onRefresh = (): void => {
     bridge
       ?.refresh()
-      .then(setResult)
+      .then((next) => {
+        setResult(next);
+        setPrsOverride(null);
+      })
       .catch(() => setResult({ kind: 'error', message: 'the stats scan failed unexpectedly' }));
   };
 
@@ -359,7 +494,14 @@ export function StatsScreen({ onClose }: StatsScreenProps) {
         ) : result.kind === 'error' ? (
           <p className="text-control text-failed">{result.message}</p>
         ) : (
-          <ScreenBody snapshot={result.snapshot} onRefresh={onRefresh} />
+          <ScreenBody
+            snapshot={
+              prsOverride === null
+                ? result.snapshot
+                : { ...result.snapshot, prsCreated: prsOverride }
+            }
+            onRefresh={onRefresh}
+          />
         )}
       </div>
     </div>

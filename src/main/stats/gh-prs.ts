@@ -1,111 +1,159 @@
 /**
- * "PRs created" — a single `gh search prs --author @me` call, counted, on
- * `sources/claude-code/pull-requests.ts`'s own pattern: argv, parsing and
- * failure classification are pure and separately testable here; the spawn
- * itself is not, because running it would reach GitHub with whatever token
- * this machine holds.
+ * "PRs created" — one `gh api graphql` call that returns a single count.
+ * Argv/parsing/classification are pure and testable here, on
+ * `sources/claude-code/pull-requests.ts`'s own pattern; the spawn itself is
+ * not, because running it would reach GitHub with whatever token this
+ * machine holds.
  *
- * UNLIKE `pull-requests.ts`, this is a `gh search`, not a `gh pr list` — it
- * asks across EVERY repository the operator's account can see, not one
- * branch of one checkout, and it needs no `cwd` inside a repository at all
- * (the operator's own example: `gh search prs --author @me --created
- * >=<tracking-since>`).
+ * WHY GRAPHQL, NOT `gh search prs --author @me`. That command paginates and
+ * — measured standalone on this machine's own account, whose PR history is
+ * long — takes many SECONDS for `--limit 1000`, occasionally exceeding this
+ * module's own 10s timeout outright. Worse, `scan.ts` used to `await` it
+ * AFTER the whole file fold, so it dominated every "warm" refresh's latency
+ * regardless of how fast the incremental cache made the rest of the scan.
+ * `search(query: $q, type: ISSUE) { issueCount }` asks GitHub for the COUNT
+ * alone: no page of results to walk, no `--limit` guess to get wrong, and
+ * `worker.ts` now runs it CONCURRENTLY with the fold rather than after it.
  *
- * NEVER `gh auth` ANYTHING. This module has exactly one command it can ever
- * build (`ghSearchPrsArgv`) and it is a read; nothing here logs in, logs out,
- * or refreshes a token. If `gh` is not authenticated, that is itself the
- * `'unavailable'` outcome — the operator connects GitHub from Settings, this
- * screen never tries to do it on their behalf.
+ * THE DATE NEVER TOUCHES THE QUERY TEXT. `toDateOnly` is the one place an
+ * ISO instant becomes the strict `YYYY-MM-DD` this module will ever accept,
+ * and `ghSearchPrsCountArgv` re-validates it anyway before use — but even a
+ * malformed date could never inject anything: it travels as a GraphQL
+ * VARIABLE (`-f q=...`), substituted by `gh` itself into the query, never
+ * concatenated into the `-f query=...` document this module hands it.
  *
- * ONE HINT FOR EVERY FAILURE, on the operator's own instruction: "otherwise
- * show '—' with the hint 'connect GitHub in Settings → Integrations'". A
- * finer taxonomy (`pull-requests.ts`'s `unavailable` DOES distinguish
- * `repo-missing`/`gh-failed`/etc, because that pane names a directory the
- * operator can fix) would only be exact ABOUT A SITUATION THIS CARD OFFERS
- * NO CONTROL FOR — there is no per-repository setting here, only "GitHub is
- * connected or it is not".
+ * NEVER `gh auth` ANYTHING. This module has exactly two commands it can
+ * ever build (the graphql call above) and both are reads; nothing here logs
+ * in, logs out, or refreshes a token. If `gh` is not authenticated, that is
+ * itself the `'unavailable'` outcome (reason `'not-logged-in'`) — the
+ * operator connects GitHub from Settings, this screen never tries to do it
+ * on their behalf.
  */
 
 import { execFile } from 'node:child_process';
-import type { PrsCreated } from '../../shared/stats.js';
+import type { PrsCreated, PrsUnavailableReason } from '../../shared/stats.js';
 
 const CONNECT_HINT = 'connect GitHub in Settings → Integrations';
 
-const unavailable = (): PrsCreated => ({ kind: 'unavailable', hint: CONNECT_HINT });
+const unavailable = (reason: PrsUnavailableReason): PrsCreated => ({
+  kind: 'unavailable',
+  hint: CONNECT_HINT,
+  reason,
+});
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * The exact argv. `sinceIso` is the snapshot's own `trackingSinceIso` —
- * `null` for a machine with no usage data at all yet, in which case
- * `--created` is omitted rather than sent as a malformed date. Only the
- * DATE half of the ISO instant is sent: `gh search`'s `--created` filter
- * takes a date or a date-time, and a date is what "since tracking began" means
- * to an operator reading this card — nobody is asking whether a pull request
- * landed before or after the exact millisecond of the earliest transcript
- * line this scan happened to read.
+ * The strict `YYYY-MM-DD` prefix of a real ISO instant (`scan.ts`'s own
+ * `trackingSinceIso`, always built by `new Date(...).toISOString()`, never
+ * free text) — or `null` when there is no date at all, or when whatever
+ * string arrived does not match that shape. Defensive rather than trusting:
+ * this is the one function standing between "the earliest timestamp this
+ * scan found" and a value that reaches a real network call.
  */
-export function ghSearchPrsArgv(sinceIso: string | null): readonly string[] {
-  const base = ['search', 'prs', '--author', '@me'];
-  const since = sinceIso === null ? [] : ['--created', `>=${sinceIso.slice(0, 10)}`];
-  return [...base, ...since, '--json', 'number', '--limit', '1000'];
+export function toDateOnly(iso: string | null): string | null {
+  if (iso === null) return null;
+  const candidate = iso.slice(0, 10);
+  return DATE_ONLY.test(candidate) ? candidate : null;
+}
+
+const QUERY = 'query($q:String!){search(query:$q,type:ISSUE){issueCount}}';
+
+/**
+ * The exact argv for the count-only graphql call. `sinceDate` is
+ * RE-VALIDATED here (never just trusted from the caller) — an invalid value
+ * falls back to omitting the `created:` filter entirely, the same safe
+ * default `null` gets, rather than ever reaching `-f q=...` unchecked.
+ */
+export function ghSearchPrsCountArgv(sinceDate: string | null): readonly string[] {
+  const valid = sinceDate !== null && DATE_ONLY.test(sinceDate) ? sinceDate : null;
+  const search = valid === null ? 'is:pr author:@me' : `is:pr author:@me created:>=${valid}`;
+  return ['api', 'graphql', '-f', `query=${QUERY}`, '-f', `q=${search}`];
 }
 
 /**
- * `gh`'s own JSON array, counted. An empty array is a REAL "none" — `{kind:
- * 'ok', count: 0}` — never folded into `'unavailable'`; only output that is
- * not a JSON array at all (a shape this parser did not anticipate) is
- * unavailable.
+ * `gh api graphql`'s own JSON envelope, read for `data.search.issueCount`
+ * alone. A real `0` is a real "none" — `{kind: 'ok', count: 0}` — never
+ * folded into `'unavailable'`; only a shape this parser did not anticipate
+ * (unparsable JSON, a GraphQL `errors` array, a missing/non-numeric
+ * `issueCount`) is `'unavailable'` (reason `'error'`).
  */
-export function parseGhPrsCount(stdout: string): PrsCreated {
+export function parseGhPrsGraphqlCount(stdout: string): PrsCreated {
   let value: unknown;
   try {
     value = JSON.parse(stdout);
   } catch {
-    return unavailable();
+    return unavailable('error');
   }
-  return Array.isArray(value) ? { kind: 'ok', count: value.length } : unavailable();
+  if (typeof value !== 'object' || value === null) return unavailable('error');
+  const data = (value as Record<string, unknown>)['data'];
+  const search =
+    typeof data === 'object' && data !== null ? (data as Record<string, unknown>)['search'] : null;
+  const issueCount =
+    typeof search === 'object' && search !== null
+      ? (search as Record<string, unknown>)['issueCount']
+      : null;
+  return typeof issueCount === 'number' && Number.isFinite(issueCount) && issueCount >= 0
+    ? { kind: 'ok', count: issueCount }
+    : unavailable('error');
 }
 
 /** What a failed `execFile` hands back — the slice `classifyGhPrsFailure`
- *  needs, mirroring `pull-requests.ts`'s own `SpawnFailure`. */
+ *  needs, mirroring `pull-requests.ts`'s own `SpawnFailure`. `killed` is
+ *  `true` when THIS module's own `GH_PRS_TIMEOUT_MS` fired (Node sets it on
+ *  the error it hands `execFile`'s callback) — the one signal that
+ *  distinguishes "we gave up waiting" from every other failure shape. */
 export type GhPrsSpawnFailure = {
   readonly code?: string | number | undefined;
+  readonly killed?: boolean | undefined;
 };
 
 /**
- * Every failure becomes the SAME outcome — see the module header for why a
- * finer taxonomy is not the point here. `stderr` is read only so a future
- * reader can see it was considered, not to branch on it.
+ * Every failure becomes `'unavailable'`, tagged with WHY: a missing `gh`
+ * binary (`'no-gh'`), this module's own timeout firing (`'timeout'`), `gh`
+ * reachable but not authenticated (`'not-logged-in'`, read from `gh`'s own
+ * stderr sentence), or anything else (`'error'`) — a `hint` alone left an
+ * operator unable to tell "you are not logged in" from "your network is
+ * slow today" apart, and the Stats screen's own tooltip now can.
  */
-export function classifyGhPrsFailure(_failure: GhPrsSpawnFailure, _stderr: string): PrsCreated {
-  return unavailable();
+export function classifyGhPrsFailure(failure: GhPrsSpawnFailure, stderr: string): PrsCreated {
+  if (failure.code === 'ENOENT') return unavailable('no-gh');
+  if (failure.killed === true) return unavailable('timeout');
+  if (/gh auth login|not logged into|authentication/i.test(stderr)) {
+    return unavailable('not-logged-in');
+  }
+  return unavailable('error');
 }
 
-/** How long `gh search` gets — the same budget `pull-requests.ts`'s own
- *  `PR_TIMEOUT_MS` uses, for the same reason: one API query, not a model
- *  call, and a timeout here becomes a visible `unavailable` reading rather
- *  than a hang blocking the Stats screen's own scan. */
+/** How long `gh` gets before this module gives up and reports `'timeout'` —
+ *  one graphql query, not a model call, and a hang here must never block
+ *  the Stats screen's own PR card past a bound the operator can see named
+ *  in its tooltip. */
 const GH_PRS_TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
 /**
- * Runs `gh search prs --author @me`, resolving to a `PrsCreated` that NEVER
- * rejects — this is the `fetchPrsCreated` dependency `scan.ts` calls once
- * per scan. Injectable `binary` for the same testing reason
- * `readPullRequestsViaCli` takes one, though this module's own tests never
- * spawn anything real (see the header).
+ * Runs the count-only graphql call, resolving to a `PrsCreated` that NEVER
+ * rejects — the `fetchPrsCreated` dependency `worker.ts` calls, concurrently
+ * with the file fold, once per scan (subject to `pr-count-cache.ts`'s own
+ * TTL). `sinceDate` is expected ALREADY validated (`toDateOnly`'s own
+ * output) — this function re-validates anyway (`ghSearchPrsCountArgv`
+ * does), never trusting a caller blindly. Injectable `binary` for the same
+ * testing reason `readPullRequestsViaCli` takes one, though this module's
+ * own tests never spawn anything real (see the header).
  */
-export function readGhPrsCreated(binary = 'gh'): (sinceIso: string | null) => Promise<PrsCreated> {
-  return (sinceIso) =>
+export function readGhPrsCreated(binary = 'gh'): (sinceDate: string | null) => Promise<PrsCreated> {
+  return (sinceDate) =>
     new Promise((resolve) => {
       execFile(
         binary,
-        ghSearchPrsArgv(sinceIso),
+        ghSearchPrsCountArgv(sinceDate),
         { timeout: GH_PRS_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
         (failure, stdout, stderr) => {
           resolve(
             failure
-              ? classifyGhPrsFailure({ code: failure.code }, String(stderr))
-              : parseGhPrsCount(String(stdout)),
+              ? classifyGhPrsFailure({ code: failure.code, killed: failure.killed }, String(stderr))
+              : parseGhPrsGraphqlCount(String(stdout)),
           );
         },
       );

@@ -73,7 +73,6 @@ function realDeps(overrides: Partial<ScanDeps> = {}): ScanDeps & { readCalls: nu
       readCalls.push(fromByte);
       return readLinesFrom(path, fromByte, onLine);
     },
-    fetchPrsCreated: async () => ({ kind: 'unavailable', hint: 'not queried in this test' }),
     cache: emptyCacheStore(),
     readCalls,
     ...overrides,
@@ -241,11 +240,92 @@ describe('runFullScan', () => {
     }
   });
 
-  it('carries the price table date and the caller-supplied prsCreated through', async () => {
-    const { snapshot } = await runFullScan(
-      realDeps({ fetchPrsCreated: async () => ({ kind: 'ok', count: 7 }) }),
-    );
+  it('carries the price table date through, and always reports prsCreated as loading', async () => {
+    // `runFullScan` never calls `gh` itself any more -- see `worker.ts`'s
+    // own header. It runs the PR fetch CONCURRENTLY with this fold, using
+    // the CACHED tracking-since date so the network call can start before
+    // this fold even knows its own answer; folding in the real result (or
+    // an error) after the fact would make this module responsible for a
+    // race it has no reason to own. `{kind:'loading'}` is the one value
+    // this module ever writes here — `worker.ts` overlays the real one.
+    const { snapshot } = await runFullScan(realDeps());
     expect(snapshot.priceTableAsOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(snapshot.prsCreated).toEqual({ kind: 'ok', count: 7 });
+    expect(snapshot.prsCreated).toEqual({ kind: 'loading' });
+  });
+
+  describe('dedup: a streamed assistant turn repeats the SAME message.id', () => {
+    // Measured on a real transcript (15,489 lines): 77% of usage-bearing
+    // lines were a repeat of an already-folded `message.id`, carrying an
+    // IDENTICAL, already-cumulative `usage` object -- streaming chunks that
+    // Claude Code appends as their own line each time the SAME message
+    // gains more content. Folding every line inflates tokens, cost, turns
+    // and active time by roughly the repeat count.
+    const dup = (over: Record<string, unknown> = {}) =>
+      assistantLine({
+        message: {
+          id: 'msg_dup_1',
+          model: 'claude-3-5-sonnet-20241022',
+          usage: { input_tokens: 100, output_tokens: 200 },
+        },
+        ...over,
+      });
+
+    it('a fixture with 3 lines sharing one id folds once', async () => {
+      await writeJsonl(join(home, '.claude', 'projects', 'atlas', 's1.jsonl'), [
+        dup(),
+        dup(),
+        dup(),
+      ]);
+      const { snapshot } = await runFullScan(realDeps());
+      expect(snapshot.usageOverview.totalTokens).toBe(300); // ONE fold, not three
+      const provider = snapshot.providers.find((p) => p.id === 'claude-code');
+      expect(provider?.turns).toBe(1);
+    });
+
+    it('duplicates split across an incremental append boundary fold once', async () => {
+      const path = join(home, '.claude', 'projects', 'atlas', 's1.jsonl');
+      // The first read sees only the FIRST of the two duplicate lines --
+      // the append boundary lands exactly between them, the same shape a
+      // live tail scan hits constantly (a resumed read never re-reads
+      // bytes the previous one already consumed).
+      await writeJsonl(path, [dup()]);
+      const first = realDeps();
+      const { cache } = await runFullScan(first);
+
+      await writeFile(path, `${JSON.stringify(dup())}\n`, { flag: 'a' });
+
+      const second = realDeps({ cache });
+      const { snapshot } = await runFullScan(second);
+      expect(second.readCalls.length).toBe(1); // really did resume, not skip
+      expect(snapshot.usageOverview.totalTokens).toBe(300); // still ONE fold
+      const provider = snapshot.providers.find((p) => p.id === 'claude-code');
+      expect(provider?.turns).toBe(1);
+    });
+
+    it('folds a DIFFERENT id normally -- dedup never merges two distinct turns', async () => {
+      await writeJsonl(join(home, '.claude', 'projects', 'atlas', 's1.jsonl'), [
+        dup(),
+        dup({
+          message: {
+            id: 'msg_dup_2',
+            model: 'claude-3-5-sonnet-20241022',
+            usage: { input_tokens: 100, output_tokens: 200 },
+          },
+        }),
+      ]);
+      const { snapshot } = await runFullScan(realDeps());
+      expect(snapshot.usageOverview.totalTokens).toBe(600);
+      const provider = snapshot.providers.find((p) => p.id === 'claude-code');
+      expect(provider?.turns).toBe(2);
+    });
+
+    it("uses the FIRST occurrence's timestamp for the active span, never a later duplicate's", async () => {
+      await writeJsonl(join(home, '.claude', 'projects', 'atlas', 's1.jsonl'), [
+        dup({ timestamp: '2026-09-04T08:00:00.000Z' }),
+        dup({ timestamp: '2026-09-04T08:00:05.000Z' }), // same id, a later stamp -- must be ignored
+      ]);
+      const { snapshot } = await runFullScan(realDeps());
+      expect(snapshot.trackingSinceIso).toBe('2026-09-04T08:00:00.000Z');
+    });
   });
 });

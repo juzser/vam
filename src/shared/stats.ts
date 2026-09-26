@@ -64,9 +64,21 @@ export type ProviderStat = {
   readonly sharePercent: number;
 };
 
+/** Why a PR count could not be read — surfaced in a tooltip beside the "—",
+ *  never folded into one generic message: `hint` alone left an operator
+ *  guessing whether "connect GitHub" meant "I forgot to log in" or "your
+ *  network is slow today". */
+export type PrsUnavailableReason = 'no-gh' | 'not-logged-in' | 'timeout' | 'error';
+
 export type PrsCreated =
   | { readonly kind: 'ok'; readonly count: number }
-  | { readonly kind: 'unavailable'; readonly hint: string };
+  /** The fold is done and this screen has everything else; the PR count's
+   *  own fetch (`gh-prs.ts`, run concurrently, never blocking the fold) has
+   *  not settled yet. Never persisted — `worker.ts` only ever puts this in
+   *  the FIRST message it sends, followed by an `'ok'`/`'unavailable'` once
+   *  the fetch resolves. */
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'unavailable'; readonly hint: string; readonly reason: PrsUnavailableReason };
 
 export type StatsSnapshot = {
   readonly generatedAt: string;

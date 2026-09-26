@@ -39,11 +39,18 @@ describe('the built stats worker', () => {
     expect(existsSync(workerPath)).toBe(true);
   });
 
-  it('runs as a real worker thread against a real (empty) HOME and posts a snapshot', async () => {
+  it('runs as a real worker thread against a real (empty) HOME and posts a "stats" snapshot', async () => {
     const cachePath = path.join(home, 'stats-cache.json');
     const worker = new Worker(workerPath, {
       workerData: { home, timeZone: 'UTC', cachePath, now: Date.now() },
     });
+    // The FIRST message is always 'stats' — see `worker.ts`'s own header.
+    // This test never asserts on `prsCreated`: with an empty HOME and no
+    // prior cache, the worker has no known since-date to start the PR
+    // fetch concurrently with, so it reaches for a real (read-only, no
+    // `gh auth`) `gh` call after the fold — whatever this machine's `gh`
+    // answers (or fails to, offline) is irrelevant to what THIS test
+    // proves, which is the file-scan protocol.
     const message = await new Promise<{ kind: string; snapshot?: unknown; message?: string }>(
       (resolve, reject) => {
         worker.once('message', resolve);
@@ -51,7 +58,7 @@ describe('the built stats worker', () => {
       },
     );
     await worker.terminate();
-    expect(message.kind).toBe('done');
+    expect(message.kind).toBe('stats');
     const snapshot = message.snapshot as {
       agentsSpawned: number;
       trackingSinceIso: string | null;

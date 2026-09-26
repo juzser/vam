@@ -759,18 +759,16 @@ void app.whenReady().then(async () => {
   // is the one screen in vam that reads all of it rather than a bounded
   // tail. The cache that makes a REPEAT scan cheap lives under this app's
   // own `userData`, never under `~/.claude` (`stats/incremental-cache.ts`).
-  registerStatsIpc(ipcMain, async () => {
-    const outcome = await runStatsScanInWorker({
+  registerStatsIpc(ipcMain, (forceRefresh) =>
+    runStatsScanInWorker({
       workerPath: join(__dirname, 'statsWorker.cjs'),
       home: homedir(),
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       cachePath: join(app.getPath('userData'), 'stats-cache.json'),
       now: Date.now,
-    });
-    return outcome.kind === 'ok'
-      ? { kind: 'ok', snapshot: outcome.snapshot }
-      : { kind: 'error', message: outcome.message };
-  });
+      forceRefresh,
+    }),
+  );
   // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
   // carrying no token, no query and nothing about this machine's sessions,
   // projects or paths. Nothing is awaited -- the window is created below

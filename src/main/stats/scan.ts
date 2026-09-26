@@ -12,11 +12,17 @@
  * snapshot the screen draws.
  *
  * NOT MAIN-PROCESS-ONLY BY IMPORT, BUT BY CONSTRUCTION: every side effect
- * (`readdir`, `statOf`, `readLines`, `fetchPrsCreated`, the clock, the home
- * directory, the timezone) arrives through `ScanDeps`, so a test drives this
- * against a real temp HOME with real `fs` calls and `worker.ts` drives it
- * inside a worker thread — this file itself imports no `node:fs` and no
- * `electron`.
+ * (`readdir`, `statOf`, `readLines`, the clock, the home directory, the
+ * timezone) arrives through `ScanDeps`, so a test drives this against a real
+ * temp HOME with real `fs` calls and `worker.ts` drives it inside a worker
+ * thread — this file itself imports no `node:fs` and no `electron`.
+ *
+ * NEVER CALLS `gh`. `prsCreated` is always `{kind: 'loading'}` in the
+ * snapshot this module returns — `worker.ts` runs that fetch CONCURRENTLY
+ * with this fold (using the CACHED tracking-since date, known before this
+ * fold even starts) and overlays the real answer once it settles, so a slow
+ * `gh` call never holds up the token stats this module already has the
+ * answer to. See that file's own header for the full protocol.
  *
  * BOUNDED CONCURRENCY: files are processed through `mapWithConcurrencyLimit`
  * (already written for exactly this reason in `sources/claude-code/
@@ -29,13 +35,7 @@ import { join } from 'node:path';
 import { extendActiveMs } from '../../shared/active-spans.js';
 import { localDayOf, makeLocalDayFormatter } from '../../shared/heatmap.js';
 import type { ProviderId } from '../../shared/providers.js';
-import type {
-  DailyBucket,
-  ProviderStat,
-  PrsCreated,
-  StatsSnapshot,
-  TokenMix,
-} from '../../shared/stats.js';
+import type { DailyBucket, ProviderStat, StatsSnapshot, TokenMix } from '../../shared/stats.js';
 import { costOfUsage, PRICE_TABLE_AS_OF, type TokenUsage } from '../../shared/stats-pricing.js';
 import { mapWithConcurrencyLimit } from '../sources/claude-code/concurrency-limit.js';
 import { parseClaudeUsageLine } from './claude-usage-line.js';
@@ -68,7 +68,22 @@ export type FileAggregate = {
    *  `turn_context` in a NEW read still has last read's model to stamp. */
   readonly currentModel: string | null;
   readonly malformedLines: number;
+  /** Claude Code only (see `claude-usage-line.ts`'s own header): the last
+   *  `MAX_RECENT_IDS` distinct `message.id`/`requestId` values this file has
+   *  already folded, oldest first. Persisted (not just held in memory for
+   *  one read) because a streamed message's repeated lines can straddle an
+   *  incremental APPEND boundary — the read that resumes from a previous
+   *  scan's byte offset must still recognise an id that read already
+   *  folded, or it folds that turn's tokens a second time. */
+  readonly recentIds: readonly string[];
 };
+
+/** How many distinct ids this file remembers across a resume — generous
+ *  enough that even a message which streams dozens of chunks in a row never
+ *  ages its own id out before the LAST duplicate line for it is read, while
+ *  staying a small, fixed-size array to persist (never proportional to the
+ *  file's own line count). */
+const MAX_RECENT_IDS = 256;
 
 /**
  * `FileAggregate`'s own working shape — every field mutable, for the SAME
@@ -91,6 +106,7 @@ type MutableAggregate = {
   activeMs: number;
   currentModel: string | null;
   malformedLines: number;
+  recentIds: string[];
 };
 
 function emptyAggregate(providerId: ProviderId): MutableAggregate {
@@ -105,6 +121,7 @@ function emptyAggregate(providerId: ProviderId): MutableAggregate {
     activeMs: 0,
     currentModel: null,
     malformedLines: 0,
+    recentIds: [],
   };
 }
 
@@ -117,6 +134,7 @@ function toMutable(state: FileAggregate): MutableAggregate {
     ...state,
     tokensByModel: { ...state.tokensByModel },
     dayTokens: { ...state.dayTokens },
+    recentIds: [...state.recentIds],
   };
 }
 
@@ -135,7 +153,6 @@ export type ScanDeps = {
     fromByte: number,
     onLine: (line: string) => void,
   ) => Promise<{ readonly bytesConsumed: number }>;
-  readonly fetchPrsCreated: (sinceIso: string | null) => Promise<PrsCreated>;
   readonly cache: CacheStore<FileAggregate>;
 };
 
@@ -273,12 +290,42 @@ async function processFile(
       : emptyAggregate(candidate.providerId);
   let malformed = agg.malformedLines;
   let currentModel = agg.currentModel;
+  // `recentIds` is `agg.recentIds` itself (the same array reference), so
+  // `rememberId` below mutates the aggregate directly rather than a copy
+  // this function would need to write back later. `seen` mirrors it as a
+  // `Set` purely for O(1) membership checks on the hot per-line path — see
+  // `FileAggregate.recentIds`'s own header for why this is bounded and
+  // persisted rather than a per-read-only local.
+  const recentIds = agg.recentIds;
+  const seen = new Set(recentIds);
+  const rememberId = (id: string): void => {
+    seen.add(id);
+    recentIds.push(id);
+    if (recentIds.length > MAX_RECENT_IDS) {
+      const dropped = recentIds.shift();
+      if (dropped !== undefined) seen.delete(dropped);
+    }
+  };
 
   const onLine = (raw: string): void => {
     if (candidate.providerId === 'claude-code') {
       const result = parseClaudeUsageLine(raw);
-      if (result.kind === 'malformed') malformed += 1;
-      else if (result.kind === 'usage') foldEvent(agg, result.event, dayFormat);
+      if (result.kind === 'malformed') {
+        malformed += 1;
+        return;
+      }
+      if (result.kind !== 'usage') return;
+      const { id } = result.event;
+      // A REPEAT of an id already folded -- a streamed message's later
+      // chunk, carrying the SAME cumulative `usage` this file already
+      // counted. Skipped entirely: not folded, not remembered again, so
+      // the FIRST occurrence's timestamp is what every span/day/turn this
+      // id contributes is stamped with. `id === null` (a line with neither
+      // `message.id` nor `requestId`) always folds, exactly as before this
+      // dedup existed -- there is no key to compare it against.
+      if (id !== null && seen.has(id)) return;
+      foldEvent(agg, result.event, dayFormat);
+      if (id !== null) rememberId(id);
       return;
     }
     const result = parseCodexLine(raw, currentModel);
@@ -466,7 +513,6 @@ export async function runFullScan(deps: ScanDeps): Promise<ScanResult> {
   const cacheTokens = mixTotals.cacheReadTokens + mixTotals.cacheWriteTokens;
   const heatmap = bucketsFromRecord(dayTotals);
   const trackingSinceIso = earliestAtMs === null ? null : new Date(earliestAtMs).toISOString();
-  const prsCreated = await deps.fetchPrsCreated(trackingSinceIso);
 
   const tokenMix: TokenMix = {
     inputTokens: mixTotals.inputTokens,
@@ -481,7 +527,7 @@ export async function runFullScan(deps: ScanDeps): Promise<ScanResult> {
     trackingSinceIso,
     agentsSpawned: candidates.length,
     activeMs: totalActiveMs,
-    prsCreated,
+    prsCreated: { kind: 'loading' },
     usageOverview: {
       totalTokens,
       estCostUsd: overallCost,

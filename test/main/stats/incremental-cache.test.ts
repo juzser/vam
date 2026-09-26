@@ -96,4 +96,24 @@ describe('loadCacheStore / saveCacheStore', () => {
     );
     expect(loaded).toEqual(emptyCacheStore());
   });
+
+  // CACHE_VERSION WAS BUMPED 1 -> 2 the day `claude-usage-line.ts` grew a
+  // dedup key: every cache written by the OLD scanner is quietly INFLATED
+  // (a streamed message's repeated lines were each folded again), and there
+  // is no way to repair one in place without re-reading every file it
+  // names. Pinned to the literal shipped number, not `CACHE_VERSION - 1`,
+  // so this test still means "the specific cache real machines have on
+  // disk today" after the next bump moves `CACHE_VERSION` again.
+  it('discards a real version-1 cache from before the dedup fix, forcing a full rebuild', async () => {
+    expect(CACHE_VERSION).toBeGreaterThan(1);
+    const loaded = await loadCacheStore(
+      async () =>
+        JSON.stringify({
+          version: 1,
+          files: { '/a.jsonl': entry() },
+        }),
+      '/cache.json',
+    );
+    expect(loaded).toEqual(emptyCacheStore());
+  });
 });

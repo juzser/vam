@@ -42,7 +42,53 @@ describe('parseClaudeUsageLine', () => {
       cacheWriteTokens: 13069,
       cacheReadTokens: 26448,
       reasoningTokens: 41,
+      id: null,
     });
+  });
+
+  // A REAL TRANSCRIPT ON THIS MACHINE (measured, never committed) has
+  // `message.id` on every assistant line and a top-level `requestId` beside
+  // it -- both stable across the SAME streamed message's repeated lines
+  // (identical `usage`, identical `message.id`). `message.id` is read
+  // first: it is Anthropic's own identity for "this one assistant turn",
+  // where `requestId` names the HTTP request that produced it, a coarser
+  // fallback `scan.ts`'s dedup only reaches for when a line carries no
+  // `message.id` at all.
+  it('reads message.id when present', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-09-04T08:12:31.919Z',
+      requestId: 'req_ignored_when_message_id_present',
+      message: {
+        id: 'msg_abc123',
+        model: 'claude-3-5-sonnet-20241022',
+        usage: { input_tokens: 2 },
+      },
+    });
+    const result = parseClaudeUsageLine(line);
+    expect(result.kind).toBe('usage');
+    if (result.kind !== 'usage') throw new Error('unreachable');
+    expect(result.event.id).toBe('msg_abc123');
+  });
+
+  it('falls back to the top-level requestId when message.id is absent', () => {
+    const line = JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-09-04T08:12:31.919Z',
+      requestId: 'req_xyz789',
+      message: { model: 'claude-3-5-sonnet-20241022', usage: { input_tokens: 2 } },
+    });
+    const result = parseClaudeUsageLine(line);
+    expect(result.kind).toBe('usage');
+    if (result.kind !== 'usage') throw new Error('unreachable');
+    expect(result.event.id).toBe('req_xyz789');
+  });
+
+  it('reads id as null when neither message.id nor requestId is present', () => {
+    const result = parseClaudeUsageLine(assistantLine());
+    expect(result.kind).toBe('usage');
+    if (result.kind !== 'usage') throw new Error('unreachable');
+    expect(result.event.id).toBeNull();
   });
 
   it('treats missing token fields as zero, never as a malformed line', () => {

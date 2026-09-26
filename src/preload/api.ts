@@ -50,7 +50,7 @@ import type { PrAction, PrActionOutcome } from '../shared/pr-action.js';
 import type { PrLinkOutcome } from '../shared/pr-link.js';
 import type { PreloadSourceApi, SourceDescriptor } from '../shared/preload-api.js';
 import type { AnswerTrustResult, StartScreenView } from '../shared/start-screen.js';
-import type { StatsSnapshot } from '../shared/stats.js';
+import type { PrsCreated, StatsSnapshot } from '../shared/stats.js';
 import type {
   ModelSwitchResult,
   PaneKey,
@@ -274,32 +274,47 @@ export function createUsageApi(ipc: InvokerLike): UsageApi {
 }
 
 /** What `stats.get`/`stats.refresh` answer -- see `CHANNELS.statsScan`'s own
- *  header for why one action serves both. */
+ *  header for why one action serves both. `snapshot.prsCreated` may read
+ *  `{kind:'loading'}` -- the fold is done, the PR count's own fetch is not
+ *  yet; `stats.prs()` is the follow-up call for exactly that case. */
 export type StatsResult =
   | { readonly kind: 'ok'; readonly snapshot: StatsSnapshot }
   | { readonly kind: 'error'; readonly message: string };
 
+/** What `stats.prs()` answers -- see `CHANNELS.statsPrs`'s own header. Never
+ *  an error variant: a scan that failed outright is what `StatsResult`'s own
+ *  `'error'` already reports, and this channel always has SOME `PrsCreated`
+ *  to hand back, even if only a safe `'unavailable'`. */
+export type StatsPrsResult = { readonly kind: 'ok'; readonly prsCreated: PrsCreated };
+
 /**
- * The Stats & Usage screen's bridge member: `get()` on mount, `refresh()` on
- * its own button -- both invoke the SAME channel (`registerStatsIpc`'s own
+ * The Stats & Usage screen's bridge: `get()` on mount, `refresh()` on its
+ * own button -- both invoke the SAME scan channel (`registerStatsIpc`'s own
  * header explains why), so this type offers two names for the one act
  * rather than have the screen call a member named for someone else's
- * moment.
+ * moment. `prs()` is the separate follow-up the screen calls only when
+ * `get()`/`refresh()` answered `{kind:'loading'}` for the PR card.
  */
 export type StatsApi = {
   get(): Promise<StatsResult>;
   refresh(): Promise<StatsResult>;
+  prs(): Promise<StatsPrsResult>;
 };
 
 /**
- * Both members forward straight through -- no `unwrap`, because
- * `vam:stats:scan` answers bare (see `src/main/stats/ipc.ts`): a scan
- * failure is a fact about this machine's disk, not a `SourceError` there is
- * a source to phrase in the words of.
+ * Every member forwards straight through -- no `unwrap`, because both
+ * channels answer bare (see `src/main/stats/ipc.ts`): a scan failure is a
+ * fact about this machine's disk, not a `SourceError` there is a source to
+ * phrase in the words of.
  */
 export function createStatsApi(ipc: InvokerLike): StatsApi {
-  const scan = () => ipc.invoke(CHANNELS.statsScan) as Promise<StatsResult>;
-  return { get: scan, refresh: scan };
+  const scan = (forceRefresh: boolean) =>
+    ipc.invoke(CHANNELS.statsScan, { forceRefresh }) as Promise<StatsResult>;
+  return {
+    get: () => scan(false),
+    refresh: () => scan(true),
+    prs: () => ipc.invoke(CHANNELS.statsPrs) as Promise<StatsPrsResult>,
+  };
 }
 
 /**

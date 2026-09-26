@@ -683,6 +683,16 @@ export const CHANNELS = {
    * a question a paired phone gets to ask.
    */
   statsScan: 'vam:stats:scan',
+  /**
+   * THE PR COUNT'S OWN FOLLOW-UP. `statsScan` answers the moment the file
+   * fold is done, which may be BEFORE the PR-count fetch settles
+   * (`snapshot.prsCreated` reads `{kind:'loading'}` in that case) — this
+   * channel answers with the SAME scan's eventual `PrsCreated`, once it
+   * does. Called only when `statsScan` said `'loading'`; a call with no
+   * scan pending at all still answers (a safe `'unavailable'`), never
+   * hangs. Desktop-only, for the identical reason `statsScan` is.
+   */
+  statsPrs: 'vam:stats:prs',
 } as const;
 
 /**

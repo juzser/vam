@@ -60,11 +60,31 @@ export function planRead<T>(prev: CacheEntry<T> | undefined, stat: FileStat): Re
   return { kind: 'append', fromByte: prev.offset };
 }
 
-export const CACHE_VERSION = 1;
+/**
+ * Bumped 1 -> 2 the day `claude-usage-line.ts` grew a `message.id` dedup
+ * key: every cache a version-1 build wrote is INFLATED (a streamed
+ * message's repeated lines were each folded again -- see that module's own
+ * header for the measured 77% repeat rate), and there is no cheap way to
+ * repair one of those files in place. Bumping this constant is the whole
+ * fix for that: `isCacheStore` below refuses anything but an EXACT version
+ * match, so every old cache silently becomes `emptyCacheStore()` on next
+ * load, and the next scan reads every file whole rather than trusting a
+ * single inflated byte of it.
+ */
+export const CACHE_VERSION = 2;
 
 export type CacheStore<T> = {
   readonly version: number;
   readonly files: Readonly<Record<string, CacheEntry<T>>>;
+  /** The PR count's own cache entry — see `pr-count-cache.ts`'s own header
+   *  for why it lives here rather than a second file. Optional (rather than
+   *  a schema bump of its own) so a cache written before this field existed
+   *  still loads: `undefined` reads exactly like "no PR count cached yet",
+   *  which is also true. Opaque to this module the same way `files`'
+   *  per-file `state: T` is — `unknown` here rather than importing
+   *  `PrsCacheEntry`, which would make this domain-agnostic module depend
+   *  on `shared/stats.ts`. */
+  readonly prs?: unknown;
 };
 
 export function emptyCacheStore<T>(): CacheStore<T> {

@@ -70,12 +70,22 @@ const SNAPSHOT: StatsSnapshot = {
 
 function stubApi(
   result: StatsResult,
-  spies: { get?: ReturnType<typeof vi.fn>; refresh?: ReturnType<typeof vi.fn> } = {},
+  spies: {
+    get?: ReturnType<typeof vi.fn>;
+    refresh?: ReturnType<typeof vi.fn>;
+    prs?: ReturnType<typeof vi.fn>;
+  } = {},
 ) {
   const get = spies.get ?? vi.fn(async () => result);
   const refresh = spies.refresh ?? vi.fn(async () => result);
-  vi.stubGlobal('window', Object.assign(globalThis.window, { api: { stats: { get, refresh } } }));
-  return { get, refresh };
+  const prs =
+    spies.prs ??
+    vi.fn(async () => ({ kind: 'ok' as const, prsCreated: { kind: 'ok' as const, count: 0 } }));
+  vi.stubGlobal(
+    'window',
+    Object.assign(globalThis.window, { api: { stats: { get, refresh, prs } } }),
+  );
+  return { get, refresh, prs };
 }
 
 describe('StatsScreen', () => {
@@ -113,11 +123,36 @@ describe('StatsScreen', () => {
       kind: 'ok',
       snapshot: {
         ...SNAPSHOT,
-        prsCreated: { kind: 'unavailable', hint: 'connect GitHub in Settings → Integrations' },
+        prsCreated: {
+          kind: 'unavailable',
+          hint: 'connect GitHub in Settings → Integrations',
+          reason: 'not-logged-in',
+        },
       },
     });
     render(<StatsScreen onClose={() => {}} />);
     expect(await screen.findByText(/connect GitHub/)).toBeTruthy();
+    expect(await screen.findByText(/not logged in to gh/)).toBeTruthy();
+  });
+
+  it('shows a loading placeholder for PRs, then calls prs() and patches in the answer once it settles', async () => {
+    let resolvePrs:
+      | ((v: { kind: 'ok'; prsCreated: { kind: 'ok'; count: number } }) => void)
+      | undefined;
+    const prs = vi.fn(
+      () =>
+        new Promise<{ kind: 'ok'; prsCreated: { kind: 'ok'; count: number } }>((resolve) => {
+          resolvePrs = resolve;
+        }),
+    );
+    stubApi({ kind: 'ok', snapshot: { ...SNAPSHOT, prsCreated: { kind: 'loading' } } }, { prs });
+    render(<StatsScreen onClose={() => {}} />);
+    await screen.findByText('42');
+    expect(prs).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('…')).toBeTruthy();
+
+    resolvePrs?.({ kind: 'ok', prsCreated: { kind: 'ok', count: 7 } });
+    expect(await screen.findByText('7')).toBeTruthy();
   });
 
   it('shows Off for a provider with no data at all, and an Enable control', async () => {

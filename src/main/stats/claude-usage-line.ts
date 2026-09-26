@@ -16,8 +16,18 @@
  * machine before this was written. A missing token field is zero, not a
  * reason to call the line malformed — an assistant message with no cache
  * activity at all carries no `cache_creation_input_tokens` key.
- */
-
+ *
+ * `id` IS THE DEDUP KEY `scan.ts` needs. Measured on a real transcript
+ * (15,489 lines): a streamed assistant turn writes MULTIPLE lines carrying
+ * the SAME `message.id` and an IDENTICAL, already-cumulative `usage` object
+ * — 1,154 of 1,489 usage-bearing lines in that one file (77%) were such a
+ * repeat. Folding every line (this module's own job before this field
+ * existed) double- to quadruple-counts tokens, cost, turns and active time.
+ * `message.id` is read first (Anthropic's own identity for the assistant
+ * turn); the top-level `requestId` is the fallback for the rare line that
+ * carries no `message.id` at all — a coarser but still-stable-per-turn key.
+ * `null` only when a line has neither, in which case `scan.ts` cannot dedup
+ * it and folds it as it always did. */
 export type ClaudeUsageEvent = {
   readonly atMs: number;
   readonly model: string;
@@ -28,6 +38,7 @@ export type ClaudeUsageEvent = {
   /** A SUBSET of `outputTokens`, never additional — see `shared/stats.ts`'s
    *  `TokenMix` header. */
   readonly reasoningTokens: number;
+  readonly id: string | null;
 };
 
 export type ClaudeLineResult =
@@ -69,6 +80,7 @@ export function parseClaudeUsageLine(raw: string): ClaudeLineResult {
     typeof details === 'object' && details !== null
       ? num((details as Record<string, unknown>)['thinking_tokens'])
       : 0;
+  const id = str((message as Record<string, unknown>)['id']) ?? str(line['requestId']);
   return {
     kind: 'usage',
     event: {
@@ -79,6 +91,7 @@ export function parseClaudeUsageLine(raw: string): ClaudeLineResult {
       cacheWriteTokens: num(u['cache_creation_input_tokens']),
       cacheReadTokens: num(u['cache_read_input_tokens']),
       reasoningTokens: thinking,
+      id,
     },
   };
 }

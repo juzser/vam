@@ -184,6 +184,12 @@ const install = () => {
       refresh: async function () {
         return this.get();
       },
+      // Never actually called by this fixture (the snapshot's own
+      // `prsCreated` is already `'ok'`, never `'loading'`) -- present only
+      // so the bridge shape matches the real preload's `StatsApi` exactly,
+      // the same reason every other unused-in-this-fixture member above it
+      // is still here.
+      prs: async () => ({ kind: 'ok', prsCreated: { kind: 'ok', count: 23 } }),
     },
   };
 };
@@ -240,11 +246,51 @@ const browser = await chromium.launch();
   check('Claude Code shows Enabled, having data', bodyText.includes('Enabled'));
   check('an unknown-model cost never guesses — n/a is drawn', bodyText.includes('n/a'));
 
+  const tileCount = await page.locator('[data-stats-icon-tile]').count();
+  check(
+    'every headline card and overview tile drew its own icon tile',
+    tileCount === 3 + 4, // 3 headline cards + 4 overview tiles
+    `found ${tileCount}`,
+  );
+
   for (const theme of ['dark', 'light']) {
     await page.evaluate((t) => {
       document.documentElement.classList.toggle('light', t === 'light');
     }, theme);
     await page.waitForTimeout(120);
+
+    // A MISSING TAILWIND V4 TOKEN EMITS NO RULE AT ALL (this file's own
+    // header) -- `bg-running/15` painting NOTHING would leave every tile
+    // transparent, invisible against the card behind it in BOTH themes,
+    // never caught by a stylesheet read. Measured against a real PAINT.
+    const tilePaint = await page.evaluate(() => {
+      const tiles = [...document.querySelectorAll('[data-stats-icon-tile]')];
+      const card = document.querySelector('[data-stats-screen] .rounded-md');
+      return {
+        fills: tiles.map((t) => getComputedStyle(t).backgroundColor),
+        cardFill: card === null ? null : getComputedStyle(card).backgroundColor,
+      };
+    });
+    // Tailwind v4's OWN opacity-modifier output is a color-function string
+    // whose SPACE differs by token -- `bg-running/15` measured here paints
+    // `oklab(... / 0.15)`, not `rgba(...)` (a fully invisible fill can still
+    // end either `, 0)` or `/ 0)` depending on which). A check that only
+    // recognised `rgb(a)` would silently pass a token that emits no rule at
+    // all (an EMPTY string) exactly as readily as it would fail a real one
+    // -- so this asks the one question that holds regardless of colour
+    // space: is there a real value here, and is its own alpha non-zero.
+    const isInvisible = (fill) => fill === '' || fill === 'transparent' || /[,/]\s*0\)$/.test(fill);
+    const opaqueTiles = tilePaint.fills.filter((f) => !isInvisible(f));
+    check(
+      `${theme}: every icon tile paints a real, non-transparent fill`,
+      opaqueTiles.length === tilePaint.fills.length,
+      `only ${opaqueTiles.length} of ${tilePaint.fills.length} tiles painted something`,
+    );
+    check(
+      `${theme}: the icon tile's fill actually differs from the card behind it`,
+      tilePaint.fills.every((f) => f !== tilePaint.cardFill),
+      `tile fill matched the card fill exactly: ${tilePaint.fills[0]}`,
+    );
 
     const scale = await page.evaluate(() => {
       const cells = [...document.querySelectorAll('[data-stats-heatmap] .rounded-\\[2px\\]')];
