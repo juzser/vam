@@ -93,7 +93,7 @@ export function SettingsCard({
           onClick={toggle}
           aria-expanded={open}
           aria-controls={contentId}
-          className={`flex w-full cursor-pointer items-center gap-2.5 px-4 py-3 text-left ${FOCUS_RING}`}
+          className={`vam-tap flex w-full cursor-pointer items-center gap-2.5 px-4 py-3 text-left ${FOCUS_RING}`}
         >
           {/* THE ICON TILE -- a rounded square, the section's own glyph inside
               it, decorative: the button's own accessible name is the label
@@ -255,7 +255,7 @@ export function AdvancedDisclosure({
         onClick={toggle}
         aria-expanded={open}
         aria-controls={contentId}
-        className={`flex cursor-pointer items-center gap-1 text-control text-ink-dim hover:text-ink ${FOCUS_RING}`}
+        className={`vam-tap flex cursor-pointer items-center gap-1 text-control text-ink-dim hover:text-ink ${FOCUS_RING}`}
       >
         {open ? (
           <ChevronDown size={13} strokeWidth={1.8} aria-hidden="true" />
