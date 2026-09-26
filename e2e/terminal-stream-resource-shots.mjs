@@ -124,21 +124,27 @@ function check(label, ok, detail) {
   failures.push(label);
 }
 
-// A generic "retry-once-alone" helper (#493's own `withP95RetryOnce`
+// A generic "retry N times, alone" helper (#493's own `withP95RetryOnce`
 // pattern in `terminal-stream-latency-shots.mjs`, generalised past wall-
 // clock p95s to any measurement whose ACCEPTABILITY, not its raw numbers,
-// is what gets asserted): re-run `measure` a single time, alone, if the
-// first pass does not satisfy `acceptable` -- a real tmux session and a
-// real Chromium renderer both carry enough incidental jitter that a single
-// noisy pass shouldn't fail the guard outright, but a SECOND bad pass is a
-// real finding, not noise.
-async function withRetryOnce(label, measure, acceptable) {
+// is what gets asserted): re-run `measure` up to `extraAttempts` more times
+// if the previous pass does not satisfy `acceptable` -- a real tmux session
+// and a real Chromium renderer both carry enough incidental jitter that a
+// single noisy pass shouldn't fail the guard outright, but running out of
+// attempts is a real finding, not noise.
+async function withRetries(label, measure, acceptable, extraAttempts) {
   let result = await measure();
-  if (acceptable(result)) return result;
-  console.warn(`  retry: ${label} missed its bound on the first pass -- re-measuring once, alone, before failing for real`);
-  result = await measure();
+  for (let attempt = 1; attempt <= extraAttempts && !acceptable(result); attempt += 1) {
+    console.warn(
+      `  retry: ${label} missed its bound on attempt ${attempt} of ${extraAttempts} -- re-measuring, alone, before failing for real`,
+    );
+    result = await measure();
+  }
   return result;
 }
+
+// The ORIGINAL, one-retry shape every OTHER caller below still uses.
+const withRetryOnce = (label, measure, acceptable) => withRetries(label, measure, acceptable, 1);
 
 /**
  * ABSOLUTE CEILINGS, calibrated from REAL data -- the coordinator's own
@@ -380,12 +386,77 @@ await new Promise((r) => setTimeout(r, 300));
  * or given up. This never weakens the assertion: `sawReseed` below is still
  * "a real reseed actually happened", never "no pause is fine too" -- see
  * this file's own `check()` for `pauseAfter.sawReseed`, unchanged.
+ *
+ * UPDATED A FOURTH TIME -- ROOT-CAUSED (run 36236036684, job 108387840295:
+ * BOTH the first pass and its own retry logged 0 reseeds over a FULL 25s
+ * duty cycle each, yet `final screen matches capture-pane's own DONE
+ * marker: true` -- the SESSION recovered fine; only THIS client's own view
+ * never did). Investigated with a temporary raw-wire tap (a second listener
+ * on the control child's own stdout, the SAME technique
+ * `stream-client-pause-after.test.ts` already uses) logging `sawPauseRaw`/
+ * `sawContinueRaw` independently of `seeds.length`, pushed on its own branch
+ * and read back from CI: three ordinary reruns AND one run with an on-demand
+ * `VAM_E2E_FORCE_CONTENTION=20` lever (20 competing `yes` processes, the
+ * SAME starvation shape that test's own header RCA used to reproduce ITS
+ * flake locally) all completed the round trip in 1-4s. Neither tmux version
+ * (3.4-1ubuntu0.1, identical to the failing run) nor CPU contention
+ * reproduces this on demand -- ruled out as the sole cause, not merely
+ * unconfirmed. tmux's own source (`control.c:control_check_age`) confirms
+ * the age check is `clock_gettime(CLOCK_MONOTONIC)`-based, computed fresh
+ * on every call, not a cached/periodic tick -- robust to ordinary scheduling
+ * jitter in principle, PROVIDED new pane output keeps arriving to re-trigger
+ * it, which a continuous `yes` guarantees.
+ *
+ * What IS measurably different: this function's own former budget shared
+ * ONE 25s window across `%pause` -> this client's own `-A ...:continue` ->
+ * its reply -> the reseed chain's two round trips, then gave the recovery
+ * check only 10 further seconds -- a combined ~35s per attempt. The vitest
+ * twin gives EACH stage its own independent, generous deadline (25s for
+ * `sawPause` alone, then 15s for `sawContinue`, then 30s for its own live
+ * text to show the marker) -- ~80s of INDEPENDENT budget per attempt, twice
+ * with vitest's own `retry: 1`. This repo's own measured history
+ * (`starvation-stretches-11ms-to-5022ms.md`: an 11ms operation stretched to
+ * 5022ms on a loaded shared runner) makes an occasional stall entirely
+ * plausible that the twin's own generosity absorbs and this guard's shared,
+ * narrower budget does not -- the SAME shape of gap named in this file's own
+ * "UPDATE A THIRD TIME" above, one layer deeper: conflating three stages
+ * into one window means a slow stage AFTER `%pause` already arrived reads
+ * back as "no pause at all", indistinguishable from a genuine regression.
+ *
+ * THE FIX: give `%pause` its own duty-cycle deadline (unchanged, 25s -- the
+ * raw-wire tap now exits on `sawPauseRaw`, not on a completed reseed, so a
+ * slow reseed can never be mistaken for a pause that never arrived), then a
+ * SEPARATE, condition-polled wait for the reseed (30s, matching the twin's
+ * own `sawContinue`+live-text generosity combined) only once `%pause` is
+ * confirmed on the wire. `sawPauseRaw` is asserted on its own, below --
+ * "tmux never sent %pause" and "tmux sent %pause but this client never
+ * finished reseeding" are now two DIFFERENT failures, never one blended
+ * message -- directly the ambiguity this investigation needed resolved.
+ * Never weakens either assertion: both still require the REAL thing to have
+ * happened; see this file's own `check()` calls for `pauseAfter.sawPauseRaw`
+ * and `pauseAfter.sawReseed`.
  */
 async function measurePauseAfter() {
+  // A raw-wire tap on the control child's own stdout -- a SECOND listener,
+  // never interfering with `StreamClient`'s own parsing (this file's own
+  // `spawnChild` injection seam, the SAME technique
+  // `stream-client-pause-after.test.ts` already uses) -- so this function
+  // can tell "tmux never sent %pause" apart from "%pause arrived but the
+  // round trip after it stalled", the ambiguity the fourth update above
+  // measured out on CI.
+  let sawPauseRaw = false;
+  let sawContinueRaw = false;
+  let rawTail = '';
   let realStdout;
   const observingSpawn = (binary, argv) => {
     const child = spawnRealControlChild(binary, argv);
     realStdout = child.stdout;
+    child.stdout.on('data', (chunk) => {
+      const text = rawTail + String(chunk);
+      if (!sawPauseRaw && /%pause /.test(text)) sawPauseRaw = true;
+      if (!sawContinueRaw && /%continue/.test(text)) sawContinueRaw = true;
+      rawTail = text.slice(-256);
+    });
     return child;
   };
   const client = new StreamClient({
@@ -403,27 +474,39 @@ async function measurePauseAfter() {
     // single window -- or even this duty cycle's own first couple of
     // iterations -- ever lines up with it. `yes` alone never stops on its
     // own; interrupted explicitly below only once a reseed has been
-    // observed (or the deadline gives up).
+    // observed (or both deadlines below give up).
     spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes', 'Enter'], { env });
 
-    // A DUTY-CYCLE stall, not one fixed window (this function's own header,
-    // third update) -- the SAME technique `stream-client-pause-after.test.ts`
-    // uses: pause the real reader, briefly resume it so a `%pause` already
-    // on the wire can be processed and this client's own `-A "...:continue"`
-    // round trip can land, and repeat -- up to a generous deadline -- rather
-    // than gambling that one fixed window overlaps with however fast (or
-    // slow) this runner happens to produce and schedule the flood today.
+    // STAGE 1 -- `%pause` ITSELF, its own budget (fourth update above): a
+    // DUTY-CYCLE stall (pause the real reader, briefly resume it so `%pause`
+    // already on the wire can be read, repeat) up to a generous deadline,
+    // exiting the MOMENT `sawPauseRaw` latches true -- never waiting on the
+    // reseed here, so a slow STAGE 2 below can never read back as "no pause
+    // at all".
     const pauseDeadline = Date.now() + 25_000;
-    while (seeds.length === 0 && Date.now() < pauseDeadline) {
+    while (!sawPauseRaw && Date.now() < pauseDeadline) {
       realStdout?.pause();
       await new Promise((r) => setTimeout(r, 1_000));
       realStdout?.resume();
       await new Promise((r) => setTimeout(r, 300));
     }
 
-    // Only NOW, with the duty cycle done (a reseed observed, or the
-    // deadline exhausted), interrupt the continuous flood and print a
-    // marker this attempt can wait on.
+    // STAGE 2 -- THE ROUND TRIP'S REST, its OWN separate budget: only once
+    // `%pause` is confirmed on the wire, wait -- condition-polled, never a
+    // bare sleep -- for this client's own `-A "...:continue"` reply and the
+    // reseed after it to land. 30s, matching the vitest twin's own combined
+    // `sawContinue` (15s) + live-text (30s) generosity rather than sharing
+    // stage 1's clock -- see this function's own header, fourth update.
+    if (sawPauseRaw) {
+      const reseedDeadline = Date.now() + 30_000;
+      while (seeds.length === 0 && Date.now() < reseedDeadline) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+
+    // Only NOW, with both stages done (a reseed observed, or one of the two
+    // deadlines gave up), interrupt the continuous flood and print a marker
+    // this attempt can wait on.
     spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'C-c'], { env });
     spawnSync(
       'tmux',
@@ -441,18 +524,41 @@ async function measurePauseAfter() {
     const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
     console.log(
       `\nreal tmux, a real StreamClient (sends pause-after), a duty-cycled real stdout (not a fixed window), a ` +
-        `continuous flood: %pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
+        `continuous flood: %pause seen on the wire: ${sawPauseRaw}, %continue seen on the wire: ${sawContinueRaw}, ` +
+        `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
         `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
         'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
     );
-    return { sawReseed: seeds.length > 0, correct };
+    return { sawPauseRaw, sawReseed: seeds.length > 0, correct };
   } finally {
     client.dispose();
   }
 }
 
-const pauseAfter = await withRetryOnce('pause-after recovery', measurePauseAfter, (r) => r.sawReseed && r.correct);
+// TWO retries (three attempts total), not `withRetryOnce`'s usual one: this
+// specific measurement's own history (PR #504 run 36137150536, PR #510/this
+// investigation's run 36236036684) is the only one of this file's six that
+// has repeatedly needed a root-cause investigation of its own, and THIS
+// investigation's own live catch (job 108401621854) measured WHY a single
+// retry is not always enough -- tmux's real `%pause` gate depends on a
+// server-side write buffer crossing a 512-byte low-watermark
+// (`control.c:CONTROL_BUFFER_LOW`) before this pane's PTY reads even get
+// re-enabled for its age check to run again (`control.c:control_pane_
+// offset`), a race between that cadence and this file's own duty-cycle that
+// a persistently degraded runner (this job's own accumulated wear from 49
+// PRECEDING sequential guards, unlike its vitest twin's short, early `check`
+// job) can occasionally lose on BOTH the first attempt and its one retry
+// alike, MEASURED identically in that same job's own log. A fresh session,
+// fresh `StreamClient`, and a third independent attempt is the cheapest way
+// to absorb that without weakening what gets asserted.
+const pauseAfter = await withRetries(
+  'pause-after recovery',
+  measurePauseAfter,
+  (r) => r.sawPauseRaw && r.sawReseed && r.correct,
+  2,
+);
 report.pauseAfter = pauseAfter;
+check('pause-after: tmux actually sent %pause for this pane (seen on the raw wire)', pauseAfter.sawPauseRaw);
 check('pause-after: %pause triggered a reseed (a real StreamClient throttled by tmux)', pauseAfter.sawReseed);
 check('pause-after: the pane recovers to the correct final screen', pauseAfter.correct);
 
