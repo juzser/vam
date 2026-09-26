@@ -890,23 +890,35 @@ console.log(`${outDir}/sidebar-tree-levels.png`);
 await page.locator('[data-sidebar-pane]').screenshot({ path: `${outDir}/sidebar-tree-column.png` });
 console.log(`${outDir}/sidebar-tree-column.png`);
 
-// The project menu, which is where the heading's `+` went.
+// The project menu -- the `+` sits beside its trigger again, not inside it.
 await page.locator('[data-project-heading][data-project-id="factory"]').hover();
 await page.locator('[data-project-menu="factory"]').click();
 await page.waitForSelector('[data-project-menu-panel="factory"]');
 const menu = await page.evaluate(() => ({
-  items: [...document.querySelectorAll('[data-project-menu-panel] [role="menuitem"]')].map((i) =>
-    i.getAttribute('data-project-menu-item'),
+  items: [...document.querySelectorAll('[data-project-menu-panel] [role="menuitem"]')].map(
+    (i) => ({
+      item: i.getAttribute('data-project-menu-item'),
+      chord: i.querySelector('[data-inline-chord]')?.textContent ?? null,
+    }),
   ),
-  focused: document.activeElement?.getAttribute('data-project-menu-item') ?? null,
   adds: document.querySelectorAll('[data-new-session-in-project]').length,
 }));
 console.log('project menu:', JSON.stringify(menu));
-check('no `+` is left on any heading', menu.adds === 0, `${menu.adds} still drawn`);
+check('the `+` is drawn on every heading, not only this one', menu.adds > 0, `${menu.adds} drawn`);
 check(
-  'the add is the menu item the keyboard lands on, so `...` then Enter starts one',
-  menu.items[0] === 'new-session' && menu.focused === 'new-session',
-  JSON.stringify(menu),
+  'New session is no longer a menu item',
+  !menu.items.some((i) => i.item === 'new-session'),
+  JSON.stringify(menu.items),
+);
+check(
+  'New worktree… carries its bound chord (Mod-Shift-w), the one item here that has one',
+  (menu.items.find((i) => i.item === 'new-worktree')?.chord ?? '').length > 0,
+  JSON.stringify(menu.items),
+);
+check(
+  'an item with no binding (remove) shows no chord',
+  menu.items.find((i) => i.item === 'remove')?.chord === null,
+  JSON.stringify(menu.items),
 );
 await page.locator('[data-sidebar-pane]').screenshot({ path: `${outDir}/sidebar-tree-menu.png` });
 console.log(`${outDir}/sidebar-tree-menu.png`);

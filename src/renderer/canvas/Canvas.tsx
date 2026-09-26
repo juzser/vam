@@ -6486,9 +6486,9 @@ function CanvasInner({
           // `newProject` is the honest fallback: it owns its own three
           // refusals (source, picker, cancel) and ends in exactly the row
           // this key is for, one directory pick later. Same handler the
-          // sidebar foot button and the getting-started screen's own button
-          // call -- one path, not a second "no session, no route" case to
-          // keep in step with it.
+          // Projects header's own `+` and the getting-started screen's own
+          // button call -- one path, not a second "no session, no route"
+          // case to keep in step with it.
           if (focusedEntry === null) {
             void newProject();
             return;
@@ -7118,25 +7118,6 @@ function CanvasInner({
     [allEntries, closeSession],
   );
 
-  const onSidebarAdd = useCallback(() => {
-    // The footer strip names no project, so it uses the focused
-    // session's, exactly as `o` does — the two controls are one path.
-    //
-    // NEVER A DEAD END. With nothing focused there is no project for this
-    // button to add TO, so it falls back to `newProject` -- the same
-    // handler the Projects header's `+` and `Mod-Shift-p` already call, and
-    // the same one `case 'newSession'` above falls back to for the `o`
-    // chord. `SessionList`'s own `addWillCreateProject` prop is computed
-    // from the identical condition, which is what keeps the footer's LABEL
-    // ("New project" instead of "New session") from disagreeing with what a
-    // click on it is about to do.
-    if (focusedEntry === null) {
-      void newProject();
-      return;
-    }
-    void createSession(focusedEntry.project.id, focusedEntry.project.name);
-  }, [focusedEntry, createSession, newProject]);
-
   const onSidebarAddInProject = useCallback(
     (project: Project) => void createSession(project.id, project.name),
     [createSession],
@@ -7359,11 +7340,6 @@ function CanvasInner({
     onPick: onSidebarPick,
     onClose: onSidebarClose,
     onRenameSession: onSidebarRenameSession,
-    onAdd: onSidebarAdd,
-    // See `onSidebarAdd`'s own comment: the SAME condition that decides
-    // what a click on the footer button DOES also decides what it is
-    // LABELLED, so the two can never disagree about what pressing it means.
-    addWillCreateProject: focusedEntry === null,
     onAddInProject: onSidebarAddInProject,
     pendingAction: pendingAction,
     // The project fold, stored -- the pair whose absence was the defect. Both

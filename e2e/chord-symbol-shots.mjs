@@ -605,13 +605,17 @@ for (const each of PLATFORMS) {
 
   /* ── TWO MORE TIGHT SITES, NOW THAT `ChordGlyphs` PAINTS FLAT ────────── */
   //
-  // The Send key option's look replaced #468's enlarged-modifier one
-  // (`ShortcutTip.tsx`'s `ChordGlyphs`), and a shrink is the direction that
-  // never clips — but "never" is a claim, not a measurement, and the sidebar
-  // footer and a command-palette row are both a control sharing its line
-  // with a label rather than a box with room to spare (`ShortcutTip.tsx`'s
-  // own distinction). A zero-size box here is a chord painted nowhere; a box
-  // wider than its row is one running into the label beside it.
+  // The Send key option's look replaced pull request 468's enlarged-modifier
+  // one (`ShortcutTip.tsx`'s `ChordGlyphs`), and a shrink is the direction
+  // that never clips — but "never" is a claim, not a measurement, and the
+  // project menu's own "New worktree…" row and a command-palette row are
+  // both a control sharing its line with a label rather than a box with room
+  // to spare (`ShortcutTip.tsx`'s own distinction). A zero-size box here is a
+  // chord painted nowhere; a box wider than its row is one running into the
+  // label beside it. This used to measure the sidebar's own full-width
+  // footer button, withdrawn once the per-project `+` and the Projects
+  // header's own `+` made it redundant -- the project menu's chord row is
+  // this file's replacement site for the identical property.
   await page.keyboard.press('Escape');
   await settle(
     page,
@@ -619,27 +623,49 @@ for (const each of PLATFORMS) {
     `${each.name}: settings closes again`,
   );
 
-  const footer = await page.evaluate(() => {
-    const button = document.querySelector('[data-sidebar-add]');
-    const chip = button?.querySelector('[data-inline-chord]');
-    if (button === null || chip === null || button === undefined || chip === undefined) {
-      return null;
-    }
-    const buttonBox = button.getBoundingClientRect();
-    const chipBox = chip.getBoundingClientRect();
-    return {
-      text: chip.textContent,
-      painted: chipBox.width > 0 && chipBox.height > 0,
-      // The chip has to be INSIDE the button it shares a line with, not
-      // spilling past its right edge into whatever sits beside the strip.
-      insideButton: chipBox.right <= buttonBox.right + 0.5,
-    };
-  });
-  check(
-    `${each.name}: the sidebar footer's chord chip paints and fits its row`,
-    footer !== null && footer.painted && footer.insideButton,
-    JSON.stringify(footer),
+  // A REAL, AWAITED CLICK, NOT A SYNTHETIC `dispatchEvent` INSIDE ONE
+  // `evaluate`: React 18 commits the menu's `openMenu` state on a microtask,
+  // which a same-turn `dispatchEvent` + query races and loses. Crossing the
+  // `await` boundary (as every other interaction in this file already does)
+  // gives the browser's own microtask queue a turn to flush before the next
+  // line reads the DOM.
+  const projectId = await page.evaluate(
+    () => document.querySelector('[data-project-heading]')?.getAttribute('data-project-id') ?? null,
   );
+  let menuRow = null;
+  if (projectId !== null) {
+    await page.locator(`[data-project-menu="${projectId}"]`).click();
+    await page.waitForSelector(`[data-project-menu-panel="${projectId}"]`, { timeout: 5_000 });
+    menuRow = await page.evaluate((id) => {
+      const item = document.querySelector(
+        `[data-project-menu-panel="${id}"] [data-project-menu-item="new-worktree"]`,
+      );
+      const chip = item?.querySelector('[data-inline-chord]');
+      if (item === null || chip === null || item === undefined || chip === undefined) {
+        return null;
+      }
+      const itemBox = item.getBoundingClientRect();
+      const chipBox = chip.getBoundingClientRect();
+      return {
+        text: chip.textContent,
+        painted: chipBox.width > 0 && chipBox.height > 0,
+        // The chip has to be INSIDE the item it shares a line with, not
+        // spilling past its right edge.
+        insideItem: chipBox.right <= itemBox.right + 0.5,
+        // FLUSH AGAINST THE RIGHT PADDING, not merely "past the midpoint" --
+        // the Windows spelling (`Ctrl+Shift+W`) is wide enough on its own to
+        // start left of the row's midpoint while still sitting hard against
+        // the right edge, which a midpoint test would misread as centred.
+        rightAligned: itemBox.right - chipBox.right <= 10,
+      };
+    }, projectId);
+  }
+  check(
+    `${each.name}: the project menu's New worktree chip paints and fits its row, right-aligned`,
+    menuRow !== null && menuRow.painted && menuRow.insideItem && menuRow.rightAligned,
+    JSON.stringify(menuRow),
+  );
+  await page.keyboard.press('Escape');
 
   await page.keyboard.press('Meta+k');
   const paletteOpen = await settle(

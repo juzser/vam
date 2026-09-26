@@ -201,44 +201,22 @@ describe('the session row after the tidy-up', () => {
   });
 });
 
-describe('the per-project add moved into the menu', () => {
-  it('leaves no + on the heading at all', () => {
+describe('the per-project add, back on the heading', () => {
+  it('draws one `+` per project heading, and none of it in the menu', () => {
     const { container } = mount(mixed(), [GROUP]);
-    // One icon less per heading was the whole point: the heading now carries
-    // the fold and the menu, and nothing else the pointer can hit.
-    expect(container.querySelectorAll('[data-new-session-in-project]')).toHaveLength(0);
-  });
-
-  it('offers it as the first item of the project menu, so the menu opens on it', () => {
-    const seen: Project[] = [];
-    const { container } = render(
-      <SessionList
-        {...baseProps(mixed())}
-        groups={[GROUP]}
-        collapsedGroups={[]}
-        onAddInProject={(project) => seen.push(project)}
-      />,
-    );
+    // Two projects on screen (alpha, gamma) -- one `+` each.
+    expect(container.querySelectorAll('[data-new-session-in-project]')).toHaveLength(2);
     act(() => {
       (container.querySelector('[data-project-menu="p1"]') as HTMLElement).click();
     });
-    const items = [
-      ...container.querySelectorAll('[data-project-menu-panel="p1"] [role="menuitem"]'),
-    ];
-    expect(items.map((item) => item.getAttribute('data-project-menu-item'))[0]).toBe('new-session');
-    // The menu focuses its first item, so `...` then Enter is the whole
-    // gesture -- which is what pays for the click the move costs.
-    expect(document.activeElement).toBe(items[0]);
-
-    act(() => {
-      (items[0] as HTMLElement).click();
-    });
-    expect(seen.map((project) => project.id)).toEqual(['p1']);
-    // It closes behind itself, like every other item in this menu.
-    expect(container.querySelector('[data-project-menu-panel]')).toBeNull();
+    expect(
+      container.querySelector(
+        '[data-project-menu-panel="p1"] [data-project-menu-item="new-session"]',
+      ),
+    ).toBeNull();
   });
 
-  it('creates in the project whose menu it was opened from', () => {
+  it('creates in the project whose heading it sits on', () => {
     const seen: Project[] = [];
     const { container } = render(
       <SessionList
@@ -249,15 +227,12 @@ describe('the per-project add moved into the menu', () => {
       />,
     );
     act(() => {
-      (container.querySelector('[data-project-menu="p3"]') as HTMLElement).click();
-    });
-    act(() => {
-      (container.querySelector('[data-project-menu-item="new-session"]') as HTMLElement).click();
+      (container.querySelector('[data-new-session-in-project="p3"]') as HTMLElement).click();
     });
     expect(seen.map((project) => project.id)).toEqual(['p3']);
   });
 
-  it('still says the refusal when the source cannot create', () => {
+  it('still says the refusal, on the tooltip rather than as visible text', () => {
     const { container } = render(
       <SessionList
         {...baseProps(mixed())}
@@ -266,16 +241,13 @@ describe('the per-project add moved into the menu', () => {
         newSessionDecline="factory has no new-session command"
       />,
     );
-    act(() => {
-      (container.querySelector('[data-project-menu="p1"]') as HTMLElement).click();
-    });
-    const item = container.querySelector('[data-project-menu-item="new-session"]');
-    // The item is still THERE and still clickable -- refusing on click and
+    const add = container.querySelector('[data-new-session-in-project="p1"]');
+    // The button is still THERE and still clickable -- refusing on click and
     // saying why is honest, refusing by being unclickable reads as broken.
-    // The refusal is VISIBLE text, not a `title` and no longer a tooltip: a
-    // menu item has room for a sentence where an icon button had none, which
-    // is the one thing this move buys back for the click it costs.
-    expect(item?.getAttribute('title')).toBeNull();
-    expect(item?.textContent).toContain('factory has no new-session command');
+    // The refusal rides the `ShortcutTip`, not a native `title` a keyboard
+    // user could never open (`test/keyboard/shortcut-tip.test.tsx` holds the
+    // tip's own behaviour); it is not painted as static text on the button.
+    expect(add?.getAttribute('title')).toBeNull();
+    expect(add?.textContent).not.toContain('factory has no new-session command');
   });
 });
