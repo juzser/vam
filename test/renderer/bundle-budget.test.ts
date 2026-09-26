@@ -90,6 +90,26 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * `electron-vite`'s CLI has no `--manifest` flag (unlike plain `vite build`),
  * so the manifest approach the web-pipeline guard used is not available
  * here; the HTML is the real, unassailable substitute.
+ *
+ * A FOURTH BUMP, AND THE FIRST THAT IS NOT A SPLIT: the cache-timer
+ * countdown (`domain/cache-timer.ts`, `panels/CacheCountdown.tsx`,
+ * `panels/cache-timer-clock.ts`, the two new `Session` fields threaded
+ * through `SessionList.tsx`, and the sidebar's first-ever use of lucide's
+ * `Timer` glyph) is eager by necessity -- it draws in the sidebar, which
+ * every load already pays for, so there is no lazy boundary to move it
+ * behind the way `SettingsOverlay` and `FilesTab` were. Measured,
+ * `electron-vite build`, same command against a worktree of the commit this
+ * feature branched from and against this branch, otherwise identical:
+ *
+ *     entry, before (92a6ca65, this feature's own merge-base)   689,674 B
+ *     entry, after (this branch)                                692,665 B  (+2,991 B, +0.43%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves to 696,000 -- about 0.5% above the measured
+ * "after", a few hundred bytes of headroom for an ordinary dependency patch
+ * rather than the ~10% a lazy split earns: this is organic feature weight in
+ * the eager path, not a chunk that could be moved out of it, so the bar
+ * stays close to what was actually measured instead of inviting the next
+ * eager feature to spend a whole percent before this test notices.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -100,7 +120,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 690_000;
+const ENTRY_BUDGET_BYTES = 696_000;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the

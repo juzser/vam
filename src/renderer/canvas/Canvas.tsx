@@ -7320,6 +7320,10 @@ function CanvasInner({
     onFilterMenuToggle: setFilterMenuOpen,
     originFilters: prefs.filters,
     onOriginFilters: onSidebarOriginFilters,
+    // The Sessions settings switch -- both the desktop column below and
+    // `PhoneShell` (which reuses this SAME object, `sidebar={sidebarProps}`
+    // a few lines down) draw the countdown off this one flag.
+    cacheTimerEnabled: prefs.cacheTimer,
     viewOptions: prefs.viewOptions,
     onViewOptions: onSidebarViewOptions,
     hiddenCounts: hiddenCounts,

@@ -643,6 +643,26 @@ export type Session = {
   /** Newest first. The canvas shows the first three. */
   readonly decisions: readonly Decision[];
   /**
+   * WHEN CLAUDE CODE'S OWN PROMPT CACHE WAS LAST READ OR WRITTEN, ISO-8601,
+   * and how long that entry lives from that moment (`cacheTtlMs`) -- together
+   * what the sidebar's cache-timer countdown counts down from
+   * (`domain/cache-timer.ts`). `main/sources/claude-code/cache-activity.ts`
+   * carries the whole reading rule, off the transcript tail already read for
+   * `decisions`.
+   *
+   * OPTIONAL, on the rule every fact only one source answers today follows
+   * (`createdAt`, `source`): absent is "nobody asked", not "no cache
+   * activity" -- `claude-code`'s own reader always computes a verdict, `null`
+   * included, so `null` here means THIS source looked and found none, while
+   * absent means a different source (which has no such cache to report on),
+   * or a row built by a path this feature has not been threaded through
+   * (`pane-row.ts`'s empty and terminal-only rows).
+   */
+  readonly lastCacheActivityAt?: string | null;
+  /** `null` exactly when `lastCacheActivityAt` is `null` -- there being no
+   *  timer to time. Absent under the same rule as `lastCacheActivityAt`. */
+  readonly cacheTtlMs?: number | null;
+  /**
    * Which system this session came from. Optional because merging several
    * sources into one project group (this task's point) cannot force every
    * existing fixture to name one at once.
