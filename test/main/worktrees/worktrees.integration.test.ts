@@ -359,6 +359,46 @@ describe('listWorktrees', () => {
     const worktrees = result as readonly { path: string; branch: string | null }[];
     expect(worktrees.some((w) => w.path === manualPath && w.branch === 'manual')).toBe(true);
   });
+
+  /**
+   * `external` IS PURELY PATH-BASED, MEASURED HERE AGAINST TWO REAL SHAPES --
+   * the UI's own new "Show external worktrees" filter (phase 2b) needs a way
+   * to tell "vam's own" from "somebody else's" that does not depend on
+   * having watched the `git worktree add` call happen. `worktreesRootFor`'s
+   * own sibling-of-the-repo path is the ONLY thing that means "vam made
+   * this" -- `createWorktree`'s own body never writes anywhere else -- so a
+   * worktree whose PARENT directory is that root is not external regardless
+   * of how it came to exist (by vam's own "+"  button, or by hand, placed
+   * there to look like one); everything else is.
+   */
+  it('reports `external: false` for a worktree created through `createWorktree`, inside vam’s own root', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    await createWorktree({ projectId: projectIdOf(repo), name: 'feat' }, deps);
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly { path: string; external: boolean }[];
+    expect(worktrees).toHaveLength(1);
+    expect(worktrees[0]?.external).toBe(false);
+  });
+
+  it('reports `external: true` for a worktree made directly with `git worktree add`, outside vam’s own root', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const manualPath = join(parent, 'manual-worktree');
+    execFileSync('git', ['worktree', 'add', '--no-track', '-b', 'manual', manualPath], {
+      cwd: repo,
+    });
+
+    const result = await listWorktrees(projectIdOf(repo), deps);
+
+    const worktrees = result as readonly { path: string; external: boolean }[];
+    const manual = worktrees.find((w) => w.path === manualPath);
+    expect(manual?.external).toBe(true);
+  });
 });
 
 describe('removeWorktree', () => {

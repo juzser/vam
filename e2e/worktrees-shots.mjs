@@ -7,14 +7,27 @@
  * painted -- and a THIRD, locked row proving its delete control is never
  * drawn at all.
  *
- * `test/panels/worktrees/WorktreesSection.test.tsx` and
+ * PHASE 2B ADDS THE FILTER ITSELF: both the adopted row (truly external --
+ * its path sits outside `vam-worktrees/` entirely) and the locked row (vam's
+ * own, but locked) are now HIDDEN BY DEFAULT -- the operator's own report
+ * opening a project full of worktrees that are not vam's, or are locked, with
+ * no way to hide or fold them. `worktrees-sidebar` is now the SHIPPED
+ * DEFAULT: one plain row, a quiet "2 hidden" note, nothing else. A second
+ * state, `worktrees-external-tree`, turns "Show external worktrees" on from
+ * the same filter popover every session-origin toggle already lives in, and
+ * shoots the compact, dimmed, dotted-connector tree those two rows draw in
+ * once shown -- nested under the project's own worktrees, never mixed into
+ * the plain list above it.
+ *
+ * `test/panels/worktrees/WorktreesSection.test.tsx`,
+ * `WorktreesSection.external-worktrees.test.tsx` and
  * `ConfirmDeleteWorktree.test.tsx` already prove the BEHAVIOUR in happy-dom:
  * fetch, create, delete, the dirty-tree escalation, the agent-worktree
- * filter, the badges. None of that is a rectangle or a paint question, and
- * `WorktreesSection.tsx`'s own header names why this feature reads
- * `window.api` directly rather than taking SessionList's usual callback
- * props -- which this file also exercises for real, through the actual
- * preload-shaped stub, rather than a mocked prop.
+ * filter, the external/locked filter, the badges. None of that is a
+ * rectangle or a paint question, and `WorktreesSection.tsx`'s own header
+ * names why this feature reads `window.api` directly rather than taking
+ * SessionList's usual callback props -- which this file also exercises for
+ * real, through the actual preload-shaped stub, rather than a mocked prop.
  *
  * THE STUB is `sidebar-ownership-shots.mjs`'s own full `PreloadSourceApi`
  * shape (that file's header explains why a partial one reddens the whole
@@ -25,8 +38,8 @@
  * holds for `window.api.load`.
  *
  * Committed evidence: `docs/ui/worktrees-sidebar-{dark,light}.png`,
- * `worktrees-create-{dark,light}.png`, `worktrees-delete-confirm-
- * {dark,light}.png`.
+ * `worktrees-external-tree-{dark,light}.png`, `worktrees-create-
+ * {dark,light}.png`, `worktrees-delete-confirm-{dark,light}.png`.
  *
  * FALSIFIED BY HAND: comment out `WorktreesSection`'s
  * `if (worktrees.length === 0 && !creating) return null;` early return --
@@ -113,6 +126,7 @@ const INITIAL_WORKTREE = {
   prunable: false,
   prunableReason: null,
   detached: false,
+  external: false,
 };
 
 /**
@@ -120,6 +134,11 @@ const INITIAL_WORKTREE = {
  * never inside `vam-worktrees/`, that vam now lists and can safely delete
  * exactly like `INITIAL_WORKTREE` above. Its `status` entry (below) paints
  * both badges at once: a dirty dot AND an ahead/behind pair.
+ *
+ * `external: true` -- phase 2b's own field, purely path-based
+ * (`worktrees.ts`'s own `worktreesRootFor`): this is the row phase 2b's new
+ * filter hides by default, and shows nested/dimmed once the operator turns
+ * it on.
  */
 const ADOPTED_WORKTREE = {
   worktreeId: '/Users/operator/code/scratch/manual-hotfix',
@@ -131,11 +150,15 @@ const ADOPTED_WORKTREE = {
   prunable: false,
   prunableReason: null,
   detached: false,
+  external: true,
 };
 
 /** LOCKED -- proves its delete "×" is never drawn at all (`removeWorktree`
  *  refuses a locked worktree unconditionally, so offering the control would
- *  not be honest), and that the row still says why via `lockReason`. */
+ *  not be honest), and that the row still says why via `lockReason`. VAM'S
+ *  OWN (`external: false`) but hidden by the SAME phase-2b default as
+ *  `ADOPTED_WORKTREE` above: the operator's own ask covers "not vam's, OR
+ *  locked" as one rule, and this row is the second half of it. */
 const LOCKED_WORKTREE = {
   worktreeId: '/Users/operator/code/vam-worktrees/release-freeze',
   path: '/Users/operator/code/vam-worktrees/release-freeze',
@@ -146,6 +169,7 @@ const LOCKED_WORKTREE = {
   prunable: false,
   prunableReason: null,
   detached: false,
+  external: false,
 };
 
 /** `worktree:status`'s own answer for the two rows worth badging --
@@ -208,6 +232,7 @@ function install({ projects, projectId, initialWorktrees }) {
           prunable: false,
           prunableReason: null,
           detached: false,
+          external: false,
         };
         window.__worktreesStore = [...window.__worktreesStore, worktree];
         return worktree;
@@ -261,16 +286,20 @@ await page.goto(`${origin}/`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-session-row]', { timeout: 10_000 });
 
 // ---------------------------------------------------------------------------
-// STATE 1: the sidebar, "Worktrees" already open -- one vam-made row, one
-// ADOPTED row with both badges, one LOCKED row with no delete control.
+// STATE 1: the sidebar, "Worktrees" already open, THE SHIPPED DEFAULT -- one
+// plain (vam-made, unlocked) row, and a quiet note for the two phase-2b
+// hides: the ADOPTED row (external) and the LOCKED row (vam's own, but
+// locked). Neither draws at all yet -- that is the whole point of this
+// state, and `worktrees-sidebar` is the SAME committed filename phase 2a
+// shot, now painting the NEW default rather than three flat rows.
 // ---------------------------------------------------------------------------
 const section = page.locator(`[data-worktrees-section="${PROJECT_ID}"]`);
 await section.waitFor({ timeout: 10_000 });
 check('the section is drawn under the project it belongs to', (await section.count()) === 1);
 const row = page.locator('[data-worktree-row]');
 check(
-  'three worktree rows, from the stubbed list()',
-  (await row.count()) === 3,
+  'ONE worktree row by default -- the external/locked filter hides the other two',
+  (await row.count()) === 1,
   `${await row.count()}`,
 );
 check(
@@ -280,15 +309,49 @@ check(
 );
 check(
   '"Start a session here" — no live session in this worktree yet',
-  (await page.locator('[data-worktree-start-here]').count()) === 3,
+  (await page.locator('[data-worktree-start-here]').count()) === 1,
   `${await page.locator('[data-worktree-start-here]').count()}`,
 );
-
-const adoptedRow = page.locator(`[data-worktree-row="${ADOPTED_WORKTREE.worktreeId}"]`);
 check(
-  'the ADOPTED row is listed, living outside vam-worktrees/ entirely',
-  (await adoptedRow.count()) === 1,
+  'the quiet note names both hidden rows, without drawing either',
+  (await page.locator('[data-worktrees-external-hidden-count]').textContent()) === '2 hidden',
 );
+check(
+  'neither hidden row is in the DOM at all, not merely visually hidden',
+  (await page.locator(`[data-worktree-row="${ADOPTED_WORKTREE.worktreeId}"]`).count()) === 0 &&
+    (await page.locator(`[data-worktree-row="${LOCKED_WORKTREE.worktreeId}"]`).count()) === 0,
+);
+
+await shootBothThemes(page, 'worktrees-sidebar');
+
+// ---------------------------------------------------------------------------
+// STATE 1b: "Show external worktrees" turned ON from the SAME filter popover
+// every session-origin toggle already lives in -- the compact, dimmed,
+// dotted-connector tree the operator's own report asked for, nested under
+// this project's plain worktree row rather than mixed into it.
+// ---------------------------------------------------------------------------
+await page.locator('[data-filter-toggle]').click();
+await page.waitForSelector('[data-origin-toggle="external-worktree"]', { timeout: 5_000 });
+await page.locator('[data-origin-toggle="external-worktree"]').click();
+await page.locator('[data-filter-toggle]').click();
+
+const externalGroup = page.locator(`[data-worktrees-external-group="${PROJECT_ID}"]`);
+await externalGroup.waitFor({ timeout: 5_000 });
+check(
+  'the tree is expanded by default the first time it is shown',
+  (await page.locator(`[data-worktrees-external-toggle="${PROJECT_ID}"]`).getAttribute('aria-expanded')) ===
+    'true',
+);
+check(
+  'both previously-hidden rows now draw, nested under that one group',
+  (await externalGroup.locator(`[data-worktree-row="${ADOPTED_WORKTREE.worktreeId}"]`).count()) === 1 &&
+    (await externalGroup.locator(`[data-worktree-row="${LOCKED_WORKTREE.worktreeId}"]`).count()) === 1,
+);
+check(
+  'the plain row never moves into that group',
+  (await externalGroup.locator(`[data-worktree-row="${INITIAL_WORKTREE.worktreeId}"]`).count()) === 0,
+);
+const adoptedRow = page.locator(`[data-worktree-row="${ADOPTED_WORKTREE.worktreeId}"]`);
 check(
   'the ADOPTED row still offers delete -- adoption means the same affordances',
   (await adoptedRow.locator('[data-worktree-delete]').count()) === 1,
@@ -313,7 +376,18 @@ check(
   (await lockedRow.locator('[data-worktree-locked]').count()) === 1,
 );
 
-await shootBothThemes(page, 'worktrees-sidebar');
+await shootBothThemes(page, 'worktrees-external-tree');
+
+// Back to the shipped default before the remaining states -- STATE 2/3 below
+// exercise the SAME behaviour phase 2a already proved, unrelated to this
+// filter, and the plain row's own delete confirmation is otherwise
+// ambiguous once a second, nested delete button exists for the same name
+// class in the DOM.
+await page.locator('[data-filter-toggle]').click();
+await page.waitForSelector('[data-origin-toggle="external-worktree"]', { timeout: 5_000 });
+await page.locator('[data-origin-toggle="external-worktree"]').click();
+await page.locator('[data-filter-toggle]').click();
+await externalGroup.waitFor({ state: 'detached', timeout: 5_000 });
 
 // ---------------------------------------------------------------------------
 // STATE 2: the create form, open, with a name typed in.
@@ -341,10 +415,12 @@ await page.waitForSelector('[data-worktrees-create-form]', { state: 'detached', 
 // So: shoot dark, close, toggle theme, reopen, shoot light.
 // ---------------------------------------------------------------------------
 async function openDeleteConfirm() {
-  // Scoped to the vam-made row specifically -- three rows now offer delete
-  // (the vam-made one and the adopted one; the locked one offers none at
-  // all), so the bare `[data-worktree-delete]` selector this used to be
-  // would match more than one element and fail Playwright's strict mode.
+  // Scoped to the vam-made row specifically -- only one by the shipped
+  // default (the other two draw only once "Show external worktrees" is on,
+  // and STATE 1b above already turned it back off), but kept scoped rather
+  // than the bare `[data-worktree-delete]` selector this used to be: that
+  // form would fail Playwright's strict mode the instant a second row with
+  // its own delete button is on screen for any reason.
   await page
     .locator(`[data-worktree-row="${INITIAL_WORKTREE.worktreeId}"] [data-worktree-delete]`)
     .click();

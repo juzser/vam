@@ -200,6 +200,16 @@ export async function listWorktrees(
   if ('kind' in entries) return entries;
 
   const selfRealPath = await safeRealpath(repoRoot, deps.realpathFn);
+  // `external`'s OWN COMPARISON ROOT -- realpath'd like every other path this
+  // function compares, tolerating a root that does not exist yet (no
+  // vam-made worktree of this repo ever created): `safeRealpath` answering
+  // `null` there is not "no worktree of this repo is external", it is "vam's
+  // own root has no realpath to compare against", so every entry falls back
+  // to comparing against the RAW (unresolved) root instead -- still correct,
+  // since a worktree actually living there resolves to a path under the raw
+  // root's own realpath, which is exactly the case this fallback exists for.
+  const worktreesRoot = worktreesRootFor(repoRoot);
+  const realWorktreesRoot = (await safeRealpath(worktreesRoot, deps.realpathFn)) ?? worktreesRoot;
   const worktrees: WorktreeInfo[] = [];
   for (const entry of entries) {
     if (entry.bare) continue;
@@ -215,6 +225,7 @@ export async function listWorktrees(
       prunable: entry.prunable,
       prunableReason: entry.prunableReason,
       detached: entry.detached,
+      external: dirname(realPath) !== realWorktreesRoot,
     });
   }
   return worktrees;
@@ -398,6 +409,11 @@ export async function createWorktree(
     prunable: false,
     prunableReason: null,
     detached: false,
+    // ALWAYS `false` HERE: `targetPath` above is always `join(worktreesRoot,
+    // slug)`, never anywhere else -- this function has exactly one place it
+    // ever creates a directory, and it is inside vam's own root by
+    // construction.
+    external: false,
   };
 }
 

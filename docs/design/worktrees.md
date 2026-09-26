@@ -343,3 +343,89 @@ A dirty dot reuses `--color-diff-file` (a changed file's own colour in the
 diff renderer) rather than a new token; ahead/behind reuse
 `--color-diff-add`/`-del` (green for commits ready to push, red for commits
 not yet pulled) — the app's own existing hues, not three new ones.
+
+## 8. Phase 2b — shipped
+
+**The operator's own report**, opening the blacksmith project (the maestro
+repo): a lot of worktrees that are not vam's, or are locked (`.wt/...`,
+`.claude/worktrees/agent-*`, locked ones, "and others"), with no way to hide
+or fold them. Phase 2a's adoption work made every such worktree a full row;
+this phase adds the filter and the tree the operator actually asked for.
+
+**`WorktreeInfo.external`**, a THIRD purely path-based field alongside
+`detached`/`prunable`: `true` when a worktree's OWN directory does not sit
+inside vam's `<repoRoot>-worktrees/` root (`worktreesRootFor`) — a worktree a
+CLI, Orca, or `claude --worktree` made, never vam's own "+". Computed once in
+`listWorktrees` by comparing a realpath'd `dirname` against a realpath'd
+worktrees root (falling back to the raw root when it does not exist yet, the
+same tolerance `safeRealpath`'s other callers already show); `createWorktree`
+always answers `false`, since its one call site never writes anywhere else.
+Not security-relevant — the confinement `removeWorktree` proves is unchanged
+(§7); this field only ever decides what a ROW looks like.
+
+**`SessionFilters.hideExternalWorktrees`** (a SEVENTH toggle,
+`domain/session-filter.ts`), `hide`-shaped like its six neighbours and
+default `true` (hidden) — but the ONLY row in the filter popover whose own
+LABEL and switch read the other way round ("Show external worktrees"), the
+operator's own words for it. Independent of `hideAgentWorktrees`: an agent
+worktree the operator reveals via that toggle is still, separately, external,
+and both gates must open before it draws as a plain row rather than a nested
+one. `worktree-visibility.ts` (colocated with the feature, never folded into
+`session-filter.ts`, which knows only `Session`) holds the one shared
+predicate, `isExternalOrLockedWorktree` — "not vam's, OR locked", the
+operator's own two examples ORed exactly as given — used BOTH to decide what
+is hidden by default AND what belongs in the tree once shown; the two
+questions have the same answer everywhere in this feature.
+
+**The tree itself.** `WorktreesSection` now partitions its (already
+agent-worktree-filtered) rows into a plain list and an external/locked one.
+The plain list draws exactly as before; the external/locked one, when the
+toggle is off, draws as its own group — a collapsible header ("External
+worktrees N"), then every one of ITS rows nested one step in, dimmer and
+smaller (`text-meta`/`text-ink-faint` in place of `text-control`/
+`text-ink-dim`), behind a dashed left border (`border-l border-dashed
+border-line`) as the tree guide. Every row — plain or nested — draws through
+the SAME `renderRow` function (a `compact` flag is the only difference): the
+delete button, "Start a session here", every marker, every nested session
+keep their full reach regardless of which list called it, and every control
+is a real `<button>`, native `Tab` order, with no separate keyboard wiring
+needed. Orca's own worktree tree was read as a reference for this shape
+(never copied); no single component there matched closely enough to be worth
+citing by name.
+
+**The collapse toggle** persists per project, directly in `localStorage`
+(`worktree-tree-collapse.ts`), NOT folded into the big `Prefs` blob
+`prefs.ts` owns — the identical trade-off `prefs/foreign-hidden-note.ts`
+already made for its own per-viewer number, and consistent with
+`WorktreesSection`'s own stated self-containment principle (§ this file's
+own header on that component). Keyed by the bare project id (already
+globally unique, unlike `Prefs.collapsedProjects`'s two-level `source → [id]`
+shape), wrapped in try/catch exactly like `foreign-hidden-note.ts`; expanded
+(absent) is the default the first time a project's own tree is ever shown.
+
+**The quiet count.** `WorktreesSection` draws its own "N hidden" note next to
+the "Worktrees" heading's count, in the SAME quiet style
+`SessionList.tsx`'s own "· N hidden" filter rows already use — never
+`font-mono`, so it cannot collide with the heading's own count span, the
+FIRST `.font-mono` element under `data-worktrees-section` a pre-existing test
+already reads by that selector. Absent, not a "0 hidden": present only while
+the default filter is actually holding something back. The popover's own new
+row carries no count of its own — the worktree rows it holds back live
+per-project, inside each project's own `WorktreesSection`, never in the flat
+session list the popover's other six rows already count against.
+
+**The badge poll skips both.** `useWorktreeStatuses`'s own `worktreeIds`
+input is now `plainWorktrees` plus the external/locked ones ONLY when their
+group is both shown (the filter is off) AND expanded (not collapsed) —
+neither a filtered-out row nor a folded-shut one ever costs a `git status`/
+`git rev-list` spawn, extending §7's own performance gate rather than
+replacing it.
+
+Falsified by hand throughout: the default-hide rule (`worktree-visibility
+.test.ts`, and end to end in `worktrees-shots.mjs` against a real built
+bundle), the `locked` half of `isExternalOrLockedWorktree` (a vam-made,
+locked worktree stops being hidden), the poll exclusion (a hidden or
+collapsed worktree starts costing a `git` spawn), and the collapse
+persistence (a click that only updates in-memory state, never
+`localStorage`, survives every assertion except the one round-trip test
+built to catch exactly that).

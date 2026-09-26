@@ -46,6 +46,12 @@ describe('the session-origin filters, persisted', () => {
       // see `session-filter.ts`'s own header for why this one is not
       // `hideIdle`'s shape.
       hideAgentWorktrees: true,
+      // A worktree vam did not make, or a locked one, is hidden by default
+      // too -- the operator's own report about the blacksmith project's
+      // `.wt/...`/`.claude/worktrees/agent-*`/locked rows, `worktree-
+      // visibility.ts`'s own header. `hide`-shaped like every field here;
+      // only the popover's own label reads "Show external worktrees".
+      hideExternalWorktrees: true,
     });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
@@ -61,6 +67,7 @@ describe('the session-origin filters, persisted', () => {
         hideForeign: false,
         hideIdle: true,
         hideAgentWorktrees: false,
+        hideExternalWorktrees: false,
       }),
     );
     expect(readPrefs(s).filters).toEqual({
@@ -70,6 +77,7 @@ describe('the session-origin filters, persisted', () => {
       hideForeign: false,
       hideIdle: true,
       hideAgentWorktrees: false,
+      hideExternalWorktrees: false,
     });
   });
 
@@ -107,6 +115,7 @@ describe('the session-origin filters, persisted', () => {
       hideForeign: true,
       hideIdle: false,
       hideAgentWorktrees: true,
+      hideExternalWorktrees: true,
     });
   });
 
@@ -121,6 +130,7 @@ describe('the session-origin filters, persisted', () => {
       hideForeign: true,
       hideIdle: false,
       hideAgentWorktrees: true,
+      hideExternalWorktrees: true,
     });
   });
 
@@ -133,6 +143,7 @@ describe('the session-origin filters, persisted', () => {
       hideForeign: false,
       hideIdle: false,
       hideAgentWorktrees: true,
+      hideExternalWorktrees: true,
     });
   });
 
@@ -145,6 +156,7 @@ describe('the session-origin filters, persisted', () => {
       hideForeign: true,
       hideIdle: true,
       hideAgentWorktrees: true,
+      hideExternalWorktrees: true,
     });
   });
 
@@ -162,11 +174,30 @@ describe('the session-origin filters, persisted', () => {
       hideForeign: true,
       hideIdle: false,
       hideAgentWorktrees: false,
+      hideExternalWorktrees: true,
     });
   });
 
   it('takes only a real boolean for hideAgentWorktrees -- garbage falls back to the shipped default (on)', () => {
     const raw = '{"filters":{"hideAgentWorktrees":"yes"}}';
     expect(readPrefs(store(raw)).filters.hideAgentWorktrees).toBe(true);
+  });
+
+  it('keeps a stored choice to SHOW external worktrees, per field like every other rule', () => {
+    const raw = '{"filters":{"hideExternalWorktrees":false}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      hideEnded: true,
+      hideForeign: true,
+      hideIdle: false,
+      hideAgentWorktrees: true,
+      hideExternalWorktrees: false,
+    });
+  });
+
+  it('takes only a real boolean for hideExternalWorktrees -- garbage falls back to the shipped default (on)', () => {
+    const raw = '{"filters":{"hideExternalWorktrees":"yes"}}';
+    expect(readPrefs(store(raw)).filters.hideExternalWorktrees).toBe(true);
   });
 });

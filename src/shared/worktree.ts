@@ -68,6 +68,20 @@ export type WorktreeInfo = {
    * tell them apart.
    */
   readonly detached: boolean;
+  /**
+   * `true` when this worktree does NOT live inside vam's own
+   * `<repoRoot>-worktrees/` root (`worktrees.ts`'s own `worktreesRootFor`) --
+   * a worktree a CLI, Orca, or `claude --worktree` made, never one vam's own
+   * "+" button did. Purely path-based, exactly like `detached` and
+   * `prunable` above: it says WHERE the worktree sits, not who clicked what,
+   * so a worktree placed by hand inside vam's own root reads the same as one
+   * vam actually made, and the reverse holds too.
+   *
+   * PHASE 2B'S OWN ADDITION (`docs/design/worktrees.md`'s "Show external
+   * worktrees" filter): the UI's default-hidden, nested-tree treatment for a
+   * worktree the operator is unlikely to want mixed in with their own.
+   */
+  readonly external: boolean;
 };
 
 /**

@@ -88,6 +88,24 @@ export type SessionFilters = {
    * than to a status a fresh install has no opinion about yet.
    */
   readonly hideAgentWorktrees: boolean;
+  /**
+   * THE SEVENTH TOGGLE: a WORKTREE ROW (never a session -- see
+   * `panels/worktrees/worktree-visibility.ts`, the pure module that actually
+   * reads this field) that is either not vam's own (`WorktreeInfo.external`)
+   * or locked. The operator's own report, opening the blacksmith project
+   * (the maestro repo): "I see a lot of worktrees that aren't vam's, or are
+   * locked... Make the hiding filter the default." ON by default, `hide
+   * AgentWorktrees`'s own shape rather than `hideIdle`'s -- a fresh install
+   * has an opinion about this one already, the operator's stated ask, not a
+   * status nobody has weighed in on yet.
+   *
+   * `hide`-SHAPED LIKE EVERY FIELD IN THIS TYPE, though the popover's own
+   * label for it reads "Show external worktrees" -- the operator's own
+   * words, the other way round. Naming the STORED field the same direction
+   * as its five neighbours is what keeps this file (and `prefs.ts`'s parser)
+   * one convention rather than two.
+   */
+  readonly hideExternalWorktrees: boolean;
 };
 
 /**
@@ -106,6 +124,7 @@ export const DEFAULT_SESSION_FILTERS: SessionFilters = {
   hideForeign: true,
   hideIdle: false,
   hideAgentWorktrees: true,
+  hideExternalWorktrees: true,
 };
 
 /**

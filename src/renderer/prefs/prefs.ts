@@ -1452,15 +1452,22 @@ export function deleteGroup(prefs: Prefs, source: string, groupId: string): Pref
 /** Per FIELD, not per object: a payload from an older vam has neither key,
  * and a payload with one bad key still has one good one. */
 function readFilters(raw: unknown): SessionFilters {
-  const { hideAgentStarted, onlyPrompted, hideEnded, hideForeign, hideIdle, hideAgentWorktrees } = (
-    typeof raw === 'object' && raw !== null ? raw : {}
-  ) as {
+  const {
+    hideAgentStarted,
+    onlyPrompted,
+    hideEnded,
+    hideForeign,
+    hideIdle,
+    hideAgentWorktrees,
+    hideExternalWorktrees,
+  } = (typeof raw === 'object' && raw !== null ? raw : {}) as {
     hideAgentStarted?: unknown;
     onlyPrompted?: unknown;
     hideEnded?: unknown;
     hideForeign?: unknown;
     hideIdle?: unknown;
     hideAgentWorktrees?: unknown;
+    hideExternalWorktrees?: unknown;
   };
   return {
     hideAgentStarted:
@@ -1492,6 +1499,14 @@ function readFilters(raw: unknown): SessionFilters {
       typeof hideAgentWorktrees === 'boolean'
         ? hideAgentWorktrees
         : DEFAULT_SESSION_FILTERS.hideAgentWorktrees,
+    // Same per-field fallback once more, and the same "ON by default"
+    // direction as `hideAgentWorktrees` immediately above, for the identical
+    // reason: every store predating this toggle has no such key, and reads
+    // back as the shipped default rather than as "off".
+    hideExternalWorktrees:
+      typeof hideExternalWorktrees === 'boolean'
+        ? hideExternalWorktrees
+        : DEFAULT_SESSION_FILTERS.hideExternalWorktrees,
   };
 }
 

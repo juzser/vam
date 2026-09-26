@@ -36,6 +36,7 @@ function worktree(over: Partial<WorktreeInfo> = {}): WorktreeInfo {
     prunable: false,
     prunableReason: null,
     detached: false,
+    external: false,
     ...over,
   };
 }
@@ -461,6 +462,13 @@ describe('WorktreesSection — locked, prunable and detached markers', () => {
         onCloseCreate={vi.fn()}
         renderSessionRow={fakeRenderSessionRow}
         hideAgentWorktrees={HIDE_AGENT_WORKTREES}
+        // A locked worktree is hidden by the NEW `hideExternalWorktrees`
+        // default too (`worktree-visibility.ts`'s own rule) -- opened here
+        // so this test keeps proving its own, unrelated concern (no delete
+        // button on a locked row) rather than proving nothing because the
+        // row never drew at all. `WorktreesSection.external-worktrees.test
+        // .tsx` is where the new default itself is proven.
+        hideExternalWorktrees={false}
       />,
     );
     await waitFor(() => expect(container.querySelector('[data-worktree-row]')).not.toBeNull());
