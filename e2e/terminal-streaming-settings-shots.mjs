@@ -1,8 +1,13 @@
 /**
  * THE STREAMING TERMINAL SETTING, AS PAINT: the "streaming terminal" row in
- * Settings -> Behaviour, in both app themes -- ON by default now
+ * Settings -> Terminal -> Advanced, in both app themes -- ON by default now
  * (`docs/design/terminal-streaming.md`'s "Flipping the default"; this row's
- * own label dropped the "(beta)" suffix in the same change).
+ * own label dropped the "(beta)" suffix in the same change). MOVED HERE FROM
+ * BEHAVIOUR by the cards restructure (`settings/sections.ts`): it is a fact
+ * about the terminal's own rendering, not about what a turn shows, and it
+ * sits behind Advanced with the colour overrides and the background opacity
+ * -- rows a terminal-first operator reaches for and everyone else never
+ * opens.
  *
  * ── WHY THIS IS THE MEANINGFUL SCREENSHOT FOR THIS FEATURE ────────────────
  * Requirement 4 ("Phone: unchanged -- remote server does not serve the
@@ -47,7 +52,12 @@ await page.goto(`${origin}/?demo=1`, { waitUntil: 'networkidle' });
 await page.waitForSelector('button[aria-label="settings"]', { timeout: 15_000 });
 await page.locator('button[aria-label="settings"]').first().click();
 await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
-await page.locator('[data-settings-nav-item="behaviour"]').click();
+await page.locator('[data-settings-nav-item="terminal"]').click();
+// The switch sits behind Terminal's own Advanced disclosure now, collapsed
+// by default (`primitives.tsx`'s `AdvancedDisclosure`) -- opened once here;
+// it persists (`card-collapse.ts`), so the light pass below finds it already
+// open on remount.
+await page.locator('[data-settings-advanced="terminal"]').click();
 await page.waitForSelector('[data-switch="streaming-terminal"]', { timeout: 5_000 });
 
 const row = page.locator('[data-switch="streaming-terminal"]').locator('xpath=ancestor::*[self::label or self::div][1]');
@@ -57,13 +67,13 @@ const isLightDark = await page.evaluate(() => document.documentElement.classList
 check('starts in dark theme', isLightDark === false, `documentElement light class: ${isLightDark}`);
 
 const switchLocator = page.locator('[data-switch="streaming-terminal"]');
-check('the streaming-terminal switch is drawn in Behaviour', (await switchLocator.count()) === 1, `count ${await switchLocator.count()}`);
+check('the streaming-terminal switch is drawn in Terminal', (await switchLocator.count()) === 1, `count ${await switchLocator.count()}`);
 check(
   'it starts on (default ON now, per the design doc)',
   (await switchLocator.getAttribute('aria-checked')) === 'true',
 );
 
-await page.locator('[data-settings-panel="behaviour"]').scrollIntoViewIfNeeded().catch(() => {});
+await page.locator('[data-settings-panel="terminal"]').scrollIntoViewIfNeeded().catch(() => {});
 await switchLocator.scrollIntoViewIfNeeded();
 await page.screenshot({ path: `${outDir}/terminal-streaming-settings-dark.png` });
 console.log(`${outDir}/terminal-streaming-settings-dark.png`);
@@ -77,7 +87,7 @@ await page.locator('button[aria-label="switch to light theme"]').first().click()
 await page.waitForFunction(() => document.documentElement.classList.contains('light'));
 await page.locator('button[aria-label="settings"]').first().click();
 await page.waitForSelector('[data-settings-nav]', { timeout: 5_000 });
-await page.locator('[data-settings-nav-item="behaviour"]').click();
+await page.locator('[data-settings-nav-item="terminal"]').click();
 await page.waitForSelector('[data-switch="streaming-terminal"]', { timeout: 5_000 });
 await switchLocator.scrollIntoViewIfNeeded();
 await page.screenshot({ path: `${outDir}/terminal-streaming-settings-light.png` });

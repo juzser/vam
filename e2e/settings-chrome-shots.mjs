@@ -1,18 +1,27 @@
 /**
  * The settings overlay's own chrome, in an engine that lays out and paints.
  *
- * Two audit findings live here, and neither can be held by the unit suite.
+ * THE CARDS RESTRUCTURE (`settings/sections.ts`, `settings/primitives.tsx`)
+ * changed what this file has to measure without changing why: it turned the
+ * six-tab, one-panel-visible overlay this file was written against into ten
+ * cards, ALL MOUNTED AND OPEN AT ONCE, each foldable on its own and some
+ * carrying their own Advanced disclosure. Every item below still holds; what
+ * moved is HOW each one has to query the page, now that "the panel on
+ * screen" is no longer one element `document.querySelector` can find by
+ * asking what is not `hidden` — that query now answers "the first of ten",
+ * not "the one you navigated to".
  *
- *  - ITEM 1 (S2). `SectionStrip` carried `<span className="hidden sm:inline">`
- *    around every label, so below 640px the narrow nav WAS the icon rail its
- *    own doc comment argued cannot work. `hidden` takes the label out of the
- *    accessibility tree as well as out of the paint and the buttons carry no
- *    `aria-label`, so the measured tree at 390px was literally
- *    `tab / tab / tab / tab` — four destinations, none of them named. jsdom
- *    applies no stylesheet, so it cannot see a breakpoint at all: what is
- *    asserted here is the COMPUTED ACCESSIBLE NAME at four narrow widths, the
- *    name attached to the element the keyboard actually lands on, and the row
- *    count the strip resolves to.
+ *  - ITEM 1 (S2, then superseded by the cards restructure). `SectionStrip`
+ *    carried `<span className="hidden sm:inline">` around every label, so
+ *    below 640px the narrow nav WAS the icon rail its own doc comment argued
+ *    cannot work. The restructure's own `SectionStrip` goes further than the
+ *    fix that shipped for this: it never wraps at all now (a single
+ *    horizontally-scrolling row, `sections.ts`'s own note on why a wrap grid
+ *    stopped being viable at ten sections), so there is no width at which
+ *    the label hides or a row count changes underfoot. What is asserted here
+ *    is the COMPUTED ACCESSIBLE NAME at narrow widths, on the element the
+ *    keyboard actually lands on, and that the strip stays the one row its
+ *    own doc comment promises.
  *  - ITEM 3 (operator report). "The button in the Remote section of settings
  *    has the same colour as the background, so it doesn't look like a button."
  *    `PairingPanel.ACTION_BUTTON` had no resting fill at all: it painted
@@ -45,25 +54,23 @@ function ratio(a, b) {
 }
 
 /**
- * The sections whose NAME this file asserts, spelled once. Read from the page
- * rather than from `sections.ts` — this file runs against the BUILT bundle,
- * and a guard that imported the source would be asserting against something it
- * did not load.
- *
- * `behaviour` joined the list when the overlay was split into look and
- * behaviour, and `update` is still deliberately absent: what it is here for is
- * the narrow strip's ACCESSIBLE NAMES, and the width table below wraps around
- * whatever the real count is (read off the DOM, not off this array). Adding a
- * row here is adding a name to check, never a section to the nav.
+ * The sections whose NAME this file asserts, spelled once, all ten of them
+ * now — read as the contract `sections.ts` fixes rather than re-derived from
+ * whatever the page happens to draw. This file still runs against the BUILT
+ * bundle rather than importing the source, so a stale copy of this table
+ * reddens against the real DOM instead of asserting against itself.
  */
 const SECTIONS = [
-  ['appearance', 'Appearance'],
+  ['interface', 'Interface'],
+  ['terminal', 'Terminal'],
+  ['window', 'Window & Sidebar'],
+  ['agents', 'Agents'],
   ['behaviour', 'Behaviour'],
   ['notifications', 'Notifications'],
-  ['sessions', 'Sessions'],
   ['integrations', 'Integrations'],
   ['remote', 'Remote'],
   ['keyboard', 'Keyboard'],
+  ['update', 'Update'],
 ];
 
 const browser = await chromium.launch();
@@ -80,16 +87,25 @@ async function openSettings(width, height = 844) {
 }
 
 /**
- * Which element the accessible name `label` resolves to, or null.
+ * Which nav item the accessible name `label` resolves to, or null.
  *
- * `getByRole` runs Chromium's own accessible-name computation, which is the
- * only thing that answers the question this item is about: a `hidden` label
- * contributes nothing to it, and neither does an unlabelled `<svg>`.
+ * NOT `getByRole` ANY MORE. A nav item is a plain `button` now (`aria-current`
+ * replaced `role="tab"`/`aria-selected` — `SettingsOverlay.tsx`'s own note on
+ * why), and every card's own header is ALSO a `button` named for its section
+ * ("Keyboard" the nav item, "Keyboard" the card header) — so
+ * `getByRole('button', { name: label })` finds two and Playwright's strict
+ * mode refuses both. The nav item's own hook, `data-settings-nav-item`, is
+ * unambiguous where the accessible-name computation is not.
  */
 async function namedTab(page, label) {
-  const found = page.getByRole('tab', { name: label, exact: true });
-  if ((await found.count()) !== 1) return null;
-  return await found.getAttribute('data-settings-nav-item');
+  const matches = await page.evaluate(
+    (wanted) =>
+      [...document.querySelectorAll('[data-settings-nav-item]')]
+        .filter((el) => (el.textContent ?? '').trim() === wanted)
+        .map((el) => el.getAttribute('data-settings-nav-item')),
+    label,
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 // ---------------------------------------------------------------- ITEM 1.
@@ -102,18 +118,20 @@ async function namedTab(page, label) {
  * layout can draw two columns in; one pixel under it is the phone shell
  * (`phone/viewport.ts`, `PHONE_MAX_WIDTH = 519`). At the operator's request
  * the phone draws ONE settings section and no nav at all, so every assertion
- * in this file about a four-tab strip, a keyboard walk across sections, or the
- * Keyboard section's chord column is a desktop assertion -- it used to run at
- * 320 and 390, where none of those exist any more.
+ * in this file about the section strip, a keyboard walk across sections, or
+ * the Keyboard section's chord column is a desktop assertion -- it used to
+ * run at 320 and 390, where none of those exist any more.
  *
  * Spelled rather than imported because this file runs against the BUILT
- * bundle. `PHONE_BOUNDARY` below probes the real breakpoint so a change to
- * either floor reddens this rather than silently moving what is measured.
+ * bundle, at the real breakpoint rather than a guess at where it falls.
  */
 const NARROWEST_DESKTOP = 520;
 
-/** Below `md` the strip is the nav; `sm` is where it stops being two rows. */
-const STRIP_WIDTHS = [NARROWEST_DESKTOP, 560, 600, 639, 700, 767];
+/** Below `md` the strip is the nav — one width is enough to prove the strip
+ *  never wraps and never hides a label, since it is the same single
+ *  scrolling row at every width under 768px; `NARROWEST_DESKTOP` is the one
+ *  worth a screenshot too. */
+const STRIP_WIDTHS = [NARROWEST_DESKTOP, 600, 767];
 
 for (const width of STRIP_WIDTHS) {
   const page = await openSettings(width);
@@ -142,8 +160,9 @@ for (const width of STRIP_WIDTHS) {
     }
   }
 
-  // A label that is present but clipped is a label the operator cannot read,
-  // and `overflow: hidden` hides that from every name computation.
+  // A label that is present but clipped INSIDE ITS OWN BUTTON is a label the
+  // operator cannot read even by scrolling to it, and `overflow: hidden`
+  // hides that from every name computation.
   const geometry = await page.evaluate(() => {
     const items = [...document.querySelectorAll('[data-settings-nav-item]')];
     return items.map((el) => ({
@@ -161,43 +180,23 @@ for (const width of STRIP_WIDTHS) {
     }
   }
 
-  // Rows, measured rather than assumed, AND THE NUMBERS ARE A FUNCTION OF HOW
-  // MANY SECTIONS THERE ARE. With four tabs this read 2 below `sm` and 1
-  // above; the fifth (Update) makes it 3 and 2, because the strip wraps at two
-  // per row narrow and four per row wide. Re-measured here rather than
-  // computed, so that a new section reddens this and somebody decides -- a
-  // guard that derived the layout from the layout would assert nothing.
-  //
-  // THE SIXTH SECTION ARRIVED AND THIS DID NOT REDDEN, which the paragraph
-  // above promised it would. Saying so is the point of this note rather than
-  // quietly leaving the numbers as they are. Behaviour was split out of
-  // Appearance and the strip's two tracks absorbed it exactly: six over two
-  // narrow tracks is three rows, the same three five needed with its last row
-  // half empty, and six over four wide tracks is two rows, the same two five
-  // needed. The literals are therefore UNCHANGED and still correct -- and the
-  // honest reading of that is that this pair of numbers is blind to any
-  // section that lands in a gap the previous count already paid for. The
-  // budget below is not: it is measured in pixels against the viewport, and it
-  // is the assertion that actually protects the operator.
-  //
-  // THE SEVENTH (Notifications) DID REDDEN IT, as the first paragraph
-  // promised: seven over two narrow tracks is four rows where six was three.
-  // Wide, seven over four tracks is still two. The pixel budget below is
-  // what decided the fourth row was acceptable: 121px, 14% of an
-  // 844px viewport at 520px, under the quarter it is held to.
+  // ONE ROW, ALWAYS — the property `SectionStrip`'s own doc comment argues
+  // for over a wrap grid tied to a section count that has already gone
+  // stale twice. Ten items on ten different `top`s would be ten rows; this
+  // strip holds them on one regardless of how many sections `sections.ts`
+  // ever grows to.
   const rows = new Set(geometry.map((item) => item.top)).size;
-  const expected = width < 640 ? 4 : 2;
-  console.log(`${width}px: ${names.join(' ')} rows=${rows} over ${geometry.length} sections`);
-  if (rows !== expected) {
+  console.log(`${width}px: ${names.join(' ')} — one row of ${geometry.length} sections`);
+  if (rows !== 1) {
     throw new Error(
-      `${width}px: the strip laid out on ${rows} row(s), expected ${expected} for ${geometry.length} sections`,
+      `${width}px: the strip laid out on ${rows} row(s) over ${geometry.length} sections — it was meant to never wrap`,
     );
   }
 
-  // AND THE THING THE ROW COUNT WAS ALWAYS A PROXY FOR. A nav that grows a row
-  // per pair of sections eventually owns the screen it is a nav for; at 320px
-  // it is 146px of an 844px viewport today (17%). The ceiling is the real
-  // assertion -- rows are how it happens, this is what it costs.
+  // AND THE ROW STAYS SHORT REGARDLESS OF HOW MANY SECTIONS SCROLL PAST IN
+  // IT. A single-row strip cannot blow the vertical budget a wrapping one
+  // used to risk, but a switch back to wrapping would, so this is the guard
+  // that would catch it.
   const navHeight = await page.evaluate(() =>
     Math.round(document.querySelector('[data-settings-nav]')?.getBoundingClientRect().height ?? 0),
   );
@@ -206,9 +205,34 @@ for (const width of STRIP_WIDTHS) {
   if (navHeight === 0) {
     throw new Error(`${width}px: the nav measured 0px, so this budget is about nothing`);
   }
-  if (share > 0.25) {
+  if (share > 0.1) {
     throw new Error(`${width}px: the section nav takes ${Math.round(share * 100)}% of the screen`);
   }
+
+  // SIDEWAYS IS THE POINT, NOT THE FAILURE, for the strip as a whole — but
+  // only if the last section is actually reachable by the one scroll gesture
+  // this row offers. Scrolled to explicitly rather than trusted from the
+  // strip's own `overflow-x-auto`, the same way a card's own scrollport is
+  // measured in `settings-panels-shots.mjs`.
+  const last = SECTIONS[SECTIONS.length - 1];
+  await page
+    .locator(`[data-settings-nav-item="${last[0]}"]`)
+    .scrollIntoViewIfNeeded();
+  const reachable = await page.evaluate(
+    (id) => {
+      const strip = document.querySelector('[data-settings-nav]');
+      const item = document.querySelector(`[data-settings-nav-item="${id}"]`);
+      if (strip === null || item === null) return false;
+      const s = strip.getBoundingClientRect();
+      const i = item.getBoundingClientRect();
+      return i.left >= s.left - 1 && i.right <= s.right + 1;
+    },
+    last[0],
+  );
+  if (!reachable) {
+    throw new Error(`${width}px: ${last[1]}, the last section, cannot be scrolled into the strip`);
+  }
+
   if (width === NARROWEST_DESKTOP) {
     await page.screenshot({ path: `${outDir}/settings-nav-narrow.png` });
   }
@@ -217,33 +241,36 @@ for (const width of STRIP_WIDTHS) {
 
 // The keyboard path, at the narrowest width the app ships a shell for. The
 // nav is one tab stop with a roving `tabIndex`, so "the tab order reaches each
-// section" means: Tab arrives on a NAMED tab, and the arrows walk the rest
-// without ever landing on an anonymous one.
+// section" means: Tab arrives on a NAMED item, and the arrows walk the rest
+// without ever landing on an anonymous one — and mark it `aria-current`, the
+// jump-link pattern's own way of saying "you are here" now that activating an
+// item no longer swaps which single panel is visible (every card stays
+// mounted; `settings-panels-shots.mjs` holds the geometry this produces).
 {
   const page = await openSettings(NARROWEST_DESKTOP);
   const reached = [];
   for (const [id, label] of SECTIONS) {
     const active = await page.evaluate(() => ({
       id: document.activeElement?.getAttribute('data-settings-nav-item') ?? null,
-      role: document.activeElement?.getAttribute('role') ?? null,
-      shown: [...document.querySelectorAll('[data-settings-panel]')]
-        .filter((el) => !el.hasAttribute('hidden'))
-        .map((el) => el.getAttribute('data-settings-panel')),
+      // A NATIVE `<button>` carries no explicit `role` attribute — its role
+      // is implicit, which is the whole point of using one instead of a
+      // `div role="tab"`. `tagName` is what proves it is really a button and
+      // not, say, a `div` the keyboard merely landed on.
+      tag: document.activeElement?.tagName ?? null,
+      current: document.activeElement?.getAttribute('aria-current') ?? null,
     }));
-    if (active.role !== 'tab' || active.id !== id) {
+    if (active.tag !== 'BUTTON' || active.id !== id) {
       throw new Error(
-        `${NARROWEST_DESKTOP}px: the keyboard is on ${JSON.stringify(active.id)} (role ${active.role}), expected the ${id} tab`,
+        `${NARROWEST_DESKTOP}px: the keyboard is on ${JSON.stringify(active.id)} (a ${active.tag}), expected the ${id} nav item`,
       );
     }
-    if (active.shown.join(',') !== id) {
-      throw new Error(
-        `${NARROWEST_DESKTOP}px: ${id} is focused but ${active.shown.join(',')} is the panel on screen`,
-      );
+    if (active.current !== 'true') {
+      throw new Error(`${NARROWEST_DESKTOP}px: ${id} has the keyboard but is not marked aria-current`);
     }
     const named = await namedTab(page, label);
     if (named !== id) {
       throw new Error(
-        `${NARROWEST_DESKTOP}px: the focused ${id} tab does not answer to the name ${JSON.stringify(label)} (it is ${named})`,
+        `${NARROWEST_DESKTOP}px: the focused ${id} item does not answer to the name ${JSON.stringify(label)} (it is ${named})`,
       );
     }
     reached.push(label);
@@ -745,16 +772,18 @@ const REMOTE_STUB = {
 console.log('\n=== the settings case ladder');
 {
   const page = await openSettings(1100, 800);
-  // ALL FOUR SECTIONS, not the one that happens to open. Three quarters of
-  // this surface is behind a nav click, and a ladder checked on `appearance`
-  // alone would have left `keyboard` -- the longest list of words here -- in
-  // whatever case it was already in.
+  // ALL TEN SECTIONS, not the one that happens to be scrolled to. Every card
+  // is mounted and open at once now (the cards restructure), so a ladder
+  // checked on `interface` alone would have left `keyboard` -- the longest
+  // list of words here -- in whatever case it was already in. The nav click
+  // below is for the screenshot's own framing, not for visibility: every
+  // panel this loop asks about is already on screen before it clicks anything.
   const sectionIds = await page.evaluate(() =>
     [...document.querySelectorAll('[data-settings-nav-item]')].map((el) =>
       el.getAttribute('data-settings-nav-item'),
     ),
   );
-  if (sectionIds.length < 4) {
+  if (sectionIds.length < 10) {
     throw new Error(`the nav offers ${sectionIds.length} sections, so this sweep is about nothing`);
   }
   const seen = { headings: 0, labels: 0, hints: 0, controls: 0, descriptions: 0, properNames: 0 };
@@ -763,16 +792,22 @@ console.log('\n=== the settings case ladder');
   for (const sectionId of sectionIds) {
   await page.locator(`[data-settings-nav-item="${sectionId}"]`).click();
   await page.waitForTimeout(150);
-  const cased = await page.evaluate(() => {
+  const cased = await page.evaluate((id) => {
     const read = (el) => ({
       text: (el.textContent ?? '').trim().slice(0, 40),
       transform: getComputedStyle(el).textTransform,
     });
-    const panel = document.querySelector('[data-settings-panel]:not([hidden])');
+    // BY ID, NOT BY "NOT HIDDEN". All ten cards are mounted and open by
+    // default now, so `:not([hidden])` would match the first of TEN and
+    // report `interface`'s own words for every section this loop asks about
+    // -- the cards restructure's whole reason this file needed a second look.
+    // `getComputedStyle` still resolves correctly on a card folded behind its
+    // own collapse or an Advanced disclosure (both just toggle `hidden`,
+    // which affects layout and paint but not the computed value of a
+    // property like `text-transform`), so scoping by id rather than by
+    // visibility loses nothing this ladder is asking about.
+    const panel = document.querySelector(`[data-settings-panel="${id}"]`);
     return {
-      // FROM THE PANEL ON SCREEN, not from the document: all four panels are
-      // rendered and the other three carry `hidden`, so a document-wide query
-      // returns four headings and none of them is "the one you are reading".
       heading: [...(panel?.querySelectorAll('[data-settings-heading]') ?? [])].map(read),
       labels: [...(panel?.querySelectorAll('[data-settings-rows] h4') ?? [])].map(read),
       hints: [...(panel?.querySelectorAll('[data-settings-rows] p') ?? [])].map(read),
@@ -817,11 +852,21 @@ console.log('\n=== the settings case ladder');
           // use to name a rank this sweep does not govern; the ITEM 4 block
           // above and `chord-symbol-shots.mjs` are what actually check this
           // rank.
+          //
+          // AND THE ADVANCED FOLD'S OWN TOGGLE IS NOT A SETTING'S CONTROL
+          // EITHER. `AdvancedDisclosure` (the cards restructure) prints the
+          // literal word "Advanced" -- chrome for a fold, the same rank as a
+          // card's own header or the nav, neither of which this sweep governs
+          // -- rather than a control a row draws for an operator to pick
+          // between. `data-settings-advanced` marks the toggle itself, so
+          // `closest` (which matches the element against itself too) is
+          // enough with no wrapper needed.
           return (
             el.closest('[data-settings-unit]') === null &&
             el.closest('[data-binding-label]') === null &&
             el.closest('[data-verbatim]') === null &&
-            el.closest('[data-settings-keys]') === null
+            el.closest('[data-settings-keys]') === null &&
+            el.closest('[data-settings-advanced]') === null
           );
         })
         .map(read),
@@ -840,7 +885,7 @@ console.log('\n=== the settings case ladder');
       // exemption from one.
       properNames: [...(panel?.querySelectorAll('[data-verbatim]') ?? [])].map(read),
     };
-  });
+  }, sectionId);
   console.log(`  [${sectionId}] heading: ${JSON.stringify(cased.heading)}`);
   console.log(`  [${sectionId}] labels: ${JSON.stringify(cased.labels.map((l) => l.text))}`);
 
@@ -934,8 +979,8 @@ console.log('\n=== the settings case ladder');
   // parent is a flex container and whose children are therefore blockified.
   // The first corpus here stopped at `[data-settings-rows]` and could not see
   // the element that was wrong.
-  const sentences = await page.evaluate(() => {
-    const panel = document.querySelector('[data-settings-panel]:not([hidden])');
+  const sentences = await page.evaluate((id) => {
+    const panel = document.querySelector(`[data-settings-panel="${id}"]`);
     const own = panel?.querySelector('[data-settings-panel-hint]') ?? null;
     const all = [...(panel?.querySelectorAll('[data-settings-rows] p') ?? [])];
     const at = (el) =>
@@ -957,7 +1002,7 @@ console.log('\n=== the settings case ladder');
         first: getComputedStyle(el, '::first-letter').textTransform,
       })),
     };
-  });
+  }, sectionId);
   console.log(`  [${sectionId}] panel hint: ${JSON.stringify(sentences.own)}`);
   if (sentences.own === null) {
     throw new Error(`[${sectionId}] the panel draws no hint of its own`);
@@ -1018,18 +1063,17 @@ console.log('\n=== the settings case ladder');
 
   // THE HEADING NAMES THE SECTION THE NAV NAMES. Before this the nav said
   // "Appearance" and the panel beside it said "appearance" -- the same
-  // destination, spelled two ways, one of them a raw id.
-  const agree = await page.evaluate(() => {
-    const heading = document.querySelector(
-      '[data-settings-panel]:not([hidden]) [data-settings-heading]',
-    );
-    const id = heading?.closest('[data-settings-panel]')?.getAttribute('data-settings-panel');
+  // destination, spelled two ways, one of them a raw id. By id again, for the
+  // same reason as above: `:not([hidden])` would find `interface`'s own
+  // heading here on every iteration once every card is open at once.
+  const agree = await page.evaluate((id) => {
+    const heading = document.querySelector(`[data-settings-panel="${id}"] [data-settings-heading]`);
     const tab = document.querySelector(`[data-settings-nav-item="${id}"]`);
     return {
       heading: (heading?.textContent ?? '').trim(),
       tab: (tab?.textContent ?? '').trim(),
     };
-  });
+  }, sectionId);
   console.log(`  heading vs tab: ${JSON.stringify(agree)}`);
   if (agree.heading !== agree.tab || agree.heading === '') {
     throw new Error(`the panel heading ${JSON.stringify(agree.heading)} is not the tab's ${JSON.stringify(agree.tab)}`);
@@ -1052,14 +1096,16 @@ console.log('\n=== the settings case ladder');
   if (seen.headings !== sectionIds.length) {
     throw new Error(`${seen.headings} headings over ${sectionIds.length} sections`);
   }
-  if (seen.descriptions < 40) {
+  if (seen.descriptions < 50) {
     throw new Error(`the keyboard list drew ${seen.descriptions} rows, so its rank is untested`);
   }
   // `properNames` has a floor of its own for the reason every other rank here
   // does: "no proper name is transformed" over zero proper names is the same
   // sentence as "there are none", and the twelve terminal themes are exactly
-  // the corpus that rule exists for.
-  if (seen.labels < 7 || seen.hints < 7 || seen.controls < 24 || seen.properNames < 12) {
+  // the corpus that rule exists for. Floors measured against the real build
+  // over all ten sections (30/35/61/18 today), each left headroom below the
+  // measured count rather than pinned to it.
+  if (seen.labels < 20 || seen.hints < 25 || seen.controls < 40 || seen.properNames < 14) {
     throw new Error(`the sweep found too little to be about the surface: ${JSON.stringify(seen)}`);
   }
   await page.close();
@@ -1078,8 +1124,15 @@ console.log('\n=== the settings case ladder');
 // needs `window.api.remote`, a preload bridge, so a browser draws the "no
 // bridge" state instead. That one is held by a class assertion in
 // `test/settings/pairing-panel.test.tsx`, which says so. What IS below is the
-// rest of the surface -- 155 buttons of it -- pinned so the next stray is
-// loud.
+// rest of the surface -- 184 buttons of it over all ten sections now -- pinned
+// so the next stray is loud.
+//
+// A CARD'S OWN HEADER AND AN ADVANCED FOLD'S TOGGLE ARE A DIFFERENT SHAPE OF
+// CONTROL, and are excluded rather than forced into one of the ranks below
+// (both carry `aria-expanded`, which nothing else on this surface does): a
+// full-bleed disclosure row was never a candidate for "one of three pill
+// heights" and pretending otherwise would be the vacuous version of this
+// census, not a stricter one.
 //
 // THE RANKS ARE PINNED, NOT COUNTED. Three heights and one radius, each with
 // a reason, and a fourth shape has to be argued for rather than merely typed.
@@ -1106,18 +1159,37 @@ console.log('\n=== the settings button census');
   for (const sectionId of sectionIds) {
     await page.locator(`[data-settings-nav-item="${sectionId}"]`).click();
     await page.waitForTimeout(120);
-    const rows = await page.evaluate(() => {
-      const panel = document.querySelector('[data-settings-panel]:not([hidden])');
-      return [...(panel?.querySelectorAll('button') ?? [])].map((el) => {
-        const box = el.getBoundingClientRect();
-        const cs = getComputedStyle(el);
-        return {
-          text: (el.textContent ?? '').trim().slice(0, 24) || (el.getAttribute('aria-label') ?? '?'),
-          height: Math.round(box.height),
-          radius: cs.borderTopLeftRadius,
-        };
-      });
-    });
+    // OPEN EVERY ADVANCED FOLD THIS CARD HAS, before measuring. A closed
+    // fold's own buttons (the colour grid's per-token resets, the bulk reset,
+    // the streaming switch) sit in a `hidden` subtree, where
+    // `getBoundingClientRect` reports all zeroes regardless of what is
+    // actually drawn once opened -- not absence, just unmeasured, and this
+    // census is about what IS painted.
+    const advanced = page.locator(`[data-settings-advanced="${sectionId}"]`);
+    if ((await advanced.count()) === 1 && (await advanced.getAttribute('aria-expanded')) !== 'true') {
+      await advanced.click();
+      await page.waitForTimeout(120);
+    }
+    const rows = await page.evaluate((id) => {
+      const panel = document.querySelector(`[data-settings-panel="${id}"]`);
+      return [...(panel?.querySelectorAll('button') ?? [])]
+        // A DISCLOSURE HEADER IS A DIFFERENT SHAPE OF CONTROL, on purpose: a
+        // card's own header (`SettingsCard`) and the Advanced fold's toggle
+        // (`AdvancedDisclosure`) are full-bleed rows that open something,
+        // not a rounded pill sized to a value -- the one shape this rank
+        // ladder is about. Both carry `aria-expanded`, which nothing else on
+        // this surface does, so it is what tells them apart here.
+        .filter((el) => !el.hasAttribute('aria-expanded'))
+        .map((el) => {
+          const box = el.getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          return {
+            text: (el.textContent ?? '').trim().slice(0, 24) || (el.getAttribute('aria-label') ?? '?'),
+            height: Math.round(box.height),
+            radius: cs.borderTopLeftRadius,
+          };
+        });
+    }, sectionId);
     for (const row of rows) {
       counted += 1;
       seenRanks.set(row.height, (seenRanks.get(row.height) ?? 0) + 1);

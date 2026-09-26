@@ -163,7 +163,24 @@ if (painted.length === 0) {
   throw new Error('the appearance section offers no palette template to override a colour with');
 }
 await page.locator(`[data-palette-template="${painted[0]}"]`).click();
+// AND THE RESET BUTTONS THIS OVERRIDE PRODUCES SIT BEHIND ADVANCED NOW. The
+// cards restructure moved the per-token colour grid -- the one place
+// `.vam-hit-24` shows up in Settings -- into Interface's own Advanced
+// disclosure, closed by default (`primitives.tsx`'s `AdvancedDisclosure`), so
+// a probe that only opens the dialog and picks a template never sees it.
+await page.locator('[data-settings-advanced="interface"]').click();
 await page.waitForSelector('[data-settings-overlay] .vam-hit-24', { timeout: 3000 });
+// AND SCROLLED INTO THE DIALOG'S OWN SCROLLPORT, not merely present in the
+// DOM. `AdvancedDisclosure` opens in place, well below the fold of a dialog
+// capped at `min(600px, 80vh)` -- `getBoundingClientRect` reports the reset
+// button's real layout position regardless (736px down a 560px-tall port,
+// measured), so `waitForSelector`'s own visibility check passes on a control
+// that is clipped by the scrollport's `overflow-y: auto` and not actually
+// painted anywhere the probe below can point at. Without this, every miss
+// resolves to the modal's own backdrop button, which sits behind the whole
+// dialog and answers for any pixel the dialog does not currently paint over.
+await page.locator('[data-settings-overlay] .vam-hit-24').first().scrollIntoViewIfNeeded();
+await page.waitForTimeout(120);
 const inSettings = await probe('[data-settings-overlay]');
 const settingsUndersized = inSettings.filter((row) => row.undersized);
 if (settingsUndersized.length === 0) {
