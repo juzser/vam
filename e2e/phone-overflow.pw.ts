@@ -486,9 +486,16 @@ test.describe('the keystroke strip scrolls horizontally', () => {
       'a drag across the strip must not also register as a tap on a chip',
     ).toHaveCount(0);
 
+    // A REAL touch tap, not a synthesised mouse click (S3 finding, cross-
+    // provider review): this file's own drag above already dispatches real
+    // touch events via CDP, and this project's `hasTouch: true`
+    // (`playwright.phone.config.ts`) is what makes `.tap()` dispatch actual
+    // `touchstart`/`touchend` rather than `mousedown`/`mouseup` -- the
+    // fine-vs-coarse-pointer distinction this same suite's own header names
+    // for the hover-only close control elsewhere in this file.
     const backspace = page.locator('[data-key-strip-key="backspace"]');
     await backspace.scrollIntoViewIfNeeded();
-    await backspace.click();
+    await backspace.tap();
     await expect(
       page.locator('[data-mode-cycle]'),
       'a plain tap must still reach the handler',

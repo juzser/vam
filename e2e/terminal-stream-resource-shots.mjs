@@ -101,6 +101,37 @@ async function sampleWindow(fn, ms) {
 console.log(`tmux: ${which.stdout.trim()} on private socket -L ${SOCKET}\n`);
 const report = { idle: {}, heavy: {} };
 
+/* ── a static file server + ONE shared browser, launched up front ──────────
+ * X-AUD-1's sibling finding (test 5, "pause-after recovery", below): the
+ * "correct final screen" check used to read only tmux's OWN screen
+ * (`capture-pane`) -- proof the SESSION recovered, never proof this
+ * `StreamClient` actually delivered that screen to a real renderer. Moved
+ * here (used to be created only for the "RENDERER HALF" further down) so
+ * test 5 can drive a real `@xterm/xterm` the same way the "RENDERER HALF"
+ * tests already do, without launching Chromium a second time. */
+const ROOT = new URL('..', import.meta.url).pathname;
+const MIME = { '.html': 'text/html', '.mjs': 'text/javascript', '.js': 'text/javascript', '.css': 'text/css' };
+const server = createServer((req, res) => {
+  const path = join(ROOT, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+  try {
+    const st = statSync(path);
+    if (!st.isFile()) throw new Error('not a file');
+    res.setHeader('Content-Type', MIME[extname(path)] ?? 'application/octet-stream');
+    createReadStream(path).pipe(res);
+  } catch {
+    res.statusCode = 404;
+    res.end('not found');
+  }
+});
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+const port = server.address().port;
+// `--enable-precise-memory-info`/`--js-flags=--expose-gc`: needed by the
+// "RENDERER HALF" heap-growth tests further down; harmless for test 5's own
+// rendered-screen check above them.
+const browser = await chromium.launch({
+  args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'],
+});
+
 // ── REAL ASSERTIONS, added for CI registration (`run-web-guards.mjs`) --
 // matching `terminal-stream-latency-shots.mjs`'s own `check`/`failures`
 // pattern exactly (#493), not a new convention. Only STRUCTURAL/RATIO
@@ -435,6 +466,20 @@ await new Promise((r) => setTimeout(r, 300));
  * Never weakens either assertion: both still require the REAL thing to have
  * happened; see this file's own `check()` calls for `pauseAfter.sawPauseRaw`
  * and `pauseAfter.sawReseed`.
+ *
+ * UPDATED A FIFTH TIME -- CROSS-PROVIDER REVIEW FINDING: `correct` (the
+ * "final screen matches" check) read ONLY `capture-pane` -- tmux's own
+ * screen, which is ground truth for whether the SESSION recovered but says
+ * nothing about whether THIS `StreamClient`'s own seed/data/reseed events
+ * ever reached a renderer. A real xterm is now fed those same events (the
+ * page/browser this file's own "RENDERER HALF" already launches, moved up
+ * so test 5 can use it too -- see the top-level comment above `const
+ * server = createServer(...)`), and `appCorrect` asserts the APP's own
+ * rendered buffer shows the DONE marker, independently of `correct`.
+ * Falsified by dropping the `client.onData` forward to the page (this
+ * task's own report holds the run: `correct` stayed true off tmux's screen
+ * while `appCorrect` went false, exactly the gap this rewrite closes) and
+ * restored.
  */
 async function measurePauseAfter() {
   // A raw-wire tap on the control child's own stdout -- a SECOND listener,
@@ -465,9 +510,40 @@ async function measurePauseAfter() {
     target: TMUX_SESSION,
     spawnChild: observingSpawn,
   });
-  await client.connect();
+  const initialSeed = await client.connect();
+
+  // A REAL `@xterm/xterm`, fed the SAME seed/data/reseed events
+  // `TerminalStreamTab.tsx` feeds its own -- the review finding this
+  // rewrite answers: "the pane recovers to the correct final screen" used
+  // to read only tmux's OWN screen (`capture-pane`), which proves the
+  // SESSION recovered but never that this `StreamClient`'s own delivery
+  // path actually reached a renderer. `capture-pane` text is a plain `\n`-
+  // separated dump (no carriage returns), so seeds/reseeds get the same
+  // `\r?\n` -> `\r\n` fixup test 6 already applies to its own seed/ground-
+  // truth writes below; raw `%output` chunks from `onData` do not (they are
+  // already proper pty bytes -- test 6's own `__feedChunk` writes them
+  // unmodified too).
+  const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
+  await page.goto(`http://127.0.0.1:${port}/e2e/terminal-stream-latency-harness.html`);
+  await page.waitForFunction(() => globalThis.window.__term !== undefined);
+  await page.evaluate((s) => globalThis.window.__term.write(s.replace(/\r?\n/g, '\r\n')), initialSeed);
+  client.onData((chunk) => {
+    void page.evaluate((c) => globalThis.window.__term.write(c), chunk);
+  });
   const seeds = [];
-  client.onSeed((seed) => seeds.push(seed));
+  client.onSeed((seed) => {
+    seeds.push(seed);
+    // A real reconnect resets the terminal before replaying the fresh
+    // ground truth (`TerminalStreamTab.tsx`'s own `term.reset()` + write,
+    // mirrored the same way test 6 mirrors it for its own ground-truth
+    // recovery) -- so the app-rendered screen reflects the SAME recovery
+    // path a real reseed drives, not a plain append racing the old screen.
+    void page.evaluate((s) => {
+      const term = globalThis.window.__term;
+      term.reset();
+      term.write(s.replace(/\r?\n/g, '\r\n'));
+    }, seed);
+  });
   try {
     // CONTINUOUS, not a fixed 5MB `head -c` (see this function's own header,
     // third update): a size-capped flood can finish producing before a
@@ -522,16 +598,40 @@ async function measurePauseAfter() {
       await new Promise((r) => setTimeout(r, 200));
     }
     const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
+
+    // THE APP'S OWN SCREEN, not tmux's -- condition-polled the same way
+    // `finalPane` above is (the last `onData`/`onSeed` writes above are
+    // fire-and-forget `page.evaluate` calls, exactly how a real renderer's
+    // `term.write` is driven off `StreamClient`'s own events, so racing a
+    // read right after the marker lands in tmux is not a new tolerance to
+    // invent -- it is the same race `finalPane`'s own poll already absorbs).
+    let appText = '';
+    const appDeadline = Date.now() + 5_000;
+    while (Date.now() < appDeadline) {
+      appText = await page.evaluate(() => {
+        const term = globalThis.window.__term;
+        const buf = term.buffer.active;
+        let text = '';
+        for (let y = 0; y < buf.length; y += 1) text += `${buf.getLine(y)?.translateToString(true) ?? ''}\n`;
+        return text;
+      });
+      if (/VAM-FLOOD-DONE-5/.test(appText)) break;
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    const appCorrect = /VAM-FLOOD-DONE-5/.test(appText);
+
     console.log(
       `\nreal tmux, a real StreamClient (sends pause-after), a duty-cycled real stdout (not a fixed window), a ` +
         `continuous flood: %pause seen on the wire: ${sawPauseRaw}, %continue seen on the wire: ${sawContinueRaw}, ` +
         `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
-        `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
-        'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
+        `final screen matches capture-pane's own DONE marker: ${correct}, the APP's own rendered xterm shows it ` +
+        `too: ${appCorrect} -- the pause-after fix makes tmux throttle this client AND StreamClient recovers to ` +
+        'a correct screen the app itself actually paints.',
     );
-    return { sawPauseRaw, sawReseed: seeds.length > 0, correct };
+    return { sawPauseRaw, sawReseed: seeds.length > 0, correct, appCorrect };
   } finally {
     client.dispose();
+    await page.close();
   }
 }
 
@@ -554,48 +654,27 @@ async function measurePauseAfter() {
 const pauseAfter = await withRetries(
   'pause-after recovery',
   measurePauseAfter,
-  (r) => r.sawPauseRaw && r.sawReseed && r.correct,
+  (r) => r.sawPauseRaw && r.sawReseed && r.correct && r.appCorrect,
   2,
 );
 report.pauseAfter = pauseAfter;
 check('pause-after: tmux actually sent %pause for this pane (seen on the raw wire)', pauseAfter.sawPauseRaw);
 check('pause-after: %pause triggered a reseed (a real StreamClient throttled by tmux)', pauseAfter.sawReseed);
-check('pause-after: the pane recovers to the correct final screen', pauseAfter.correct);
+check("pause-after: the pane recovers to the correct final screen (tmux's own capture-pane)", pauseAfter.correct);
+check(
+  "pause-after: the APP's own rendered xterm recovers to the correct final screen too (not just tmux's)",
+  pauseAfter.appCorrect,
+);
 
 // A FRESH SESSION for test 6, never test 5's own leftover flood.
 tmux('kill-session', '-t', TMUX_SESSION);
 tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
 await new Promise((r) => setTimeout(r, 300));
 
-/* ═══════════════════════════════ RENDERER HALF ══════════════════════════ */
-
-const ROOT = new URL('..', import.meta.url).pathname;
-const MIME = { '.html': 'text/html', '.mjs': 'text/javascript', '.js': 'text/javascript', '.css': 'text/css' };
-const server = createServer((req, res) => {
-  const path = join(ROOT, decodeURIComponent(new URL(req.url, 'http://x').pathname));
-  try {
-    const st = statSync(path);
-    if (!st.isFile()) throw new Error('not a file');
-    res.setHeader('Content-Type', MIME[extname(path)] ?? 'application/octet-stream');
-    createReadStream(path).pipe(res);
-  } catch {
-    res.statusCode = 404;
-    res.end('not found');
-  }
-});
-await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-const port = server.address().port;
-
-// `--enable-precise-memory-info` -- WITHOUT it, Chromium quantizes
-// `performance.memory.usedJSHeapSize` to a small set of buckets (its own
-// anti-fingerprinting bucketing), which reads as a flat, uninformative "0.00
-// MB growth" for exactly the kind of small-to-medium allocation this
-// measures. `--js-flags=--expose-gc` is what makes `window.gc()` (below)
-// something other than a silent no-op, so "before" is measured after
-// garbage is actually collected, not merely after a request for some.
-const browser = await chromium.launch({
-  args: ['--enable-precise-memory-info', '--js-flags=--expose-gc'],
-});
+/* ═══════════════════════════════ RENDERER HALF ══════════════════════════
+ * `server`/`port`/`browser` are already up (moved above test 1 so test 5's
+ * own pause-after check could use them too) -- reused here, not
+ * re-launched. */
 
 async function heapAfterLines(scrollback, lineCount) {
   const page = await browser.newPage({ viewport: { width: 1100, height: 700 } });
