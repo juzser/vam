@@ -1246,6 +1246,7 @@ describe('loadClaudeCodeProjects', () => {
         activity: null,
         decisions: [],
         questions: [],
+        questionOffsets: new Map(),
       },
       roster: { agents: [], running: 0 },
       mtimeMs: over.mtimeMs ?? null,
@@ -1893,7 +1894,14 @@ describe('loadClaudeCodeProjects', () => {
    */
   describe('concurrent transcript reads', () => {
     const emptyRead = (branch: string) => ({
-      facts: { aiTitle: null, branch, activity: null, decisions: [], questions: [] },
+      facts: {
+        aiTitle: null,
+        branch,
+        activity: null,
+        decisions: [],
+        questions: [],
+        questionOffsets: new Map(),
+      },
       roster: { agents: [], running: 0 },
       mtimeMs: null,
       birthtimeMs: null,

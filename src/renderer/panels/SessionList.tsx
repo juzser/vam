@@ -1404,9 +1404,20 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     writeAcknowledgedForeignHiddenCount(count);
   }, []);
   const foreignNoteShown = foreignHiddenCount > acknowledgedForeignCount && !showGettingStarted;
-  /** Paused while the pointer is over the note, or focus is inside it — see
-   * the note's own render site for the handlers that set this. */
-  const [foreignNotePaused, setForeignNotePaused] = useState(false);
+  /**
+   * PAUSED WHILE THE POINTER IS OVER THE NOTE, OR FOCUS IS INSIDE IT -- see
+   * the note's own render site for the handlers that set these. Two flags,
+   * not one: hover and focus end independently (the operator can tab to
+   * Dismiss, then move the pointer away while still reading it, or the
+   * reverse), and a single shared flag let whichever one ended LAST win --
+   * leaving hover while focus was still inside un-paused the clock right out
+   * from under a still-focused control. `foreignNotePaused` below is the
+   * derived, either-one-holds-it value every reader outside this pair of
+   * setters actually wants.
+   */
+  const [foreignNoteHovered, setForeignNoteHovered] = useState(false);
+  const [foreignNoteFocused, setForeignNoteFocused] = useState(false);
+  const foreignNotePaused = foreignNoteHovered || foreignNoteFocused;
   /**
    * LAGS `foreignNoteShown` ON THE WAY OUT ONLY, so a hide is a fade
    * (`FOREIGN_HIDDEN_NOTE_FADE_MS`) rather than a snap, and unmounts for real
@@ -4720,18 +4731,18 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           // the right way to hear "N sessions hidden" arrive without an
           // operator having had to go looking for it.
           role="status"
-          onMouseEnter={() => setForeignNotePaused(true)}
-          onMouseLeave={() => setForeignNotePaused(false)}
+          onMouseEnter={() => setForeignNoteHovered(true)}
+          onMouseLeave={() => setForeignNoteHovered(false)}
           // React's `onFocus`/`onBlur` are the bubbling kind (unlike the DOM
           // events they are named for), so these fire once for the whole
           // subtree rather than needing a handler on every focusable child --
           // `Show` today, `Dismiss` below. `relatedTarget` is what tells
           // "focus moved to Dismiss, still inside" apart from "focus left the
           // note entirely": only the second should resume the clock.
-          onFocus={() => setForeignNotePaused(true)}
+          onFocus={() => setForeignNoteFocused(true)}
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget)) {
-              setForeignNotePaused(false);
+              setForeignNoteFocused(false);
             }
           }}
           className={[

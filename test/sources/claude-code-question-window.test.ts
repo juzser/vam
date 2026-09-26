@@ -171,4 +171,37 @@ describe('an AskUserQuestion buried under a burst of ordinary output', () => {
     expect(second.facts.questions).toHaveLength(1);
     expect(second.facts.questions[0]?.answer).toBeNull();
   });
+
+  /**
+   * A REUSED `tool_use` id, drawn TWICE (cross-provider review finding). The
+   * tail window's own `collectQuestions` (questions.ts) counts a reused id's
+   * occurrences from only the bytes ITS OWN window covers; this module's cold
+   * start scan (`QUESTION_SCAN_CAP_BYTES`, 4 MiB -- far wider than this
+   * fixture) sees the WHOLE file. The first `toolu_mock_1` ask is answered and
+   * pushed out of the tail window by the same burst of filler
+   * `fillerPastTheWindow` uses elsewhere in this file; the SECOND ask under
+   * the same id -- still open -- is the only occurrence the tail window ever
+   * sees, so it numbers it as if it were the FIRST (`toolu_mock_1:0`, no `#2`)
+   * while this module, having read the whole file, correctly calls it
+   * `toolu_mock_1#2:0`. Keyed off that mismatched numbering, the merge used to
+   * treat them as two different questions and draw the one real open question
+   * twice.
+   */
+  it('draws exactly one card for a reused id the two paths would otherwise number differently', async () => {
+    mkdirSync(join(root, 'proj'), { recursive: true });
+    writeFileSync(
+      join(root, 'proj', 'sess-1.jsonl'),
+      jsonl(ask('toolu_mock_1')) +
+        jsonl(answerLine('toolu_mock_1')) +
+        fillerPastTheWindow(TAIL_WINDOW_BYTES + 4096) +
+        jsonl(ask('toolu_mock_1')),
+      'utf8',
+    );
+
+    const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+    const questions = project?.sessions[0]?.questions ?? [];
+
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.answer).toBeNull();
+  });
 });

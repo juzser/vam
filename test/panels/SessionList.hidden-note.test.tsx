@@ -112,6 +112,37 @@ describe('the foreign-hidden note auto-hides and can be dismissed', () => {
     expect(container.querySelector('[data-foreign-hidden]'), 'focus paused it').not.toBeNull();
   });
 
+  /**
+   * HOVER AND FOCUS USED TO SHARE ONE PAUSE FLAG (cross-provider review
+   * finding): both `onMouseEnter`/`onFocus` set it true and both
+   * `onMouseLeave`/`onBlur` set it false, so leaving hover while focus was
+   * STILL inside the note (the operator's pointer left after tabbing to
+   * Dismiss, say) un-paused the clock out from under a still-focused control.
+   * Hover and focus must be tracked separately and the countdown paused while
+   * EITHER is active, not just whichever set the flag last.
+   */
+  it('stays paused when the mouse leaves but focus is still inside the note', async () => {
+    vi.useFakeTimers();
+    const { container } = render(<SessionList {...baseProps([])} foreignHiddenCount={2} />);
+    const note = container.querySelector('[data-foreign-hidden]') as Element;
+    const dismiss = container.querySelector('[data-foreign-hidden-dismiss]') as HTMLElement;
+
+    fireEvent.mouseEnter(note);
+    fireEvent.focus(dismiss);
+    fireEvent.mouseLeave(note);
+    // Two ticks, as elsewhere in this file: the first would CROSS the
+    // auto-hide boundary and fire the acknowledge if the clock had actually
+    // resumed on mouseLeave, the second would let the exit fade that fire
+    // just scheduled actually finish and unmount. If focus is still correctly
+    // holding the pause, NEITHER tick should move the note at all.
+    await advance(FOREIGN_HIDDEN_NOTE_AUTO_HIDE_MS + 10);
+    await advance(PAST_FADE);
+    expect(
+      container.querySelector('[data-foreign-hidden]'),
+      'focus should still hold the pause after the pointer left',
+    ).not.toBeNull();
+  });
+
   it('Dismiss hides it right away, without waiting for the timer', async () => {
     vi.useFakeTimers();
     const { container } = render(<SessionList {...baseProps([])} foreignHiddenCount={2} />);
