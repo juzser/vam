@@ -3788,7 +3788,24 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
           free space split it, which is the bug. */}
       {(!showGettingStarted || showStartingProvisional) && (
         <OverlayScroll
-          className="flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 py-2.5"
+          className={[
+            'flex flex-1 flex-col gap-3.5 overflow-y-auto px-2.5 pt-2.5',
+            // PHONE ONLY: `PhoneShell.tsx`'s own floating "+" is `absolute`
+            // over THIS pane (56px tall, 16px off its bottom edge), and
+            // without this the last row's own bottom could sit UNDER it --
+            // a real defect, measured on the shipped screenshot
+            // (`phone-controls-list-dark-after.png`): the FAB covered the
+            // last row's own preview line. This reserves the FAB's full
+            // footprint (its height, its own margin, one more 16px of
+            // clearance so the row does not sit flush against its edge) plus
+            // the safe-area inset -- belt over what the footer below already
+            // handles, since this pane's padding cannot know whether a
+            // caller other than `PhoneShell.tsx` will ever draw a FAB over
+            // it without also reserving room. `e2e/phone-shell.pw.ts`'s own
+            // scroll-to-bottom check holds that the last row's rectangle
+            // never intersects the FAB's, in a real browser.
+            phone ? 'pb-[calc(56px+16px+16px+env(safe-area-inset-bottom))]' : 'pb-2.5',
+          ].join(' ')}
           scrollRef={(el) => {
             scrollerRef.current = el;
           }}

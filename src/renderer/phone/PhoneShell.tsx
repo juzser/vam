@@ -75,6 +75,7 @@ import { SessionList } from '../panels/SessionList.js';
 import { type Tab, visibleTabs } from '../panels/tabs.js';
 import { ConfirmCloseSession } from './ConfirmCloseSession.js';
 import { closeSession, isSessionEntry, openSession } from './history.js';
+import { SessionCreatePicker } from './SessionCreatePicker.js';
 
 /** 44x44 is WCAG 2.2 SC 2.5.5 (AAA) and Apple's HIG figure, not a taste. */
 const TOUCH = 'flex min-h-[44px] min-w-[44px] items-center justify-center';
@@ -427,9 +428,59 @@ export function PhoneShell({
 
   const entry = detail.entry;
   const session = entry?.session ?? null;
-  /** The list screen's own floating "+" targets this one -- see its own
-   *  comment, below, for which project and why. */
-  const firstEntry = sidebar.entries[0] ?? null;
+  /**
+   * Is the FAB's own sheet (`SessionCreatePicker`) open? A local, self-
+   * contained overlay -- unlike `SettingsOverlay`/`IconPicker`/`GroupPicker`/
+   * `ProjectPicker`, all rendered by `Canvas.tsx` because they serve both
+   * shells, this one exists only behind a control (the FAB) that only the
+   * phone shell draws, so its state lives here rather than one level up.
+   */
+  const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
+  /**
+   * Every project the list draws, once each, in the sheet -- deduplicated
+   * from `sidebar.entries` rather than read off a raw `project.sessions`,
+   * on the same rule `SessionTabStrip`'s own comment states: a project's
+   * RAW sessions are unfiltered, and reading them straight is "the phone
+   * half of the bug report" that comment warns the next reader away from.
+   * `entries` is already `Canvas.tsx`'s filtered, urgency-first,
+   * project-major order, so a first-seen dedupe of it is both the sheet's
+   * order and the list screen's own.
+   *
+   * `paneOnly`: the renderer-visible shape of pull request 486's "pane-only
+   * project" -- a tagged tmux pane with no live conversation yet reports every session
+   * as `unstarted` (`domain/model.ts`'s own `SessionStatus` doc), so a
+   * project none of whose VISIBLE sessions has moved past that state is
+   * read as pane-only here. Not a field the model carries; a derivation of
+   * the same story `docs/design/worktrees.md` §4 tells at the HTTP layer,
+   * for the one thing this sheet has to say about it.
+   */
+  const sessionCreateChoices = useMemo(() => {
+    const projectsById = new Map<string, Project>();
+    const sessionsByProject = new Map<string, Session[]>();
+    const order: string[] = [];
+    for (const e of sidebar.entries) {
+      if (!projectsById.has(e.project.id)) {
+        projectsById.set(e.project.id, e.project);
+        order.push(e.project.id);
+      }
+      const list = sessionsByProject.get(e.project.id) ?? [];
+      list.push(e.session);
+      sessionsByProject.set(e.project.id, list);
+    }
+    return {
+      projectsById,
+      choices: order.map((id) => {
+        const project = projectsById.get(id);
+        const sessions = sessionsByProject.get(id) ?? [];
+        return {
+          id,
+          name: project?.name ?? id,
+          icon: project?.icon,
+          paneOnly: sessions.every((s) => s.status === 'unstarted'),
+        };
+      }),
+    };
+  }, [sidebar.entries]);
   /**
    * THIS SCREEN'S OWN `SessionTabStrip`, scoped to `entry.project` -- the
    * status-rank order `orderedInProject` gives directly, for free:
@@ -544,25 +595,25 @@ export function PhoneShell({
           />
           {/* THE FLOATING "+", ORCA'S SHAPE: a round button over the list
               rather than a row inside it, reachable from wherever the
-              operator has scrolled to. It is not a second way to do what the
-              Projects header's own `+` already does (`onNewProject`, a few
-              lines up in `SessionList.tsx`) -- that route needs a native
-              directory picker this build never has (`hasDirectoryPicker` is
-              false on every phone; `window.api?.dialog?.chooseDirectory` is
-              an Electron bridge), so it declines on a phone every time it is
-              pressed. This button calls `onAddInProject` instead, the SAME
-              handler the per-project `+` on each heading already wears
-              (`Canvas.tsx`'s `onSidebarAddInProject`,
-              `createSession(project.id, …)`) -- a session in a project vam
-              already knows, which needs no picker and is the one
-              create-route that actually works here. That is also what
-              "respects the pane-only-project behaviour" means for this
-              button: it is not a second implementation of that rule, it is
-              the first implementation, called from a second place.
-              WHICH PROJECT: `sidebar.entries` is `Canvas.tsx`'s own
-              urgency-first order, project-major -- the same order the list
-              is drawn in -- so its first entry's project is the one heading
-              the operator is already looking at without scrolling.
+              operator has scrolled to. It opens a SHEET (below) rather than
+              creating directly -- the operator's own call, after seeing a
+              first cut that guessed the topmost project: "opens a project
+              picker... tapping one creates a session there, through the
+              same onAddInProject path". It is still not a second way to do
+              what the Projects header's own `+` already does
+              (`onNewProject`, a few lines up in `SessionList.tsx`) -- that
+              route needs a native directory picker this build never has
+              (`hasDirectoryPicker` is false on every phone;
+              `window.api?.dialog?.chooseDirectory` is an Electron bridge),
+              so it declines on a phone every time it is pressed. Picking a
+              row in the sheet calls `onAddInProject`, the SAME handler the
+              per-project `+` on each heading already wears (`Canvas.tsx`'s
+              `onSidebarAddInProject`, `createSession(project.id, …)`) -- a
+              session in a project vam already knows, which needs no picker
+              and is the one create-route that actually works here. That is
+              also what "respects the pane-only-project behaviour" means for
+              this button: it is not a second implementation of that rule,
+              it is the first implementation, called from a second place.
               Not drawn at all when the list is empty: `GettingStarted`
               (drawn by `SessionList` itself when `phone` and there is
               nothing here) already carries this screen's one creation route
@@ -582,13 +633,13 @@ export function PhoneShell({
               never reach into the footer's box to cover a control drawn in
               it, and it needs no `safe-area-inset-bottom` of its own either:
               the footer already reserves that band below. */}
-          {firstEntry !== null && (
+          {sessionCreateChoices.choices.length > 0 && (
             <button
               type="button"
               data-phone-fab
-              aria-label={sidebar.newSessionDecline ?? `new session in ${firstEntry.project.name}`}
+              aria-label={sidebar.newSessionDecline ?? 'new session'}
               disabled={sidebar.newSessionDecline !== null}
-              onClick={() => sidebar.onAddInProject(firstEntry.project)}
+              onClick={() => setSessionPickerOpen(true)}
               // `disabled:` carries the declined look -- one Tailwind
               // variant, no ternary -- rather than a second class list this
               // component would compute on every render. No re-entrancy
@@ -601,6 +652,17 @@ export function PhoneShell({
             >
               <Plus size={24} strokeWidth={2} aria-hidden="true" />
             </button>
+          )}
+          {sessionPickerOpen && (
+            <SessionCreatePicker
+              choices={sessionCreateChoices.choices}
+              onPick={(projectId) => {
+                setSessionPickerOpen(false);
+                const project = sessionCreateChoices.projectsById.get(projectId);
+                if (project !== undefined) sidebar.onAddInProject(project);
+              }}
+              onClose={() => setSessionPickerOpen(false)}
+            />
           )}
         </div>
         {/* WHAT THIS BAR NO LONGER SAYS. It opened with `2 running · 3 waiting
