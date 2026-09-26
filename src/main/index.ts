@@ -65,6 +65,7 @@ import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { openWritesPreference, writesPreferencePath } from './remote/writes-preference.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
+import { paneCwdOf, paneNameOf } from './sources/claude-code/pane-row.js';
 import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/pr-actions.js';
 import { prRepoOverride } from './sources/claude-code/pr-repos.js';
 import { projectIdOf } from './sources/claude-code/project-id.js';
@@ -678,8 +679,25 @@ function spawnTailscaleServe(
  * `registerAttachImageIpc` and `registerFilesListIpc` so the image picker and
  * the file-editor tab's listing cannot drift on how a session id becomes a
  * directory -- they used to be two copies of the same four lines.
+ *
+ * A `pane:` ROW ID IS CHECKED FIRST, and answered from vam's own tmux
+ * listing rather than `claude agents --json` -- issues 502/507's "other entry
+ * points": a pane row has no live agent to look up (there never is one, the
+ * same fact `recordPrompt`/`closeSession` dispatch on in `source.ts`), so
+ * this used to answer `unknown-session` for exactly the pane the Response
+ * view's `PaneReady` state had already confirmed running a provider and
+ * enabled the composer for -- the image-attach button and the file-editor
+ * tab's own listing refusing a row the prompt box beside them could already
+ * send into. `paneCwdOf` (`pane-row.ts`) is the pure lookup; this is only the
+ * tmux call it needs.
  */
 async function resolveSessionCwd(sessionId: string): Promise<string | null> {
+  if (paneNameOf(sessionId) !== null) {
+    const listed = await listVamSessions(createTmuxRunner());
+    // `unavailable` becomes `null` for the identical reason the agent-list
+    // branch below does: vam could not ask, so it has no cwd to answer with.
+    return listed.kind === 'ok' ? paneCwdOf(listed.sessions, sessionId) : null;
+  }
   const agentsResult = await listLiveAgents();
   // `unavailable` becomes `null`, same as an unmatched row: vam could not
   // ask, so it has no cwd to answer with -- never "no sessions are running".
