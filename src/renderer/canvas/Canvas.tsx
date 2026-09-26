@@ -231,6 +231,14 @@ const SettingsOverlay = lazy(() =>
   import('../settings/SettingsOverlay.js').then((m) => ({ default: m.SettingsOverlay })),
 );
 
+/** The Stats & Usage screen, lazy on the SAME idiom as `SettingsOverlay`
+ *  above: it exists only once `statsOpen` is true, so its own chunk (the
+ *  heatmap grid, the provider cards) costs nothing until the operator
+ *  actually opens it. */
+const StatsScreen = lazy(() =>
+  import('../stats/StatsScreen.js').then((m) => ({ default: m.StatsScreen })),
+);
+
 /** `model.groups ?? []` on every render is a fresh reference each keystroke,
  *  defeating `SessionList`'s memo -- a module-level constant keeps this a
  *  stable reference across renders. */
@@ -2223,12 +2231,19 @@ function CanvasInner({
     setSettingsSection,
     errorLogOpen,
     setErrorLogOpen,
+    statsOpen,
+    setStatsOpen,
     confirmForceClose,
     setConfirmForceClose,
   } = useCanvasOverlays();
   /** Any full-screen overlay on screen. See the keydown handler for the rule. */
   const overlayOpen =
-    paletteOpen || keySheetOpen || settingsOpen || errorLogOpen || confirmForceClose !== null;
+    paletteOpen ||
+    keySheetOpen ||
+    settingsOpen ||
+    errorLogOpen ||
+    statsOpen ||
+    confirmForceClose !== null;
   /**
    * Whether the source has a terminal to draw, which decides how many tabs the
    * bar has. Read in two places -- the pane is told, and `Mod-<digit>` counts
@@ -7212,6 +7227,7 @@ function CanvasInner({
     setSettingsSection('remote');
     setSettingsOpen(true);
   }, [setSettingsSection, setSettingsOpen]);
+  const onSidebarStats = useCallback(() => setStatsOpen(true), [setStatsOpen]);
 
   const onSidebarToggleTheme = useCallback(
     () => savePrefs(setTheme(prefs, effective === 'dark' ? 'light' : 'dark')),
@@ -7380,6 +7396,7 @@ function CanvasInner({
     onRenameProject: renameOneProject,
     onSettings: onSidebarSettings,
     onRemote: onSidebarRemote,
+    onStats: onSidebarStats,
     width: sidebarWidth,
     resizeHandle: sidebarResizeHandle,
   };
@@ -8033,6 +8050,15 @@ function CanvasInner({
           opened FROM the status bar, so it must be able to draw over whatever
           the layout is showing at the time. */}
       {errorLogOpen && <ErrorLogPanel onClose={() => setErrorLogOpen(false)} />}
+
+      {/* Same reason as the log above: opened from the sidebar's own avatar
+          bar, so it must draw over whatever layout is on screen. `Suspense`
+          with a `null` fallback, on `SettingsOverlay`'s own idiom below. */}
+      {statsOpen && (
+        <Suspense fallback={null}>
+          <StatsScreen onClose={() => setStatsOpen(false)} />
+        </Suspense>
+      )}
 
       {/* Same reason again: settings is a window overlay, so it sits with the
           palette and the sheet rather than inside the canvas column.

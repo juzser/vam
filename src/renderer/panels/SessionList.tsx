@@ -25,6 +25,7 @@ import {
   ArrowLeft,
   Bell,
   Bot,
+  ChartColumn,
   Check,
   ChevronDown,
   ChevronRight,
@@ -1088,6 +1089,16 @@ export type SessionListProps = {
    */
   readonly onRemote: () => void;
   /**
+   * Opens the Stats & Usage screen — a full local scan of this machine's own
+   * agent transcripts, never a settings section: it is not a preference and
+   * nothing in it is chosen, the same reasoning `ErrorLogPanel.tsx` states
+   * for why IT is not a fifth Settings section either. Optional so every
+   * existing caller (and every fixture that builds `SessionListProps` by
+   * hand) keeps compiling; absent, the icon simply is not drawn — the same
+   * "absent, not disabled" rule the getting-started button already follows.
+   */
+  readonly onStats?: () => void;
+  /**
    * The theme ON SCREEN, already resolved — never `prefs.theme`, which can be
    * `system`. The two-way ternary below is exactly why: a third value would
    * land in its `else` arm, label the wrong direction and typecheck anyway.
@@ -1350,6 +1361,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
     onRemoveProject,
     onSettings,
     onRemote,
+    onStats,
     theme,
     onToggleTheme,
     width,
@@ -2929,6 +2941,34 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
               polling, its own dismissal wiring). See that component's own
               header for the rest. */}
           <UsagePopover />
+          {/* THE STATS & USAGE ENTRY ICON, beside the account icon at the
+              operator's own request. NOT ON A PHONE, the same rule Settings
+              takes a few lines below and for the identical reason: this
+              reads `window.api.stats`, which is not a member of
+              `PreloadSourceApi` and so is not on `remote/server.ts`'s route
+              table at all -- a paired phone has no bridge to it, and the
+              screen would draw nothing but "only available in the desktop
+              app" there. `44px` floor and `26px` box match every other icon
+              in this bar (`[data-avatar-bar] button` in `styles.css`). */}
+          {!phone && onStats !== undefined && (
+            <ShortcutTip label="Stats & usage">
+              <button
+                type="button"
+                onClick={onStats}
+                // NOT "stats and usage", though that is this screen's own
+                // title: the account icon right beside it already carries
+                // `aria-label="usage"`, and `e2e/usage-popover-shots.mjs`
+                // finds it with a SUBSTRING match (`getByLabel('usage')`) --
+                // any label containing that word makes the query ambiguous
+                // between the two buttons. Measured: it did, before this
+                // comment existed.
+                aria-label="stats"
+                className="flex h-[26px] w-[26px] cursor-pointer items-center justify-center rounded-[7px] text-ink-faint hover:text-ink"
+              >
+                <ChartColumn size={14} strokeWidth={1.5} />
+              </button>
+            </ShortcutTip>
+          )}
           {/* Pushes the icons to the right edge on every surface. On a
               phone, and only there, it is ALSO where the connectivity dot
               lives now: `min-w-0`/`truncate` so the rare non-healthy arms

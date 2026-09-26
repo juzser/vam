@@ -668,6 +668,21 @@ export const CHANNELS = {
    * Desktop-only, like the three above it, for the identical reason.
    */
   worktreeStatus: 'vam:worktree:status',
+  /**
+   * THE STATS & USAGE SCREEN'S ONE CHANNEL. Answers bare (a `StatsResult`,
+   * never an `IpcResult`), like `usageGet` — a scan failure is not a
+   * `SourceError`, there is no source and no session to refuse anything on
+   * (`src/main/stats/ipc.ts`).
+   *
+   * ONE CHANNEL FOR BOTH THE SCREEN'S OWN OPEN AND ITS REFRESH BUTTON: the
+   * operator's rule is "compute only while the screen is open, plus on an
+   * explicit refresh", and main does the identical thing either way — run
+   * the (incrementally cached) scan again. Desktop-only by construction:
+   * `remote/server.ts`'s route table carries no matching path, because a
+   * full filesystem scan of this machine's own `~/.claude`/`~/.codex` is not
+   * a question a paired phone gets to ask.
+   */
+  statsScan: 'vam:stats:scan',
 } as const;
 
 /**
