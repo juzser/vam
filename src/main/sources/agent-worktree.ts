@@ -32,41 +32,23 @@
  */
 
 import { realpath } from 'node:fs/promises';
-
-/** The one literal `hasAgentWorktreeSegment` matches on. Exported so a
- *  caller that already has a realpath in hand (`isAgentWorktreeCwd`'s own
- *  second tier) never has to import a second copy of the string. */
-export const AGENT_WORKTREE_PATH_SEGMENT = '/.claude/worktrees/';
-
-/** What `isAgentWorktreeBranch` matches on -- Claude Code's own naming for
- *  the branch an `isolation: "worktree"` subagent runs on. */
-const AGENT_WORKTREE_BRANCH_PREFIX = 'worktree-agent-';
+import {
+  AGENT_WORKTREE_PATH_SEGMENT,
+  hasAgentWorktreeSegment,
+  isAgentWorktreeBranch,
+} from '../../shared/agent-worktree.js';
 
 /**
- * Does this (already realpath'd, or raw when the caller has no realpath to
- * give) path carry a Claude Code agent worktree segment?
- *
- * THE CONSTANT'S OWN TRAILING SLASH is what keeps this from matching the
- * CONTAINER directory itself (`/repo/.claude/worktrees`, with nothing after
- * it): that path names where Claude Code keeps its worktrees, not a
- * worktree, and is not a row `loadClaudeCodeProjects` would ever draw a
- * project for -- every real session's cwd is a CHILD of that directory, so
- * its path always continues past the slash.
+ * THE PURE HALF -- `AGENT_WORKTREE_PATH_SEGMENT`, `hasAgentWorktreeSegment`,
+ * `isAgentWorktreeBranch` -- now LIVES in `shared/agent-worktree.ts`, so the
+ * renderer can filter an adopted worktree ROW by the same rule a session
+ * already is, without dragging `node:fs/promises` into the web bundle
+ * (`shared/worktree.ts`'s own "no node import, ever" rule). Re-exported here
+ * unchanged so every existing importer of THIS module -- `claude-code/
+ * source.ts`, `codex/source.ts`, this file's own test -- keeps working with
+ * no import path to update.
  */
-export function hasAgentWorktreeSegment(path: string): boolean {
-  return path.includes(AGENT_WORKTREE_PATH_SEGMENT);
-}
-
-/** Does this branch name say "an isolated agent worktree", by Claude Code's
- *  own naming convention? `null` (branch unknown, or none) is false --
- *  absence is never evidence either way, the rule every optional fact in
- *  this source follows. */
-export function isAgentWorktreeBranch(branch: string | null): boolean {
-  // Not `branch?.startsWith(...)`: that widens the expression to `boolean |
-  // undefined`, which this function's own `: boolean` return type refuses.
-  // biome-ignore lint/complexity/useOptionalChain: see above.
-  return branch !== null && branch.startsWith(AGENT_WORKTREE_BRANCH_PREFIX);
-}
+export { AGENT_WORKTREE_PATH_SEGMENT, hasAgentWorktreeSegment, isAgentWorktreeBranch };
 
 /** The slice of `node:fs/promises` this needs -- injectable so a test never
  *  resolves a real path on the machine running it. */

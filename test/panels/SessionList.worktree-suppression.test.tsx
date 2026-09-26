@@ -32,6 +32,9 @@ function worktree(over: Partial<WorktreeInfo> = {}): WorktreeInfo {
     locked: false,
     lockReason: null,
     prunable: false,
+    prunableReason: null,
+    detached: false,
+    external: false,
     ...over,
   };
 }

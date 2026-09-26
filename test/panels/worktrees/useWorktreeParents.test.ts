@@ -15,12 +15,15 @@ function worktree(over: Partial<WorktreeInfo> = {}): WorktreeInfo {
     locked: false,
     lockReason: null,
     prunable: false,
+    prunableReason: null,
+    detached: false,
+    external: false,
     ...over,
   };
 }
 
 function fakeApi(list: (projectId: string) => Promise<readonly WorktreeInfo[]>): WorktreesApi {
-  return { list, create: vi.fn(), remove: vi.fn() };
+  return { list, create: vi.fn(), remove: vi.fn(), status: vi.fn().mockResolvedValue([]) };
 }
 
 describe('useWorktreeParents', () => {

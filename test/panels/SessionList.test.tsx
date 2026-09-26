@@ -778,6 +778,7 @@ describe('SessionList projects header', () => {
         hideForeign: true,
         hideIdle: false,
         hideAgentWorktrees: true,
+        hideExternalWorktrees: true,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('1');
@@ -792,6 +793,7 @@ describe('SessionList projects header', () => {
         hideForeign: true,
         hideIdle: false,
         hideAgentWorktrees: true,
+        hideExternalWorktrees: true,
       },
     });
     expect(three.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -886,6 +888,7 @@ describe('SessionList filter popover', () => {
         hideForeign: true,
         hideIdle: false,
         hideAgentWorktrees: true,
+        hideExternalWorktrees: true,
       },
     ]);
   });
@@ -924,6 +927,7 @@ describe('SessionList filter popover', () => {
         hideForeign: true,
         hideIdle: false,
         hideAgentWorktrees: true,
+        hideExternalWorktrees: true,
       },
     });
     expect(two.querySelector('[data-filter-badge]')?.textContent).toBe('2');
@@ -962,6 +966,7 @@ describe('SessionList filter popover', () => {
         hideForeign: true,
         hideIdle: false,
         hideAgentWorktrees: true,
+        hideExternalWorktrees: true,
       },
     ]);
   });
@@ -1000,6 +1005,7 @@ describe('SessionList filter popover', () => {
         hideForeign: false,
         hideIdle: false,
         hideAgentWorktrees: true,
+        hideExternalWorktrees: true,
       },
     ]);
   });
@@ -1051,6 +1057,47 @@ describe('SessionList filter popover', () => {
         hideForeign: true,
         hideIdle: false,
         hideAgentWorktrees: false,
+        hideExternalWorktrees: true,
+      },
+    ]);
+  });
+
+  it('offers a row for external worktrees, OFF (hidden) by default, its label reading “Show”', () => {
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+    });
+    const row = container.querySelector('[data-origin-toggle="external-worktree"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    // Checked reads "showing", not "hiding" -- the row's own label says
+    // "Show external worktrees", and the shipped default HIDES them, so the
+    // switch starts unchecked even though the stored field (`hideExternal
+    // Worktrees`) is `true`.
+    expect(row.getAttribute('aria-checked')).toBe('false');
+    expect(row.textContent).toContain('Show external worktrees');
+  });
+
+  it('turns the external-worktree rule ON (shows them) without disturbing the other six', () => {
+    const seen: SessionFilters[] = [];
+    const { container } = mountWith(twoProjects(), {
+      filterMenuOpen: true,
+      originFilters: DEFAULT_SESSION_FILTERS,
+      onOriginFilters: (next) => seen.push(next),
+    });
+    act(() => {
+      fireEvent.click(
+        container.querySelector('[data-origin-toggle="external-worktree"]') as Element,
+      );
+    });
+    expect(seen).toEqual([
+      {
+        hideAgentStarted: true,
+        onlyPrompted: false,
+        hideEnded: true,
+        hideForeign: true,
+        hideIdle: false,
+        hideAgentWorktrees: true,
+        hideExternalWorktrees: false,
       },
     ]);
   });

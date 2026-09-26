@@ -65,6 +65,8 @@ import type {
   RemoveWorktreeInput,
   RemoveWorktreeOutcome,
   WorktreeInfo,
+  WorktreeStatus,
+  WorktreeStatusInput,
 } from '../shared/worktree.js';
 
 /** The slice of `ipcRenderer` used here, so this module is testable without electron. */
@@ -1009,19 +1011,22 @@ export type { RemoteState };
 
 /**
  * The worktrees feature's own member -- desktop-only, like `files` above,
- * and for the same reason `CHANNELS.worktreeList/Create/Remove`'s own
- * comment gives: not part of `DesktopSourceApi`/`PreloadSourceApi`, so a
- * paired phone has no route to any of the three. `list`/`create`/`remove`
- * all forward through `unwrap`, exactly like `files.read`/`files.write`:
- * there IS a refusal behind each in `worktrees.ts`'s own words (unknown
- * project, dirty tree, locked, a branch that already exists), and the
- * renderer draws that sentence rather than a rejected promise electron has
- * rewritten.
+ * and for the same reason `CHANNELS.worktreeList/Create/Remove/Status`'s
+ * own comment gives: not part of `DesktopSourceApi`/`PreloadSourceApi`, so a
+ * paired phone has no route to any of the four. `list`/`create`/`remove`/
+ * `status` all forward through `unwrap`, exactly like `files.read`/
+ * `files.write`: there IS a refusal behind each in `worktrees.ts`'s own
+ * words (unknown project, dirty tree, locked, a branch that already
+ * exists), and the renderer draws that sentence rather than a rejected
+ * promise electron has rewritten.
  */
 export type WorktreesApi = {
   list(projectId: string): Promise<readonly WorktreeInfo[]>;
   create(input: CreateWorktreeInput): Promise<WorktreeInfo>;
   remove(input: RemoveWorktreeInput): Promise<RemoveWorktreeOutcome>;
+  /** Phase 2a's own member -- `status.ts`'s own dirty/ahead/behind read,
+   *  for a caller-chosen subset of `list()`'s own rows. */
+  status(input: WorktreeStatusInput): Promise<readonly WorktreeStatus[]>;
 };
 
 export function createWorktreesApi(ipc: InvokerLike): WorktreesApi {
@@ -1030,5 +1035,7 @@ export function createWorktreesApi(ipc: InvokerLike): WorktreesApi {
       unwrap<readonly WorktreeInfo[]>(ipc.invoke(CHANNELS.worktreeList, projectId)),
     create: (input) => unwrap<WorktreeInfo>(ipc.invoke(CHANNELS.worktreeCreate, input)),
     remove: (input) => unwrap<RemoveWorktreeOutcome>(ipc.invoke(CHANNELS.worktreeRemove, input)),
+    status: (input) =>
+      unwrap<readonly WorktreeStatus[]>(ipc.invoke(CHANNELS.worktreeStatus, input)),
   };
 }

@@ -17,13 +17,14 @@ MVP that actually shipped, with the decisions the brief left open now made.
   a typed-name confirmation for a dirty tree.
 - A `/New worktree…` command palette action.
 
-**Explicitly out of v1** (see §6, Phase 2):
+**Explicitly out of v1** (see §6, Phase 2 — and §7, phase 2a, for the two
+items it shipped):
 
 - `node_modules`/`.env` copy or symlink on create.
 - Sparse checkouts, SSH/remote worktrees.
-- Detecting or adopting a worktree the operator made by hand
-  (`git worktree add` outside vam).
-- Dirty / ahead-behind badges in the sidebar.
+- ~~Detecting or adopting a worktree the operator made by hand
+  (`git worktree add` outside vam).~~ **Shipped, §7.**
+- ~~Dirty / ahead-behind badges in the sidebar.~~ **Shipped, §7.**
 - Branch auto-delete as anything other than the safe `git branch -d` this
   feature already runs after a successful `remove()`.
 - Exposing worktree creation or removal over the remote (phone) API.
@@ -68,6 +69,16 @@ type WorktreeInfo = {
   locked: boolean;
   lockReason: string | null;
   prunable: boolean;
+  prunableReason: string | null; // phase 2a
+  detached: boolean;             // phase 2a — branch is a short sha BECAUSE of this
+};
+
+// phase 2a — a SEPARATE round trip, `CHANNELS.worktreeStatus`, §7
+type WorktreeStatus = {
+  worktreeId: string;
+  dirty: boolean;
+  ahead: number | null;   // null: no upstream (includes every detached HEAD)
+  behind: number | null;
 };
 
 type CreateWorktreeInput = { projectId: string; name: string; baseRef?: string };
@@ -243,11 +254,10 @@ Security rules, and where each is enforced:
 
 ## 6. Phase 2 (named, not built)
 
-- Detection + adoption of a worktree made outside vam
-  (`git worktree list --porcelain`'s own listing already surfaces one; the
-  gap is only that vam does not yet offer to fold it into the sidebar under
-  a nicer name).
-- Dirty / ahead-behind badges on each worktree row.
+- ~~Detection + adoption of a worktree made outside vam~~ — **shipped, §7
+  (phase 2a)**.
+- ~~Dirty / ahead-behind badges on each worktree row~~ — **shipped, §7
+  (phase 2a)**.
 - `.env` / config copy-on-create (an `.worktreeinclude`-style convention is
   worth reusing conceptually — never Orca's code).
 - A configurable shared `node_modules` symlink — **treat with real
@@ -261,3 +271,224 @@ Security rules, and where each is enforced:
 - SSH/remote worktrees, sparse checkouts, Windows junction fallback (vam's
   toolchain is macOS/Linux-targeted today; unverified whether it should stay
   that way).
+
+## 7. Phase 2a — shipped
+
+**Adoption.** `listWorktrees` needed no change at all: `git worktree list
+--porcelain` was always unconditional, so a worktree a CLI, Orca, or
+`claude --worktree` made was already IN the answer §3.1 describes — v1's own
+gap was narrower than §6 first named it. The actual gap was `removeWorktree`:
+its confinement (§5 rule 6) required the candidate to sit inside
+`<repoRoot>-worktrees/`, which a worktree made outside vam never does. That
+location check is now GONE from `removeWorktree` — the other two proofs rule
+6 already made (the candidate's own `.git` → `commondir` chain resolves to
+the SAME repo root the resolved project names, AND a fresh `git worktree
+list` still registers it) turn out to fully carry the security invariant on
+their own, proven by falsification: disabling the location check alone still
+leaves every attack shape in `worktrees.integration.test.ts`'s "confinement
+(S2)" suite refused. `createWorktree` is UNCHANGED — vam still only ever
+*creates* inside `<repoRoot>-worktrees/`; only *removing* a worktree it did
+not create had to stop caring where that worktree lives.
+
+An adopted worktree that is itself a Claude Code agent worktree
+(`.claude/worktrees/agent-*`, `main/sources/agent-worktree.ts`) is filtered
+from the sidebar row the same way an agent-worktree SESSION already is —
+`SessionFilters.hideAgentWorktrees`, the operator's own existing toggle,
+threaded down as `WorktreesSection`'s own `hideAgentWorktrees` prop rather
+than growing a second, independent one. The two pure predicates that
+recognise one (`hasAgentWorktreeSegment`, `isAgentWorktreeBranch`) moved to
+`shared/agent-worktree.ts` so the renderer can apply the SAME rule to a
+worktree row without pulling `node:fs/promises` into the web bundle;
+`main/sources/agent-worktree.ts` re-exports them unchanged.
+
+`WorktreeInfo` grew two fields: `detached` (a `HEAD` that names no branch —
+`branch` was already a short sha in this case, but nothing said WHY) and
+`prunableReason` (parity with `lockReason`). `locked`/`prunable`/`detached`
+are all marked in the sidebar row; a locked worktree's delete control is not
+merely refused after a click, it is not drawn at all — `removeWorktree`
+refuses one unconditionally regardless, so offering the control was never
+honest.
+
+**Dirty / ahead-behind badges.** A NEW round trip, `CHANNELS.worktreeStatus`
+/ `getWorktreeStatuses` (`main/worktrees/status.ts`), deliberately NOT folded
+into `list()`'s own answer — a dirty check and an ahead/behind count are each
+their own `git` spawn PER worktree, and running both for every worktree of
+every project on every poll would multiply this feature's process count by
+however many worktrees a workspace has, whether or not anyone is looking.
+Every candidate id is proven with the SAME two checks `removeWorktree` now
+uses (commondir chain + live registration) before either `git` call ever
+runs — one code path, reused, not a second place this proof could drift.
+
+`git status --porcelain=v1 -z` runs WITH untracked files (measured against
+this repository: 26ms including them vs. 16ms with `--untracked-files=no`,
+both far under any cadence this polls at) — an untracked file left in a
+worktree is not "clean" to an operator asking "did I leave something here".
+`git rev-list --left-right --count @{u}...HEAD` answers `<behind>\t<ahead>`;
+failing outright (no upstream, or a detached `HEAD`, which cannot have one)
+reads as `null`/`null`, the same "cannot say" `WorktreeInfo.branch: null`
+already means.
+
+The renderer's own `useWorktreeStatuses` hook is the performance gate:
+`mapWithConcurrencyLimit` (reused from `claude-code/concurrency-limit.ts`,
+never reimplemented) bounds how many `git status`/`git rev-list` pairs run
+at once; `useVisibilityInterval`'s `hidden: 'pause'` mode stops polling
+outright once the window is hidden; the poll cadence (20s) is an order of
+magnitude slower than `useSourceModel`'s own base poll (10s) because this
+data is advisory, never correctness-critical; and the hook is only ever
+MOUNTED for a project whose Worktrees section already has rows to draw
+(`WorktreesSection`'s own "hidden when there are none" rule, unchanged) — a
+project with none never polls at all.
+
+A dirty dot reuses `--color-diff-file` (a changed file's own colour in the
+diff renderer) rather than a new token; ahead/behind reuse
+`--color-diff-add`/`-del` (green for commits ready to push, red for commits
+not yet pulled) — the app's own existing hues, not three new ones.
+
+## 8. Phase 2b — shipped
+
+**The operator's own report**, opening the blacksmith project (the maestro
+repo): a lot of worktrees that are not vam's, or are locked (`.wt/...`,
+`.claude/worktrees/agent-*`, locked ones, "and others"), with no way to hide
+or fold them. Phase 2a's adoption work made every such worktree a full row;
+this phase adds the filter and the tree the operator actually asked for.
+
+**`WorktreeInfo.external`**, a THIRD purely path-based field alongside
+`detached`/`prunable`: `true` when a worktree's OWN directory does not sit
+inside vam's `<repoRoot>-worktrees/` root (`worktreesRootFor`) — a worktree a
+CLI, Orca, or `claude --worktree` made, never vam's own "+". Computed once in
+`listWorktrees` by comparing a realpath'd `dirname` against a realpath'd
+worktrees root (falling back to the raw root when it does not exist yet, the
+same tolerance `safeRealpath`'s other callers already show); `createWorktree`
+always answers `false`, since its one call site never writes anywhere else.
+Not security-relevant — the confinement `removeWorktree` proves is unchanged
+(§7); this field only ever decides what a ROW looks like.
+
+**`SessionFilters.hideExternalWorktrees`** (a SEVENTH toggle,
+`domain/session-filter.ts`), `hide`-shaped like its six neighbours and
+default `true` (hidden) — but the ONLY row in the filter popover whose own
+LABEL and switch read the other way round ("Show external worktrees"), the
+operator's own words for it. Independent of `hideAgentWorktrees`: an agent
+worktree the operator reveals via that toggle is still, separately, external,
+and both gates must open before it draws as a plain row rather than a nested
+one. `worktree-visibility.ts` (colocated with the feature, never folded into
+`session-filter.ts`, which knows only `Session`) holds the one shared
+predicate, `isExternalOrLockedWorktree` — "not vam's, OR locked", the
+operator's own two examples ORed exactly as given — used BOTH to decide what
+is hidden by default AND what belongs in the tree once shown; the two
+questions have the same answer everywhere in this feature.
+
+**The tree itself.** `WorktreesSection` now partitions its (already
+agent-worktree-filtered) rows into a plain list and an external/locked one.
+The plain list draws exactly as before; the external/locked one, when the
+toggle is off, draws as its own group — a collapsible header ("External
+worktrees N"), then every one of ITS rows nested one step in, dimmer and
+smaller (`text-meta`/`COMPACT_DIM_TEXT` in place of `text-control`/
+`text-ink-dim`), behind a dotted left border (`border-l border-dotted
+border-ink-faint`) as the tree guide. Every row — plain or nested — draws
+through the SAME `renderRow` function (a `compact` flag is the only
+difference): the delete button, "Start a session here", every marker, every
+nested session keep their full reach regardless of which list called it, and
+every control is a real `<button>`, native `Tab` order, with no separate
+keyboard wiring needed. Orca's own worktree tree was read as a reference for
+this shape (never copied); no single component there matched closely enough
+to be worth citing by name.
+
+**IT HANGS UNDER THE PROJECT'S MAIN SESSION ROW, IN REAL DOM ORDER** — a
+follow-up review measured the first cut against the operator's own words
+("under the main session row... a collapsible dotted line") and found two
+gaps, both fixed in the same pass:
+
+- *Placement.* The first cut drew the external/locked tree ABOVE the
+  project's own sessions (inside the "Worktrees" block). `WorktreesSection`
+  now ALSO draws this project's own top-level sessions itself
+  (`mainSessionEntries`, a new prop `SessionList.tsx` threads through as
+  `section.items` rather than this file re-deriving the same set from
+  `allEntries` — that set is DELIBERATELY the broader, unfiltered list, so
+  re-filtering it here would risk drifting from whatever narrowing
+  `SessionList.tsx` applies next). The component's own return is now three
+  pieces in DOM order: the plain worktrees block, then `mainSessionEntries`,
+  then the external/locked tree — so the tree is genuinely AFTER the main
+  session in the DOM, not merely painted to look that way. A CSS `order`
+  trick was considered and rejected: it would leave keyboard/`Tab` and
+  screen-reader order pointing at the tree BEFORE the session, the opposite
+  of what "hangs under" means. A project with no main-worktree session needs
+  no special-cased fallback — with `mainSessionEntries` empty, the tree is
+  simply the next thing after the plain list, which is the exact spot it
+  already held, so "falls back to the current spot" falls out of the
+  ordering for free. This is also why the two "return null" early exits are
+  gone: a project with no worktrees at all, or a source with no worktrees
+  bridge, still has its own sessions to draw, and this component became the
+  ONLY thing drawing them in `groupBy === 'project'` mode.
+- *Visual weight, measured.* The first cut's compact text
+  (`text-ink-faint`) read 7.247:1 dark / 4.642:1 light against the row's
+  real, rendered background — close enough to normal rows' `text-ink-dim`
+  (9.394:1+) to read as one weight, exactly the "barely dimmer" report.
+  `--color-ink-ghost` (the one token dimmer than `ink-faint`) was measured
+  and ruled out outright: `styles.css`'s own header on it records 1.75:1
+  dark / 2.39:1 light against `panel`, below both floors, and a dedicated
+  test (`ink-ghost-sites.test.ts`) already holds its call sites to
+  non-text marks only. With no token between the two, `COMPACT_DIM_TEXT`
+  (`text-ink-faint/80`) applies opacity instead — 80% is the darkest
+  (most-dimmed) value that still clears 3:1 in LIGHT theme (3.175:1
+  measured), which is the binding constraint for one class shared by both
+  themes (dark still reads 5.181:1 at the same opacity). The tree guide
+  went the OTHER direction — `border-ink-faint` at FULL strength (not
+  reduced), reusing the same token `COMPACT_DIM_TEXT` dims text FROM,
+  measured 7.247:1 dark / 4.642:1 light, replacing `border-line` (1.614:1
+  dark / 1.099:1 light — and no `line-*` token clears 3:1 in light theme;
+  `line-loudest`, the strongest, still only reads 2.804:1 there). The
+  pattern changed from dashed to DOTTED too, matching the operator's own
+  word for it. Every one of these numbers is measured in
+  `e2e/worktrees-shots.mjs` itself now (`measureContrast`), resolving
+  whatever `getComputedStyle` returns — including an `oklab(... / 0.8)`
+  string Tailwind v4's own opacity modifier can produce, which no regex
+  should be trusted to parse — through the browser's own colour parser
+  (`CanvasRenderingContext2D.fillStyle`) rather than assuming a class name
+  painted what it says.
+
+**The collapse toggle** persists per project, directly in `localStorage`
+(`worktree-tree-collapse.ts`), NOT folded into the big `Prefs` blob
+`prefs.ts` owns — the identical trade-off `prefs/foreign-hidden-note.ts`
+already made for its own per-viewer number, and consistent with
+`WorktreesSection`'s own stated self-containment principle (§ this file's
+own header on that component). Keyed by the bare project id (already
+globally unique, unlike `Prefs.collapsedProjects`'s two-level `source → [id]`
+shape), wrapped in try/catch exactly like `foreign-hidden-note.ts`; expanded
+(absent) is the default the first time a project's own tree is ever shown.
+
+**The quiet count.** `WorktreesSection` draws its own "N hidden" note next to
+the "Worktrees" heading's count, in the SAME quiet style
+`SessionList.tsx`'s own "· N hidden" filter rows already use — never
+`font-mono`, so it cannot collide with the heading's own count span, the
+FIRST `.font-mono` element under `data-worktrees-section` a pre-existing test
+already reads by that selector. Absent, not a "0 hidden": present only while
+the default filter is actually holding something back. The popover's own new
+row carries no count of its own — the worktree rows it holds back live
+per-project, inside each project's own `WorktreesSection`, never in the flat
+session list the popover's other six rows already count against.
+
+**The badge poll skips both.** `useWorktreeStatuses`'s own `worktreeIds`
+input is now `plainWorktrees` plus the external/locked ones ONLY when their
+group is both shown (the filter is off) AND expanded (not collapsed) —
+neither a filtered-out row nor a folded-shut one ever costs a `git status`/
+`git rev-list` spawn, extending §7's own performance gate rather than
+replacing it.
+
+Falsified by hand throughout: the default-hide rule (`worktree-visibility
+.test.ts`, and end to end in `worktrees-shots.mjs` against a real built
+bundle), the `locked` half of `isExternalOrLockedWorktree` (a vam-made,
+locked worktree stops being hidden), the poll exclusion (a hidden or
+collapsed worktree starts costing a `git` spawn), the collapse persistence
+(a click that only updates in-memory state, never `localStorage`, survives
+every assertion except the one round-trip test built to catch exactly
+that), the two "return null" removals (reintroducing either one deletes a
+project's own sessions the moment it has no worktrees, or no worktrees
+bridge at all — `WorktreesSection.external-worktrees.test.tsx`'s own
+"still draws the project's own sessions..." pair), and the two contrast
+floors themselves (`worktrees-shots.mjs`'s own `measureContrast`:
+reverting the tree guide to `border-line border-dashed` measures
+1.614:1/1.099:1 and fails; reverting the compact text to plain
+`text-ink-faint` does NOT fail its own check, because that token alone
+already clears 3:1 — the operator's report was a relative "barely dimmer"
+complaint, not an absolute floor violation, and only the screenshots
+themselves, not this check, are what judge that).

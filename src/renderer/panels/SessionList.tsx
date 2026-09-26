@@ -30,6 +30,7 @@ import {
   ChevronRight,
   Filter,
   Folder,
+  FolderGit2,
   FolderPlus,
   GitBranch,
   LoaderCircle,
@@ -3504,6 +3505,31 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       originFilters.hideAgentWorktrees,
                       hiddenCounts.agentWorktree,
                     ],
+                    // THE SEVENTH ROW -- the operator's own report opening the
+                    // blacksmith project (the maestro repo): "I see a lot of
+                    // worktrees that aren't vam's, or are locked... Make the
+                    // hiding filter the default." STORED `hide`-shaped like
+                    // every row above (`session-filter.ts`'s own header on
+                    // `hideExternalWorktrees`), but the ONLY row whose LABEL
+                    // and SWITCH read the other way round -- the operator's
+                    // own words for it -- so `on` here is `!hideExternal
+                    // Worktrees` (checked means "showing"), and the click
+                    // handler below writes that same `on` back as the new
+                    // `hideExternalWorktrees` (flipping a already-inverted
+                    // value flips it back the right direction). This row's
+                    // own count is always absent: the worktree rows it holds
+                    // back live per-project, inside each project's own
+                    // `WorktreesSection`, never in this popover's flat
+                    // `sessions` list -- that section draws its OWN quiet "N
+                    // hidden" note instead, next to its own "Worktrees" count.
+                    [
+                      'external-worktree',
+                      FolderGit2,
+                      'Show external worktrees',
+                      'Show worktrees vam did not make, or that are locked — nested, dimmed, under the project they belong to.',
+                      !originFilters.hideExternalWorktrees,
+                      0,
+                    ],
                   ] as const
                 ).map(([key, Icon, label, note, on, hides]) => (
                   <Note key={key} text={note}>
@@ -3524,7 +3550,14 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                   ? { ...originFilters, hideIdle: !on }
                                   : key === 'agent-worktree'
                                     ? { ...originFilters, hideAgentWorktrees: !on }
-                                    : { ...originFilters, onlyPrompted: !on },
+                                    : key === 'external-worktree'
+                                      ? // `on` IS ALREADY `!hideExternalWorktrees` (this
+                                        // row's own tuple, above) -- writing it straight
+                                        // back is the flip, not `!on`: old hidden=true
+                                        // (on=false) -> new hidden=false=on; old
+                                        // hidden=false (on=true) -> new hidden=true=on.
+                                        { ...originFilters, hideExternalWorktrees: on }
+                                      : { ...originFilters, onlyPrompted: !on },
                         )
                       }
                       className={[
@@ -4562,7 +4595,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             </span>
                           </div>
                         )}
-                      {viewOptions.groupBy === 'project' && (
+                      {viewOptions.groupBy === 'project' ? (
                         <WorktreesSection
                           project={section.project}
                           allEntries={allEntries}
@@ -4573,9 +4606,32 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             )
                           }
                           renderSessionRow={renderSessionRow}
+                          // THE SAME TOGGLE A SESSION ROW ALREADY OBEYS
+                          // (`isHiddenByAgentWorktreeFilter`, this file's own
+                          // popover) -- an adopted Claude Code agent
+                          // worktree row respects the operator's existing
+                          // preference rather than growing a second one.
+                          hideAgentWorktrees={originFilters.hideAgentWorktrees}
+                          // THE SEVENTH ROW'S OWN TOGGLE, threaded the
+                          // identical way -- `worktree-visibility.ts`'s own
+                          // rule, independent of `hideAgentWorktrees` above.
+                          hideExternalWorktrees={originFilters.hideExternalWorktrees}
+                          // PHASE 2B'S OWN MOVE -- `WorktreesSection` now
+                          // draws this project's OWN top-level sessions
+                          // itself (between its plain worktree list and its
+                          // external/locked tree), so the operator's ask
+                          // that tree "hangs under the project's main
+                          // session row" is real DOM order, not a CSS
+                          // reorder. `section.items` is passed WHOLE, never
+                          // recomputed from `allEntries`: it is already the
+                          // exact filtered/ordered set `renderSessionRow`
+                          // would otherwise be mapped over right below,
+                          // one line down in every OTHER `groupBy` mode.
+                          mainSessionEntries={section.items}
                         />
+                      ) : (
+                        section.items.map((entry) => renderSessionRow(entry))
                       )}
-                      {section.items.map((entry) => renderSessionRow(entry))}
                     </div>
                   )}
                 </li>
