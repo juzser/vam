@@ -199,13 +199,41 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 3,180 B; the Integrations header above gives no isolated gzip figure of
  * its own to sum against, only "the gzip budget is untouched"), confirming
  * the merge did not duplicate or multiply either eager cost.
- * `ENTRY_BUDGET_BYTES` moves 692,500 -> 694,500: the real merged
+ * `ENTRY_BUDGET_BYTES` moved 692,500 -> 694,500: the real merged
  * figure (692,320 B) plus ~2.2 KB (~0.3%) of slack, the same order of
  * headroom both individual bumps above used for "measurement noise and an
  * ordinary dependency patch bump" -- not a fresh double-bump stacking both
- * PRs' own margins on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at
- * 212,000: the merged gzip figure (208,172 B) still has 3.8 KB of headroom
+ * PRs' own margins on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stayed at
+ * 212,000: the merged gzip figure (208,172 B) still had 3.8 KB of headroom
  * under it, more than either feature alone needed.
+ *
+ * THE CACHE-TIMER COUNTDOWN THEN MERGED IN TOO, on top of the ADHD-card +
+ * Integrations tree above: `domain/cache-timer.ts`, `panels/
+ * CacheCountdown.tsx`, `panels/cache-timer-clock.ts`, three new `Session`
+ * fields threaded through `SessionList.tsx`, and the sidebar's first-ever
+ * use of lucide's `Timer` glyph, eager by necessity -- it draws in the
+ * sidebar, which every load already pays for, so there is no lazy boundary
+ * to move it behind the way `SettingsOverlay` and `FilesTab` were. This
+ * branch's own two earlier "before/after" pairs (measured against
+ * Integrations alone, then re-measured against Integrations alone again
+ * after this branch's own rebases) both went stale the moment the ADHD card
+ * and Integrations merged into ONE commit on `main` -- so, the same lesson
+ * the paragraph above already draws, this is a real remeasurement against
+ * the true merged tree rather than arithmetic stacked on top of either
+ * stale figure. Measured with a merge-base worktree build at `main`'s own
+ * tip carrying both prior features (14a57c03) and at this branch's merge
+ * commit carrying all three, same code and chunks both times,
+ * `electron-vite build --mode production`:
+ *
+ *     entry, main (ADHD card + Integrations, neither cache-timer)   692,523 B
+ *     entry, merged (all three features)                           695,970 B  (+3,447 B, +0.50%)
+ *
+ * `ENTRY_BUDGET_BYTES` moves 694,500 -> 699,500: the real merged figure
+ * (695,970 B) plus ~3.5 KB (~0.5%) of slack, the same small-headroom
+ * convention every bump above uses for "measurement noise and an ordinary
+ * dependency patch bump" -- not the three features' own separate margins
+ * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
+ * unaffected by this merge, still comfortably clear of the combined figure.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -216,7 +244,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 694_500;
+const ENTRY_BUDGET_BYTES = 699_500;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
