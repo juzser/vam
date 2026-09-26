@@ -241,10 +241,6 @@ jobs:
         env:
           VAM_E2E_OUT: ${{ runner.temp }}/web-guard-shots
           VAM_E2E_CHECK_ORPHANS: '1'
-          # TEMPORARY, diagnostic-only (removed once the pause-after CI-only
-          # flake -- run 36236036684, job 108387840295 -- is root-caused):
-          # forces the same starvation shape that run hit, on demand.
-          VAM_E2E_FORCE_CONTENTION: '20'
         run: pnpm run test:e2e:web
 
       # A failed assertion is much easier to read next to the frame it failed on.
