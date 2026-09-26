@@ -45,6 +45,7 @@
  */
 
 import type { Session } from '../../../renderer/domain/model.js';
+import { identifyRunningProvider } from '../tmux/shell.js';
 import type { TmuxSession } from '../tmux/spawn.js';
 
 const PANE_ROW_PREFIX = 'pane:';
@@ -127,6 +128,7 @@ export function unclaimedPanes(
  * name is replaced by the agent's own the moment there is an agent.
  */
 export function paneRow(session: TmuxSession): Session {
+  const runningProvider = identifyRunningProvider(session.command);
   return {
     id: paneRowId(session.name),
     title: session.name,
@@ -147,6 +149,12 @@ export function paneRow(session: TmuxSession): Session {
     origin: { startedBy: 'human', promptCount: null },
     vamControlled: true,
     pane: session.name,
+    // WHO IS ALREADY RUNNING HERE, from the SAME `TmuxSession` this row is
+    // built from -- no second read. `Session.runningProvider`'s own header.
+    // Absent, not `undefined`-valued, on the same "an unset key is nobody
+    // said" rule `resumeCommand` below follows: an ordinary empty shell must
+    // read exactly as it always has to a reader who only checks presence.
+    ...(runningProvider === undefined ? {} : { runningProvider }),
   };
 }
 
@@ -195,6 +203,7 @@ export function terminalRow(
     readonly createdAt: string | null;
   },
 ): Session {
+  const runningProvider = identifyRunningProvider(session.command);
   return {
     id: paneRowId(session.name),
     title: conversation.title,
@@ -211,5 +220,8 @@ export function terminalRow(
     vamControlled: true,
     pane: session.name,
     ...(conversation.resumeCommand === null ? {} : { resumeCommand: conversation.resumeCommand }),
+    // See `paneRow`'s own comment just above -- identical fact, identical
+    // rule, for the `terminal` row's own shell.
+    ...(runningProvider === undefined ? {} : { runningProvider }),
   };
 }

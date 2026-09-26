@@ -19,10 +19,14 @@
  */
 
 import { cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Session } from '../../src/renderer/domain/model.js';
 import type { SessionEntry } from '../../src/renderer/domain/selectors.js';
-import { DetailPanel, type DetailPanelProps } from '../../src/renderer/panels/DetailPanel.js';
+import {
+  DetailPanel,
+  type DetailPanelProps,
+  type StartingPaneWait,
+} from '../../src/renderer/panels/DetailPanel.js';
 import { PROVIDERS } from '../../src/shared/providers.js';
 
 const EMPTY: Session = {
@@ -164,5 +168,149 @@ describe('the Response view of a pane with nothing started in it', () => {
     draw({ onStartSession: () => {}, tab: 'Terminal', terminal: true });
     // Whatever the Terminal view draws for it, the start screen is not there.
     expect(q('[data-start-session]')).toBeNull();
+  });
+});
+
+/**
+ * THE OPERATOR'S FIRST REPORT, MADE CONCRETE: "if the CLI has an update or
+ * needs to trust the folder, the Response view is stuck in the loading state
+ * while the terminal is asking about the update and trust." `startingPane.
+ * screen` (`Canvas.tsx`'s own poll, `start-screen.ts`'s classifier) is what
+ * this card is drawn from instead of the bare spinner.
+ */
+describe('the start screen card -- what the pane is actually asking', () => {
+  const waiting = (screen: StartingPaneWait['screen']): StartingPaneWait => ({
+    kind: 'start',
+    provider: 'claude-code',
+    timedOut: false,
+    projectId: 'p1',
+    rowId: EMPTY.id,
+    screen,
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(window, 'api');
+  });
+
+  it('names the trust question instead of an unexplained spinner', () => {
+    draw({ onStartSession: () => {}, startingPane: waiting('trust') });
+    const card = q('[data-start-screen-card]');
+    expect(card?.getAttribute('data-start-screen-kind')).toBe('trust');
+    expect(card?.textContent).toContain('Do you trust the files in this folder?');
+    // The ordinary spinner label is gone -- the card replaces it outright.
+    expect(q('[data-start-timeout-hint]')).toBeNull();
+  });
+
+  it('answers "Yes" through window.api.terminal.answerTrust, aimed at THIS wait’s own row', () => {
+    const answerTrust = vi.fn(async () => null);
+    (window as unknown as { api: unknown }).api = { terminal: { answerTrust } };
+    draw({ onStartSession: () => {}, startingPane: waiting('trust') });
+    fireEvent.click(q('[data-start-screen-trust-yes]') as Element);
+    expect(answerTrust).toHaveBeenCalledWith('p1', EMPTY.id, true);
+  });
+
+  it('answers "No" the same way, with `trust: false`', () => {
+    const answerTrust = vi.fn(async () => null);
+    (window as unknown as { api: unknown }).api = { terminal: { answerTrust } };
+    draw({ onStartSession: () => {}, startingPane: waiting('trust') });
+    fireEvent.click(q('[data-start-screen-trust-no]') as Element);
+    expect(answerTrust).toHaveBeenCalledWith('p1', EMPTY.id, false);
+  });
+
+  it('offers "Open Terminal to answer" beside the trust buttons too, as a fallback', () => {
+    draw({
+      onStartSession: () => {},
+      startingPane: waiting('trust'),
+      tab: 'Response',
+      terminal: true,
+    });
+    expect(q('[data-start-screen-open-terminal]')).not.toBeNull();
+  });
+
+  it.each(['update', 'login', 'onboarding'] as const)(
+    'names the %s screen with "Open Terminal to answer" and no Yes/No',
+    (screen) => {
+      draw({ onStartSession: () => {}, startingPane: waiting(screen), terminal: true });
+      const card = q('[data-start-screen-card]');
+      expect(card?.getAttribute('data-start-screen-kind')).toBe(screen);
+      expect(q('[data-start-screen-trust-yes]')).toBeNull();
+      expect(q('[data-start-screen-trust-no]')).toBeNull();
+      expect(q('[data-start-screen-open-terminal]')).not.toBeNull();
+    },
+  );
+
+  it('draws the ordinary spinner, never a card, while the screen is not yet known', () => {
+    draw({ onStartSession: () => {}, startingPane: waiting(null) });
+    expect(q('[data-start-screen-card]')).toBeNull();
+    expect(q('[data-start-session-button]')?.querySelector('.vam-spin')).not.toBeNull();
+  });
+
+  it('falls back to the ordinary timeout hint for `unknown` output, past the bound', () => {
+    // `unknown` never draws a card of its own (`StartingPaneWait`'s own
+    // header) -- it only ever changes how SOON `timedOut` arrives, which
+    // `Canvas.tsx`'s own `armUnknownStall` owns; this component just proves
+    // the fallback still reads `timedOut`, unmoved by `screen`.
+    draw({
+      onStartSession: () => {},
+      startingPane: { ...waiting('unknown'), timedOut: true },
+    });
+    expect(q('[data-start-screen-card]')).toBeNull();
+    expect(q('[data-start-timeout-hint]')).not.toBeNull();
+  });
+});
+
+/**
+ * THE COORDINATOR'S OWN BLOCKER: `runningProvider` confirmed running while
+ * `entry.session.status` still reads `unstarted`/`terminal` must draw the
+ * ready state, never fall back to the start screen -- see `runningProvider`'s
+ * own header on `DetailPanelProps` for the bug this closes.
+ */
+describe('the ready state -- confirmed running, ahead of the agents-list poll', () => {
+  it('draws the ready state instead of the start screen, and withdraws Start entirely', () => {
+    draw({ onStartSession: () => {}, runningProvider: 'claude-code' });
+    expect(q('[data-start-session]')).toBeNull();
+    expect(q('[data-start-session-button]')).toBeNull();
+    expect(q('[data-start-providers]')).toBeNull();
+    expect(q('[data-pane-ready]')).not.toBeNull();
+    expect(q('[data-pane-ready]')?.textContent).toContain('Claude Code is ready');
+  });
+
+  it('names codex too, from the confirmed provider rather than any picker default', () => {
+    draw({ onStartSession: () => {}, defaultProvider: 'claude-code', runningProvider: 'codex' });
+    expect(q('[data-pane-ready]')?.textContent).toContain('Codex is ready');
+  });
+
+  it('still draws the ready state for a `null` provider -- confirmed running, command unrecognised', () => {
+    draw({ onStartSession: () => {}, runningProvider: null });
+    expect(q('[data-pane-ready]')).not.toBeNull();
+    expect(q('[data-pane-ready]')?.textContent).toContain('already has an agent running');
+    expect(q('[data-start-session-button]')).toBeNull();
+  });
+
+  it('draws the ready state on a `terminal` row too, ahead of `TerminalOnlyStart`', () => {
+    const TERMINAL_ENTRY: SessionEntry = {
+      project: PROJECT,
+      session: { ...EMPTY, status: 'terminal', resumeCommand: 'claude --resume aaaa' },
+    };
+    draw({
+      entry: TERMINAL_ENTRY,
+      onStartSession: () => {},
+      onResumeInPane: () => {},
+      runningProvider: 'claude-code',
+    });
+    expect(q('[data-terminal-only-start]')).toBeNull();
+    expect(q('[data-pane-ready]')).not.toBeNull();
+    expect(q('[data-resume-in-pane]')).toBeNull();
+  });
+
+  it('enables the composer once the pane is confirmed running', () => {
+    draw({ onStartSession: () => {}, runningProvider: 'claude-code', records: true });
+    expect(q('textarea[aria-label="prompt to session"]')).not.toBeNull();
+  });
+
+  it('leaves the ordinary start screen untouched while `runningProvider` is absent', () => {
+    draw({ onStartSession: () => {} });
+    expect(q('[data-pane-ready]')).toBeNull();
+    expect(q('[data-start-session]')).not.toBeNull();
   });
 });

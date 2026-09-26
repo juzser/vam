@@ -60,7 +60,15 @@ function check(label, ok, detail) {
  * promise that never resolves is "the agent registers a moment later" held
  * open for exactly as long as the screenshot below needs it.
  */
-function stubApiScript({ row, pane, hangRecordPrompt }) {
+function stubApiScript({
+  row,
+  pane,
+  hangRecordPrompt,
+  startScreen,
+  startScreenProvider,
+  answerTrustSpy,
+  runningProvider,
+}) {
   const SCREEN = ['Last login: Mon Sep 21 10:12:03 on ttys006', `~/w/notes $ `].join('\n');
   const unavailable = () =>
     Promise.resolve({
@@ -123,6 +131,12 @@ function stubApiScript({ row, pane, hangRecordPrompt }) {
             decisions: [],
             source: 'claude-code',
             vamControlled: true,
+            // THE COORDINATOR'S OWN PERFORMANCE FIX: the idle-row ready state
+            // now comes from the MODEL (`Session.runningProvider`,
+            // `pane-row.ts`), not a poll -- `undefined` here (the ordinary
+            // case) omits the key entirely, matching the shape `Object.
+            // hasOwn` -based unit tests pin at the source.
+            ...(runningProvider === undefined ? {} : { runningProvider }),
           },
         ],
       },
@@ -153,6 +167,31 @@ function stubApiScript({ row, pane, hangRecordPrompt }) {
       send: async () => 'sent',
       answer: async () => ({ kind: 'unavailable' }),
       prompt: async () => ({ kind: 'unavailable' }),
+      // WHAT `Canvas.tsx`'s OWN FAST POLL READS while an ACTIVE Start-session
+      // wait is up (`main/terminal/start-screen.ts`) -- `startScreen` is
+      // `undefined` in most blocks below, which answers `unavailable` and
+      // leaves the wait to the ordinary spinner, exactly as it always has.
+      // The trust-card block is the one that passes it; the READY case is
+      // `runningProvider` on the fixture row above instead (the coordinator's
+      // own performance fix: an idle row's readiness comes from the model,
+      // never from this poll). `startScreenProvider` defaults to `null`
+      // (confirmed running, unidentified) rather than to `undefined` (not
+      // confirmed at all) -- `StartScreenView`'s own shape requires the
+      // field whenever `screen` is reported at all.
+      startScreen: async () =>
+        startScreen === undefined
+          ? { kind: 'unavailable' }
+          : { kind: 'ok', screen: startScreen, provider: startScreenProvider ?? null },
+      // `answerTrustSpy` records the call on `window` rather than closing
+      // over a real function -- `page.addInitScript` serialises this whole
+      // script into the page, so nothing outside JSON survives the trip.
+      answerTrust: async (projectId, rowId, trust) => {
+        if (answerTrustSpy) {
+          globalThis.window.__vamAnswerTrustCalls ??= [];
+          globalThis.window.__vamAnswerTrustCalls.push([projectId, rowId, trust]);
+        }
+        return null;
+      },
     },
   };
 }
@@ -413,6 +452,129 @@ await loadingStateShot({
   phone: true,
   outName: 'start-session-loading-phone',
 });
+
+/**
+ * THE OPERATOR'S FIRST REPORT, SEEN: "if the CLI has an update or needs to
+ * trust the folder, the Response view is stuck in the loading state while
+ * the terminal is asking about the update and trust." `startScreen: 'trust'`
+ * is `Canvas.tsx`'s own poll (`start-screen.ts`) reporting the real trust
+ * dialog's shape, measured against the real `claude` CLI
+ * (`test/main/terminal/start-screen-live-screens.ts`); `hangRecordPrompt:
+ * true` keeps the write in flight the same way `loadingStateShot` does, so
+ * the card is drawn INSTEAD of the plain spinner, not after it.
+ */
+async function trustCardShot({ theme }) {
+  const outName = `start-screen-trust-${theme}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript(stubApiScript, {
+    row: ROW,
+    pane: PANE,
+    hangRecordPrompt: true,
+    startScreen: 'trust',
+    answerTrustSpy: true,
+  });
+  await page.addInitScript(
+    (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),
+    theme,
+  );
+  await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-tab-strip]');
+  await page.locator(`[data-session-row="${ROW}"]`).first().click();
+  await page.waitForSelector('[data-start-session]');
+  await page.locator('[data-start-session-button]').click();
+  const cardDrawn = await page
+    .waitForSelector('[data-start-screen-card][data-start-screen-kind="trust"]', { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${outName}: the trust card is drawn instead of the bare spinner`, cardDrawn);
+  const text = await page.evaluate(
+    () => document.querySelector('[data-start-screen-card]')?.textContent ?? '',
+  );
+  check(
+    `${outName}: it names the actual question`,
+    /Do you trust the files in this folder\?/.test(text),
+    text,
+  );
+  check(
+    `${outName}: the ordinary timeout hint is not ALSO drawn`,
+    (await page.locator('[data-start-timeout-hint]').count()) === 0,
+  );
+  await page.screenshot({ path: `${outDir}/${outName}.png` });
+
+  await page.locator('[data-start-screen-trust-yes]').click();
+  const calls = await page.evaluate(() => globalThis.window.__vamAnswerTrustCalls ?? []);
+  check(
+    `${outName}: "Yes, trust it" answers through window.api.terminal.answerTrust, aimed at this row`,
+    calls.length === 1 && calls[0][0] === 'notes' && calls[0][1] === ROW && calls[0][2] === true,
+    JSON.stringify(calls),
+  );
+  await page.close();
+}
+
+/**
+ * THE OPERATOR'S SECOND REPORT, SEEN, AND TWO ROUNDS OF REVIEW ON THE FIRST
+ * CUT OF THIS FIX: "even when the terminal has finished starting the
+ * session, the Response view is still stuck loading." `runningProvider:
+ * 'claude-code'` on the fixture ROW is the pane's own tmux listing proving
+ * the CLI is up, from the moment the page loads -- the RELOAD case
+ * (`Session.runningProvider`, `pane-row.ts`'s header): no Start press
+ * happens in this shot at all, which is the point.
+ *
+ * TWO BLOCKERS, IN ORDER. The first cut of this guard pressed Start and
+ * screenshotted the wait clearing back to the ORDINARY, idle Start button --
+ * caught as the exact bug being fixed wearing a different shape: a pane vam
+ * has already proven is running an agent must never fall back to offering
+ * Start. The second cut answered the reload case with a SECOND background
+ * poll (`window.api.terminal.startScreen` on an interval, across every idle
+ * row) -- caught as an unbounded per-row IPC that never stops. This shot now
+ * proves the CURRENT shape: `PaneReady` (`DetailPanel.tsx`) drawn straight
+ * off the row's OWN `runningProvider` field, no poll of any kind, no click
+ * at all, no Start button anywhere, and the composer already enabled.
+ */
+async function readyStateShot({ theme }) {
+  const outName = `start-screen-ready-${theme}`;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  await page.addInitScript(stubApiScript, {
+    row: ROW,
+    pane: PANE,
+    hangRecordPrompt: false,
+    runningProvider: 'claude-code',
+  });
+  await page.addInitScript(
+    (t) => globalThis.localStorage.setItem('vam.prefs.v1', JSON.stringify({ theme: t })),
+    theme,
+  );
+  await page.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+  await page.waitForSelector('[data-tab-strip]');
+  await page.locator(`[data-session-row="${ROW}"]`).first().click();
+  const ready = await page
+    .waitForSelector('[data-pane-ready]', { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${outName}: the ready state is drawn, with no Start ever pressed`, ready);
+  check(
+    `${outName}: the Start button is never offered -- a provider is already confirmed running`,
+    (await page.locator('[data-start-session-button]').count()) === 0,
+  );
+  const text = await page.evaluate(
+    () => document.querySelector('[data-pane-ready]')?.textContent ?? '',
+  );
+  check(`${outName}: it names the confirmed provider`, /Claude Code is ready/.test(text), text);
+  const composerEnabled = await page
+    .waitForSelector('textarea[aria-label="prompt to session"]', { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  check(`${outName}: the composer is enabled, ready to send the first message`, composerEnabled);
+  await page.screenshot({ path: `${outDir}/${outName}.png` });
+  await page.close();
+}
+
+for (const theme of ['dark', 'light']) {
+  await trustCardShot({ theme });
+  await readyStateShot({ theme });
+}
 
 await browser.close();
 console.log(failures.length === 0 ? '\nstart-screen-shots: all checks passed.' : '');

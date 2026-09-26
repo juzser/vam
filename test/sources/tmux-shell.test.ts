@@ -11,7 +11,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isShellCommand, loginShellCommand } from '../../src/main/sources/tmux/shell.js';
+import {
+  identifyRunningProvider,
+  isShellCommand,
+  loginShellCommand,
+} from '../../src/main/sources/tmux/shell.js';
 
 describe('telling a shell from an agent by the pane’s foreground command', () => {
   it('names every shell `loginShellCommand` can start, and the ones tmux might', () => {
@@ -36,6 +40,50 @@ describe('telling a shell from an agent by the pane’s foreground command', () 
     // field existed, and this is the value that makes them.
     expect(isShellCommand(undefined)).toBe(false);
     expect(isShellCommand('')).toBe(false);
+  });
+});
+
+/**
+ * `identifyRunningProvider` -- the SECOND question about the same field
+ * `isShellCommand` above already reads: not "is anything running here",
+ * "WHICH of vam's two providers, if either". Three states, matching that
+ * function's own "ABSENCE IS NOT A SHELL" rule: `undefined` for silence or a
+ * plain shell (the ordinary empty pane must read the same way either way);
+ * `null` for something running that names neither provider; the `ProviderId`
+ * once it does.
+ */
+describe('identifyRunningProvider -- which agent, if any, from the same command', () => {
+  it('answers undefined for every shell isShellCommand already recognises', () => {
+    for (const shell of ['sh', 'bash', 'zsh', 'fish', 'ksh', 'dash', 'tcsh', 'csh', '-zsh']) {
+      expect(identifyRunningProvider(shell), shell).toBeUndefined();
+    }
+  });
+
+  it('answers undefined for silence -- no command in the listing at all', () => {
+    expect(identifyRunningProvider(undefined)).toBeUndefined();
+    expect(identifyRunningProvider('')).toBeUndefined();
+  });
+
+  it('names codex directly, by its own bare command', () => {
+    expect(identifyRunningProvider('codex')).toBe('codex');
+  });
+
+  it('names claude-code from the literal command, before it has replaced argv[0]', () => {
+    expect(identifyRunningProvider('claude')).toBe('claude-code');
+  });
+
+  it('names claude-code from its own measured version-string quirk', () => {
+    expect(identifyRunningProvider('2.1.282')).toBe('claude-code');
+  });
+
+  it('strips a login shell’s leading dash, the same way isShellCommand does', () => {
+    expect(identifyRunningProvider('-codex')).toBe('codex');
+  });
+
+  it('is null, not undefined, for a command that is confirmed running but names neither provider', () => {
+    for (const other of ['htop', 'vim', 'ssh', 'node']) {
+      expect(identifyRunningProvider(other), other).toBeNull();
+    }
   });
 });
 
