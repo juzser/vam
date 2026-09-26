@@ -234,6 +234,31 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * dependency patch bump" -- not the three features' own separate margins
  * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
  * unaffected by this merge, still comfortably clear of the combined figure.
+ *
+ * THE SETTINGS CARDS RESTRUCTURE (Appearance split into Interface, Terminal
+ * and Window & Sidebar; Sessions renamed Agents; four new primitives)
+ * TOUCHES NEITHER BUDGET, and is the first entry here that does not. It is a
+ * pure re-layout of code and strings already behind `SettingsOverlay`'s own
+ * lazy boundary -- no new eager import, no new eager component -- so its
+ * whole cost lands in the `SettingsOverlay-*.js` chunk this file does not
+ * budget (lazy chunks are checked for existence and for the entry's absence
+ * from them, never for size). Measured with a merge-base worktree build at
+ * this PR's own merge-base (`main`, 3ea57e75) and at this branch's tip, same
+ * code and chunks both times, `electron-vite build --mode production`:
+ *
+ *     entry, merge-base       695,970 B  (209,465 B gzip)
+ *     entry, this PR          696,124 B  (209,544 B gzip)  (+154 B, +0.02%)
+ *     SettingsOverlay chunk, merge-base    76,458 B
+ *     SettingsOverlay chunk, this PR       80,171 B  (lazy; unbudgeted)
+ *
+ * +154 B eager / +79 B gzip -- the new icons (`PanelLeft`, `SquareTerminal`)
+ * `sections.ts` now imports, which is also reachable eagerly from
+ * `SessionList.tsx`/`canvas-overlays.ts` (the same reason the Integrations
+ * bump above measured `sections.ts`'s own nav metadata as eager cost). Both
+ * budgets keep the headroom the Integrations/cache-timer bump left them
+ * (699,500 - 696,124 = 3,376 B eager; 212,000 - 209,544 = 2,456 B gzip), so
+ * neither constant moves -- "bump only by the measured need," and the
+ * measured need here is comfortably inside what is already there.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
