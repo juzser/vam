@@ -44,12 +44,10 @@ function mount(entries: readonly SessionEntry[]) {
   return render(<SessionList {...baseProps(entries)} />);
 }
 
-/* `openTipOn` lived here: it focused a control and read the Radix tooltip that
-   opened, which is how the per-project `+` proved its caption reached a
-   keyboard. Both of its callers went with that button -- the caption is the
-   menu item's own visible text now -- and a helper with no caller is a helper
-   that goes stale unread. `test/keyboard/shortcut-tip.test.tsx` still holds
-   the tooltip's behaviour itself. */
+/* The per-project `+`'s own tooltip (label, decline, chord) is exercised in
+   `test/keyboard/shortcut-tip.test.tsx`, alongside the header's two `+`
+   buttons it is wired the identical way to -- no local `openTipOn` here, so
+   the same behaviour is not asserted twice from two files. */
 
 function mountWith(entries: readonly SessionEntry[], over: Partial<SessionListProps>) {
   return render(<SessionList {...baseProps(entries)} {...over} />);
@@ -396,7 +394,6 @@ describe('SessionList placeholder row', () => {
           onRenameCancel: noop,
           onPick: noop,
           onClose: noop,
-          onAdd: noop,
           onAddInProject: noop,
           onPickIcon: (project: Project) => seen.push(project.name),
           onSettings: noop,
@@ -417,38 +414,36 @@ describe('SessionList placeholder row', () => {
    * standing in for a CC/CX badge that artboard 1a does not have either.
    */
   /**
-   * The `+` in a project heading was an `aria-hidden` span: no pointer, no
-   * hover, unclickable — while the full-width "New session" button below it,
-   * which equally cannot create a session, is a real button that answers on
-   * the status bar. Two controls that refuse for the same reason should refuse
-   * the same way.
-   *
-   * IT IS NO LONGER A `+` IN THE HEADING AT ALL -- it is the first item of
-   * that project's own menu, one icon less per heading at the operator's
-   * request. What this pair still holds is everything the fix above won: a
-   * real button, reachable, that names the project it will create in and
-   * reports that project when pressed. Where it says which project has moved
-   * from an `aria-label` to the panel the item lives in, whose own label is
-   * `<project> actions` -- which is why the assertion is on containment.
+   * The `+` is back on the heading, beside the menu trigger -- the
+   * operator's own reversal of the move #371 made (this test used to assert
+   * the opposite: zero `+`s on any heading, and the add as the menu's first
+   * item). It is a real, always-in-the-DOM button (hover/hover-focus only
+   * changes its opacity, never its presence -- `addButtons` finds it either
+   * way), reachable, that names the project it will create in and reports
+   * that project when pressed.
    */
-  it('offers the per-project add as a real button inside that project’s own menu', () => {
+  it('offers the per-project add as a real button beside the project menu', () => {
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'a1' });
-    // No `+` left on any heading: the count is the point of the move.
-    expect(addButtons(container)).toHaveLength(0);
+    const adds = addButtons(container);
+    expect(adds).toHaveLength(2);
     for (const [projectId, name] of [
       ['p1', 'alpha'],
       ['p2', 'beta'],
     ] as const) {
-      openProjectMenu(container, projectId);
-      const panel = container.querySelector(`[data-project-menu-panel="${projectId}"]`);
-      expect(panel?.getAttribute('aria-label')).toBe(`${name} actions`);
-      const add = panel?.querySelector<HTMLElement>('[data-project-menu-item="new-session"]');
+      const add = container.querySelector<HTMLElement>(
+        `[data-new-session-in-project="${projectId}"]`,
+      );
       expect(add?.tagName).toBe('BUTTON');
-      expect(add?.getAttribute('role')).toBe('menuitem');
-      expect(add?.getAttribute('aria-hidden')).toBeNull();
+      expect(add?.getAttribute('aria-label')).toBe(`new session in ${name}`);
       expect(add?.className).toContain('cursor-pointer');
       expect(add?.className).toMatch(/hover:/);
-      expect(add?.textContent).toContain('New session');
+      // The menu no longer offers it -- one route, not two.
+      openProjectMenu(container, projectId);
+      expect(
+        container.querySelector(
+          `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
+        ),
+      ).toBeNull();
     }
   });
 
@@ -458,10 +453,7 @@ describe('SessionList placeholder row', () => {
       focusedSessionId: 'b1',
       onAddInProject: (project: Project) => seen.push(project.name),
     });
-    openProjectMenu(container, 'p2');
-    act(() => {
-      (container.querySelector('[data-project-menu-item="new-session"]') as HTMLElement).click();
-    });
+    (container.querySelector('[data-new-session-in-project="p2"]') as HTMLElement).click();
     expect(seen).toEqual(['beta']);
   });
 
@@ -610,31 +602,27 @@ describe('the close button reveals with its own row, not with the whole list', (
  * protecting, which is that the route exists for a project you are not
  * currently in.
  */
-describe('the per-project add is in the menu, not on the heading', () => {
-  it('draws no add control on any heading, whichever project holds focus', () => {
+describe('the per-project add is back on the heading', () => {
+  it('draws an add control on every heading, whichever project holds focus', () => {
     for (const focused of [null, 'a1', 'b1'] as const) {
       const { container } = mountWith(twoProjects(), { focusedSessionId: focused });
-      expect(addButtons(container), `focused: ${focused}`).toHaveLength(0);
-      // And nothing else crept in to replace it: fold and menu, and that is
-      // the whole of the heading's controls.
+      expect(addButtons(container), `focused: ${focused}`).toHaveLength(2);
+      // Icon, fold, menu, add -- the whole of the heading's controls, for
+      // every project regardless of which one holds focus.
       for (const heading of container.querySelectorAll('[data-project-heading]')) {
-        expect([...heading.querySelectorAll('button')].length).toBe(3);
+        expect([...heading.querySelectorAll('button')].length).toBe(4);
       }
       cleanup();
     }
   });
 
   it('offers the route for a project that does not hold focus', () => {
-    // The defect the reveal was fixing, restated against the menu: with beta
-    // focused, alpha must still have a way in. It does, and it is the same
-    // gesture for both -- no opacity, no hover, no focus to match.
+    // With beta focused, alpha must still have a way in. It does, and it is
+    // the same gesture for both -- no opacity, no hover, no focus to match:
+    // the button is in the DOM either way, only its reveal-on-hover opacity
+    // differs, and happy-dom paints no opacity for this to hinge on.
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
-    openProjectMenu(container, 'p1');
-    expect(
-      container.querySelector(
-        '[data-project-menu-panel="p1"] [data-project-menu-item="new-session"]',
-      ),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-new-session-in-project="p1"]')).not.toBeNull();
   });
 
   /**
@@ -1410,17 +1398,12 @@ describe('SessionList project controls', () => {
   });
 
   /**
-   * THE `+` USED TO BE THE LAST CONTROL IN THIS ROW, and three tests here held
-   * its position: after the fold and the menu in document order (which is tab
-   * order), at the far right of the spacer, and lit only for the focused
-   * project. All three are about a control the heading no longer draws.
-   *
-   * The property that survives the move is the one they were all protecting:
-   * the heading is a caption with the SMALLEST set of controls that works, and
-   * every one of them is reachable by tab in a stated order. It is two now,
-   * and the add is the first item of the menu (`SessionList.tree.test.tsx`).
+   * THE `+` IS THE LAST CONTROL IN THIS ROW AGAIN, right of the menu -- the
+   * operator's own reversal of the move that used to leave the heading at
+   * two controls. Four now: icon, fold, menu, add, in that document (tab)
+   * order, with the add the last of them.
    */
-  it('leaves the heading exactly two controls, fold then menu, and ends on the menu', () => {
+  it('leaves the heading four controls, icon/fold/menu/add, and ends on the add', () => {
     const { container } = mountWith(twoProjects(), { focusedSessionId: 'b1' });
     for (const projectId of ['p1', 'p2'] as const) {
       const row = heading(container, projectId);
@@ -1431,20 +1414,24 @@ describe('SessionList project controls', () => {
             ? 'fold'
             : node.getAttribute('data-project-menu') !== null
               ? 'menu'
-              : 'other',
+              : node.getAttribute('data-new-session-in-project') !== null
+                ? 'add'
+                : 'other',
       );
-      expect(controls).toEqual(['icon', 'fold', 'menu']);
+      expect(controls).toEqual(['icon', 'fold', 'menu', 'add']);
       // Far right is the spacer's doing, not a margin: everything after the
-      // `flex-1` span is pushed to the end of the row, and the menu is now the
+      // `flex-1` span is pushed to the end of the row, and the add is now the
       // last of them -- so a stray control appended after it fails here.
       const children = [...row.children];
       const spacer = children.find((node) => node.className.includes('flex-1')) as HTMLElement;
       expect(spacer).not.toBeUndefined();
-      expect(children.at(-1)).toBe(row.querySelector(`[data-project-menu="${projectId}"]`));
+      expect(children.at(-1)).toBe(
+        row.querySelector(`[data-new-session-in-project="${projectId}"]`),
+      );
     }
   });
 
-  it('creates in the project whose menu was opened, focused or not', () => {
+  it('creates in the project whose add was pressed, focused or not', () => {
     // Argument value, in click order: an untested argument order on this exact
     // call was a review finding once, and the away project is the new path.
     const seen: string[] = [];
@@ -1453,12 +1440,9 @@ describe('SessionList project controls', () => {
       onAddInProject: (project: Project) => seen.push(project.name),
     });
     for (const projectId of ['p1', 'p2'] as const) {
-      openProjectMenu(container, projectId);
       act(() => {
         (
-          container.querySelector(
-            `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
-          ) as HTMLElement
+          container.querySelector(`[data-new-session-in-project="${projectId}"]`) as HTMLElement
         ).click();
       });
     }
@@ -1497,20 +1481,46 @@ describe('SessionList project menu', () => {
     // absent from this list along with `Project settings`, on the reasoning
     // that a derived project has nothing to remove -- see the note at the
     // menu itself for which half of that expired and which half did not.
+    //
+    // NO `new-session` HERE ANY MORE: it is the heading's own `+` again
+    // (`SessionList.tree.test.tsx`), so the menu opens on `collapse` now --
+    // whichever item this fixture leaves first, since `onRenameProject` is
+    // unwired here and "Rename repo" does not draw.
     expect(items.map((i) => i.getAttribute('data-project-menu-item'))).toEqual([
-      // FIRST, and first on purpose: it is the only item here that makes
-      // something, and the panel focuses its first item -- so `...`+Enter is
-      // the gesture that pays for the click the move off the heading cost.
-      'new-session',
       'collapse',
       'icon',
       // The entry point for a project's FIRST worktree: `WorktreesSection`
       // stays hidden with none, so this is the only route to it until one
-      // exists (see `docs/design/worktrees.md`).
+      // exists (see `docs/design/worktrees.md`). Carries its own bound chord
+      // (`Mod-Shift-w`), right-aligned -- see the next test.
       'new-worktree',
       'remove',
     ]);
     expect(container.textContent).not.toContain('Project settings');
+  });
+
+  /**
+   * Right-aligned chords, read live off the same table every tooltip in the
+   * app reads -- `InlineChord`, not a literal. `new-worktree` is the one item
+   * here with a bound chord (`Mod-Shift-w`); the rest have none that matches
+   * (rename/collapse/icon act on the FOCUSED session or have no chord at
+   * all), so they print nothing rather than a borrowed key.
+   */
+  it('shows New worktree’s own bound chord, and nothing beside the items with none', () => {
+    const { container } = mount(twoProjects());
+    openMenu(container);
+    const worktree = container.querySelector('[data-project-menu-item="new-worktree"]');
+    const chip = worktree?.querySelector('[data-inline-chord]');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).not.toBe('');
+    // Right of the label: the chip's box sits past the item's own midpoint.
+    const itemBox = worktree as HTMLElement;
+    expect(itemBox.lastElementChild).toBe(chip);
+
+    for (const item of ['collapse', 'icon', 'remove'] as const) {
+      const node = container.querySelector(`[data-project-menu-item="${item}"]`);
+      expect(node?.querySelector('[data-inline-chord]'), item).toBeNull();
+    }
   });
 
   it('closes on Escape and puts focus back on the button that opened it', () => {
@@ -1620,42 +1630,38 @@ describe('SessionList new-project control', () => {
     const entries = twoProjects();
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
     expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
-    openProjectMenu(container, 'p2');
     const add = container.querySelector<HTMLButtonElement>(
-      '[data-project-menu-panel="p2"] [data-project-menu-item="new-session"]',
+      '[data-new-session-in-project="p2"]',
     );
-    // No native `title`, for the reason the header `+` lost its own: a caption
-    // that opens on hover and nothing else is unreachable from a keyboard. It
-    // needs no tooltip either -- the item is a word, and the project it means
-    // is the panel it is inside (`<project> actions`).
+    // No native `title`: the caption is the `ShortcutTip` beside it
+    // (`shortcut-tip.test.tsx`), which opens on keyboard focus too, unlike a
+    // `title` that only ever opens on hover.
     expect(add?.getAttribute('title')).toBeNull();
-    expect(add?.textContent).toBe('New session');
+    expect(add?.getAttribute('aria-label')).toBe('new session in beta');
   });
 
   /**
-   * Audit item 1 (S2). This is the assertion that had to move surfaces --
-   * TWICE. The refusal used to be a `title` while `aria-label` promised a new
+   * Audit item 1 (S2), still true of the icon button the control is again.
+   * The refusal used to be a `title` while `aria-label` promised a new
    * session unconditionally, so a keyboard user pressed the button, got
-   * silence, and had no route to the reason; the tooltip was that route.
-   *
-   * It does not need to be a tooltip any more. The reason it was one is that
-   * an icon button has nowhere to put a sentence -- and this control is a menu
-   * item now, which has. Visible text is the surface that needs no hover, no
-   * focus and no assistive technology to reach.
+   * silence, and had no route to the reason. The tooltip is that route: it
+   * opens on focus, not only on hover, and its label swaps to the refusal in
+   * the source's own words -- see `shortcut-tip.test.tsx` for the open tip's
+   * content. This file only holds what the button ITSELF exposes, which is
+   * deliberately nothing static: no `title`, and it stays pressable rather
+   * than disabled -- refusing on click and saying why is honest, while a
+   * control that cannot be pressed just reads as broken.
    */
-  it('prints the refusal on the item itself when the source cannot create', () => {
+  it('carries no static refusal on the item itself, and stays pressable, when the source cannot create', () => {
     const { container } = mountWith(twoProjects(), {
       focusedSessionId: 'b1',
       newSessionDecline: 'factory has no new-session command',
     });
-    openProjectMenu(container, 'p1');
     const add = container.querySelector<HTMLButtonElement>(
-      '[data-project-menu-item="new-session"]',
+      '[data-new-session-in-project="p1"]',
     );
     expect(add?.getAttribute('title')).toBeNull();
-    expect(add?.textContent).toContain('factory has no new-session command');
-    // Still pressable: refusing on click and saying why is honest, while a
-    // control that cannot be pressed just reads as broken.
+    expect(add?.textContent).not.toContain('factory has no new-session command');
     expect(add?.disabled).toBe(false);
   });
 });

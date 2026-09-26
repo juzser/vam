@@ -86,12 +86,12 @@ describe('the phone shell’s hit areas', () => {
   it('gives every control it renders a 44px floor, hosted panels included', () => {
     phone();
     // OPENED, because a menu that is shut renders no items and a sweep over
-    // what is on screen would be green having examined none of them. This is
-    // not a detour: the per-project "new session" USED to be a 19px `+` on the
-    // heading, listed among the hooks below, and it is the first item of this
-    // menu now -- so the one route a phone has to creating a session in a
-    // named project is inside here. A control that changes surface keeps its
-    // floor or it has been quietly dropped.
+    // what is on screen would be green having examined none of them. The
+    // per-project "new session" is a 19px `+` on the heading again (its own
+    // `data-new-session-in-project` hook, swept by `sizedControls()` below
+    // with no menu open at all) -- what is still only reachable through this
+    // menu is rename, collapse, icon and worktree, so those four are why the
+    // sweep still needs the menu open.
     act(() => {
       (document.querySelector('[data-phone-shell] [data-project-menu]') as HTMLElement).click();
     });

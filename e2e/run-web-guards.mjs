@@ -210,6 +210,11 @@ const GUARDS = [
   'files-tree-resize-shots',
   'terminal-ime-shots',
   'sidebar-tree-shots',
+  // THE PROJECT ROW'S OWN `+`, restored beside its menu trigger, and the
+  // menu's own chords -- measured as paint (button rectangle, phone floor,
+  // tooltip, chip position) in both themes and at 390px, which is what
+  // `sidebar-tree-shots.mjs`'s DOM-shape checks cannot answer.
+  'project-add-menu-shots',
   'workspace-options-shots',
   'sidebar-seam-shots',
   'terminal-chrome-shots',

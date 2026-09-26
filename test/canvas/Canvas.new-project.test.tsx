@@ -45,19 +45,11 @@ const MODEL: CanvasModel = {
 /** A directory that is nobody's home: this repo is public. */
 const CHOSEN = '/srv/work/orchard';
 
-/** Start a session in a named project: the first item of that project's own
- *  menu, which is where the heading's `+` went (one icon less per heading, at
- *  the operator's request). */
+/** Start a session in a named project: one click on that project's own `+`,
+ *  beside its menu trigger. */
 async function addInProject(projectId: string) {
   await act(async () => {
-    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
-  });
-  await act(async () => {
-    (
-      document.querySelector(
-        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
-      ) as HTMLElement
-    ).click();
+    (document.querySelector(`[data-new-session-in-project="${projectId}"]`) as HTMLElement).click();
   });
 }
 
