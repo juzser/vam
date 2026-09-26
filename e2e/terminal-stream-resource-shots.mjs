@@ -124,21 +124,27 @@ function check(label, ok, detail) {
   failures.push(label);
 }
 
-// A generic "retry-once-alone" helper (#493's own `withP95RetryOnce`
+// A generic "retry N times, alone" helper (#493's own `withP95RetryOnce`
 // pattern in `terminal-stream-latency-shots.mjs`, generalised past wall-
 // clock p95s to any measurement whose ACCEPTABILITY, not its raw numbers,
-// is what gets asserted): re-run `measure` a single time, alone, if the
-// first pass does not satisfy `acceptable` -- a real tmux session and a
-// real Chromium renderer both carry enough incidental jitter that a single
-// noisy pass shouldn't fail the guard outright, but a SECOND bad pass is a
-// real finding, not noise.
-async function withRetryOnce(label, measure, acceptable) {
+// is what gets asserted): re-run `measure` up to `extraAttempts` more times
+// if the previous pass does not satisfy `acceptable` -- a real tmux session
+// and a real Chromium renderer both carry enough incidental jitter that a
+// single noisy pass shouldn't fail the guard outright, but running out of
+// attempts is a real finding, not noise.
+async function withRetries(label, measure, acceptable, extraAttempts) {
   let result = await measure();
-  if (acceptable(result)) return result;
-  console.warn(`  retry: ${label} missed its bound on the first pass -- re-measuring once, alone, before failing for real`);
-  result = await measure();
+  for (let attempt = 1; attempt <= extraAttempts && !acceptable(result); attempt += 1) {
+    console.warn(
+      `  retry: ${label} missed its bound on attempt ${attempt} of ${extraAttempts} -- re-measuring, alone, before failing for real`,
+    );
+    result = await measure();
+  }
   return result;
 }
+
+// The ORIGINAL, one-retry shape every OTHER caller below still uses.
+const withRetryOnce = (label, measure, acceptable) => withRetries(label, measure, acceptable, 1);
 
 /**
  * ABSOLUTE CEILINGS, calibrated from REAL data -- the coordinator's own
@@ -529,10 +535,27 @@ async function measurePauseAfter() {
   }
 }
 
-const pauseAfter = await withRetryOnce(
+// TWO retries (three attempts total), not `withRetryOnce`'s usual one: this
+// specific measurement's own history (PR #504 run 36137150536, PR #510/this
+// investigation's run 36236036684) is the only one of this file's six that
+// has repeatedly needed a root-cause investigation of its own, and THIS
+// investigation's own live catch (job 108401621854) measured WHY a single
+// retry is not always enough -- tmux's real `%pause` gate depends on a
+// server-side write buffer crossing a 512-byte low-watermark
+// (`control.c:CONTROL_BUFFER_LOW`) before this pane's PTY reads even get
+// re-enabled for its age check to run again (`control.c:control_pane_
+// offset`), a race between that cadence and this file's own duty-cycle that
+// a persistently degraded runner (this job's own accumulated wear from 49
+// PRECEDING sequential guards, unlike its vitest twin's short, early `check`
+// job) can occasionally lose on BOTH the first attempt and its one retry
+// alike, MEASURED identically in that same job's own log. A fresh session,
+// fresh `StreamClient`, and a third independent attempt is the cheapest way
+// to absorb that without weakening what gets asserted.
+const pauseAfter = await withRetries(
   'pause-after recovery',
   measurePauseAfter,
   (r) => r.sawPauseRaw && r.sawReseed && r.correct,
+  2,
 );
 report.pauseAfter = pauseAfter;
 check('pause-after: tmux actually sent %pause for this pane (seen on the raw wire)', pauseAfter.sawPauseRaw);
