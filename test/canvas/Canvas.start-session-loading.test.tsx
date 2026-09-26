@@ -794,12 +794,21 @@ describe('Start session — the wait for the agent to register', () => {
      * the Response view on the model's own next poll, not bounded by
      * `PROVIDER_CONFIRMATION_EXPIRY_MS` at all (the long-running-then-
      * crashes shape, distinct from the never-registered one above).
+     *
+     * EXTENDED FOR A REVIEW-FOUND S2: a handoff is a one-way ratchet unless
+     * it is PRUNED once the thing it vouched for ends. Without pruning, the
+     * revert above (Start returns) is correct, but the operator restarting
+     * the SAME pane afterward -- or a provider typed by hand -- would have
+     * the model's bare process name trusted OUTRIGHT again, with no poll
+     * ever re-verifying it: the exact trust-card S2 this whole chain closes,
+     * wearing a stale-handoff shape instead of a never-handed-off one.
      */
-    it('hands off to the model the moment it agrees, so a later revert returns Start faster than the expiry bound', async () => {
+    it('hands off to the model the moment it agrees, so a later revert returns Start faster than the expiry bound, and a later restart is re-verified, not trusted stale', async () => {
       vi.useFakeTimers();
+      let screen: 'ready' | 'trust' = 'ready';
       const startScreen = vi.fn(async () => ({
         kind: 'ok' as const,
-        screen: 'ready' as const,
+        screen,
         provider: 'claude-code' as const,
       }));
       (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
@@ -834,6 +843,90 @@ describe('Start session — the wait for the agent to register', () => {
       });
       expect(document.querySelector('[data-pane-ready]')).toBeNull();
       expect(startButton()).not.toBeNull();
+
+      // THE EXTENSION: the operator restarts the CLI in this SAME pane, and
+      // this time it sits on a trust dialog -- a stale handoff would skip
+      // straight to `PaneReady` on the model's bare process name alone; a
+      // PRUNED one begins a fresh `confirm` wait that actually polls it.
+      screen = 'trust';
+      await act(async () => {
+        view.rerender(
+          <Canvas
+            model={modelWith({ ...UNSTARTED, runningProvider: 'claude-code' })}
+            source={source}
+          />,
+        );
+      });
+      expect(document.querySelector('[data-pane-ready]')).toBeNull();
+      const card = document.querySelector('[data-start-screen-card]');
+      expect(card?.getAttribute('data-start-screen-kind')).toBe('trust');
+    });
+
+    /**
+     * THE OTHER PRUNING TRIGGER: the row itself disappearing entirely (the
+     * project closed, filtered out, whatever the reason) must ALSO retire a
+     * handoff -- not just a revert to a shell. A LATER row reusing the SAME
+     * pane key (vam's own shell-reuse shape) must be verified fresh, not
+     * inherit trust a row that no longer exists once earned.
+     */
+    it('prunes a handoff once its row disappears entirely, so a later row reusing the same pane key is verified fresh', async () => {
+      vi.useFakeTimers();
+      let screen: 'ready' | 'trust' = 'ready';
+      const startScreen = vi.fn(async () => ({
+        kind: 'ok' as const,
+        screen,
+        provider: 'claude-code' as const,
+      }));
+      (window as unknown as { api: unknown }).api = { terminal: { startScreen } };
+      const { source, release } = gatedSource();
+      const view = render(<Canvas model={modelWith(UNSTARTED)} source={source} />);
+      await act(async () => {
+        startButton()?.click();
+      });
+      await act(async () => {
+        release();
+      });
+      await act(async () => {});
+      await act(async () => {
+        view.rerender(
+          <Canvas
+            model={modelWith({ ...UNSTARTED, runningProvider: 'claude-code' })}
+            source={source}
+          />,
+        );
+      });
+      expect(document.querySelector('[data-pane-ready]')).not.toBeNull(); // handed off
+
+      // THE ROW DISAPPEARS ENTIRELY -- nothing at all is left for this key.
+      await act(async () => {
+        view.rerender(<Canvas model={modelWith(otherSession('elsewhere'))} source={source} />);
+      });
+
+      // A DIFFERENT row later reuses the SAME pane, sitting on a trust
+      // dialog this time. Focus does not follow a new arrival on its own
+      // (`otherSession('elsewhere')` is already the one thing on screen), so
+      // this pins the DISPLAY explicitly -- the auto-classify effect only
+      // ever polls the row on screen, and that is exactly what this test is
+      // about.
+      screen = 'trust';
+      await act(async () => {
+        view.rerender(
+          <Canvas
+            model={modelWith(otherSession('elsewhere'), {
+              ...UNSTARTED,
+              id: 'pane:reused',
+              runningProvider: 'claude-code',
+            })}
+            source={source}
+          />,
+        );
+      });
+      await act(async () => {
+        document.querySelector<HTMLElement>('[data-session-row="pane:reused"]')?.click();
+      });
+      expect(document.querySelector('[data-pane-ready]')).toBeNull();
+      const card = document.querySelector('[data-start-screen-card]');
+      expect(card?.getAttribute('data-start-screen-kind')).toBe('trust');
     });
 
     it('shows the trust card once the pane reports trust, and does not clear the wait', async () => {

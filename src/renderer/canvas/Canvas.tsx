@@ -2640,6 +2640,20 @@ function CanvasInner({
     Readonly<Record<string, StartingPaneWait>>
   >({});
   /**
+   * A LIVE MIRROR, read by the fast poll's own `.then` a few screens down --
+   * an informational race the reviewer flagged: `poll()`'s closure captures
+   * `wait` once, at the moment a call is ISSUED, and that call may still be
+   * in flight when the wait it was launched for has since ended and been
+   * REPLACED (the row's own `cancelled` flag already guards the case where
+   * the whole effect instance tore down, but this is the belt beside that
+   * suspender -- assigned during render, every render, the same "mirrored
+   * during render, read in a later commit" contract `entriesByIdRef` above
+   * already relies on). The `.then` below compares `wait` against THIS,
+   * never the closure's own stale `startingPaneByKey`, before acting on it.
+   */
+  const startingPaneByKeyRef = useRef<Readonly<Record<string, StartingPaneWait>>>({});
+  startingPaneByKeyRef.current = startingPaneByKey;
+  /**
    * D12: THE RACE `startingPaneByKey` COULD NOT CLOSE ON ITS OWN.
    *
    * Two presses within a few milliseconds -- two rapid clicks, or Enter's own
@@ -2845,6 +2859,19 @@ function CanvasInner({
    * and expiry means the model NEVER agreed -- trusting it going forward
    * would reintroduce the exact crash-before-registering S2 case 3 exists
    * to close.
+   *
+   * PRUNED BY A SEPARATE EFFECT, A FEW LINES DOWN -- a review-found S2. The
+   * `.delete(key)` in case 1 just below only ever fires for a key STILL in
+   * `providerRunningByKey` (an active wait that never got handed off, whose
+   * row happened to leave `unstarted`/`terminal`); by the time a key IS
+   * handed off, case 2 has ALREADY deleted it from that same map in the SAME
+   * step, so this effect never visits it again and never prunes it here.
+   * Left standing, a handoff was a ONE-WAY RATCHET: trusted forever, even
+   * through a LATER crash-then-restart onto a genuine trust/update dialog --
+   * the auto-classify effect skips a key `handedOffKeys` already trusts, so
+   * nothing would ever poll the pane again, and the merge would draw
+   * `PaneReady` straight off the model's bare process name for the NEW
+   * process. The pruning effect closes exactly that gap.
    */
   const handedOffKeys = useRef(new Set<string>());
   // Cleared by whichever of the three facts above comes first -- see
@@ -2891,6 +2918,43 @@ function CanvasInner({
       }
     }
   }, [allEntries, providerRunningByKey, clearProviderRunning, clearStartingPane]);
+  /**
+   * PRUNES `handedOffKeys` -- A REVIEW-FOUND S2, `handedOffKeys`'s own
+   * header. Deliberately independent of `providerRunningByKey`: by the time
+   * a key is handed off, that map holds nothing for it at all, so gating
+   * this on it (the way the effect above is gated) would never visit a
+   * handed-off key again. Runs over `allEntries` alone instead -- the same
+   * "a fresh model poll landing" trigger every effect on this page uses --
+   * and deletes a key the MOMENT the fact it vouched for ends:
+   *
+   * 1. The row is gone, or no longer `unstarted`/`terminal` -- nothing left
+   *    to be trusted ABOUT.
+   * 2. The model's own `runningProvider` for this key reads `undefined` --
+   *    the process this handoff vouched for has exited (the crash the
+   *    handoff test above already covers); the row is still `unstarted`, but
+   *    a NEXT launch in the SAME pane is a DIFFERENT process the model has
+   *    not seen a dialog on yet, and must be verified again, not grandfathered
+   *    in on the strength of the one this handoff was ORIGINALLY about.
+   *
+   * Once pruned, the auto-classify effect below sees an empty set again for
+   * this key and begins a fresh `confirm` wait the next time the model
+   * reports a provider running here -- exactly as it would for a row that
+   * had never been confirmed at all.
+   */
+  useEffect(() => {
+    if (handedOffKeys.current.size === 0) return;
+    for (const key of handedOffKeys.current) {
+      const row = allEntries.find(
+        (candidate) => (candidate.session.pane ?? candidate.session.id) === key,
+      );
+      const stillPending =
+        row !== undefined &&
+        (row.session.status === 'unstarted' || row.session.status === 'terminal');
+      if (!stillPending || row.session.runningProvider === undefined) {
+        handedOffKeys.current.delete(key);
+      }
+    }
+  }, [allEntries]);
   /**
    * WHICH ROW EACH VISIBLE PANE IS SHOWING RIGHT NOW -- every leaf's OWN
    * active tab (`leaf.sessionId`, membership in `leaf.sessionIds` is not
@@ -3031,7 +3095,12 @@ function CanvasInner({
         if (wait === undefined) continue;
         getStartScreen(wait.projectId, wait.rowId)
           .then((view) => {
-            if (cancelled || view.kind !== 'ok') return;
+            // TAGGED WITH THE WAIT IT WAS LAUNCHED FOR -- `startingPaneByKeyRef`
+            // 's own header. `cancelled` alone only catches a torn-down EFFECT
+            // INSTANCE; this catches the wait itself having been replaced.
+            if (cancelled || view.kind !== 'ok' || startingPaneByKeyRef.current[key] !== wait) {
+              return;
+            }
             if (view.screen === 'ready') {
               setProviderRunningByKey((current) =>
                 key in current
