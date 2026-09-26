@@ -32,7 +32,7 @@
  * Run by hand:
  *   node e2e/terminal-stream-resource-shots.mjs
  */
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createReadStream, mkdtempSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
@@ -382,6 +382,17 @@ await new Promise((r) => setTimeout(r, 300));
  * this file's own `check()` for `pauseAfter.sawReseed`, unchanged.
  */
 async function measurePauseAfter() {
+  // TEMPORARY, FALSIFICATION-STYLE LEVER (coordinator's own ask): forces the
+  // SAME shape of CPU starvation `stream-client-pause-after.test.ts`'s own
+  // header RCA used to reproduce ITS flake locally ("20 competing `yes >
+  // /dev/null` processes") -- default OFF (0), so ordinary runs are
+  // unaffected; set via VAM_E2E_FORCE_CONTENTION=<N> to force N competing
+  // busy processes for the DURATION of this one measurement, so a CI-only
+  // starvation-shaped failure can be forced on demand rather than waited for.
+  const contentionCount = Number(process.env.VAM_E2E_FORCE_CONTENTION ?? '0');
+  const contenderProcs = Array.from({ length: contentionCount }, () =>
+    spawn('yes', [], { stdio: 'ignore' }),
+  );
   // TEMPORARY DIAGNOSTIC (coordinator's own ask, CI flake investigation):
   // this guard's own `check()` only ever asserts on `seeds.length` -- a full
   // %pause -> %continue -> reseed round trip -- which cannot tell "tmux
@@ -484,6 +495,7 @@ async function measurePauseAfter() {
     return { sawReseed: seeds.length > 0, correct };
   } finally {
     client.dispose();
+    for (const proc of contenderProcs) proc.kill();
   }
 }
 
