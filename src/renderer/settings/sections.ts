@@ -21,6 +21,7 @@ import {
   Keyboard,
   type LucideIcon,
   Palette,
+  Puzzle,
   RefreshCw,
   SlidersHorizontal,
   Smartphone,
@@ -38,6 +39,7 @@ export type SectionId =
   | 'behaviour'
   | 'notifications'
   | 'sessions'
+  | 'integrations'
   | 'remote'
   | 'keyboard'
   | 'update';
@@ -137,6 +139,14 @@ export const SECTIONS: readonly {
   // and the longest, and a list that ends in a reference reads as a list that
   // ended. Nothing else depends on the position.
   { id: 'sessions', label: 'Sessions', Icon: Bot },
+  // GITHUB: `gh` auth status, Connect/Disconnect, and which repo each
+  // project reads pull requests from. Desktop-only, the same reasoning
+  // `PHONE_SECTIONS`'s own note gives for Remote's neighbours: `gh` runs on
+  // THIS machine with the operator's own credentials, and a phone has no
+  // bridge to spawn it. After Sessions, which is the other place a project's
+  // directory matters, and before Remote, which is about the DEVICE rather
+  // than a project.
+  { id: 'integrations', label: 'Integrations', Icon: Puzzle },
   // Where a phone is paired. Beside Sessions rather than under it: what it
   // grants is the ability to drive those sessions from somewhere else, and it
   // stays before Keyboard for the reason above.

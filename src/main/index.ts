@@ -35,6 +35,15 @@ import { recordMainFailure } from './errors/log.js';
 import { registerFilesIpc } from './files/ipc.js';
 import { registerFilesListIpc } from './files/list-ipc.js';
 import { registerFilesResolveIpc } from './files/resolve-ipc.js';
+import { readGithubAuthPane, startGithubAuthPane } from './integrations/github-pane.js';
+import { readProjectRemotes } from './integrations/github-remotes.js';
+import {
+  createGithubReposRun,
+  readGithubOrgs,
+  readGithubRepos,
+} from './integrations/github-repos.js';
+import { createGhAuthRun, readGithubAuthStatus } from './integrations/github-status.js';
+import { registerGithubIntegrationIpc } from './integrations/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { LAUNCH_FIXTURE_PROJECTS } from './launch-fixture.js';
@@ -817,6 +826,42 @@ void app.whenReady().then(async () => {
       return prRepoOverride('claude-code', projectIdOf(cwd)) ?? cwd;
     },
     run: PR_ACTIONS,
+  });
+  /**
+   * Settings -> Integrations -> GitHub. `channels.ts`'s own note carries the
+   * whole argument for why every one of these six is desktop-only; this is
+   * only the wiring.
+   *
+   * `createTmuxRunner()`, not the control-mode runner the Terminal tab uses:
+   * Connect/Disconnect is one spawn per press, not a per-keystroke hot path,
+   * so the plain runner already every OTHER occasional tmux write in this
+   * file uses (`resolveWorktreeProjectDirectory`, above) is the right one.
+   */
+  const githubTmuxRunner = createTmuxRunner();
+  const readGithubReposOf = readGithubRepos(createGithubReposRun());
+  const readGithubViewerOrgs = readGithubOrgs(createGithubReposRun());
+  const readOneProjectsRemotes = readProjectRemotes();
+  registerGithubIntegrationIpc(ipcMain, {
+    authStatus: readGithubAuthStatus(createGhAuthRun()),
+    connectStart: (kind) => startGithubAuthPane(githubTmuxRunner, kind),
+    connectRead: () => readGithubAuthPane(githubTmuxRunner),
+    reposList: async (owner) => {
+      const result = await readGithubReposOf(owner);
+      if (result.kind === 'ok') return result;
+      return result.kind === 'bad-response'
+        ? { kind: 'error', code: 'bad-response', message: result.message }
+        : { kind: 'error', code: result.error.code, message: result.error.message };
+    },
+    orgsList: async () => {
+      const result = await readGithubViewerOrgs();
+      return result.kind === 'ok'
+        ? result
+        : { kind: 'error', code: result.error.code, message: result.error.message };
+    },
+    projectRemotes: async (projectId) => {
+      const cwd = await resolveWorktreeProjectDirectory(projectId);
+      return cwd === null ? [] : readOneProjectsRemotes(cwd);
+    },
   });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while

@@ -16,6 +16,7 @@ import {
   createClipboardApi,
   createDialogApi,
   createFilesApi,
+  createGithubApi,
   createIssueApi,
   createLinkApi,
   createMainErrorsApi,
@@ -39,6 +40,9 @@ contextBridge.exposeInMainWorld('api', {
   // Reaches github.com, and only when something asks it to -- nothing on
   // this bridge checks on its own.
   update: createUpdateApi(ipcRenderer),
+  // Settings -> Integrations -> GitHub. Desktop-only, the same standing as
+  // `update` above -- see `CHANNELS.githubAuthStatus`'s own comment.
+  github: createGithubApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
   // Opens a PREFILLED issue form in the operator's own browser, and posts
   // nothing. Takes text, never a location -- see `CHANNELS.issueOpen`.

@@ -99,6 +99,21 @@ export const CHANNELS = {
    */
   setConciseOutput: 'vam:terminal:set-concise-output',
   /**
+   * Settings -> Integrations -> GitHub, six channels, ALL DESKTOP-ONLY and
+   * none of them a member of `PreloadSourceApi` -- `remote/server.ts`
+   * registers no route for any of them, the same standing as `setPrRepos`
+   * above. `gh` is spawned on THIS machine with the operator's own
+   * credentials; a paired phone sees the RESULT (which repo a project reads
+   * pull requests from) through the ordinary source read, and never a way to
+   * trigger a `gh` run of its own. See `main/integrations/github-pane.ts`.
+   */
+  githubAuthStatus: 'vam:github:auth-status',
+  githubConnectStart: 'vam:github:connect-start',
+  githubConnectRead: 'vam:github:connect-read',
+  githubReposList: 'vam:github:repos-list',
+  githubOrgsList: 'vam:github:orgs-list',
+  githubProjectRemotes: 'vam:github:project-remotes',
+  /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
    */
