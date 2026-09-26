@@ -790,6 +790,42 @@ attached`, while every other check in the file stayed green, including
 "zero clients once disposed" (the injected extra client is torn down
 alongside the real one). Removed after (the env var reverts to unset).
 
+### UPDATE: the echo/burst markers were typed, not printed (X-AUD-1)
+
+A cross-provider review found that TEST 2 (echo loop) and TEST 3 (burst) both
+built their DONE marker as a literal string and sent it with `send-keys -l`
+as part of the typed command itself (`` `echo ${marker}` ``, `` `...; echo
+${marker}` ``). A real pty ECHOES literal keystrokes back onto the screen the
+moment tmux delivers them -- a real `%output` notification, rendered by the
+same app xterm this guard measures -- well before Enter is even sent.
+`waitForPaintContaining` already read the right place (`window.__paints`, the
+app's own rendered rows, never tmux's own screen), but with the marker typed
+verbatim it could be satisfied by that typed-line echo alone: **the burst
+check could pass even if the burst's own OUTPUT never rendered a single
+byte**, because the marker was already on screen before the command ever
+ran -- print → paint measured in name only; in practice it could measure
+typing-echo → paint, the exact defect pane A's own steady-typing test is
+supposed to isolate, silently substituted into TEST 2/3.
+
+**The fix.** Both tests now build their marker via `markerPrintCommand()`,
+which splits it across two adjacent single-quoted shell literals
+(`printf '%s\n' '<a>''<b>'`) -- the shell concatenates them into one argument
+before `printf` ever runs, so the OUTPUT still contains the marker exactly
+once, contiguous, while the TYPED command line (and its echo) never contains
+the two halves joined, and so never satisfies `waitForPaintContaining`'s own
+contiguous-substring search on its own.
+
+**Falsified** with a standalone throwaway script (same real `StreamClient`,
+same real harness, a private tmux socket) that types a marker command with
+`send-keys -l` and deliberately never sends Enter -- the command never runs,
+never produces one byte of real output. With the OLD literal `` `echo
+${marker}` `` shape, the marker still painted (found purely from the typed
+line's own echo). With the fixed `markerPrintCommand()` shape, it did not --
+confirming the split marker is never satisfied by typed-command echo alone.
+A third run of the fixed shape WITH Enter sent confirmed it still paints once
+the command actually runs and prints it, so the fix does not just make the
+guard fail closed -- it still measures the real thing.
+
 ### The one-line hook for the streaming resource guard
 
 `e2e/terminal-stream-resource-shots.mjs` (CPU, memory, client count, tmux
@@ -1030,6 +1066,23 @@ here is the property that actually matters end to end: whatever gets
 dropped, the very next reconnect a real client performs restores a correct
 screen, exactly like a `%pause`-triggered reseed already does one layer
 down.
+
+**UPDATE, cross-provider review**: the pause-after recovery check
+(`measurePauseAfter`, the "final screen" assertion right above the 5MB flood
+table) used to read ONLY tmux's own `capture-pane` for "the pane recovers to
+the correct final screen" -- ground truth for whether the SESSION recovered,
+never proof that this `StreamClient`'s own seed/data/reseed events actually
+reached a renderer (the same gap X-AUD-1 named in the latency guard, one
+test over). It now also feeds those same events into a real `@xterm/xterm`
+page (the same browser this file's "RENDERER HALF" already launches, moved
+up front so this earlier test can use it too) and asserts the APP's own
+rendered buffer shows the DONE marker independently of `capture-pane`
+(`appCorrect`, its own `check()`). Falsified by removing the `client.onData`
+forward to that page: `correct` (tmux's own screen) stayed `true`, while
+`appCorrect` (the app's own rendered xterm) went `false` -- proof the two
+checks are not redundant, and that the old shape alone could not have caught
+a renderer that silently stopped receiving this client's output. Restored,
+both checks pass.
 
 ### Heavy-output ceilings, calibrated from real CI + local data
 
