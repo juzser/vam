@@ -50,8 +50,8 @@ for (const theme of ['light', 'dark']) {
       a.pause();
     }
   });
-  await page.screenshot({ path: `${outDir}/phone-prompt-${theme}-${label}.png` });
-  console.log(`${outDir}/phone-prompt-${theme}-${label}.png`);
+  await page.screenshot({ path: `${outDir}/phone-prompt-${theme}-${label}${suffix}.png` });
+  console.log(`${outDir}/phone-prompt-${theme}-${label}${suffix}.png`);
   await page.close();
 }
 await browser.close();
