@@ -64,13 +64,15 @@
  *
  * `mergeOpenQuestion` is the only place this module's finding reaches the
  * facts a poll actually returns, and it is deliberately conservative: if the
- * tail window ALREADY produced a question for the same `tool_use` id -- the
- * common case, where the window is wide enough on its own -- that reading
- * wins, unchanged. This module's answer is appended only when the window has
- * nothing at all for that id, which is exactly the case the window cannot be
- * trusted for. It is never asked to CLOSE a question the window opened, and a
- * question this module finds already answered contributes nothing (`open` is
- * `null`) rather than a stale, already-closed card.
+ * tail window ALREADY read the exact ask this module found -- the common
+ * case, where the window is wide enough on its own -- that reading wins,
+ * unchanged. Matched by the ask's own absolute byte OFFSET, not by how either
+ * side numbered a reused id: see `mergeOpenQuestion`'s own header for why.
+ * This module's answer is appended only when the window never read that ask
+ * at all, which is exactly the case the window cannot be trusted for. It is
+ * never asked to CLOSE a question the window opened, and a question this
+ * module finds already answered contributes nothing (`open` is `null`)
+ * rather than a stale, already-closed card.
  */
 
 import type { AgentQuestion } from '../../../renderer/domain/model.js';
@@ -94,9 +96,9 @@ export type OpenQuestion = {
   /**
    * `toolUseId` run through `nextEffectiveId` -- identical to it unless
    * `toolUseId` is this transcript's 2nd or later occurrence of a repeated
-   * id. `mergeOpenQuestion` keys its dedup check off THIS, never off
-   * `toolUseId` raw, so a reused id's still-open occurrence is never mistaken
-   * for one the tail window already covered under the same raw prefix.
+   * id. Carried for the `AgentQuestion.id`s under `questions` below, not for
+   * `mergeOpenQuestion`'s own dedup check any more -- that now keys off
+   * `offset`, which the two readers can never number differently.
    */
   readonly effectiveId: string;
   /** The absolute byte offset of the `tool_use` line that asked it. */
@@ -243,47 +245,62 @@ export async function readOpenQuestion(
 
 /**
  * The facts a poll actually reports, with `open` folded in ONLY where the
- * tail window has nothing for that `tool_use` id -- see the module header for
- * why the window always wins when it has an answer of its own. Pure, so it is
- * tested without a filesystem: `readOpenQuestion` is the only half of this
- * module that touches one.
+ * tail window does not already account for that SAME occurrence -- see the
+ * module header for why the window always wins when it has a reading of its
+ * own. Pure, so it is tested without a filesystem: `readOpenQuestion` is the
+ * only half of this module that touches one.
+ *
+ * `windowOffsets` is `collectQuestions`'s own `offsets` map
+ * (`TranscriptFacts.questionOffsets`, threaded here by `source.ts`): the
+ * absolute byte offset of the ask behind each of `windowQuestions`' own
+ * occurrences, keyed by THAT reading's `effectiveId` -- not `open`'s.
+ *
+ * MATCHING BY OFFSET, NOT BY `effectiveId` (a past version of this function,
+ * and the S2 that replaced it in turn -- both below). An occurrence's
+ * absolute byte offset is the one fact about it neither reader can disagree
+ * on, because it is where the `tool_use` line that asked it physically sits
+ * in the file: two readings of the SAME occurrence always carry the SAME
+ * offset, and two readings of two DIFFERENT occurrences never do, regardless
+ * of how either one counted its way to an `effectiveId`.
+ *
+ * WHAT `effectiveId` MATCHING GOT WRONG, TWICE:
+ *
+ *  1. Exact `effectiveId` match alone missed a reused id whose numbering the
+ *     two readers disagreed on: `collectQuestions` (questions.ts) counts a
+ *     `toolUseId`'s occurrences from only the bytes ITS OWN (tail) window
+ *     covers; this module counts from its own wider, persisted scan. An id
+ *     whose FIRST occurrence sits outside the tail window but inside this
+ *     module's scan is UNDERCOUNTED by the window -- it draws what is really
+ *     the SAME occurrence this module found open as if it were the first (no
+ *     `#N` suffix) rather than the true, higher ordinal -- so the exact
+ *     match never fired, and the same open question drew as two cards.
+ *
+ *  2. The fix for (1) matched on the RAW `toolUseId` instead, once the window
+ *     already held an UNANSWERED entry for it -- reasoning that a raw id has
+ *     at most one open occurrence at a time. Nothing in `collectQuestions`
+ *     actually promises that (its own header now says so): two asks under one
+ *     reused id with no result between them are both open at once, sharing a
+ *     raw id purely because the transcript is defective. That version of
+ *     this function read the window's FIRST open occurrence as already
+ *     covering this module's SECOND, genuinely distinct one, and silently
+ *     DROPPED it -- data loss, worse than the duplicate card it was fixing.
+ *
+ * Offset sidesteps both: it needs no assumption about how many occurrences of
+ * a raw id can be open, and it needs no agreement between the two readers'
+ * own counting.
  */
 export function mergeOpenQuestion(
   windowQuestions: readonly AgentQuestion[],
   open: OpenQuestion | null,
+  windowOffsets: ReadonlyMap<string, number>,
 ): readonly AgentQuestion[] {
   if (open === null) return windowQuestions;
-  // `effectiveId`, never `toolUseId` raw: a reused id's already-answered
-  // first occurrence and still-open second occurrence share the raw prefix
-  // but must not share this check -- see `OpenQuestion`'s own doc.
-  const prefix = `${open.effectiveId}:`;
-  if (windowQuestions.some((q) => q.id.startsWith(prefix))) return windowQuestions;
-  // THE TWO PATHS CAN NUMBER THE SAME REUSED ID DIFFERENTLY. `collectQuestions`
-  // (questions.ts) counts a `toolUseId`'s occurrences from only the bytes ITS
-  // OWN (tail) window covers; this module counts from its own wider, persisted
-  // scan. A raw id whose FIRST occurrence sits outside the tail window but
-  // inside this module's scan is UNDERCOUNTED by the window: it draws what is
-  // really the SAME occurrence this module found open as if it were the first
-  // (no `#N` suffix) rather than the true, higher ordinal -- so the exact
-  // `effectiveId` prefix above never matches, and the open question this
-  // module found would otherwise be appended a second time under its own
-  // numbering, drawing two cards for one open question
-  // (`claude-code-question-index.test.ts`, `claude-code-question-window.
-  // test.ts`).
-  //
-  // A raw id can have at most ONE occurrence open at a time -- Claude Code
-  // never asks a second question under an id whose earlier occurrence is
-  // still unanswered (`nextEffectiveId`'s own header) -- so an UNANSWERED
-  // window entry sharing the raw id is always this SAME occurrence, however
-  // the window's own count numbered it, never a genuinely different one: a
-  // real earlier occurrence under that id would already be answered by the
-  // time a later one opens, and so would never reach this branch (the exact
-  // `effectiveId` prefix check above already returns early for it).
-  const rawPrefix = open.toolUseId;
-  const sameRawIdAlreadyOpenInWindow = windowQuestions.some(
-    (q) =>
-      q.answer === null && (q.id.startsWith(`${rawPrefix}:`) || q.id.startsWith(`${rawPrefix}#`)),
-  );
-  if (sameRawIdAlreadyOpenInWindow) return windowQuestions;
+  // Every occurrence the window itself parsed at all -- open or answered,
+  // readable or not -- has its ask's offset recorded here (`CollectedQuestions`'s
+  // own header). If `open`'s offset is among them, the window already read
+  // that exact physical line, whatever it made of it, and this module's
+  // separately-numbered copy of the SAME ask is not appended again.
+  const windowAlreadyReadThisAsk = [...windowOffsets.values()].includes(open.offset);
+  if (windowAlreadyReadThisAsk) return windowQuestions;
   return [...windowQuestions, ...open.questions];
 }

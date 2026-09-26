@@ -262,7 +262,10 @@ export async function readTranscript(
     // poll after the first: an append-only file only ever hands this the
     // bytes written since the last look, typically one line.
     const open = await readOpenQuestion(questionIndex, path, info.size, info.mtimeMs, source);
-    const facts = { ...windowFacts, questions: mergeOpenQuestion(windowFacts.questions, open) };
+    const facts = {
+      ...windowFacts,
+      questions: mergeOpenQuestion(windowFacts.questions, open, windowFacts.questionOffsets),
+    };
     // The roster's walk is what names the live agents, and it has already been
     // paid for the `●N` badge -- so a session with none costs nothing new here
     // and reads no file it did not read before (`subagent.ts`).

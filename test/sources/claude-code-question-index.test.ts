@@ -361,59 +361,80 @@ describe('mergeOpenQuestion', () => {
 
   it('passes the window questions through untouched when there is no open question', () => {
     const windowQuestions = [openOf('toolu_1')];
-    expect(mergeOpenQuestion(windowQuestions, null)).toBe(windowQuestions);
+    expect(mergeOpenQuestion(windowQuestions, null, new Map())).toBe(windowQuestions);
   });
 
   it('appends the open question when the window never saw its tool_use', () => {
-    const merged = mergeOpenQuestion([], {
-      toolUseId: 'toolu_2',
-      effectiveId: 'toolu_2',
-      offset: 0,
-      questions: [openOf('toolu_2')],
-    });
+    const merged = mergeOpenQuestion(
+      [],
+      {
+        toolUseId: 'toolu_2',
+        effectiveId: 'toolu_2',
+        offset: 0,
+        questions: [openOf('toolu_2')],
+      },
+      new Map(),
+    );
     expect(merged.map((q) => q.id)).toEqual(['toolu_2:0']);
   });
 
   it('does not duplicate a question the window already represents', () => {
     const windowQuestions = [{ ...openOf('toolu_1'), answer: 'yes' }];
-    const merged = mergeOpenQuestion(windowQuestions, {
-      toolUseId: 'toolu_1',
-      effectiveId: 'toolu_1',
-      offset: 0,
-      questions: [openOf('toolu_1')],
-    });
+    // The window's own recorded offset for its one ask, and `open`'s own
+    // offset below are the SAME physical ask -- offset 0.
+    const windowOffsets = new Map([['toolu_1', 0]]);
+    const merged = mergeOpenQuestion(
+      windowQuestions,
+      {
+        toolUseId: 'toolu_1',
+        effectiveId: 'toolu_1',
+        offset: 0,
+        questions: [openOf('toolu_1')],
+      },
+      windowOffsets,
+    );
     expect(merged).toBe(windowQuestions);
   });
 
   it('keeps the window questions first -- the open one is always the newest', () => {
     const windowQuestions = [openOf('toolu_1')];
-    const merged = mergeOpenQuestion(windowQuestions, {
-      toolUseId: 'toolu_2',
-      effectiveId: 'toolu_2',
-      offset: 10,
-      questions: [openOf('toolu_2')],
-    });
+    const windowOffsets = new Map([['toolu_1', 0]]);
+    const merged = mergeOpenQuestion(
+      windowQuestions,
+      {
+        toolUseId: 'toolu_2',
+        effectiveId: 'toolu_2',
+        offset: 10,
+        questions: [openOf('toolu_2')],
+      },
+      windowOffsets,
+    );
     expect(merged.map((q) => q.id)).toEqual(['toolu_1:0', 'toolu_2:0']);
   });
 
   /**
    * A REUSED raw id, disambiguated -- see `nextEffectiveId` in `questions.ts`.
-   * The window already holds the FIRST occurrence, answered; the open one
-   * IS the second, still waiting. Keying the merge's dedup check off the raw
-   * `toolUseId` (as it used to) would read the window's first-occurrence id
-   * as already covering this one -- same prefix, `toolu_mock_1:` -- and drop
-   * the genuinely open second occurrence on the floor. Keying it off
-   * `effectiveId` instead tells the two occurrences apart.
+   * The window already holds the FIRST occurrence, answered, at its own
+   * offset (5); the open one IS the second, still waiting, at a DIFFERENT
+   * offset (50) -- a later ask under the same raw id. Matching by offset
+   * (rather than by the raw id the two share, which an earlier version of
+   * this function tried and an S2 retired -- see `mergeOpenQuestion`'s own
+   * header) is what tells the two occurrences apart here.
    */
   it("does not let a reused id's answered first occurrence swallow its open second", () => {
     const answeredFirst = { ...openOf('toolu_mock_1'), answer: 'first answer' };
+    const windowOffsets = new Map([['toolu_mock_1', 5]]);
     const openSecond = { ...openOf('toolu_mock_1'), id: 'toolu_mock_1#2:0' };
-    const merged = mergeOpenQuestion([answeredFirst], {
-      toolUseId: 'toolu_mock_1',
-      effectiveId: 'toolu_mock_1#2',
-      offset: 10,
-      questions: [openSecond],
-    });
+    const merged = mergeOpenQuestion(
+      [answeredFirst],
+      {
+        toolUseId: 'toolu_mock_1',
+        effectiveId: 'toolu_mock_1#2',
+        offset: 50,
+        questions: [openSecond],
+      },
+      windowOffsets,
+    );
     expect(merged.map((q) => q.id)).toEqual(['toolu_mock_1:0', 'toolu_mock_1#2:0']);
     // The merge never reopens what the window already settled.
     expect(merged[0]?.answer).toBe('first answer');
@@ -430,20 +451,63 @@ describe('mergeOpenQuestion', () => {
    * scan is undercounted by the window: it draws the window's OWN (second,
    * genuinely open) occurrence as `toolu_mock_1:0` -- no `#2` suffix, as if
    * it were the first -- while this module correctly names the very same
-   * occurrence `toolu_mock_1#2:0`. Keyed off `effectiveId` alone (the prefix
-   * check above), the two strings never match and the same open question is
-   * appended a second time under its OWN module's numbering, drawing two
-   * cards for one open question. `claude-code-question-window.test.ts` holds
-   * the full, real-file version of this same scenario end to end.
+   * occurrence `toolu_mock_1#2:0`. BOTH readings are of the exact same
+   * physical ask, though, so they carry the SAME offset (50) -- which is
+   * what the merge now keys on, rather than the mismatched `effectiveId`
+   * strings. `claude-code-question-window.test.ts` holds the full,
+   * real-file version of this same scenario end to end.
    */
   it("does not double-draw a reused id when the window's own numbering undercounted it", () => {
     const windowQuestions = [openOf('toolu_mock_1')]; // window's own guess: 'toolu_mock_1:0', unanswered
-    const merged = mergeOpenQuestion(windowQuestions, {
-      toolUseId: 'toolu_mock_1',
-      effectiveId: 'toolu_mock_1#2', // this module's own, correctly-numbered finding for the SAME occurrence
-      offset: 10,
-      questions: [{ ...openOf('toolu_mock_1'), id: 'toolu_mock_1#2:0' }],
-    });
+    const windowOffsets = new Map([['toolu_mock_1', 50]]); // the one ask the window actually read
+    const merged = mergeOpenQuestion(
+      windowQuestions,
+      {
+        toolUseId: 'toolu_mock_1',
+        effectiveId: 'toolu_mock_1#2', // this module's own, correctly-numbered finding for the SAME occurrence
+        offset: 50, // the SAME physical ask the window already read, above
+        questions: [{ ...openOf('toolu_mock_1'), id: 'toolu_mock_1#2:0' }],
+      },
+      windowOffsets,
+    );
     expect(merged).toEqual(windowQuestions);
+  });
+
+  /**
+   * THE S2 A RAW-ID-KEYED FIX (a prior version of this function) COST:
+   * DATA LOSS, worse than the duplicate card it replaced. That version
+   * treated any UNANSWERED window entry sharing `open`'s raw `toolUseId` as
+   * already covering it, reasoning that a raw id has at most one open
+   * occurrence at a time. Nothing in `collectQuestions` (questions.ts)
+   * actually promises that -- its own header says so -- and this is the
+   * shape that breaks the assumption: the window independently found an
+   * OLDER ask under `toolu_mock_1` still open (its own tail read predates a
+   * later one), and this module -- scanning the same file more currently --
+   * found a GENUINELY DIFFERENT, newer ask under the SAME raw id, ALSO still
+   * open (`readOpenQuestion` always reports only the newest live ask, so an
+   * older one it no longer tracks does not make this module's finding wrong,
+   * only incomplete on its own). The raw-id-keyed version read the window's
+   * older open entry as already covering the newer one and silently dropped
+   * the genuinely distinct, still-pending question. Offset does not make
+   * that mistake: the two asks sit at different byte positions, so both
+   * survive.
+   */
+  it('draws two cards when a reused raw id has two distinct, simultaneously open occurrences', () => {
+    const olderOpen = openOf('toolu_mock_1'); // id 'toolu_mock_1:0', unanswered -- the window's own reading
+    const windowOffsets = new Map([['toolu_mock_1', 5]]);
+    const newerOpen = { ...openOf('toolu_mock_1'), id: 'toolu_mock_1#2:0' };
+    const merged = mergeOpenQuestion(
+      [olderOpen],
+      {
+        toolUseId: 'toolu_mock_1',
+        effectiveId: 'toolu_mock_1#2',
+        offset: 50, // a DIFFERENT, later ask under the same reused raw id
+        questions: [newerOpen],
+      },
+      windowOffsets,
+    );
+    expect(merged.map((q) => q.id)).toEqual(['toolu_mock_1:0', 'toolu_mock_1#2:0']);
+    expect(merged[0]?.answer).toBeNull();
+    expect(merged[1]?.answer).toBeNull();
   });
 });

@@ -83,6 +83,16 @@ export type TranscriptFacts = {
    * answered by the rule in `questions.ts`. Empty is the common case.
    */
   readonly questions: readonly AgentQuestion[];
+  /**
+   * The absolute byte offset of the ask behind each entry in `questions`,
+   * keyed by that occurrence's own `effectiveId` -- `collectQuestions`'s own
+   * `CollectedQuestions` type says why this is carried separately from
+   * `questions` itself rather than folded into it. Read by
+   * `source.ts`'s `readTranscript`, which hands it to `mergeOpenQuestion`
+   * (`question-index.ts`) so a reused id's numbering never has to agree
+   * across the two readers.
+   */
+  readonly questionOffsets: ReadonlyMap<string, number>;
 };
 
 export const EMPTY_FACTS: TranscriptFacts = {
@@ -91,6 +101,7 @@ export const EMPTY_FACTS: TranscriptFacts = {
   activity: null,
   decisions: [],
   questions: [],
+  questionOffsets: new Map(),
 };
 
 export type Line = Record<string, unknown>;
@@ -824,6 +835,9 @@ export function summarizeLines(
     }));
 
   // Read off the SAME parsed lines: the questions are a second reading of one
-  // pass over the window, not a second read of the file.
-  return { aiTitle, branch, activity, decisions, questions: collectQuestions(lines) };
+  // pass over the window, not a second read of the file. `located`, not the
+  // stripped `lines` above: `collectQuestions` needs each ask's own byte
+  // offset now (`questionOffsets`, `CollectedQuestions`'s own header).
+  const { questions, offsets: questionOffsets } = collectQuestions(located);
+  return { aiTitle, branch, activity, decisions, questions, questionOffsets };
 }
