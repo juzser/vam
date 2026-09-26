@@ -181,6 +181,31 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * 691,861 = 639 B) the old budget gave for "an ordinary dependency bump."
  * The gzip budget is untouched: `ENTRY_GZIP_BUDGET_BYTES` still passes, since
  * short repeated UI strings compress well.
+ *
+ * THE ADHD CARD AND INTEGRATIONS THEN MERGED, EACH HAVING BUDGETED FOR ITS
+ * OWN DELTA ALONE (692,000 above and 692,500 here) -- neither number
+ * accounted for the other landing too, so the merge needed a real
+ * remeasurement rather than trusting either arithmetic in isolation.
+ * Measured with a merge-base worktree build at the true common ancestor of
+ * both PRs (`main`, 5176d0ad, before either landed) and at the merge commit
+ * carrying both, same code and chunks both times, `electron-vite build
+ * --mode production`:
+ *
+ *     entry, common ancestor (neither feature)   689,116 B  (207,368 B gzip)
+ *     entry, merged (both features)              692,320 B  (208,172 B gzip)
+ *
+ * +3,204 B eager / +804 B gzip combined -- close to the sum of the eager
+ * side of the two features' own separately-measured deltas (1,011 + 2,169 =
+ * 3,180 B; the Integrations header above gives no isolated gzip figure of
+ * its own to sum against, only "the gzip budget is untouched"), confirming
+ * the merge did not duplicate or multiply either eager cost.
+ * `ENTRY_BUDGET_BYTES` moves 692,500 -> 694,500: the real merged
+ * figure (692,320 B) plus ~2.2 KB (~0.3%) of slack, the same order of
+ * headroom both individual bumps above used for "measurement noise and an
+ * ordinary dependency patch bump" -- not a fresh double-bump stacking both
+ * PRs' own margins on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at
+ * 212,000: the merged gzip figure (208,172 B) still has 3.8 KB of headroom
+ * under it, more than either feature alone needed.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -191,7 +216,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 692_500;
+const ENTRY_BUDGET_BYTES = 694_500;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
