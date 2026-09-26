@@ -492,3 +492,67 @@ reverting the tree guide to `border-line border-dashed` measures
 already clears 3:1 — the operator's report was a relative "barely dimmer"
 complaint, not an absolute floor violation, and only the screenshots
 themselves, not this check, are what judge that).
+
+## 9. Phase 2c — the parent/child cycle fix
+
+A cross-provider review found, and reproduced against real git, that a
+project which is ITSELF a linked worktree could list the main checkout as
+one of its OWN "children" — the reverse of §4's identity decision, which
+never anticipated `list()` being called on a linked worktree's own project
+as well as on the main checkout's. This section names the invariant §4 left
+implicit and records why it needed a second, independent guard, not merely
+one fix.
+
+**The invariant, stated plainly.** The main worktree (the repository's own
+primary checkout) is NEVER a child of anything. Every other worktree — vam-
+made or adopted, inside `<repoRoot>-worktrees/` or not — is a child of
+exactly one project: the main checkout's, per §4's `projectId` reverse-map
+decision. A linked worktree never has children of its OWN in the sidebar,
+even though nothing in git itself prevents `git worktree add` from being run
+with a linked worktree as `cwd` (all of a repository's worktrees, main or
+linked, share one flat registration; git has no notion of nesting one under
+another).
+
+**Root cause.** `listWorktrees` filtered only `selfRealPath` — the
+QUERYING project's own resolved directory — out of git's answer, reading
+that as "the main worktree, already a row in the sidebar." That equivalence
+holds only when `projectId` names the main checkout. A linked worktree is
+ALSO its own known vam project (§4), and queried from one, `repoRootOf`
+resolves to the linked worktree's own directory (its `.git` is a FILE, which
+counts, `sources/repo.ts`'s comment on `repoRootOf`) — so `selfRealPath`
+means "this linked worktree," not "the main worktree," and the real main
+checkout survived the filter and came back as one of the linked worktree's
+own "children." The sidebar's `useWorktreeParents` hook calls `list()` for
+every VISIBLE project of a repo, main checkout and linked worktree alike, so
+this produced `parent(mainProject) === linkedProject` on top of the correct
+`parent(linkedProject) === mainProject` already recorded the other way —
+a two-node cycle, and each project then read as a "suppressed child" of the
+other with no unsuppressed ancestor to stop at, hiding both sidebar sections
+at once.
+
+**The fix, main process.** `listWorktrees` now also excludes
+`entries[0]` — `git worktree list --porcelain`'s own guaranteed ordering
+always names the repository's main worktree first, regardless of which of
+the repo's worktrees `cwd` was when the command ran. Filtering that entry
+closes the cycle for every querying project at once; `selfRealPath` keeps
+doing its own, narrower job (a linked worktree never lists itself) whenever
+the querying project isn't the main checkout.
+
+**The fix, renderer — a second, independent guard.** `useWorktreeParents`
+does not assume the main-process fix above is the only thing standing
+between it and a cycle: after building its child→parent map, it walks each
+project's parent chain and strips the parent edge from every node whose
+chain leads back to itself. A project caught in a (would-be) cycle falls
+back to a top-level row rather than vanishing — worst case one extra
+section, never a project's sessions becoming unreachable. This is
+deliberately belt-and-suspenders: the main-process fix is the actual root
+cause fix, but the renderer no longer trusts any single source to keep a
+parent-assignment map acyclic forever.
+
+**Where this leaves nesting.** The design decision was, and remains, to
+NEST a linked worktree's project under its main checkout's "Worktrees" row
+when the main checkout is visible (§4) — that direction was always correct
+and is unchanged by this fix. What changes is that the reverse edge (main
+checkout nested under a linked worktree) can no longer be produced by
+`listWorktrees`, and even if it somehow were, the renderer's own cycle guard
+would refuse to act on it.

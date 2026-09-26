@@ -651,24 +651,19 @@ export type Prefs = {
    */
   readonly narrowViews: boolean;
   /**
-   * Whether vam asks the agent for a shorter, clearer answer.
+   * LEGACY, READ-ONLY-IN-SPIRIT: whether the operator once had the old
+   * "concise output" switch on, before this app installed the real
+   * `ayghri/i-have-adhd` skill instead of typing vam's own wording of it into
+   * a session's first prompt (`src/shared/adhd-skill.ts`'s header carries the
+   * whole story). The switch itself is gone -- there is no row that writes
+   * `true` here any more -- and the field survives ONLY so
+   * `AdhdSkillCard.tsx` can show a one-time migration note to an operator who
+   * had it on, then flip this back to `false` once they have seen it (via the
+   * same `setConciseOutput` this file still exports).
    *
-   * THE ONE FIELD IN THIS RECORD NOTHING IN THE RENDERER READS, and that is
-   * the fact worth carrying here. Every other preference changes something on
-   * screen or in `localStorage`; this one changes what vam TYPES INTO SOMEBODY
-   * ELSE'S PANE. It reaches the only code that consults it -- main, at the
-   * seam where a prompt becomes keystrokes -- over `window.api.prefs`, pushed
-   * by `activatePrefs` on every read and write, the same crossing `prRepos`
-   * makes and for the same reason.
-   *
-   * `prefs/concise-output.ts` carries why the default is off;
-   * `main/terminal/concise.ts` carries what is sent, when it travels, and the
-   * limit vam cannot see (a `/clear` empties the agent's context and nothing
-   * tells vam).
-   *
-   * GLOBAL, for the reason `focusView` is, plus one of its own: it is a
-   * standing instruction about how the operator wants to be answered, which
-   * does not change between the sessions they have open.
+   * Never pushed to main any more: nothing there reads it. The push
+   * `activatePrefs` used to make on every read and write is deleted along
+   * with `main/terminal/concise.ts`.
    *
    * Exempt from the icon TTL like `theme` and `panes`: it describes the
    * person, not a session that stopped existing.
@@ -1719,10 +1714,12 @@ export function setNarrowViews(prefs: Prefs, narrow: unknown): Prefs {
   return { ...prefs, narrowViews: readNarrowViews(narrow) };
 }
 
-/** Normalised on the way in as well as on the way out, like every setter above
- *  it -- and this is the one where the direction is not a nicety: anything but
- *  a literal `true` is off, because "on" means vam types a paragraph of its
- *  own into a pane somebody's agent is reading. */
+/**
+ * NORMALISED, LIKE EVERY SETTER ABOVE IT -- kept now for exactly one caller:
+ * `AdhdSkillCard.tsx` flips this to `false` once an operator who had the old
+ * switch on has seen the one-time migration note. Nothing writes `true` here
+ * any more; the row that once did is gone.
+ */
 export function setConciseOutput(prefs: Prefs, on: unknown): Prefs {
   return { ...prefs, conciseOutput: readConciseOutput(on) };
 }
@@ -2730,10 +2727,17 @@ export function activatePrefs(prefs: Prefs): Prefs {
   setActiveFilesMarkdownView(prefs.filesMarkdownView);
   setActiveStreamingTerminal(prefs.streamingTerminal);
   /**
-   * AND TWO PREFERENCES CROSS INTO MAIN, because the thing each one changes
-   * happens there: `gh` is spawned by `main/sources/claude-code/source.ts`,
-   * and the concise-output rules are typed into a pane by
-   * `main/terminal/concise.ts`. Neither has access to this store.
+   * ONE PREFERENCE CROSSES INTO MAIN, because what it changes happens there:
+   * `gh` is spawned by `main/sources/claude-code/source.ts`, which has no
+   * access to this store.
+   *
+   * A SECOND CROSSING LIVED HERE ONCE, pushing `conciseOutput` to
+   * `main/terminal/concise.ts` on every read and write. That module is
+   * deleted -- see `src/shared/adhd-skill.ts`'s header for what replaced it --
+   * and nothing in main reads this preference any more, so there is nothing
+   * left to push. `AdhdSkillCard.tsx` still reads `prefs.conciseOutput`
+   * directly, in the renderer, for the one-time migration note; that is a
+   * local read, not a crossing, and belongs nowhere near `activatePrefs`.
    *
    * HERE RATHER THAN AT THE PICKER, for the reason every line above it is
    * here: `activatePrefs` runs on every read AND every write, so a reload arms
@@ -2750,21 +2754,6 @@ export function activatePrefs(prefs: Prefs): Prefs {
    * has no `prefs` at all and this must simply not happen.
    */
   globalThis.window?.api?.prefs?.setPrRepos?.(prefs.prRepos)?.catch?.(() => {});
-  /**
-   * THE SECOND CROSSING, AND THE ONLY READER THIS PREFERENCE HAS. Nothing in
-   * the renderer consults `conciseOutput`; main does, at the seam where a
-   * prompt becomes keystrokes. So this line is not a projection that can go
-   * one poll stale like the map above it -- it IS the setting. Wired to the
-   * control alone it would leave main holding `false` until somebody opened
-   * settings, and every session started before that would be answered at full
-   * length by a vam whose switch was on.
-   *
-   * BOTH STATES ARE PUSHED. `false` is as load-bearing as `true` here: it is
-   * how turning the switch off reaches main at all, and -- because main clears
-   * its priming ledger on `false` -- it is what makes off-and-on-again the
-   * operator's one way to re-arm a session whose agent has forgotten.
-   */
-  globalThis.window?.api?.prefs?.setConciseOutput?.(prefs.conciseOutput)?.catch?.(() => {});
   return prefs;
 }
 

@@ -1,32 +1,29 @@
 // @vitest-environment happy-dom
 
 /**
- * THE CONCISE-OUTPUT SWITCH, AND THE CROSSING IT DEPENDS ON.
+ * THE OLD CONCISE-OUTPUT SWITCH'S STORED VALUE -- LEGACY, READ ONLY FOR THE
+ * MIGRATION NOTE.
  *
- * The same bargain every other preference here holds -- a stored value read
- * back, normalised on both sides, surviving a neighbour's write -- plus one
- * thing none of the others but `prRepos` needs: THIS PREFERENCE IS NEVER READ
- * IN THE RENDERER. Nothing on screen changes when it is thrown. The decision
- * it governs is made in main, at the seam where a prompt becomes keystrokes
- * (`main/terminal/concise.ts`), so a value that is stored perfectly and never
- * pushed is a switch that does nothing at all -- and every assertion about the
- * store would still be green.
- *
- * So the push is the load-bearing assertion in this file.
+ * The switch itself, and the crossing that once pushed this value to main on
+ * every read and write (`main/terminal/concise.ts`), are both deleted:
+ * `src/shared/adhd-skill.ts`'s header carries what replaced them. What
+ * remains is the STORED value alone, read by `AdhdSkillCard.tsx` to show a
+ * one-time note to an operator who had it on, and `setConciseOutput`'s one
+ * remaining caller, which flips it back to `false` once they have seen that
+ * note. This file holds what is left: the default, the normalisation on
+ * read and write, and that a neighbour's write disturbs neither.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_CONCISE_OUTPUT,
   readConciseOutput,
 } from '../../src/renderer/prefs/concise-output.js';
 import {
-  activatePrefs,
   EMPTY_PREFS,
   readPrefs,
   type StorageLike,
   setConciseOutput,
-  setFocusView,
 } from '../../src/renderer/prefs/prefs.js';
 
 function fake(initial: string | null): StorageLike {
@@ -40,11 +37,6 @@ function fake(initial: string | null): StorageLike {
 }
 
 const stored = (payload: Record<string, unknown>) => readPrefs(fake(JSON.stringify(payload)));
-
-afterEach(() => {
-  Reflect.deleteProperty(window, 'api');
-  vi.restoreAllMocks();
-});
 
 describe('the default is off, because the rules cost the operator tokens', () => {
   it('ships off, and an absent key reads as off', () => {
@@ -76,53 +68,16 @@ describe('the default is off, because the rules cost the operator tokens', () =>
   });
 });
 
-describe('the value crosses into main, where the only reader is', () => {
-  /** The desktop bridge, stubbed down to the one member this preference uses. */
-  function bridge() {
-    const setConcise = vi.fn(() => Promise.resolve());
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: { prefs: { setConciseOutput: setConcise } },
-    });
-    return setConcise;
-  }
-
-  it('is pushed on every activation, not only when the row is clicked', () => {
-    // THE SAME ARGUMENT `prRepos` MAKES. `activatePrefs` runs on every read AND
-    // every write, so a reload arms main as surely as a click does. Wired to
-    // the control alone, main would hold `false` until the operator happened
-    // to open settings -- and the session started at launch would be answered
-    // at full length by a vam whose switch was on.
-    const push = bridge();
-    activatePrefs({ ...EMPTY_PREFS, conciseOutput: true });
-    expect(push).toHaveBeenCalledWith(true);
-    // A neighbouring write re-pushes the same value rather than going quiet.
-    activatePrefs(setFocusView({ ...EMPTY_PREFS, conciseOutput: true }, true));
-    expect(push).toHaveBeenCalledTimes(2);
-  });
-
-  it('pushes the off state too, so turning it off reaches main', () => {
-    // Half a crossing is worse than none: an operator who turns this off and
-    // sees vam keep priming new sessions has a switch that lies.
-    const push = bridge();
-    activatePrefs({ ...EMPTY_PREFS, conciseOutput: false });
-    expect(push).toHaveBeenCalledWith(false);
-  });
-
-  it('survives a build with no bridge at all', () => {
-    // `window.api` does not exist in the browser build a paired phone loads.
-    // The push must simply not happen there rather than throw on every prefs
-    // read -- which would take the whole surface down.
-    Reflect.deleteProperty(window, 'api');
-    expect(() => activatePrefs({ ...EMPTY_PREFS, conciseOutput: true })).not.toThrow();
-  });
-
-  it('swallows a rejected push rather than failing a prefs write', () => {
-    const rejecting = vi.fn(() => Promise.reject(new Error('no such channel')));
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: { prefs: { setConciseOutput: rejecting } },
-    });
-    expect(() => activatePrefs({ ...EMPTY_PREFS, conciseOutput: true })).not.toThrow();
+describe('migration: this value has no reader left in main', () => {
+  it('is never pushed by activatePrefs -- there is no bridge member left to push to', async () => {
+    // `createPrefsBridge()` (`src/preload/api.ts`) carries exactly one member
+    // now, `setPrRepos`; `setConciseOutput` is not one of its keys any more.
+    // This is a type-level fact as much as a runtime one -- there is no
+    // `window.api.prefs.setConciseOutput` for `activatePrefs` to call, so the
+    // only way this could regress is a NEW crossing being added, which this
+    // assertion would not survive either.
+    const { createPrefsBridge } = await import('../../src/preload/api.js');
+    const bridge = createPrefsBridge({ invoke: async () => ({ ok: true, value: undefined }) });
+    expect(Object.keys(bridge)).toEqual(['setPrRepos']);
   });
 });

@@ -82,6 +82,69 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * component puts its chunk straight back into the entry and fails both
  * budgets outright.
  *
+ * A FOURTH GROWTH, ORDINARY THIS TIME RATHER THAN A REGRESSION: the ADHD
+ * skill card (`AdhdSkillCard.tsx`, replacing the old concise-output switch)
+ * is itself lazy -- it is only ever mounted inside `SettingsOverlay`, so its
+ * OWN component code carries no eager weight, verified the same way the
+ * three splits above are: its own `data-adhd-skill-install` marker is absent
+ * from the entry and present only in `SettingsOverlay-*.js`. The bundled
+ * skill files themselves (`resources/skills/i-have-adhd/{SKILL.md,LICENSE}`)
+ * are read only by `src/main/skills/adhd-skill.ts` -- a main-process module
+ * with its own `node:fs/promises` import that no renderer file reaches --
+ * and `src/shared/adhd-skill.ts` (the vocabulary both processes share) holds
+ * only string constants and types, never the files' contents; grepping the
+ * built entry for `gfmTable`-style unique markers from either bundled file
+ * finds nothing, confirming neither ever crosses into the renderer.
+ *
+ * What DID move the entry is `src/renderer/i18n/strings.ts` itself: the
+ * catalogue is one module, `DetailPanel.tsx` (eager) imports it for six
+ * unrelated keys (`prs.repo.*`, `steps.*`), and Rollup inlines the WHOLE
+ * `EN` object into every chunk that reaches it rather than splitting it into
+ * a shared chunk of its own -- so all ~100 `settings.*` strings ride in the
+ * eager entry regardless of `SettingsOverlay`'s own lazy boundary, and did
+ * before this card existed too. Growing that catalogue by one row -- a
+ * title, a hint, three status words, two button labels, a confirm, a copy
+ * command invitation, a credit and a link, a coverage heading and two chip
+ * words, a browser fallback, a one-time migration note -- costs real bytes
+ * here on that account alone. The copy was written tersely on purpose
+ * (`i18n/strings.ts`'s own comment on the block says so) and still costs
+ * this much; splitting the catalogue itself into an eager and a
+ * settings-only module was considered and set aside FOR THIS PR, because
+ * `src/renderer/i18n/strings.ts` is also where a second, parallel change
+ * (an Integrations → GitHub settings section) adds its own rows at the same
+ * time -- restructuring the module underneath a change in flight elsewhere
+ * is a conflict this repository does not need. Left as a note for whoever
+ * next grows this catalogue substantially: the six non-`settings.*` keys are
+ * the only ones `DetailPanel.tsx` actually reads, so moving the rest to
+ * their own module and giving `SettingsOverlay.tsx` (and its own children)
+ * a separate `t()` over CORE + SETTINGS would let entry-chunk growth track
+ * only the six keys DetailPanel actually needs, not the other ~100.
+ *
+ * Measured with a merge-base worktree build (`git worktree add` at this PR's
+ * actual merge-base with `smith/vam/0.2-tab-shell`, 6331d640, through #514),
+ * same code and chunks both times, `electron-vite build --mode production`:
+ *
+ *     entry, merge-base (no card)   689,116 B  (207,368 B gzip)
+ *     entry, this PR (with card)    690,127 B  (207,626 B gzip)
+ *
+ * +1,011 B eager / +258 B gzipped for the whole card -- confirming the
+ * component itself costs nothing here (it is lazy, above); this is purely
+ * the catalogue rows, same order of magnitude as an ordinary small feature
+ * elsewhere in this codebase. Gzip (207,626 B) is still comfortably UNDER
+ * the pre-existing 212,000 B budget -- that number is untouched by this PR.
+ * Eager crosses the pre-existing 690,000 B budget by only 127 B: the
+ * baseline had already drifted to within 884 B of that ceiling from
+ * ordinary, unrelated growth in the time since the 624,969 B split above,
+ * and this card's own ~1 KB is what tips it over, not an outsized cost of
+ * its own.
+ *
+ * `ENTRY_BUDGET_BYTES` moves 690,000 -> 692,000: just enough to clear this
+ * PR's own measured 690,127 B, plus ~1.9 KB (~0.3%) of slack for measurement
+ * noise -- NOT a fresh "~10%" re-baseline off the current, already-grown
+ * entry, which would manufacture a ~70 KB jump no single small feature here
+ * earned. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: this PR's own gzip
+ * figure does not approach it.
+ *
  * The entry chunk is found by parsing the renderer's own emitted
  * `index.html` for its `<script type="module">` tag -- the same thing a
  * browser reads to decide what loads eagerly -- rather than a hardcoded
@@ -110,39 +173,67 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  *     entry, after Integrations   691,861 B
  *
  * a ~2,169 B growth entirely in Settings-surface strings and nav metadata,
- * not in the new panel's own code.
+ * not in the new panel's own code. The PREVIOUS `ENTRY_BUDGET_BYTES`
+ * (690,000) had already been eaten down to 308 B of slack by unrelated work
+ * landed on this branch before this change even started -- this bump does
+ * not restore the old 10%-headroom policy, it only clears the one feature
+ * that is actually landing here, with the same amount of margin (692,500 -
+ * 691,861 = 639 B) the old budget gave for "an ordinary dependency bump."
+ * The gzip budget is untouched: `ENTRY_GZIP_BUDGET_BYTES` still passes, since
+ * short repeated UI strings compress well.
  *
- * A FIFTH BUMP, LANDING BESIDE INTEGRATIONS RATHER THAN AFTER IT: the
- * cache-timer countdown (`domain/cache-timer.ts`, `panels/
+ * THE ADHD CARD AND INTEGRATIONS THEN MERGED, EACH HAVING BUDGETED FOR ITS
+ * OWN DELTA ALONE (692,000 above and 692,500 here) -- neither number
+ * accounted for the other landing too, so the merge needed a real
+ * remeasurement rather than trusting either arithmetic in isolation.
+ * Measured with a merge-base worktree build at the true common ancestor of
+ * both PRs (`main`, 5176d0ad, before either landed) and at the merge commit
+ * carrying both, same code and chunks both times, `electron-vite build
+ * --mode production`:
+ *
+ *     entry, common ancestor (neither feature)   689,116 B  (207,368 B gzip)
+ *     entry, merged (both features)              692,320 B  (208,172 B gzip)
+ *
+ * +3,204 B eager / +804 B gzip combined -- close to the sum of the eager
+ * side of the two features' own separately-measured deltas (1,011 + 2,169 =
+ * 3,180 B; the Integrations header above gives no isolated gzip figure of
+ * its own to sum against, only "the gzip budget is untouched"), confirming
+ * the merge did not duplicate or multiply either eager cost.
+ * `ENTRY_BUDGET_BYTES` moved 692,500 -> 694,500: the real merged
+ * figure (692,320 B) plus ~2.2 KB (~0.3%) of slack, the same order of
+ * headroom both individual bumps above used for "measurement noise and an
+ * ordinary dependency patch bump" -- not a fresh double-bump stacking both
+ * PRs' own margins on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stayed at
+ * 212,000: the merged gzip figure (208,172 B) still had 3.8 KB of headroom
+ * under it, more than either feature alone needed.
+ *
+ * THE CACHE-TIMER COUNTDOWN THEN MERGED IN TOO, on top of the ADHD-card +
+ * Integrations tree above: `domain/cache-timer.ts`, `panels/
  * CacheCountdown.tsx`, `panels/cache-timer-clock.ts`, three new `Session`
  * fields threaded through `SessionList.tsx`, and the sidebar's first-ever
- * use of lucide's `Timer` glyph) is eager by necessity -- it draws in the
+ * use of lucide's `Timer` glyph, eager by necessity -- it draws in the
  * sidebar, which every load already pays for, so there is no lazy boundary
- * to move it behind the way `SettingsOverlay` and `FilesTab` were. Both
- * features were developed in parallel off the same earlier base and landed
- * on `main` one after the other, so this branch's own honest baseline is
- * Integrations' OWN "after" figure above, not the older commit this branch
- * actually forked from -- re-measured fresh against the combined tree
- * rather than carrying forward a number a since-landed sibling PR had
- * already made stale.
+ * to move it behind the way `SettingsOverlay` and `FilesTab` were. This
+ * branch's own two earlier "before/after" pairs (measured against
+ * Integrations alone, then re-measured against Integrations alone again
+ * after this branch's own rebases) both went stale the moment the ADHD card
+ * and Integrations merged into ONE commit on `main` -- so, the same lesson
+ * the paragraph above already draws, this is a real remeasurement against
+ * the true merged tree rather than arithmetic stacked on top of either
+ * stale figure. Measured with a merge-base worktree build at `main`'s own
+ * tip carrying both prior features (14a57c03) and at this branch's merge
+ * commit carrying all three, same code and chunks both times,
+ * `electron-vite build --mode production`:
  *
- * Measured, `electron-vite build`, both from a real build to a temp
- * `--outDir` (not the "after Integrations" figure quoted above, which this
- * branch's own rebase made one commit stale the moment Integrations
- * actually landed on `main`):
+ *     entry, main (ADHD card + Integrations, neither cache-timer)   692,523 B
+ *     entry, merged (all three features)                           695,970 B  (+3,447 B, +0.50%)
  *
- *     entry, before (main @ ce6f1fd5, Integrations already on it)   691,298 B
- *     entry, after (this branch, on top of that)                   694,751 B  (+3,453 B, +0.50%)
- *
- * `ENTRY_BUDGET_BYTES` moves to 698,300 -- about 0.5% above the measured
- * "after", a few hundred bytes of headroom for an ordinary dependency patch
- * rather than the ~10% a lazy split earns: this is organic feature weight in
- * the eager path, not a chunk that could be moved out of it, so the bar
- * stays close to what was actually measured instead of inviting the next
- * eager feature to spend a whole percent before this test notices. The gzip
- * budget is untouched: `ENTRY_GZIP_BUDGET_BYTES` still passes, since short
- * repeated UI strings and cache-timer's own small addition both compress
- * well.
+ * `ENTRY_BUDGET_BYTES` moves 694,500 -> 699,500: the real merged figure
+ * (695,970 B) plus ~3.5 KB (~0.5%) of slack, the same small-headroom
+ * convention every bump above uses for "measurement noise and an ordinary
+ * dependency patch bump" -- not the three features' own separate margins
+ * stacked on top of each other. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000:
+ * unaffected by this merge, still comfortably clear of the combined figure.
  */
 
 const repoRoot = path.resolve(__dirname, '..', '..');
@@ -153,7 +244,7 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 698_300;
+const ENTRY_BUDGET_BYTES = 699_500;
 const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
