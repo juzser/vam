@@ -1630,9 +1630,7 @@ describe('SessionList new-project control', () => {
     const entries = twoProjects();
     const { container } = mountWith(entries, { focusedSessionId: 'b1' });
     expect(container.querySelector('[data-placeholder="new-session-in-project"]')).toBeNull();
-    const add = container.querySelector<HTMLButtonElement>(
-      '[data-new-session-in-project="p2"]',
-    );
+    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project="p2"]');
     // No native `title`: the caption is the `ShortcutTip` beside it
     // (`shortcut-tip.test.tsx`), which opens on keyboard focus too, unlike a
     // `title` that only ever opens on hover.
@@ -1657,9 +1655,7 @@ describe('SessionList new-project control', () => {
       focusedSessionId: 'b1',
       newSessionDecline: 'factory has no new-session command',
     });
-    const add = container.querySelector<HTMLButtonElement>(
-      '[data-new-session-in-project="p1"]',
-    );
+    const add = container.querySelector<HTMLButtonElement>('[data-new-session-in-project="p1"]');
     expect(add?.getAttribute('title')).toBeNull();
     expect(add?.textContent).not.toContain('factory has no new-session command');
     expect(add?.disabled).toBe(false);
