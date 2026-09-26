@@ -29,6 +29,21 @@
  * concurrency-limit.ts`), never one `Promise.all` over every file on the
  * machine at once — an operator with thousands of transcripts must not open
  * thousands of file descriptors in the same tick.
+ *
+ * `CONCURRENCY` MOVED 8 -> 4, MEASURED, on a real cold scan of this
+ * machine's own `~/.claude`/`~/.codex` (3.4GB + 2.1GB, ~4,100 files):
+ *
+ *     CONCURRENCY=8, 1MiB read chunks (the original settings)  396.2MB peak RSS, 12,330ms
+ *     CONCURRENCY=8, 128KiB read chunks (line-stream.ts's own bound, see
+ *       `worker.ts`)                                            230.2MB peak RSS, 13,125ms
+ *     CONCURRENCY=4, 128KiB read chunks (both changes)          198.2MB peak RSS, 12,981ms
+ *     CONCURRENCY=2, 128KiB read chunks (tried, not kept)        195.0MB peak RSS, 13,199ms
+ *
+ * Roughly half the peak RSS for well under 1s of wall time, most of it from
+ * the smaller read buffer (fewer, smaller chunks held in memory across
+ * `CONCURRENCY` files at once); `CONCURRENCY=2` measured almost no further
+ * gain over 4, so 4 keeps more of the original headroom for a slow or
+ * networked disk without paying for it in RSS.
  */
 
 import { join } from 'node:path';
@@ -49,7 +64,7 @@ import {
 } from './incremental-cache.js';
 
 /** How many files this scan reads concurrently — see the module header. */
-const CONCURRENCY = 8;
+const CONCURRENCY = 4;
 
 /** One file's running aggregate — the shape `incremental-cache.ts` persists
  *  per path. Plain, JSON-serialisable records throughout (never a `Map`),

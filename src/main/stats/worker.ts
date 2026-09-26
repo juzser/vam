@@ -133,7 +133,13 @@ async function main(input: WorkerInput): Promise<void> {
         return null;
       }
     },
-    readLines: readLinesFrom,
+    // 128KiB, not `readLinesFrom`'s own 1MiB default -- measured (see
+    // `scan.ts`'s own header for the full table): the smaller chunk alone
+    // dropped a real cold scan's peak RSS from 396MB to 230MB, for well
+    // under 1s of extra wall time, because `CONCURRENCY` files each hold a
+    // read buffer of this size at once.
+    readLines: (path, fromByte, onLine) =>
+      readLinesFrom(path, fromByte, onLine, { highWaterMark: 128 * 1024 }),
     cache,
   };
 
