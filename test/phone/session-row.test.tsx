@@ -225,6 +225,90 @@ describe('the text the phone list screen is made of', () => {
   });
 });
 
+describe('the phone row’s preview line', () => {
+  it('draws on the rows that are not waiting, and never on the one that is', () => {
+    draw(true);
+    // a2 (running) and a3 (done) each get `entries()`'s default seven
+    // `decisions` (`session-list-props.ts`'s `makeSession`, `output: null`
+    // throughout), so their preview falls back to the turn's own `input`.
+    // a1 is `needsYou`: its line is `data-row-question`, built from the same
+    // `decisions[0]` — a preview beside it would say the same sentence under
+    // a second name, so this row draws none.
+    expect(row('a1').querySelector('[data-row-preview]')).toBeNull();
+    expect(row('a1').querySelector('[data-row-question]')).not.toBeNull();
+    expect(row('a2').querySelector('[data-row-preview]')?.textContent).toContain('input');
+    expect(row('a3').querySelector('[data-row-preview]')?.textContent).toContain('input');
+  });
+
+  it('prefers the turn’s output over its input, and falls back to the input while a turn is in flight', () => {
+    const project = { id: 'p1', name: 'factory', source: 'claude-code' as const, sessions: [] };
+    const answered = {
+      project,
+      session: {
+        id: 'r1',
+        title: 'answered-row',
+        epic: null,
+        branch: null,
+        status: 'done' as const,
+        runningAgents: 0,
+        activity: null,
+        age: '1h',
+        decisions: [
+          {
+            id: 'd1',
+            label: 'turn',
+            input: 'do the thing',
+            output: 'done — see PR #9',
+            commands: [],
+          },
+        ],
+      },
+    };
+    const inFlight = {
+      project,
+      session: {
+        id: 'r2',
+        title: 'in-flight-row',
+        epic: null,
+        branch: null,
+        status: 'running' as const,
+        runningAgents: 1,
+        activity: null,
+        age: '2m',
+        decisions: [{ id: 'd1', label: 'turn', input: 'keep going', output: null, commands: [] }],
+      },
+    };
+    render(<SessionList {...baseProps([answered, inFlight])} phone width={undefined} />);
+    expect(row('r1').querySelector('[data-row-preview]')?.textContent).toContain(
+      'done — see PR #9',
+    );
+    expect(row('r2').querySelector('[data-row-preview]')?.textContent).toContain('keep going');
+  });
+
+  it('carries the provider mark, the same hook the meta line’s own lane uses', () => {
+    const project = { id: 'p1', name: 'factory', source: 'claude-code' as const, sessions: [] };
+    const entry = {
+      project,
+      session: {
+        id: 'r1',
+        title: 'answered-row',
+        epic: null,
+        branch: null,
+        status: 'done' as const,
+        runningAgents: 0,
+        activity: null,
+        age: '1h',
+        decisions: [
+          { id: 'd1', label: 'turn', input: 'do the thing', output: 'all set', commands: [] },
+        ],
+      },
+    };
+    render(<SessionList {...baseProps([entry])} phone width={undefined} />);
+    const preview = row('r1').querySelector('[data-row-preview]');
+    expect(preview?.querySelector('[data-row-source]')).not.toBeNull();
+  });
+});
+
 describe('the desktop row, which shares this component', () => {
   it('keeps its branch line, its ring and its cursor bar', () => {
     draw(false);
