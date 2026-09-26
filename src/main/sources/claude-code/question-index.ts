@@ -258,5 +258,32 @@ export function mergeOpenQuestion(
   // but must not share this check -- see `OpenQuestion`'s own doc.
   const prefix = `${open.effectiveId}:`;
   if (windowQuestions.some((q) => q.id.startsWith(prefix))) return windowQuestions;
+  // THE TWO PATHS CAN NUMBER THE SAME REUSED ID DIFFERENTLY. `collectQuestions`
+  // (questions.ts) counts a `toolUseId`'s occurrences from only the bytes ITS
+  // OWN (tail) window covers; this module counts from its own wider, persisted
+  // scan. A raw id whose FIRST occurrence sits outside the tail window but
+  // inside this module's scan is UNDERCOUNTED by the window: it draws what is
+  // really the SAME occurrence this module found open as if it were the first
+  // (no `#N` suffix) rather than the true, higher ordinal -- so the exact
+  // `effectiveId` prefix above never matches, and the open question this
+  // module found would otherwise be appended a second time under its own
+  // numbering, drawing two cards for one open question
+  // (`claude-code-question-index.test.ts`, `claude-code-question-window.
+  // test.ts`).
+  //
+  // A raw id can have at most ONE occurrence open at a time -- Claude Code
+  // never asks a second question under an id whose earlier occurrence is
+  // still unanswered (`nextEffectiveId`'s own header) -- so an UNANSWERED
+  // window entry sharing the raw id is always this SAME occurrence, however
+  // the window's own count numbered it, never a genuinely different one: a
+  // real earlier occurrence under that id would already be answered by the
+  // time a later one opens, and so would never reach this branch (the exact
+  // `effectiveId` prefix check above already returns early for it).
+  const rawPrefix = open.toolUseId;
+  const sameRawIdAlreadyOpenInWindow = windowQuestions.some(
+    (q) =>
+      q.answer === null && (q.id.startsWith(`${rawPrefix}:`) || q.id.startsWith(`${rawPrefix}#`)),
+  );
+  if (sameRawIdAlreadyOpenInWindow) return windowQuestions;
   return [...windowQuestions, ...open.questions];
 }

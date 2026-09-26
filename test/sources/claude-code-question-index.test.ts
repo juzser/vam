@@ -419,4 +419,31 @@ describe('mergeOpenQuestion', () => {
     expect(merged[0]?.answer).toBe('first answer');
     expect(merged[1]?.answer).toBeNull();
   });
+
+  /**
+   * THE TWO PATHS NUMBER THE SAME REUSED ID DIFFERENTLY, AND THE DEDUP MISSES
+   * IT (cross-provider review finding). `collectQuestions` (questions.ts) --
+   * the tail window's own reading -- counts a reused `toolUseId`'s
+   * occurrences from only the bytes ITS OWN window covers; `readOpenQuestion`
+   * counts from this module's wider, persisted scan. A `toolUseId` whose
+   * FIRST occurrence sits outside the tail window but inside this module's
+   * scan is undercounted by the window: it draws the window's OWN (second,
+   * genuinely open) occurrence as `toolu_mock_1:0` -- no `#2` suffix, as if
+   * it were the first -- while this module correctly names the very same
+   * occurrence `toolu_mock_1#2:0`. Keyed off `effectiveId` alone (the prefix
+   * check above), the two strings never match and the same open question is
+   * appended a second time under its OWN module's numbering, drawing two
+   * cards for one open question. `claude-code-question-window.test.ts` holds
+   * the full, real-file version of this same scenario end to end.
+   */
+  it("does not double-draw a reused id when the window's own numbering undercounted it", () => {
+    const windowQuestions = [openOf('toolu_mock_1')]; // window's own guess: 'toolu_mock_1:0', unanswered
+    const merged = mergeOpenQuestion(windowQuestions, {
+      toolUseId: 'toolu_mock_1',
+      effectiveId: 'toolu_mock_1#2', // this module's own, correctly-numbered finding for the SAME occurrence
+      offset: 10,
+      questions: [{ ...openOf('toolu_mock_1'), id: 'toolu_mock_1#2:0' }],
+    });
+    expect(merged).toEqual(windowQuestions);
+  });
 });
