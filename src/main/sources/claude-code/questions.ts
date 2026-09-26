@@ -98,6 +98,10 @@ function readQuestion(value: unknown, id: string): AgentQuestion | null {
  * call are distinct while sharing that call's openness. EXPORTED for
  * `question-index.ts`, which asks it the same question `collectQuestions`
  * below does, off a `tool_use` line found outside the tail window.
+ *
+ * `toolUseId` here is the EFFECTIVE id -- see `nextEffectiveId` below -- so
+ * for the overwhelming common case (an id that never repeats) it is exactly
+ * the call's own id, unchanged.
  */
 export function questionsFromToolUse(part: Line, toolUseId: string): readonly AgentQuestion[] {
   const list = obj(part['input'])?.['questions'];
@@ -105,6 +109,24 @@ export function questionsFromToolUse(part: Line, toolUseId: string): readonly Ag
   return list
     .map((value, index) => readQuestion(value, `${toolUseId}:${index}`))
     .filter((question): question is AgentQuestion => question !== null);
+}
+
+/**
+ * The id a `tool_use` occurrence actually keys its questions under.
+ *
+ * Real Claude Code ids are unique per call, so `occurrence` is 1 and this is
+ * the identity function -- every id `collectQuestions` has ever produced for
+ * a normal transcript is unchanged, byte for byte. The one case it exists for
+ * is a transcript that reuses an id across two different `AskUserQuestion`
+ * calls (a transcript defect, not a vam one -- one synthetic fixture in the
+ * operator's own corpus does this): the 2nd and later occurrence gets the
+ * occurrence ordinal appended, so the two calls' questions never collapse
+ * into one id sharing one answer. `question-index.ts` calls this too, so a
+ * `tool_use` it reads off the same transcript keys its questions the same
+ * way `collectQuestions` would.
+ */
+export function nextEffectiveId(toolUseId: string, occurrence: number): string {
+  return occurrence <= 1 ? toolUseId : `${toolUseId}#${occurrence}`;
 }
 
 /** The text of a `tool_result`, whichever of its two shapes it arrived in. */
@@ -124,29 +146,50 @@ function resultText(part: Line): string | null {
 /**
  * Every `AskUserQuestion` in these lines, oldest first, each carrying the
  * answer it has received or `null` while it is still open.
+ *
+ * A `tool_result` is paired with the NEAREST PRECEDING unanswered `tool_use`
+ * of its id -- a plain stack per raw id, pushed on each ask and popped on
+ * each result. For the common case, one ask then one matching result, that
+ * is just the one entry either way. It only does real work when an id
+ * repeats: the result closes whichever occurrence is still open and nearest
+ * to it, rather than every occurrence sharing that id, and `nextEffectiveId`
+ * gives the 2nd and later occurrence its own id so it renders as its own
+ * card.
  */
 export function collectQuestions(lines: readonly Line[]): readonly AgentQuestion[] {
-  const asked: { toolUseId: string; question: AgentQuestion }[] = [];
+  const asked: { effectiveId: string; question: AgentQuestion }[] = [];
   const answers = new Map<string, string | null>();
+  const occurrences = new Map<string, number>();
+  const pending = new Map<string, string[]>();
 
   for (const line of lines) {
     for (const part of contentParts(line)) {
       if (part['type'] === 'tool_use' && part['name'] === 'AskUserQuestion') {
         const toolUseId = str(part['id']);
         if (toolUseId === null) continue;
-        for (const question of questionsFromToolUse(part, toolUseId)) {
-          asked.push({ toolUseId, question });
+        const occurrence = (occurrences.get(toolUseId) ?? 0) + 1;
+        occurrences.set(toolUseId, occurrence);
+        const effectiveId = nextEffectiveId(toolUseId, occurrence);
+        for (const question of questionsFromToolUse(part, effectiveId)) {
+          asked.push({ effectiveId, question });
         }
+        const stack = pending.get(toolUseId);
+        if (stack === undefined) pending.set(toolUseId, [effectiveId]);
+        else stack.push(effectiveId);
       } else if (part['type'] === 'tool_result') {
         const toolUseId = str(part['tool_use_id']);
+        if (toolUseId === null) continue;
+        const stack = pending.get(toolUseId);
+        const effectiveId =
+          stack !== undefined && stack.length > 0 ? (stack.pop() as string) : toolUseId;
         // Present-but-unreadable still CLOSES the question: the answer was
         // given, and drawing it as still waiting is the worse error.
-        if (toolUseId !== null) answers.set(toolUseId, resultText(part));
+        answers.set(effectiveId, resultText(part));
       }
     }
   }
 
-  return asked.map(({ toolUseId, question }) =>
-    answers.has(toolUseId) ? { ...question, answer: answers.get(toolUseId) ?? '' } : question,
+  return asked.map(({ effectiveId, question }) =>
+    answers.has(effectiveId) ? { ...question, answer: answers.get(effectiveId) ?? '' } : question,
   );
 }

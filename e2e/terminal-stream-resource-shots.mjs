@@ -140,6 +140,76 @@ async function withRetryOnce(label, measure, acceptable) {
   return result;
 }
 
+/**
+ * ABSOLUTE CEILINGS, calibrated from REAL data -- the coordinator's own
+ * follow-up ask on this file's header comment above, which named the
+ * heavy-output numbers informational only for lack of exactly this. Every
+ * OTHER number this file prints stays informational (see the header): these
+ * two are the ones a real sample set supports a stable bound for.
+ *
+ * Both are normalised PER BYTE (`bytes`, the ACTUAL decoded byte count test
+ * 4 measures forwarding, never the nominal "5MB" flood constant), so a
+ * future change to the flood size does not, on its own, move either bound --
+ * the same reason the latency guards' `MAX_BURST_WRITE_CALLS`
+ * (`terminal-stream-latency-shots.mjs`) counts DELIVERIES rather than lines.
+ *
+ * SAMPLES, CI (ubuntu-latest, `web-guards` job -- `gh run list --repo
+ * juzser/vam --workflow CI --limit 100`, then `gh run view <id> --log`,
+ * grepping this guard's own "heavy output ... stream path" and "renderer
+ * TaskDuration" lines):
+ *   PR #495                  (36118555962, 2026-09-25): 1025.6ms / 7,500,025B = 136.75ms/MB CPU; peak heap 23.19MB
+ *   push main after #497     (36121271588, 2026-09-25): 1006.6ms / 7,500,025B = 134.21ms/MB CPU; peak heap 16.07MB
+ *   "Ship the 0.2 tab shell" (36121264340, 2026-09-25): 1003.8ms / 7,500,025B = 133.84ms/MB CPU; peak heap 23.32MB
+ * PR #496 (36118785107) and the earlier main push (35969967616, 2026-09-24)
+ * both predate this guard's registration in the branch snapshot their own
+ * run actually checked out: their `web-guards` logs have no
+ * `terminal-stream-resource-shots.mjs` section at all -- confirmed by
+ * grepping the full `--log` output for both, not a narrower filter missing
+ * it. The FAILED precursor of #495 (`vam/stream-default`, 36111783558) is
+ * the same story -- it failed before this guard existed on that branch.
+ *
+ * SAMPLES, LOCAL (this machine, `node e2e/terminal-stream-resource-shots.mjs`
+ * run 5x serially, nothing else concurrent):
+ *   1006.7ms / 7,500,066B = 134.23ms/MB CPU; peak heap 25.96MB
+ *    974.9ms / 7,500,032B = 129.99ms/MB CPU; peak heap 25.08MB
+ *    933.4ms / 7,500,038B = 124.45ms/MB CPU; peak heap 25.99MB
+ *    946.8ms / 7,500,047B = 126.24ms/MB CPU; peak heap 26.09MB
+ *    959.4ms / 7,500,031B = 127.92ms/MB CPU; peak heap 26.20MB
+ *
+ * Worst CPU/MB overall: 136.75ms/MB (CI, PR #495). Worst peak heap overall:
+ * 26.20MB (local, run 5). `STREAM_HEAVY_CPU_MS_PER_MB_BOUND` is ~5.1x that
+ * worst CPU/MB sample (comfortably over the task's own "≥3x the worst CI
+ * sample" floor); `FLOOD_PEAK_HEAP_MB_BOUND` is ~3.4x the worst CI heap
+ * sample and ~3.1x the worst sample of EITHER population -- an
+ * order-of-magnitude ceiling loose enough to absorb a slower or noisier
+ * runner without becoming the flaky guard the next person disables, while
+ * still catching a real regression (falsified below: injecting artificial
+ * per-chunk CPU work through a default-off env lever turns the CPU/MB check
+ * red).
+ */
+const STREAM_HEAVY_CPU_MS_PER_MB_BOUND = 700;
+const FLOOD_PEAK_HEAP_MB_BOUND = 80;
+
+/**
+ * FALSIFICATION ONLY, never set by a real run: milliseconds of synchronous,
+ * CPU-burning busy-work run on EVERY `%output` chunk `measureHeavyStream`
+ * receives, in this script's own main process -- the same process
+ * `process.cpuUsage()` samples, and the same shape #493's own
+ * `VAM_E2E_ARTIFICIAL_PAINT_DELAY_MS` lever takes (`terminal-stream-latency-
+ * shots.mjs`), moved from an injected PAINT delay to an injected CPU cost
+ * because what THIS bound measures is CPU, not wall clock. This task's own
+ * report holds the falsification run (a 40ms-per-chunk injection turning the
+ * CPU/MB check red) and its removal.
+ */
+const artificialChunkCpuMs = Number(process.env.VAM_E2E_ARTIFICIAL_CHUNK_CPU_MS ?? '0');
+function burnCpuMs(ms) {
+  if (ms <= 0) return;
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    /* deliberately busy -- see artificialChunkCpuMs above */
+  }
+}
+
 /* ── 1+2. IDLE CPU, POLL vs STREAM: a real capture-pane every REFRESH_MS
  * (250ms) against one open, idle `StreamClient` connection. The STRUCTURAL
  * property -- streaming is cheaper than polling while idle, the whole
@@ -206,16 +276,19 @@ await new Promise((r) => setTimeout(r, 300));
   void flood;
 }
 
-// A FRESH SESSION for test 4, never test 3's own: `yes | head -c 5000000`
-// (no redirect, so it actually prints) can still be draining into test 3's
-// pane after its own 3s sampling window ends, and test 4 must not measure a
-// mix of two floods.
-tmux('kill-session', '-t', TMUX_SESSION);
-tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
-await new Promise((r) => setTimeout(r, 300));
+/* ── 4. HEAVY OUTPUT, STREAM: every %output chunk is decoded and forwarded ──
+ * Folded into its own measure function, retried once alone if it misses
+ * STREAM_HEAVY_CPU_MS_PER_MB_BOUND (see that constant's own header), so the
+ * FRESH SESSION reset (never test 3's own -- `yes | head -c 5000000`, no
+ * redirect, so it actually prints, can still be draining into test 3's pane
+ * after its own 3s sampling window ends, and test 4 must not measure a mix
+ * of two floods) happens for a retry's own attempt too, not just the first.
+ */
+async function measureHeavyStream() {
+  tmux('kill-session', '-t', TMUX_SESSION);
+  tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
+  await new Promise((r) => setTimeout(r, 300));
 
-/* ── 4. HEAVY OUTPUT, STREAM: every %output chunk is decoded and forwarded ── */
-{
   const client = new StreamClient({ binary: 'tmux', prefix: ['-L', SOCKET], target: TMUX_SESSION });
   await client.connect();
   let bytes = 0;
@@ -223,6 +296,7 @@ await new Promise((r) => setTimeout(r, 300));
   client.onData((chunk) => {
     bytes += chunk.length;
     chunks += 1;
+    burnCpuMs(artificialChunkCpuMs);
   });
   const before = process.cpuUsage();
   const t0 = Date.now();
@@ -234,15 +308,28 @@ await new Promise((r) => setTimeout(r, 300));
     if (bytes === lastBytes) break;
     lastBytes = bytes;
   }
-  const cpu = msOf(process.cpuUsage(before));
+  const cpuMs = msOf(process.cpuUsage(before));
   const wallMs = Date.now() - t0;
-  report.heavy.stream = { cpuMs: cpu, wallMs, chunks, bytes };
+  const cpuMsPerMB = bytes > 0 ? cpuMs / (bytes / 1_000_000) : Number.POSITIVE_INFINITY;
   console.log(
-    `heavy output (yes | head -c 5MB), stream path: ${cpu.toFixed(1)}ms CPU, ${wallMs}ms wall, ` +
-      `${chunks} %output chunks, ${bytes} decoded bytes -- cost scales with the FLOOD, not with a tick.`,
+    `heavy output (yes | head -c 5MB), stream path: ${cpuMs.toFixed(1)}ms CPU, ${wallMs}ms wall, ` +
+      `${chunks} %output chunks, ${bytes} decoded bytes, ${cpuMsPerMB.toFixed(1)}ms CPU/MB -- cost scales with the FLOOD, not with a tick.`,
   );
   client.dispose();
+  return { cpuMs, wallMs, chunks, bytes, cpuMsPerMB };
 }
+
+const heavyStream = await withRetryOnce(
+  'heavy-output stream CPU/MB',
+  measureHeavyStream,
+  (r) => r.cpuMsPerMB < STREAM_HEAVY_CPU_MS_PER_MB_BOUND,
+);
+report.heavy.stream = heavyStream;
+check(
+  `heavy output, stream path: main-process CPU stays under ${STREAM_HEAVY_CPU_MS_PER_MB_BOUND}ms/MB streamed`,
+  heavyStream.cpuMsPerMB < STREAM_HEAVY_CPU_MS_PER_MB_BOUND,
+  `${heavyStream.cpuMsPerMB.toFixed(1)}ms/MB (${heavyStream.cpuMs.toFixed(1)}ms / ${(heavyStream.bytes / 1_000_000).toFixed(2)}MB)`,
+);
 
 // A FRESH SESSION again, for the same reason as before test 4.
 tmux('kill-session', '-t', TMUX_SESSION);
@@ -271,6 +358,28 @@ await new Promise((r) => setTimeout(r, 300));
  * Node's stream from draining the OS pipe for EVERY listener, forcing
  * genuine backpressure regardless of chunk size or system load, rather
  * than racing tmux's own batching to out-spin it.
+ *
+ * UPDATED A THIRD TIME -- MEASURED: even the single-window pause above still
+ * FLAKES on CI (PR #504, run 36137150536, job 108078099793 -- an UNRELATED
+ * change, both the first pass and its own lone retry logged `%pause ->
+ * reseed round trip seen: false (0 reseed(s))`). A single fixed pause/resume
+ * window is a gamble regardless of which way a runner's speed differs from
+ * this machine's: a bounded `head -c 5000000` flood can fully drain before
+ * tmux ever notices this client fell behind (a fast runner schedules the
+ * pipeline and this reader's resume close enough together that the backlog
+ * never ages past `PAUSE_AFTER_SECONDS`), or the pipeline's own start can be
+ * delayed past the window entirely (a starved runner -- the EXACT bug
+ * `stream-client-pause-after.test.ts`'s own header RCA's (1) already
+ * measured and fixed there). Ported HERE, the same fix that test already
+ * uses successfully: a DUTY-CYCLE stall (pause, briefly resume so a
+ * `%pause` -> `%continue` -> reseed round trip already in flight can land,
+ * repeat) against a generous deadline, fed by a CONTINUOUS `yes` (never a
+ * bounded `head -c`, so there is always more output on the way no matter
+ * how slowly -- or quickly -- this runner gets around to producing it) that
+ * this function explicitly stops (`C-c`) only once it has observed a reseed
+ * or given up. This never weakens the assertion: `sawReseed` below is still
+ * "a real reseed actually happened", never "no pause is fine too" -- see
+ * this file's own `check()` for `pauseAfter.sawReseed`, unchanged.
  */
 async function measurePauseAfter() {
   let realStdout;
@@ -289,19 +398,39 @@ async function measurePauseAfter() {
   const seeds = [];
   client.onSeed((seed) => seeds.push(seed));
   try {
+    // CONTINUOUS, not a fixed 5MB `head -c` (see this function's own header,
+    // third update): a size-capped flood can finish producing before a
+    // single window -- or even this duty cycle's own first couple of
+    // iterations -- ever lines up with it. `yes` alone never stops on its
+    // own; interrupted explicitly below only once a reseed has been
+    // observed (or the deadline gives up).
+    spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes', 'Enter'], { env });
+
+    // A DUTY-CYCLE stall, not one fixed window (this function's own header,
+    // third update) -- the SAME technique `stream-client-pause-after.test.ts`
+    // uses: pause the real reader, briefly resume it so a `%pause` already
+    // on the wire can be processed and this client's own `-A "...:continue"`
+    // round trip can land, and repeat -- up to a generous deadline -- rather
+    // than gambling that one fixed window overlaps with however fast (or
+    // slow) this runner happens to produce and schedule the flood today.
+    const pauseDeadline = Date.now() + 25_000;
+    while (seeds.length === 0 && Date.now() < pauseDeadline) {
+      realStdout?.pause();
+      await new Promise((r) => setTimeout(r, 1_000));
+      realStdout?.resume();
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    // Only NOW, with the duty cycle done (a reseed observed, or the
+    // deadline exhausted), interrupt the continuous flood and print a
+    // marker this attempt can wait on.
+    spawnSync('tmux', ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'C-c'], { env });
     spawnSync(
       'tmux',
-      ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'yes | head -c 5000000; echo VAM-FLOOD-DONE-5', 'Enter'],
+      ['-L', SOCKET, 'send-keys', '-t', `=${TMUX_SESSION}:`, 'echo VAM-FLOOD-DONE-5', 'Enter'],
       { env },
     );
-    // Deterministic stall: pause the REAL stream (not a per-chunk delay).
-    realStdout?.pause();
-    await new Promise((r) => setTimeout(r, 1_500));
-    realStdout?.resume();
-    const deadline = Date.now() + 15_000;
-    while (seeds.length === 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
-    }
+
     let finalPane = '';
     const doneDeadline = Date.now() + 10_000;
     while (Date.now() < doneDeadline) {
@@ -311,8 +440,8 @@ async function measurePauseAfter() {
     }
     const correct = /VAM-FLOOD-DONE-5/.test(finalPane);
     console.log(
-      `\nreal tmux, a real StreamClient (sends pause-after), a paused real stdout (not a busy-wait), same 5MB flood: ` +
-        `%pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
+      `\nreal tmux, a real StreamClient (sends pause-after), a duty-cycled real stdout (not a fixed window), a ` +
+        `continuous flood: %pause -> reseed round trip seen: ${seeds.length > 0} (${seeds.length} reseed(s)), ` +
         `final screen matches capture-pane's own DONE marker: ${correct} -- ` +
         'the pause-after fix makes tmux throttle this client AND StreamClient recovers to a correct screen.',
     );
@@ -487,6 +616,12 @@ try {
    * visible rather than papered over by measuring only the healed state.
    */
   console.log('\n--- 5MB flood, full pipeline: real StreamClient + real xterm + this file’s own backpressure ---');
+
+  // Folded into its own measure function -- retried once alone if it misses
+  // FLOOD_PEAK_HEAP_MB_BOUND (see that constant's own header) -- so a retry
+  // gets its own fresh session, `StreamClient` and browser page rather than
+  // reusing the first attempt's.
+  async function measureFlood6() {
   tmux('kill-session', '-t', TMUX_SESSION);
   tmux('new-session', '-d', '-s', TMUX_SESSION, '-x', String(COLUMNS), '-y', String(ROWS), 'sh');
   await new Promise((r) => setTimeout(r, 300));
@@ -600,17 +735,11 @@ try {
   const liveTextAfterReseed = await bufferText();
   const matchesAfterReseed = /VAM-FLOOD-DONE-6/.test(liveTextAfterReseed);
 
-  report.flood6 = {
-    cpuMs: (taskAfter6 - taskBefore6) * 1000,
-    peakHeapMB: peakHeapBytes / (1024 * 1024),
-    timeToQuietMs,
-    droppedChunks,
-    liveMatchesBeforeReseed,
-    matchesAfterReseed,
-  };
+  const cpuMs = (taskAfter6 - taskBefore6) * 1000;
+  const peakHeapMB = peakHeapBytes / (1024 * 1024);
   console.log(
-    `renderer TaskDuration: ${((taskAfter6 - taskBefore6) * 1000).toFixed(1)}ms, ` +
-      `peak JS heap: ${(peakHeapBytes / (1024 * 1024)).toFixed(2)}MB, ` +
+    `renderer TaskDuration: ${cpuMs.toFixed(1)}ms, ` +
+      `peak JS heap: ${peakHeapMB.toFixed(2)}MB, ` +
       `time-to-quiet: ${timeToQuietMs ?? 'did not settle in 20s'}ms, ` +
       `chunks dropped by the high-water mark: ${droppedChunks}`,
   );
@@ -619,17 +748,38 @@ try {
       `after a reseed from a fresh capture-pane, shows it: ${matchesAfterReseed} ` +
       '(this one MUST be true -- it is what a real reconnect always restores).',
   );
-  // STRUCTURAL, unlike the CPU/heap/time-to-quiet numbers logged above (no
-  // calibration history yet -- see this file's header): whether a reseed
-  // from ground truth produces a correct screen is a property that must
-  // always hold, regardless of the flood's speed or the runner's load.
-  // `liveMatchesBeforeReseed` is deliberately NOT asserted here -- it is
-  // expected to be `false` exactly when the drop-and-reseed path correctly
-  // triggers, so it is a fact about what happened, not a pass/fail signal.
-  check('full pipeline: after a reseed from ground truth, the live screen matches capture-pane', matchesAfterReseed);
 
   await floodPage.close();
   floodClient.dispose();
+
+  return { cpuMs, peakHeapMB, timeToQuietMs, droppedChunks, liveMatchesBeforeReseed, matchesAfterReseed };
+  }
+
+  const flood6 = await withRetryOnce(
+    'full-pipeline peak renderer heap',
+    measureFlood6,
+    (r) => r.peakHeapMB < FLOOD_PEAK_HEAP_MB_BOUND,
+  );
+  report.flood6 = flood6;
+  // STRUCTURAL, unlike the CPU/heap/time-to-quiet numbers logged above (no
+  // calibration history for TASK DURATION / time-to-quiet -- see this file's
+  // header on why only CPU-per-MB and peak heap get an asserted ceiling):
+  // whether a reseed from ground truth produces a correct screen is a
+  // property that must always hold, regardless of the flood's speed or the
+  // runner's load. `liveMatchesBeforeReseed` is deliberately NOT asserted
+  // here -- it is expected to be `false` exactly when the drop-and-reseed
+  // path correctly triggers, so it is a fact about what happened, not a
+  // pass/fail signal.
+  check(
+    'full pipeline: after a reseed from ground truth, the live screen matches capture-pane',
+    flood6.matchesAfterReseed,
+  );
+  check(
+    `full pipeline: peak renderer heap stays under ${FLOOD_PEAK_HEAP_MB_BOUND}MB during the flood`,
+    flood6.peakHeapMB < FLOOD_PEAK_HEAP_MB_BOUND,
+    `${flood6.peakHeapMB.toFixed(2)}MB`,
+  );
+
   tmux('kill-session', '-t', TMUX_SESSION);
 } finally {
   await browser.close();

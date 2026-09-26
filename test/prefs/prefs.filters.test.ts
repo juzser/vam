@@ -42,6 +42,10 @@ describe('the session-origin filters, persisted', () => {
       // A fresh toggle must change nothing for an operator who never touched
       // it -- see `session-filter.ts`'s own header for `hideIdle`.
       hideIdle: false,
+      // Agent worktrees are hidden by default, the operator's own ask --
+      // see `session-filter.ts`'s own header for why this one is not
+      // `hideIdle`'s shape.
+      hideAgentWorktrees: true,
     });
     expect(EMPTY_PREFS.filters).toEqual(DEFAULT_SESSION_FILTERS);
   });
@@ -56,6 +60,7 @@ describe('the session-origin filters, persisted', () => {
         hideEnded: false,
         hideForeign: false,
         hideIdle: true,
+        hideAgentWorktrees: false,
       }),
     );
     expect(readPrefs(s).filters).toEqual({
@@ -64,6 +69,7 @@ describe('the session-origin filters, persisted', () => {
       hideEnded: false,
       hideForeign: false,
       hideIdle: true,
+      hideAgentWorktrees: false,
     });
   });
 
@@ -100,6 +106,7 @@ describe('the session-origin filters, persisted', () => {
       hideEnded: true,
       hideForeign: true,
       hideIdle: false,
+      hideAgentWorktrees: true,
     });
   });
 
@@ -113,6 +120,7 @@ describe('the session-origin filters, persisted', () => {
       hideEnded: true,
       hideForeign: true,
       hideIdle: false,
+      hideAgentWorktrees: true,
     });
   });
 
@@ -124,6 +132,7 @@ describe('the session-origin filters, persisted', () => {
       hideEnded: true,
       hideForeign: false,
       hideIdle: false,
+      hideAgentWorktrees: true,
     });
   });
 
@@ -135,11 +144,29 @@ describe('the session-origin filters, persisted', () => {
       hideEnded: true,
       hideForeign: true,
       hideIdle: true,
+      hideAgentWorktrees: true,
     });
   });
 
   it('takes only a real boolean for hideIdle -- garbage falls back to the default', () => {
     const raw = '{"filters":{"hideIdle":"yes"}}';
     expect(readPrefs(store(raw)).filters.hideIdle).toBe(false);
+  });
+
+  it('keeps a stored choice to SHOW agent worktrees, per field like every other rule', () => {
+    const raw = '{"filters":{"hideAgentWorktrees":false}}';
+    expect(readPrefs(store(raw)).filters).toEqual({
+      hideAgentStarted: true,
+      onlyPrompted: false,
+      hideEnded: true,
+      hideForeign: true,
+      hideIdle: false,
+      hideAgentWorktrees: false,
+    });
+  });
+
+  it('takes only a real boolean for hideAgentWorktrees -- garbage falls back to the shipped default (on)', () => {
+    const raw = '{"filters":{"hideAgentWorktrees":"yes"}}';
+    expect(readPrefs(store(raw)).filters.hideAgentWorktrees).toBe(true);
   });
 });

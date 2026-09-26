@@ -64,8 +64,8 @@ const view = (over: Partial<ViewOptions> = {}): ViewOptions => ({
 });
 
 describe('DEFAULT_VIEW_OPTIONS', () => {
-  it('is Project grouping and needs-you-first sorting -- today’s only behaviour, unchanged', () => {
-    expect(DEFAULT_VIEW_OPTIONS).toEqual({ groupBy: 'project', sortBy: 'needs-you' });
+  it('is Project grouping and created-order sorting -- the operator’s own "stop jumping" default', () => {
+    expect(DEFAULT_VIEW_OPTIONS).toEqual({ groupBy: 'project', sortBy: 'created' });
   });
 });
 
@@ -95,13 +95,13 @@ describe('applyViewOrder — groupBy: project (the default)', () => {
   const alpha = project('p-alpha', 'alpha');
   const beta = project('p-beta', 'beta');
 
-  it('is a no-op at the shipped defaults -- byte-identical to `entries` as handed in', () => {
+  it('is a no-op for needs-you -- today’s other, still-offered order', () => {
     const input = [
       entry(alpha, session('a1', 'Zebra', { status: 'waiting' })),
       entry(alpha, session('a2', 'Apple', { status: 'running' })),
       entry(beta, session('b1', 'Mango', { status: 'waiting' })),
     ];
-    expect(applyViewOrder(input, view())).toEqual(input);
+    expect(applyViewOrder(input, view({ sortBy: 'needs-you' }))).toEqual(input);
   });
 
   it('sorts by name WITHIN each project run, but never merges two projects’ runs', () => {
@@ -130,6 +130,71 @@ describe('applyViewOrder — groupBy: project (the default)', () => {
     ];
     const out = applyViewOrder(input, view({ sortBy: 'name' }));
     expect(out.map((e) => e.session.id)).toEqual(['a1', 'b1', 'a2']);
+  });
+});
+
+describe('applyViewOrder — sortBy: created', () => {
+  const alpha = project('p-alpha', 'alpha');
+  const beta = project('p-beta', 'beta');
+
+  it('orders a project’s run oldest-created first', () => {
+    const input = [
+      entry(alpha, session('a1', 'Zebra', { createdAt: '2026-01-03T00:00:00.000Z' })),
+      entry(alpha, session('a2', 'Apple', { createdAt: '2026-01-01T00:00:00.000Z' })),
+      entry(alpha, session('a3', 'Mango', { createdAt: '2026-01-02T00:00:00.000Z' })),
+    ];
+    const out = applyViewOrder(input, view({ sortBy: 'created' }));
+    expect(out.map((e) => e.session.id)).toEqual(['a2', 'a3', 'a1']);
+  });
+
+  it('never merges two projects’ runs, same as every other sortBy', () => {
+    const input = [
+      entry(alpha, session('a1', 'a1', { createdAt: '2026-01-02T00:00:00.000Z' })),
+      entry(beta, session('b1', 'b1', { createdAt: '2026-01-01T00:00:00.000Z' })),
+    ];
+    const out = applyViewOrder(input, view({ sortBy: 'created' }));
+    expect(out.map((e) => e.project.id)).toEqual(['p-alpha', 'p-beta']);
+  });
+
+  it('does not reorder when only status changes -- the whole point of the operator’s ask', () => {
+    const input = [
+      entry(alpha, session('a1', 'a1', { createdAt: '2026-01-01T00:00:00.000Z', status: 'idle' })),
+      entry(alpha, session('a2', 'a2', { createdAt: '2026-01-02T00:00:00.000Z', status: 'idle' })),
+    ];
+    const before = applyViewOrder(input, view({ sortBy: 'created' })).map((e) => e.session.id);
+    const afterStatusChange = [
+      entry(
+        alpha,
+        session('a1', 'a1', { createdAt: '2026-01-01T00:00:00.000Z', status: 'waiting' }),
+      ),
+      entry(
+        alpha,
+        session('a2', 'a2', { createdAt: '2026-01-02T00:00:00.000Z', status: 'running' }),
+      ),
+    ];
+    const after = applyViewOrder(afterStatusChange, view({ sortBy: 'created' })).map(
+      (e) => e.session.id,
+    );
+    expect(after).toEqual(before);
+  });
+
+  it('breaks an equal-timestamp tie deterministically by id', () => {
+    const input = [
+      entry(alpha, session('b', 'b', { createdAt: '2026-01-01T00:00:00.000Z' })),
+      entry(alpha, session('a', 'a', { createdAt: '2026-01-01T00:00:00.000Z' })),
+    ];
+    const out = applyViewOrder(input, view({ sortBy: 'created' }));
+    expect(out.map((e) => e.session.id)).toEqual(['a', 'b']);
+  });
+
+  it('sorts a session vam could not time-stamp after every timestamped one, tied by id among themselves', () => {
+    const input = [
+      entry(alpha, session('unknown-b', 'unknown-b')),
+      entry(alpha, session('known', 'known', { createdAt: '2026-01-01T00:00:00.000Z' })),
+      entry(alpha, session('unknown-a', 'unknown-a', { createdAt: null })),
+    ];
+    const out = applyViewOrder(input, view({ sortBy: 'created' }));
+    expect(out.map((e) => e.session.id)).toEqual(['known', 'unknown-a', 'unknown-b']);
   });
 });
 
@@ -185,7 +250,7 @@ describe('applyViewOrder — groupBy: none', () => {
 describe('applyViewOrder — the empty list', () => {
   it('is empty under every combination, never throws', () => {
     for (const groupBy of ['project', 'status', 'none'] as const) {
-      for (const sortBy of ['needs-you', 'name'] as const) {
+      for (const sortBy of ['needs-you', 'name', 'created'] as const) {
         expect(applyViewOrder([], view({ groupBy, sortBy }))).toEqual([]);
       }
     }

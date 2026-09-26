@@ -567,6 +567,292 @@ for (const theme of ['dark', 'light']) {
   );
 }
 
+/**
+ * ── NO OVERFLOW, NO PAINTED SCROLLBAR, AT ANY SIZE ─────────────────────────
+ * The operator's own report (translated): "xterm always shows a scrollbar
+ * right from the start, because its height is taller than the wrapper."
+ * MEASURED, against a real `@xterm/xterm` 6 build: it never was a height
+ * mismatch -- every element from `[data-terminal-stream]` down to
+ * `[data-terminal-stream-mount]` already has `scrollHeight === clientHeight`
+ * (`FitAddon.fit()`'s own `Math.floor` division guarantees it, and this
+ * suite already exercises that path). The real cause is xterm 6's OWN
+ * scroll chrome: `.xterm-scrollable-element > .scrollbar`, a VS Code-style
+ * overlay thumb the pre-6 native-`overflow-y` bar this file's sibling rule
+ * already hides (`[data-terminal-stream] .xterm-viewport`) never had to
+ * account for. That thumb reveals at `opacity: 1` on `term.open()` AND on
+ * every later `term.write()` -- mount, each streamed chunk alike -- and
+ * fades back out only after roughly 1.2s of no new output, which for an
+ * ACTIVELY STREAMING pane (this tab's whole reason to exist) means it is
+ * functionally always mid-fade: MEASURED with a scrollback-length seed, the
+ * thumb sits at `opacity: 1` at both the moment of mount and immediately
+ * after a fresh chunk arrives.
+ *
+ * This check proves BOTH halves at once, at three window heights, two font
+ * sizes and DPR 2 (falsified by hand against the pre-fix build: dropping
+ * `[data-terminal-stream] .xterm-scrollable-element > .scrollbar { display:
+ * none }` reddens every "no painted scrollbar" assertion below, at mount and
+ * after the simulated chunk, while every "no overflow" assertion stays green
+ * regardless -- proving this was never an overflow bug a taller wrapper
+ * could have fixed):
+ *   - no element from the pane down to the mount has `scrollHeight` more
+ *     than 0.5px past its own `clientHeight`;
+ *   - no scrollbar element (xterm's native one, xterm 6's own overlay thumb)
+ *     has a painted (`getBoundingClientRect`) width or height, neither right
+ *     after the seed nor right after a fresh chunk simulates the pane
+ *     actively streaming;
+ *   - wheel scrollback still moves the buffer (the fix removes the thumb
+ *     from paint, not the scroll behaviour behind it -- `mouseWheelSmoothScroll`
+ *     lives on the viewport, never on the thumb DOM node itself).
+ *
+ * A SEPARATE, TALLER SEED (`SCROLLBACK_TEXT`, four times a typical pane's
+ * row count) is what makes this reproducible at all: the frame-parity
+ * fixture above is one line, which never has scrollback to reveal xterm's
+ * own thumb over in the first place -- an empty-handed check would pass
+ * before this task's fix by having nothing to falsify it with.
+ */
+const SCROLLBACK_TEXT =
+  `${Array.from({ length: 80 }, (_, i) => `line ${i} of scrollback filler text, wide enough to matter`).join('\r\n')}\r\n`;
+
+async function openScrollbackTerminal(viewportHeight, fontSize, dpr) {
+  const p = await browser.newPage({
+    viewport: { width: 1100, height: viewportHeight },
+    deviceScaleFactor: dpr,
+  });
+  p.on('pageerror', (err) => console.error('PAGE ERROR:', err));
+  p.on('console', (msg) => {
+    if (msg.type() === 'error') console.error('CONSOLE ERROR:', msg.text());
+  });
+  await p.addInitScript(
+    ({ session, branch, tmuxName, screenText }) => {
+      globalThis.window.__dataHandlers = [];
+      const unavailable = () =>
+        Promise.resolve({
+          kind: 'unavailable',
+          error: { kind: 'unreachable', code: 'stub', message: 'stub source' },
+        });
+      globalThis.window.api = {
+        describe: async () => ({
+          id: 'stub',
+          label: 'Stub',
+          capabilities: {
+            liveUpdates: false,
+            recordPrompt: false,
+            deliverPrompt: false,
+            promptAttachments: false,
+            slashCommands: false,
+            renameSession: false,
+            closeSession: false,
+            createSession: false,
+            governance: false,
+            pullRequests: false,
+            terminal: true,
+            agentRoster: false,
+            resumeSession: false,
+          },
+          declines: {},
+          viewerScope: 'operator',
+        }),
+        load: async () => [
+          {
+            id: 'p1',
+            name: 'stub project',
+            sessions: [
+              {
+                id: session,
+                title: 'stub session',
+                icon: null,
+                epic: null,
+                branch,
+                status: 'waiting',
+                runningAgents: 0,
+                activity: null,
+                age: '2m',
+                decisions: [
+                  { id: 'd1', label: 'step 1', input: 'a turn', output: 'an answer', commands: [] },
+                ],
+              },
+            ],
+          },
+        ],
+        subscribe: () => () => {},
+        recordPrompt: async () => {},
+        renameSession: async () => {},
+        closeSession: async () => {},
+        createSession: async () => {},
+        createSessionIn: async () => {},
+        pickImageAttachment: async () => null,
+        history: async () => unavailable(),
+        agentWork: async () => unavailable(),
+        applyWaivers: async () => {},
+        transitionLesson: async () => {},
+        usage: { get: async () => ({ kind: 'unavailable' }) },
+        terminal: {
+          read: async () => ({
+            kind: 'ok',
+            name: tmuxName,
+            text: screenText,
+            cursor: { kind: 'unreadable' },
+          }),
+          resize: async () => true,
+          send: async () => 'sent',
+          answer: async () => ({ kind: 'unavailable' }),
+          prompt: async () => ({ kind: 'unavailable' }),
+        },
+        terminalStream: {
+          open: async () => ({ ok: true, streamId: 'stub-stream', seed: screenText, name: tmuxName }),
+          close: () => {},
+          write: () => {},
+          // CAPTURED, not a no-op: the "reveal on every chunk" half of this
+          // check calls these back directly, the same shape a live
+          // `%output` notification arrives by.
+          onData: (_streamId, cb) => {
+            globalThis.window.__dataHandlers.push(cb);
+            return () => {};
+          },
+          onSeed: () => () => {},
+          onDown: () => () => {},
+        },
+      };
+    },
+    { session: SESSION, branch: BRANCH, tmuxName: TMUX_NAME, screenText: SCROLLBACK_TEXT },
+  );
+  await p.addInitScript(
+    ({ size }) => {
+      globalThis.localStorage.setItem(
+        'vam.prefs.v1',
+        JSON.stringify({
+          streamingTerminal: true,
+          streamingTerminalMigrated: true,
+          theme: 'dark',
+          terminalFontSize: size,
+        }),
+      );
+    },
+    { size: fontSize },
+  );
+  await p.goto(`${origin}?demo=1`, { waitUntil: 'networkidle' });
+  await p.waitForSelector('[data-tab-strip]');
+  await p.locator(`[data-session-row="${SESSION}"]`).first().click();
+  await p.locator('[data-view="terminal"]').click();
+  await p.waitForSelector('[data-terminal-stream]', { timeout: 5_000 });
+  return p;
+}
+
+/** `scrollHeight`/`clientHeight` for every element from the pane frame down
+ *  to the unpadded mount -- the chain `FitAddon.proposeDimensions()` reads,
+ *  walked directly rather than assumed to be exactly these four selectors so
+ *  a future wrapper div is still covered. */
+async function overflowChain(p) {
+  return p.evaluate(() => {
+    const ids = [
+      '[data-terminal-stream-root]',
+      '[data-terminal-stream]',
+      '[data-terminal-stream-mount]',
+    ];
+    return ids.map((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return { sel, missing: true };
+      return { sel, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
+    });
+  });
+}
+
+/** The painted rect of every scrollbar-shaped element this pane could show:
+ *  xterm's pre-6 native bar AND xterm 6's own overlay thumb. `display` read
+ *  alongside the rect so a failure names WHICH property let it paint. */
+async function scrollbarRects(p) {
+  return p.evaluate(() => {
+    const pane = document.querySelector('[data-terminal-stream]');
+    const scrollable = pane?.querySelector('.xterm-scrollable-element');
+    const bars = scrollable ? [...scrollable.querySelectorAll(':scope > .scrollbar')] : [];
+    return bars.map((b) => {
+      const r = b.getBoundingClientRect();
+      return {
+        className: b.className,
+        display: getComputedStyle(b).display,
+        width: r.width,
+        height: r.height,
+      };
+    });
+  });
+}
+
+for (const height of [500, 700, 900]) {
+  for (const fontSize of [10.5, 14]) {
+    for (const dpr of [1, 2]) {
+      const label = `height=${height} fontSize=${fontSize} dpr=${dpr}`;
+      const p = await openScrollbackTerminal(height, fontSize, dpr);
+
+      const chainAtMount = await overflowChain(p);
+      for (const entry of chainAtMount) {
+        check(
+          `${label}: ${entry.sel} has no overflow at mount`,
+          entry.missing !== true && entry.scrollHeight - entry.clientHeight <= 0.5,
+          JSON.stringify(entry),
+        );
+      }
+      const barsAtMount = await scrollbarRects(p);
+      check(
+        `${label}: no scrollbar element paints at mount`,
+        barsAtMount.every((b) => b.width === 0 && b.height === 0),
+        JSON.stringify(barsAtMount),
+      );
+
+      // THE ACTIVELY-STREAMING CASE: a fresh chunk, delivered the same way
+      // a live `%output` notification would be, through the captured
+      // `onData` handler -- proving the thumb stays unpainted on the path
+      // that made it show "always" rather than only briefly at mount.
+      await p.evaluate(() => {
+        const enc = new TextEncoder();
+        for (const cb of globalThis.window.__dataHandlers) cb(enc.encode('fresh output\r\n'));
+      });
+      const barsAfterChunk = await scrollbarRects(p);
+      check(
+        `${label}: no scrollbar element paints right after a streamed chunk`,
+        barsAfterChunk.every((b) => b.width === 0 && b.height === 0),
+        JSON.stringify(barsAfterChunk),
+      );
+      const chainAfterChunk = await overflowChain(p);
+      for (const entry of chainAfterChunk) {
+        check(
+          `${label}: ${entry.sel} has no overflow after a streamed chunk`,
+          entry.missing !== true && entry.scrollHeight - entry.clientHeight <= 0.5,
+          JSON.stringify(entry),
+        );
+      }
+
+      await p.close();
+    }
+  }
+}
+
+/**
+ * WHEEL SCROLLBACK STILL WORKS. Hiding the thumb (`display: none`) removes
+ * it from paint, not the `Scrollable` model behind it -- `term.write()`
+ * moves `ydisp` to the bottom on new output, so a wheel scroll UP has to be
+ * the last thing this test does, and the check is simply that the topmost
+ * rendered row's text changed: a wheel event that reached nothing would
+ * leave the same row on screen.
+ */
+{
+  const p = await openScrollbackTerminal(700, 12.5, 1);
+  await p.locator('[data-terminal-stream]').click();
+  const before = await p.evaluate(
+    () => document.querySelector('[data-terminal-stream] .xterm-rows')?.firstElementChild?.textContent ?? null,
+  );
+  await p.mouse.wheel(0, -600);
+  await p.waitForTimeout(150);
+  const after = await p.evaluate(
+    () => document.querySelector('[data-terminal-stream] .xterm-rows')?.firstElementChild?.textContent ?? null,
+  );
+  check(
+    'a wheel scroll still moves the buffer with the thumb hidden',
+    before !== null && after !== null && before !== after,
+    `${before} -> ${after}`,
+  );
+  await p.close();
+}
+
 await browser.close();
 
 if (failures.length > 0) {

@@ -234,6 +234,27 @@ describe('a vam pane no source row is paired to', () => {
     expect(alpha?.sessions.map((s) => s.id)).toEqual(['sess-1#100']);
   });
 
+  it('marks an unstarted pane row an agent worktree when its own cwd checks true', async () => {
+    const projects = await loadClaudeCodeProjects(
+      root,
+      [],
+      NOW,
+      undefined,
+      sessionsRoot,
+      null,
+      [{ project: '', pid: '', name: 'vam-x-000002', cwd: '/w/gamma' }],
+      [],
+      undefined,
+      null,
+      null,
+      null,
+      undefined,
+      async (cwd) => cwd === '/w/gamma',
+    );
+    const gamma = projects.find((p) => p.id === projectIdOf('/w/gamma'));
+    expect(gamma?.sessions[0]?.isAgentWorktree).toBe(true);
+  });
+
   it('reuses the same brand-new project for two untagged panes in the one directory', async () => {
     const BETA = '/w/beta';
     const projects = await load(
@@ -268,5 +289,82 @@ describe('a vam pane no source row is paired to', () => {
     expect(then?.sessions.some((s) => s.id === paneRowId('vam-alpha-new001'))).toBe(true);
     const [gone] = await load([agent()], []);
     expect(gone?.sessions.some((s) => s.id === paneRowId('vam-alpha-new001'))).toBe(false);
+  });
+});
+
+/**
+ * `runningProvider` -- the coordinator's own performance fix: an idle row's
+ * "who is already running here" fact comes from the SAME tmux listing this
+ * whole file already builds rows from (`TmuxSession.command`), not a second,
+ * per-row poll. `identifyRunningProvider` (`sources/tmux/shell.ts`) is the
+ * one classifier both this row and the fast, active-wait poll
+ * (`main/terminal/start-screen.ts`) run the SAME command through.
+ */
+describe('runningProvider -- who is already in the pane, from its own foreground command', () => {
+  let root: string;
+  let sessionsRoot: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'vam-pane-rows-running-'));
+    sessionsRoot = mkdtempSync(join(tmpdir(), 'vam-pane-rows-running-sessions-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(sessionsRoot, { recursive: true, force: true });
+  });
+  // TWO AGENTS IN THIS PROJECT, deliberately not one: `paneForRow`'s own
+  // single-candidate tier (`reply.ts`) claims a pane whose command is
+  // provably neither a shell nor another configured provider for THAT one
+  // agent's own row -- correct there (a version-string pane really is that
+  // agent's), but it would leave nothing `unstarted` for these tests to find
+  // the field on. A second agent makes the candidate count two, which
+  // vetoes that tier outright regardless of command, so the pane row this
+  // suite is actually testing survives unclaimed either way.
+  const agentTwo = agent({ key: 'sess-2#200', sessionId: 'sess-2', name: 'demo-2' });
+  const load = (command: string | undefined) =>
+    loadClaudeCodeProjects(root, [agent(), agentTwo], NOW, undefined, sessionsRoot, null, [
+      {
+        project: ALPHA_ID,
+        pid: '777',
+        name: 'vam-alpha-new001',
+        ...(command === undefined ? {} : { command }),
+      },
+    ]);
+  const row = (project: Awaited<ReturnType<typeof load>>[number] | undefined) =>
+    project?.sessions.find((s) => s.id === paneRowId('vam-alpha-new001'));
+
+  it('is absent for a plain shell -- the ordinary empty pane, unchanged', async () => {
+    const [project] = await load('zsh');
+    const found = row(project);
+    expect(found?.status).toBe('unstarted');
+    expect(found?.runningProvider).toBeUndefined();
+    expect(Object.hasOwn(found ?? {}, 'runningProvider')).toBe(false);
+  });
+
+  it('is absent when the listing carries no foreground command at all', async () => {
+    const [project] = await load(undefined);
+    const found = row(project);
+    expect(found?.status).toBe('unstarted');
+    expect(found?.runningProvider).toBeUndefined();
+  });
+
+  it('names codex, from its own bare foreground command', async () => {
+    const [project] = await load('codex');
+    const found = row(project);
+    expect(found?.status).toBe('unstarted');
+    expect(found?.runningProvider).toBe('codex');
+  });
+
+  it('names claude-code from claude’s own measured version-string quirk', async () => {
+    const [project] = await load('2.1.282');
+    const found = row(project);
+    expect(found?.status).toBe('unstarted');
+    expect(found?.runningProvider).toBe('claude-code');
+  });
+
+  it('is null, not absent, for something running that names neither provider', async () => {
+    const [project] = await load('htop');
+    const found = row(project);
+    expect(found?.status).toBe('unstarted');
+    expect(found?.runningProvider).toBeNull();
   });
 });

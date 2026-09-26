@@ -78,13 +78,14 @@ import { basename, join } from 'node:path';
 import type { Project, Session } from '../../../renderer/domain/model.js';
 import type { SourceDescriptor } from '../../../shared/preload-api.js';
 import type { SourceError } from '../../ipc/channels.js';
+import { isAgentWorktreeCwd } from '../agent-worktree.js';
 import { fileTranscriptSource } from '../claude-code/window.js';
 import type { MainSource } from '../source.js';
 import { createTmuxRunner, listVamSessions, type TmuxRun } from '../tmux/spawn.js';
 import { type Liveness, livenessOf, type ProbeLock, probeLockViaOpen } from './liveness.js';
 import { queueMessage, type RunCodex, runCodexViaCli } from './queue.js';
 import { resumeThread } from './resume.js';
-import { readRolloutTail } from './rollout.js';
+import { readRolloutTail, threadStartOf } from './rollout.js';
 import {
   codexHome,
   type RunSqlite,
@@ -345,6 +346,8 @@ async function sessionFor(
   // Stamped onto the row verbatim when the caller's own tmux read failed this
   // load -- see `Session.vamListingGap`. `null` is the ordinary case.
   vamListingGap: { readonly code: string; readonly message: string } | null = null,
+  // Same seam `claude-code/source.ts`'s own parameter of the same name is.
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<Session> {
   let facts: Awaited<ReturnType<typeof readRolloutTail>> | null = null;
   try {
@@ -356,6 +359,7 @@ async function sessionFor(
     // does and that read succeeded.
     facts = null;
   }
+  const isAgentWorktree = await isAgentWorktreeOf(row.cwd, row.branch);
   return {
     // THE BARE THREAD UUID. The same string is `threads.id`, the rollout
     // filename and `--thread`, so no `#pid` suffix is needed -- contrast
@@ -382,6 +386,12 @@ async function sessionFor(
     activity: facts?.activity ?? null,
     age: row.recencyAtMs === null ? null : compactAge(nowMs - row.recencyAtMs),
     branch: row.branch,
+    // NEVER `row.recencyAtMs` -- `docs/design/vam-owns-the-session.md`'s own
+    // trap, restated: a recency moves on every touch and is not a start
+    // time. `threadStartOf` reads the instant Codex itself embedded in the
+    // rollout's own file name (`rollout.ts`), so this costs no read of the
+    // file at all.
+    createdAt: threadStartOf(row.rolloutPath),
     decisions: facts?.decisions ?? [],
     source: CODEX_SOURCE_ID,
     // ABSENT, NOT EMPTY, on `Session.agents`' own rule: empty is a source that
@@ -406,6 +416,7 @@ async function sessionFor(
     // offer to change it.
     model: row.model,
     ...(vamListingGap === null ? {} : { vamListingGap }),
+    ...(isAgentWorktree ? { isAgentWorktree: true } : {}),
   };
 }
 
@@ -423,11 +434,15 @@ export async function projectsFrom(
   // See `sessionFor`'s own doc for the three states this carries through.
   vamSessionIds: ReadonlySet<string> | null = new Set(),
   vamListingGap: { readonly code: string; readonly message: string } | null = null,
+  // See `sessionFor`'s own doc.
+  isAgentWorktreeOf: (cwd: string, branch: string | null) => Promise<boolean> = isAgentWorktreeCwd,
 ): Promise<readonly Project[]> {
   const byProject = new Map<string, { cwd: string; sessions: Session[] }>();
   const order: string[] = [];
   const sessions = await Promise.all(
-    threads.map((row) => sessionFor(row, nowMs, liveness(row.id), vamSessionIds, vamListingGap)),
+    threads.map((row) =>
+      sessionFor(row, nowMs, liveness(row.id), vamSessionIds, vamListingGap, isAgentWorktreeOf),
+    ),
   );
   threads.forEach((row, index) => {
     const id = codexProjectId(row.cwd);

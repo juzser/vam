@@ -832,6 +832,7 @@ export type SessionListProps = {
     readonly ended: number;
     readonly foreign: number;
     readonly idle: number;
+    readonly agentWorktree: number;
   };
   /**
    * HOW MANY ROWS `hideForeign` IS HIDING RIGHT NOW -- NOT `hiddenCounts.
@@ -1184,11 +1185,13 @@ const GROUP_BY_PILLS: readonly {
   { value: 'project', label: 'Project', disabled: false },
 ];
 
-/** In the drill-in's own order, top to bottom -- `needs-you` first because
- *  it is the shipped default, the same reason it heads `STATUS_BUCKET_ORDER`. */
-const SORT_BY_OPTIONS: readonly SortBy[] = ['needs-you', 'name'];
+/** In the drill-in's own order, top to bottom -- `created` first because it
+ *  is the shipped default (`selectors.ts`'s `DEFAULT_VIEW_OPTIONS`), the same
+ *  reason `needs-you` used to head this list before it was. */
+const SORT_BY_OPTIONS: readonly SortBy[] = ['created', 'needs-you', 'name'];
 
 const SORT_BY_LABELS: Readonly<Record<SortBy, string>> = {
+  created: 'Oldest first',
   'needs-you': 'Needs you first',
   name: 'Name',
 };
@@ -1199,7 +1202,7 @@ const SORT_BY_LABELS: Readonly<Record<SortBy, string>> = {
  * A separate component rather than inline JSX in `SessionList` itself, for
  * the one thing that needs its own lifecycle: focus lands on the back button
  * the moment this mounts, so a keyboard operator who pressed "Sort by" does
- * not have to Tab past it to reach the two options -- the same "where the
+ * not have to Tab past it to reach the offered options -- the same "where the
  * keyboard goes when a layer opens" contract `SessionList`'s own popover-
  * open effect already keeps for the popover as a whole.
  */
@@ -1217,8 +1220,8 @@ function SortByMenu({
     backRef.current?.focus();
   }, []);
 
-  /** ArrowDown/ArrowUp, wrapping -- two options is short enough that
-   *  wrapping reads as a single ring rather than a dead end at either end. */
+  /** ArrowDown/ArrowUp, wrapping -- a short list of options is short enough
+   *  that wrapping reads as a single ring rather than a dead end at either end. */
   const moveFocus = (from: SortBy, delta: 1 | -1) => {
     const index = SORT_BY_OPTIONS.indexOf(from);
     const next = SORT_BY_OPTIONS[(index + delta + SORT_BY_OPTIONS.length) % SORT_BY_OPTIONS.length];
@@ -3485,6 +3488,22 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                       originFilters.hideIdle,
                       hiddenCounts.idle,
                     ],
+                    // THE SIXTH ROW -- the operator's own report: "I see a
+                    // worktree-agent showing when I press New session." ON
+                    // BY DEFAULT, `foreign`'s own shape rather than `idle`'s
+                    // -- `session-filter.ts`'s own header on
+                    // `hideAgentWorktrees` says why. A waiting session under
+                    // this rule is never actually hidden (same file), so the
+                    // count here can undercount what `isAgentWorktreeSession`
+                    // alone would say, on purpose.
+                    [
+                      'agent-worktree',
+                      GitBranch,
+                      'Hide agent worktrees',
+                      'Hide Claude Code’s own temporary worktrees for isolated subagents — not a project you opened yourself.',
+                      originFilters.hideAgentWorktrees,
+                      hiddenCounts.agentWorktree,
+                    ],
                   ] as const
                 ).map(([key, Icon, label, note, on, hides]) => (
                   <Note key={key} text={note}>
@@ -3503,7 +3522,9 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                                 ? { ...originFilters, hideForeign: !on }
                                 : key === 'idle'
                                   ? { ...originFilters, hideIdle: !on }
-                                  : { ...originFilters, onlyPrompted: !on },
+                                  : key === 'agent-worktree'
+                                    ? { ...originFilters, hideAgentWorktrees: !on }
+                                    : { ...originFilters, onlyPrompted: !on },
                         )
                       }
                       className={[

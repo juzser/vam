@@ -116,6 +116,39 @@ describe('Sort by: name', () => {
   });
 });
 
+describe('Sort by: created (the shipped default)', () => {
+  it('orders a project’s rows oldest-created first, ignoring status entirely', () => {
+    const project = makeProject({ id: 'p1', name: 'alpha' }, []);
+    const raw: SessionEntry[] = [
+      {
+        project,
+        session: makeSession({
+          id: 'a1',
+          title: 'newer',
+          status: 'waiting',
+          createdAt: '2026-02-02T00:00:00.000Z',
+        }),
+      },
+      {
+        project,
+        session: makeSession({
+          id: 'a2',
+          title: 'older',
+          status: 'done',
+          createdAt: '2026-02-01T00:00:00.000Z',
+        }),
+      },
+    ];
+    const { container } = render(
+      <SessionList {...baseProps(applyViewOrder(raw, DEFAULT_VIEW_OPTIONS))} />,
+    );
+    const titles = [...container.querySelectorAll('[data-project-rows="p1"] [data-row-title]')].map(
+      (el) => el.textContent,
+    );
+    expect(titles).toEqual(['older', 'newer']);
+  });
+});
+
 describe('the Group by control', () => {
   it('is a radiogroup with the three offered options checked correctly, PR disabled', () => {
     const { container } = mount();
@@ -152,18 +185,29 @@ describe('the Group by control', () => {
 });
 
 describe('the Sort by drill-in', () => {
-  it('opens a submenu with a back affordance and a radiogroup of the two options', () => {
-    const { container } = mount();
+  it('opens a submenu with a back affordance and a radiogroup of the three options, the current one checked', () => {
+    const { container } = mount({ viewOptions: { groupBy: 'project', sortBy: 'needs-you' } });
     fireEvent.click(container.querySelector('[data-sort-by-open]') as Element);
     const menu = container.querySelector('[data-sort-by-menu]');
     expect(menu).not.toBeNull();
     expect(container.querySelector('[data-popover-back]')).not.toBeNull();
     const group = container.querySelector('[data-sort-by-menu] [role="radiogroup"]');
     expect(group).not.toBeNull();
+    const created = container.querySelector('[data-sort-by-option="created"]');
     const needsYou = container.querySelector('[data-sort-by-option="needs-you"]');
     const name = container.querySelector('[data-sort-by-option="name"]');
+    expect(created).not.toBeNull();
     expect(needsYou?.getAttribute('aria-checked')).toBe('true');
+    expect(created?.getAttribute('aria-checked')).toBe('false');
     expect(name?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('shows Created checked at the shipped default', () => {
+    const { container } = mount();
+    fireEvent.click(container.querySelector('[data-sort-by-open]') as Element);
+    expect(
+      container.querySelector('[data-sort-by-option="created"]')?.getAttribute('aria-checked'),
+    ).toBe('true');
   });
 
   it('writes the pref, keeping groupBy untouched, and returns to the main view', () => {

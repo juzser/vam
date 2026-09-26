@@ -402,6 +402,17 @@ export function compactAge(ms: number): string {
 }
 
 /**
+ * A millisecond epoch, ISO-8601, or `null` for the absence every reader of
+ * `Session.createdAt` already treats as "vam cannot say" -- `source.ts`'s
+ * own fallback chain (`read.birthtimeMs ?? agent.startedAt`) hands this
+ * either a real number or `null`/`undefined`, never a value worth
+ * distinguishing further.
+ */
+export function isoOrNull(ms: number | null | undefined): string | null {
+  return ms === null || ms === undefined ? null : new Date(ms).toISOString();
+}
+
+/**
  * A short, content-derived fingerprint of a turn's own prompt. THE FALLBACK
  * identity, used only when the caller cannot say where its window begins;
  * `idOf` below prefers the turn's absolute position and explains why.

@@ -301,18 +301,43 @@ for (const each of PLATFORMS) {
     await page.locator('[data-settings-nav-item="keyboard"]').click();
     await page.waitForSelector('[data-binding-slot]', { timeout: 5_000 });
     const slots = await page.evaluate(() => {
+      // `ChordGlyphs` paints a slot's chord as several sibling nodes now — a
+      // `font-sans` span per Apple glyph segment, plain text beside it —
+      // rather than the one flat string this range used to hold before the
+      // Keyboard settings rows were routed through it too. A `Range` gives
+      // back one rect PER NODE'S OWN fragment, so a chord that never wraps
+      // at all now reports several rects: one physical line read as several.
+      // Grouped by `top`, which recovers the count this measurement always
+      // meant — same-line fragments differ by at most ~1px (the sans span's
+      // own ascent against the mono text beside it, measured live), a real
+      // wrap by a full line-height (14-15px at this size), so a 4px
+      // tolerance tells the two apart without being tuned to either font.
+      const visualLines = (rects) => {
+        const groups = [];
+        for (const rect of rects) {
+          const group = groups.find((g) => Math.abs(g.top - rect.top) < 4);
+          if (group === undefined) {
+            groups.push({ top: rect.top, rects: [rect] });
+          } else {
+            group.rects.push(rect);
+          }
+        }
+        return groups.map((g) => ({
+          width: Math.max(...g.rects.map((r) => r.right)) - Math.min(...g.rects.map((r) => r.left)),
+        }));
+      };
       const rows = [];
       for (const slot of document.querySelectorAll('[data-binding-slot]')) {
         const kbd = slot.querySelector('[data-settings-keys]');
         if (kbd === null) continue;
         const range = document.createRange();
         range.selectNodeContents(kbd);
-        const lines = [...range.getClientRects()];
+        const boxLines = visualLines([...range.getClientRects()]);
         rows.push({
           keys: (kbd.textContent ?? '').trim(),
           name: slot.getAttribute('aria-label') ?? '',
-          inkW: Math.max(...lines.map((r) => r.width)),
-          lines: lines.length,
+          inkW: Math.max(...boxLines.map((l) => l.width), 0),
+          lines: boxLines.length,
           innerW: slot.clientWidth,
           scrollW: slot.scrollWidth,
           left: slot.getBoundingClientRect().left,
@@ -373,6 +398,74 @@ for (const each of PLATFORMS) {
     );
     await page.screenshot({ path: `${outDir}/chord-symbols-settings-${each.name}.png` });
     console.log(`${outDir}/chord-symbols-settings-${each.name}.png`);
+  }
+
+  /* ── THE ROW ITSELF, AND THE REBINDING EDITOR BESIDE IT ──────────────
+   *
+   * #482 measured the key sheet's ⇧ against the Send key option and missed
+   * this list: `BindingLine` (`SettingsOverlay.tsx`) painted `chordSymbols`
+   * as a flat string inside a `font-mono` slot, so its own ⌘/⇧ never got the
+   * sans-stack span every other chip did — the exact defect the operator
+   * reported a second time ("they still aren't consistent"). Measured the
+   * same way here, on both states the operator asked to recheck: the
+   * ordinary list, and the rebinding editor mid-capture — arming ONE slot
+   * swaps it for an input; its neighbours keep painting theirs, which is
+   * what stays on screen while a rebind is in progress.
+   */
+  let keyboardRowGlyph = null;
+  let keyboardRowGlyphArmed = null;
+  if (settingsOpen && each.name === 'mac') {
+    const glyphInSlot = async (id, glyph) =>
+      page.evaluate(
+        ({ rowId, target }) => {
+          const glyphRect = (root, needle) => {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              const idx = node.textContent.indexOf(needle);
+              if (idx !== -1) {
+                const range = document.createRange();
+                range.setStart(node, idx);
+                range.setEnd(node, idx + 1);
+                const rect = range.getBoundingClientRect();
+                return {
+                  fontFamily: getComputedStyle(node.parentElement).fontFamily,
+                  height: rect.height,
+                };
+              }
+            }
+            return null;
+          };
+          const slot = document.querySelector(
+            `[data-binding-slot="${rowId}:0"] [data-settings-keys]`,
+          );
+          return slot === null ? null : glyphRect(slot, target);
+        },
+        { rowId: id, target: glyph },
+      );
+
+    // `newProject` ships `Mod-Shift-p` — ⇧⌘P — so the SAME glyph (⇧) this
+    // section compares below is what gets measured, rather than a different
+    // Apple symbol whose glyph shape could account for its own sub-pixel
+    // height difference.
+    keyboardRowGlyph = await glyphInSlot('newProject', '⇧');
+    // Arm a DIFFERENT row (`palette`) — the rebinding editor — and
+    // re-measure `newProject`, which stays on screen, unarmed, right beside
+    // it.
+    await page.locator('[data-binding-slot="palette:0"]').click();
+    const armed = await settle(
+      page,
+      () => document.querySelector('[data-binding-capture]') !== null,
+      `${each.name}: the rebinding editor arms`,
+    );
+    if (armed) {
+      keyboardRowGlyphArmed = await glyphInSlot('newProject', '⇧');
+    }
+    await page.keyboard.press('Escape');
+    await settle(
+      page,
+      () => document.querySelector('[data-binding-capture]') === null,
+      `${each.name}: the rebinding editor cancels`,
+    );
   }
 
   /* ── THE SEND KEY OPTION'S ⇧, AGAINST A CHIP THAT SHARES IT ─────────────
@@ -480,6 +573,33 @@ for (const each of PLATFORMS) {
         sendKeyGlyph !== null &&
         Math.abs(sheetGlyph.height - sendKeyGlyph.height) <= 1,
       JSON.stringify({ sheetGlyph, sendKeyGlyph }),
+    );
+    // THE KEYBOARD SETTINGS ROW, THE SAME TWO QUESTIONS — the operator's own
+    // recheck, and the one comparison #482 never ran.
+    check(
+      `${each.name}: a Keyboard settings row’s ⇧ shares the Send key option’s computed font-family`,
+      keyboardRowGlyph !== null &&
+        sendKeyGlyph !== null &&
+        keyboardRowGlyph.fontFamily === sendKeyGlyph.fontFamily,
+      JSON.stringify({ keyboardRowGlyph, sendKeyGlyph }),
+    );
+    check(
+      `${each.name}: and paints within 1px of the Send key option’s own ⇧ height`,
+      keyboardRowGlyph !== null &&
+        sendKeyGlyph !== null &&
+        Math.abs(keyboardRowGlyph.height - sendKeyGlyph.height) <= 1,
+      JSON.stringify({ keyboardRowGlyph, sendKeyGlyph }),
+    );
+    // AND STILL TRUE WITH THE REBINDING EDITOR OPEN BESIDE IT — arming a
+    // neighbour's capture box must not be what makes this row's own glyph
+    // correct or incorrect.
+    check(
+      `${each.name}: the row’s ⇧ still matches with the rebinding editor armed beside it`,
+      keyboardRowGlyphArmed !== null &&
+        sendKeyGlyph !== null &&
+        keyboardRowGlyphArmed.fontFamily === sendKeyGlyph.fontFamily &&
+        Math.abs(keyboardRowGlyphArmed.height - sendKeyGlyph.height) <= 1,
+      JSON.stringify({ keyboardRowGlyphArmed, sendKeyGlyph }),
     );
   }
 

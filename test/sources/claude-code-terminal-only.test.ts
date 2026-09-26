@@ -70,6 +70,7 @@ describe('terminalRow -- the pure shape', () => {
       decisions: [],
       branch: 'feature/x',
       resumeCommand: `claude --resume ${CONVO_ID}`,
+      createdAt: '2026-01-01T00:00:00.000Z',
     });
     expect(row).toMatchObject({
       // THE ROW ID STAYS PANE-ROUTED, deliberately: `recordPrompt` and
@@ -86,6 +87,7 @@ describe('terminalRow -- the pure shape', () => {
       vamControlled: true,
       pane: 'vam-alpha-new001',
       resumeCommand: `claude --resume ${CONVO_ID}`,
+      createdAt: '2026-01-01T00:00:00.000Z',
     });
   });
 
@@ -96,8 +98,41 @@ describe('terminalRow -- the pure shape', () => {
       decisions: [],
       branch: null,
       resumeCommand: null,
+      createdAt: null,
     });
     expect(row.resumeCommand).toBeUndefined();
+  });
+
+  /**
+   * `runningProvider` -- the same fact `paneRow`'s own sibling test carries,
+   * for the `terminal` row: this pane's foreground command is the SAME
+   * `TmuxSession.command` this row is already built from, so a provider
+   * started by hand over a `terminal` row (Resume's own alternative) is
+   * caught with no second read either.
+   */
+  it('is absent for a plain shell -- the fixture session’s own "zsh"', () => {
+    const row = terminalRow(session, {
+      sessionId: CONVO_ID,
+      title: 'x',
+      decisions: [],
+      branch: null,
+      resumeCommand: null,
+      createdAt: null,
+    });
+    expect(row.runningProvider).toBeUndefined();
+  });
+
+  it('names the provider when the pane’s foreground command is one', () => {
+    const running: TmuxSession = { ...session, command: 'codex' };
+    const row = terminalRow(running, {
+      sessionId: CONVO_ID,
+      title: 'x',
+      decisions: [],
+      branch: null,
+      resumeCommand: null,
+      createdAt: null,
+    });
+    expect(row.runningProvider).toBe('codex');
   });
 });
 

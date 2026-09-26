@@ -306,6 +306,52 @@ describe('listVamSessions', () => {
   });
 
   /**
+   * THE SEVENTH FIELD: tmux's own `session_created`, unix seconds -- what a
+   * pane with no transcript yet (`pane-row.ts`'s `paneRow`) reads for
+   * `Session.createdAt`, on the same rule the fifth and sixth fields follow:
+   * it comes LAST, so every shorter stub in this suite, including every case
+   * above, keeps parsing.
+   */
+  it('reads session_created as a seventh field, and does without it', async () => {
+    const run = fakeTmux(() => ({
+      stdout: [
+        [
+          'claude-code:demo-11111111',
+          '4242',
+          'vam-demo-a1b2c3',
+          'claude',
+          'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+          '/w/demo',
+          '1700000000',
+        ].join('\t'),
+        '',
+      ].join('\n'),
+    }));
+    await expect(listVamSessions(run)).resolves.toEqual({
+      kind: 'ok',
+      sessions: [
+        {
+          project: 'claude-code:demo-11111111',
+          pid: '4242',
+          name: 'vam-demo-a1b2c3',
+          command: 'claude',
+          vamSessionId: 'a1b2c3d4-e5f6-4789-a012-3456789abcde',
+          cwd: '/w/demo',
+          sessionCreated: '1700000000',
+        },
+      ],
+    });
+  });
+
+  it('reports a session with no seventh field as carrying none', async () => {
+    const run = fakeTmux(() => ({
+      stdout: ['claude-code:demo-11111111\t4242\tvam-demo-a1b2c3\tzsh\t\t/w/demo', ''].join('\n'),
+    }));
+    const result = await listVamSessions(run);
+    expect(result.kind === 'ok' && result.sessions[0]?.sessionCreated).toBeUndefined();
+  });
+
+  /**
    * THE PID FIELD ON ITS OWN, so a project-tag failure and a pid-tag failure
    * are distinguishable by a caller that only wants one of them: a session
    * `createVamSession` tagged with a project but whose pid tag failed (or

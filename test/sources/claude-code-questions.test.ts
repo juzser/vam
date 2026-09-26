@@ -137,6 +137,65 @@ describe('AskUserQuestion, malformed -- data we do not have, never a throw', () 
 });
 
 /**
+ * A REUSED `tool_use` id -- a transcript defect, not a vam one. Real Claude
+ * Code ids are unique; this is insurance against a transcript that breaks
+ * that assumption (one synthetic fixture in the operator's own corpus did),
+ * so two different `AskUserQuestion` calls never collapse into one card
+ * sharing one answer.
+ */
+describe('a tool_use id that repeats', () => {
+  it('leaves every id unchanged, byte for byte, when no id repeats', () => {
+    const tail = jsonl(
+      ask('toolu_1', [PROVIDERS]),
+      answer('toolu_1', 'Codex CLI'),
+      ask('toolu_2', [PROVIDERS]),
+    );
+    expect(facts(tail).questions.map((q) => q.id)).toEqual(['toolu_1:0', 'toolu_2:0']);
+  });
+
+  it('answers the first occurrence and leaves the second open', () => {
+    const second = { ...PROVIDERS, question: 'Which one first?' };
+    const tail = jsonl(
+      ask('toolu_mock_1', [PROVIDERS]),
+      answer('toolu_mock_1', 'Codex CLI'),
+      ask('toolu_mock_1', [second]),
+    );
+    const questions = facts(tail).questions;
+    expect(questions).toHaveLength(2);
+    expect(questions[0]?.question).toBe(PROVIDERS.question);
+    expect(questions[0]?.answer).toBe('Codex CLI');
+    expect(questions[1]?.question).toBe(second.question);
+    expect(questions[1]?.answer).toBeNull();
+    expect(questions[0]?.id).not.toBe(questions[1]?.id);
+  });
+
+  it('attaches an answer to the occurrence it actually closes, not to every occurrence', () => {
+    const second = { ...PROVIDERS, question: 'Which one first?' };
+    const tail = jsonl(
+      ask('toolu_mock_1', [PROVIDERS]),
+      ask('toolu_mock_1', [second]),
+      answer('toolu_mock_1', 'second answer'),
+    );
+    const questions = facts(tail).questions;
+    expect(questions[0]?.answer).toBeNull();
+    expect(questions[1]?.answer).toBe('second answer');
+  });
+
+  it('does not reopen the first occurrence once the second has been answered', () => {
+    const second = { ...PROVIDERS, question: 'Which one first?' };
+    const tail = jsonl(
+      ask('toolu_mock_1', [PROVIDERS]),
+      answer('toolu_mock_1', 'first answer'),
+      ask('toolu_mock_1', [second]),
+      answer('toolu_mock_1', 'second answer'),
+    );
+    const questions = facts(tail).questions;
+    expect(questions[0]?.answer).toBe('first answer');
+    expect(questions[1]?.answer).toBe('second answer');
+  });
+});
+
+/**
  * `preview` -- 127 of 917 options in the operator's own data carry one, and it
  * was dropped on the floor: `readOption` kept `label` and `description` and
  * `QuestionOption` had no third field. It is what picking the option would

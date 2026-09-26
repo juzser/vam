@@ -52,7 +52,9 @@
  */
 
 import { StringDecoder } from 'node:string_decoder';
+import { CURSOR_FORMAT } from '../../sources/tmux/argv.js';
 import {
+  CONTROL_TIMEOUT_MS,
   type ControlChildProcess,
   RECONNECT_BACKOFF_MS,
   type SpawnControlChild,
@@ -65,6 +67,7 @@ import {
   SAFE_TARGET_RE,
 } from '../../sources/tmux/control-protocol.js';
 import { NO_SESSION } from '../../sources/tmux/spawn.js';
+import { seedWithCursor } from './seed.js';
 
 export type { ControlChildProcess, SpawnControlChild } from '../../sources/tmux/control.js';
 
@@ -135,7 +138,18 @@ export type StreamClientOptions = {
  * empty body by `#handleDown`, which already owns rescheduling for that
  * case -- see `#reconnect`'s own note). */
 type BlockResult = { readonly ok: boolean; readonly body: string };
-type PendingBlock = { readonly resolve: (result: BlockResult) => void };
+type PendingBlock = {
+  readonly resolve: (result: BlockResult) => void;
+  /** Reference-identity marker shared by every entry ONE `#sendChain` call
+   * pushes for its `;`-chained line -- lets the block handler recognise
+   * "this reply's siblings, still queued right behind it, belong to the
+   * SAME chain" without threading a separate id counter through, and
+   * without risking a false match against an unrelated `#send()` (which
+   * never sets this) or a LATER, unrelated chain. `undefined` for a plain
+   * `#send()`, which only ever expects exactly one reply and has nothing
+   * to abort-flush. */
+  readonly chain?: object;
+};
 
 /**
  * One connection, attached to the session's window, for as long as the
@@ -204,8 +218,12 @@ export class StreamClient {
 
   /**
    * Attach, resolve the pane id and seed the initial screen -- resolves with
-   * the RAW `capture-pane -p -e -J` body (escape sequences intact, exactly
-   * what `xterm.write()` wants).
+   * `seedWithCursor`'s own composed body (the RAW `capture-pane -p -e -N`
+   * text, escape sequences intact, with tmux's own cursor position appended
+   * as a trailing CSI escape -- see `seed.ts`'s own header for why; this
+   * file used to ask for `-J` and hand `xterm.write()` nothing but the
+   * plain text dump, which is what that flag named here until the cursor
+   * fix replaced it) -- exactly what `xterm.write()` wants.
    */
   async connect(): Promise<string> {
     // THE ONE VALIDATION GATE (module header) -- refused BEFORE anything is
@@ -317,11 +335,41 @@ export class StreamClient {
    * result IS the first seed) and by every later reseed (`%continue`,
    * reconnect), which instead push through `onSeed`. `ok` is carried
    * through unchanged: a `%error` here (the session is gone) must not be
-   * mistaken for a real screen by a caller that only reads `.body`. */
+   * mistaken for a real screen by a caller that only reads `.body`.
+   *
+   * CHAINED WITH A CURSOR QUERY, in ONE control-mode line (`#sendChain`),
+   * exactly `argv.ts`'s `capturePaneArgv` shape -- see `seed.ts`'s own
+   * header for why a plain `capture-pane` text dump on its own is not
+   * enough (it carries no cursor position at all) and why this asks for
+   * `-N` rather than this file's old `-J` (row-count exactness `cursor_y`
+   * depends on). `seedWithCursor` turns the pair into the one body this
+   * method returns -- xterm's cursor lands on tmux's own cell the moment
+   * this text is written, never wherever the text itself happened to end.
+   *
+   * NEVER HANGS (a review finding on PR 505): this method's only `await` is
+   * `#sendChain`, which is itself bounded -- see its own header for both
+   * halves of that fix (an aborted chain settled the instant it happens,
+   * a silent one bounded by a timeout) -- so bounding `#sendChain` bounds
+   * this method overall, with nothing further needed here. */
   async #reseed(): Promise<BlockResult> {
-    const result = await this.#send(`capture-pane -p -e -J -t ${paneTarget(this.#target)}`);
-    if (result.ok) this.#seeded = true;
-    return result;
+    const target = paneTarget(this.#target);
+    const results = await this.#sendChain(
+      `display-message -p -t ${target} -F "${CURSOR_FORMAT}" ; capture-pane -p -e -N -t ${target}`,
+      2,
+    );
+    const cursor = results[0];
+    const screen = results[1];
+    // `#sendChain(line, 2)` always resolves an array of exactly two entries
+    // (it pushes exactly `count` promises before writing the line, and
+    // `Promise.all` preserves both their order and count) -- this is only
+    // reachable if that invariant itself is ever broken, never in ordinary
+    // operation, and TypeScript's `noUncheckedIndexedAccess` cannot see that
+    // invariant through a fixed-index destructure on a `readonly T[]`.
+    if (cursor === undefined || screen === undefined) {
+      throw new Error('StreamClient#reseed: #sendChain did not answer with two replies');
+    }
+    if (screen.ok) this.#seeded = true;
+    return { ok: screen.ok, body: seedWithCursor(screen.body, cursor.body) };
   }
 
   /** Best-effort: a real tmux answers `%error` for an unsupported flag
@@ -354,6 +402,94 @@ export class StreamClient {
     });
   }
 
+  /**
+   * A `;`-chained control-mode LINE, exactly `argv.ts`'s own `capturePaneArgv`
+   * shape (cursor query first, screen read second, ONE tmux invocation) --
+   * `#send` above only ever expects ONE `%begin`/`%end` per line it writes,
+   * so a chained line needs its own method: `count` block replies are queued
+   * in the SAME FIFO `#blockQueue` `#send` already uses (tmux answers a
+   * `;`-chained line with one block PER sub-command, in order -- this file's
+   * own `#handleEvent` already shifts one queued resolver per block event
+   * REGARDLESS of how many were pushed for a single write, so queueing
+   * `count` of them here needs no change there at all), then written as ONE
+   * line so tmux runs both commands back to back with no OTHER client's
+   * command -- and no `%output` this connection would otherwise have to
+   * wait out -- able to land in between (`argv.ts`'s own note: "THE ORDER IS
+   * LOAD-BEARING").
+   *
+   * NEVER HANGS (a review finding on PR 505, real-tmux MEASURED): a real tmux
+   * aborts the WHOLE chained line the instant its first sub-command fails to
+   * parse or otherwise errors at parse time (an unknown command, an unknown
+   * flag) -- exactly ONE `%begin`/`%error`/`%end` for the entire line, and
+   * every command chained after it is neither run nor answered. Before this
+   * fix, `count` resolvers were queued but only the ones a real block
+   * actually arrived for were ever settled, so `Promise.all` below waited
+   * forever for whichever sibling tmux silently dropped. Two independent
+   * backstops close that:
+   *   1. `#handleEvent`'s block branch settles every remaining SIBLING of an
+   *      erroring block synchronously, the instant the error itself is
+   *      handled -- covers the measured case above with no timer needed.
+   *   2. THIS method's own timer (`#timeoutChain`, `CONTROL_TIMEOUT_MS` --
+   *      the same budget `control.ts`'s own `ControlClient` bounds a single
+   *      command to, this file's only established number for "tmux never
+   *      answered at all") -- covers anything (1) does not: a connection
+   *      that goes fully silent rather than answering with an error at all.
+   * Cleared the moment `Promise.all` itself settles, whichever backstop (or
+   * neither, the ordinary case) got there first.
+   */
+  #sendChain(line: string, count: number): Promise<readonly BlockResult[]> {
+    const chain = {};
+    const results: Promise<BlockResult>[] = [];
+    for (let i = 0; i < count; i += 1) {
+      results.push(
+        new Promise<BlockResult>((resolve) => this.#blockQueue.push({ resolve, chain })),
+      );
+    }
+    const child = this.#child;
+    this.#write(line);
+    const settled = Promise.all(results);
+    const timer = setTimeout(() => this.#timeoutChain(chain, child), CONTROL_TIMEOUT_MS);
+    return settled.finally(() => clearTimeout(timer));
+  }
+
+  /**
+   * Fires only if `#sendChain`'s own `Promise.all` has NOT already settled
+   * `CONTROL_TIMEOUT_MS` after its line was written -- see that method's own
+   * header for why this is the second of two backstops, not the only one.
+   *
+   * ALWAYS settles whatever this chain is still owed, unconditionally: even
+   * if the connection itself is already gone (this chain was written to a
+   * child that had already died, or died before answering at all -- either
+   * way nothing else will ever pair a reply to these resolvers). Settled
+   * with an EMPTY body, exactly `#handleDown`'s own flush convention below
+   * -- `#reconnect`'s and `#handleReseedFailure`'s own `result.body === ''`
+   * checks already read that as "this failure was already handled here,
+   * take no further action", so this must never invent different text.
+   *
+   * THEN, ONLY if the connection itself is still THIS chain's own -- alive,
+   * simply never answering -- treats it exactly like any other lost
+   * connection: kills it and runs the ordinary `#handleDown` reconnect
+   * bookkeeping, so a stuck reseed surfaces through `onDown` (a review
+   * finding: this used to be able to leave a phantom, nobody-is-tracking
+   * connection open instead). Guarded on `this.#child === child`: if the
+   * connection already dropped (or a fresh one already replaced it) by the
+   * time this fires, that drop's own handling already ran and this must not
+   * repeat it against an unrelated child.
+   */
+  #timeoutChain(chain: object, child: ControlChildProcess | null): void {
+    for (let i = this.#blockQueue.length - 1; i >= 0; i -= 1) {
+      const entry = this.#blockQueue[i];
+      if (entry !== undefined && entry.chain === chain) {
+        this.#blockQueue.splice(i, 1);
+        entry.resolve({ ok: false, body: '' });
+      }
+    }
+    if (child !== null && this.#child === child) {
+      child.kill();
+      this.#handleDown();
+    }
+  }
+
   #onData(chunk: string): void {
     for (const event of this.#framer.feedEvents(chunk)) {
       this.#handleEvent(event);
@@ -369,7 +505,24 @@ export class StreamClient {
       // life it arrives, never paired with a command this file wrote.
       if (!event.reply) return;
       const pending = this.#blockQueue.shift();
-      pending?.resolve({ ok: event.ok, body: event.body });
+      if (pending === undefined) return;
+      pending.resolve({ ok: event.ok, body: event.body });
+      if (event.ok || pending.chain === undefined) return;
+      // A CHAIN-ABORTING %error (a review finding on PR 505, real-tmux
+      // MEASURED -- see `#sendChain`'s own header): tmux never runs, or
+      // answers, anything chained after a failing sub-command, so every
+      // SIBLING this same chain still owes a reply to never gets one on its
+      // own. Settled right here, synchronously, with the SAME error text --
+      // there is nothing else to give them, and `#reconnect`'s existing
+      // non-empty-body handling already knows what to do with a real error.
+      // Stops at the first entry that is not this chain's own (a different
+      // chain, a plain `#send()`, or the queue is simply empty).
+      let sibling = this.#blockQueue[0];
+      while (sibling !== undefined && sibling.chain === pending.chain) {
+        this.#blockQueue.shift();
+        sibling.resolve({ ok: false, body: event.body });
+        sibling = this.#blockQueue[0];
+      }
       return;
     }
     if (event.kind === 'output') {
@@ -452,14 +605,25 @@ export class StreamClient {
     // RESEED rather than trust nothing was missed while paused -- `%output`
     // that arrived during the pause was dropped above (see the module
     // header), so a fresh `capture-pane` is the only way to know the
-    // screen is caught up. A failed reseed here (the session vanished
-    // between the pause and the resume) is left for the NEXT drop to
-    // discover through the ordinary reconnect path -- rare enough
-    // (`%continue` implies the connection was never lost) not to earn its
-    // own give-up branch.
+    // screen is caught up. A FAILED reseed here (the session vanished
+    // between the pause and the resume, or its chain aborted/timed out --
+    // `#sendChain`'s own header) is routed through the SAME
+    // `#handleReseedFailure` `#reconnect` uses below (a review finding on
+    // PR 505: this used to just swallow a failed reseed here, silently --
+    // nothing else was guaranteed to ever notice or retry, since `%continue`
+    // implies the connection was never lost, so there may be no "next drop"
+    // coming on its own to discover it through). `child` is captured before
+    // the reseed rather than re-read from `this.#child` afterwards: nothing
+    // else in this class changes it while this reseed is in flight, but
+    // capturing it up front matches every OTHER identity check in this file
+    // and costs nothing.
+    const child = this.#child;
     void this.#reseed().then((result) => {
-      if (!result.ok) return;
-      for (const listener of this.#seedListeners) listener(result.body);
+      if (result.ok) {
+        for (const listener of this.#seedListeners) listener(result.body);
+        return;
+      }
+      if (child !== null) this.#handleReseedFailure(result.body, child);
     });
   }
 
@@ -512,26 +676,11 @@ export class StreamClient {
    * `control.ts`'s A2 note on why a mutating command must never be blindly
    * re-run applies here for the identical reason).
    *
-   * A FAILED reseed here splits three ways (a review finding on the
-   * unbounded loop, closed together with the cap above).
-   *
-   * AN EMPTY body means the reply was synthesised by `#handleDown`'s own
-   * queue-flush (`#wire`'s new child died again before replying at all) --
-   * that `#handleDown` call has ALREADY run (a child's `'exit'`/`'error'`
-   * fires before this `await` resumes) and already decided whether to
-   * schedule the next attempt or give up; nothing further happens here, or
-   * that decision would be double-made.
-   *
-   * A NON-EMPTY body means the connection stayed up long enough to ask and
-   * tmux actually answered `%error` -- this attempt's own child is still
-   * alive and is killed here either way, since neither branch below reuses
-   * it. If the text matches `NO_SESSION` ("can't find session/pane/
-   * window"), the session itself is gone and this gives up FOR GOOD,
-   * immediately, never spending the remaining attempts on a server that
-   * will never answer differently. Any OTHER real error text is treated
-   * as "try again" -- `#handleDown` is called explicitly (nothing else
-   * would, since this child never actually died) to run the same
-   * cap/backoff decision an ordinary connection drop would.
+   * A FAILED reseed here is routed through `#handleReseedFailure` (a review
+   * finding on the unbounded loop, closed together with the cap above; that
+   * method's own header covers the empty-vs-non-empty-body split in full --
+   * shared, since `#finishResume` below needs the identical decision for a
+   * failed reseed of its own).
    */
   async #reconnect(): Promise<void> {
     const child = this.#spawn();
@@ -540,18 +689,55 @@ export class StreamClient {
     const result = await this.#reseed();
     if (this.#disposed || this.#givenUp) return;
     if (!result.ok) {
-      if (result.body === '') return;
-      const stillCurrent = this.#child === child;
-      if (stillCurrent) this.#child = null;
-      child.kill();
-      if (NO_SESSION.test(result.body)) {
-        this.#giveUp('session-gone');
-      } else if (stillCurrent) {
-        this.#handleDown();
-      }
+      this.#handleReseedFailure(result.body, child);
       return;
     }
     this.#reconnectAttempts = 0;
     for (const listener of this.#seedListeners) listener(result.body);
+  }
+
+  /**
+   * A failed reseed, however it was learned about -- `#reconnect`'s own
+   * attempt above, or `#finishResume`'s after `%pause`/`%continue` -- landed
+   * the SAME way rather than one of them silently swallowing it (a review
+   * finding on PR 505: `#finishResume` used to just give up quietly on a
+   * failed reseed; unless the connection also happened to drop for some
+   * OTHER reason afterwards, nothing would ever prompt a reconnect attempt
+   * or tell `onDown`'s listeners anything was wrong -- exactly the silent
+   * freeze this fix closes, since `write()` would keep accepting keystrokes
+   * into a pane nothing is reading from anymore).
+   *
+   * AN EMPTY body means the reply was synthesised by `#handleDown`'s own
+   * queue-flush OR `#sendChain`'s own timeout backstop (`#timeoutChain`,
+   * which already kills the child and calls `#handleDown` itself before
+   * this ever runs) -- that call has ALREADY run and already decided
+   * whether to schedule the next attempt or give up; nothing further
+   * happens here, or that decision would be double-made.
+   *
+   * A NON-EMPTY body means the connection stayed up long enough to ask and
+   * tmux actually answered `%error` (including a chain-aborting one --
+   * `#sendChain`'s own header: real tmux stays healthy after aborting one
+   * chained line, so this is never presumed dead by that alone) -- `child`
+   * is killed here either way, since neither branch below reuses it. If the
+   * text matches `NO_SESSION` ("can't find session/pane/window"), the
+   * session itself is gone and this gives up FOR GOOD, immediately, never
+   * spending the remaining attempts on a server that will never answer
+   * differently. Any OTHER real error text is treated as "try again" --
+   * `#handleDown` is called explicitly (nothing else would, since this
+   * child never actually died on its own) to run the same cap/backoff
+   * decision an ordinary connection drop would, but ONLY if `child` is
+   * still `this.#child` -- a concurrent drop or a later successful
+   * reconnect may already have moved it on by the time this runs.
+   */
+  #handleReseedFailure(body: string, child: ControlChildProcess): void {
+    if (body === '') return;
+    const stillCurrent = this.#child === child;
+    if (stillCurrent) this.#child = null;
+    child.kill();
+    if (NO_SESSION.test(body)) {
+      this.#giveUp('session-gone');
+    } else if (stillCurrent) {
+      this.#handleDown();
+    }
   }
 }
