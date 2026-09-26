@@ -6,12 +6,22 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { projectIdOf } from '../../../src/main/sources/claude-code/project-id.js';
+import type { GitRun } from '../../../src/main/worktrees/git-run.js';
 import { runGitViaCli } from '../../../src/main/worktrees/git-run.js';
 import { getWorktreeStatuses } from '../../../src/main/worktrees/status.js';
 import { createWorktree, type WorktreesDeps } from '../../../src/main/worktrees/worktrees.js';
@@ -51,6 +61,29 @@ function depsFor(repoRoot: string): WorktreesDeps {
     resolveProjectDirectory: async (id: string) => (id === projectId ? repoRoot : null),
     knownProjectIds: async () => [projectId],
   };
+}
+
+/**
+ * WRAPS THE REAL `runGitViaCli()`, never replaces it -- every call still
+ * reaches a real `git` binary (this file's own "no mocked git" rule, this
+ * file's header), just with each `argv`/`cwd` pair recorded first. This is
+ * what lets a single test both prove the ARGV SHAPE (`-c core.fsmonitor=
+ * false`, `--no-optional-locks`, in the right position relative to the
+ * subcommand) and the real, git-verified BEHAVIOUR in one assertion,
+ * without a second, separately-mocked test that could drift from what this
+ * module actually spawns.
+ */
+function recordingRun(): {
+  readonly run: GitRun;
+  readonly calls: readonly { readonly argv: readonly string[]; readonly cwd: string }[];
+} {
+  const calls: { argv: readonly string[]; cwd: string }[] = [];
+  const real = runGitViaCli();
+  const run: GitRun = async (argv, cwd) => {
+    calls.push({ argv, cwd });
+    return real(argv, cwd);
+  };
+  return { run, calls };
 }
 
 describe('getWorktreeStatuses', () => {
@@ -249,5 +282,66 @@ describe('getWorktreeStatuses', () => {
     const statuses = result as readonly { worktreeId: string; dirty: boolean }[];
     expect(statuses).toHaveLength(1);
     expect(statuses[0]?.dirty).toBe(true);
+  });
+});
+
+describe('getWorktreeStatuses — security (S2): fsmonitor hook / lock hygiene', () => {
+  it('the status call carries `-c core.fsmonitor=false` and `--no-optional-locks`; the rev-list call carries neither', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const { run, calls } = recordingRun();
+    const deps: WorktreesDeps = { ...depsFor(repo), run };
+    const created = await createWorktree({ projectId: projectIdOf(repo), name: 'feat' }, deps);
+    const worktreeId = (created as { worktreeId: string }).worktreeId;
+
+    await getWorktreeStatuses({ projectId: projectIdOf(repo), worktreeIds: [worktreeId] }, deps);
+
+    const statusCall = calls.find((c) => c.argv.includes('status'));
+    expect(statusCall?.argv).toEqual([
+      '-c',
+      'core.fsmonitor=false',
+      '--no-optional-locks',
+      'status',
+      '--porcelain=v1',
+      '-z',
+    ]);
+    const revListCall = calls.find((c) => c.argv.includes('rev-list'));
+    expect(revListCall?.argv).toEqual(['rev-list', '--left-right', '--count', '@{u}...HEAD']);
+  });
+
+  /**
+   * A REAL `core.fsmonitor` HOOK, PLANTED IN THE WORKTREE'S OWN SHARED
+   * CONFIG -- exactly the S2 finding: an adopted worktree's `.git/config` is
+   * not trusted content, and `git status` itself (never anything in this
+   * module) is what would run whatever `core.fsmonitor` names, unattended,
+   * on every 20s poll. The marker file is the hook's own side effect, not a
+   * status assertion -- this test cares whether the hook RAN, not what it
+   * printed.
+   *
+   * FALSIFIED BY HAND, MEASURED: remove `'-c', 'core.fsmonitor=false',` from
+   * `computeOneStatus`'s own argv and rerun -- the marker file appears,
+   * proving this test exercises the real flag rather than some other,
+   * coincidental reason `git` never ran the hook. Verified by hand outside
+   * this suite too (a scratch repo, a hook script, a bare `git status`
+   * before and after adding the flag) before writing either assertion.
+   */
+  it('never fires a planted `core.fsmonitor` hook while polling status', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const created = await createWorktree({ projectId: projectIdOf(repo), name: 'feat' }, deps);
+    const worktreeId = (created as { worktreeId: string }).worktreeId;
+    const marker = join(parent, 'fsmonitor-fired.txt');
+    const hookPath = join(worktreeId, 'fsmonitor-hook.sh');
+    writeFileSync(
+      hookPath,
+      `#!/bin/sh\necho fired >> ${JSON.stringify(marker)}\necho '"a b" true'\n`,
+    );
+    chmodSync(hookPath, 0o755);
+    execFileSync('git', ['config', 'core.fsmonitor', hookPath], { cwd: worktreeId });
+
+    await getWorktreeStatuses({ projectId: projectIdOf(repo), worktreeIds: [worktreeId] }, deps);
+
+    expect(existsSync(marker)).toBe(false);
   });
 });

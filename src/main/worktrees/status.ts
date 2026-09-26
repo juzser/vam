@@ -8,19 +8,53 @@
  * DIRECTORY (never `repoRoot` -- a worktree's dirty state and its own
  * upstream are per-CHECKOUT facts, not per-repository ones):
  *
- *  - `git status --porcelain=v1 -z` -- WITH untracked files, deliberately.
- *    Measured against this very repository before choosing: 26ms including
- *    untracked files vs. 16ms with `--untracked-files=no` -- both far under
- *    any cadence this feature polls at (`useWorktreeStatuses.ts`'s own
- *    20s), so the plainer, more complete form (an untracked file left in a
- *    worktree is not "clean" to an operator asking "did I leave something
- *    here") wins without needing the faster flag at all.
+ *  - `git -c core.fsmonitor=false --no-optional-locks status --porcelain=v1
+ *    -z` -- WITH untracked files, deliberately. Measured against this very
+ *    repository before choosing: 26ms including untracked files vs. 16ms
+ *    with `--untracked-files=no` -- both far under any cadence this feature
+ *    polls at (`useWorktreeStatuses.ts`'s own 20s), so the plainer, more
+ *    complete form (an untracked file left in a worktree is not "clean" to
+ *    an operator asking "did I leave something here") wins without needing
+ *    the faster flag at all.
+ *
+ *    SECURITY REVIEW FINDING (S2): `git status` runs UNATTENDED, every 20s,
+ *    with `cwd` inside a worktree this module has proven is real but NOT
+ *    trusted content -- an adopted worktree's own `.git`/config is read by
+ *    `git` itself before `status` ever answers. A planted `core.fsmonitor`
+ *    (an arbitrary executable, invoked BY `git status` to answer "what
+ *    might have changed") turns every recurring poll into a script vam
+ *    itself fires. FALSIFIED, MEASURED (not argued): a real repo with
+ *    `core.fsmonitor` set to a script that touches a marker file has that
+ *    marker appear after a bare `git status --porcelain=v1 -z`, and NOT
+ *    appear once `-c core.fsmonitor=false` is added -- `status.test.ts`'s
+ *    own "fsmonitor hook" suite has both directions. `--no-optional-locks`
+ *    alone does NOT stop it (measured the same way) -- it exists for a
+ *    DIFFERENT reason: it stops this poll from taking `index.lock` at all,
+ *    so a 20s background read never races the operator's own foreground
+ *    `git` over that lock. Both are per-call argv (`-c`, never written to
+ *    any `.git/config`), so neither ever survives past this one spawn.
+ *
+ *    RESIDUAL RISK, ACCEPTED: `-c core.fsmonitor=false` closes the ONE hook
+ *    `git status` itself consults for "what changed" before answering. It
+ *    does not disable every hook a full index refresh can still run under
+ *    some configurations (a `filter.<driver>.clean` on a tracked path, for
+ *    instance) -- closing every one of those would mean not running `git
+ *    status` in an untrusted worktree at all, which is a larger change than
+ *    this review round asked for. Accepted because the operator's own shell
+ *    prompt and IDE already run plain `git status` inside the same
+ *    worktrees on the same cadence class (seconds, not this feature's own
+ *    20s) -- vam's unattended poll is not a NEW exposure, only one MORE
+ *    caller of a surface the operator's own tooling already exercises.
  *  - `git rev-list --left-right --count @{u}...HEAD` -- `<behind>\t<ahead>`
  *    in that order (`--left-right`'s own convention: `@{u}` is the LEFT
  *    side of `...`). Fails outright when the worktree has no upstream
  *    configured, which is equally true of a DETACHED `HEAD` (no branch,
  *    hence no upstream either) -- caught and read as "cannot say", the
- *    same `null` reading `WorktreeInfo.branch` already gives.
+ *    same `null` reading `WorktreeInfo.branch` already gives. NEITHER FLAG
+ *    ABOVE APPLIES HERE: `rev-list` walks the commit graph alone -- it
+ *    never builds a working-tree diff, so it never consults `core.
+ *    fsmonitor` (a status-family concept) at all, and it takes no lock
+ *    `--no-optional-locks` would have skipped (it writes nothing).
  *
  * EVERY CANDIDATE IS PROVEN BEFORE EITHER CALL EVER RUNS -- the identical
  * two-check proof `removeWorktree` requires (`worktrees.ts`'s own security
@@ -99,7 +133,13 @@ function parseAheadBehind(stdout: string): { ahead: number; behind: number } | n
 async function computeOneStatus(worktreeId: string, run: GitRun): Promise<WorktreeStatus | null> {
   let dirty: boolean;
   try {
-    const { stdout } = await run(['status', '--porcelain=v1', '-z'], worktreeId);
+    // `-c core.fsmonitor=false` and `--no-optional-locks` -- BOTH per-call
+    // argv, NEVER written to any `.git/config` -- see this module's own
+    // header for the measured reason each one is here.
+    const { stdout } = await run(
+      ['-c', 'core.fsmonitor=false', '--no-optional-locks', 'status', '--porcelain=v1', '-z'],
+      worktreeId,
+    );
     dirty = stdout !== '';
   } catch {
     return null;

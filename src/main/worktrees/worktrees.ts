@@ -539,6 +539,23 @@ export async function removeWorktree(
   if (matched === undefined) {
     return refused('not-a-worktree', `${input.worktreeId} is not a linked worktree of ${repoRoot}`);
   }
+  // BELT AND SUSPENDERS, SAME AS `status.ts`'s OWN `matched.bare` CHECK --
+  // provably unreachable through any REAL git state today (a `bare` record
+  // only appears when the REPO itself being queried is bare, and `repoRoot`
+  // here is never bare: `whyNotARepository`/`repoRootOf` already refused
+  // that earlier, both in `removeWorktree` and in whatever resolved
+  // `resolvedDir` in the first place). NOT what protects the main worktree
+  // (that is the commondir check above; the main worktree's own entry is
+  // real, unlocked and NOT bare) -- this is a second, independent refusal
+  // for a different, purely hypothetical shape: an entry this module would
+  // otherwise treat as a normal, deletable worktree despite git itself
+  // marking it administrative.
+  if (matched.bare) {
+    return refused(
+      'not-a-worktree',
+      `${input.worktreeId} is a bare repository record, not a linked worktree`,
+    );
+  }
   if (matched.locked) {
     return refused(
       'locked',

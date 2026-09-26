@@ -492,6 +492,43 @@ describe('removeWorktree', () => {
     expect(existsSync(worktreeId)).toBe(true);
   });
 
+  /**
+   * THE MAIN WORKTREE ITSELF -- the project's own primary checkout, already
+   * a row in the sidebar, never one `listWorktrees` would ever hand back as
+   * a `WorktreeInfo` to delete (its own "filtered out by realpath
+   * comparison" rule). Before phase 2a's S4 review round this held only by
+   * READING `findRepoRootFromWorktree`'s own doc comment ("a `.git`
+   * DIRECTORY... is itself a main repository, not a linked worktree"), never
+   * by a test that actually calls `removeWorktree` on it. `resolvedDir`
+   * itself IS `repo` here (`depsFor`'s own `resolveProjectDirectory`), so
+   * `worktreeId: repo` is exactly what a compromised renderer sending the
+   * project's own directory back as a "worktree to delete" would look like.
+   *
+   * FALSIFIED BY HAND, MEASURED: disabling the `claimedRepoRoot === null ||
+   * ...` guard alone (the commondir check) is enough -- `matched` is found
+   * (the main worktree is a REAL entry in its own `git worktree list`,
+   * neither bare nor locked), so nothing else in `removeWorktree` catches
+   * it, and `git worktree remove` genuinely runs against the main checkout.
+   * `git` itself then refuses ("is a main working tree"), so the directory
+   * survives either way -- but the refusal changes from vam's own clean,
+   * pre-`git`-call `not-a-worktree` to git's own `git-failed`, proving this
+   * guard is the thing standing between "asked to delete the main worktree"
+   * and actually invoking `git worktree remove` on it, git's own refusal
+   * being a second, independent net rather than vam's only one.
+   */
+  it('refuses to remove the MAIN worktree itself, and touches nothing', async () => {
+    const parent = tempParent();
+    const repo = tempRepo(parent);
+    const deps = depsFor(repo);
+    const projectId = projectIdOf(repo);
+
+    const result = await removeWorktree({ projectId, worktreeId: repo }, deps);
+
+    expect(result).toMatchObject({ kind: 'refused', code: 'not-a-worktree' });
+    expect(existsSync(repo)).toBe(true);
+    expect(existsSync(join(repo, '.git'))).toBe(true);
+  });
+
   it('refuses a directory inside the confined root that git never registered as a worktree', async () => {
     const parent = tempParent();
     const repo = tempRepo(parent);

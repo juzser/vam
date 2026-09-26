@@ -3,8 +3,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  WORKTREE_STATUS_POLL_MS,
   useWorktreeStatuses,
+  WORKTREE_STATUS_POLL_MS,
 } from '../../../src/renderer/panels/worktrees/useWorktreeStatuses.js';
 import type { WorktreeStatus } from '../../../src/shared/worktree.js';
 
