@@ -378,6 +378,118 @@ check(
 
 await shootBothThemes(page, 'worktrees-external-tree');
 
+// ---------------------------------------------------------------------------
+// CONTRAST, MEASURED IN THE BROWSER, NOT ASSUMED FROM A CLASS STRING -- the
+// coordinator's own report: the compact rows read "barely dimmer than
+// normal", and the dashed guide was "nearly invisible at 1x". Tailwind v4's
+// own opacity modifier (`text-ink-faint/80`) can render as `oklab(... /
+// 0.8)`, which `getComputedStyle` returns verbatim rather than downcasting
+// to `rgb()` -- a colour string no regex should be trusted to parse. This
+// resolves ANY CSS colour to real sRGB bytes, alpha already composited over
+// its own real background, using the browser's OWN colour parser
+// (`CanvasRenderingContext2D.fillStyle`), then computes WCAG contrast by
+// hand. FALSIFIED BY HAND, MEASURED: reverting `WorktreesSection.tsx`'s
+// guide to `border-line border-dashed` DOES turn this check red -- 1.614:1
+// dark / 1.099:1 light, both under the 3:1 floor, exactly the numbers this
+// file's own header on `COMPACT_DIM_TEXT` cites. Reverting the compact
+// TEXT to plain `text-ink-faint` (no `/80`) does NOT turn its own check
+// red: `text-ink-faint` alone already clears 3:1 (7.247:1 dark / 4.642:1
+// light) -- the operator's report was that it read "barely dimmer than
+// normal", a RELATIVE complaint no absolute floor check can catch, not
+// that it failed the floor outright. This check exists to guard the floor
+// (and the border regression it does catch); the SCREENSHOTS above it are
+// what a reviewer actually judges "clearly dim" against.
+// ---------------------------------------------------------------------------
+async function measureContrast() {
+  return page.evaluate(() => {
+    function relLum([r, g, b]) {
+      const chan = (c) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      };
+      const [rl, gl, bl] = [chan(r), chan(g), chan(b)];
+      return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
+    }
+    function contrastOf(a, b) {
+      const la = relLum(a);
+      const lb = relLum(b);
+      const [lighter, darker] = la > lb ? [la, lb] : [lb, la];
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+    function bgOf(el) {
+      let cur = el;
+      while (cur !== null) {
+        const cs = getComputedStyle(cur);
+        if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') {
+          return cs.backgroundColor;
+        }
+        cur = cur.parentElement;
+      }
+      return 'rgb(0, 0, 0)';
+    }
+    function toRgbBytes(colorStr, backdropStr) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = backdropStr;
+      ctx.fillRect(0, 0, 1, 1);
+      ctx.fillStyle = colorStr;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+      return [r, g, b];
+    }
+    const nameEl = document.querySelector('[data-worktree-name]');
+    const rowEl = nameEl?.closest('[data-worktree-row]') ?? null;
+    const groupEl = document.querySelector('[data-worktrees-external-group]');
+    const borderEl = groupEl?.querySelector('div.border-l') ?? null;
+    const rowBg = rowEl === null ? null : bgOf(rowEl);
+    const borderBg = borderEl === null ? null : bgOf(borderEl);
+    const nameRgb =
+      nameEl === null || rowBg === null ? null : toRgbBytes(getComputedStyle(nameEl).color, rowBg);
+    const rowBgRgb = rowBg === null ? null : toRgbBytes(rowBg, 'rgb(0,0,0)');
+    const borderRgb =
+      borderEl === null || borderBg === null
+        ? null
+        : toRgbBytes(getComputedStyle(borderEl).borderLeftColor, borderBg);
+    const borderBgRgb = borderBg === null ? null : toRgbBytes(borderBg, 'rgb(0,0,0)');
+    return {
+      nameContrast: nameRgb === null || rowBgRgb === null ? null : contrastOf(nameRgb, rowBgRgb),
+      borderContrast:
+        borderRgb === null || borderBgRgb === null ? null : contrastOf(borderRgb, borderBgRgb),
+    };
+  });
+}
+
+const NON_TEXT_CONTRAST_FLOOR = 3.0;
+const darkContrast = await measureContrast();
+check(
+  `compact row text clears the ${NON_TEXT_CONTRAST_FLOOR}:1 floor in dark theme`,
+  darkContrast.nameContrast !== null && darkContrast.nameContrast >= NON_TEXT_CONTRAST_FLOOR,
+  `${darkContrast.nameContrast}`,
+);
+check(
+  `tree guide clears the ${NON_TEXT_CONTRAST_FLOOR}:1 floor in dark theme`,
+  darkContrast.borderContrast !== null && darkContrast.borderContrast >= NON_TEXT_CONTRAST_FLOOR,
+  `${darkContrast.borderContrast}`,
+);
+
+await page.locator('button[aria-label="switch to light theme"]').click();
+await page.waitForSelector('button[aria-label="switch to dark theme"]', { timeout: 3_000 });
+const lightContrast = await measureContrast();
+check(
+  `compact row text clears the ${NON_TEXT_CONTRAST_FLOOR}:1 floor in light theme`,
+  lightContrast.nameContrast !== null && lightContrast.nameContrast >= NON_TEXT_CONTRAST_FLOOR,
+  `${lightContrast.nameContrast}`,
+);
+check(
+  `tree guide clears the ${NON_TEXT_CONTRAST_FLOOR}:1 floor in light theme`,
+  lightContrast.borderContrast !== null && lightContrast.borderContrast >= NON_TEXT_CONTRAST_FLOOR,
+  `${lightContrast.borderContrast}`,
+);
+await page.locator('button[aria-label="switch to dark theme"]').click();
+await page.waitForSelector('button[aria-label="switch to light theme"]', { timeout: 3_000 });
+
 // Back to the shipped default before the remaining states -- STATE 2/3 below
 // exercise the SAME behaviour phase 2a already proved, unrelated to this
 // filter, and the plain row's own delete confirmation is otherwise

@@ -6,7 +6,7 @@ import type { SessionEntry } from '../../../src/renderer/domain/selectors.js';
 import { WorktreesSection } from '../../../src/renderer/panels/worktrees/WorktreesSection.js';
 import { setWorktreeTreeCollapsed } from '../../../src/renderer/panels/worktrees/worktree-tree-collapse.js';
 import type { WorktreeInfo } from '../../../src/shared/worktree.js';
-import { makeProject } from '../session-list-props.js';
+import { makeProject, makeSession } from '../session-list-props.js';
 
 /**
  * THE NEW "Show external worktrees" FILTER (phase 2b) -- the operator's own
@@ -372,5 +372,146 @@ describe('WorktreesSection — the badge poll skips hidden/collapsed worktrees',
       (status.mock.calls[0]?.[0] as { worktreeIds: readonly string[] } | undefined)?.worktreeIds ??
       [];
     expect([...ids].sort()).toEqual(['/elsewhere/manual', '/repo-worktrees/feat']);
+  });
+});
+
+/**
+ * THE COORDINATOR'S FOLLOW-UP: the tree must hang under the project's OWN
+ * main-worktree session row -- the session running in the repo's main
+ * checkout -- not merely somewhere inside the Worktrees section. REAL DOM
+ * order, not a CSS `order` trick (that would leave keyboard/`Tab` and
+ * screen-reader order pointing at the tree BEFORE the session, the opposite
+ * of "hangs under"). `WorktreesSection` now draws `mainSessionEntries`
+ * itself, between its own plain list and its own external/locked tree --
+ * see its header and `mainSessionEntries`'s own prop doc for the mechanics.
+ */
+describe('WorktreesSection — the external tree hangs under the main session row', () => {
+  const mainSession = makeSession({ id: 'main-1', title: 'main session' });
+
+  it('draws the main session row BEFORE the external tree in real DOM order', async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([normalWorktree, externalWorktree]) },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideExternalWorktrees={false}
+        mainSessionEntries={[{ project, session: mainSession }]}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktrees-external-group]')).not.toBeNull(),
+    );
+    const ordered = [
+      ...container.querySelectorAll('[data-session-row], [data-worktrees-external-group]'),
+    ];
+    const kinds = ordered.map((el) =>
+      el.hasAttribute('data-session-row') ? 'session' : 'external-group',
+    );
+    expect(kinds).toEqual(['session', 'external-group']);
+  });
+
+  it('draws the main session row BEFORE the plain worktrees block too', async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([normalWorktree]) },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        mainSessionEntries={[{ project, session: mainSession }]}
+      />,
+    );
+    await waitFor(() => expect(container.querySelector('[data-session-row]')).not.toBeNull());
+    // The PLAIN worktree ("wherever it is now") never moves -- it stays
+    // ABOVE the session row, only the external/locked tree moves below it.
+    const ordered = [...container.querySelectorAll('[data-session-row], [data-worktree-row]')];
+    const kinds = ordered.map((el) => (el.hasAttribute('data-session-row') ? 'session' : 'row'));
+    expect(kinds).toEqual(['row', 'session']);
+  });
+
+  it('falls back to the tree’s existing spot when the project has no main-worktree session', async () => {
+    installApi({
+      worktrees: { list: vi.fn().mockResolvedValue([normalWorktree, externalWorktree]) },
+    });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        hideExternalWorktrees={false}
+        mainSessionEntries={[]}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-worktrees-external-group]')).not.toBeNull(),
+    );
+    expect(container.querySelector('[data-session-row]')).toBeNull();
+    // No session row to hang under -- the tree still draws, right after the
+    // PLAIN row specifically (never a row nested inside the tree itself,
+    // which also carries `data-worktree-row` and would otherwise make the
+    // last match in a flat query the tree's OWN last row, not the tree).
+    const plainRow = container.querySelector(
+      `[data-worktree-row="${normalWorktree.worktreeId}"]`,
+    ) as Element;
+    const group = container.querySelector('[data-worktrees-external-group]') as Element;
+    expect(plainRow.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
+  /**
+   * THE REGRESSION `mainSessionEntries` EXISTS TO PREVENT: before phase 2b,
+   * `state.kind === 'unavailable'` (no `window.api.worktrees` at all -- a
+   * source with no worktrees bridge) made this component return `null`
+   * OUTRIGHT. Now that it also owns rendering the project's own sessions,
+   * doing that would have deleted every session row for every project under
+   * such a source. Falsified by hand: reintroducing the old `if (state.kind
+   * === 'unavailable') return null;` turns exactly this test red while
+   * every other test in this file stays green.
+   */
+  it('still draws the project’s own sessions when there is no worktrees bridge at all', async () => {
+    // No `installApi()` call -- `window.api` stays fully undefined.
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        mainSessionEntries={[{ project, session: mainSession }]}
+      />,
+    );
+    expect(container.querySelector('[data-session-row="main-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-worktrees-section]')).toBeNull();
+  });
+
+  /**
+   * THE OTHER REGRESSION: a project with ZERO worktrees used to return
+   * `null` too (unless `creating`). Sessions must survive that as well.
+   */
+  it('still draws the project’s own sessions when the project has zero worktrees', async () => {
+    installApi({ worktrees: { list: vi.fn().mockResolvedValue([]) } });
+    const { container } = render(
+      <WorktreesSection
+        project={project}
+        allEntries={[]}
+        forceOpenCreate={false}
+        onCloseCreate={vi.fn()}
+        renderSessionRow={fakeRenderSessionRow}
+        mainSessionEntries={[{ project, session: mainSession }]}
+      />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[data-session-row="main-1"]')).not.toBeNull(),
+    );
+    expect(container.querySelector('[data-worktrees-section]')).toBeNull();
   });
 });

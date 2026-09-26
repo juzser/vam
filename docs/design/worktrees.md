@@ -382,16 +382,69 @@ agent-worktree-filtered) rows into a plain list and an external/locked one.
 The plain list draws exactly as before; the external/locked one, when the
 toggle is off, draws as its own group — a collapsible header ("External
 worktrees N"), then every one of ITS rows nested one step in, dimmer and
-smaller (`text-meta`/`text-ink-faint` in place of `text-control`/
-`text-ink-dim`), behind a dashed left border (`border-l border-dashed
-border-line`) as the tree guide. Every row — plain or nested — draws through
-the SAME `renderRow` function (a `compact` flag is the only difference): the
-delete button, "Start a session here", every marker, every nested session
-keep their full reach regardless of which list called it, and every control
-is a real `<button>`, native `Tab` order, with no separate keyboard wiring
-needed. Orca's own worktree tree was read as a reference for this shape
-(never copied); no single component there matched closely enough to be worth
-citing by name.
+smaller (`text-meta`/`COMPACT_DIM_TEXT` in place of `text-control`/
+`text-ink-dim`), behind a dotted left border (`border-l border-dotted
+border-ink-faint`) as the tree guide. Every row — plain or nested — draws
+through the SAME `renderRow` function (a `compact` flag is the only
+difference): the delete button, "Start a session here", every marker, every
+nested session keep their full reach regardless of which list called it, and
+every control is a real `<button>`, native `Tab` order, with no separate
+keyboard wiring needed. Orca's own worktree tree was read as a reference for
+this shape (never copied); no single component there matched closely enough
+to be worth citing by name.
+
+**IT HANGS UNDER THE PROJECT'S MAIN SESSION ROW, IN REAL DOM ORDER** — a
+follow-up review measured the first cut against the operator's own words
+("under the main session row... a collapsible dotted line") and found two
+gaps, both fixed in the same pass:
+
+- *Placement.* The first cut drew the external/locked tree ABOVE the
+  project's own sessions (inside the "Worktrees" block). `WorktreesSection`
+  now ALSO draws this project's own top-level sessions itself
+  (`mainSessionEntries`, a new prop `SessionList.tsx` threads through as
+  `section.items` rather than this file re-deriving the same set from
+  `allEntries` — that set is DELIBERATELY the broader, unfiltered list, so
+  re-filtering it here would risk drifting from whatever narrowing
+  `SessionList.tsx` applies next). The component's own return is now three
+  pieces in DOM order: the plain worktrees block, then `mainSessionEntries`,
+  then the external/locked tree — so the tree is genuinely AFTER the main
+  session in the DOM, not merely painted to look that way. A CSS `order`
+  trick was considered and rejected: it would leave keyboard/`Tab` and
+  screen-reader order pointing at the tree BEFORE the session, the opposite
+  of what "hangs under" means. A project with no main-worktree session needs
+  no special-cased fallback — with `mainSessionEntries` empty, the tree is
+  simply the next thing after the plain list, which is the exact spot it
+  already held, so "falls back to the current spot" falls out of the
+  ordering for free. This is also why the two "return null" early exits are
+  gone: a project with no worktrees at all, or a source with no worktrees
+  bridge, still has its own sessions to draw, and this component became the
+  ONLY thing drawing them in `groupBy === 'project'` mode.
+- *Visual weight, measured.* The first cut's compact text
+  (`text-ink-faint`) read 7.247:1 dark / 4.642:1 light against the row's
+  real, rendered background — close enough to normal rows' `text-ink-dim`
+  (9.394:1+) to read as one weight, exactly the "barely dimmer" report.
+  `--color-ink-ghost` (the one token dimmer than `ink-faint`) was measured
+  and ruled out outright: `styles.css`'s own header on it records 1.75:1
+  dark / 2.39:1 light against `panel`, below both floors, and a dedicated
+  test (`ink-ghost-sites.test.ts`) already holds its call sites to
+  non-text marks only. With no token between the two, `COMPACT_DIM_TEXT`
+  (`text-ink-faint/80`) applies opacity instead — 80% is the darkest
+  (most-dimmed) value that still clears 3:1 in LIGHT theme (3.175:1
+  measured), which is the binding constraint for one class shared by both
+  themes (dark still reads 5.181:1 at the same opacity). The tree guide
+  went the OTHER direction — `border-ink-faint` at FULL strength (not
+  reduced), reusing the same token `COMPACT_DIM_TEXT` dims text FROM,
+  measured 7.247:1 dark / 4.642:1 light, replacing `border-line` (1.614:1
+  dark / 1.099:1 light — and no `line-*` token clears 3:1 in light theme;
+  `line-loudest`, the strongest, still only reads 2.804:1 there). The
+  pattern changed from dashed to DOTTED too, matching the operator's own
+  word for it. Every one of these numbers is measured in
+  `e2e/worktrees-shots.mjs` itself now (`measureContrast`), resolving
+  whatever `getComputedStyle` returns — including an `oklab(... / 0.8)`
+  string Tailwind v4's own opacity modifier can produce, which no regex
+  should be trusted to parse — through the browser's own colour parser
+  (`CanvasRenderingContext2D.fillStyle`) rather than assuming a class name
+  painted what it says.
 
 **The collapse toggle** persists per project, directly in `localStorage`
 (`worktree-tree-collapse.ts`), NOT folded into the big `Prefs` blob
@@ -425,7 +478,17 @@ Falsified by hand throughout: the default-hide rule (`worktree-visibility
 .test.ts`, and end to end in `worktrees-shots.mjs` against a real built
 bundle), the `locked` half of `isExternalOrLockedWorktree` (a vam-made,
 locked worktree stops being hidden), the poll exclusion (a hidden or
-collapsed worktree starts costing a `git` spawn), and the collapse
-persistence (a click that only updates in-memory state, never
-`localStorage`, survives every assertion except the one round-trip test
-built to catch exactly that).
+collapsed worktree starts costing a `git` spawn), the collapse persistence
+(a click that only updates in-memory state, never `localStorage`, survives
+every assertion except the one round-trip test built to catch exactly
+that), the two "return null" removals (reintroducing either one deletes a
+project's own sessions the moment it has no worktrees, or no worktrees
+bridge at all — `WorktreesSection.external-worktrees.test.tsx`'s own
+"still draws the project's own sessions..." pair), and the two contrast
+floors themselves (`worktrees-shots.mjs`'s own `measureContrast`:
+reverting the tree guide to `border-line border-dashed` measures
+1.614:1/1.099:1 and fails; reverting the compact text to plain
+`text-ink-faint` does NOT fail its own check, because that token alone
+already clears 3:1 — the operator's report was a relative "barely dimmer"
+complaint, not an absolute floor violation, and only the screenshots
+themselves, not this check, are what judge that).

@@ -4595,7 +4595,7 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                             </span>
                           </div>
                         )}
-                      {viewOptions.groupBy === 'project' && (
+                      {viewOptions.groupBy === 'project' ? (
                         <WorktreesSection
                           project={section.project}
                           allEntries={allEntries}
@@ -4616,9 +4616,22 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
                           // identical way -- `worktree-visibility.ts`'s own
                           // rule, independent of `hideAgentWorktrees` above.
                           hideExternalWorktrees={originFilters.hideExternalWorktrees}
+                          // PHASE 2B'S OWN MOVE -- `WorktreesSection` now
+                          // draws this project's OWN top-level sessions
+                          // itself (between its plain worktree list and its
+                          // external/locked tree), so the operator's ask
+                          // that tree "hangs under the project's main
+                          // session row" is real DOM order, not a CSS
+                          // reorder. `section.items` is passed WHOLE, never
+                          // recomputed from `allEntries`: it is already the
+                          // exact filtered/ordered set `renderSessionRow`
+                          // would otherwise be mapped over right below,
+                          // one line down in every OTHER `groupBy` mode.
+                          mainSessionEntries={section.items}
                         />
+                      ) : (
+                        section.items.map((entry) => renderSessionRow(entry))
                       )}
-                      {section.items.map((entry) => renderSessionRow(entry))}
                     </div>
                   )}
                 </li>
