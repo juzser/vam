@@ -343,6 +343,16 @@ const GUARDS = [
   // delete-confirm}-{dark,light}.png`. `worktrees-shots.mjs`'s own header
   // holds the falsification.
   'worktrees-shots',
+  // THE PARENT/CHILD CYCLE (cross-provider review finding): a linked
+  // worktree's own project used to list the main checkout as one of ITS
+  // OWN children, closing a two-node cycle that hid BOTH projects' sidebar
+  // sections at once. Feeds `window.api.worktrees.list` the exact cyclic
+  // shape the review reproduced against real git and proves the renderer's
+  // own second guard (`useWorktreeParents.ts`'s `breakCycles`) still shows
+  // both. Regenerates `docs/ui/worktree-parent-cycle-sidebar-{dark,
+  // light}.png`. `worktree-parent-cycle-shots.mjs`'s own header holds the
+  // falsification.
+  'worktree-parent-cycle-shots',
   // DISMISS, THROUGH THE REAL PRELOAD CONTRACT AND A REAL CLICK -- the
   // operator's own report, "some sessions cannot be closed and report a
   // failure — they stay there forever." Stubs `window.api` and throws
