@@ -87,9 +87,18 @@ describe('the single-ticker guarantee', () => {
    * fifty rows sharing a timer count with one row is what actually proves.
    */
   it('costs the same number of intervals for one row as for fifty', () => {
+    // Pinned to the fixture's own `lastCacheActivityAt`, same reason "the
+    // visibility pause" below does it: real wall time can already be past
+    // the fixture's five-minute TTL, which -- now that a row with nothing
+    // live no longer starts the driver at all (below) -- would make this
+    // prove nothing (0 intervals for one row and 0 for fifty is a
+    // coincidence, not the single-driver guarantee it claims).
+    vi.useFakeTimers({ now: Date.parse('2026-09-26T01:00:00.000Z') });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     const oneRowIntervals = vi.spyOn(window, 'setInterval');
     renderList([cacheReady({ id: 's1' })]);
     const withOneRow = oneRowIntervals.mock.calls.length;
+    expect(withOneRow).toBeGreaterThan(0);
     cleanup();
     oneRowIntervals.mockRestore();
 
@@ -106,6 +115,53 @@ describe('the single-ticker guarantee', () => {
     const sessions = Array.from({ length: 50 }, (_, i) => cacheReady({ id: `s${i}` }));
     renderList(sessions, false);
     expect(setIntervalSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * THE OTHER HALF OF "THE TICKER NEVER STOPS": a row that is ALREADY
+   * expired needs no live countdown ever again -- `formatCountdown` never
+   * draws past zero -- so a pane where every row is in that state must never
+   * start the shared interval at all, not merely tick it uselessly forever.
+   */
+  it('creates no interval at all once every row has already expired, however many rows there are', () => {
+    // An hour past the fixture's own five-minute TTL -- unambiguously
+    // expired, not a real-wall-clock coincidence.
+    vi.useFakeTimers({ now: Date.parse('2026-09-26T02:00:00.000Z') });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const sessions = Array.from({ length: 50 }, (_, i) => cacheReady({ id: `s${i}` }));
+    const { container } = renderList(sessions);
+
+    expect(container.querySelectorAll('[data-cache-timer]')).toHaveLength(50);
+    container
+      .querySelectorAll('[data-cache-timer]')
+      .forEach((el) => expect(el.getAttribute('data-cache-timer-phase')).toBe('expired'));
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+  });
+
+  /**
+   * AND RESTARTS THE MOMENT ONE DOES: a poll that refreshes `entries` with
+   * one row's cache activity renewed (a fresh write, real evidence the
+   * operator sent another message) must turn the driver back on -- proving
+   * "stop when none is counting" is not a one-way trip.
+   */
+  it('restarts once a fresh poll brings a live row back', () => {
+    vi.useFakeTimers({ now: Date.parse('2026-09-26T02:00:00.000Z') });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const expired = [cacheReady({ id: 's1' })];
+    const { rerender } = render(
+      <SessionList {...baseProps(entriesOf(expired))} entries={entriesOf(expired)} cacheTimerEnabled />,
+    );
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    const revived = [
+      cacheReady({ id: 's1', lastCacheActivityAt: '2026-09-26T02:00:00.000Z' }),
+    ];
+    rerender(
+      <SessionList {...baseProps(entriesOf(revived))} entries={entriesOf(revived)} cacheTimerEnabled />,
+    );
+    expect(setIntervalSpy).toHaveBeenCalled();
   });
 });
 

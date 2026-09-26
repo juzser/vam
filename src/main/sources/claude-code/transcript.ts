@@ -842,6 +842,11 @@ export function summarizeLines(
     activity,
     decisions,
     questions: collectQuestions(lines),
-    cache: detectCacheActivity(lines),
+    // `decisionIdPrefix` is the session's own stable id -- the same key
+    // `idOf` above mints decision ids from -- so a poll whose own window
+    // holds no write can still recall one an earlier poll of this session
+    // showed (`cache-activity.ts`'s own header, "NEVER GUESS, ACROSS POLLS
+    // TOO").
+    cache: detectCacheActivity(lines, decisionIdPrefix),
   };
 }

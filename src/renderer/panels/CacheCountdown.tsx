@@ -12,12 +12,15 @@
  */
 
 import { Timer } from 'lucide-react';
-import type { ReactElement } from 'react';
+import { type ReactElement, useRef } from 'react';
 import { type CacheTimerPhase, cacheTimerFor, formatCountdown } from '../domain/cache-timer.js';
 import type { Session } from '../domain/model.js';
 import { useCacheTimerClockTick } from './cache-timer-clock.js';
 
-type SessionCacheFields = Pick<Session, 'source' | 'status' | 'lastCacheActivityAt' | 'cacheTtlMs'>;
+type SessionCacheFields = Pick<
+  Session,
+  'source' | 'status' | 'lastCacheActivityAt' | 'cacheTtlMs' | 'cacheSourceNowMs'
+>;
 
 /**
  * The phase's own ink. `normal` and `expired` share the row's own quiet tone
@@ -65,12 +68,37 @@ export function CacheCountdown({
   readonly enabled: boolean;
   readonly nowMs?: () => number;
 }): ReactElement | null {
-  // Subscribed unconditionally: `SessionList.tsx` only mounts this component
-  // at all for a row that already has cache data to show (its own gate,
-  // beside the call site), so every mounted instance genuinely needs the
-  // tick -- there is no row here paying for a subscription it never uses.
-  useCacheTimerClockTick();
-  const state = cacheTimerFor(session, nowMs(), enabled);
+  // CLOCK SKEW: `lastCacheActivityAt` / `cacheSourceNowMs` are both stamped
+  // on the SOURCE's own clock (`model.ts`'s own header on `cacheSourceNowMs`
+  // explains why this cannot just be a pre-rendered string the way
+  // `Session.age` is). This device's `nowMs()` is a DIFFERENT clock, and the
+  // two can disagree by minutes on a paired phone. The fix: the moment a
+  // FRESH `cacheSourceNowMs` reading arrives, capture the OFFSET between
+  // this device's clock and it, once -- then apply that fixed offset to
+  // every later LIVE tick rather than re-deriving it (which would just
+  // cancel the correction back out, since both clocks keep moving together
+  // at the same rate once skew, not drift, is the only difference between
+  // them).
+  const offsetRef = useRef<{ readonly sourceNowMs: number; readonly offsetMs: number } | null>(
+    null,
+  );
+  const sourceNowMs = session.cacheSourceNowMs;
+  if (sourceNowMs != null && offsetRef.current?.sourceNowMs !== sourceNowMs) {
+    offsetRef.current = { sourceNowMs, offsetMs: nowMs() - sourceNowMs };
+  }
+  const correctedNowMs =
+    offsetRef.current === null ? nowMs() : nowMs() - offsetRef.current.offsetMs;
+
+  const state = cacheTimerFor(session, correctedNowMs, enabled);
+  // A row that has already expired never changes its own paint again --
+  // `formatCountdown` is never drawn past zero -- so the instant THIS
+  // render finds that phase, this instance drops off the shared clock's
+  // listener set entirely rather than paying for a tick that would only
+  // repaint the exact same quiet mark (`cache-timer-clock.ts`'s own
+  // `active` parameter). `SessionList.tsx` only mounts this component for a
+  // row that already has cache data to show, so every OTHER phase here
+  // genuinely needs the tick.
+  useCacheTimerClockTick(state !== null && state.phase !== 'expired');
   if (state === null) return null;
   const ttlMs = session.cacheTtlMs;
   // `cacheTimerFor` already proved this is non-null for a non-null state.

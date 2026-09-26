@@ -761,6 +761,12 @@ export async function loadClaudeCodeProjects(
       // treats as "nothing to draw".
       lastCacheActivityAt: read.facts.cache.lastCacheActivityAt,
       cacheTtlMs: read.facts.cache.cacheTtlMs,
+      // THIS POLL'S OWN CLOCK, alongside what it timed -- `model.ts`'s own
+      // header on `cacheSourceNowMs` explains why the renderer needs this
+      // rather than assuming its own `Date.now()` agrees with the machine
+      // that wrote `lastCacheActivityAt`. Paired with it under the same
+      // null rule: no reading to time, no clock to send alongside one.
+      cacheSourceNowMs: read.facts.cache.lastCacheActivityAt === null ? null : nowMs,
       branch,
       // Absent, not empty, when nobody injected a reader: an empty list is
       // "vam asked GitHub and this branch has none", which a load that never

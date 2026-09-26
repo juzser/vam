@@ -58,6 +58,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { cacheTimerFor } from '../domain/cache-timer.js';
 import type { Group, Project, Session, SessionStatus, SourceId } from '../domain/model.js';
 import type {
   GroupBy,
@@ -1397,12 +1398,28 @@ export const SessionList = memo(function SessionList(props: SessionListProps) {
   } = props;
 
   // ONE DRIVER FOR THE WHOLE PANE, never one per row -- `cache-timer-
-  // clock.ts`'s own header. `enabled` is the setting alone: while it is off
-  // this costs no timer at all, the same as every other
-  // `useVisibilityInterval` caller in this renderer, and every row's own
-  // `CacheCountdown` gate (below, at each render site) is what keeps a row
-  // with nothing to show from ever subscribing to it.
-  useCacheTimerClockDriver(cacheTimerEnabled);
+  // clock.ts`'s own header. `enabled` is the setting COMPOSED WITH "does any
+  // visible row currently hold a live (not yet expired) countdown" --
+  // `anyLiveCountdown` below -- not the setting alone: a pane where every
+  // row has already expired has nothing left for a tick to redraw, and
+  // ticking one anyway was the running-forever defect this composition
+  // fixes. Recomputed each render off `entries`, which is exactly as often
+  // as a fresh poll can change the answer -- this never reads a live clock
+  // on every SECOND, only on every POLL, so it costs nothing on the ticks
+  // themselves and never re-renders this list off one (`cacheTimerFor`'s own
+  // read of `Date.now()` here is one call per poll, not per tick).
+  const anyLiveCountdown = useMemo(() => {
+    if (!cacheTimerEnabled) return false;
+    const now = Date.now();
+    for (const entry of entries) {
+      const rowSource = entry.session.source ?? entry.project.source ?? null;
+      if (!hasCacheTimerData(entry.session, rowSource)) continue;
+      const state = cacheTimerFor(entry.session, now, cacheTimerEnabled);
+      if (state !== null && state.phase !== 'expired') return true;
+    }
+    return false;
+  }, [entries, cacheTimerEnabled]);
+  useCacheTimerClockDriver(cacheTimerEnabled && anyLiveCountdown);
 
   /**
    * What a control wears while its own action is running: it cannot be pressed

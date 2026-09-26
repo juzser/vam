@@ -171,22 +171,89 @@ describe('mixed', () => {
   });
 });
 
-describe('a read with no write ever seen in the window', () => {
+describe('a read with no write ever seen in the window, and no memory of one either', () => {
   /**
-   * THE WINDOW IS A TAIL, NOT THE WHOLE FILE (`tail.ts`): the write that
-   * created this cache entry can sit above where vam started reading. A read
-   * still PROVES a cache exists (`cache_read_input_tokens > 0`), so this is
-   * not `NO_CACHE_ACTIVITY` -- it reads as Anthropic's own documented
-   * default for an ephemeral breakpoint nobody chose a `ttl` for: 5 minutes,
-   * the same default `readNotifyWaiting` and its neighbours reach for when a
-   * value cannot be read at all.
+   * NEVER GUESS. THE WINDOW IS A TAIL, NOT THE WHOLE FILE (`tail.ts`): the
+   * write that created this cache entry can sit above where vam started
+   * reading -- and on this machine's own measured corpus, every write ever
+   * observed used the 1-hour bucket, never the 5-minute one. Reading a bare
+   * read as the SHORTER, un-evidenced 5-minute default (as this used to)
+   * would mark a genuinely 1-hour-cached session "expired" up to 55 minutes
+   * early -- worse than showing nothing. A read still PROVES a cache
+   * exists, so `lastCacheActivityAt` is real; what is not knowable from
+   * this window ALONE, with no `sessionKey` to remember a previous poll's
+   * write by, is which bucket -- so this reports `NO_CACHE_ACTIVITY`
+   * outright, the countdown's own contract for "nothing to draw".
    */
-  it('defaults to the documented 5-minute TTL', () => {
+  it('reports no timer at all, never a guessed one', () => {
     const result = detectCacheActivity(lines(turn('2026-09-26T01:00:00.000Z', { cacheRead: 900 })));
-    expect(result).toEqual({
-      lastCacheActivityAt: '2026-09-26T01:00:00.000Z',
-      cacheTtlMs: CACHE_TTL_5M_MS,
+    expect(result).toEqual(NO_CACHE_ACTIVITY);
+  });
+
+  it('still reports nothing even with a sessionKey nobody has ever written a TTL under', () => {
+    const result = detectCacheActivity(
+      lines(turn('2026-09-26T01:00:00.000Z', { cacheRead: 900 })),
+      'session-never-seen-a-write',
+    );
+    expect(result).toEqual(NO_CACHE_ACTIVITY);
+  });
+});
+
+describe('remembering a write’s TTL across polls, by sessionKey', () => {
+  /**
+   * ONE POLL SEES THE WRITE; THE NEXT SEES ONLY THE TAIL THAT SCROLLED PAST
+   * IT. `readLiveTail` (`tail.ts`) re-reads a bounded window on every poll,
+   * so a session whose write sits far enough back loses it from the window
+   * on a LATER poll even though the cache it created is still very much
+   * alive -- exactly the gap the previous (5-minute-guess) behaviour got
+   * wrong. `sessionKey` is the same identity `summarizeLines` already mints
+   * decision ids from (`decisionIdPrefix`), stable for the life of one
+   * session, so this survives across polls the same way `source.ts`'s own
+   * `FIRST_LINE_TIMESTAMP_CACHE` already does for a different fact.
+   */
+  it('a later window with only a read still reports the earlier poll’s written bucket', () => {
+    const sessionKey = 'session-remember-1h';
+    const first = detectCacheActivity(
+      lines(turn('2026-09-26T01:00:00.000Z', { cacheCreation: 18687, oneHour: 18687 })),
+      sessionKey,
+    );
+    expect(first.cacheTtlMs).toBe(CACHE_TTL_1H_MS);
+
+    // The next poll's own window holds ONLY a read -- the write above has
+    // scrolled out of the tail entirely.
+    const second = detectCacheActivity(
+      lines(turn('2026-09-26T01:50:00.000Z', { cacheRead: 24641 })),
+      sessionKey,
+    );
+    expect(second).toEqual({
+      lastCacheActivityAt: '2026-09-26T01:50:00.000Z',
+      cacheTtlMs: CACHE_TTL_1H_MS,
     });
+  });
+
+  it('does not leak one session’s remembered bucket into a different sessionKey', () => {
+    detectCacheActivity(
+      lines(turn('2026-09-26T01:00:00.000Z', { cacheCreation: 18687, oneHour: 18687 })),
+      'session-a-leak-check',
+    );
+    const other = detectCacheActivity(
+      lines(turn('2026-09-26T01:05:00.000Z', { cacheRead: 900 })),
+      'session-b-leak-check',
+    );
+    expect(other).toEqual(NO_CACHE_ACTIVITY);
+  });
+
+  it('a fresh write in a later poll overwrites what was remembered, not just what was in this window', () => {
+    const sessionKey = 'session-overwrite-check';
+    detectCacheActivity(
+      lines(turn('2026-09-26T01:00:00.000Z', { cacheCreation: 18687, oneHour: 18687 })),
+      sessionKey,
+    );
+    const rewritten = detectCacheActivity(
+      lines(turn('2026-09-26T02:00:00.000Z', { cacheCreation: 500, fiveMin: 500 })),
+      sessionKey,
+    );
+    expect(rewritten.cacheTtlMs).toBe(CACHE_TTL_5M_MS);
   });
 });
 

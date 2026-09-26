@@ -69,6 +69,105 @@ describe('CacheCountdown', () => {
     expect(getByTestId('cache-timer').title).toMatch(/5 minutes/);
   });
 
+  describe('a device clock that disagrees with the source’s own', () => {
+    // `lastCacheActivityAt` is stamped on the SOURCE's clock
+    // (`source.ts`'s own `nowMs`, the same figure `Session.age` already
+    // uses); `cacheSourceNowMs` is that SAME clock's reading at the moment
+    // this snapshot was taken. A paired phone's own `Date.now()` is a
+    // DIFFERENT clock -- the operator's own report -- and can disagree by
+    // minutes. `cacheSourceNowMs` reads one minute after
+    // `lastCacheActivityAt`: by the SOURCE's own reckoning, 4 of 5 minutes
+    // remain.
+    const skewedSession = { ...session, cacheSourceNowMs: START_MS + 60_000 };
+
+    it('corrects a device clock that runs ten minutes ahead of the source', () => {
+      // Read naively (this device's raw `Date.now()` against the source-
+      // stamped `lastCacheActivityAt`) this would already claim the entry
+      // expired 5 minutes 59 seconds ago. Corrected for the OFFSET at
+      // receipt, it must still read what the source itself would say: 4:00.
+      const { getByTestId } = render(
+        <CacheCountdown
+          session={skewedSession}
+          enabled
+          nowMs={() => START_MS + 60_000 + 10 * 60_000}
+        />,
+      );
+      expect(getByTestId('cache-timer').textContent).toBe('4:00');
+    });
+
+    it('keeps ticking at the device’s own pace once the offset is captured', () => {
+      let now = START_MS + 60_000 + 10 * 60_000; // the receipt instant
+      const { getByTestId, rerender } = render(
+        <CacheCountdown session={skewedSession} enabled nowMs={() => now} />,
+      );
+      expect(getByTestId('cache-timer').textContent).toBe('4:00');
+
+      // Thirty real seconds pass on THIS device's own clock, same session
+      // object (no new poll) -- the offset captured at receipt must still
+      // apply, landing on 3:30 by the source's clock, not a value the raw
+      // device clock alone would produce.
+      now += 30_000;
+      rerender(<CacheCountdown session={skewedSession} enabled nowMs={() => now} />);
+      expect(getByTestId('cache-timer').textContent).toBe('3:30');
+    });
+
+    it('reads the device clock as-is when the source never sent its own now', () => {
+      // No `cacheSourceNowMs` at all -- an older poll, or a source this
+      // has not been threaded through yet (`model.ts`'s own absent/null
+      // convention) -- must not throw and must not invent an offset.
+      const { getByTestId } = render(
+        <CacheCountdown session={session} enabled nowMs={() => START_MS} />,
+      );
+      expect(getByTestId('cache-timer').textContent).toBe('5:00');
+    });
+  });
+
+  describe('dropping off the shared clock once there is nothing left to redraw', () => {
+    it('never subscribes at all for a row that is already expired at mount', async () => {
+      const { cacheTimerClockListenerCount } = await import(
+        '../../src/renderer/panels/cache-timer-clock.js'
+      );
+      const before = cacheTimerClockListenerCount();
+      const { unmount } = render(
+        <CacheCountdown session={session} enabled nowMs={() => START_MS + 5 * 60 * 1000} />,
+      );
+      expect(cacheTimerClockListenerCount()).toBe(before);
+      unmount();
+    });
+
+    it('stays subscribed while its own countdown is still live', async () => {
+      const { cacheTimerClockListenerCount } = await import(
+        '../../src/renderer/panels/cache-timer-clock.js'
+      );
+      const before = cacheTimerClockListenerCount();
+      const { unmount } = render(<CacheCountdown session={session} enabled nowMs={() => START_MS} />);
+      expect(cacheTimerClockListenerCount()).toBe(before + 1);
+      unmount();
+      expect(cacheTimerClockListenerCount()).toBe(before);
+    });
+
+    it('unsubscribes mid-life, the instant a live tick finds it expired', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      const { cacheTimerClockListenerCount, useCacheTimerClockDriver } = await import(
+        '../../src/renderer/panels/cache-timer-clock.js'
+      );
+      const { renderHook } = await import('@testing-library/react');
+      renderHook(() => useCacheTimerClockDriver(true));
+
+      let now = START_MS + 5 * 60 * 1000 - 1_000; // one second still live
+      const before = cacheTimerClockListenerCount();
+      render(<CacheCountdown session={session} enabled nowMs={() => now} />);
+      expect(cacheTimerClockListenerCount()).toBe(before + 1);
+
+      now = START_MS + 5 * 60 * 1000 + 1; // the next tick finds it expired
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(cacheTimerClockListenerCount()).toBe(before);
+    });
+  });
+
   it('re-renders its own text off the shared clock, not a private timer', async () => {
     vi.useFakeTimers();
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');

@@ -33,9 +33,33 @@
  * older steps onto the front) and remembers the newest WRITE's bucket, so a
  * session that goes quiet for four minutes and then only reads the same
  * entry keeps reporting the countdown that entry actually has, not "unknown".
+ *
+ * ── NEVER GUESS, ACROSS POLLS TOO ─────────────────────────────────────────
+ * A read whose write is not IN THIS WINDOW is not a read whose write never
+ * happened -- `tail.ts`'s own window is a bounded suffix, and a session that
+ * goes quiet for longer than the window's step can lose the write that set
+ * its TTL from view entirely while the entry it created is still very much
+ * alive. This used to read such a read as Anthropic's documented 5-minute
+ * default, which is wrong in exactly the direction that hurts: every write
+ * ever measured on this machine used the 1-hour bucket, so guessing 5
+ * minutes could mark a session "expired" up to 55 minutes early. Reporting
+ * `NO_CACHE_ACTIVITY` instead is at least honest, but `REMEMBERED_WRITE_TTL`
+ * -- keyed by `sessionKey`, the same identity `summarizeLines` mints
+ * decision ids from, and kept for the life of this process the same way
+ * `source.ts`'s own `FIRST_LINE_TIMESTAMP_CACHE` already is -- means the
+ * common case (a write this same session showed on an EARLIER poll) does
+ * not have to fall back to that at all.
  */
 
 import type { Line } from './transcript.js';
+
+/**
+ * The newest WRITTEN bucket a session (`sessionKey`) has ever shown this
+ * process, across polls -- see "NEVER GUESS, ACROSS POLLS TOO" above. A
+ * poll whose own window holds no write at all still has this to fall back
+ * to before giving up and reporting no timer.
+ */
+const REMEMBERED_WRITE_TTL = new Map<string, number>();
 
 /** Anthropic's shorter bucket -- the documented default for a breakpoint
  *  nobody set a `ttl` on. */
@@ -91,11 +115,17 @@ function writtenTtlMs(usage: Record<string, unknown>): number | null {
  * One window's cache activity, oldest first -- the same order and the same
  * parsed lines `summarizeLines` already holds, so this costs one more pass
  * over data already in memory and no read of its own.
+ *
+ * `sessionKey` is optional so every existing caller and fixture that has no
+ * stable identity to offer keeps working exactly as before -- it simply
+ * cannot benefit from `REMEMBERED_WRITE_TTL` and falls back to
+ * `NO_CACHE_ACTIVITY` the moment a window holds no write of its own.
  */
-export function detectCacheActivity(lines: readonly Line[]): CacheActivity {
+export function detectCacheActivity(lines: readonly Line[], sessionKey?: string): CacheActivity {
   let lastActivityAt: string | null = null;
   let ttlAtLastActivity: number | null = null;
-  let knownWriteTtl: number | null = null;
+  let knownWriteTtl: number | null =
+    sessionKey === undefined ? null : (REMEMBERED_WRITE_TTL.get(sessionKey) ?? null);
 
   for (const line of lines) {
     if (line['type'] !== 'assistant') continue;
@@ -106,7 +136,10 @@ export function detectCacheActivity(lines: readonly Line[]): CacheActivity {
     const usageRecord = usage as Record<string, unknown>;
 
     const written = writtenTtlMs(usageRecord);
-    if (written !== null) knownWriteTtl = written;
+    if (written !== null) {
+      knownWriteTtl = written;
+      if (sessionKey !== undefined) REMEMBERED_WRITE_TTL.set(sessionKey, written);
+    }
 
     const wrote = positive(usageRecord['cache_creation_input_tokens']);
     const read = positive(usageRecord['cache_read_input_tokens']);
@@ -116,13 +149,14 @@ export function detectCacheActivity(lines: readonly Line[]): CacheActivity {
     if (typeof stamp !== 'string' || stamp === '') continue;
 
     lastActivityAt = stamp;
-    // A read with no write ever seen in this window still proves a cache
-    // exists; Anthropic's own documented default is what a nameless
-    // breakpoint gets, so that is what an unknown bucket reads as.
-    ttlAtLastActivity = knownWriteTtl ?? CACHE_TTL_5M_MS;
+    // NEVER GUESS: a read with no write ever seen -- neither in this window
+    // nor remembered from an earlier poll of the same session -- has no
+    // bucket this reader may report, so `ttlAtLastActivity` stays `null`
+    // and the whole result folds to `NO_CACHE_ACTIVITY` below.
+    ttlAtLastActivity = knownWriteTtl;
   }
 
-  return lastActivityAt === null
+  return lastActivityAt === null || ttlAtLastActivity === null
     ? NO_CACHE_ACTIVITY
     : { lastCacheActivityAt: lastActivityAt, cacheTtlMs: ttlAtLastActivity };
 }

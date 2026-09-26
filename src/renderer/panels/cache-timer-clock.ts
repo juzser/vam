@@ -18,7 +18,7 @@
  * only the fan-out on top of its single callback.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { useVisibilityInterval } from '../useVisibilityInterval.js';
 
 let version = 0;
@@ -46,23 +46,56 @@ export function subscribeCacheTimerClock(listener: () => void): () => void {
 }
 
 /**
+ * How many rows are currently subscribed -- EXPORTED FOR TESTS ONLY
+ * (`CacheCountdown.test.tsx`), so a row that drops off the shared clock the
+ * moment it has nothing left to redraw can be proven from outside without
+ * reaching into this module's own closure. Production code never reads
+ * this: the driver (`useCacheTimerClockDriver`) does not gate on it -- see
+ * that hook's own header for why `SessionList.tsx` is instead the one that
+ * decides whether ANY row currently needs the driver running at all.
+ */
+export function cacheTimerClockListenerCount(): number {
+  return listeners.size;
+}
+
+/**
  * Drives the shared clock. `SessionList.tsx` calls this EXACTLY ONCE, never
  * per row -- that single call site is the whole guarantee; a leaf that called
- * it too would be back to one timer per row. `enabled` is the caller's own
- * gate (the setting, composed with "does any row on screen need one"): while
- * `false` this costs no timer at all, the same as every other
- * `useVisibilityInterval` caller in this renderer.
+ * it too would be back to one timer per row. `enabled` IS "does any row on
+ * screen need one", composed with the setting, ALREADY -- `SessionList.tsx`
+ * folds "is the setting on" and "does at least one visible row currently
+ * hold a live (not yet expired) countdown" into the one boolean it passes
+ * here, recomputed each time its own poll data changes, so a poll that finds
+ * every row expired stops this outright rather than ticking a clock nothing
+ * is listening to. While `false` this costs no timer at all, the same as
+ * every other `useVisibilityInterval` caller in this renderer.
  */
 export function useCacheTimerClockDriver(enabled: boolean): void {
   useVisibilityInterval(enabled, 1000, 'pause', () => tick());
 }
 
 /**
- * Re-renders the caller once a second while the driver is running. The
- * countdown text itself is computed fresh from `Date.now()` at render time
- * (`cacheTimerFor`'s own `nowMs` parameter) -- this hook only supplies the
- * "render now" signal, never a cached clock reading of its own.
+ * Re-renders the caller once a second while `active` and the driver is
+ * running.
+ *
+ * `active` is the CALLER's own verdict on whether it still has anything left
+ * to redraw -- `CacheCountdown.tsx` passes `false` the instant its own state
+ * resolves to `expired`, an outcome that repaints the exact same quiet mark
+ * on every future tick forever. Passing `false` here drops the caller from
+ * the shared listener set entirely (the `subscribe` callback below registers
+ * nothing at all), rather than merely ignoring ticks it still paid to
+ * receive -- which is what makes `cacheTimerClockListenerCount()` a true
+ * count of rows with something left to show, and what lets an all-expired
+ * pane's `SessionList.tsx` legitimately turn the driver off outright.
+ *
+ * The countdown text itself is computed fresh from `Date.now()` at render
+ * time (`cacheTimerFor`'s own `nowMs` parameter) -- this hook only supplies
+ * the "render now" signal, never a cached clock reading of its own.
  */
-export function useCacheTimerClockTick(): void {
-  useSyncExternalStore(subscribeCacheTimerClock, cacheTimerClockVersion, cacheTimerClockVersion);
+export function useCacheTimerClockTick(active: boolean): void {
+  const subscribe = useCallback(
+    (listener: () => void) => (active ? subscribeCacheTimerClock(listener) : () => {}),
+    [active],
+  );
+  useSyncExternalStore(subscribe, cacheTimerClockVersion, cacheTimerClockVersion);
 }

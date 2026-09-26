@@ -1923,6 +1923,26 @@ describe('loadClaudeCodeProjects', () => {
       expect(session?.lastCacheActivityAt).toBeNull();
       expect(session?.cacheTtlMs).toBeNull();
     });
+
+    /**
+     * THE SOURCE'S OWN CLOCK, ALONGSIDE ITS OWN READING -- `model.ts`'s own
+     * header on `cacheSourceNowMs`: a paired device's clock can disagree
+     * with this machine's, so the renderer needs THIS poll's `nowMs` beside
+     * the activity it timed, not just the activity itself.
+     */
+    it('stamps the poll’s own nowMs onto the session when there is cache activity to time', async () => {
+      writeTranscript('proj', 'sess-1', jsonl(cacheWrite('2026-09-03T09:00:00.000Z')));
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const session = project?.sessions[0];
+      expect(session?.cacheSourceNowMs).toBe(NOW);
+    });
+
+    it('reports null, not the poll’s nowMs, when there is no cache activity to time', async () => {
+      writeTranscript('proj', 'sess-1', jsonl(reply('no usage on this one')));
+      const [project] = await loadClaudeCodeProjects(root, [agent()], NOW);
+      const session = project?.sessions[0];
+      expect(session?.cacheSourceNowMs).toBeNull();
+    });
   });
 
   /**

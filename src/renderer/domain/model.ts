@@ -663,6 +663,33 @@ export type Session = {
    *  timer to time. Absent under the same rule as `lastCacheActivityAt`. */
   readonly cacheTtlMs?: number | null;
   /**
+   * THE SOURCE'S OWN CLOCK, `Date.now()` AT THE MOMENT it computed the pair
+   * above -- so a device with a clock that disagrees with the source's can
+   * still show a correct countdown.
+   *
+   * WHY THIS EXISTS: `lastCacheActivityAt` is stamped on the machine running
+   * Claude Code, not on the machine looking at the sidebar. On a paired
+   * phone reached over Tailscale Serve those are different devices, and a
+   * countdown that subtracted this device's own `Date.now()` from a
+   * timestamp a DIFFERENT clock wrote would be wrong by however far the two
+   * clocks disagree -- the operator's own report. `Session.age` never has
+   * this problem because it is a STRING the source already finished
+   * computing; a live countdown cannot be pre-rendered the same way and
+   * still tick, so it needs the source's clock reading alongside its data
+   * instead. `panels/CacheCountdown.tsx` is the one reader: it captures the
+   * OFFSET between this device's clock and this value, once, the moment a
+   * fresh reading of it arrives, and applies that fixed offset to every
+   * later live tick rather than re-deriving it from a device clock that has
+   * since moved on (which would just cancel the correction back out).
+   *
+   * `null` exactly when `lastCacheActivityAt` is `null` -- there being no
+   * reading to time. Absent under the same rule as `lastCacheActivityAt`:
+   * a source that has not been taught this yet, or a fixture with no
+   * opinion about it, and `CacheCountdown.tsx` falls back to the device's
+   * own clock uncorrected rather than throwing.
+   */
+  readonly cacheSourceNowMs?: number | null;
+  /**
    * Which system this session came from. Optional because merging several
    * sources into one project group (this task's point) cannot force every
    * existing fixture to name one at once.
