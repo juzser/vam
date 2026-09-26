@@ -258,11 +258,14 @@ const EN = {
   'settings.behaviour.adhd.copyHint': 'prefer your own terminal?',
   'settings.behaviour.adhd.copy': 'Copy install command',
   'settings.behaviour.adhd.copied': 'Copied',
-  // THE ATTRIBUTION. Never opens with the lower-case repo slug -- the
-  // structural rule in `styles.css` uppercases the first letter of every
-  // paragraph in this panel, and "Ayghri/i-have-adhd" would misspell a
-  // GitHub handle that is lower case everywhere else it appears.
-  'settings.behaviour.adhd.credit': 'pinned, unmodified copy of',
+  // THE ATTRIBUTION. The proper noun leads (a separate, `data-verbatim`
+  // button, `creditLink` below), this continues it -- never opens with the
+  // repo slug itself, which is why this one does not need the
+  // capitalize-first-letter guard the button's own exemption already
+  // covers. `{sha}` is `ADHD_SKILL_PINNED_SHA` sliced to seven characters,
+  // filled by `AdhdSkillCard.tsx` -- never hand-copied here, where it would
+  // drift from the constant that actually pins the bundle.
+  'settings.behaviour.adhd.credit': 'pinned to {sha}, unmodified.',
   'settings.behaviour.adhd.creditLink': 'ayghri/i-have-adhd (MIT)',
   'settings.behaviour.adhd.coverageTitle': 'Agent coverage',
   'settings.behaviour.adhd.coverageHint': 'install above, then re-check',

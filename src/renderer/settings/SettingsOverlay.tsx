@@ -2205,11 +2205,7 @@ function HexField({
  * heading, the first row would draw a top rule directly under the heading's
  * bottom one.
  */
-/** Exported for `AdhdSkillCard.tsx`, the one caller outside this file: the
- *  card wants the same label/hint/hairline chrome every other row in this
- *  panel draws, and duplicating it would give the panel two ideas of what a
- *  row looks like. */
-export function Block({
+function Block({
   label,
   hint,
   action,

@@ -32,6 +32,7 @@ import type { AdhdSkillApi } from '../../preload/api.js';
 import {
   ADHD_SKILL_AGENT_LABEL,
   ADHD_SKILL_AGENTS,
+  ADHD_SKILL_PINNED_SHA,
   ADHD_SKILL_SOURCE_URL,
   type AdhdSkillAgent,
   type AdhdSkillState,
@@ -40,10 +41,21 @@ import {
 } from '../../shared/adhd-skill.js';
 import { t } from '../i18n/strings.js';
 import { type Prefs, setConciseOutput } from '../prefs/prefs.js';
-import { Block } from './SettingsOverlay.js';
+import { SourceMark } from '../sources/provider-marks.js';
 
 const FOCUS_RING =
   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink';
+
+/** `AdhdSkillAgent` ('claude' | 'codex') to `PROVIDER_MARKS`' own key --
+ *  two different vocabularies for the same two products, because this
+ *  module's agent id predates `provider-marks.tsx` and neither owes the
+ *  other a rename. `codex` happens to match on both sides; `claude` does
+ *  not (`provider-marks.tsx` keys Claude's mark `claude-code`, the source id
+ *  a session is stamped with, not the agent name this card installs into). */
+const AGENT_SOURCE_ID: Record<AdhdSkillAgent, string> = {
+  claude: 'claude-code',
+  codex: 'codex',
+};
 
 // `capitalize`, LIKE `UpdatePanel.tsx`'s OWN `BUTTON` CONSTANT: every button
 // on this surface whose text names a SETTING or an ACTION is Title Case --
@@ -60,7 +72,7 @@ const QUIET_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center ga
  *  proper name rather than a setting: the credit link. Paired with
  *  `data-verbatim`, the same word this codebase already uses for "somebody
  *  chose these letters" (`UpdatePanel.tsx`'s version line). */
-const VERBATIM_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center gap-1.5 rounded px-2 text-control text-ink-faint hover:text-ink-dim disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`;
+const VERBATIM_BUTTON = `vam-tap flex h-[28px] w-fit cursor-pointer items-center gap-1.5 rounded px-2 text-ink-faint text-meta hover:text-ink-dim disabled:cursor-default disabled:opacity-60 ${FOCUS_RING}`;
 
 /** The bridge, where there is one. A browser tab has no preload, which is
  *  what decides whether this card draws any button at all -- the same
@@ -85,11 +97,30 @@ const PILL_TONE: Record<AdhdSkillState, string> = {
   'outdated-modified': 'text-failed',
 };
 
+/** The BORDER half of the same tone, one step lighter than the text --
+ *  `SessionList.tsx`'s own status-filter pill (`border-waiting-tint
+ *  text-waiting`) is the precedent this reuses rather than invents.
+ *  `outdated-modified` has no measured `-tint` token of its own (only
+ *  `waiting` and `done` do), so it falls back to `border-failed` at reduced
+ *  opacity -- the same fallback this file's own confirm dialog already
+ *  uses below. */
+const PILL_BORDER: Record<AdhdSkillState, string> = {
+  'not-installed': 'border-waiting-tint',
+  installed: 'border-done-tint',
+  'outdated-modified': 'border-failed/40',
+};
+
+/** A REAL PILL -- rounded-full, bordered, its own background -- not a bare
+ *  dot-plus-word. `SessionList.tsx`'s status filter chips
+ *  (`rounded-full border bg-ground px-2.5 py-1 font-mono`) are the shape
+ *  this reuses rather than invents: the same badge convention every other
+ *  status-as-a-fact reads in this app, applied here instead of Orca's own
+ *  colours (the operator's own constraint, from the first brief). */
 function StatusPill({ state }: { readonly state: AdhdSkillState }) {
   return (
     <span
       data-adhd-skill-pill={state}
-      className={`inline-flex items-center gap-1.5 text-control font-medium capitalize ${PILL_TONE[state]}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border bg-ground px-2.5 py-1 font-mono text-control capitalize ${PILL_BORDER[state]} ${PILL_TONE[state]}`}
     >
       <span
         aria-hidden="true"
@@ -214,28 +245,58 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
   const showMigration = prefs.conciseOutput === true;
 
   return (
-    <Block
-      name="adhd-skill"
-      label={t('settings.behaviour.adhd.title')}
-      hint={t('settings.behaviour.adhd.hint')}
-      // ABSENT, NOT DIMMED, WHILE THE FIRST READ IS IN FLIGHT -- the same
-      // rule `UpdatePanel.tsx` keeps for its own bridge-less state. There is
-      // no fourth pill for "checking": the read is one IPC round trip to a
-      // local disk, over before a blank pill could be noticed.
-      action={
-        api === undefined || status === null ? undefined : <StatusPill state={status.overall} />
-      }
-    >
-      <div className="flex flex-col gap-3">
+    <div className="mt-6 first:mt-0" data-settings-block="adhd-skill">
+      {/* THE CARD ITSELF -- a bordered, rounded surface (`bg-card`, this
+          app's own raised-surface token, over the panel's flat `bg-panel`),
+          the shape the operator asked for by name against the Orca
+          reference. Every OTHER row in this panel is deliberately flat
+          (`Block`'s own header: "the space is the separator... at 2px each
+          row would start reading as a card it is not") -- this row is the
+          one exception, because the operator asked for exactly that
+          reading, once, here. */}
+      <div className="flex flex-col gap-3 rounded border border-line bg-card p-4">
+        <div className="flex items-start gap-3">
+          {/* THE ICON TILE -- a bordered square, `rounded` (4px, this
+              dialog's ONE established radius -- the button census pins it
+              for buttons and this stays consistent with it rather than
+              inventing a second value), no fill of its own: `bg-card` is
+              already the card's own surface, so a tile filled the same way
+              would carry no contrast against it, and `border-line-strong`
+              (one step up from the card's own `border-line`) is what marks
+              it as a nested shape rather than a fill would. */}
+          <div className="flex h-8 w-8 flex-none items-center justify-center rounded border border-line-strong">
+            <Brain size={16} strokeWidth={1.8} aria-hidden="true" className="text-ink-dim" />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="m-0 font-medium text-body text-ink capitalize">
+                {t('settings.behaviour.adhd.title')}
+              </h4>
+              {/* ABSENT, NOT DIMMED, WHILE THE FIRST READ IS IN FLIGHT -- the
+                  same rule `UpdatePanel.tsx` keeps for its own bridge-less
+                  state. There is no fourth pill for "checking": the read is
+                  one IPC round trip to a local disk, over before a blank
+                  pill could be noticed. */}
+              {api !== undefined && status !== null && (
+                <span className="ml-auto">
+                  <StatusPill state={status.overall} />
+                </span>
+              )}
+            </div>
+            <p className="vam-sentence m-0 max-w-[52ch] text-control text-ink-dim">
+              {t('settings.behaviour.adhd.hint')}
+            </p>
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center gap-2">
-          <p className="m-0 max-w-[40ch] text-control text-ink-dim">
-            {t('settings.behaviour.adhd.credit')}
-          </p>
-          {/* THE SAME SHAPE AS EVERY OTHER BUTTON ON THIS SURFACE, not Orca's
-              inline underlined text -- `e2e/settings-chrome-shots.mjs`'s own
-              button census pins THREE heights and ONE radius for the whole
-              dialog, and a bare `underline` link measured 16px tall with no
-              radius at all: a fourth shape nobody argued for. */}
+          {/* THE LINK LEADS, THE FACTS FOLLOW -- one flowing line rather
+              than the two disconnected sentences an earlier draft of this
+              card read as ("Pinned, unmodified. ayghri/i-have-adhd (MIT)").
+              Reads left to right: "ayghri/i-have-adhd (MIT) pinned to
+              839872f, unmodified." `text-meta`, GettingStarted.tsx's own
+              attribution-line size, on both nodes -- a credit is a caption,
+              not a setting's own prose. */}
           <button
             type="button"
             data-adhd-skill-credit
@@ -245,6 +306,9 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
           >
             {t('settings.behaviour.adhd.creditLink')}
           </button>
+          <p className="m-0 max-w-[40ch] text-ink-faint text-meta">
+            {t('settings.behaviour.adhd.credit', { sha: ADHD_SKILL_PINNED_SHA.slice(0, 7) })}
+          </p>
         </div>
 
         {showMigration && (
@@ -381,7 +445,14 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
                       data-adhd-skill-agent={agent}
                       className="inline-flex items-center gap-1.5 rounded border border-line px-2 py-1 text-control text-ink-dim"
                     >
-                      <Brain size={12} strokeWidth={1.8} aria-hidden="true" />
+                      {/* THE PROVIDER'S OWN MARK -- `provider-marks.tsx`'s
+                          table, the SAME outline the sidebar and the status
+                          bar draw for a session from this agent, rather
+                          than a generic glyph of this card's own invention.
+                          `AGENT_SOURCE_ID` is the one seam: this card's
+                          agent id and that table's source id are two
+                          different vocabularies for the same two products. */}
+                      <SourceMark source={AGENT_SOURCE_ID[agent]} lane={12} />
                       {/* THE AGENT'S OWN NAME, A PROPER NOUN -- `data-verbatim`,
                           not `capitalize`: "Codex" survives either way, but
                           the taxonomy this surface's own case ladder draws is
@@ -403,6 +474,6 @@ export function AdhdSkillCard({ prefs, onChange, api }: AdhdSkillCardProps) {
           </>
         )}
       </div>
-    </Block>
+    </div>
   );
 }

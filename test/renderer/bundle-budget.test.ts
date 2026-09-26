@@ -87,7 +87,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * is itself lazy -- it is only ever mounted inside `SettingsOverlay`, so its
  * OWN component code carries no eager weight, verified the same way the
  * three splits above are: its own `data-adhd-skill-install` marker is absent
- * from the entry and present only in `SettingsOverlay-*.js`.
+ * from the entry and present only in `SettingsOverlay-*.js`. The bundled
+ * skill files themselves (`resources/skills/i-have-adhd/{SKILL.md,LICENSE}`)
+ * are read only by `src/main/skills/adhd-skill.ts` -- a main-process module
+ * with its own `node:fs/promises` import that no renderer file reaches --
+ * and `src/shared/adhd-skill.ts` (the vocabulary both processes share) holds
+ * only string constants and types, never the files' contents; grepping the
+ * built entry for `gfmTable`-style unique markers from either bundled file
+ * finds nothing, confirming neither ever crosses into the renderer.
  *
  * What DID move the entry is `src/renderer/i18n/strings.ts` itself: the
  * catalogue is one module, `DetailPanel.tsx` (eager) imports it for six
@@ -113,24 +120,30 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * a separate `t()` over CORE + SETTINGS would let entry-chunk growth track
  * only the six keys DetailPanel actually needs, not the other ~100.
  *
- * Measured, `electron-vite build`, same code and chunks both times, against
- * this PR's own base commit (`smith/vam/0.2-tab-shell`, 92a6ca65):
+ * Measured with a merge-base worktree build (`git worktree add` at this PR's
+ * actual merge-base with `smith/vam/0.2-tab-shell`, 6331d640, through #514),
+ * same code and chunks both times, `electron-vite build --mode production`:
  *
- *     entry, before this card   689,674 B  (208,058 B gzip)
- *     entry, with this card     690,678 B  (208,316 B gzip)
+ *     entry, merge-base (no card)   689,116 B  (207,368 B gzip)
+ *     entry, this PR (with card)    690,127 B  (207,626 B gzip)
  *
- * ONLY +1,004 B eager / +258 B gzipped for the whole card -- the component
- * itself costs nothing here (confirmed lazy, above); this is purely the
- * catalogue rows. The BASELINE was already 326 B under the OLD 690,000
- * budget before this card touched anything, which is the real story: the
- * ~10% headroom the previous split bought has been spent by ordinary
- * feature growth in the time since, and this card is the PR that happened
- * to cross the line, not an outsized one on its own.
+ * +1,011 B eager / +258 B gzipped for the whole card -- confirming the
+ * component itself costs nothing here (it is lazy, above); this is purely
+ * the catalogue rows, same order of magnitude as an ordinary small feature
+ * elsewhere in this codebase. Gzip (207,626 B) is still comfortably UNDER
+ * the pre-existing 212,000 B budget -- that number is untouched by this PR.
+ * Eager crosses the pre-existing 690,000 B budget by only 127 B: the
+ * baseline had already drifted to within 884 B of that ceiling from
+ * ordinary, unrelated growth in the time since the 624,969 B split above,
+ * and this card's own ~1 KB is what tips it over, not an outsized cost of
+ * its own.
  *
- * `ENTRY_BUDGET_BYTES` (760,000) and `ENTRY_GZIP_BUDGET_BYTES` (230,000)
- * both sit ~10% above the WITH-this-card figures -- the SAME headroom
- * policy as above, recomputed fresh rather than padded further on top of an
- * already-exhausted margin.
+ * `ENTRY_BUDGET_BYTES` moves 690,000 -> 692,000: just enough to clear this
+ * PR's own measured 690,127 B, plus ~1.9 KB (~0.3%) of slack for measurement
+ * noise -- NOT a fresh "~10%" re-baseline off the current, already-grown
+ * entry, which would manufacture a ~70 KB jump no single small feature here
+ * earned. `ENTRY_GZIP_BUDGET_BYTES` stays at 212,000: this PR's own gzip
+ * figure does not approach it.
  *
  * The entry chunk is found by parsing the renderer's own emitted
  * `index.html` for its `<script type="module">` tag -- the same thing a
@@ -150,8 +163,8 @@ const configPath = path.join(repoRoot, 'electron.vite.config.ts');
 // depends on is even present, decided BEFORE anything tries to build.
 const buildAvailable = existsSync(electronViteBinary) && existsSync(configPath);
 
-const ENTRY_BUDGET_BYTES = 760_000;
-const ENTRY_GZIP_BUDGET_BYTES = 230_000;
+const ENTRY_BUDGET_BYTES = 692_000;
+const ENTRY_GZIP_BUDGET_BYTES = 212_000;
 
 // The one string this repo's markdown stack ships that nothing else in the
 // dependency graph or vam's own source does: `gfmTable`, the extension name

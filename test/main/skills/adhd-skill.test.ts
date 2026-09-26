@@ -9,7 +9,7 @@
  * bottom, with `HOME` pointed at a temp dir for the length of that one test.
  */
 
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -140,6 +140,47 @@ describe('status: outdated or modified', () => {
 
     expect(status.agents.find((a) => a.agent === 'claude')?.state).toBe('outdated-modified');
   });
+
+  it('flags a symlinked skill directory as outdated-modified EVEN WHEN its target content is byte-identical to the bundle', async () => {
+    // THE GAP A CONTENT-ONLY COMPARISON LEAVES: byte equality against a
+    // PUBLIC, pinned bundle is exactly what a planted symlink can satisfy.
+    // A directory that is itself a symlink must never read back
+    // "installed", no matter what its target holds -- see this module's own
+    // header for why a match made by reading THROUGH a symlink is never
+    // trusted.
+    const homeDir = await home();
+    const bundledDir = await bundle();
+    const elsewhere = await tempDir('vam-adhd-elsewhere-identical-');
+    await writeFile(join(elsewhere, 'SKILL.md'), SKILL_MD);
+    await writeFile(join(elsewhere, 'LICENSE'), LICENSE);
+    await mkdir(join(homeDir, '.claude', 'skills'), { recursive: true });
+    await symlink(elsewhere, claudeDir(homeDir));
+
+    const status = await readAdhdSkillStatus(deps(homeDir, bundledDir));
+
+    expect(status.agents.find((a) => a.agent === 'claude')?.state).toBe('outdated-modified');
+  });
+
+  it('flags a symlinked `skills` PARENT directory the same way, even with a real, byte-identical `i-have-adhd` at the far end', async () => {
+    // THE SIBLING VARIANT: the same hijack one level up. `mkdir(dir, {
+    // recursive: true })` can create the `skills` segment itself, so a
+    // planted symlink there redirects every agent's skill directory at
+    // once, even though `i-have-adhd` itself, at the symlink's target, is a
+    // perfectly ordinary directory with byte-identical content.
+    const homeDir = await home();
+    const bundledDir = await bundle();
+    const elsewhere = await tempDir('vam-adhd-elsewhere-skills-parent-');
+    const realSkillDir = join(elsewhere, 'i-have-adhd');
+    await mkdir(realSkillDir, { recursive: true });
+    await writeFile(join(realSkillDir, 'SKILL.md'), SKILL_MD);
+    await writeFile(join(realSkillDir, 'LICENSE'), LICENSE);
+    await mkdir(join(homeDir, '.claude'), { recursive: true });
+    await symlink(elsewhere, join(homeDir, '.claude', 'skills'));
+
+    const status = await readAdhdSkillStatus(deps(homeDir, bundledDir));
+
+    expect(status.agents.find((a) => a.agent === 'claude')?.state).toBe('outdated-modified');
+  });
 });
 
 describe('install', () => {
@@ -200,6 +241,33 @@ describe('install', () => {
     expect(result.agents.find((a) => a.agent === 'claude')?.kind).toBe('written');
     expect(await readFile(join(claudeDir(homeDir), 'SKILL.md'), 'utf8')).toBe(SKILL_MD);
     expect(result.status.overall).toBe('installed');
+  });
+
+  it('REFUSES a symlinked directory even with force: true, even when its target content is byte-identical to the bundle', async () => {
+    // FALSIFY THE GUARD: the target files are made read-only (0o444) before
+    // this call. `force` overriding "content differs" is the ONLY thing
+    // that ever lets this module write past a refusal -- if the symlink
+    // guard were the thing standing between `force` and this write instead
+    // of a hard, unconditional refusal, the write would be attempted here,
+    // hit EACCES, and the outcome would come back `error`, not `refused`,
+    // failing the assertion below. A missing guard shows up as exactly
+    // that: this line goes red with `error` where it expects `refused`.
+    const homeDir = await home();
+    const bundledDir = await bundle();
+    const elsewhere = await tempDir('vam-adhd-elsewhere-identical-');
+    await writeFile(join(elsewhere, 'SKILL.md'), SKILL_MD);
+    await writeFile(join(elsewhere, 'LICENSE'), LICENSE);
+    await chmod(join(elsewhere, 'SKILL.md'), 0o444);
+    await chmod(join(elsewhere, 'LICENSE'), 0o444);
+    await mkdir(join(homeDir, '.claude', 'skills'), { recursive: true });
+    await symlink(elsewhere, claudeDir(homeDir));
+
+    const result = await installAdhdSkill(deps(homeDir, bundledDir), true);
+
+    expect(result.agents.find((a) => a.agent === 'claude')?.kind).toBe('refused');
+    // Read back through the symlink one more time: still the cautious
+    // state, never "installed" -- see the status describe block above.
+    expect(result.status.agents.find((a) => a.agent === 'claude')?.state).toBe('outdated-modified');
   });
 });
 
@@ -280,6 +348,36 @@ describe('remove', () => {
     expect(await readFile(join(elsewhere, 'SKILL.md'), 'utf8')).toBe(
       "somebody else's file entirely",
     );
+  });
+
+  it('REFUSES a symlinked directory even when its target content is byte-identical to the bundle', async () => {
+    // THE EXACT SCENARIO THE SECURITY REVIEW NAMED: "a planted symlink plus
+    // byte-identical files makes Remove ... act at an arbitrary target." A
+    // content-only comparison here would call this an ordinary vam-owned
+    // install and delete it. FALSIFY THE GUARD: `elsewhere` is made
+    // read-only (0o555) before this call, so a bypassed guard's `rm` would
+    // hit EACCES and come back `error`, not `left-foreign` -- this line
+    // goes red exactly where a missing guard would show up.
+    const homeDir = await home();
+    const bundledDir = await bundle();
+    const elsewhere = await tempDir('vam-adhd-elsewhere-identical-');
+    await writeFile(join(elsewhere, 'SKILL.md'), SKILL_MD);
+    await writeFile(join(elsewhere, 'LICENSE'), LICENSE);
+    await mkdir(join(homeDir, '.claude', 'skills'), { recursive: true });
+    await symlink(elsewhere, claudeDir(homeDir));
+    await chmod(elsewhere, 0o555);
+
+    try {
+      const result = await removeAdhdSkill(deps(homeDir, bundledDir));
+
+      expect(result.agents.find((a) => a.agent === 'claude')?.kind).toBe('left-foreign');
+      expect(await readFile(join(elsewhere, 'SKILL.md'), 'utf8')).toBe(SKILL_MD);
+      expect(await readFile(join(elsewhere, 'LICENSE'), 'utf8')).toBe(LICENSE);
+    } finally {
+      // Restore write permission before the shared `afterEach` tries to
+      // `rm(..., { recursive: true })` this directory away.
+      await chmod(elsewhere, 0o755);
+    }
   });
 });
 
