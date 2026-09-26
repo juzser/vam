@@ -44,6 +44,14 @@ import type { AdhdSkillActionResult, AdhdSkillStatus } from '../shared/adhd-skil
 import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { CodexUsageSnapshot } from '../shared/codex-usage.js';
+import type {
+  GithubAuthPaneRefusal,
+  GithubAuthPaneView,
+  GithubAuthStatus,
+  GithubOrgsResult,
+  GithubRemote,
+  GithubReposResult,
+} from '../shared/github.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { NotifyVerdict } from '../shared/notify.js';
@@ -337,6 +345,38 @@ export function createAdhdSkillApi(ipc: InvokerLike): AdhdSkillApi {
     install: (force = false) =>
       ipc.invoke(CHANNELS.adhdSkillInstall, force) as Promise<AdhdSkillActionResult>,
     remove: () => ipc.invoke(CHANNELS.adhdSkillRemove) as Promise<AdhdSkillActionResult>,
+  };
+}
+
+/**
+ * Settings -> Integrations -> GitHub's six channels: whether `gh` is signed
+ * in, Connect/Disconnect run in a pane, and the picker's three reads. Desktop
+ * only -- see `channels.ts`'s own note on every one of them -- and its own
+ * bridge member for the reason `update` above is one: none of these six are on
+ * `PreloadSourceApi`, so a paired phone never gets a route to trigger a `gh`
+ * run of its own.
+ */
+export type GithubApi = {
+  authStatus(): Promise<GithubAuthStatus>;
+  connectStart(kind: 'login' | 'logout'): Promise<GithubAuthPaneRefusal | null>;
+  connectRead(): Promise<GithubAuthPaneView>;
+  reposList(owner: string): Promise<GithubReposResult>;
+  orgsList(): Promise<GithubOrgsResult>;
+  projectRemotes(projectId: string): Promise<readonly GithubRemote[]>;
+};
+
+/** Every member forwards straight through -- no `unwrap`: none of these six
+ *  channels answer an `IpcResult`, exactly like `update` above. */
+export function createGithubApi(ipc: InvokerLike): GithubApi {
+  return {
+    authStatus: () => ipc.invoke(CHANNELS.githubAuthStatus) as Promise<GithubAuthStatus>,
+    connectStart: (kind) =>
+      ipc.invoke(CHANNELS.githubConnectStart, kind) as Promise<GithubAuthPaneRefusal | null>,
+    connectRead: () => ipc.invoke(CHANNELS.githubConnectRead) as Promise<GithubAuthPaneView>,
+    reposList: (owner) => ipc.invoke(CHANNELS.githubReposList, owner) as Promise<GithubReposResult>,
+    orgsList: () => ipc.invoke(CHANNELS.githubOrgsList) as Promise<GithubOrgsResult>,
+    projectRemotes: (projectId) =>
+      ipc.invoke(CHANNELS.githubProjectRemotes, projectId) as Promise<readonly GithubRemote[]>,
   };
 }
 

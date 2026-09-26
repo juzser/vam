@@ -25,6 +25,7 @@ import {
   PROVIDERS,
   resolveProvider,
 } from '../../shared/providers.js';
+import type { SourceId } from '../domain/model.js';
 import { t } from '../i18n/strings.js';
 import {
   bindingClashes,
@@ -94,6 +95,7 @@ import {
 } from '../prefs/terminal-scheme.js';
 import type { SourceDeclines } from '../sources/port.js';
 import { AdhdSkillCard, desktopAdhdSkillApi } from './AdhdSkillCard.js';
+import { desktopGithubApi, GithubPanel } from './GithubPanel.js';
 import { desktopNotifyApi, NotifyTest } from './NotifyTest.js';
 import { RemoteLimits } from './RemoteLimits.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
@@ -133,6 +135,18 @@ export type SettingsOverlayProps = {
    * same picture -- no list -- and every caller that HAS a source passes it.
    */
   readonly declines?: SourceDeclines;
+  /**
+   * Every project vam knows about, for the Integrations section's repo
+   * picker -- one entry per project the sidebar groups sessions under.
+   * OPTIONAL, and `[]` is the honest default: a caller that has not wired
+   * this (or a build with no live projects yet) gets a picker with nothing
+   * to aim at rather than a crash, the same rule `declines` above follows.
+   */
+  readonly projects?: readonly {
+    readonly id: string;
+    readonly source: SourceId;
+    readonly name: string;
+  }[];
 };
 
 const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
@@ -240,6 +254,7 @@ export function SettingsOverlay({
   onClose,
   initialSection,
   declines = {},
+  projects = [],
 }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
@@ -1194,6 +1209,26 @@ export function SettingsOverlay({
                   says which is which while you type.
                 </p>
               </Block>
+            </Panel>
+
+            <Panel
+              id="integrations"
+              active={section === 'integrations'}
+              hint={t('settings.integrations.hint')}
+              phone={phone}
+            >
+              {/* The bridge is read HERE, like `RemotePanel` below -- `window.api`
+                  exists only in the Electron shell, and this is the one
+                  section that needs it. */}
+              <GithubPanel
+                api={desktopGithubApi()}
+                active={section === 'integrations'}
+                prefs={prefs}
+                onChange={onChange}
+                projects={projects}
+                copyText={window.api?.clipboard?.writeText}
+                chooseDirectory={window.api?.dialog?.chooseDirectory}
+              />
             </Panel>
 
             <Panel
