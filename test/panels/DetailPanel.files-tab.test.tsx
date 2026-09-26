@@ -707,6 +707,180 @@ describe('save-time normalisation', () => {
     expect(write).toHaveBeenCalledWith('/work/atlas/notes.txt', 'a\nb\nc\n', SIGNATURE());
     expect(editor.value).toBe('a\nb\nc\n');
   });
+
+  /**
+   * X-SET-1 — the cross-provider review's own finding: trimming EVERY line's
+   * trailing whitespace destroys a CommonMark hard line break (two trailing
+   * spaces), a unified diff's own quoted trailing space, and an inline
+   * snapshot's serialised whitespace. `files-save-normalize.test.ts` holds
+   * the behaviour table in full; these three are the integration proof that
+   * `saveFile` actually reaches the exempted path for a real open file.
+   */
+  it('a markdown hard line break survives a save — the trailing two spaces are not trimmed', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.md'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'kept', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'line one  \nline two' } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith(
+      '/work/atlas/notes.md',
+      'line one  \nline two\n',
+      SIGNATURE(),
+    );
+  });
+
+  it('a patch file’s trailing-space context line survives a save', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/change.patch'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'kept', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    const patch = '--- a/f\n+++ b/f\n@@ -1 +1 @@\n context line \n-old \n+new \n';
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: patch } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith('/work/atlas/change.patch', patch, SIGNATURE());
+  });
+
+  it('.env keeps getting trimmed — the exemption is named types only, not every save', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({ root: '/work/atlas', files: ['/work/atlas/.env'], truncated: false }),
+      read: async () => ({ content: 'A=1', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: 'A=1   \nB=2\t\n' } });
+    });
+    await saveViaChord(editor);
+
+    expect(write).toHaveBeenCalledWith('/work/atlas/.env', 'A=1\nB=2\n', SIGNATURE());
+  });
+
+  /**
+   * X-SET-2 — Mod-s on a buffer nobody edited must not touch disk. Loading a
+   * file whose own on-disk bytes are not yet normalised (trailing
+   * whitespace, no final newline) is the sharpest version of this: the OLD
+   * code would have "fixed" it on the very first Mod-s even though the
+   * operator changed nothing, which is the rewrite this finding is about.
+   */
+  it('Mod-s on an unedited buffer never calls write, even when the file itself is not yet normalised', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'a  \nb\t', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    await saveViaChord(editor);
+
+    expect(write).not.toHaveBeenCalled();
+    // Untouched — not even the trailing whitespace already on disk.
+    expect(editor.value).toBe('a  \nb\t');
+  });
+
+  /**
+   * S3 — the caret must not jump when a save trims whitespace on a line
+   * ABOVE it. Real `selectionStart`/`selectionEnd`, a real save, and the
+   * assertion is on the textarea's own selection afterwards — not on
+   * `mapOffset` in isolation (`files-save-normalize.test.ts` already holds
+   * that), but on the DOM property an operator's eyes and next keystroke
+   * both depend on.
+   */
+  it('keeps the caret on the same character after a save trims whitespace on an earlier line', async () => {
+    const write = vi.fn(
+      async (): Promise<FileWriteResult> => ({ signature: SIGNATURE({ sha256: 'new' }) }),
+    );
+    withBridge({
+      list: async () => ({
+        root: '/work/atlas',
+        files: ['/work/atlas/notes.txt'],
+        truncated: false,
+      }),
+      read: async () => ({ content: 'kept', isBinary: false, signature: SIGNATURE() }),
+      write,
+    });
+    await draw({ files: true });
+    await openFiles();
+    await act(async () => {
+      q<HTMLElement>('[data-files-row]')?.click();
+      await Promise.resolve();
+    });
+    const editor = q<HTMLTextAreaElement>('[data-files-editor]') as HTMLTextAreaElement;
+    const content = 'hello   \nworld';
+    await act(async () => {
+      fireEvent.change(editor, { target: { value: content } });
+    });
+    // The caret sits right before "world" — three trailing spaces on the
+    // line above it are about to be trimmed out from under it.
+    const caret = content.indexOf('world');
+    await act(async () => {
+      editor.setSelectionRange(caret, caret);
+    });
+
+    await saveViaChord(editor);
+
+    expect(editor.value).toBe('hello\nworld\n');
+    const expectedCaret = editor.value.indexOf('world');
+    expect(editor.selectionStart).toBe(expectedCaret);
+    expect(editor.selectionEnd).toBe(expectedCaret);
+  });
 });
 
 describe('the line-number gutter', () => {
