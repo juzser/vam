@@ -9,7 +9,7 @@
  * create must call nothing at all, not call and then apologise.
  */
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Canvas } from '../../src/renderer/canvas/Canvas.js';
 import type { CanvasModel, Session } from '../../src/renderer/domain/model.js';
@@ -35,25 +35,10 @@ const MODEL: CanvasModel = {
 
 const statusBar = () => document.querySelector('[data-status-bar]')?.textContent ?? '';
 
-async function clickAsync(label: string) {
-  await act(async () => {
-    screen.getByLabelText(label).click();
-  });
-}
-
-/** The per-project add, which is the first item of that project's own menu
- *  now rather than a `+` on its heading -- one icon less per heading, at the
- *  operator's request. Two presses, same call. */
+/** The per-project add: the `+` beside the project's own menu trigger. */
 async function addInProject(projectId: string) {
   await act(async () => {
-    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
-  });
-  await act(async () => {
-    (
-      document.querySelector(
-        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
-      ) as HTMLElement
-    ).click();
+    (document.querySelector(`[data-new-session-in-project="${projectId}"]`) as HTMLElement).click();
   });
 }
 
@@ -138,16 +123,16 @@ describe('creating a session with `o`', () => {
   });
 
   /**
-   * The two mouse paths, against a source that CAN create -- which is the
-   * whole point of asserting them. Clicked against a source that cannot, both
-   * buttons return at the `createSession` guard before either argument is
-   * read, so a swapped `(name, id)` would sail through: main answers
-   * `unknown-project` for every add and no test moves.
+   * Against a source that CAN create -- which is the whole point of
+   * asserting it. Clicked against a source that cannot, the button returns at
+   * the `createSession` guard before either argument is read, so a swapped
+   * `(name, id)` would sail through: main answers `unknown-project` for every
+   * add and no test moves.
    *
    * So the assertion is by VALUE and in ORDER: the project id first, the
    * display name second.
    */
-  it('the per-project add item passes (id, name), in that order', async () => {
+  it('the per-project add passes (id, name), in that order', async () => {
     const created: [string, string][] = [];
     const { source, wrote } = sourceWith(async (projectId, title) => {
       created.push([projectId, title]);
@@ -156,16 +141,6 @@ describe('creating a session with `o`', () => {
     await addInProject('p1');
     expect(created).toEqual([['p1', 'alpha']]);
     expect(wrote.count).toBe(1);
-  });
-
-  it('the footer add button passes (id, name), in that order', async () => {
-    const created: [string, string][] = [];
-    const { source } = sourceWith(async (projectId, title) => {
-      created.push([projectId, title]);
-    });
-    render(<Canvas model={MODEL} source={source} />);
-    await clickAsync('new session');
-    expect(created).toEqual([['p1', 'alpha']]);
   });
 
   it('does not claim the new session is visible yet', async () => {

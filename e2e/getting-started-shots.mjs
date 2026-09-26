@@ -154,7 +154,6 @@ const browser = await chromium.launch();
         chips: [...li.querySelectorAll('[data-inline-chord]')].map((c) => c.textContent),
       }),
     );
-    const sidebarAdd = document.querySelector('[data-sidebar-add]');
     const strip = document.querySelector('[data-tab-strip]');
     const markFrame = screenEl?.querySelector('[data-icon-frame]');
     return {
@@ -168,7 +167,6 @@ const browser = await chromium.launch();
       markFrameBox: r2(markFrame),
       shortcuts,
       hidden: document.querySelector('[data-getting-started-hidden]'),
-      sidebarAddLabel: sidebarAdd?.textContent ?? null,
       stripText: strip?.textContent ?? null,
     };
   });
@@ -221,11 +219,11 @@ const browser = await chromium.launch();
       shape.button.y + shape.button.h <= shape.paneBox.y + shape.paneBox.h,
     JSON.stringify({ button: shape.button, pane: shape.paneBox }),
   );
-  check(
-    'the sidebar foot button reads New project, not New session -- never a dead end',
-    shape.sidebarAddLabel !== null && shape.sidebarAddLabel.includes('New project'),
-    shape.sidebarAddLabel ?? 'null',
-  );
+  // THE SIDEBAR'S OWN FULL-WIDTH FOOTER BUTTON, WHICH USED TO BE MEASURED
+  // HERE, IS GONE -- the operator's own request: the Projects header's `+`
+  // (measured two checks up, always drawn, never gated on focus) already
+  // covers the "nothing focused" fallback this file used to name, and `o`
+  // still reaches it (`Canvas.getting-started.test.tsx`'s own unit coverage).
 
   // THE SCREEN ITSELF, BEFORE THE CLICK -- the state this file's shot is
   // actually of. Taken here, not after New project runs: main's own write
@@ -405,7 +403,6 @@ const browser = await chromium.launch();
       decline: document.querySelector('[data-getting-started-decline]')?.textContent ?? null,
       show: r2(show),
       markFrameBox: r2(document.querySelector('[data-getting-started] [data-icon-frame]')),
-      sidebarFootDrawn: document.querySelector('[data-sidebar-add]') !== null,
       standaloneHiddenStrips: document.querySelectorAll('[data-foreign-hidden]').length,
       shortcutsDrawn: document.querySelector('[data-getting-started-shortcuts]') !== null,
     };
@@ -443,10 +440,10 @@ const browser = await chromium.launch();
     phone.show !== null && phone.show.x >= 0 && phone.show.x + phone.show.w <= phone.viewport.w,
     JSON.stringify(phone),
   );
-  check(
-    'the sidebar foot strip is withdrawn, not duplicated beside this screen’s own button',
-    phone.sidebarFootDrawn === false,
-  );
+  // THE SIDEBAR'S OWN FULL-WIDTH FOOTER STRIP, WHICH USED TO BE MEASURED
+  // HERE TOO, IS GONE EVERYWHERE NOW, not only withdrawn on this one screen
+  // -- the operator's own request -- so there is no longer a conditional
+  // withdrawal here to prove.
   check(
     'the standalone hidden-count strip is withdrawn too -- one copy of the sentence, not two',
     phone.standaloneHiddenStrips === 0,

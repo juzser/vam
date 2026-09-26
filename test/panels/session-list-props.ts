@@ -124,11 +124,6 @@ export function baseProps(entries: readonly SessionEntry[]): SessionListProps {
     onRenameCancel: noop,
     onPick: noop,
     onClose: noop,
-    onAdd: noop,
-    // The ordinary fixture: something IS focused, so the footer button adds
-    // a session rather than falling back to New project. A test exercising
-    // the fallback overrides this alongside `focusedSessionId: null`.
-    addWillCreateProject: false,
     onAddInProject: noop,
     onNewProject: noop,
     newSessionDecline: null,

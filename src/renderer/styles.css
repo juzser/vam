@@ -2924,16 +2924,17 @@ html {
 /* The inline chord hints, suppressed rather than deleted.
  *
  * `InlineChord` prints `primaryChord(action)` unconditionally -- it knows
- * nothing about viewports -- and two of its three call sites are on the phone's
- * list screen: the `/` in the search control and the `o` in New session. A
- * chord is the one part of that hint a touchscreen cannot use, and neither hint
- * is the only thing saying what its button does: both carry an icon and their
- * own words.
+ * nothing about viewports -- and several of its call sites are on the phone's
+ * list screen: the `/` in the search control, the "Filters" restore strip,
+ * and (inside the project menu's own popover) "New worktree…"'s own bound
+ * chord. A chord is the one part of any of those hints a touchscreen cannot
+ * use, and none of them is the only thing saying what its control does --
+ * every one carries an icon, a word, or both.
  *
  * NOT deleted, because the chord is not dead at 390px -- `Canvas`'s keydown
  * listener is not phone-gated, so a Bluetooth or folio keyboard on a narrow
  * viewport still fires every one. What a hardware-keyboard phone user loses is
- * two inline reminders; `?` still opens the key sheet, which documents all of
+ * the inline reminder; `?` still opens the key sheet, which documents all of
  * them. */
 [data-phone-shell] [data-inline-chord] {
   display: none;

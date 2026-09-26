@@ -109,25 +109,11 @@ const click = async (label: string) => {
   });
 };
 
-/**
- * Start a session in a named project -- two presses now, and that is the
- * change rather than an accident of this helper.
- *
- * The control was a `+` on the project heading labelled "new session in
- * alpha", which is what these tests used to click. It is the first item of
- * that project's own menu now (one icon less per heading, at the operator's
- * request), so the route is: open the menu, press the item.
- */
+/** Start a session in a named project: one click on that project's own `+`,
+ *  beside its menu trigger (`data-new-session-in-project`). */
 const addInProject = async (projectId: string) => {
   await act(async () => {
-    (document.querySelector(`[data-project-menu="${projectId}"]`) as HTMLElement).click();
-  });
-  await act(async () => {
-    (
-      document.querySelector(
-        `[data-project-menu-panel="${projectId}"] [data-project-menu-item="new-session"]`,
-      ) as HTMLElement
-    ).click();
+    (document.querySelector(`[data-new-session-in-project="${projectId}"]`) as HTMLElement).click();
   });
 };
 
@@ -160,29 +146,27 @@ afterEach(() => {
 });
 
 /**
- * WHAT CARRIES THE WAIT NOW THAT THE CONTROL CLOSES BEHIND ITSELF.
- *
- * These four used to read the `+`'s own attributes -- `data-pending`,
- * `aria-busy`, `disabled` -- because the button stayed on screen through the
- * spawn. The add is a menu item now, and a menu item that did not dismiss its
- * menu would be the only one in vam that does not.
- *
- * Nothing is unheld by that. The wait was never carried by the button alone:
- * `createSession` sets `starting`, which draws an `aria-live` row inside the
- * project reading "starting a session in alpha…", and sets the status bar in
- * the same breath. That row is the assertion here, and it is the better one --
- * it names the project, it is announced, and it is what the operator actually
- * looks at. The double-press guard never lived on the control either: a
- * disabled button dispatches no click, so the guard that matters is
- * `createSession`'s own `pendingAction` check, which the second test reaches
- * through a DIFFERENT control exactly as it did before.
+ * THE CONTROL STAYS ON SCREEN THROUGH THE SPAWN, AGAIN -- it is a real
+ * button beside the project menu trigger now, not a menu item that would
+ * have to dismiss its own menu (and its own pending state along with it) the
+ * instant it was pressed. So both channels are asserted: the button's own
+ * `data-pending`/`aria-busy`/`disabled`, and `createSession`'s `starting`
+ * row (an `aria-live` line inside the project reading "starting a session in
+ * alpha…", set alongside the status bar in the same breath) -- the row is
+ * announced and names the project even to someone who cannot see the button
+ * change, which is why it stays asserted too.
  */
 describe('creating a session', () => {
-  it('shows the work running, and says where, while the spawn runs', async () => {
+  it('shows the control working, and disables it, while the spawn runs', async () => {
     const gate = deferred<void>();
     const { source } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
     await addInProject('p1');
+
+    const button = control('new session in alpha');
+    expect(button.getAttribute('data-pending')).toBe('true');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(button.disabled).toBe(true);
 
     const row = startingRow();
     expect(row, 'no starting row while the spawn runs').not.toBeNull();
@@ -195,6 +179,7 @@ describe('creating a session', () => {
     await act(async () => {
       gate.settle();
     });
+    expect(control('new session in alpha').getAttribute('data-pending')).toBeNull();
     expect(statusFull()).toContain('it may take a moment to appear');
   });
 
@@ -203,8 +188,13 @@ describe('creating a session', () => {
     const { source, calls } = sourceWith(() => gate.promise);
     render(<Canvas model={MODEL} source={source} />);
     await addInProject('p1');
+    // Two different controls reaching for the same guard: the keyboard
+    // chord, then the same `+` pressed again -- `createSession`'s own
+    // `pendingAction` check is what blocks both, not anything control-local
+    // (a disabled button dispatches no click either, but `o` never touches
+    // `disabled` at all).
     await press('o');
-    await click('new session');
+    await addInProject('p1');
     expect(calls.create).toEqual(['p1']);
     await act(async () => {
       gate.settle();
