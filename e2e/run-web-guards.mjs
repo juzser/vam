@@ -413,6 +413,12 @@ const GUARDS = [
   // Chromium has already closed: it needs the same real, private-socket
   // tmux this job already installs for `terminal-echo-scroll-shots.mjs` and
   // `terminal-typing-latency-shots.mjs` above, and its own p95 bounds carry
+  // The Stats & Usage screen: the entry icon, the overlay it opens, the
+  // headline numbers against a fixture (never a raw token count or a
+  // guessed cost), the heatmap's own scale painting a real, distinguishable
+  // gradient in BOTH themes, Escape, and that a phone cannot reach it at
+  // all. `e2e/stats-usage-shots.mjs`'s own header holds the full list.
+  'stats-usage-shots',
   // headroom for a loaded machine, not a QUIET one -- running it last (never
   // parallel; this whole list is sequential, this file's own header
   // explains why) is the cheapest way to give it the quietest tail of the

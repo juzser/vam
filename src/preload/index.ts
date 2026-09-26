@@ -26,6 +26,7 @@ import {
   createPreloadApi,
   createPrsApi,
   createRemoteApi,
+  createStatsApi,
   createStreamSubscribe,
   createTerminalApi,
   createTerminalStreamApi,
@@ -38,6 +39,10 @@ contextBridge.exposeInMainWorld('api', {
   ...createPreloadApi(ipcRenderer),
   subscribe: createStreamSubscribe(ipcRenderer),
   usage: createUsageApi(ipcRenderer),
+  // The Stats & Usage screen's one channel -- a full filesystem scan run in
+  // main's own worker thread, never on this process. See
+  // `src/main/stats/ipc.ts`.
+  stats: createStatsApi(ipcRenderer),
   // Reaches github.com, and only when something asks it to -- nothing on
   // this bridge checks on its own.
   update: createUpdateApi(ipcRenderer),

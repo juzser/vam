@@ -692,6 +692,31 @@ export const CHANNELS = {
   adhdSkillStatus: 'vam:skills:adhd-status',
   adhdSkillInstall: 'vam:skills:adhd-install',
   adhdSkillRemove: 'vam:skills:adhd-remove',
+  /**
+   * THE STATS & USAGE SCREEN'S ONE CHANNEL. Answers bare (a `StatsResult`,
+   * never an `IpcResult`), like `usageGet` — a scan failure is not a
+   * `SourceError`, there is no source and no session to refuse anything on
+   * (`src/main/stats/ipc.ts`).
+   *
+   * ONE CHANNEL FOR BOTH THE SCREEN'S OWN OPEN AND ITS REFRESH BUTTON: the
+   * operator's rule is "compute only while the screen is open, plus on an
+   * explicit refresh", and main does the identical thing either way — run
+   * the (incrementally cached) scan again. Desktop-only by construction:
+   * `remote/server.ts`'s route table carries no matching path, because a
+   * full filesystem scan of this machine's own `~/.claude`/`~/.codex` is not
+   * a question a paired phone gets to ask.
+   */
+  statsScan: 'vam:stats:scan',
+  /**
+   * THE PR COUNT'S OWN FOLLOW-UP. `statsScan` answers the moment the file
+   * fold is done, which may be BEFORE the PR-count fetch settles
+   * (`snapshot.prsCreated` reads `{kind:'loading'}` in that case) — this
+   * channel answers with the SAME scan's eventual `PrsCreated`, once it
+   * does. Called only when `statsScan` said `'loading'`; a call with no
+   * scan pending at all still answers (a safe `'unavailable'`), never
+   * hangs. Desktop-only, for the identical reason `statsScan` is.
+   */
+  statsPrs: 'vam:stats:prs',
 } as const;
 
 /**

@@ -80,6 +80,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * markdown split above already established -- enough to absorb an ordinary
  * dependency bump without flapping, but a reverted lazy split on either
  * component puts its chunk straight back into the entry and fails both
+ *
+ * A FOURTH, SMALL, DELIBERATE BUMP: the Stats & Usage entry icon
+ * (`SessionList.tsx`'s avatar bar) is eagerly-loaded chrome, same as every
+ * other icon there, and `StatsScreen` itself is lazy on `SettingsOverlay`'s
+ * own idiom (`StatsScreen-*.js`, fetched on first open, never in this
+ * chunk). Measured, `electron-vite build`, after that one icon and its
+ * button: entry 690,589 B -- 589 B past the PREVIOUS 690,000 budget, which
+ * itself already carried the ~10% headroom the markdown/settings split
+ * established, so this is not that same category of change and does not
+ * earn a second helping of it.
+ *
+ * `ENTRY_BUDGET_BYTES` moves to 691,000 -- just past the measured figure,
+ * not a fresh 10%: this is one icon, not a split, and the budget should
+ * still notice the NEXT one that lands without a reason.
  * budgets outright.
  *
  * A FOURTH GROWTH, ORDINARY THIS TIME RATHER THAN A REGRESSION: the ADHD

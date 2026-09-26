@@ -77,6 +77,8 @@ import { combineSources } from './sources/combine.js';
 import type { MainSource } from './sources/source.js';
 import { createControlTmuxRunner } from './sources/tmux/control.js';
 import { createTmuxRunner, listVamSessions } from './sources/tmux/spawn.js';
+import { registerStatsIpc } from './stats/ipc.js';
+import { runStatsScanInWorker } from './stats/scan-runner.js';
 import { createNodeEventSource } from './stream/event-source.js';
 import { registerStreamIpc } from './stream/register.js';
 import { registerTerminalIpc } from './terminal/ipc.js';
@@ -778,6 +780,24 @@ void app.whenReady().then(async () => {
   // never on a floor the renderer itself controls (`codex-reader.ts`,
   // `usage/ipc.ts`).
   registerCodexUsageIpc(ipcMain, () => readCodexUsage());
+  // The Stats & Usage screen's one channel. The scan itself runs in a real
+  // `node:worker_threads` worker (`stats/worker.ts`, bundled as its own
+  // entry -- `electron.vite.config.ts`'s `statsWorker` input), never on
+  // this event loop: a full walk of `~/.claude/projects` and
+  // `~/.codex/sessions` can mean gigabytes on a long-lived machine, and this
+  // is the one screen in vam that reads all of it rather than a bounded
+  // tail. The cache that makes a REPEAT scan cheap lives under this app's
+  // own `userData`, never under `~/.claude` (`stats/incremental-cache.ts`).
+  registerStatsIpc(ipcMain, (forceRefresh) =>
+    runStatsScanInWorker({
+      workerPath: join(__dirname, 'statsWorker.cjs'),
+      home: homedir(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      cachePath: join(app.getPath('userData'), 'stats-cache.json'),
+      now: Date.now,
+      forceRefresh,
+    }),
+  );
   // Contacts github.com ONCE, here, as vam starts: one unauthenticated GET
   // carrying no token, no query and nothing about this machine's sessions,
   // projects or paths. Nothing is awaited -- the window is created below
