@@ -399,6 +399,22 @@ await shootBothThemes(page, 'worktrees-external-tree');
 // that it failed the floor outright. This check exists to guard the floor
 // (and the border regression it does catch); the SCREENSHOTS above it are
 // what a reviewer actually judges "clearly dim" against.
+//
+// A FOLLOW-UP REVIEW OF THIS FILE ITSELF found the text half was worse than
+// that: `document.querySelector('[data-worktree-name]')` was unscoped, so it
+// always resolved to the first plain (non-compact) row's own name span --
+// never a row inside `groupEl` at all. That row uses `text-ink-dim`, not
+// `COMPACT_DIM_TEXT`, and clears 3:1 by a wide margin regardless of what the
+// compact token is set to -- which is exactly why the paragraph above could
+// truthfully say the compact-text revert "does NOT turn its own check red":
+// the check was never measuring a compact row's text in the first place.
+// FALSIFIED BY HAND, MEASURED, a second time: with `COMPACT_DIM_TEXT` set to
+// `text-ink-faint/40` (well under the floor in both themes), the OLD,
+// unscoped lookup left both "compact row text" checks green; scoping
+// `nameEl`/`rowEl` to `groupEl` the same way `borderEl` already was, plus a
+// new structural check that the measured row actually carries `text-meta`
+// (the class `renderRow` only ever gives a compact row), turns both red at
+// the same opacity, then green again at the shipped `/80`.
 // ---------------------------------------------------------------------------
 async function measureContrast() {
   return page.evaluate(() => {
@@ -439,9 +455,20 @@ async function measureContrast() {
       const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
       return [r, g, b];
     }
-    const nameEl = document.querySelector('[data-worktree-name]');
-    const rowEl = nameEl?.closest('[data-worktree-row]') ?? null;
+    // Scoped to `groupEl`, the SAME way `borderEl` already was -- an
+    // unscoped `document.querySelector('[data-worktree-name]')` resolves to
+    // the first such element in the WHOLE document, which is the plain,
+    // non-compact row above the tree (brighter `text-ink-dim`, not
+    // `COMPACT_DIM_TEXT`), never a row inside the group. That plain row
+    // clears 3:1 trivially regardless of what `COMPACT_DIM_TEXT` is set to,
+    // so the two "compact row text" checks below were structurally
+    // incapable of catching a regression in the compact row's own text --
+    // caught by a fresh pair of eyes on this file, FALSIFIED BY HAND:
+    // dropping `COMPACT_DIM_TEXT` to `text-ink-faint/40` (well under the
+    // floor) left both checks green under the OLD, unscoped lookup.
     const groupEl = document.querySelector('[data-worktrees-external-group]');
+    const nameEl = groupEl?.querySelector('[data-worktree-name]') ?? null;
+    const rowEl = nameEl?.closest('[data-worktree-row]') ?? null;
     const borderEl = groupEl?.querySelector('div.border-l') ?? null;
     const rowBg = rowEl === null ? null : bgOf(rowEl);
     const borderBg = borderEl === null ? null : bgOf(borderEl);
@@ -453,16 +480,26 @@ async function measureContrast() {
         ? null
         : toRgbBytes(getComputedStyle(borderEl).borderLeftColor, borderBg);
     const borderBgRgb = borderBg === null ? null : toRgbBytes(borderBg, 'rgb(0,0,0)');
+    // Proves the row just measured really IS a compact one -- `renderRow`'s
+    // own wrapper carries `text-meta` only when `compact: true`
+    // (`WorktreesSection.tsx`), so this is a structural fact about the DOM,
+    // not another read of the colour this function already measures.
+    const rowIsCompact = rowEl !== null && rowEl.className.split(/\s+/).includes('text-meta');
     return {
       nameContrast: nameRgb === null || rowBgRgb === null ? null : contrastOf(nameRgb, rowBgRgb),
       borderContrast:
         borderRgb === null || borderBgRgb === null ? null : contrastOf(borderRgb, borderBgRgb),
+      rowIsCompact,
     };
   });
 }
 
 const NON_TEXT_CONTRAST_FLOOR = 3.0;
 const darkContrast = await measureContrast();
+check(
+  'the row measured for text contrast really is a compact, dimmed one -- not the plain row above it',
+  darkContrast.rowIsCompact,
+);
 check(
   `compact row text clears the ${NON_TEXT_CONTRAST_FLOOR}:1 floor in dark theme`,
   darkContrast.nameContrast !== null && darkContrast.nameContrast >= NON_TEXT_CONTRAST_FLOOR,
@@ -477,6 +514,10 @@ check(
 await page.locator('button[aria-label="switch to light theme"]').click();
 await page.waitForSelector('button[aria-label="switch to dark theme"]', { timeout: 3_000 });
 const lightContrast = await measureContrast();
+check(
+  'the row measured for text contrast really is a compact, dimmed one -- not the plain row above it (light theme)',
+  lightContrast.rowIsCompact,
+);
 check(
   `compact row text clears the ${NON_TEXT_CONTRAST_FLOOR}:1 floor in light theme`,
   lightContrast.nameContrast !== null && lightContrast.nameContrast >= NON_TEXT_CONTRAST_FLOOR,
