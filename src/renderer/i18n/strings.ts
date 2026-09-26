@@ -302,6 +302,43 @@ const EN = {
   'settings.sessions.sendKey.label': 'send key',
   'settings.sessions.sendKey.hint': 'which key sends the prompt you are typing to the session',
 
+  // ── Integrations ─────────────────────────────────────────────────────────
+  // Operator: "add an Integrations section in Settings, to connect a GitHub
+  // account and select a repo." vam stores no token of its own -- `gh` keeps
+  // it in the Keychain -- so this section is a status read, a pane vam types
+  // `gh auth login`/`gh auth logout` into, and a picker over `gh repo list`.
+  'settings.integrations.hint':
+    'connect a GitHub account with `gh`, and choose which repo each project reads pull requests from',
+  'settings.integrations.github.heading': 'GitHub',
+  'settings.integrations.github.status.missing': '`gh` is not installed',
+  'settings.integrations.github.status.installLink': 'install gh',
+  'settings.integrations.github.status.loggedOut': 'not logged in',
+  'settings.integrations.github.status.loggedIn': 'logged in as {login} on {host}',
+  'settings.integrations.github.status.unknown': 'vam could not tell — {message}',
+  'settings.integrations.github.recheck': 're-check',
+  'settings.integrations.github.rechecking': 'checking…',
+  'settings.integrations.github.scopesWarning':
+    'this token is missing a scope vam’s pull-request features need: {scopes}',
+  'settings.integrations.github.connect': 'connect',
+  'settings.integrations.github.connecting': 'starting…',
+  'settings.integrations.github.disconnect': 'disconnect',
+  'settings.integrations.github.disconnect.confirm': 'disconnect this account?',
+  'settings.integrations.github.disconnect.yes': 'yes, disconnect',
+  'settings.integrations.github.disconnect.cancel': 'cancel',
+  'settings.integrations.github.copyCommand': 'copy command',
+  'settings.integrations.github.copied': 'copied',
+  'settings.integrations.github.pane.ended': 're-check above',
+  'settings.integrations.repo.heading': 'repository',
+  'settings.integrations.repo.current': 'reading pull requests from {name}',
+  'settings.integrations.repo.own': "this project's own repository",
+  'settings.integrations.repo.change': 'change…',
+  'settings.integrations.repo.clear': "use the project's own",
+  'settings.integrations.repo.searchLabel': 'search a GitHub owner or owner/name',
+  'settings.integrations.repo.searchPlaceholder': 'owner or owner/name',
+  'settings.integrations.repo.searchButton': 'search',
+  'settings.integrations.repo.suggested': 'suggested — this project’s own remotes',
+  'settings.integrations.repo.noProject': 'open a project first to choose its repository',
+
   // ── Remote ───────────────────────────────────────────────────────────────
   'settings.remote.hint': 'pair a phone over your tailnet — in person, at this machine',
 

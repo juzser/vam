@@ -61,6 +61,7 @@ const SECTIONS = [
   ['behaviour', 'Behaviour'],
   ['notifications', 'Notifications'],
   ['sessions', 'Sessions'],
+  ['integrations', 'Integrations'],
   ['remote', 'Remote'],
   ['keyboard', 'Keyboard'],
 ];
