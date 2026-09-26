@@ -126,10 +126,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * rather than carrying forward a number a since-landed sibling PR had
  * already made stale.
  *
- * Measured, `electron-vite build`, same code and chunks both times:
+ * Measured, `electron-vite build`, both from a real build to a temp
+ * `--outDir` (not the "after Integrations" figure quoted above, which this
+ * branch's own rebase made one commit stale the moment Integrations
+ * actually landed on `main`):
  *
- *     entry, before (main, with Integrations already on it)   691,861 B
- *     entry, after (this branch, on top of that)              694,918 B  (+3,057 B, +0.44%)
+ *     entry, before (main @ ce6f1fd5, Integrations already on it)   691,298 B
+ *     entry, after (this branch, on top of that)                   694,751 B  (+3,453 B, +0.50%)
  *
  * `ENTRY_BUDGET_BYTES` moves to 698,300 -- about 0.5% above the measured
  * "after", a few hundred bytes of headroom for an ordinary dependency patch
