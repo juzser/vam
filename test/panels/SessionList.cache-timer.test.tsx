@@ -132,10 +132,11 @@ describe('the single-ticker guarantee', () => {
     const sessions = Array.from({ length: 50 }, (_, i) => cacheReady({ id: `s${i}` }));
     const { container } = renderList(sessions);
 
-    expect(container.querySelectorAll('[data-cache-timer]')).toHaveLength(50);
-    container
-      .querySelectorAll('[data-cache-timer]')
-      .forEach((el) => expect(el.getAttribute('data-cache-timer-phase')).toBe('expired'));
+    const badges = container.querySelectorAll('[data-cache-timer]');
+    expect(badges).toHaveLength(50);
+    for (const el of badges) {
+      expect(el.getAttribute('data-cache-timer-phase')).toBe('expired');
+    }
     expect(setIntervalSpy).not.toHaveBeenCalled();
   });
 
@@ -151,15 +152,21 @@ describe('the single-ticker guarantee', () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval');
     const expired = [cacheReady({ id: 's1' })];
     const { rerender } = render(
-      <SessionList {...baseProps(entriesOf(expired))} entries={entriesOf(expired)} cacheTimerEnabled />,
+      <SessionList
+        {...baseProps(entriesOf(expired))}
+        entries={entriesOf(expired)}
+        cacheTimerEnabled
+      />,
     );
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
-    const revived = [
-      cacheReady({ id: 's1', lastCacheActivityAt: '2026-09-26T02:00:00.000Z' }),
-    ];
+    const revived = [cacheReady({ id: 's1', lastCacheActivityAt: '2026-09-26T02:00:00.000Z' })];
     rerender(
-      <SessionList {...baseProps(entriesOf(revived))} entries={entriesOf(revived)} cacheTimerEnabled />,
+      <SessionList
+        {...baseProps(entriesOf(revived))}
+        entries={entriesOf(revived)}
+        cacheTimerEnabled
+      />,
     );
     expect(setIntervalSpy).toHaveBeenCalled();
   });

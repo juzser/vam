@@ -140,7 +140,9 @@ describe('CacheCountdown', () => {
         '../../src/renderer/panels/cache-timer-clock.js'
       );
       const before = cacheTimerClockListenerCount();
-      const { unmount } = render(<CacheCountdown session={session} enabled nowMs={() => START_MS} />);
+      const { unmount } = render(
+        <CacheCountdown session={session} enabled nowMs={() => START_MS} />,
+      );
       expect(cacheTimerClockListenerCount()).toBe(before + 1);
       unmount();
       expect(cacheTimerClockListenerCount()).toBe(before);
