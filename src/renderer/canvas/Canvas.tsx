@@ -1960,6 +1960,28 @@ function CanvasInner({
   const allEntries = useMemo(() => orderedSessions(model), [model]);
 
   /**
+   * Every project vam knows about, deduped by id, for Settings ->
+   * Integrations -> GitHub's repo picker. `allEntries` rather than the
+   * filtered `entries` below: a project hidden from the sidebar or excluded
+   * by a search is still a project whose PR-repo the operator may want to
+   * change, and this picker is not the sidebar's view of them.
+   */
+  const settingsProjects = useMemo(() => {
+    const seen = new Map<string, { id: string; source: SourceId; name: string }>();
+    for (const entry of allEntries) {
+      // `Project.source` is optional -- the field's own note says why -- and
+      // a project with none has no `SourceId` this picker's prefs key
+      // (`Prefs.prRepos[sourceId][projectId]`) could ever address, so it is
+      // left out rather than guessed at.
+      const source = entry.project.source;
+      if (source !== undefined && !seen.has(entry.project.id)) {
+        seen.set(entry.project.id, { id: entry.project.id, source, name: entry.project.name });
+      }
+    }
+    return [...seen.values()];
+  }, [allEntries]);
+
+  /**
    * A15.1 — the detail pane's own layout: one or more panes, arranged by
    * `split.ts`'s tree, each showing one session. Before any split exists
    * this is a single leaf, and the whole rest of the file goes on reading
@@ -8082,6 +8104,7 @@ function CanvasInner({
                holding it. `{}` for a source that is not a session source: there
                is nothing to decline. */
             declines={source.kind === 'session' ? source.source.declines : {}}
+            projects={settingsProjects}
           />
         </Suspense>
       )}

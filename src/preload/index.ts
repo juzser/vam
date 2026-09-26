@@ -13,9 +13,11 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+  createAdhdSkillApi,
   createClipboardApi,
   createDialogApi,
   createFilesApi,
+  createGithubApi,
   createIssueApi,
   createLinkApi,
   createMainErrorsApi,
@@ -44,6 +46,9 @@ contextBridge.exposeInMainWorld('api', {
   // Reaches github.com, and only when something asks it to -- nothing on
   // this bridge checks on its own.
   update: createUpdateApi(ipcRenderer),
+  // Settings -> Integrations -> GitHub. Desktop-only, the same standing as
+  // `update` above -- see `CHANNELS.githubAuthStatus`'s own comment.
+  github: createGithubApi(ipcRenderer),
   clipboard: createClipboardApi(ipcRenderer),
   // Opens a PREFILLED issue form in the operator's own browser, and posts
   // nothing. Takes text, never a location -- see `CHANNELS.issueOpen`.
@@ -90,4 +95,9 @@ contextBridge.exposeInMainWorld('api', {
   // `CHANNELS.worktreeList`'s own comment for why a paired phone has no
   // route to any of the three.
   worktrees: createWorktreesApi(ipcRenderer),
+  // The ADHD skill card's own three: read status, install (into
+  // `~/.claude/skills` and `~/.agents/skills`), remove. Desktop-only, for the
+  // reason `CHANNELS.adhdSkillInstall`'s own comment gives -- a paired phone
+  // must not be able to write into either directory.
+  adhdSkill: createAdhdSkillApi(ipcRenderer),
 });

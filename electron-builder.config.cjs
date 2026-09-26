@@ -30,7 +30,23 @@ module.exports = {
   // this line is what will break it -- and it will break at runtime in a
   // packaged build, not in `pnpm run dev:app`. Re-audit the requires in
   // out/main/index.cjs before adding a main-process dependency.
-  files: ['out/**/*', 'dist-web/**/*', 'package.json', '!node_modules/**/*'],
+  //
+  // `resources/skills/**/*` IS THE ADHD SKILL'S PINNED, BUNDLED COPY -- a
+  // `SKILL.md` and a `LICENSE`, verbatim from `ayghri/i-have-adhd` at the
+  // commit `src/shared/adhd-skill.ts` pins, plus a `NOTICE.md` this repo
+  // wrote for provenance. Read at runtime by
+  // `src/main/skills/adhd-skill.ts` via `app.getAppPath()` -- the SAME call
+  // `webRoot` above makes for `dist-web`, which is why this glob is
+  // repo-root-relative rather than routed through electron-vite: neither
+  // `dist-web` nor this directory is TypeScript for electron-vite to bundle,
+  // both are static files this app ships and reads back. Packed straight
+  // into the asar rather than as an unpacked `extraResources` entry: main
+  // only ever `readFile`s these two files as plain text, never executes or
+  // spawns them, and asar's read-only patch on `fs` handles that
+  // transparently -- see `test/main/electron-builder.adhd-skill.test.ts` for
+  // the static assertion this glob is present, and the PR's own gate run for
+  // the built app actually listing it (`npx asar list ... | grep skills`).
+  files: ['out/**/*', 'dist-web/**/*', 'resources/skills/**/*', 'package.json', '!node_modules/**/*'],
   asar: true,
   npmRebuild: false,
   // Icons come from `buildResources` (build/icon.png), which electron-builder

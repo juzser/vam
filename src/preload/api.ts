@@ -40,9 +40,18 @@ import type { UnsavedReport } from '../main/quit/unsaved.js';
 import type { RemoteState } from '../main/remote/state.js';
 import type { Project } from '../renderer/domain/model.js';
 import type { SourceError } from '../renderer/sources/port.js';
+import type { AdhdSkillActionResult, AdhdSkillStatus } from '../shared/adhd-skill.js';
 import type { AgentWork } from '../shared/agent-work.js';
 import type { AnswerRequest, AnswerResult, PromptView } from '../shared/answer.js';
 import type { CodexUsageSnapshot } from '../shared/codex-usage.js';
+import type {
+  GithubAuthPaneRefusal,
+  GithubAuthPaneView,
+  GithubAuthStatus,
+  GithubOrgsResult,
+  GithubRemote,
+  GithubReposResult,
+} from '../shared/github.js';
 import type { HistoryCursor, TranscriptPage } from '../shared/history.js';
 import type { LinkOutcome } from '../shared/link.js';
 import type { NotifyVerdict } from '../shared/notify.js';
@@ -156,26 +165,31 @@ export const unwrapAgentWork = (pending: Promise<unknown>): Promise<AgentWork> =
   unwrapIntoArm(pending) as Promise<AgentWork>;
 
 /**
- * THE PREFERENCES MAIN NEEDS A COPY OF. Two, now.
+ * THE PREFERENCES MAIN NEEDS A COPY OF. One, today.
  *
  * ITS OWN FACTORY, AND NOT PART OF `DesktopSourceApi`, which is the whole
  * point. `DesktopSourceApi` is `PreloadSourceApi` minus one member -- the
- * shape a paired phone also implements over HTTP -- and adding either of these
- * there would put a desktop-only act on the remote routes: "a directory this
- * machine spawns a process in" for the first, and "what vam types into an
- * agent running on this machine" for the second. They are preferences main
- * happens to need, not things the source can do, so they sit beside
- * `clipboard` and `dialog` as their own desktop-only member. See
- * `main/sources/claude-code/pr-repos.ts` and `main/terminal/concise.ts`.
+ * shape a paired phone also implements over HTTP -- and adding this there
+ * would put a desktop-only act on the remote routes: "a directory this
+ * machine spawns a process in". It is a preference main happens to need, not
+ * something the source can do, so it sits beside `clipboard` and `dialog` as
+ * its own desktop-only member. See `main/sources/claude-code/pr-repos.ts`.
  *
- * NEITHER DECIDES ANYTHING HERE. Both forward a value main validates on its
- * own side, because the renderer is the least trusted process in the app and a
+ * A SECOND MEMBER LIVED HERE ONCE, `setConciseOutput`: main's copy of the
+ * old concise-output switch, pushed on every prefs read and write. Retired
+ * with the switch itself -- see `src/shared/adhd-skill.ts`'s header for what
+ * replaced it -- and there is no successor member on this bridge, because the
+ * ADHD skill card's own channels (`window.api.adhdSkill`) take no preference
+ * at all: install/remove/status all read and write the filesystem directly,
+ * with nothing for `activatePrefs` to push on every keystroke.
+ *
+ * NOTHING DECIDES ANYTHING HERE. It forwards a value main validates on its own
+ * side, because the renderer is the least trusted process in the app and a
  * check in the preload is a check the renderer could have skipped.
  */
 export function createPrefsBridge(ipc: InvokerLike) {
   return {
     setPrRepos: (map: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setPrRepos, map)),
-    setConciseOutput: (on: unknown) => unwrap<void>(ipc.invoke(CHANNELS.setConciseOutput, on)),
   };
 }
 
@@ -350,6 +364,64 @@ export function createUpdateApi(ipc: InvokerLike): UpdateApi {
     check: () => ipc.invoke(CHANNELS.updateCheck) as Promise<UpdateStatus>,
     recheck: () => ipc.invoke(CHANNELS.updateRecheck) as Promise<UpdateStatus>,
     open: () => ipc.invoke(CHANNELS.updateOpen) as Promise<boolean>,
+  };
+}
+
+/**
+ * THE ADHD SKILL CARD'S BRIDGE: read status, install (optionally forcing an
+ * overwrite of an outdated-or-modified directory), remove.
+ *
+ * `install` TAKES ONE BOOLEAN, NEVER A PATH -- the target directories are a
+ * fixed table `src/main/skills/adhd-skill.ts` resolves on its own side, and
+ * this is the only argument that crosses. `force` defaults to `false` here,
+ * on the renderer's side, so a caller that forgets it gets the SAFE
+ * behaviour (refuse to overwrite anything that differs) rather than the
+ * renderer's forgetfulness silently becoming main's `true`.
+ */
+export type AdhdSkillApi = {
+  status(): Promise<AdhdSkillStatus>;
+  install(force?: boolean): Promise<AdhdSkillActionResult>;
+  remove(): Promise<AdhdSkillActionResult>;
+};
+
+export function createAdhdSkillApi(ipc: InvokerLike): AdhdSkillApi {
+  return {
+    status: () => ipc.invoke(CHANNELS.adhdSkillStatus) as Promise<AdhdSkillStatus>,
+    install: (force = false) =>
+      ipc.invoke(CHANNELS.adhdSkillInstall, force) as Promise<AdhdSkillActionResult>,
+    remove: () => ipc.invoke(CHANNELS.adhdSkillRemove) as Promise<AdhdSkillActionResult>,
+  };
+}
+
+/**
+ * Settings -> Integrations -> GitHub's six channels: whether `gh` is signed
+ * in, Connect/Disconnect run in a pane, and the picker's three reads. Desktop
+ * only -- see `channels.ts`'s own note on every one of them -- and its own
+ * bridge member for the reason `update` above is one: none of these six are on
+ * `PreloadSourceApi`, so a paired phone never gets a route to trigger a `gh`
+ * run of its own.
+ */
+export type GithubApi = {
+  authStatus(): Promise<GithubAuthStatus>;
+  connectStart(kind: 'login' | 'logout'): Promise<GithubAuthPaneRefusal | null>;
+  connectRead(): Promise<GithubAuthPaneView>;
+  reposList(owner: string): Promise<GithubReposResult>;
+  orgsList(): Promise<GithubOrgsResult>;
+  projectRemotes(projectId: string): Promise<readonly GithubRemote[]>;
+};
+
+/** Every member forwards straight through -- no `unwrap`: none of these six
+ *  channels answer an `IpcResult`, exactly like `update` above. */
+export function createGithubApi(ipc: InvokerLike): GithubApi {
+  return {
+    authStatus: () => ipc.invoke(CHANNELS.githubAuthStatus) as Promise<GithubAuthStatus>,
+    connectStart: (kind) =>
+      ipc.invoke(CHANNELS.githubConnectStart, kind) as Promise<GithubAuthPaneRefusal | null>,
+    connectRead: () => ipc.invoke(CHANNELS.githubConnectRead) as Promise<GithubAuthPaneView>,
+    reposList: (owner) => ipc.invoke(CHANNELS.githubReposList, owner) as Promise<GithubReposResult>,
+    orgsList: () => ipc.invoke(CHANNELS.githubOrgsList) as Promise<GithubOrgsResult>,
+    projectRemotes: (projectId) =>
+      ipc.invoke(CHANNELS.githubProjectRemotes, projectId) as Promise<readonly GithubRemote[]>,
   };
 }
 

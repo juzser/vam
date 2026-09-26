@@ -35,6 +35,15 @@ import { recordMainFailure } from './errors/log.js';
 import { registerFilesIpc } from './files/ipc.js';
 import { registerFilesListIpc } from './files/list-ipc.js';
 import { registerFilesResolveIpc } from './files/resolve-ipc.js';
+import { readGithubAuthPane, startGithubAuthPane } from './integrations/github-pane.js';
+import { readProjectRemotes } from './integrations/github-remotes.js';
+import {
+  createGithubReposRun,
+  readGithubOrgs,
+  readGithubRepos,
+} from './integrations/github-repos.js';
+import { createGhAuthRun, readGithubAuthStatus } from './integrations/github-status.js';
+import { registerGithubIntegrationIpc } from './integrations/ipc.js';
 import { registerSourceIpc } from './ipc/handlers.js';
 import { registerIssueIpc } from './issue/ipc.js';
 import { LAUNCH_FIXTURE_PROJECTS } from './launch-fixture.js';
@@ -55,7 +64,10 @@ import { createPairing } from './remote/pairing.js';
 import { disableServe, enableServe } from './remote/serve.js';
 import { createStreamRegistry, startRemoteServer } from './remote/server.js';
 import { openWritesPreference, writesPreferencePath } from './remote/writes-preference.js';
+import { defaultAdhdSkillDeps } from './skills/adhd-skill.js';
+import { registerAdhdSkillIpc } from './skills/ipc.js';
 import { listLiveAgents } from './sources/claude-code/agents.js';
+import { paneCwdOf, paneNameOf } from './sources/claude-code/pane-row.js';
 import { createPrActionRunner, runPrActionViaCli } from './sources/claude-code/pr-actions.js';
 import { prRepoOverride } from './sources/claude-code/pr-repos.js';
 import { projectIdOf } from './sources/claude-code/project-id.js';
@@ -671,8 +683,25 @@ function spawnTailscaleServe(
  * `registerAttachImageIpc` and `registerFilesListIpc` so the image picker and
  * the file-editor tab's listing cannot drift on how a session id becomes a
  * directory -- they used to be two copies of the same four lines.
+ *
+ * A `pane:` ROW ID IS CHECKED FIRST, and answered from vam's own tmux
+ * listing rather than `claude agents --json` -- issues 502/507's "other entry
+ * points": a pane row has no live agent to look up (there never is one, the
+ * same fact `recordPrompt`/`closeSession` dispatch on in `source.ts`), so
+ * this used to answer `unknown-session` for exactly the pane the Response
+ * view's `PaneReady` state had already confirmed running a provider and
+ * enabled the composer for -- the image-attach button and the file-editor
+ * tab's own listing refusing a row the prompt box beside them could already
+ * send into. `paneCwdOf` (`pane-row.ts`) is the pure lookup; this is only the
+ * tmux call it needs.
  */
 async function resolveSessionCwd(sessionId: string): Promise<string | null> {
+  if (paneNameOf(sessionId) !== null) {
+    const listed = await listVamSessions(createTmuxRunner());
+    // `unavailable` becomes `null` for the identical reason the agent-list
+    // branch below does: vam could not ask, so it has no cwd to answer with.
+    return listed.kind === 'ok' ? paneCwdOf(listed.sessions, sessionId) : null;
+  }
   const agentsResult = await listLiveAgents();
   // `unavailable` becomes `null`, same as an unmatched row: vam could not
   // ask, so it has no cwd to answer with -- never "no sessions are running".
@@ -838,6 +867,42 @@ void app.whenReady().then(async () => {
     },
     run: PR_ACTIONS,
   });
+  /**
+   * Settings -> Integrations -> GitHub. `channels.ts`'s own note carries the
+   * whole argument for why every one of these six is desktop-only; this is
+   * only the wiring.
+   *
+   * `createTmuxRunner()`, not the control-mode runner the Terminal tab uses:
+   * Connect/Disconnect is one spawn per press, not a per-keystroke hot path,
+   * so the plain runner already every OTHER occasional tmux write in this
+   * file uses (`resolveWorktreeProjectDirectory`, above) is the right one.
+   */
+  const githubTmuxRunner = createTmuxRunner();
+  const readGithubReposOf = readGithubRepos(createGithubReposRun());
+  const readGithubViewerOrgs = readGithubOrgs(createGithubReposRun());
+  const readOneProjectsRemotes = readProjectRemotes();
+  registerGithubIntegrationIpc(ipcMain, {
+    authStatus: readGithubAuthStatus(createGhAuthRun()),
+    connectStart: (kind) => startGithubAuthPane(githubTmuxRunner, kind),
+    connectRead: () => readGithubAuthPane(githubTmuxRunner),
+    reposList: async (owner) => {
+      const result = await readGithubReposOf(owner);
+      if (result.kind === 'ok') return result;
+      return result.kind === 'bad-response'
+        ? { kind: 'error', code: 'bad-response', message: result.message }
+        : { kind: 'error', code: result.error.code, message: result.error.message };
+    },
+    orgsList: async () => {
+      const result = await readGithubViewerOrgs();
+      return result.kind === 'ok'
+        ? result
+        : { kind: 'error', code: result.error.code, message: result.error.message };
+    },
+    projectRemotes: async (projectId) => {
+      const cwd = await resolveWorktreeProjectDirectory(projectId);
+      return cwd === null ? [] : readOneProjectsRemotes(cwd);
+    },
+  });
   // The Terminal tab's only route to tmux. Registered unconditionally, but it
   // spawns nothing until the renderer asks -- and the renderer asks only while
   // the tab is open, so a closed tab costs a process nothing.
@@ -942,6 +1007,15 @@ void app.whenReady().then(async () => {
     resolveProjectDirectory: resolveWorktreeProjectDirectory,
     knownProjectIds: async () => (await combineSources(DESKTOP_SOURCES).load()).map((p) => p.id),
   });
+  // Install the real `ayghri/i-have-adhd` skill into `~/.claude/skills` and
+  // `~/.agents/skills`, read its status back, or remove what vam wrote.
+  // `defaultAdhdSkillDeps` resolves BOTH of its inputs here, once: the real
+  // `os.homedir()` and the bundled pinned copy this build ships at
+  // `resources/skills/i-have-adhd` (`app.getAppPath()`, the same call
+  // `webRoot` above makes for `dist-web` -- repo root in dev, the asar root
+  // once packaged). DESKTOP-ONLY, like `registerWorktreesIpc` above -- see
+  // `CHANNELS.adhdSkillInstall`'s own comment.
+  registerAdhdSkillIpc(ipcMain, defaultAdhdSkillDeps(app.getAppPath()));
   // The file-editor tab's LAST channel, and the only one that carries no path
   // at all: how many of its buffers are unsaved, and what they are called.
   // Registered here rather than in `createWindow` because the guard it feeds

@@ -25,6 +25,7 @@ import {
   PROVIDERS,
   resolveProvider,
 } from '../../shared/providers.js';
+import type { SourceId } from '../domain/model.js';
 import { t } from '../i18n/strings.js';
 import {
   bindingClashes,
@@ -57,7 +58,6 @@ import {
   type Prefs,
   paletteFor,
   paletteValue,
-  setConciseOutput,
   setDefaultProvider,
   setEditorHighlight,
   setEditorIndent,
@@ -94,6 +94,8 @@ import {
   terminalThemesFor,
 } from '../prefs/terminal-scheme.js';
 import type { SourceDeclines } from '../sources/port.js';
+import { AdhdSkillCard, desktopAdhdSkillApi } from './AdhdSkillCard.js';
+import { desktopGithubApi, GithubPanel } from './GithubPanel.js';
 import { desktopNotifyApi, NotifyTest } from './NotifyTest.js';
 import { RemoteLimits } from './RemoteLimits.js';
 import { desktopRemoteApi, RemotePanel } from './RemotePanel.js';
@@ -133,6 +135,18 @@ export type SettingsOverlayProps = {
    * same picture -- no list -- and every caller that HAS a source passes it.
    */
   readonly declines?: SourceDeclines;
+  /**
+   * Every project vam knows about, for the Integrations section's repo
+   * picker -- one entry per project the sidebar groups sessions under.
+   * OPTIONAL, and `[]` is the honest default: a caller that has not wired
+   * this (or a build with no live projects yet) gets a picker with nothing
+   * to aim at rather than a crash, the same rule `declines` above follows.
+   */
+  readonly projects?: readonly {
+    readonly id: string;
+    readonly source: SourceId;
+    readonly name: string;
+  }[];
 };
 
 const THEMES: readonly Theme[] = ['dark', 'light', 'system'];
@@ -240,6 +254,7 @@ export function SettingsOverlay({
   onClose,
   initialSection,
   declines = {},
+  projects = [],
 }: SettingsOverlayProps) {
   const closeButton = useRef<HTMLButtonElement | null>(null);
   const dialog = useRef<HTMLDivElement | null>(null);
@@ -948,94 +963,22 @@ export function SettingsOverlay({
                 </p>
               </Block>
 
-              {/* CONCISE OUTPUT — NEXT TO FOCUS VIEW, which is where the
-                  operator asked for it and is also the right place: the two
-                  rows together are how much the operator has to read. One
-                  decides what vam DRAWS of a turn, the other what the agent
-                  WRITES in one.
+              {/* THE ADHD SKILL CARD — NEXT TO FOCUS VIEW, which is where the
+                  old concise-output switch sat and is also the right place:
+                  the two rows together are how much the operator has to read.
+                  One decides what vam DRAWS of a turn, the other what the
+                  agent is TOLD to write.
 
-                  AND THEY ARE OPPOSITE IN ONE WAY WORTH READING TWICE. Focus
-                  view is vam's own paint and reaches no session; this one
-                  leaves vam entirely -- the rules are typed into a pane
-                  somebody's agent is reading (`main/terminal/concise.ts`).
-                  That is the whole design, from the operator's own question:
-                  "is there a way that, if the skill is enabled, vam uses the
-                  skill before the input is sent, or when the session starts?"
-                  vam has no model and must never show prose the agent did not
-                  write, so the only honest mechanism is to ASK.
-
-                  DRAWN UNCONDITIONALLY, INCLUDING FOR A SOURCE THAT CANNOT
-                  TAKE A PROMPT AT ALL (`recordPrompt: false`). The rule this
-                  surface keeps elsewhere -- "a control that cannot act is not
-                  drawn as one", `RemotePanel`'s header -- is about a control
-                  whose press does nothing HERE AND NOW; this is a standing
-                  preference about every session vam will ever type into, and
-                  the dialog is not opened per session. Withdrawing it because
-                  the row currently focused has no pane would make it appear
-                  and disappear as the operator clicks around the sidebar. The
-                  precedent is one section over: `send key` is drawn on the
-                  same terms, and for the same reason. The per-session refusal
-                  is answered where it happens -- `replyToSession` types
-                  nothing into a session it cannot prove a pane for, and the
-                  priming is not spent, so the rules wait for a prompt that
-                  lands. */}
-              <Block
-                label={t('settings.behaviour.conciseOutput.label')}
-                hint={t('settings.behaviour.conciseOutput.hint')}
-              >
-                <Switch
-                  name="concise-output"
-                  label={t('settings.behaviour.conciseOutput.label')}
-                  checked={prefs.conciseOutput}
-                  onChange={(next) => onChange(setConciseOutput(prefs, next))}
-                  on={t('settings.behaviour.conciseOutput.on')}
-                  off={t('settings.behaviour.conciseOutput.off')}
-                />
-                {/* THE DISCLOSURE, ON SCREEN, and it is longer than any other
-                    note in this dialog because this is the only switch whose
-                    "on" position TYPES SOMETHING INTO A RUNNING AGENT. Four
-                    facts the operator cannot guess and would otherwise meet as
-                    a surprise in their own transcript: that vam's words appear
-                    there, that they ride the FIRST prompt to each session,
-                    that a `/clear` empties them and vam cannot tell, and that
-                    turning the switch off cannot un-say them.
-
-                    THE LIMIT IS NAMED RATHER THAN PAPERED OVER. vam has no
-                    signal for "this agent has forgotten"; inventing one (every
-                    N prompts, or on a gap in the transcript) would be wrong in
-                    both directions. Off-and-on-again is the only re-arm there
-                    is, so it is written where the person who needs it will
-                    look.
-
-                    TIGHTENED, NEVER DROPPED, in the conciseness pass. All four
-                    facts are still here and they are still the reason this is
-                    the longest note in the dialog; what went was the
-                    elaboration around them -- "where you can read exactly what
-                    was asked" (which is what "in your transcript" means) and
-                    "to ask every session afresh" (which is what re-asking is).
-                    A disclosure is the one kind of copy this pass may not
-                    shorten by removing a fact, and
-                    `test/settings/concise-output.test.tsx` holds each of the
-                    four separately so that shortening it any further has to
-                    redden something.
-
-                    AND IT DOES NOT OPEN WITH "vam", which is the rule the
-                    editor-colours note above carries and the same guard that
-                    catches it: this panel upper-cases a paragraph's first
-                    letter and the product is spelled `vam`. The first draft of
-                    this paragraph began "vam types the request...",
-                    `e2e/settings-chrome-shots.mjs` measured `Vam` on the
-                    screen, and the fix is the WORDING rather than a
-                    `data-verbatim` opt-out -- that attribute means "somebody
-                    chose these letters", and this is prose. */}
-                <p data-concise-output-note className="mt-3 max-w-[52ch] text-control text-ink-dim">
-                  the request rides the <span className="text-ink">first</span> prompt vam sends to
-                  each session, so it is in your transcript and costs those tokens once. A{' '}
-                  <code className="text-ink">/clear</code> or a compaction empties it and vam cannot
-                  tell — turn this off and on again to re-ask. Turning it off stops the asking, not
-                  what a session was already told.
-                </p>
-              </Block>
+                  IT REPLACES A SWITCH THAT TYPED VAM'S OWN WORDING OF
+                  `ayghri/i-have-adhd` INTO A SESSION'S FIRST PROMPT
+                  (`main/terminal/concise.ts`, deleted). Operator, having seen
+                  that design: install the REAL skill instead, into the
+                  agent's own skills directory, so it works for every session
+                  -- including one the operator started by hand -- and is not
+                  undone by a `/clear` vam could never see past.
+                  `AdhdSkillCard.tsx` carries the whole design; this row is
+                  only the seam it is mounted at. */}
+              <AdhdSkillCard prefs={prefs} onChange={onChange} api={desktopAdhdSkillApi()} />
 
               {/* THE STREAMING TERMINAL, BETA. A second Terminal tab
                   implementation, `TerminalStreamTab.tsx`, driven by xterm.js
@@ -1266,6 +1209,26 @@ export function SettingsOverlay({
                   says which is which while you type.
                 </p>
               </Block>
+            </Panel>
+
+            <Panel
+              id="integrations"
+              active={section === 'integrations'}
+              hint={t('settings.integrations.hint')}
+              phone={phone}
+            >
+              {/* The bridge is read HERE, like `RemotePanel` below -- `window.api`
+                  exists only in the Electron shell, and this is the one
+                  section that needs it. */}
+              <GithubPanel
+                api={desktopGithubApi()}
+                active={section === 'integrations'}
+                prefs={prefs}
+                onChange={onChange}
+                projects={projects}
+                copyText={window.api?.clipboard?.writeText}
+                chooseDirectory={window.api?.dialog?.chooseDirectory}
+              />
             </Panel>
 
             <Panel

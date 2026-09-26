@@ -82,22 +82,20 @@ export const CHANNELS = {
    */
   setPrRepos: 'vam:source:set-pr-repos',
   /**
-   * DESKTOP-ONLY, the same standing as `setPrRepos` above, and the second
-   * preference main needs a copy of: whether vam asks the agent for a shorter,
-   * clearer answer.
-   *
-   * NOT A MEMBER OF `PreloadSourceApi`, for a reason that is stronger here
-   * than for the map. The rules are typed into a tmux pane ON THIS MACHINE;
-   * putting the switch on the routes `remote/server.ts` registers would let a
-   * paired phone change what vam types into an agent running on the desktop,
-   * which is a remote capability nobody asked for. The phone still gets the
-   * effect -- a prompt SENT from the phone travels through the same
-   * `DESKTOP_SOURCE.recordPrompt` -- it just cannot change the setting.
-   *
-   * Answers through the `IpcResult` envelope like `setPrRepos`, so a caller
-   * has one shape to read. See `main/terminal/concise.ts`.
+   * Settings -> Integrations -> GitHub, six channels, ALL DESKTOP-ONLY and
+   * none of them a member of `PreloadSourceApi` -- `remote/server.ts`
+   * registers no route for any of them, the same standing as `setPrRepos`
+   * above. `gh` is spawned on THIS machine with the operator's own
+   * credentials; a paired phone sees the RESULT (which repo a project reads
+   * pull requests from) through the ordinary source read, and never a way to
+   * trigger a `gh` run of its own. See `main/integrations/github-pane.ts`.
    */
-  setConciseOutput: 'vam:terminal:set-concise-output',
+  githubAuthStatus: 'vam:github:auth-status',
+  githubConnectStart: 'vam:github:connect-start',
+  githubConnectRead: 'vam:github:connect-read',
+  githubReposList: 'vam:github:repos-list',
+  githubOrgsList: 'vam:github:orgs-list',
+  githubProjectRemotes: 'vam:github:project-remotes',
   /**
    * The usage channel. Unlike every channel above, it answers with a bare
    * `UsageSnapshot`, never an `IpcResult` -- see `src/main/usage/ipc.ts`.
@@ -622,7 +620,7 @@ export const CHANNELS = {
    * whole instrument. `activated` is a PUSH, `{sourceId, sessionId}`, sent
    * when a banner is clicked, so the renderer can go to that session.
    *
-   * NOT MEMBERS OF `PreloadSourceApi`, for the reason `setConciseOutput` is
+   * NOT MEMBERS OF `PreloadSourceApi`, for the reason `adhdSkillInstall` is
    * not: a paired phone must not be able to raise a banner on the desktop.
    *
    * `test` is the settings button. No argument -- main chooses the title and
@@ -668,6 +666,32 @@ export const CHANNELS = {
    * Desktop-only, like the three above it, for the identical reason.
    */
   worktreeStatus: 'vam:worktree:status',
+  /**
+   * THE ADHD SKILL CARD'S THREE CHANNELS -- install the real
+   * `ayghri/i-have-adhd` skill into an agent's own skills directory on this
+   * machine, read its status back, or remove what vam wrote.
+   *
+   * DESKTOP-ONLY, the same standing as `worktreeList` above and for the same
+   * reason: `~/.claude/skills` and `~/.agents/skills` are directories on THIS
+   * machine's disk, and a paired phone must not be able to write into either
+   * of them. There is no matching entry on `remote/server.ts`'s route table.
+   *
+   * NONE OF THE THREE TAKES A PATH. `adhdSkillInstall` takes one optional
+   * `force: boolean` -- whether to overwrite a directory whose content
+   * differs from the bundle -- and the other two take nothing at all. The
+   * target directories are a fixed table in
+   * `src/main/skills/adhd-skill.ts`, resolved before this channel is ever
+   * invoked; the renderer, the least trusted process in this app, cannot name
+   * one.
+   *
+   * Bare answers, not the `IpcResult` envelope: like `updateCheck` and
+   * `terminalRead`, `src/shared/adhd-skill.ts`'s own types already carry
+   * every outcome (`AdhdSkillStatus`, `AdhdSkillActionResult`) and there is no
+   * source to refuse anything in the words of.
+   */
+  adhdSkillStatus: 'vam:skills:adhd-status',
+  adhdSkillInstall: 'vam:skills:adhd-install',
+  adhdSkillRemove: 'vam:skills:adhd-remove',
   /**
    * THE STATS & USAGE SCREEN'S ONE CHANNEL. Answers bare (a `StatsResult`,
    * never an `IpcResult`), like `usageGet` — a scan failure is not a

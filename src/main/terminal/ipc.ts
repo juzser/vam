@@ -34,7 +34,6 @@ import { readSessionModelFromTranscript } from '../sources/claude-code/transcrip
 import { PANE_HISTORY_LINES } from '../sources/tmux/argv.js';
 import { listVamSessions, type TmuxRun } from '../sources/tmux/spawn.js';
 import { answerQuestion, readSessionPrompt } from './answer.js';
-import { setConciseOutput } from './concise.js';
 import { readSessionModel } from './model.js';
 import { switchSessionModel } from './model-switch.js';
 import {
@@ -136,27 +135,6 @@ export function registerTerminalIpc(
    * the right one's name.
    */
   const aims = new Map<string, Aim>();
-
-  /**
-   * THE CONCISE-OUTPUT SWITCH, pushed from the renderer's prefs on every write
-   * and every read (`prefs.ts`'s `activatePrefs`).
-   *
-   * REGISTERED HERE rather than beside `setPrRepos` in `ipc/handlers.ts`,
-   * because the module it feeds is this directory's: what the switch changes
-   * is what vam types into a pane, which is the subject of every other channel
-   * on this registration. It answers through the `IpcResult` envelope all the
-   * same, so the preload's one `unwrap` covers both preference channels.
-   *
-   * NO VALIDATION TABLE AND NO CAPABILITY GATE, for the reason `setPrRepos`
-   * needs neither: it asks the source for nothing, and `setConciseOutput` is
-   * TOTAL -- anything that is not exactly `true` lands as off, which is what
-   * vam did before this existed. The check is on this side of the bridge
-   * because the renderer is the least trusted process in the app.
-   */
-  ipcMain.handle(CHANNELS.setConciseOutput, async (_event, ...args: unknown[]) => {
-    setConciseOutput(args[0]);
-    return { ok: true, value: undefined } as const;
-  });
 
   ipcMain.handle(CHANNELS.terminalRead, async (_event, ...args: unknown[]): Promise<PaneView> => {
     const [projectId, rowId, asked] = args;
